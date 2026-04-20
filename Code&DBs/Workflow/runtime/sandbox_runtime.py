@@ -782,7 +782,7 @@ class DockerLocalSandboxProvider:
         # the worker inherited — the ephemeral CLI container needs them for
         # non-file auth paths (Keychain-backed OAuth).
         from adapters.docker_runner import _cli_auth_env_forward
-        for key, value in sorted(_cli_auth_env_forward(None).items()):
+        for key, value in sorted(_cli_auth_env_forward(provider_slug).items()):
             if key in env_items:
                 continue
             docker_cmd.extend(["-e", f"{key}={value}"])

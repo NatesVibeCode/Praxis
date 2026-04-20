@@ -307,7 +307,7 @@ def test_compile_prose_reuses_definition_artifact_before_semantic_retrieval(monk
     assert result["reuse_provenance"]["input_fingerprint"] == definition["compile_provenance"]["input_fingerprint"]
 
 
-def test_compile_prose_skips_malformed_reusable_definition_artifact(monkeypatch) -> None:
+def test_compile_prose_fails_on_malformed_reusable_definition_artifact(monkeypatch) -> None:
     snapshot = _compile_index_snapshot(
         catalog=[],
         integrations=[],
@@ -323,15 +323,39 @@ def test_compile_prose_skips_malformed_reusable_definition_artifact(monkeypatch)
         ),
     )
 
-    result = compiler.compile_prose(
-        "Triage support email",
-        title="Support Mail",
-        compile_index_snapshot=snapshot,
-        conn=_FakeConn(),
+    with pytest.raises(RuntimeError, match="compile_artifact.reuse_failed"):
+        compiler.compile_prose(
+            "Triage support email",
+            title="Support Mail",
+            compile_index_snapshot=snapshot,
+            conn=_FakeConn(),
+        )
+
+
+def test_compile_prose_fails_when_definition_artifact_persistence_fails(monkeypatch) -> None:
+    snapshot = _compile_index_snapshot(
+        catalog=[],
+        integrations=[],
+        object_types=[],
+        capabilities=[],
+        route_hints=(),
+    )
+    monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
+    monkeypatch.setattr(
+        compiler.CompileArtifactStore,
+        "record_definition",
+        lambda self, **kwargs: (_ for _ in ()).throw(
+            CompileArtifactError("compile artifact write rejected")
+        ),
     )
 
-    assert result["reuse_provenance"]["decision"] == "compiled"
-    assert result["error"] is None
+    with pytest.raises(RuntimeError, match="compile_artifact.persist_failed"):
+        compiler.compile_prose(
+            "Triage support email",
+            title="Support Mail",
+            compile_index_snapshot=snapshot,
+            conn=_FakeConn(),
+        )
 
 
 def test_compile_prose_refreshes_stale_compile_index_snapshot_when_unpinned(monkeypatch) -> None:

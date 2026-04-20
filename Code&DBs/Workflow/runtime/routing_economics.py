@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from asyncpg import PostgresError
 from registry.provider_execution_registry import (
-    default_llm_adapter_type,
+    resolve_default_adapter_type,
     resolve_adapter_economics,
     supports_adapter,
 )
@@ -161,7 +161,7 @@ def resolve_route_economics(
     allow_payg_fallback.
     """
     if default_adapter is None:
-        default_adapter = default_llm_adapter_type()
+        default_adapter = resolve_default_adapter_type(provider_slug)
 
     budget_window = budget_windows.get(provider_policy_id or "")
     spend_pressure = budget_spend_pressure(budget_window)
@@ -179,7 +179,9 @@ def resolve_route_economics(
         ):
             candidate_adapters.append(normalized_candidate)
     if not candidate_adapters:
-        candidate_adapters.append(default_adapter)
+        raise RuntimeError(
+            f"provider {provider_slug!r} has no supported adapter for routing economics"
+        )
 
     options: list[dict[str, Any]] = []
     for candidate_adapter_type in candidate_adapters:
@@ -205,7 +207,7 @@ def resolve_route_economics(
             "spend_pressure": spend_pressure,
             "budget_status": str((budget_window or {}).get("budget_status") or ""),
             "prefer_prepaid": bool(economics.get("prefer_prepaid", False)),
-            "allow_payg_fallback": bool(economics.get("allow_payg_fallback", True)),
+            "allow_payg_fallback": bool(economics.get("allow_payg_fallback", False)),
         })
 
     options.sort(

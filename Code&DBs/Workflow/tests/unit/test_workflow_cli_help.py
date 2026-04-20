@@ -29,6 +29,7 @@ def test_commands_delegates_to_modern_command_index(capsys) -> None:
     assert legacy_rendered == modern_rendered
     assert "workflow commands" in legacy_rendered
     assert "workflow tools [list|search|describe|call|help]" in legacy_rendered
+    assert "workflow decompose <objective...>" in legacy_rendered
 
 
 def test_help_topic_delegates_to_modern_command_usage(capsys) -> None:
@@ -92,6 +93,16 @@ def test_help_topic_diagnose_delegates_to_modern_usage(capsys) -> None:
     assert legacy_rc == modern_rc == 0
     assert legacy_rendered == modern_rendered
     assert "usage: workflow diagnose <run_id>" in legacy_rendered
+
+
+def test_help_topic_decompose_delegates_to_modern_usage(capsys) -> None:
+    legacy_rc, legacy_rendered = _run_legacy(["help", "decompose"], capsys)
+    modern_rc, modern_rendered = _run_modern(["help", "decompose"])
+
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "usage: workflow decompose <objective...> [--scope-files a,b,c] [--json]" in legacy_rendered
+    assert "--scope-files" in legacy_rendered
 
 
 def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:

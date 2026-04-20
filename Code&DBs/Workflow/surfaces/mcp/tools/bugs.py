@@ -257,11 +257,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "target_kind": {
                         "type": "string",
-                        "description": "Optional verifier target kind for resolve+verifier_ref. Defaults to 'bug'.",
+                        "description": "Optional verifier target kind for resolve+verifier_ref. Defaults to 'path' when inputs.path is supplied, otherwise 'platform'. Allowed verifier-run target kinds include platform, receipt, run, path, and connector.",
                     },
                     "target_ref": {
                         "type": "string",
-                        "description": "Optional verifier target ref for resolve+verifier_ref. Defaults to the bug_id.",
+                        "description": "Optional verifier target ref for resolve+verifier_ref. Defaults to inputs.path when supplied, otherwise the bug_id.",
                     },
                     "resume_context": {
                         "type": "object",

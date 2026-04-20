@@ -543,7 +543,7 @@ def build_bug_scoreboard(
         detail="; ".join(getattr(stats, "errors", ()) or ()) or None,
     )
 
-    sampled_bugs = bug_tracker.list_bugs(open_only=True, limit=max(limit * 3, packet_limit))
+    sampled_bugs = bug_tracker.list_bugs(open_only=False, limit=max(limit * 3, packet_limit))
     bug_items: list[dict[str, Any]] = []
     packet_errors: list[str] = []
     for bug in sampled_bugs:

@@ -15,6 +15,7 @@ from runtime.primitive_contracts import (
     bug_status_sql_in_literal,
     build_orient_primitive_contracts,
 )
+from registry.provider_execution_registry import registry_health as provider_registry_health
 from surfaces._boot import resolve_surface_env, workflow_database_status
 from surfaces.api.operator_read import (
     build_transport_support_summary,
@@ -718,6 +719,15 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         pg=subs.get_pg_conn(),
     )
     transport_support_summary = build_transport_support_summary(transport_support)
+    try:
+        provider_registry = provider_registry_health()
+    except Exception as exc:
+        provider_registry = {
+            "status": "load_failed",
+            "error": str(exc),
+            "authority_available": False,
+            "fallback_active": False,
+        }
     for provider_slug, adapter_type in transport_support_summary["probe_targets"]:
         probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 
@@ -782,7 +792,11 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "registered_providers": list(transport_support_summary["registered_providers"]),
             "providers": list(transport_support_summary["providers"]),
             "support_basis": transport_support_summary["support_basis"],
+            "provider_registry_status": provider_registry.get("status"),
+            "provider_registry_authority_available": provider_registry.get("authority_available"),
+            "provider_registry_fallback_active": provider_registry.get("fallback_active"),
         },
+        "provider_registry": provider_registry,
         "lane_recommendation": {
             "recommended_posture": lane.recommended_posture,
             "confidence": lane.confidence,

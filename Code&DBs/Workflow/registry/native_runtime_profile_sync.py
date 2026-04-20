@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from registry.provider_execution_registry import default_llm_adapter_type, get_profile, supports_adapter
+from registry.provider_execution_registry import get_profile, resolve_default_adapter_type, supports_adapter
 from runtime._workflow_database import resolve_runtime_database_url
 from storage.postgres import PostgresConfigurationError, ensure_postgres_available
 
@@ -161,7 +161,7 @@ def _default_live_budget_window(
 def _native_transport_ready_refs(
     provider_slug: str,
 ) -> tuple[str, ...] | None:
-    adapter_type = default_llm_adapter_type()
+    adapter_type = resolve_default_adapter_type(provider_slug)
     if not supports_adapter(provider_slug, adapter_type):
         return None
 

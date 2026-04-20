@@ -167,39 +167,6 @@ async def _run_checks_async(probes: list[HealthProbe]) -> list[PreflightCheck]:
     if not probes:
         return []
     return list(await asyncio.gather(*(asyncio.to_thread(probe.check) for probe in probes)))
-class DatabaseProbe(HealthProbe):
-    """Checks that a file exists and is readable."""
-
-    def __init__(self, db_path: str) -> None:
-        self._db_path = db_path
-
-    @property
-    def name(self) -> str:
-        return f"database:{self._db_path}"
-
-    def check(self) -> PreflightCheck:
-        started_at = _utcnow()
-        started_monotonic = time.monotonic()
-        try:
-            exists = os.path.isfile(self._db_path)
-            readable = os.access(self._db_path, os.R_OK) if exists else False
-            passed = exists and readable
-            message = "ok" if passed else f"file missing or unreadable: {self._db_path}"
-            status = "ok" if passed else "failed"
-        except Exception as exc:
-            passed = False
-            message = str(exc)
-            status = "failed"
-        return _build_check(
-            name=self.name,
-            passed=passed,
-            message=message,
-            started_at=started_at,
-            started_monotonic=started_monotonic,
-            status=status,
-        )
-
-
 class PostgresProbe(HealthProbe):
     """Checks that a Postgres connection string is parseable."""
 
@@ -1135,7 +1102,6 @@ class WaveHealthMonitor:
 __all__ = [
     "AdmissionDecision",
     "ApiLivenessProbe",
-    "DatabaseProbe",
     "DiskSpaceProbe",
     "DiskUsageProbe",
     "FileExistsProbe",

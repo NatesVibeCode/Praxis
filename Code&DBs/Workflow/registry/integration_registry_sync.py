@@ -7,10 +7,12 @@ Static integrations and MCP tool metadata both project into
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import json
 
+import runtime.integration_manifest as integration_manifest
 from surfaces.mcp.catalog import projected_mcp_integrations
 
 logger = logging.getLogger(__name__)
@@ -81,7 +83,7 @@ _STATIC_INTEGRATIONS: list[dict[str, Any]] = [
 
 
 def sync_integration_registry(conn: Any) -> int:
-    """Best-effort upsert of static integrations and MCP tool rows."""
+    """Authoritative upsert of static integrations and MCP tool rows."""
     if conn is None:
         return 0
 
@@ -139,8 +141,15 @@ def sync_integration_registry(conn: Any) -> int:
             {", ".join(update_assignments)}
     """
 
-    rows = []
-    for integration in _all_integration_rows():
+    rows, manifest_errors = _all_integration_rows()
+    if manifest_errors:
+        raise RuntimeError(
+            "integration registry sync aborted due to malformed manifest(s): "
+            + "; ".join(manifest_errors)
+        )
+
+    batch_rows = []
+    for integration in rows:
         row = [
             integration["id"],
             integration["name"],
@@ -161,31 +170,37 @@ def sync_integration_registry(conn: Any) -> int:
             row.append(json.dumps(integration.get("endpoint_templates", {})))
         if "catalog_dispatch" in columns:
             row.append(bool(integration.get("catalog_dispatch", False)))
-        rows.append(tuple(row))
+        batch_rows.append(tuple(row))
 
     try:
-        conn.execute_many(sql, rows)
+        conn.execute_many(sql, batch_rows)
     except Exception as exc:
         logger.warning("integration registry sync failed: %s", exc)
         return 0
 
-    return len(rows)
+    return len(batch_rows)
 
 
-def _all_integration_rows() -> list[dict[str, Any]]:
+def _all_integration_rows() -> tuple[list[dict[str, Any]], list[str]]:
     rows = list(_STATIC_INTEGRATIONS)
+    manifest_errors: list[str] = []
     try:
-        from runtime.integration_manifest import load_manifests, manifest_to_registry_row
-
-        for manifest in load_manifests():
-            rows.append(manifest_to_registry_row(manifest))
+        manifest_dir = Path(getattr(integration_manifest, "_MANIFEST_DIR"))
+        if manifest_dir.is_dir():
+            parser = getattr(integration_manifest, "_parse_manifest")
+            for path in sorted(manifest_dir.glob("*.toml")):
+                try:
+                    manifest = parser(path)
+                    rows.append(integration_manifest.manifest_to_registry_row(manifest))
+                except Exception as exc:
+                    manifest_errors.append(f"{path.name}: {type(exc).__name__}: {exc}")
     except Exception as exc:
-        logger.warning("manifest loading failed: %s", exc)
+        manifest_errors.append(f"manifest directory load failed: {type(exc).__name__}: {exc}")
     try:
         rows.extend(projected_mcp_integrations())
     except Exception as exc:
         logger.warning("mcp tool catalog projection failed: %s", exc)
-    return rows
+    return rows, manifest_errors
 
 
 def _integration_registry_columns(conn: Any) -> set[str]:

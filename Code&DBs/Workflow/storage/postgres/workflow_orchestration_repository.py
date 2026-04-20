@@ -57,9 +57,7 @@ def _normalize_failure_code(value: object) -> str:
     if value is None:
         return ""
     text = str(value).strip()
-    if not text:
-        return ""
-    return text[:200]
+    return text
 
 
 def _require_terminal_state(value: object) -> str:

@@ -240,8 +240,12 @@ def test_execute_job_uses_materialized_workdir_for_cli(monkeypatch, tmp_path) ->
         "resolve_execution_transport",
         lambda _config: SimpleNamespace(transport_kind="cli"),
     )
-    monkeypatch.setattr(provider_registry_module, "default_llm_adapter_type", lambda: "cli")
-    monkeypatch.setattr(importlib.import_module("runtime.task_type_router"), "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setattr(provider_registry_module, "resolve_default_adapter_type", lambda provider_slug=None: "cli")
+    monkeypatch.setattr(
+        importlib.import_module("runtime.task_type_router"),
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "cli",
+    )
     monkeypatch.setattr(
         _exec_mod,
         "_resolve_job_prompt_authority",

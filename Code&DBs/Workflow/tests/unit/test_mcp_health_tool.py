@@ -54,19 +54,46 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
             captured["probe_payloads"] = [probe.payload for probe in probes]
 
     class _FakeConn:
-        def execute(self, sql: str):
+        def execute(self, sql: str, *args):
             if "FROM memory_entities" in sql:
+                if args:
+                    ids = set(args[0] or [])
+                    rows = [
+                        {
+                            "id": "doc-1",
+                            "entity_type": "document",
+                            "name": "weekly-plan",
+                            "content": "weekly plan content",
+                            "created_at": "2026-04-01T00:00:00+00:00",
+                            "updated_at": "2026-04-05T00:00:00+00:00",
+                        },
+                        {
+                            "id": "workflow-run-1",
+                            "entity_type": "workflow_run",
+                            "name": "run-1",
+                            "content": "workflow run summary",
+                            "created_at": "2026-04-02T00:00:00+00:00",
+                            "updated_at": "2026-04-06T00:00:00+00:00",
+                        },
+                    ]
+                    return [row for row in rows if row["id"] in ids]
                 return [
                     {
                         "id": "doc-1",
                         "entity_type": "document",
                         "name": "weekly-plan",
+                        "content": "weekly plan content",
                         "created_at": "2026-04-01T00:00:00+00:00",
                         "updated_at": "2026-04-05T00:00:00+00:00",
                     }
                 ]
             if "FROM memory_edges" in sql:
-                return []
+                return [
+                    {
+                        "source_id": "doc-1",
+                        "target_id": "workflow-run-1",
+                    }
+                ]
             raise AssertionError(f"Unexpected SQL in test stub: {sql}")
 
     def _fake_resolve(env=None):
@@ -114,6 +141,17 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         health_tool,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+            "provider_count": 2,
+            "providers": ["google", "openai"],
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
         "_subs",
         SimpleNamespace(
             get_health_mod=lambda: SimpleNamespace(
@@ -154,7 +192,11 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
             {"provider_slug": "google", "adapters": ["cli_llm"]},
         ],
         "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
+        "provider_registry_status": "loaded_from_db",
+        "provider_registry_authority_available": True,
+        "provider_registry_fallback_active": False,
     }
+    assert result["provider_registry"]["status"] == "loaded_from_db"
     assert result["dependency_truth"] == {"ok": True, "scope": "all"}
     assert provider_probe_calls == [
         ("openai", "cli_llm"),
@@ -170,4 +212,124 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
                 "severity": "medium",
             }
         ],
+        "edges": [
+            {
+                "source": "doc-1",
+                "target": "workflow-run-1",
+                "source_entity": {
+                    "entity_id": "doc-1",
+                    "entity_type": "document",
+                    "name": "weekly-plan",
+                    "summary": "weekly plan content",
+                },
+                "target_entity": {
+                    "entity_id": "workflow-run-1",
+                    "entity_type": "workflow_run",
+                    "name": "run-1",
+                    "summary": "workflow run summary",
+                },
+            }
+        ],
     }
+
+
+def test_tool_dag_health_enriches_edge_endpoints_with_entity_context(monkeypatch) -> None:
+    class _FakeConn:
+        def execute(self, sql: str, *args):
+            if "FROM memory_entities" in sql and args:
+                ids = set(args[0] or [])
+                rows = [
+                    {
+                        "id": "doc-1",
+                        "entity_type": "document",
+                        "name": "weekly-plan",
+                        "content": "weekly plan content",
+                        "created_at": "2026-04-01T00:00:00+00:00",
+                        "updated_at": "2026-04-05T00:00:00+00:00",
+                    },
+                    {
+                        "id": "workflow-run-1",
+                        "entity_type": "workflow_run",
+                        "name": "run-1",
+                        "content": "workflow run summary",
+                        "created_at": "2026-04-02T00:00:00+00:00",
+                        "updated_at": "2026-04-06T00:00:00+00:00",
+                    },
+                ]
+                return [row for row in rows if row["id"] in ids]
+            if "FROM memory_entities" in sql:
+                return [
+                    {
+                        "id": "doc-1",
+                        "entity_type": "document",
+                        "name": "weekly-plan",
+                        "content": "weekly plan content",
+                        "created_at": "2026-04-01T00:00:00+00:00",
+                        "updated_at": "2026-04-05T00:00:00+00:00",
+                    }
+                ]
+            if "FROM memory_edges" in sql:
+                return [
+                    {
+                        "source_id": "doc-1",
+                        "target_id": "workflow-run-1",
+                    }
+                ]
+            raise AssertionError(f"Unexpected SQL in test stub: {sql}")
+
+    monkeypatch.setattr(
+        health_tool,
+        "dependency_truth_report",
+        lambda scope="all": {"ok": True, "scope": scope},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"},
+    )
+    monkeypatch.setattr(health_tool, "workflow_database_url_for_repo", lambda repo_root, env=None: "postgresql://repo.test/workflow")
+    monkeypatch.setattr(health_tool, "get_context_cache", lambda: SimpleNamespace(stats=lambda: {"hit_rate": 0.0}))
+    monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
+    monkeypatch.setattr(missing_detector, "_now", lambda: datetime(2026, 4, 15, tzinfo=timezone.utc))
+    monkeypatch.setattr(
+        health_tool,
+        "query_transport_support",
+        lambda **_kwargs: {
+            "default_provider_slug": "openai",
+            "default_adapter_type": "cli_llm",
+            "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
+            "providers": [],
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+            "provider_count": 0,
+            "providers": [],
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "_subs",
+        SimpleNamespace(
+            get_health_mod=lambda: SimpleNamespace(
+                PostgresProbe=lambda db_url: _FakeProbe(("postgres", db_url)),
+                PostgresConnectivityProbe=lambda db_url: _FakeProbe(("postgres_connectivity", db_url)),
+                DiskSpaceProbe=lambda path: _FakeProbe(("disk", path)),
+                ProviderTransportProbe=lambda provider_slug, adapter_type: _FakeProbe(("provider_transport", provider_slug, adapter_type)),
+                PreflightRunner=_FakePreflightRunner,
+            ),
+            get_pg_conn=lambda: "pg-conn",
+            get_operator_panel=lambda: _FakePanel(),
+            get_memory_engine=lambda: SimpleNamespace(_connect=lambda: _FakeConn()),
+        ),
+    )
+
+    result = health_tool.tool_dag_health({})
+    assert result["content_health"]["total_findings"] == 1
+    assert result["content_health"].get("edges")[0]["source_entity"]["entity_type"] == "document"
+    assert result["content_health"].get("edges")[0]["target_entity"]["entity_type"] == "workflow_run"

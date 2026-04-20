@@ -701,6 +701,24 @@ def _cleanup_subject(conn, entity_ids: list[str], constraint_ids: list[str]) -> 
     )
 
 
+def _claim_only(processor, *intent_kinds: str, enqueue: bool = False) -> None:
+    if not enqueue:
+        processor.enqueue_due_policies = lambda: 0
+
+    def _claim(limit: int = 25):
+        remaining = limit
+        claimed = []
+        for intent_kind in intent_kinds:
+            if remaining <= 0:
+                break
+            rows = processor.claim_pending_by_kind(intent_kind, limit=remaining)
+            claimed.extend(rows)
+            remaining -= len(rows)
+        return claimed
+
+    processor.claim_pending = _claim
+
+
 def test_entity_embedding_intents_materialize_vector_neighbors() -> None:
     conn = _shared_test_conn()
     _apply_migration(conn)
@@ -756,6 +774,7 @@ def test_entity_embedding_intents_materialize_vector_neighbors() -> None:
         )
 
         processor = DatabaseMaintenanceProcessor(conn, embedder=_FakeEmbedder())
+        _claim_only(processor, "embed_entity")
         first_run = processor.run_once(limit=10)
         # The follow-on drain may already process refresh intents in the
         # first cycle.  Boost any remaining pending refresh intents and
@@ -866,6 +885,7 @@ def test_constraint_embedding_intent_backfills_vector() -> None:
         )
 
         processor = DatabaseMaintenanceProcessor(conn, embedder=_FakeEmbedder())
+        _claim_only(processor, "embed_constraint")
         run = processor.run_once(limit=10)
         assert run.completed >= 1
 
@@ -1240,6 +1260,7 @@ def test_daily_maintenance_review_starts_backlog_summary(monkeypatch: pytest.Mon
         )
 
         processor = DatabaseMaintenanceProcessor(conn, embedder=_FakeEmbedder())
+        _claim_only(processor, "start_maintenance_review", enqueue=True)
         run = processor.run_once(limit=1)
 
         assert run.completed == 1
@@ -1574,6 +1595,7 @@ def test_auto_repair_starts_when_severe_dirty_state_is_detected(
         )
 
         processor = DatabaseMaintenanceProcessor(conn, embedder=_FakeEmbedder())
+        _claim_only(processor, "start_maintenance_repair", enqueue=True)
         run = processor.run_once(limit=1)
 
         assert run.completed == 1

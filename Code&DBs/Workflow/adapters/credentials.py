@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 from .keychain import resolve_secret
 from registry.provider_execution_registry import resolve_api_key_env_vars
-from .provider_transport import BUILTIN_PROVIDER_PROFILES, resolve_api_key_env_vars as resolve_builtin_api_key_env_vars
 
 
 class CredentialResolutionError(RuntimeError):
@@ -34,12 +33,6 @@ class ResolvedCredential:
     auth_ref: str
     api_key: str
     provider_hint: str
-
-
-_BUILTIN_PROVIDER_PROFILES_MAP = {
-    profile.provider_slug: profile
-    for profile in BUILTIN_PROVIDER_PROFILES
-}
 
 
 def resolve_credential(
@@ -72,11 +65,6 @@ def resolve_credential(
     provider_hint = segments[-1].lower() if segments else ""
 
     env_vars = resolve_api_key_env_vars(provider_hint)
-    if not env_vars:
-        env_vars = resolve_builtin_api_key_env_vars(
-            provider_hint,
-            profiles=_BUILTIN_PROVIDER_PROFILES_MAP,
-        )
     if not env_vars:
         raise CredentialResolutionError(
             "credential.provider_unknown",

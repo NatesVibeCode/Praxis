@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from adapters.keychain import resolve_secret
+from registry.provider_execution_registry import resolve_api_key_env_vars
 
 
 # ---------------------------------------------------------------------------
@@ -53,11 +54,11 @@ class SpawnResult:
 # Provider readiness
 # ---------------------------------------------------------------------------
 
-_PROVIDER_ENV_KEYS: dict[str, list[str]] = {
+_PROVIDER_ENV_KEYS_FALLBACK: dict[str, list[str]] = {
     "anthropic": ["ANTHROPIC_API_KEY"],
     "cursor": ["CURSOR_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
-    "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+    "google": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
 }
 
 _PROVIDER_CLI_BINARIES: dict[str, str] = {
@@ -72,10 +73,10 @@ class ProviderReadinessChecker:
 
     def check(self, provider: str) -> ProviderReadiness:
         now = datetime.now(timezone.utc)
-        env_keys = _PROVIDER_ENV_KEYS.get(provider)
+        env_keys = list(resolve_api_key_env_vars(provider)) or _PROVIDER_ENV_KEYS_FALLBACK.get(provider, [])
         cli_binary = _PROVIDER_CLI_BINARIES.get(provider)
 
-        if env_keys is None and cli_binary is None:
+        if not env_keys and cli_binary is None:
             return ProviderReadiness(
                 provider=provider,
                 ready=False,

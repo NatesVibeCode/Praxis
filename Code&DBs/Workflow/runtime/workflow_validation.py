@@ -24,9 +24,8 @@ from runtime.workflow.execution_bundle import _VERIFICATION_REQUIRED_TASK_TYPES
 def _preflight_deterministic_builders(spec) -> list[dict[str, Any]]:
     """For each deterministic_task job, confirm the dotted-path builder in
     `input_payload.deterministic_builder` imports to a callable. Missing
-    builders cause the adapter to silently echo `expected_outputs` back (see
-    `adapters/deterministic.py::DeterministicTaskAdapter.execute`), which is
-    the biggest source of "green receipts over phantom work" in the system.
+    builders are errors unless the job explicitly opts into smoke-only
+    passthrough echo with `allow_passthrough_echo=true`.
     """
     warnings: list[dict[str, Any]] = []
     for job in getattr(spec, "jobs", ()) or ():
@@ -37,19 +36,30 @@ def _preflight_deterministic_builders(spec) -> list[dict[str, Any]]:
         input_payload = job.get("inputs") or job.get("input_payload") or {}
         if isinstance(input_payload, dict):
             builder_path = str(input_payload.get("deterministic_builder") or "").strip()
+            allow_passthrough_echo = input_payload.get("allow_passthrough_echo") is True
         else:
             builder_path = ""
+            allow_passthrough_echo = False
         if not builder_path:
-            # Not an error per se — passthrough-echo is legal for smoke runs.
-            # But flag at warning severity so the operator sees it.
+            severity = "warning" if allow_passthrough_echo else "error"
             warnings.append({
-                "kind": "deterministic_builder_missing",
-                "severity": "warning",
+                "kind": (
+                    "deterministic_builder_passthrough_echo"
+                    if allow_passthrough_echo
+                    else "deterministic_builder_missing"
+                ),
+                "severity": severity,
                 "label": label,
                 "message": (
                     f"job '{label}' has adapter_type=deterministic_task but no "
-                    f"'deterministic_builder' in inputs; this node will echo "
-                    f"expected_outputs rather than run real work"
+                    f"'deterministic_builder' in inputs; "
+                    + (
+                        "allow_passthrough_echo=true permits this smoke-only node "
+                        "to echo expected_outputs"
+                        if allow_passthrough_echo
+                        else "add a deterministic_builder or set allow_passthrough_echo=true "
+                        "only for explicit smoke runs"
+                    )
                 ),
             })
             continue
@@ -182,6 +192,31 @@ def _preflight_workdir_drift(spec) -> list[dict[str, Any]]:
     what they're doing can legitimately submit from a path-rebasing wrapper.
     """
     warnings: list[dict[str, Any]] = []
+    workspace_roots_cache: tuple[Path, ...] | None = None
+    workspace_roots_failed = False
+
+    def _authority_workspace_roots() -> tuple[Path, ...]:
+        nonlocal workspace_roots_cache
+        nonlocal workspace_roots_failed
+        if workspace_roots_cache is not None:
+            return workspace_roots_cache
+        if workspace_roots_failed:
+            return ()
+        try:
+            workspace_roots_cache = authority_workspace_roots()
+            return workspace_roots_cache
+        except Exception as exc:
+            workspace_roots_failed = True
+            warnings.append({
+                "kind": "workdir_authority_unavailable",
+                "severity": "warning",
+                "label": None,
+                "message": (
+                    "could not resolve authority workspace roots while checking "
+                    f"workdir drift: {type(exc).__name__}: {exc}"
+                ),
+            })
+            return ()
 
     def _check_path(label: str | None, field: str, value: str) -> None:
         path = (value or "").strip()
@@ -193,7 +228,7 @@ def _preflight_workdir_drift(spec) -> list[dict[str, Any]]:
         # if the path looks like a known host-mount sibling.
         suggestion: str | None = None
         path_obj = Path(path)
-        for prefix in authority_workspace_roots():
+        for prefix in _authority_workspace_roots():
             try:
                 rel = path_obj.relative_to(prefix)
             except ValueError:

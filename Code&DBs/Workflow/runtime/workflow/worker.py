@@ -19,12 +19,21 @@ from runtime.execution.records import (
     NODE_AWAITING_HUMAN_RECEIPT_TYPE,
     NODE_EXECUTION_RECEIPT_TYPE,
 )
+from runtime.self_healing import normalize_failure_code
 from runtime.run_node_receipts import write_run_node_receipt
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
 
 logger = logging.getLogger(__name__)
+
+
+def _worker_error_code(exc: BaseException, *, fallback: str) -> str:
+    for attr in ("failure_code", "reason_code", "error_code", "code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, str) and value.strip():
+            return normalize_failure_code(value.strip(), str(exc))
+    return normalize_failure_code(fallback, str(exc))
 
 
 class RunNodeStateRepository(Protocol):
@@ -242,6 +251,7 @@ class WorkflowWorker:
             release_downstream(self._conn, run_id, node_id)
         except Exception as exc:
             logger.error("Card execution failed for %s: %s", node_id, exc, exc_info=True)
+            failure_code = _worker_error_code(exc, fallback="worker_exception")
             receipt_id = None
             try:
                 receipt_id = write_run_node_receipt(
@@ -251,7 +261,7 @@ class WorkflowWorker:
                     receipt_type=NODE_EXECUTION_RECEIPT_TYPE,
                     status="failed",
                     outputs={"error": str(exc)[:500]},
-                    failure_code=str(exc)[:200],
+                    failure_code=failure_code,
                     agent_slug="card_executor",
                     executor_type="runtime.workflow.worker",
                 )
@@ -263,7 +273,7 @@ class WorkflowWorker:
                 )
             self._run_node_repository.mark_failed(
                 run_node_id=run_node_id,
-                failure_code=str(exc)[:200],
+                failure_code=failure_code,
                 receipt_id=receipt_id,
             )
             raise

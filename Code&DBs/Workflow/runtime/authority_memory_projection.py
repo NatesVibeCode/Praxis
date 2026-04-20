@@ -4,7 +4,7 @@ Today ``memory_edges`` is ``authority_class='enrichment'`` by default, so the
 knowledge graph is shallow even though the authority tables hold real
 structure (roadmap parent/child, roadmap->source_bug, operator_object_relations,
 workflow_build_intents, etc). This projection mirrors those FK columns into
-``memory_edges`` under ``authority_class='authoritative'``, so discover, recall,
+``memory_edges`` under ``authority_class='canonical'``, so discover, recall,
 and the atlas see the full structure.
 
 Design notes
@@ -20,16 +20,25 @@ The refresher is upsert-only; it never retracts enrichment edges. When an FK is
 cleared on the authority side, the corresponding authoritative edge is set to
 ``active=false`` but the row is preserved for audit.
 
-Projections wired here (initial set)
-------------------------------------
-- ``roadmap_items.parent_roadmap_item_id``  -> ``parent_of`` (104 rows today)
-- ``roadmap_items.source_bug_id``           -> ``resolves_bug``
-  (0 rows today; populating this closes the 7 P2 "closeout blocked:
-  missing source_bug_id" bugs the moment projection runs)
-- ``operator_object_relations`` (active)    -> mirror of source_kind/target_kind
-- ``workflow_build_intents.workflow_id``    -> ``implements_build``
-
-Extend ``_PROJECTIONS`` with additional FK mappings as new authorities land.
+Projections wired here
+---------------------
+- ``roadmap_items.parent_roadmap_item_id``              -> ``parent_of``
+- ``roadmap_items.source_bug_id``                       -> ``resolves_bug``
+- ``roadmap_item_dependencies``                         -> ``depends_on``
+- ``operator_object_relations`` (active)                -> mirror of source/target kinds + relation metadata
+- ``bugs.discovered_in_run_id``                         -> ``recorded_in``
+- ``bugs.discovered_in_receipt_id``                     -> ``recorded_in``
+- ``bugs.source_issue_id``                              -> ``derived_from``
+- ``workflow_build_intents.workflow_id``                -> ``implements_build``
+- ``bug_evidence_links``                               -> ``related_to`` by evidence kind
+- ``workflow_job_submissions.run_id``                   -> ``parent_of`` to submission IDs
+- ``workflow_job_submissions.workflow_id``               -> ``related_to`` to workflow IDs
+- ``workflow_chains``                                   -> ``parent_of`` to chain waves
+- ``workflow_chain_waves``                              -> ``parent_of`` to wave runs
+- ``workflow_chain_wave_runs.run_id``                   -> ``parent_of`` to workflow runs
+- ``issues.discovered_in_run_id``                       -> ``recorded_in``
+- ``issues.discovered_in_receipt_id``                   -> ``recorded_in``
+- ``operator_decisions`` with typed scope                -> ``related_to``
 """
 
 from __future__ import annotations
@@ -45,10 +54,8 @@ DEFAULT_PROJECTION_ID = "authority_memory_projection"
 # memory_edges check constraints (ck_memory_edges_*) limit these to specific enums:
 #   authority_class: canonical | enrichment
 #   provenance_kind: schema_projection is the closest fit for FK-derived edges
-#   relation_type:   depends_on, constrains, implements, supersedes, related_to,
-#                    derived_from, caused_by, correlates_with, produced, triggered,
-#                    covers, verified_by, recorded_in, regressed_from,
-#                    semantic_neighbor
+#   relation_type:   depends_on, parent_of, resolves_bug, implements_build,
+#                    belongs_to_area, related_to, recorded_in, derived_from
 AUTHORITY_CLASS = "canonical"
 PROVENANCE_KIND = "schema_projection"
 
@@ -114,6 +121,85 @@ _PROJECTIONS: tuple[FkProjection, ...] = (
         provenance_ref="roadmap_items.source_bug_id",
     ),
     FkProjection(
+        name="bug_discovered_in_run",
+        select_sql=(
+            """
+            SELECT
+              'bug::' || bug_id                      AS source_id,
+              'bug'                                  AS source_kind,
+              bug_id                                 AS source_name,
+              'workflow_run::' || discovered_in_run_id AS target_id,
+              'workflow_run'                         AS target_kind,
+              discovered_in_run_id                    AS target_name,
+              TRUE                                   AS active
+            FROM bugs
+            WHERE discovered_in_run_id IS NOT NULL
+            """
+        ),
+        relation_type="recorded_in",
+        semantic_kind="bug_discovered_in_run",
+        provenance_ref="bugs.discovered_in_run_id",
+    ),
+    FkProjection(
+        name="bug_discovered_in_receipt",
+        select_sql=(
+            """
+            SELECT
+              'bug::' || bug_id                             AS source_id,
+              'bug'                                        AS source_kind,
+              bug_id                                       AS source_name,
+              'receipt::' || discovered_in_receipt_id        AS target_id,
+              'receipt'                                    AS target_kind,
+              discovered_in_receipt_id                      AS target_name,
+              TRUE                                         AS active
+            FROM bugs
+            WHERE discovered_in_receipt_id IS NOT NULL
+            """
+        ),
+        relation_type="recorded_in",
+        semantic_kind="bug_discovered_in_receipt",
+        provenance_ref="bugs.discovered_in_receipt_id",
+    ),
+    FkProjection(
+        name="bug_source_issue",
+        select_sql=(
+            """
+            SELECT
+              'issue::' || source_issue_id                AS source_id,
+              'issue'                                     AS source_kind,
+              source_issue_id                              AS source_name,
+              'bug::' || bug_id                           AS target_id,
+              'bug'                                       AS target_kind,
+              bug_id                                      AS target_name,
+              TRUE                                        AS active
+            FROM bugs
+            WHERE source_issue_id IS NOT NULL
+            """
+        ),
+        relation_type="derived_from",
+        semantic_kind="bug_source_issue",
+        provenance_ref="bugs.source_issue_id",
+    ),
+    FkProjection(
+        name="roadmap_item_dependencies",
+        select_sql=(
+            """
+            SELECT
+              'roadmap_item::' || roadmap_item_id          AS source_id,
+              'roadmap_item'                                AS source_kind,
+              roadmap_item_id                                AS source_name,
+              'roadmap_item::' || depends_on_roadmap_item_id AS target_id,
+              'roadmap_item'                                AS target_kind,
+              depends_on_roadmap_item_id                     AS target_name,
+              TRUE                                          AS active
+            FROM roadmap_item_dependencies
+            """
+        ),
+        relation_type="depends_on",
+        semantic_kind="roadmap_dependency",
+        provenance_ref="roadmap_item_dependencies",
+    ),
+    FkProjection(
         name="operator_object_relations_mirror",
         select_sql=(
             """
@@ -128,9 +214,13 @@ _PROJECTIONS: tuple[FkProjection, ...] = (
               jsonb_build_object('operator_relation_kind', relation_kind)  AS metadata_override
             FROM operator_object_relations
             WHERE source_kind IN ('bug', 'roadmap_item', 'repo_path',
-                                  'operator_decision', 'functional_area')
+                                  'operator_decision', 'functional_area', 'issue',
+                                  'workflow_class', 'schedule_definition',
+                                  'workflow_run', 'document', 'cutover_gate')
               AND target_kind IN ('bug', 'roadmap_item', 'repo_path',
-                                  'operator_decision', 'functional_area')
+                                  'operator_decision', 'functional_area', 'issue',
+                                  'workflow_class', 'schedule_definition',
+                                  'workflow_run', 'document', 'cutover_gate')
             """
         ),
         relation_type="belongs_to_area",
@@ -156,6 +246,315 @@ _PROJECTIONS: tuple[FkProjection, ...] = (
         relation_type="implements_build",
         semantic_kind="implements_build",
         provenance_ref="workflow_build_intents.workflow_id",
+    ),
+    FkProjection(
+        name="workflow_job_submission_workflow",
+        select_sql=(
+            """
+            SELECT
+              'workflow_job_submission::' || submission_id   AS source_id,
+              'workflow_job_submission'                     AS source_kind,
+              submission_id                                 AS source_name,
+              'workflow::' || workflow_id                    AS target_id,
+              'workflow'                                    AS target_kind,
+              workflow_id                                   AS target_name,
+              TRUE                                          AS active
+            FROM workflow_job_submissions
+            WHERE workflow_id IS NOT NULL
+            """
+        ),
+        relation_type="related_to",
+        semantic_kind="submission_workflow",
+        provenance_ref="workflow_job_submissions.workflow_id",
+    ),
+    FkProjection(
+        name="bug_evidence_links_receipt",
+        select_sql=(
+            """
+            SELECT
+              'bug::' || bug_id                           AS source_id,
+              'bug'                                       AS source_kind,
+              bug_id                                      AS source_name,
+              'receipt::' || evidence_ref                  AS target_id,
+              'receipt'                                   AS target_kind,
+              evidence_ref                                 AS target_name,
+              TRUE                                         AS active,
+              jsonb_build_object(
+                'evidence_kind', evidence_kind,
+                'evidence_role', evidence_role
+              )                                           AS metadata_override
+            FROM bug_evidence_links
+            WHERE evidence_kind = 'receipt'
+            """
+        ),
+        relation_type="related_to",
+        semantic_kind="bug_evidence",
+        provenance_ref="bug_evidence_links.receipt",
+    ),
+    FkProjection(
+        name="bug_evidence_links_run",
+        select_sql=(
+            """
+            SELECT
+              'bug::' || bug_id                           AS source_id,
+              'bug'                                       AS source_kind,
+              bug_id                                      AS source_name,
+              'workflow_run::' || evidence_ref             AS target_id,
+              'workflow_run'                              AS target_kind,
+              evidence_ref                                 AS target_name,
+              TRUE                                         AS active,
+              jsonb_build_object(
+                'evidence_kind', evidence_kind,
+                'evidence_role', evidence_role
+              )                                           AS metadata_override
+            FROM bug_evidence_links
+            WHERE evidence_kind = 'run'
+            """
+        ),
+        relation_type="related_to",
+        semantic_kind="bug_evidence",
+        provenance_ref="bug_evidence_links.run",
+    ),
+    FkProjection(
+        name="bug_evidence_links_verification_run",
+        select_sql=(
+            """
+            SELECT
+              'bug::' || bug_id                           AS source_id,
+              'bug'                                       AS source_kind,
+              bug_id                                      AS source_name,
+              'verification_run::' || evidence_ref         AS target_id,
+              'verification_run'                          AS target_kind,
+              evidence_ref                                 AS target_name,
+              TRUE                                         AS active,
+              jsonb_build_object(
+                'evidence_kind', evidence_kind,
+                'evidence_role', evidence_role
+              )                                           AS metadata_override
+            FROM bug_evidence_links
+            WHERE evidence_kind = 'verification_run'
+            """
+        ),
+        relation_type="related_to",
+        semantic_kind="bug_evidence",
+        provenance_ref="bug_evidence_links.verification_run",
+    ),
+    FkProjection(
+        name="bug_evidence_links_healing_run",
+        select_sql=(
+            """
+            SELECT
+              'bug::' || bug_id                           AS source_id,
+              'bug'                                       AS source_kind,
+              bug_id                                      AS source_name,
+              'healing_run::' || evidence_ref              AS target_id,
+              'healing_run'                               AS target_kind,
+              evidence_ref                                 AS target_name,
+              TRUE                                         AS active,
+              jsonb_build_object(
+                'evidence_kind', evidence_kind,
+                'evidence_role', evidence_role
+              )                                           AS metadata_override
+            FROM bug_evidence_links
+            WHERE evidence_kind = 'healing_run'
+            """
+        ),
+        relation_type="related_to",
+        semantic_kind="bug_evidence",
+        provenance_ref="bug_evidence_links.healing_run",
+    ),
+    FkProjection(
+        name="workflow_job_submissions_to_workflow_runs",
+        select_sql=(
+            """
+            SELECT
+              'workflow_run::' || run_id               AS source_id,
+              'workflow_run'                           AS source_kind,
+              run_id                                   AS source_name,
+              'workflow_job_submission::' || submission_id AS target_id,
+              'workflow_job_submission'                AS target_kind,
+              submission_id                            AS target_name,
+              TRUE                                     AS active
+            FROM workflow_job_submissions
+            WHERE run_id IS NOT NULL
+            """
+        ),
+        relation_type="parent_of",
+        semantic_kind="run_submissions",
+        provenance_ref="workflow_job_submissions.run_id",
+    ),
+    FkProjection(
+        name="workflow_chains_to_waves",
+        select_sql=(
+            """
+            SELECT
+              'workflow_chain::' || chain_id                     AS source_id,
+              'workflow_chain'                                   AS source_kind,
+              chain_id                                           AS source_name,
+              'workflow_chain_wave::' || chain_id || '::' || wave_id AS target_id,
+              'workflow_chain_wave'                              AS target_kind,
+              wave_id                                            AS target_name,
+              TRUE                                               AS active
+            FROM workflow_chain_waves
+            WHERE chain_id IS NOT NULL
+              AND wave_id IS NOT NULL
+            """
+        ),
+        relation_type="parent_of",
+        semantic_kind="chain_contains_wave",
+        provenance_ref="workflow_chain_waves",
+    ),
+    FkProjection(
+        name="workflow_chain_waves_to_wave_runs",
+        select_sql=(
+            """
+            SELECT
+              'workflow_chain_wave::' || chain_id || '::' || wave_id  AS source_id,
+              'workflow_chain_wave'                                   AS source_kind,
+              chain_id || '|' || wave_id                               AS source_name,
+              'workflow_chain_wave_run::' || chain_id || '::' || wave_id || '::' || spec_path
+                                                                      AS target_id,
+              'workflow_chain_wave_run'                                AS target_kind,
+              spec_path                                               AS target_name,
+              TRUE                                                    AS active
+            FROM workflow_chain_wave_runs
+            WHERE chain_id IS NOT NULL
+              AND wave_id IS NOT NULL
+              AND spec_path IS NOT NULL
+            """
+        ),
+        relation_type="parent_of",
+        semantic_kind="wave_contains_run_spec",
+        provenance_ref="workflow_chain_wave_runs",
+    ),
+    FkProjection(
+        name="workflow_chain_wave_runs_to_workflow_runs",
+        select_sql=(
+            """
+            SELECT
+              'workflow_chain_wave_run::' || chain_id || '::' || wave_id || '::' || spec_path
+                                                          AS source_id,
+              'workflow_chain_wave_run'                          AS source_kind,
+              chain_id || '|' || wave_id || '|' || spec_path        AS source_name,
+              'workflow_run::' || run_id                           AS target_id,
+              'workflow_run'                                      AS target_kind,
+              run_id                                              AS target_name,
+              TRUE                                                AS active
+            FROM workflow_chain_wave_runs
+            WHERE run_id IS NOT NULL
+            """
+        ),
+        relation_type="parent_of",
+        semantic_kind="wave_run_executes_run",
+        provenance_ref="workflow_chain_wave_runs.run_id",
+    ),
+    FkProjection(
+        name="operator_decisions_to_scope",
+        select_sql=(
+            """
+            SELECT
+              'operator_decision::' || operator_decision_id AS source_id,
+              'operator_decision'                          AS source_kind,
+              operator_decision_id                         AS source_name,
+              CASE lower(decision_scope_kind)
+                WHEN 'bug' THEN 'bug::' || decision_scope_ref
+                WHEN 'issue' THEN 'issue::' || decision_scope_ref
+                WHEN 'roadmap_item' THEN 'roadmap_item::' || decision_scope_ref
+                WHEN 'workflow' THEN 'workflow::' || decision_scope_ref
+                WHEN 'workflow_run' THEN 'workflow_run::' || decision_scope_ref
+                WHEN 'workflow_chain' THEN 'workflow_chain::' || decision_scope_ref
+                WHEN 'workflow_build_intent' THEN 'workflow_build_intent::' || decision_scope_ref
+                WHEN 'functional_area' THEN 'functional_area::' || decision_scope_ref
+                WHEN 'repo_path' THEN 'repo_path::' || decision_scope_ref
+                WHEN 'operator_decision' THEN 'operator_decision::' || decision_scope_ref
+                WHEN 'workflow_class' THEN 'workflow_class::' || decision_scope_ref
+                WHEN 'schedule_definition' THEN 'schedule_definition::' || decision_scope_ref
+                WHEN 'document' THEN 'document::' || decision_scope_ref
+                WHEN 'cutover_gate' THEN 'cutover_gate::' || decision_scope_ref
+                WHEN 'provider' THEN 'provider::' || decision_scope_ref
+                WHEN 'authority_domain' THEN 'authority_domain::' || decision_scope_ref
+                ELSE NULL
+              END                                          AS target_id,
+              CASE lower(decision_scope_kind)
+                WHEN 'bug' THEN 'bug'
+                WHEN 'issue' THEN 'issue'
+                WHEN 'roadmap_item' THEN 'roadmap_item'
+                WHEN 'workflow' THEN 'workflow'
+                WHEN 'workflow_run' THEN 'workflow_run'
+                WHEN 'workflow_chain' THEN 'workflow_chain'
+                WHEN 'workflow_build_intent' THEN 'workflow_build_intent'
+                WHEN 'functional_area' THEN 'functional_area'
+                WHEN 'repo_path' THEN 'repo_path'
+                WHEN 'operator_decision' THEN 'operator_decision'
+                WHEN 'workflow_class' THEN 'workflow_class'
+                WHEN 'schedule_definition' THEN 'schedule_definition'
+                WHEN 'document' THEN 'document'
+                WHEN 'cutover_gate' THEN 'cutover_gate'
+                WHEN 'provider' THEN 'provider'
+                WHEN 'authority_domain' THEN 'authority_domain'
+                ELSE NULL
+              END                                          AS target_kind,
+              decision_scope_ref                            AS target_name,
+              TRUE                                         AS active,
+              jsonb_build_object(
+                'decision_scope_kind', decision_scope_kind,
+                'decision_scope_ref', decision_scope_ref
+              )                                           AS metadata_override
+            FROM operator_decisions
+            WHERE decision_scope_kind IS NOT NULL
+              AND decision_scope_ref IS NOT NULL
+              AND lower(decision_scope_kind) IN (
+                'bug', 'issue', 'roadmap_item', 'workflow', 'workflow_run',
+                'workflow_chain', 'workflow_build_intent', 'functional_area',
+                'repo_path', 'operator_decision', 'workflow_class',
+                'schedule_definition', 'document', 'cutover_gate',
+                'provider', 'authority_domain'
+              )
+            """
+        ),
+        relation_type="related_to",
+        semantic_kind="decision_scope",
+        provenance_ref="operator_decisions.decision_scope",
+    ),
+    FkProjection(
+        name="issue_discovered_in_run",
+        select_sql=(
+            """
+            SELECT
+              'issue::' || issue_id                      AS source_id,
+              'issue'                                    AS source_kind,
+              issue_id                                   AS source_name,
+              'workflow_run::' || discovered_in_run_id    AS target_id,
+              'workflow_run'                             AS target_kind,
+              discovered_in_run_id                        AS target_name,
+              TRUE                                       AS active
+            FROM issues
+            WHERE discovered_in_run_id IS NOT NULL
+            """
+        ),
+        relation_type="recorded_in",
+        semantic_kind="issue_discovered_in_run",
+        provenance_ref="issues.discovered_in_run_id",
+    ),
+    FkProjection(
+        name="issue_discovered_in_receipt",
+        select_sql=(
+            """
+            SELECT
+              'issue::' || issue_id                      AS source_id,
+              'issue'                                    AS source_kind,
+              issue_id                                   AS source_name,
+              'receipt::' || discovered_in_receipt_id      AS target_id,
+              'receipt'                                  AS target_kind,
+              discovered_in_receipt_id                    AS target_name,
+              TRUE                                       AS active
+            FROM issues
+            WHERE discovered_in_receipt_id IS NOT NULL
+            """
+        ),
+        relation_type="recorded_in",
+        semantic_kind="issue_discovered_in_receipt",
+        provenance_ref="issues.discovered_in_receipt_id",
     ),
 )
 
@@ -351,15 +750,6 @@ async def refresh_authority_memory_projection(
     return await AuthorityMemoryProjection().refresh_async(as_of=as_of, env=env)
 
 
-# --- Follow-ups for a full implementation (intentional TODOs) -----------
-# 1. Wire into the CLI: `praxis workflow tools call praxis_authority_memory_refresh`.
-#    Register a handler in surfaces/mcp/tools/ that calls refresh_authority_memory_projection.
-# 2. Schedule via recurring_run_windows or heartbeat — run every N minutes.
-# 3. When authority write paths emit outbox events (roadmap_items,
-#    operator_object_relations, workflow_build_intents), swap the refresher
-#    for a true cursor-based subscriber. The FkProjection rows already carry
-#    enough metadata to drive per-event projection.
-# 4. Add memory_entity rows for any source_id/target_id that doesn't yet exist
-#    in memory_entities so discover/recall can resolve the edge endpoints.
-# 5. Extend _PROJECTIONS with: bug evidence refs, workflow_chains,
-#    workflow_job_submissions -> workflow_runs, operator_decisions -> scope.
+# --- Authoritative coverage now implemented in code ---
+# This projection remains scan-based until outbox events are available for
+# incremental refreshes of every upstream authority table.

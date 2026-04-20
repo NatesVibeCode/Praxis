@@ -23,10 +23,28 @@ interface FieldRow {
   display_order: number;
 }
 
+interface RelationshipRow {
+  entity_id: string;
+  entity_type: string;
+  name: string;
+  summary: string;
+  table: string;
+  relation: string;
+  direction: string;
+  source_id: string;
+  target_id: string;
+  metadata: Record<string, any>;
+}
+
 interface DescribePayload {
   object: { object_kind: string; label: string; category: string; summary: string };
   fields: FieldRow[];
   entries_by_source: Record<string, number>;
+  relationships?: {
+    depends_on: RelationshipRow[];
+    referenced_by: RelationshipRow[];
+  };
+  relationship_counts?: Record<string, number>;
 }
 
 const CATEGORIES = [
@@ -235,6 +253,20 @@ export function MoonDataDictionaryPanel() {
     [selected, reloadDetail, reloadObjects],
   );
 
+  const linkedEdges = useMemo(() => {
+    if (!detail?.relationships) return [];
+    return [
+      ...(detail.relationships.depends_on || []).map((row) => ({
+        ...row,
+        bucket: 'depends_on',
+      })),
+      ...(detail.relationships.referenced_by || []).map((row) => ({
+        ...row,
+        bucket: 'referenced_by',
+      })),
+    ];
+  }, [detail]);
+
   return (
     <div className="moon-surface-review">
       <button
@@ -368,6 +400,42 @@ export function MoonDataDictionaryPanel() {
                   ))}
                 </tbody>
               </table>
+
+              {linkedEdges.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div className="moon-dock__section-label">Linked edges</div>
+                  <table className="moon-catalog__table" style={{ marginTop: 12, width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left' }}>direction</th>
+                        <th style={{ textAlign: 'left' }}>relation</th>
+                        <th style={{ textAlign: 'left' }}>object</th>
+                        <th style={{ textAlign: 'left' }}>metadata</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {linkedEdges.map((row) => (
+                        <tr key={`${row.bucket}:${row.source_id}:${row.target_id}:${row.relation}`}>
+                          <td>{row.direction}</td>
+                          <td>{row.relation}</td>
+                          <td>
+                            <div>{row.name || row.table || row.entity_id}</div>
+                            <div className="moon-action__surface-note">
+                              {row.entity_type}
+                              {row.summary ? ` · ${row.summary}` : ''}
+                            </div>
+                          </td>
+                          <td className="moon-action__surface-note">
+                            {Object.keys(row.metadata || {}).length > 0
+                              ? JSON.stringify(row.metadata)
+                              : ''}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 

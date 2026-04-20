@@ -7,7 +7,11 @@ from runtime.task_type_router import TaskTypeRouter
 
 @pytest.fixture(autouse=True)
 def _stub_router_provider_defaults(monkeypatch):
-    monkeypatch.setitem(TaskTypeRouter.__init__.__globals__, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setitem(
+        TaskTypeRouter.__init__.__globals__,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "cli",
+    )
 
 
 def _policy_row() -> dict[str, object]:

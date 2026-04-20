@@ -32,25 +32,10 @@ def project_failure_classification(
             outputs={"stderr": str(stdout_preview or "")},
         ).to_dict()
     except Exception:
-        classification = None
-
-    if classification is None:
-        return {
-            "category": normalized_category,
-            "is_retryable": not bool(is_transient),
-            "is_transient": bool(is_transient),
-            "recommended_action": "",
-            "severity": "low",
-        }
+        return None
 
     if classification.get("category") == "unknown" and normalized_category != "unknown":
-        return {
-            "category": normalized_category,
-            "is_retryable": not bool(is_transient),
-            "is_transient": bool(is_transient),
-            "recommended_action": "",
-            "severity": "low",
-        }
+        return None
 
     classification["category"] = normalized_category
     return classification

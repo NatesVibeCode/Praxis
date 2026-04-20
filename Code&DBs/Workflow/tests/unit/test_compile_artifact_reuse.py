@@ -164,7 +164,7 @@ def test_compile_prose_reuses_definition_artifact_on_exact_input_match(monkeypat
     assert second["definition"]["definition_revision"] == first["definition"]["definition_revision"]
 
 
-def test_compile_prose_skips_invalid_reusable_definition_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compile_prose_fails_on_invalid_reusable_definition_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
     conn = _ArtifactConn()
     snapshot = _compile_index_snapshot()
     monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
@@ -175,14 +175,12 @@ def test_compile_prose_skips_invalid_reusable_definition_artifact(monkeypatch: p
     )
     conn.compile_artifact_rows[0]["content_hash"] = "not-the-real-hash"
 
-    result = compiler.compile_prose(
-        "Review the workflow output carefully.",
-        conn=conn,
-        compile_index_snapshot=snapshot,
-    )
-
-    assert result["reuse_provenance"]["decision"] == "compiled"
-    assert result["error"] is None
+    with pytest.raises(RuntimeError, match="compile_artifact.reuse_failed"):
+        compiler.compile_prose(
+            "Review the workflow output carefully.",
+            conn=conn,
+            compile_index_snapshot=snapshot,
+        )
 
 
 def test_compile_prose_reuses_definition_artifact_when_db_returns_json_strings(

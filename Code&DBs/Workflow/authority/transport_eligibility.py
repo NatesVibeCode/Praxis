@@ -437,13 +437,14 @@ def load_transport_eligibility_authority(
                 )
                 route_preflight_overall = "blocked"
 
+    default_provider_slug = _require_text(
+        provider_registry_mod.default_provider_slug(),
+        field_name="default_provider_slug",
+    )
     return TransportEligibilityAuthority(
-        default_provider_slug=_require_text(
-            provider_registry_mod.default_provider_slug(),
-            field_name="default_provider_slug",
-        ),
+        default_provider_slug=default_provider_slug,
         default_adapter_type=_require_text(
-            provider_registry_mod.default_llm_adapter_type(),
+            provider_registry_mod.resolve_default_adapter_type(default_provider_slug),
             field_name="default_adapter_type",
         ),
         provider_records=tuple(provider_records),

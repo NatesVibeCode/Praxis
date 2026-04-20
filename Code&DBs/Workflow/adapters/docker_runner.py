@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from registry.provider_execution_registry import resolve_api_key_env_vars
 from runtime.docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
 from runtime.sandbox_runtime import _cli_auth_volume_flags
 from runtime.workflow.execution_policy import validate_auth_mount_policy
@@ -33,34 +34,28 @@ if TYPE_CHECKING:
 _PRAXIS_DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _PRAXIS_DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 
-# CLI auth env vars that must be forwarded into ephemeral CLI containers.
-# File-based auth is mounted via _cli_auth_volume_flags; these cover the
-# token-env-var case (e.g. CLAUDE_CODE_OAUTH_TOKEN for non-interactive auth).
-_CLI_AUTH_ENV_ALLOWLIST: tuple[str, ...] = (
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GOOGLE_GENAI_API_KEY",
-    "CURSOR_API_KEY",
-)
+_PROVIDER_AUTH_ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "anthropic": ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+    "openai": ("OPENAI_API_KEY",),
+    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"),
+    "cursor": ("CURSOR_API_KEY",),
+    "cursor_local": ("CURSOR_API_KEY",),
+}
 
 
 def _cli_auth_env_forward(provider_slug: str | None) -> dict[str, str]:
-    """Return a dict of CLI auth env vars present in os.environ, to forward
-    into the ephemeral CLI container. Empty values are skipped so that an
-    explicitly-cleared ANTHROPIC_API_KEY in the outer env doesn't override
-    OAuth-token auth in the inner container."""
-    del provider_slug  # Allowlist is provider-agnostic; vars only apply where recognized.
+    """Return the single provider auth env var to forward into the container."""
+    normalized_provider = str(provider_slug or "").strip().lower()
+    if not normalized_provider:
+        return {}
+
     forwarded: dict[str, str] = {}
-    for key in _CLI_AUTH_ENV_ALLOWLIST:
+    candidates = _PROVIDER_AUTH_ENV_CANDIDATES.get(normalized_provider) or resolve_api_key_env_vars(normalized_provider)
+    for key in candidates:
         value = os.environ.get(key)
         if value:
             forwarded[key] = value
+            break
     return forwarded
 
 

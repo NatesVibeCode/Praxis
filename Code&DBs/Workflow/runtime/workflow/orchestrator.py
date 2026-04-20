@@ -26,7 +26,7 @@ from typing import Any
 
 from ..prompt_renderer import render_prompt, render_prompt_as_messages
 from ..output_writer import apply_structured_output
-from registry.provider_execution_registry import default_llm_adapter_type, default_provider_slug
+from registry.provider_execution_registry import default_provider_slug, resolve_default_adapter_type
 from runtime.domain import RuntimeBoundaryError
 from adapters.task_profiles import resolve_profile
 from runtime.native_authority import default_native_authority_refs
@@ -91,7 +91,7 @@ class WorkflowSpec:
     provider_slug: str = field(default_factory=default_provider_slug)
     model_slug: str | None = None
     tier: str | None = None  # "frontier", "mid", "economy", "auto" — overrides provider_slug/model_slug
-    adapter_type: str = field(default_factory=default_llm_adapter_type)
+    adapter_type: str | None = None
     timeout: int = 300
     workdir: str | None = None
     max_tokens: int = 4096
@@ -108,6 +108,12 @@ class WorkflowSpec:
     verify_refs: list[str] | None = None
     definition_revision: str | None = None
     plan_revision: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.adapter_type is None or not self.adapter_type.strip():
+            object.__setattr__(self, "adapter_type", resolve_default_adapter_type(self.provider_slug))
+        elif self.adapter_type != self.adapter_type.strip():
+            object.__setattr__(self, "adapter_type", self.adapter_type.strip())
     packet_provenance: dict[str, Any] | None = None
     output_schema: dict | None = None
     authoring_contract: dict[str, Any] | None = None
@@ -470,9 +476,13 @@ def run_workflow_pipeline(
 
     # Determine provider/model from the first step for result metadata
     first_step = steps[0]
-    provider_slug = first_step.provider_slug or "anthropic"
+    provider_slug = first_step.provider_slug or default_provider_slug()
     model_slug = first_step.model_slug
-    adapter_type = first_step.adapter_type
+    adapter_type = (
+        first_step.adapter_type.strip()
+        if first_step.adapter_type is not None and first_step.adapter_type.strip()
+        else resolve_default_adapter_type(provider_slug)
+    )
     context = WorkflowExecutionContext(
         provider_slug=provider_slug,
         model_slug=model_slug,

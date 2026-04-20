@@ -4,6 +4,7 @@ import sys
 import types
 from typing import Any
 
+import storage.postgres.workflow_orchestration_repository as run_node_repo_mod
 import runtime.workflow.worker as workflow_worker
 from runtime.workflow.worker import WorkflowWorker
 
@@ -153,11 +154,17 @@ def test_workflow_worker_delegates_failure_persistence_to_repository(monkeypatch
             (),
             {
                 "run_node_id": "node-2",
-                "failure_code": "explode",
+                "failure_code": "worker_exception",
                 "receipt_id": "receipt:run-2:card.build:1:terminal",
             },
         ),
     ]
+
+
+def test_run_node_failure_code_normalizer_does_not_truncate() -> None:
+    code = "worker_exception." + ("x" * 240)
+
+    assert run_node_repo_mod._normalize_failure_code(code) == code
 
 
 def test_workflow_worker_records_awaiting_human_with_canonical_receipt(monkeypatch) -> None:

@@ -36,6 +36,9 @@ def _stub_external_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         def load_reusable_artifact(self, **_kwargs):
             return None
 
+        def record_definition(self, **_kwargs):
+            return None
+
     def _fake_llm_compile(prose: str, context: str, *, conn=None) -> dict:
         return {
             "title": compiler_module._derive_title(prose, prose),

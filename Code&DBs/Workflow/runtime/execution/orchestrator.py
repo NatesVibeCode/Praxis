@@ -22,7 +22,7 @@ The runtime:
   3. Injects context sections into the next step's input_payload before
      execution
   4. Records resolution evidence in _scope_resolution metadata
-  5. Fails the step if scope_strict=True and resolution fails
+  5. Fails upstream-scope steps by default when resolution fails
 
 See extract_file_refs() and the execution loop in execute_deterministic_path()
 for implementation details.
@@ -465,10 +465,10 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         input_payload = node.inputs.get("input_payload")
         if isinstance(input_payload, Mapping):
             scope_source = input_payload.get("scope_source", "none")
-            scope_strict = input_payload.get("scope_strict", False)
+            scope_strict = input_payload.get("scope_strict", True)
         else:
             scope_source = node.inputs.get("scope_source", "none")
-            scope_strict = node.inputs.get("scope_strict", False)
+            scope_strict = node.inputs.get("scope_strict", True)
 
         if scope_source == "upstream" and node_results:
             upstream_outputs: dict[str, Any] = {}

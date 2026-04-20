@@ -182,7 +182,7 @@ def _build_workflow_graph(spec: "WorkflowSpec") -> WorkflowRequest:
         )
 
     _edge(prev, "terminal")
-    _node("terminal", "deterministic_task", "terminal", {}, {"terminal": True})
+    _node("terminal", "deterministic_task", "terminal", {"allow_passthrough_echo": True}, {"terminal": True})
 
     topology = json.dumps(
         [(node.node_id, node.adapter_type) for node in nodes]

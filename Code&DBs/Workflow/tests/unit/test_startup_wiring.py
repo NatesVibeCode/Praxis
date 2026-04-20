@@ -173,6 +173,37 @@ def test_sync_integration_registry_projects_static_and_mcp_rows() -> None:
     assert [cap["action"] for cap in run_status_caps] == ["run_status"]
 
 
+def test_sync_integration_registry_aborts_on_malformed_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "good.toml").write_text(
+        "[integration]\n"
+        'id = "good-manifest"\n'
+        'name = "Good Manifest"\n'
+        'provider = "http"\n'
+    )
+    (tmp_path / "bad.toml").write_text("this is not [valid toml")
+
+    monkeypatch.setattr(
+        integration_registry_sync_mod.integration_manifest,
+        "_MANIFEST_DIR",
+        tmp_path,
+    )
+    monkeypatch.setattr(
+        integration_registry_sync_mod,
+        "projected_mcp_integrations",
+        lambda: [],
+    )
+
+    conn = _FakeConn()
+
+    with pytest.raises(RuntimeError, match="bad.toml"):
+        sync_integration_registry(conn)
+
+    assert conn.batch_calls == []
+
+
 def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heartbeat(monkeypatch) -> None:
     events: list[str] = []
     fake_conn = _FakeConn()

@@ -22,6 +22,29 @@ class IntegrationResult(TypedDict, total=False):
 
 
 IntegrationHandler = Callable[[dict, Any], IntegrationResult]
+INTEGRATION_SUCCEEDED_STATUS = "succeeded"
+INTEGRATION_FAILED_STATUS = "failed"
+INTEGRATION_SKIPPED_STATUS = "skipped"
+_INTEGRATION_TERMINAL_STATUSES = frozenset(
+    {INTEGRATION_SUCCEEDED_STATUS, INTEGRATION_FAILED_STATUS, INTEGRATION_SKIPPED_STATUS}
+)
+
+
+def integration_result_status(result: dict[str, Any] | None) -> str:
+    status = str((result or {}).get("status") or "").strip().lower()
+    return status if status in _INTEGRATION_TERMINAL_STATUSES else INTEGRATION_FAILED_STATUS
+
+
+def integration_result_succeeded(result: dict[str, Any] | None) -> bool:
+    return integration_result_status(result) == INTEGRATION_SUCCEEDED_STATUS
+
+
+def integration_result_error_code(result: dict[str, Any] | None) -> str:
+    status = integration_result_status(result)
+    if status == INTEGRATION_SUCCEEDED_STATUS:
+        return ""
+    error = str((result or {}).get("error") or "").strip()
+    return error or f"integration_{status}"
 
 
 def _build_bindings() -> dict[tuple[str, str], IntegrationHandler]:

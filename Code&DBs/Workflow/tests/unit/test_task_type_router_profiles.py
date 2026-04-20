@@ -23,7 +23,11 @@ def _passthrough_economics(**kwargs):
 
 @pytest.fixture(autouse=True)
 def _stub_router_provider_defaults(monkeypatch):
-    monkeypatch.setitem(TaskTypeRouter.__init__.__globals__, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setitem(
+        TaskTypeRouter.__init__.__globals__,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "cli",
+    )
     monkeypatch.setitem(
         TaskTypeRouter._build_profile_task_rows.__globals__,
         "_resolve_route_economics",
@@ -212,6 +216,17 @@ class _CatalogProfileConn:
             return []
         if "FROM provider_lane_policy" in sql:
             return []
+        if "provider_budget_windows" in sql:
+            return [{
+                "provider_policy_id": "provider_policy.openai",
+                "budget_status": "limited",
+                "request_limit": 100,
+                "requests_used": 92,
+                "token_limit": 1000,
+                "tokens_used": 940,
+                "spend_limit_usd": 10.0,
+                "spend_used_usd": 9.6,
+            }]
         if "FROM provider_model_candidates" in sql:
             return [
                 {
@@ -388,6 +403,17 @@ class _ScopedProfileConn(_CatalogProfileConn):
                     }}},
                 },
             ]
+        if "FROM provider_budget_windows" in sql:
+            return [{
+                "provider_policy_id": "provider_policy.openai",
+                "budget_status": "limited",
+                "request_limit": 100,
+                "requests_used": 92,
+                "token_limit": 1000,
+                "tokens_used": 940,
+                "spend_limit_usd": 10.0,
+                "spend_used_usd": 9.6,
+            }]
         if "FROM route_eligibility_states" in sql:
             return [
                 {"candidate_ref": "candidate.gpt-5.4", "eligibility_status": "eligible", "reason_code": "eligible"},
@@ -423,6 +449,41 @@ def test_runtime_profile_does_not_override_explicit_slug() -> None:
     assert decision.was_auto is False
 
 
+def test_explicit_slug_uses_runtime_profile_budget_authority(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def _budget_aware_economics(**kwargs):
+        calls.append(dict(kwargs))
+        provider_policy_id = str(kwargs.get("provider_policy_id") or "")
+        budget_window = kwargs.get("budget_windows", {}).get(provider_policy_id)
+        return {
+            "adapter_type": kwargs.get("adapter_type") or "cli",
+            "billing_mode": "owned_compute",
+            "budget_bucket": "test",
+            "effective_marginal_cost": float(kwargs.get("raw_cost_per_m_tokens") or 0.0),
+            "spend_pressure": "high" if budget_window else "unknown",
+            "budget_status": str((budget_window or {}).get("budget_status") or ""),
+            "prefer_prepaid": True,
+            "allow_payg_fallback": not bool(budget_window),
+        }
+
+    monkeypatch.setitem(TaskTypeRouter.resolve.__globals__, "_resolve_route_economics", _budget_aware_economics)
+
+    router = TaskTypeRouter(_ScopedProfileConn())
+
+    decision = router.resolve(
+        "openai/gpt-5.4-mini",
+        runtime_profile_ref="runtime_profile.build",
+    )
+
+    assert calls
+    assert calls[0]["provider_policy_id"] == "provider_policy.openai"
+    assert "provider_policy.openai" in calls[0]["budget_windows"]
+    assert decision.spend_pressure == "high"
+    assert decision.budget_status == "limited"
+    assert decision.allow_payg_fallback is False
+
+
 def test_explicit_route_decision_preserves_economics_policy_bits(monkeypatch) -> None:
     monkeypatch.setitem(
         TaskTypeRouter.resolve.__globals__,
@@ -443,6 +504,48 @@ def test_explicit_route_decision_preserves_economics_policy_bits(monkeypatch) ->
     decision = router.resolve("anthropic/claude-sonnet-4-6")
 
     assert decision.prefer_prepaid is False
+    assert decision.allow_payg_fallback is False
+
+
+def test_explicit_route_decision_defaults_allow_payg_fallback_false_when_sparse(monkeypatch) -> None:
+    monkeypatch.setitem(
+        TaskTypeRouter.resolve.__globals__,
+        "_resolve_route_economics",
+        lambda **kwargs: {
+            "adapter_type": "llm_task",
+            "billing_mode": "metered_api",
+            "budget_bucket": "api",
+            "effective_marginal_cost": 1.0,
+            "spend_pressure": "unknown",
+            "budget_status": "",
+            "prefer_prepaid": False,
+        },
+    )
+    router = TaskTypeRouter(_ScopedProfileConn())
+
+    decision = router.resolve("openai/gpt-5.4-mini")
+
+    assert decision.allow_payg_fallback is False
+
+
+def test_explicit_route_decision_defaults_missing_payg_fallback_to_false(monkeypatch) -> None:
+    monkeypatch.setitem(
+        TaskTypeRouter.resolve.__globals__,
+        "_resolve_route_economics",
+        lambda **kwargs: {
+            "adapter_type": "llm_task",
+            "billing_mode": "metered_api",
+            "budget_bucket": "api",
+            "effective_marginal_cost": 1.0,
+            "spend_pressure": "low",
+            "budget_status": "",
+            "prefer_prepaid": False,
+        },
+    )
+    router = TaskTypeRouter(_ScopedProfileConn())
+
+    decision = router.resolve("anthropic/claude-sonnet-4-6")
+
     assert decision.allow_payg_fallback is False
 
 

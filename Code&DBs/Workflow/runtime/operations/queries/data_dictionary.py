@@ -22,9 +22,7 @@ from runtime.data_dictionary import (
     describe_object,
     list_object_kinds,
 )
-
-
-_TABLE_PREFIX = "table:"
+_ENTITY_PREFIX_SEPARATORS = ("::", ":")
 
 
 def _as_dict(value: object) -> dict[str, Any]:
@@ -47,39 +45,108 @@ def _as_iso(value: object) -> str | None:
     return None
 
 
-def _as_table_name(entity_id: str) -> str | None:
-    if entity_id.startswith(_TABLE_PREFIX):
-        return entity_id[len(_TABLE_PREFIX):]
-    return None
+def _entity_kind(entity_id: str) -> str:
+    for separator in _ENTITY_PREFIX_SEPARATORS:
+        if separator in entity_id:
+            return entity_id.split(separator, 1)[0]
+    return ""
 
 
-def _extract_edges_by_direction(conn, table_entity_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _entity_label(entity_id: str) -> str:
+    for separator in _ENTITY_PREFIX_SEPARATORS:
+        if separator in entity_id:
+            return entity_id.split(separator, 1)[1]
+    return entity_id
+
+
+def _load_entity_contexts(conn: Any, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
+    ids = [entity_id for entity_id in dict.fromkeys(entity_ids) if entity_id]
+    if not ids:
+        return {}
+    rows = conn.execute(
+        "SELECT id, entity_type, name, content FROM memory_entities WHERE id = ANY($1::text[])",
+        ids,
+    )
+    contexts: dict[str, dict[str, Any]] = {}
+    for row in rows or []:
+        contexts[str(row["id"])] = {
+            "entity_id": str(row["id"]),
+            "entity_type": str(row.get("entity_type") or ""),
+            "name": str(row.get("name") or ""),
+            "summary": str(row.get("content") or ""),
+        }
+    return contexts
+
+
+def _extract_edges_by_direction(
+    conn,
+    table_entity_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows = conn.execute(
         "SELECT source_id, target_id, relation_type, metadata "
         "FROM memory_edges "
         "WHERE source_id = $1 OR target_id = $1",
         table_entity_id,
     )
+    entity_contexts = _load_entity_contexts(
+        conn,
+        [row["source_id"] for row in rows or []] + [row["target_id"] for row in rows or []],
+    )
+
+    def _edge_payload(
+        *,
+        source_id: str,
+        target_id: str,
+        relation: str,
+        metadata: dict[str, Any],
+        direction: str,
+        other_id: str,
+    ) -> dict[str, Any]:
+        context = entity_contexts.get(other_id, {})
+        name = str(context.get("name") or _entity_label(other_id) or other_id)
+        return {
+            "entity_id": other_id,
+            "entity_type": str(context.get("entity_type") or _entity_kind(other_id) or ""),
+            "name": name,
+            "summary": str(context.get("summary") or ""),
+            "table": name,
+            "relation": relation,
+            "direction": direction,
+            "source_id": source_id,
+            "target_id": target_id,
+            "metadata": metadata,
+        }
+
     outgoing: list[dict[str, Any]] = []
     incoming: list[dict[str, Any]] = []
     for row in rows or []:
         relation = str(row["relation_type"] or "")
         metadata = _as_dict(row["metadata"])
-        source_table = _as_table_name(str(row["source_id"] or ""))
-        target_table = _as_table_name(str(row["target_id"] or ""))
-        if row["source_id"] == table_entity_id and target_table:
-            outgoing.append({
-                "table": target_table,
-                "relation": relation,
-                "metadata": metadata,
-            })
+        source_id = str(row["source_id"] or "")
+        target_id = str(row["target_id"] or "")
+        if source_id == table_entity_id:
+            outgoing.append(
+                _edge_payload(
+                    source_id=source_id,
+                    target_id=target_id,
+                    relation=relation,
+                    metadata=metadata,
+                    direction="depends_on",
+                    other_id=target_id,
+                )
+            )
             continue
-        if row["target_id"] == table_entity_id and source_table:
-            incoming.append({
-                "table": source_table,
-                "relation": relation,
-                "metadata": metadata,
-            })
+        if target_id == table_entity_id:
+            incoming.append(
+                _edge_payload(
+                    source_id=source_id,
+                    target_id=target_id,
+                    relation=relation,
+                    metadata=metadata,
+                    direction="referenced_by",
+                    other_id=source_id,
+                )
+            )
     return outgoing, incoming
 
 

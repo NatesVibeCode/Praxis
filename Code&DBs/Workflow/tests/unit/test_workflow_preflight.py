@@ -32,8 +32,7 @@ class _FakeSpec:
 # ----- Deterministic builder checks --------------------------------------
 
 
-def test_deterministic_missing_builder_is_warning_not_error() -> None:
-    # Passthrough-echo is legal for smoke runs, so this is only a warning.
+def test_deterministic_missing_builder_is_error_without_explicit_passthrough() -> None:
     spec = _FakeSpec(jobs=[{
         "label": "step_smoke",
         "adapter_type": "deterministic_task",
@@ -44,9 +43,25 @@ def test_deterministic_missing_builder_is_warning_not_error() -> None:
 
     assert len(warnings) == 1
     assert warnings[0]["kind"] == "deterministic_builder_missing"
+    assert warnings[0]["severity"] == "error"
+    assert warnings[0]["label"] == "step_smoke"
+    assert "add a deterministic_builder" in warnings[0]["message"]
+
+
+def test_deterministic_missing_builder_can_opt_into_smoke_passthrough_warning() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "step_smoke",
+        "adapter_type": "deterministic_task",
+        "inputs": {"input_path": "data.json", "allow_passthrough_echo": True},
+    }])
+
+    warnings = _preflight_deterministic_builders(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "deterministic_builder_passthrough_echo"
     assert warnings[0]["severity"] == "warning"
     assert warnings[0]["label"] == "step_smoke"
-    assert "echo expected_outputs" in warnings[0]["message"]
+    assert "allow_passthrough_echo=true" in warnings[0]["message"]
 
 
 def test_deterministic_builder_import_failure_is_error() -> None:
@@ -286,9 +301,13 @@ def test_workdir_drift_quiet_when_relative_path() -> None:
     assert _preflight_workdir_drift(spec) == []
 
 
-def test_workdir_drift_covers_per_job_workdirs(tmp_path) -> None:
+def test_workdir_drift_covers_per_job_workdirs(monkeypatch, tmp_path) -> None:
     spec_workdir = str(tmp_path)  # exists
     missing_job_workdir = "/Users/nate/Praxis/elsewhere/nope"
+    monkeypatch.setattr(
+        "runtime.workflow_validation.authority_workspace_roots",
+        lambda: (),
+    )
     spec = _FakeSpec(
         raw={"workdir": spec_workdir},
         jobs=[
@@ -302,3 +321,22 @@ def test_workdir_drift_covers_per_job_workdirs(tmp_path) -> None:
     assert len(warnings) == 1
     assert warnings[0]["label"] == "step_bad"
     assert "job.workdir" in warnings[0]["message"]
+
+
+def test_workdir_drift_warns_when_workspace_authority_unavailable(monkeypatch) -> None:
+    def _boom():
+        raise RuntimeError("authority unavailable")
+
+    monkeypatch.setattr(
+        "runtime.workflow_validation.authority_workspace_roots",
+        _boom,
+    )
+    spec = _FakeSpec(raw={"workdir": "/Users/nate/Praxis/elsewhere/nope"})
+
+    warnings = _preflight_workdir_drift(spec)
+
+    assert [warning["kind"] for warning in warnings] == [
+        "workdir_authority_unavailable",
+        "workdir_path_missing",
+    ]
+    assert "authority unavailable" in warnings[0]["message"]

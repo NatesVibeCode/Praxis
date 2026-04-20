@@ -33,7 +33,11 @@ _ttr_mod._resolve_route_economics = _passthrough_economics
 
 @pytest.fixture(autouse=True)
 def _stub_router_provider_defaults(monkeypatch):
-    monkeypatch.setitem(TaskTypeRouter.__init__.__globals__, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setitem(
+        TaskTypeRouter.__init__.__globals__,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "cli",
+    )
     monkeypatch.setitem(
         TaskTypeRouter._build_profile_task_rows.__globals__,
         "_resolve_route_economics",

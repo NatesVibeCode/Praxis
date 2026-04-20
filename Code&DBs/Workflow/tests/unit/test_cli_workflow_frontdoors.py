@@ -112,6 +112,8 @@ def test_top_level_help_mentions_routes_alias() -> None:
     assert "workflow integration list" in rendered
     assert "workflow integration help" in rendered
     assert "workflow research 'API auth drift'" in rendered
+    assert "workflow decompose 'build real-time notifications'" in rendered
+    assert "workflow authority-index" in rendered
     assert "workflow records" not in rendered
     assert "workflow defs <create|update>" not in rendered
 
@@ -130,6 +132,8 @@ def test_commands_index_mentions_routes_alias() -> None:
     assert "workflow api data-dictionary" in rendered
     assert "workflow integration [list|describe|health|test|call|create|secret|reload|help]" in rendered
     assert "workflow research [list|<topic>] [--workers N] [--agent SLUG] [--threshold N] [--json]" in rendered
+    assert "workflow decompose <objective...>" in rendered
+    assert "workflow authority-index" in rendered
     assert "workflow dictionary <list|describe|set-override|clear-override|reproject>" in rendered
     assert "workflow authority-memory refresh" in rendered
     assert "workflow records <create|update|rename>" in rendered
@@ -267,6 +271,58 @@ def test_research_frontdoor_launches_parallel_workflow(monkeypatch: pytest.Monke
     payload = json.loads(stdout.getvalue())
     assert payload["action"] == "run"
     assert payload["workflow"]["run_id"] == "run_123"
+
+
+def test_decompose_frontdoor_routes_to_sprint_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], **_kwargs):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {
+            "total_sprints": 2,
+            "total_estimate_minutes": 75,
+            "critical_path": ["plan", "build"],
+            "sprints": [
+                {"label": "plan", "complexity": "low", "estimate_minutes": 15},
+                {"label": "build", "complexity": "medium", "estimate_minutes": 60},
+            ],
+        }
+
+    monkeypatch.setattr(query_commands, "run_cli_tool", _fake_run_cli_tool)
+    stdout = StringIO()
+
+    assert (
+        workflow_cli_main(
+            [
+                "decompose",
+                "Build",
+                "real-time",
+                "notifications",
+                "--scope-files",
+                "src/alpha.py,src/beta.py",
+                "--json",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+    assert captured == {
+        "tool_name": "praxis_decompose",
+        "params": {
+            "objective": "Build real-time notifications",
+            "scope_files": ["src/alpha.py", "src/beta.py"],
+        },
+    }
+    assert json.loads(stdout.getvalue()) == {
+        "total_sprints": 2,
+        "total_estimate_minutes": 75,
+        "critical_path": ["plan", "build"],
+        "sprints": [
+            {"label": "plan", "complexity": "low", "estimate_minutes": 15},
+            {"label": "build", "complexity": "medium", "estimate_minutes": 60},
+        ],
+    }
 
 
 def test_integration_create_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -75,6 +75,18 @@ def test_authority_workspace_roots_includes_explicit_host_override() -> None:
     assert roots[0] == Path("/host/workspace")
 
 
+def test_authority_workspace_roots_propagates_instance_authority_errors(monkeypatch) -> None:
+    import runtime.instance as instance_module
+
+    def _boom(*, env=None):
+        raise RuntimeError("native authority exploded")
+
+    monkeypatch.setattr(instance_module, "native_instance_contract", _boom)
+
+    with pytest.raises(RuntimeError, match="native authority exploded"):
+        authority_workspace_roots(env={})
+
+
 def test_to_repo_ref_canonicalizes_absolute() -> None:
     canonical = code_tree_dirname()
     sample = workflow_root() / "runtime" / "workspace_paths.py"

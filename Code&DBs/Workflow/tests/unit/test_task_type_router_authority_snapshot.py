@@ -79,7 +79,11 @@ class _CountingConn:
 
 
 def test_router_reuses_static_authority_snapshot_across_construction(monkeypatch) -> None:
-    monkeypatch.setitem(TaskTypeRouter.__init__.__globals__, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setitem(
+        TaskTypeRouter.__init__.__globals__,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "cli",
+    )
     TaskTypeRouter.invalidate_all_authority_snapshots()
     conn = _CountingConn()
 
@@ -96,7 +100,11 @@ def test_router_reuses_static_authority_snapshot_across_construction(monkeypatch
 
 
 def test_router_authority_snapshot_invalidation_forces_reload(monkeypatch) -> None:
-    monkeypatch.setitem(TaskTypeRouter.__init__.__globals__, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setitem(
+        TaskTypeRouter.__init__.__globals__,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "cli",
+    )
     TaskTypeRouter.invalidate_all_authority_snapshots()
     conn = _CountingConn()
 

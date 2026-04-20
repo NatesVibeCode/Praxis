@@ -40,7 +40,21 @@ ALTER TABLE memory_entities
         'workflow_build_intent',
         'functional_area',
         'repo_path',
-        'operator_decision'
+        'operator_decision',
+        'issue',
+        'workflow_chain',
+        'workflow_chain_wave',
+        'workflow_chain_wave_run',
+        'workflow_job_submission',
+        'workflow_run',
+        'verification_run',
+        'healing_run',
+        'receipt',
+        'provider',
+        'authority_domain',
+        'cutover_gate',
+        'workflow_class',
+        'schedule_definition'
     ]));
 
 ALTER TABLE memory_edges

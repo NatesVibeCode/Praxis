@@ -52,6 +52,16 @@ class _CleanupMissingConn(_Conn):
         return super().execute(query, *args)
 
 
+class _CleanupProbeErrorConn(_Conn):
+    def execute(self, query: str, *args):
+        if "to_regprocedure('cleanup_system_events(integer)')" in query:
+            self.calls.append((query, args))
+            raise RuntimeError("catalog lookup failed")
+        if "cleanup_system_events(30)" in query:
+            raise RuntimeError("cleanup should not run when probe fails")
+        return super().execute(query, *args)
+
+
 class _Engine:
     def __init__(self, *args, **kwargs) -> None:
         pass
@@ -323,6 +333,15 @@ def test_trigger_evaluator_module_runs_runtime_trigger_loop(monkeypatch):
 
 def test_system_events_cleanup_skips_missing_function():
     conn = _CleanupMissingConn([])
+    result = heartbeat_runner.SystemEventsCleanupModule(conn).run()
+
+    assert result.module_name == "system_events_cleanup"
+    assert result.ok is True
+    assert not any("cleanup_system_events(30)" in query for query, _ in conn.calls)
+
+
+def test_system_events_cleanup_fails_closed_on_probe_error():
+    conn = _CleanupProbeErrorConn([])
     result = heartbeat_runner.SystemEventsCleanupModule(conn).run()
 
     assert result.module_name == "system_events_cleanup"

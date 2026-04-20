@@ -208,7 +208,7 @@ def test_pre_suggest_includes_workflow_registry_matches():
 
 
 def test_task_type_router_resolves_auto_support(monkeypatch):
-    monkeypatch.setattr(task_type_router, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setattr(task_type_router, "resolve_default_adapter_type", lambda provider_slug=None: "cli")
     monkeypatch.setattr(
         task_type_router,
         "_resolve_route_economics",

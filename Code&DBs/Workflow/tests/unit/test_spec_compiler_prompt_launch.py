@@ -13,8 +13,8 @@ from runtime import spec_compiler
 def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missing(monkeypatch) -> None:
     monkeypatch.setattr(
         spec_compiler,
-        "default_adapter_type_for_provider",
-        lambda provider_slug: "cli_llm" if provider_slug == "openai" else None,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "cli_llm" if provider_slug == "openai" else None,
     )
     monkeypatch.setattr(
         spec_compiler,
@@ -58,8 +58,8 @@ def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missi
 def test_compile_prompt_launch_spec_prefers_provider_specific_adapter_when_unspecified(monkeypatch) -> None:
     monkeypatch.setattr(
         spec_compiler,
-        "default_adapter_type_for_provider",
-        lambda provider_slug: "llm_task" if provider_slug == "cursor" else None,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "llm_task" if provider_slug == "cursor" else None,
     )
     monkeypatch.setattr(
         spec_compiler,
@@ -80,8 +80,8 @@ def test_compile_prompt_launch_spec_prefers_provider_specific_adapter_when_unspe
 def test_compile_prompt_launch_spec_carries_runtime_profile_authority(monkeypatch) -> None:
     monkeypatch.setattr(
         spec_compiler,
-        "default_adapter_type_for_provider",
-        lambda provider_slug: "cli_llm" if provider_slug == "openai" else None,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "cli_llm" if provider_slug == "openai" else None,
     )
     monkeypatch.setattr(
         spec_compiler,
@@ -107,8 +107,8 @@ def test_compile_prompt_launch_spec_carries_runtime_profile_authority(monkeypatc
 def test_compile_prompt_launch_spec_rejects_unadmitted_prompt_provider(monkeypatch) -> None:
     monkeypatch.setattr(
         spec_compiler,
-        "default_adapter_type_for_provider",
-        lambda provider_slug: "llm_task" if provider_slug == "cursor" else None,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: "llm_task" if provider_slug == "cursor" else None,
     )
     monkeypatch.setattr(
         spec_compiler,

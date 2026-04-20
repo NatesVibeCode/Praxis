@@ -5,7 +5,6 @@ from typing import Any
 import re
 
 from memory.federated_retrieval import FederatedRetriever
-from memory.types import EntityType
 from surfaces.api import operator_write as operator_control
 
 _DECISION_ENTITY_TYPES = {"", "decision", "architecture_policy", "operator_decision"}
@@ -187,27 +186,20 @@ def _search_federated_memory_results(
 
     try:
         retriever = FederatedRetriever(engine)
-        memory_entity_type = None
-        if entity_type:
-            try:
-                memory_entity_type = EntityType(entity_type)
-            except ValueError:
-                memory_entity_type = None
-
-        results = retriever.search(
-            query,
-            entity_type=memory_entity_type,
-            limit=limit,
-        )
+        results = retriever.search(query, limit=limit)
     except Exception as exc:
         raise RecallAuthorityError(
             f"federated memory search failed: {type(exc).__name__}: {exc}"
         ) from exc
 
+    normalized_type = str(entity_type or "").strip()
     normalized: list[dict[str, Any]] = []
     for result in results:
         try:
-            normalized.append(_normalize_knowledge_result(result))
+            normalized_result = _normalize_knowledge_result(result)
+            if normalized_type and normalized_result.get("type") != normalized_type:
+                continue
+            normalized.append(normalized_result)
         except Exception:
             continue
     return normalized

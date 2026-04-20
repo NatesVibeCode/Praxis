@@ -3,7 +3,7 @@ from __future__ import annotations
 import registry.provider_execution_registry as provider_registry
 
 
-def test_provider_registry_degrades_to_builtins_when_db_authority_is_unavailable(monkeypatch):
+def test_provider_registry_fails_closed_when_db_authority_is_unavailable(monkeypatch):
     original_registry = dict(provider_registry._REGISTRY)
     original_aliases = dict(provider_registry._ALIAS_MAP)
     original_config = dict(provider_registry._ADAPTER_CONFIG)
@@ -25,12 +25,13 @@ def test_provider_registry_degrades_to_builtins_when_db_authority_is_unavailable
         health = provider_registry.registry_health()
         contract = provider_registry.resolve_adapter_contract("openai", "llm_task")
 
-        assert health["status"] == "degraded_builtin"
+        assert health["status"] == "load_failed"
         assert health["error"] == "db missing"
-        assert "openai" in health["providers"]
-        assert contract is not None
-        assert contract.adapter_type == "llm_task"
-        assert contract.transport_kind == "http"
+        assert health["authority_available"] is False
+        assert health["fallback_active"] is False
+        assert health["providers"] == []
+        assert health["provider_count"] == 0
+        assert contract is None
     finally:
         provider_registry._REGISTRY.clear()
         provider_registry._REGISTRY.update(original_registry)

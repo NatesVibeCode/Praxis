@@ -119,12 +119,12 @@ def authority_workspace_roots(*, env: Mapping[str, str] | None = None) -> tuple[
     _append(source.get(_HOST_WORKSPACE_ROOT_ENV))
     try:
         from runtime.instance import native_instance_contract
-
+    except ImportError:
+        native_instance_contract = None
+    if native_instance_contract is not None:
         contract = native_instance_contract(env=source)
         _append(contract.get("repo_root"))
         _append(contract.get("workdir"))
-    except Exception:
-        pass
     _append(_repo_root())
     return tuple(roots)
 

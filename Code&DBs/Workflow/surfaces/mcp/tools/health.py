@@ -6,6 +6,7 @@ from typing import Any
 from runtime.engineering_observability import build_trend_observability
 from runtime.dependency_contract import dependency_truth_report
 from runtime.context_cache import get_context_cache
+from registry.provider_execution_registry import registry_health as provider_registry_health
 from surfaces.api.operator_read import (
     build_transport_support_summary,
     query_transport_support,
@@ -14,6 +15,26 @@ from surfaces.api.operator_read import (
 from surfaces._workflow_database import workflow_database_url_for_repo
 from ..subsystems import _subs, REPO_ROOT, workflow_database_env
 from ..helpers import _serialize
+
+
+def _entity_contexts(conn: Any, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
+    unique_ids = [entity_id for entity_id in dict.fromkeys(entity_ids) if entity_id]
+    if not unique_ids:
+        return {}
+    rows = conn.execute(
+        "SELECT id, entity_type, name, content FROM memory_entities "
+        "WHERE id = ANY($1::text[])",
+        unique_ids,
+    )
+    return {
+        str(row["id"]): {
+            "entity_id": str(row["id"]),
+            "entity_type": str(row.get("entity_type") or ""),
+            "name": str(row.get("name") or ""),
+            "summary": str(row.get("content") or ""),
+        }
+        for row in rows or []
+    }
 
 
 def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
@@ -32,6 +53,15 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         pg=_subs.get_pg_conn(),
     )
     transport_support_summary = build_transport_support_summary(transport_support)
+    try:
+        provider_registry = provider_registry_health()
+    except Exception as exc:
+        provider_registry = {
+            "status": "load_failed",
+            "error": str(exc),
+            "authority_available": False,
+            "fallback_active": False,
+        }
     for provider_slug, adapter_type in transport_support_summary["probe_targets"]:
         probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 
@@ -74,6 +104,10 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
                 "SELECT source_id, target_id FROM memory_edges "
                 "WHERE active = true LIMIT 2000"
             )
+            edge_entity_contexts = _entity_contexts(
+                conn,
+                [row["source_id"] for row in edge_rows] + [row["target_id"] for row in edge_rows],
+            )
             entities = [
                 {
                     "id": row["id"],
@@ -88,6 +122,8 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
                 {
                     "source": row["source_id"],
                     "target": row["target_id"],
+                    "source_entity": edge_entity_contexts.get(str(row["source_id"]), {}),
+                    "target_entity": edge_entity_contexts.get(str(row["target_id"]), {}),
                 }
                 for row in edge_rows
             ]
@@ -105,6 +141,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
                     }
                     for finding in prioritized
                 ],
+                "edges": edges,
             }
     except Exception as exc:
         content_health = {"status": "error", "reason": str(exc)}
@@ -139,7 +176,11 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
             "registered_providers": list(transport_support_summary["registered_providers"]),
             "providers": list(transport_support_summary["providers"]),
             "support_basis": transport_support_summary["support_basis"],
+            "provider_registry_status": provider_registry.get("status"),
+            "provider_registry_authority_available": provider_registry.get("authority_available"),
+            "provider_registry_fallback_active": provider_registry.get("fallback_active"),
         },
+        "provider_registry": provider_registry,
         "dependency_truth": dependency_truth,
         "context_cache": cache_stats,
         "content_health": content_health,

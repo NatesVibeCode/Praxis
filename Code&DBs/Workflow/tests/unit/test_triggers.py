@@ -743,3 +743,56 @@ def test_evaluate_event_subscriptions_ignores_worker_run_subscriptions():
     assert "COALESCE(s.consumer_kind, '') = 'worker'" in subscription_query
     assert "COALESCE(s.cursor_scope, '') = 'run'" in subscription_query
     assert not any("FROM public.subscription_checkpoints" in query for query, _ in conn.calls)
+
+
+def test_evaluate_event_subscriptions_is_system_event_only(monkeypatch, caplog):
+    conn = _Conn()
+    conn.subscriptions = [
+        {
+            "subscription_id": "sub-workflow-event",
+            "subscription_name": "workflow event subscription",
+            "workflow_id": "wf-workflow-event",
+            "run_id": None,
+            "consumer_kind": "workflow",
+            "envelope_kind": "workflow_event",
+            "cursor_scope": "global",
+            "filter_policy": {"event_type": "workflow.completed"},
+            "definition": {"definition_revision": "rev-workflow-event"},
+            "compiled_spec": {
+                "definition_revision": "rev-workflow-event",
+                "jobs": [{"prompt": "wrong stream"}],
+            },
+            "workflow_name": "Workflow Event Subscription",
+        }
+    ]
+    conn.subscription_events = [
+        {
+            "id": 99,
+            "event_type": "workflow.completed",
+            "source_id": "run-99",
+            "source_type": "workflow_run",
+            "payload": {},
+            "created_at": "2026-04-07T00:00:00Z",
+        }
+    ]
+
+    _install_submit_stub(
+        monkeypatch,
+        lambda *_args, **_kwargs: pytest.fail("workflow_event subscription used system_events path"),
+    )
+
+    with caplog.at_level("WARNING"):
+        fired = triggers.evaluate_event_subscriptions(conn)
+
+    assert fired == 0
+    subscription_query = next(
+        query for query, _ in conn.calls
+        if "FROM public.event_subscriptions" in query
+    )
+    assert "COALESCE(s.envelope_kind, '') = 'system_event'" in subscription_query
+    assert "unsupported envelope_kind=workflow_event" in caplog.text
+    assert not any(
+        "payload, created_at FROM public.system_events" in query
+        for query, _ in conn.calls
+    )
+    assert not any("INSERT INTO public.subscription_checkpoints" in query for query, _ in conn.calls)

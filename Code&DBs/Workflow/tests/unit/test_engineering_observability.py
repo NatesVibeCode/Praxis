@@ -71,6 +71,7 @@ class _FakeTrendDetector:
 
 class _FakeBugTracker:
     def __init__(self) -> None:
+        self.list_bugs_calls: list[dict[str, object]] = []
         self.failure_packet_calls: list[dict[str, object]] = []
         self._bugs = [
             _bug(
@@ -122,7 +123,8 @@ class _FakeBugTracker:
         }
 
     def list_bugs(self, *args, **kwargs):
-        del args, kwargs
+        del args
+        self.list_bugs_calls.append(dict(kwargs))
         return list(self._bugs)
 
     def failure_packet(
@@ -200,6 +202,7 @@ def test_build_bug_scoreboard_surfaces_recurring_and_under_observed_bugs(tmp_pat
     assert payload["top_recurring"][0]["bug_id"] == "BUG-1"
     assert payload["regressions"][0]["bug_id"] == "BUG-1"
     assert payload["under_observed"][0]["bug_id"] == "BUG-2"
+    assert tracker.list_bugs_calls[0]["open_only"] is False
     assert tracker.failure_packet_calls
     assert all(call["allow_backfill"] is False for call in tracker.failure_packet_calls)
 

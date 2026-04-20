@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from adapters.docker_runner import normalize_command_parts_for_docker
-from registry.provider_execution_registry import build_command
+from registry.provider_execution_registry import build_command, resolve_api_key_env_vars
 from runtime.load_balancer import get_load_balancer
 from runtime.execution_transport import resolve_execution_transport
 from runtime.sandbox_runtime import SandboxRuntime, derive_sandbox_identity
@@ -59,6 +59,14 @@ def _load_env_secret_from_keychain(env: dict[str, str], key_name: str) -> None:
         return
     if value.returncode == 0 and value.stdout.strip():
         env[key_name] = value.stdout.strip()
+
+
+def _resolve_api_key_env_name(provider_slug: str, env: dict[str, str]) -> str | None:
+    env_names = resolve_api_key_env_vars(provider_slug)
+    for env_name in env_names:
+        if str(env.get(env_name, "")).strip():
+            return env_name
+    return env_names[0] if env_names else None
 
 
 def _sanitize_base_env() -> dict[str, str]:
@@ -134,12 +142,9 @@ def _build_execution_env(
     env = _sanitize_base_env()
     dotenv_exports = _load_dotenv_exports(workdir, env)
     provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
+    provider_api_key_names = _provider_api_key_names(provider_slug)
     export_names = {
-        *_provider_api_key_names(provider_slug),
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
+        *provider_api_key_names,
         *dotenv_exports.keys(),
     }
     policy = getattr(agent_config, "sandbox_policy", None)
@@ -155,14 +160,17 @@ def _build_execution_env(
     export_names.update(str(name).strip() for name in secret_allowlist if str(name).strip())
     for key_name in sorted(export_names):
         _load_env_secret_from_keychain(env, key_name)
-    if "GEMINI_API_KEY" not in env and "GOOGLE_API_KEY" in env:
-        env["GEMINI_API_KEY"] = env["GOOGLE_API_KEY"]
+    selected_api_key_env = _resolve_api_key_env_name(provider_slug, env)
 
     sandbox_env = {
         key_name: str(env[key_name]).strip()
         for key_name in sorted(export_names)
         if str(env.get(key_name, "")).strip()
     }
+    if selected_api_key_env:
+        for key_name in provider_api_key_names:
+            if key_name != selected_api_key_env:
+                sandbox_env.pop(key_name, None)
     if execution_bundle:
         encoded_bundle = json.dumps(
             execution_bundle,
@@ -380,7 +388,12 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
 
 def execute_integration(job: dict[str, Any], conn, *, logger: logging.Logger | None = None) -> dict[str, Any]:
     """Execute a job via the integration tool registry without any LLM."""
-    from runtime.integrations import execute_integration as run_integration
+    from runtime.integrations import (
+        execute_integration as run_integration,
+        integration_result_error_code,
+        integration_result_succeeded,
+        integration_result_status,
+    )
 
     log = logger or logging.getLogger(__name__)
     integration_id = job["integration_id"]
@@ -401,12 +414,15 @@ def execute_integration(job: dict[str, Any], conn, *, logger: logging.Logger | N
     )
 
     result = run_integration(integration_id, action, args_raw, conn)
-    status = result.get("status", "failed")
+    status = integration_result_status(result)
+    succeeded = integration_result_succeeded(result)
     summary = result.get("summary", "")
     data = result.get("data")
-    error = result.get("error")
+    error_code = integration_result_error_code(result)
 
-    stdout = summary
+    stdout = f"Integration status: {status}"
+    if summary:
+        stdout += f"\n{summary}"
     if data:
         try:
             stdout += "\n\n" + json.dumps(data, indent=2, default=str)
@@ -414,10 +430,12 @@ def execute_integration(job: dict[str, Any], conn, *, logger: logging.Logger | N
             stdout += f"\n\n{data}"
 
     return {
-        "status": "succeeded" if status in ("succeeded", "skipped") else "failed",
-        "exit_code": 0 if status in ("succeeded", "skipped") else 1,
+        "status": "succeeded" if succeeded else "failed",
+        "exit_code": 0 if succeeded else 1,
         "stdout": stdout,
-        "error_code": error or "",
+        "stderr": "" if succeeded else summary,
+        "error_code": error_code,
+        "integration_status": status,
         "token_input": 0,
         "token_output": 0,
         "cost_usd": 0.0,
@@ -600,6 +618,7 @@ def execute_api(
             workdir=resolved_workdir,
             execution_bundle=execution_bundle,
         )
+        selected_api_key_env = _resolve_api_key_env_name(provider_slug, env)
         model_slug = str(getattr(agent_config, "model", "") or "").strip()
         max_output_tokens = int(getattr(agent_config, "max_output_tokens", 4096) or 4096)
         timeout = int(getattr(agent_config, "timeout_seconds", 90) or 90)
@@ -618,7 +637,9 @@ def execute_api(
             }
         _api_protocol = _profile.api_protocol_family
         _api_endpoint = _profile.api_endpoint
-        _api_key_env = _profile.api_key_env_vars[0] if _profile.api_key_env_vars else f"{provider_slug.upper()}_API_KEY"
+        _api_key_env = selected_api_key_env or (
+            _profile.api_key_env_vars[0] if _profile.api_key_env_vars else f"{provider_slug.upper()}_API_KEY"
+        )
         _reasoning_flag = (
             f"--reasoning-effort {shlex.quote(reasoning_effort)}" if reasoning_effort else ""
         )

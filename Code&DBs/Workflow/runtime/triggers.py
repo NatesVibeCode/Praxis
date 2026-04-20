@@ -309,18 +309,34 @@ def _fire_integration_trigger(
 
     merged_args = {**integration_args, "_trigger_event": payload}
 
-    from runtime.integrations import execute_integration
+    from runtime.integrations import (
+        execute_integration,
+        integration_result_error_code,
+        integration_result_succeeded,
+        integration_result_status,
+    )
 
     result = execute_integration(integration_id, integration_action, merged_args, conn)
+    result_status = integration_result_status(result)
 
     logger.info(
         "Trigger %s fired integration %s/%s → %s",
         trigger_id,
         integration_id,
         integration_action,
-        result.get("status", "unknown"),
+        result_status,
     )
-    return True
+    if integration_result_succeeded(result):
+        return True
+    logger.warning(
+        "trigger.integration_not_fired: trigger_id=%s integration=%s/%s status=%s error=%s",
+        trigger_id,
+        integration_id,
+        integration_action,
+        result_status,
+        integration_result_error_code(result),
+    )
+    return False
 
 
 def _workflow_trigger_event_types(event_type: str) -> tuple[str, ...]:
@@ -335,13 +351,14 @@ def _workflow_trigger_event_types(event_type: str) -> tuple[str, ...]:
 
 
 def evaluate_event_subscriptions(conn: Any) -> int:
-    """Process durable event subscriptions against system_events."""
+    """Process workflow-firing event subscriptions against system_events."""
     subscriptions = conn.execute(
         """SELECT s.subscription_id,
                   s.subscription_name,
                   s.workflow_id,
                   s.run_id,
                   s.consumer_kind,
+                  s.envelope_kind,
                   s.cursor_scope,
                   s.filter_policy,
                   w.definition,
@@ -351,6 +368,7 @@ def evaluate_event_subscriptions(conn: Any) -> int:
            LEFT JOIN public.workflows w ON w.id = s.workflow_id
            WHERE s.status = 'active'
              AND s.workflow_id IS NOT NULL
+             AND COALESCE(s.envelope_kind, '') = 'system_event'
              AND NOT (
                  COALESCE(s.consumer_kind, '') = 'worker'
                  AND COALESCE(s.cursor_scope, '') = 'run'
@@ -383,11 +401,19 @@ def _process_event_subscription(
     subscription_id = subscription["subscription_id"]
     workflow_id = subscription.get("workflow_id")
     workflow_name = subscription.get("workflow_name") or workflow_id or subscription_id
+    envelope_kind = str(subscription.get("envelope_kind") or "system_event").strip()
     from runtime.operating_model_planner import current_compiled_spec
 
     compiled_spec = current_compiled_spec(subscription.get("definition"), subscription.get("compiled_spec"))
     filter_policy = _json_mapping(subscription.get("filter_policy"))
 
+    if envelope_kind != "system_event":
+        logger.warning(
+            "Event subscription %s has unsupported envelope_kind=%s for trigger evaluator; skipping",
+            subscription_id,
+            envelope_kind,
+        )
+        return 0
     if not workflow_id:
         logger.warning(
             "Event subscription %s has no workflow_id; skipping",

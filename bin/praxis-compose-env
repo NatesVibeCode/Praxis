@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# praxis-compose-env — export macOS Keychain secrets (account="praxis") as
+# shell env lines so docker-compose can pass them into long-lived control
+# containers (api-server, scheduler) that run the MCP bridge and integration
+# dispatch paths.
+#
+# Usage:
+#   eval "$(bin/praxis-compose-env)"
+#   docker compose up -d --force-recreate api-server scheduler
+#
+# Or piped into docker compose --env-file:
+#   bin/praxis-compose-env --dotenv > /tmp/praxis-compose.env
+#   docker compose --env-file /tmp/praxis-compose.env up -d
+#
+# Why this exists: integration manifests declare env_var-backed auth. The
+# resolve_secret() chain in adapters/keychain.py checks .env → Keychain →
+# os.environ, but inside a Linux container only .env and os.environ are
+# reachable. Keychain-first policy forbids plaintext in .env, so the
+# container must get the secret via os.environ — set at compose-up by
+# this script from the host Keychain.
+#
+# This is the authorized Keychain→container bridge. See
+# architecture-policy::providers::provider-auth-mode-single-authority for
+# the broader single-auth-rail principle.
+
+set -euo pipefail
+
+emit_mode="shell"
+if [[ "${1:-}" == "--dotenv" ]]; then
+  emit_mode="dotenv"
+fi
+
+if ! command -v security >/dev/null 2>&1; then
+  echo "praxis-compose-env: 'security' CLI not found — macOS Keychain required" >&2
+  exit 2
+fi
+
+# Enumerate services under account="praxis". dump-keychain prints entries
+# in a multi-line format; we pair svce with its immediately-following acct.
+services=$(security dump-keychain 2>/dev/null \
+  | awk '
+      /"svce"<blob>=/ {
+        sub(/.*"svce"<blob>="/, "")
+        sub(/"$/, "")
+        svce=$0
+        next
+      }
+      /"acct"<blob>="praxis"/ {
+        if (svce != "") print svce
+        svce=""
+      }
+    ' \
+  | sort -u)
+
+if [[ -z "$services" ]]; then
+  echo "praxis-compose-env: no Keychain entries for account='praxis'" >&2
+  exit 3
+fi
+
+while IFS= read -r name; do
+  # Only hydrate things that look like env-var names (uppercase + underscore
+  # + digits). Skip noisy entries.
+  if [[ ! "$name" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+    continue
+  fi
+  value=$(security find-generic-password -a praxis -s "$name" -w 2>/dev/null || true)
+  if [[ -z "$value" ]]; then
+    continue
+  fi
+  case "$emit_mode" in
+    shell)
+      # export NAME='value'  (single-quote escape any interior ')
+      printf "export %s=%s\n" "$name" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/")"
+      ;;
+    dotenv)
+      printf "%s=%s\n" "$name" "$value"
+      ;;
+  esac
+done <<< "$services"

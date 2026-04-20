@@ -137,6 +137,22 @@ class ObservabilityHub:
         self._failure_category_counts: dict[str, int] = defaultdict(int)
         self._recent_receipts: deque[dict[str, Any]] = deque(maxlen=50)
 
+    @staticmethod
+    def _receipt_lineage_depth(receipt: dict[str, Any] | None) -> int | None:
+        if not isinstance(receipt, dict):
+            return None
+        lineage_depth = receipt.get("lineage_depth")
+        if lineage_depth is None:
+            lineage = receipt.get("lineage")
+            if isinstance(lineage, dict):
+                lineage_depth = lineage.get("lineage_depth")
+        if lineage_depth is None:
+            return None
+        try:
+            return max(int(lineage_depth), 0)
+        except (TypeError, ValueError):
+            return None
+
     # -- lazy initialization ------------------------------------------------
 
     def _get_quality(self):
@@ -185,9 +201,12 @@ class ObservabilityHub:
         panel.register_last_failure_category(failure_category or None)
         panel.register_last_activity_at(timestamp)
         panel.register_failure_categories(dict(self._failure_category_counts))
-        if parent_run_id:
+        lineage_depth = self._receipt_lineage_depth(receipt)
+        if lineage_depth is None and parent_run_id:
+            lineage_depth = 1
+        if lineage_depth is not None:
             try:
-                panel.register_lineage_depth(1)
+                panel.register_lineage_depth(lineage_depth)
             except Exception:
                 pass
 
@@ -238,8 +257,11 @@ class ObservabilityHub:
                 fallback_run_id = str(latest_receipt.get("run_id"))
             if latest_receipt.get("failure_category"):
                 fallback_failure_category = str(latest_receipt.get("failure_category"))
-            if latest_receipt.get("parent_run_id"):
+            fallback_lineage_depth = self._receipt_lineage_depth(latest_receipt)
+            if fallback_lineage_depth is None and latest_receipt.get("parent_run_id"):
                 fallback_lineage_depth = 1
+            if fallback_lineage_depth is None:
+                fallback_lineage_depth = 0
 
         panel.register_failure_categories(
             recent_failure_categories

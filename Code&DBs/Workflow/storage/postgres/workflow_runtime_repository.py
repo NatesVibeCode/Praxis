@@ -14,6 +14,9 @@ from .validators import (
     _require_mapping,
     _require_text,
 )
+from .observability_maintenance_repository import (
+    PostgresObservabilityMaintenanceRepository,
+)
 
 _MANIFEST_UNSET = object()
 _CONTROL_MANIFEST_HEAD_SCHEMA_STATEMENTS = (
@@ -623,30 +626,9 @@ def reset_observability_metrics(
     before_date: str | None = None,
 ) -> dict[str, Any]:
     """Run destructive observability maintenance through a dedicated helper."""
-
-    results: dict[str, Any] = {}
-    if before_date:
-        for table in ("quality_rollups", "agent_profiles"):
-            conn.execute(
-                f"DELETE FROM {table} WHERE window_start < $1",
-                before_date,
-            )
-            results[table] = f"deleted rows before {before_date}"
-        conn.execute("DELETE FROM failure_catalog")
-        results["failure_catalog"] = "cleared"
-    else:
-        for table in ("quality_rollups", "agent_profiles", "failure_catalog"):
-            conn.execute(f"TRUNCATE {table}")
-            results[table] = "truncated"
-
-    conn.execute(
-        "UPDATE task_type_routing SET recent_successes = 0, recent_failures = 0"
-    )
-    results["task_type_routing_counters"] = "zeroed"
-    results["note"] = (
-        "Canonical receipts are preserved. Next rollup cycle will regenerate clean aggregations."
-    )
-    return results
+    return PostgresObservabilityMaintenanceRepository(
+        conn,
+    ).reset_observability_metrics(before_date=before_date)
 
 
 def load_workflow_record(

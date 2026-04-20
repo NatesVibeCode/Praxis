@@ -60,15 +60,39 @@ class _FakeConnection:
 
 def test_projections_registered() -> None:
     names = {p.name for p in _PROJECTIONS}
-    assert "roadmap_parent_of" in names
-    assert "roadmap_resolves_bug" in names
-    assert "operator_object_relations_mirror" in names
-    assert "workflow_build_intent_implements_build" in names
+    expected = {
+        "roadmap_parent_of",
+        "roadmap_resolves_bug",
+        "bug_discovered_in_run",
+        "bug_discovered_in_receipt",
+        "bug_source_issue",
+        "roadmap_item_dependencies",
+        "operator_object_relations_mirror",
+        "workflow_job_submission_workflow",
+        "workflow_build_intent_implements_build",
+        "bug_evidence_links_receipt",
+        "bug_evidence_links_run",
+        "bug_evidence_links_verification_run",
+        "bug_evidence_links_healing_run",
+        "workflow_job_submissions_to_workflow_runs",
+        "workflow_chains_to_waves",
+        "workflow_chain_waves_to_wave_runs",
+        "workflow_chain_wave_runs_to_workflow_runs",
+        "issue_discovered_in_run",
+        "issue_discovered_in_receipt",
+        "operator_decisions_to_scope",
+    }
+    assert expected <= names
+    relation_by_name = {p.name: p.relation_type for p in _PROJECTIONS}
+    assert relation_by_name["bug_discovered_in_run"] == "recorded_in"
+    assert relation_by_name["bug_discovered_in_receipt"] == "recorded_in"
+    assert relation_by_name["bug_source_issue"] == "derived_from"
+    assert relation_by_name["issue_discovered_in_run"] == "recorded_in"
+    assert relation_by_name["issue_discovered_in_receipt"] == "recorded_in"
 
 
 def test_refresh_upserts_authoritative_rows_only() -> None:
     async def run() -> None:
-        # For each of the 4 projections: 1 row to upsert, 0 deactivation candidates.
         fetch_responses: list[list[_FakeRow]] = []
         for _ in _PROJECTIONS:
             fetch_responses.append([
@@ -110,7 +134,7 @@ def test_refresh_deactivates_missing_rows() -> None:
             _FakeRow(source_id="a::1", target_id="b::1"),
             _FakeRow(source_id="a::stale", target_id="b::stale"),
         ])
-        # Remaining three projections: empty source, empty existing.
+        # Remaining projections: empty source, empty existing.
         for _ in _PROJECTIONS[1:]:
             fetch_responses.append([])
             fetch_responses.append([])

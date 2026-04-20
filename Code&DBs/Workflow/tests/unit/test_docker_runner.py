@@ -119,6 +119,15 @@ class TestProcessIsolation:
         assert result.timed_out
 
 
+def test_cli_auth_env_forward_is_provider_scoped(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+
+    assert docker_runner._cli_auth_env_forward("google") == {"GEMINI_API_KEY": "gemini-test-key"}
+    assert docker_runner._cli_auth_env_forward("openai") == {"OPENAI_API_KEY": "openai-test-key"}
+
+
 def test_run_model_fails_closed_when_docker_is_unavailable(monkeypatch):
     monkeypatch.setattr("adapters.docker_runner._has_docker", lambda: False)
 

@@ -21,11 +21,10 @@ from typing import Any
 import uuid
 
 from registry.provider_execution_registry import (
-    default_adapter_type_for_provider,
-    default_llm_adapter_type,
     default_model_for_provider,
     default_provider_slug,
     registered_providers,
+    resolve_default_adapter_type,
     resolve_lane_policy,
 )
 from runtime.capability_catalog import (
@@ -76,10 +75,7 @@ def _default_provider_slug() -> str:
 
 
 def _default_llm_adapter() -> str:
-    try:
-        return default_llm_adapter_type()
-    except Exception:
-        return "cli_llm"
+    return resolve_default_adapter_type()
 
 
 # ---------------------------------------------------------------------------
@@ -458,15 +454,7 @@ def compile_prompt_launch_spec(
     if provider_slug is None:
         provider_slug = _default_provider_slug()
     if adapter_type is None:
-        normalized_provider_slug = str(provider_slug or "").strip()
-        if (
-            normalized_provider_slug
-            and "/" not in normalized_provider_slug
-            and not normalized_provider_slug.startswith("auto/")
-        ):
-            adapter_type = default_adapter_type_for_provider(normalized_provider_slug)
-        if adapter_type is None:
-            adapter_type = _default_llm_adapter()
+        adapter_type = resolve_default_adapter_type(provider_slug)
 
     if scope_write and not workdir:
         workdir = os.getcwd()

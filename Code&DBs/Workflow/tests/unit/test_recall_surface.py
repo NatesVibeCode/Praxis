@@ -10,13 +10,14 @@ from surfaces import _recall
 
 
 class _FakeFederatedRetriever:
-    calls: list[tuple[str, object, int]] = []
+    calls: list[tuple[str, int]] = []
 
     def __init__(self, engine):
         self._engine = engine
 
-    def search(self, query: str, entity_type=None, limit: int = 20):
-        self.calls.append((query, entity_type, limit))
+    def search(self, query: str, limit: int = 20, *, record_telemetry: bool = True):
+        del record_telemetry
+        self.calls.append((query, limit))
         now = datetime.now(timezone.utc)
         entity = Entity(
             id="memory-hit-1",
@@ -55,6 +56,7 @@ class _FakeSubsystems:
 
 def test_search_recall_results_uses_federated_memory_search(monkeypatch):
     monkeypatch.setattr(_recall, "FederatedRetriever", _FakeFederatedRetriever)
+    monkeypatch.setattr(_recall, "_search_operator_decisions", lambda *_args, **_kwargs: [])
     _FakeFederatedRetriever.calls = []
 
     results = _recall.search_recall_results(
@@ -68,7 +70,23 @@ def test_search_recall_results_uses_federated_memory_search(monkeypatch):
     assert results[0]["name"] == "Federated memory hit"
     assert results[0]["source"] == "memory"
     assert results[0]["found_via"] == "text"
-    assert _FakeFederatedRetriever.calls == [("federated memory", None, 10)]
+    assert _FakeFederatedRetriever.calls == [("federated memory", 10)]
+
+
+def test_search_recall_results_filters_federated_results_by_entity_type(monkeypatch):
+    monkeypatch.setattr(_recall, "FederatedRetriever", _FakeFederatedRetriever)
+    monkeypatch.setattr(_recall, "_search_operator_decisions", lambda *_args, **_kwargs: [])
+    _FakeFederatedRetriever.calls = []
+
+    results = _recall.search_recall_results(
+        _FakeSubsystems(),
+        query="federated memory",
+        entity_type="lesson",
+        limit=10,
+    )
+
+    assert results == []
+    assert _FakeFederatedRetriever.calls == [("federated memory", 10)]
 
 
 def test_search_recall_results_surfaces_federated_engine_failure() -> None:
@@ -89,7 +107,8 @@ def test_search_recall_results_surfaces_federated_search_failure(monkeypatch) ->
         def __init__(self, engine):
             self._engine = engine
 
-        def search(self, query: str, entity_type=None, limit: int = 20):
+        def search(self, query: str, limit: int = 20, *, record_telemetry: bool = True):
+            del query, limit, record_telemetry
             raise RuntimeError("vector index offline")
 
     monkeypatch.setattr(_recall, "FederatedRetriever", _BrokenRetriever)

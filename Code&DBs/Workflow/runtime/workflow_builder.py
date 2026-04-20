@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from registry.provider_execution_registry import default_llm_adapter_type
+from registry.provider_execution_registry import resolve_default_adapter_type
 from contracts.domain import (
     WorkflowEdgeContract,
     WorkflowNodeContract,
@@ -38,8 +38,10 @@ def _default_runtime_profile() -> str:
     return default_native_authority_refs()[1]
 
 
-def _default_llm_adapter() -> str:
-    return default_llm_adapter_type()
+def _resolve_step_adapter_type(step: "WorkflowStep") -> str:
+    if step.adapter_type is not None and step.adapter_type.strip():
+        return step.adapter_type.strip()
+    return resolve_default_adapter_type(step.provider_slug)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +55,8 @@ class WorkflowStep:
     prompt:
         The prompt or task description for this step.
     adapter_type:
-        Adapter to execute the step (default resolved from the global LLM transport).
+        Adapter to execute the step. ``None`` resolves through provider execution
+        registry defaults after ``provider_slug`` is known.
     provider_slug:
         Provider override (e.g. ``"anthropic"``, ``"openai"``).
         ``None`` means the adapter/router decides.
@@ -84,13 +87,13 @@ class WorkflowStep:
           - ``"upstream"``: scope discovered from prior step outputs
     scope_strict:
         When ``True``, unresolved file references fail the step before
-        execution. When ``False`` (default), unresolved refs are logged
-        but execution proceeds.
+        execution. Upstream scope is strict by default so missing dynamic
+        scope authority cannot quietly execute without context.
     """
 
     name: str
     prompt: str
-    adapter_type: str = field(default_factory=_default_llm_adapter)
+    adapter_type: str | None = None
     provider_slug: str | None = None
     model_slug: str | None = None
     tier: str | None = None
@@ -102,7 +105,7 @@ class WorkflowStep:
     fan_out_prompt: str | None = None
     fan_out_max_parallel: int = 4
     scope_source: str = "none"
-    scope_strict: bool = False
+    scope_strict: bool = True
 
 
 def build_workflow_request(
@@ -168,7 +171,7 @@ def build_workflow_request(
             WorkflowNodeContract(
                 node_id=f"node_{i}",
                 node_type="deterministic_task",
-                adapter_type=step.adapter_type,
+                adapter_type=_resolve_step_adapter_type(step),
                 display_name=step.name,
                 inputs=input_payload,
                 expected_outputs={},

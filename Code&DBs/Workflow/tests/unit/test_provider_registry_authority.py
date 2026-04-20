@@ -212,6 +212,17 @@ def test_admin_health_uses_transport_support_frontdoor_for_provider_probes(monke
     )
     monkeypatch.setattr(
         workflow_admin,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+            "provider_count": 2,
+            "providers": ["google", "openai"],
+        },
+    )
+    monkeypatch.setattr(
+        workflow_admin,
         "dependency_truth_report",
         lambda scope="all": {"ok": True, "scope": scope},
     )
@@ -273,7 +284,11 @@ def test_admin_health_uses_transport_support_frontdoor_for_provider_probes(monke
             {"provider_slug": "google", "adapters": ["cli_llm"]},
         ],
         "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
+        "provider_registry_status": "loaded_from_db",
+        "provider_registry_authority_available": True,
+        "provider_registry_fallback_active": False,
     }
+    assert result["provider_registry"]["status"] == "loaded_from_db"
 
 
 def test_mcp_health_uses_transport_support_frontdoor_for_provider_probes(monkeypatch) -> None:
@@ -295,6 +310,17 @@ def test_mcp_health_uses_transport_support_frontdoor_for_provider_probes(monkeyp
         health_tool,
         "query_transport_support",
         lambda **_kwargs: _transport_support_payload(),
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+            "provider_count": 2,
+            "providers": ["google", "openai"],
+        },
     )
     monkeypatch.setattr(
         health_tool,
@@ -354,4 +380,8 @@ def test_mcp_health_uses_transport_support_frontdoor_for_provider_probes(monkeyp
             {"provider_slug": "google", "adapters": ["cli_llm"]},
         ],
         "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
+        "provider_registry_status": "loaded_from_db",
+        "provider_registry_authority_available": True,
+        "provider_registry_fallback_active": False,
     }
+    assert result["provider_registry"]["status"] == "loaded_from_db"

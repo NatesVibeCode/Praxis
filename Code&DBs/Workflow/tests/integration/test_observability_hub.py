@@ -366,6 +366,29 @@ class TestRefreshOperatorPanel:
         assert "openai" in snap.circuit_breaker_open
         assert "anthropic" not in snap.circuit_breaker_open
 
+    def test_preserves_receipt_lineage_depth_when_refreshing(self, hub):
+        receipt = _make_receipt(
+            status="failed",
+            failure_code="TIMEOUT",
+            parent_run_id="parent-run-1",
+            lineage_depth=3,
+        )
+        hub.ingest_receipt(receipt)
+
+        snap = hub.refresh_operator_panel(
+            circuit_breakers={},
+            loop_warnings=0,
+            write_conflicts=0,
+            governance_blocks=0,
+            pending_jobs=0,
+            running_jobs=0,
+            active_leases=0,
+            posture="operate",
+        )
+
+        assert snap.recent_lineage_depth == 3
+        assert hub.operator_snapshot().recent_lineage_depth == 3
+
 
 class TestFileBugAndGetBugs:
     def test_file_and_retrieve(self, hub):

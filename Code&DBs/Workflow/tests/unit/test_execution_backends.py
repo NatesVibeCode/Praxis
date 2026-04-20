@@ -232,6 +232,62 @@ def test_execute_cli_google_emits_manifest_backed_mcp_settings(monkeypatch, tmp_
     assert result["status"] == "succeeded"
 
 
+def test_execute_cli_google_uses_google_api_key_without_aliasing(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return _sandbox_result()
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "build_command",
+        lambda provider_slug, model=None: ["gemini", "-p", ".", "-o", "json", "--model", model or provider_slug],
+    )
+
+    result = execution_backends.execute_cli(
+        _agent(wrapper_command=None, provider="google", model="gemini-2.5-flash"),
+        "hello from stdin",
+        str(tmp_path),
+    )
+
+    assert captured["env"]["GOOGLE_API_KEY"] == "google-test-key"
+    assert "GEMINI_API_KEY" not in captured["env"]
+    assert result["status"] == "succeeded"
+
+
+def test_execute_integration_job_preserves_skipped_result_as_failed_job(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "runtime.integrations.execute_integration",
+        lambda *_args, **_kwargs: {
+            "status": "skipped",
+            "data": {"configured_channels": 0},
+            "summary": "Notifications are not configured; nothing was sent.",
+            "error": None,
+        },
+    )
+
+    result = execution_backends.execute_integration(
+        {
+            "id": 123,
+            "integration_id": "notifications",
+            "integration_action": "send",
+            "integration_args": {},
+        },
+        object(),
+    )
+
+    assert result["status"] == "failed"
+    assert result["exit_code"] == 1
+    assert result["integration_status"] == "skipped"
+    assert result["error_code"] == "integration_skipped"
+    assert "Integration status: skipped" in result["stdout"]
+
+
 def test_execute_cli_prefers_bundle_sandbox_profile_contract(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
 

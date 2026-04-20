@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from asyncpg import PostgresError
 from registry.provider_execution_registry import (
-    default_llm_adapter_type,
+    resolve_default_adapter_type,
 )
 from registry.runtime_profile_admission import (
     RuntimeProfileAdmittedCandidate,
@@ -303,7 +303,7 @@ class TaskRouteDecision:
     spend_pressure: str = "unknown"
     budget_status: str = ""
     prefer_prepaid: bool = False
-    allow_payg_fallback: bool = True
+    allow_payg_fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -374,7 +374,9 @@ class TaskTypeRouter:
         self._task_profiles = authority.task_profiles
         self._benchmark_metrics = authority.benchmark_metrics
         self._runtime_profile_candidate_cache: dict[str, tuple[dict[str, Any], ...]] = {}
-        self._default_adapter_type = default_llm_adapter_type()
+
+    def _default_adapter_for_provider(self, provider_slug: str) -> str:
+        return resolve_default_adapter_type(provider_slug)
 
     @property
     def route_policy(self) -> TaskRoutePolicy:
@@ -568,9 +570,28 @@ class TaskTypeRouter:
         provider, model = parts
         if task_type:
             self._check_permission(task_type, model, provider)
+        provider_policy_id: str | None = None
+        budget_windows: dict[str, dict[str, Any]] = {}
+        if runtime_profile_ref:
+            for candidate in self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref):
+                if (
+                    str(candidate.get("provider_slug") or "") == provider
+                    and str(candidate.get("model_slug") or "") == model
+                ):
+                    provider_policy_id = str(candidate.get("provider_policy_id") or "").strip() or None
+                    if provider_policy_id:
+                        budget_windows = self._load_provider_budget_windows({provider_policy_id})
+                    break
         economics = _resolve_route_economics(
-            provider_slug=provider, adapter_type=None, provider_policy_id=None,
-            raw_cost_per_m_tokens=0.0, budget_windows={}, default_adapter=self._default_adapter_type,
+            provider_slug=provider,
+            adapter_type=None,
+            provider_policy_id=provider_policy_id,
+            raw_cost_per_m_tokens=0.0,
+            budget_windows=budget_windows,
+            default_adapter=self._default_adapter_for_provider(provider),
+        )
+        resolved_adapter_type = str(
+            economics.get("adapter_type") or self._default_adapter_for_provider(provider)
         )
         return TaskRouteDecision(
             task_type=task_type or "build",
@@ -582,14 +603,14 @@ class TaskTypeRouter:
             cost_per_m_tokens=0,
             rationale="explicit slug",
             was_auto=False,
-            adapter_type=str(economics.get("adapter_type") or self._default_adapter_type),
+            adapter_type=resolved_adapter_type,
             billing_mode=str(economics.get("billing_mode") or "metered_api"),
             budget_bucket=str(economics.get("budget_bucket") or "unknown"),
             effective_marginal_cost=_row_effective_marginal_cost(economics),
             spend_pressure=str(economics.get("spend_pressure") or "unknown"),
             budget_status=str(economics.get("budget_status") or ""),
             prefer_prepaid=bool(economics.get("prefer_prepaid", False)),
-            allow_payg_fallback=bool(economics.get("allow_payg_fallback", True)),
+            allow_payg_fallback=bool(economics.get("allow_payg_fallback", False)),
         )
 
     def resolve_explicit_eligibility(
@@ -699,6 +720,7 @@ class TaskTypeRouter:
         return {
             "candidate_ref": candidate.candidate_ref, "provider_ref": candidate.provider_ref,
             "provider_name": candidate.provider_name, "provider_slug": candidate.provider_slug,
+            "provider_policy_id": candidate.provider_policy_id,
             "model_slug": candidate.model_slug, "priority": candidate.priority,
             "balance_weight": candidate.balance_weight,
             "route_tier": _normalize_auto_route_key(candidate.route_tier or ""),
@@ -782,12 +804,14 @@ class TaskTypeRouter:
             benchmark_score = float(explicit_override.get("benchmark_score") or 0.0) if explicit_override else 0.0
             benchmark_name = str(explicit_override.get("benchmark_name") or "") if explicit_override else ""
             raw_cost_per_m_tokens = _base_cost_per_m_tokens(candidate, state_row=state_row)
+            provider_slug = str(candidate["provider_slug"])
             economics = _resolve_route_economics(
-                provider_slug=str(candidate["provider_slug"]),
+                provider_slug=provider_slug,
                 adapter_type=str(candidate["adapter_type"]) if candidate.get("adapter_type") else None,
                 provider_policy_id=str(candidate["provider_policy_id"]) if candidate.get("provider_policy_id") else None,
                 raw_cost_per_m_tokens=raw_cost_per_m_tokens,
-                budget_windows=budget_windows, default_adapter=self._default_adapter_type,
+                budget_windows=budget_windows,
+                default_adapter=self._default_adapter_for_provider(provider_slug),
             )
             rationale = str(explicit_override.get("rationale") or "") if explicit_override is not None else (
                 f"auto-derived: {affinity_bucket} affinity for {task_type}; "
@@ -942,12 +966,14 @@ class TaskTypeRouter:
                 continue
             profile_rank = int(candidate.get(profile_rank_column) or 99)
             raw_cost_per_m_tokens = _base_cost_per_m_tokens(candidate, state_row=None)
+            provider_slug = str(candidate["provider_slug"])
             economics = _resolve_route_economics(
-                provider_slug=str(candidate["provider_slug"]),
+                provider_slug=provider_slug,
                 adapter_type=str(candidate["adapter_type"]) if candidate.get("adapter_type") else None,
                 provider_policy_id=str(candidate["provider_policy_id"]) if candidate.get("provider_policy_id") else None,
                 raw_cost_per_m_tokens=raw_cost_per_m_tokens,
-                budget_windows=budget_windows, default_adapter=self._default_adapter_type,
+                budget_windows=budget_windows,
+                default_adapter=self._default_adapter_for_provider(provider_slug),
             )
             rows.append({
                 "provider_slug": candidate["provider_slug"],
@@ -989,14 +1015,17 @@ class TaskTypeRouter:
                     else str(row.get("rationale") or "")
                 ),
                 was_auto=True,
-                adapter_type=str(row.get("adapter_type") or self._default_adapter_type),
+                adapter_type=str(
+                    row.get("adapter_type")
+                    or self._default_adapter_for_provider(str(row.get("provider_slug") or ""))
+                ),
                 billing_mode=str(row.get("billing_mode") or "metered_api"),
                 budget_bucket=str(row.get("budget_bucket") or "unknown"),
                 effective_marginal_cost=_row_effective_marginal_cost(row),
                 spend_pressure=str(row.get("spend_pressure") or "unknown"),
                 budget_status=str(row.get("budget_status") or ""),
                 prefer_prepaid=bool(row.get("prefer_prepaid", False)),
-                allow_payg_fallback=bool(row.get("allow_payg_fallback", True)),
+                allow_payg_fallback=bool(row.get("allow_payg_fallback", False)),
             )
             for row in rows
         ]
@@ -1032,7 +1061,7 @@ class TaskTypeRouter:
         rejected: list[str] = []
         for row in rows:
             provider = str(row.get("provider_slug") or "")
-            adapter_type = str(row.get("adapter_type") or self._default_adapter_type)
+            adapter_type = str(row.get("adapter_type") or self._default_adapter_for_provider(provider))
             spend_pressure = str(row.get("spend_pressure") or "") or None
             admitted, reason = admit_adapter_type(
                 policies, provider, adapter_type, spend_pressure=spend_pressure,

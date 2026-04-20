@@ -188,6 +188,10 @@ def _is_mapping(value: object) -> bool:
     return isinstance(value, Mapping)
 
 
+def _allows_passthrough_echo(input_payload: Mapping[str, Any]) -> bool:
+    return input_payload.get("allow_passthrough_echo") is True
+
+
 class DeterministicTaskAdapter:
     """Single boring deterministic adapter for the minimal workflow slice."""
 
@@ -266,12 +270,10 @@ class DeterministicTaskAdapter:
                 failure_code="adapter.deterministic_builder_failed",
             )
 
-        # Passthrough-echo path: no `deterministic_builder` provided. We echo
-        # `expected_outputs` back. This is useful for smoke tests and wiring
-        # validation but is the single biggest source of "green receipts over
-        # phantom work" in the system — an operator writing a real spec that
-        # forgets the builder will see their node succeed without doing any
-        # work at all. We surface three signals so this is never silent again:
+        # Passthrough-echo path: no `deterministic_builder` provided. This is
+        # only legal for explicit smoke specs that opt into it; otherwise the
+        # adapter fails closed instead of minting green receipts over phantom
+        # work. Explicit passthrough still surfaces three signals:
         #   1. A distinct reason_code so receipts can be queried/filtered.
         #   2. An output annotation (`passthrough_echo: true`) so downstream
         #      adapters, verifiers, and UIs can detect the echo.
@@ -279,6 +281,24 @@ class DeterministicTaskAdapter:
         #      a builder. Operators tailing worker logs see this immediately.
         passthrough_echo = outputs is None
         if passthrough_echo:
+            if not _allows_passthrough_echo(input_payload):
+                return DeterministicTaskResult(
+                    node_id=request.node_id,
+                    task_name=request.task_name,
+                    status="failed",
+                    reason_code="adapter.deterministic_builder_missing",
+                    executor_type=self.executor_type,
+                    inputs=normalized_inputs,
+                    outputs={
+                        "failure_reason": (
+                            "deterministic_task requires input_payload.deterministic_builder "
+                            "unless allow_passthrough_echo is true"
+                        )
+                    },
+                    started_at=started_at,
+                    finished_at=_utc_now(),
+                    failure_code="adapter.deterministic_builder_missing",
+                )
             outputs = dict(request.expected_outputs)
             outputs.setdefault("passthrough_echo", True)
             _log.warning(

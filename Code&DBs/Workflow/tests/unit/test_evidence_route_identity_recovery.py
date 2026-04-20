@@ -1,9 +1,4 @@
-"""Tests for defensive route_identity reads in the postgres evidence reader.
-
-Inspect must keep rendering even when persisted evidence rows lack the
-``route_identity`` lineage block — a sentinel is returned and a structured
-``DataQualityIssue`` is attached so operators can see what's wrong.
-"""
+"""Tests for route_identity reads in the postgres evidence reader."""
 
 from __future__ import annotations
 
@@ -11,9 +6,10 @@ import pytest
 
 from receipts import DataQualityIssue
 from storage.postgres.evidence import _route_identity_from_lineage
+from storage.postgres.validators import PostgresStorageError
 
 
-def _call(payload: dict) -> tuple:
+def _call(payload: dict, *, allow_legacy_missing_route_identity: bool = False) -> tuple:
     return _route_identity_from_lineage(
         payload,
         kind="workflow_event",
@@ -22,6 +18,7 @@ def _call(payload: dict) -> tuple:
         fallback_workflow_id="wf-A",
         fallback_run_id="run-A",
         fallback_request_id="req-A",
+        allow_legacy_missing_route_identity=allow_legacy_missing_route_identity,
     )
 
 
@@ -46,9 +43,26 @@ def test_well_formed_payload_returns_no_issues() -> None:
     assert route_identity.transition_seq == 7
 
 
-def test_missing_route_identity_returns_sentinel_and_issue() -> None:
+def test_missing_route_identity_fails_closed_by_default() -> None:
     payload = {"transition_seq": 3}
-    route_identity, issues = _call(payload)
+
+    with pytest.raises(PostgresStorageError) as exc_info:
+        _call(payload)
+
+    assert exc_info.value.reason_code == "postgres.missing_route_identity"
+    assert exc_info.value.details == {
+        "kind": "workflow_event",
+        "row_id": "row-123",
+        "evidence_seq": 42,
+    }
+
+
+def test_missing_route_identity_requires_explicit_legacy_compatibility() -> None:
+    payload = {"transition_seq": 3}
+    route_identity, issues = _call(
+        payload,
+        allow_legacy_missing_route_identity=True,
+    )
     assert len(issues) == 1
     issue = issues[0]
     assert isinstance(issue, DataQualityIssue)
@@ -62,7 +76,7 @@ def test_missing_route_identity_returns_sentinel_and_issue() -> None:
     assert route_identity.transition_seq == 3
 
 
-def test_route_identity_present_but_missing_subfield_emits_issue() -> None:
+def test_route_identity_present_but_missing_subfield_fails_closed_by_default() -> None:
     payload = {
         "route_identity": {
             "workflow_id": "wf-X",
@@ -73,7 +87,29 @@ def test_route_identity_present_but_missing_subfield_emits_issue() -> None:
         },
         "transition_seq": 1,
     }
-    route_identity, issues = _call(payload)
+
+    with pytest.raises(PostgresStorageError) as exc_info:
+        _call(payload)
+
+    assert exc_info.value.reason_code == "postgres.missing_route_identity_field"
+    assert exc_info.value.details["field"] == "claim_id"
+
+
+def test_route_identity_present_but_missing_subfield_has_legacy_compatibility() -> None:
+    payload = {
+        "route_identity": {
+            "workflow_id": "wf-X",
+            "run_id": "run-X",
+            "request_id": "req-X",
+            "authority_context_ref": "ctx-1",
+            "authority_context_digest": "digest-1",
+        },
+        "transition_seq": 1,
+    }
+    route_identity, issues = _call(
+        payload,
+        allow_legacy_missing_route_identity=True,
+    )
     assert any(
         issue.reason_code == "workflow.inspect.missing_lineage_field"
         for issue in issues

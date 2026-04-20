@@ -31,6 +31,23 @@ from typing import Any
 # ImportGraph
 # ---------------------------------------------------------------------------
 
+class ScopeResolutionError(ValueError):
+    """Raised when a workflow scope file reference cannot be resolved exactly."""
+
+    def __init__(
+        self,
+        reason_code: str,
+        message: str,
+        *,
+        file_path: str,
+        matches: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.file_path = file_path
+        self.matches = matches
+
+
 class ImportGraph:
     """File-level import graph for a Python project.
 
@@ -159,37 +176,77 @@ class ImportGraph:
           - bare stems (dispatch) — matched against the graph
         """
         root = Path(self._root_dir)
+        raw = str(file_path or "").strip()
+        if not raw:
+            raise ScopeResolutionError(
+                "scope.file_ref_unresolved",
+                "empty scope file reference cannot be resolved",
+                file_path=str(file_path),
+            )
 
         # Absolute path → make relative
-        try:
-            p = Path(file_path)
-            if p.is_absolute():
-                return str(p.relative_to(root))
-        except ValueError:
-            pass
+        p = Path(raw)
+        if p.is_absolute():
+            try:
+                relative = str(p.relative_to(root))
+            except ValueError as exc:
+                raise ScopeResolutionError(
+                    "scope.file_ref_outside_root",
+                    f"scope file reference is outside root {root}: {raw}",
+                    file_path=raw,
+                ) from exc
+            if relative in self._forward:
+                return relative
+            raise ScopeResolutionError(
+                "scope.file_ref_unresolved",
+                f"scope file reference {raw!r} is under {root} but is not in the Python import graph",
+                file_path=raw,
+            )
 
         # Already relative and exists as a key
-        if file_path in self._forward:
-            return file_path
+        if raw in self._forward:
+            return raw
 
         # Normalise separators
-        normalised = file_path.replace("\\", "/")
+        normalised = raw.replace("\\", "/").lstrip("./")
         if normalised in self._forward:
             return normalised
 
-        # Bare stem match
-        stem = Path(file_path).stem
-        matches = [f for f in self._all_files if Path(f).stem == stem]
+        suffix_matches = [f for f in self._all_files if f.endswith(normalised)]
+        if len(suffix_matches) == 1:
+            return suffix_matches[0]
+        if len(suffix_matches) > 1:
+            ordered = tuple(sorted(suffix_matches))
+            raise ScopeResolutionError(
+                "scope.file_ref_ambiguous",
+                f"scope file reference {raw!r} matched multiple files: {ordered}",
+                file_path=raw,
+                matches=ordered,
+            )
+
+        # Bare stem match. Do not use a stem from a longer path; that would
+        # turn a misspelled qualified ref into a surprising unrelated file.
+        if "/" not in normalised:
+            stem = Path(raw).stem
+            matches = [f for f in self._all_files if Path(f).stem == stem]
+        else:
+            matches = []
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            # Prefer the one whose path ends with file_path
-            for m in matches:
-                if m.endswith(normalised) or m.endswith(file_path):
-                    return m
-            return matches[0]
+            ordered = tuple(sorted(matches))
+            raise ScopeResolutionError(
+                "scope.file_ref_ambiguous",
+                f"scope file reference {raw!r} matched multiple files: {ordered}",
+                file_path=raw,
+                matches=ordered,
+            )
 
-        return file_path  # return as-is; caller gets an empty result
+        raise ScopeResolutionError(
+            "scope.file_ref_unresolved",
+            f"scope file reference {raw!r} does not match any Python file under {root}",
+            file_path=raw,
+        )
 
     # ------------------------------------------------------------------
     # Public API

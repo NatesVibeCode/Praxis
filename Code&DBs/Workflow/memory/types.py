@@ -23,6 +23,20 @@ class EntityType(enum.Enum):
     code_unit = "code_unit"
     tool = "tool"
     metric = "metric"
+    issue = "issue"
+    workflow_chain = "workflow_chain"
+    workflow_chain_wave = "workflow_chain_wave"
+    workflow_chain_wave_run = "workflow_chain_wave_run"
+    workflow_job_submission = "workflow_job_submission"
+    workflow_run = "workflow_run"
+    verification_run = "verification_run"
+    healing_run = "healing_run"
+    receipt = "receipt"
+    provider = "provider"
+    authority_domain = "authority_domain"
+    cutover_gate = "cutover_gate"
+    workflow_class = "workflow_class"
+    schedule_definition = "schedule_definition"
 
 
 class RelationType(enum.Enum):
@@ -41,6 +55,7 @@ class RelationType(enum.Enum):
     recorded_in = "recorded_in"
     regressed_from = "regressed_from"
     semantic_neighbor = "semantic_neighbor"
+    belongs_to_area = "belongs_to_area"
 
 
 class EdgeAuthorityClass(enum.Enum):

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import runtime.manifest_generator as manifest_generator
 
 
@@ -92,6 +94,17 @@ def test_manifest_refine_route_respects_override(monkeypatch) -> None:
     monkeypatch.setenv("WORKFLOW_REFINE_AGENT_ROUTE", "auto/review")
 
     assert manifest_generator._manifest_refine_agent_route() == "auto/review"
+
+
+def test_manifest_llm_call_requires_db_route_authority(monkeypatch) -> None:
+    monkeypatch.setattr(
+        manifest_generator.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("direct CLI fallback must not run"),
+    )
+
+    with pytest.raises(RuntimeError, match="route_authority_unavailable"):
+        manifest_generator._call_llm("Build the workspace", conn=None)
 
 
 def test_manifest_generator_does_not_embed_manifest_or_object_type_write_sql() -> None:

@@ -274,24 +274,23 @@ def _call_llm(prompt: str, conn=None, *, route_slug: str = _DEFAULT_MANIFEST_GEN
         if k.upper().startswith("CLAUDE") and k.upper() != "CLAUDE_CONFIG_DIR":
             del env[k]
 
-    # Resolve planner chain from routing table
-    if conn:
-        from runtime.task_type_router import TaskTypeRouter
-        router = TaskTypeRouter(conn)
-        chain = router.resolve_failover_chain(route_slug)
-    else:
-        # No DB connection — fall back to claude with -p
-        chain = None
-
-    if not chain:
-        result = subprocess.run(
-            ["claude", "--output-format", "json", "--no-chrome",
-             "--disable-slash-commands", "--tools", "", "-p", prompt],
-            capture_output=True, text=True, timeout=120, env=env,
+    if conn is None:
+        raise RuntimeError(
+            "manifest_generator.route_authority_unavailable: "
+            "manifest LLM calls require a DB-backed route authority"
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"claude CLI failed (rc={result.returncode})")
-        return result.stdout.strip()
+
+    from runtime.task_type_router import TaskTypeRouter
+
+    router = TaskTypeRouter(conn)
+    chain = router.resolve_failover_chain(route_slug)
+    if not chain:
+        raise RuntimeError(
+            "manifest_generator.route_chain_empty: "
+            f"no provider route tiers resolved for {route_slug}"
+        )
+
+    tier_failures: list[str] = []
 
     for tier in chain:
         provider = tier.provider_slug
@@ -300,6 +299,7 @@ def _call_llm(prompt: str, conn=None, *, route_slug: str = _DEFAULT_MANIFEST_GEN
         # Read CLI config from registry
         cli_config = _get_cli_config_static(conn, provider, model_slug)
         if not cli_config or not cli_config.get("cmd_template"):
+            tier_failures.append(f"{provider}/{model_slug}: missing cli_config.cmd_template")
             continue
 
         cmd = [
@@ -321,10 +321,17 @@ def _call_llm(prompt: str, conn=None, *, route_slug: str = _DEFAULT_MANIFEST_GEN
                     except _json.JSONDecodeError:
                         pass
                 return raw.strip()
-        except Exception:
-            continue
+            tier_failures.append(
+                f"{provider}/{model_slug}: rc={result.returncode} stderr={result.stderr.strip()[:500]}"
+            )
+        except Exception as exc:
+            tier_failures.append(f"{provider}/{model_slug}: {type(exc).__name__}: {exc}")
 
-    raise RuntimeError("All planner tiers failed")
+    detail = "; ".join(tier_failures) if tier_failures else "no routed tiers attempted"
+    raise RuntimeError(
+        "manifest_generator.route_chain_failed: "
+        f"all provider route tiers failed for {route_slug}: {detail}"
+    )
 
 
 def _get_cli_config_static(conn, provider_slug: str, model_slug: str):

@@ -40,8 +40,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
-from registry.provider_execution_registry import default_llm_adapter_type, default_provider_slug
-from adapters.provider_transport import BUILTIN_PROVIDER_PROFILES, builtin_default_provider_slug
+from registry.provider_execution_registry import (
+    default_provider_slug,
+    resolve_default_adapter_type,
+)
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
 from runtime.operation_catalog_bindings import resolve_http_operation_binding
@@ -761,19 +763,11 @@ def _default_runtime_profile_ref() -> str:
 
 
 def _default_workflow_provider_slug() -> str:
-    try:
-        return default_provider_slug()
-    except Exception:
-        return builtin_default_provider_slug(
-            {profile.provider_slug: profile for profile in BUILTIN_PROVIDER_PROFILES}
-        )
+    return default_provider_slug()
 
 
 def _default_workflow_adapter_type() -> str:
-    try:
-        return default_llm_adapter_type()
-    except Exception:
-        return "cli_llm"
+    return resolve_default_adapter_type()
 
 
 def _normalize_operate_mode(value: object) -> str:

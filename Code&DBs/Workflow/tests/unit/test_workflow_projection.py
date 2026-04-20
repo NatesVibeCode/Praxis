@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import sys
+import types
 
 from receipts.evidence import EvidenceRow, ReceiptV1, WorkflowEventV1
 from runtime.domain import RouteIdentity
+from runtime import failure_projection
 from runtime.workflow_projection import project_workflow_result
 
 
@@ -82,3 +85,22 @@ def test_project_workflow_result_uses_failure_reason_when_terminal_event_claims_
     assert projected["status"] == "failed"
     assert projected["reason_code"] == "cli_adapter.nonzero_exit"
     assert projected["failure_code"] == "cli_adapter.nonzero_exit"
+
+
+def test_project_failure_classification_fails_closed_when_classifier_broken(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "runtime.failure_classifier",
+        types.SimpleNamespace(
+            classify_failure=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+        ),
+    )
+
+    assert (
+        failure_projection.project_failure_classification(
+            failure_category="adapter.timeout",
+            is_transient=False,
+            stdout_preview="timeout after 30s",
+        )
+        is None
+    )

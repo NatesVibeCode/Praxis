@@ -1,9 +1,11 @@
 """Tool: praxis_authority_memory_refresh.
 
-Projects authoritative FK relationships from authority tables
-(roadmap_items, operator_object_relations, workflow_build_intents) into
-memory_edges as ``authority_class='canonical'`` edges so discover, recall,
-and the system atlas see the real structure instead of only enrichment.
+Projects authoritative FK relationships from authority tables (roadmap_items,
+roadmap_item_dependencies, operator_object_relations, bugs, issues,
+bug_evidence_links, workflow_build_intents, workflow_job_submissions, workflow
+chain tables, and operator_decisions) into memory_edges as
+``authority_class='canonical'`` edges so discover, recall, and the system atlas
+see the real structure instead of only enrichment.
 
 Runtime: runtime/authority_memory_projection.py
 Migration: 158_authority_memory_projection_vocabulary.sql
@@ -27,10 +29,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_authority_memory_refresh,
         {
             "description": (
-                "Project authority FKs into memory_edges so the knowledge graph reflects "
-                "actual structure. Upserts canonical-class edges for roadmap parent_of, "
-                "roadmap resolves_bug, operator_object_relations mirror, and "
-                "workflow_build_intent implements_build. Idempotent; safe to re-run.\n\n"
+                "Project authority FK data into memory_edges so the knowledge graph reflects "
+                "real structure. Upserts canonical-class edges for roadmap parent_of/dependencies, "
+                "roadmap resolves_bug, operator_object_relations, workflow build intent links, "
+                "bug and issue lineage, bug evidence links, workflow job/chain relationships, "
+                "and operator decision scopes. "
+                "Idempotent; safe to re-run.\n\n"
                 "USE WHEN: after bulk roadmap edits, new operator_object_relations, or "
                 "when `praxis workflow discover` returns shallow results and you suspect "
                 "the memory graph is stale.\n\n"

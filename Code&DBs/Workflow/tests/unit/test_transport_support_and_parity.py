@@ -94,6 +94,14 @@ def _builtin_provider_registry_fixture(monkeypatch):
     )
     monkeypatch.setattr(
         provider_registry_mod,
+        "resolve_default_adapter_type",
+        lambda provider_slug=None: provider_transport.default_adapter_type_for_provider(
+            provider_slug or "openai",
+            profiles=profiles,
+        ) or provider_transport.default_llm_adapter_type(profiles),
+    )
+    monkeypatch.setattr(
+        provider_registry_mod,
         "default_model_for_provider",
         lambda provider_slug: provider_transport.default_model_for_provider(provider_slug, profiles),
     )
@@ -1022,6 +1030,30 @@ def test_route_economics_preserves_zero_cost_for_prepaid_lanes(monkeypatch) -> N
     )
 
     assert economics["effective_marginal_cost"] == 0.0
+    assert economics["allow_payg_fallback"] is True
+
+
+def test_route_economics_defaults_missing_payg_fallback_to_false(monkeypatch) -> None:
+    import runtime.routing_economics as routing_economics_mod
+
+    monkeypatch.setattr(routing_economics_mod, "resolve_adapter_economics", lambda provider_slug, adapter_type: {
+        "billing_mode": "subscription_included",
+        "budget_bucket": f"{provider_slug}_monthly",
+        "effective_marginal_cost": 0.0,
+        "prefer_prepaid": True,
+    })
+    monkeypatch.setattr(routing_economics_mod, "supports_adapter", lambda provider_slug, adapter_type: True)
+
+    economics = routing_economics_mod.resolve_route_economics(
+        provider_slug="openai",
+        adapter_type=None,
+        provider_policy_id=None,
+        raw_cost_per_m_tokens=8.75,
+        budget_windows={},
+        default_adapter="cli_llm",
+    )
+
+    assert economics["allow_payg_fallback"] is False
 
 
 def test_route_economics_prefers_prepaid_adapter_over_metered_default(monkeypatch) -> None:

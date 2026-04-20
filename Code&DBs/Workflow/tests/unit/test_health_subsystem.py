@@ -3,7 +3,6 @@
 import importlib
 import os
 import sys
-import tempfile
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -22,7 +21,6 @@ _spec.loader.exec_module(_mod)
 
 import runtime.queue_admission as queue_admission
 
-DatabaseProbe = _mod.DatabaseProbe
 DiskSpaceProbe = _mod.DiskSpaceProbe
 FileExistsProbe = _mod.FileExistsProbe
 HealthProbe = _mod.HealthProbe
@@ -36,25 +34,6 @@ QueueDepthProbe = _mod.QueueDepthProbe
 WaveHealth = _mod.WaveHealth
 WaveHealthMonitor = _mod.WaveHealthMonitor
 queue_admission_check = _mod.queue_admission_check
-
-
-# ---- DatabaseProbe --------------------------------------------------------
-
-class TestDatabaseProbe:
-    def test_pass_existing_db(self, tmp_path):
-        db = tmp_path / "test.db"
-        db.write_bytes(b"")
-        probe = DatabaseProbe(str(db))
-        result = probe.check()
-        assert result.passed is True
-        assert result.message == "ok"
-        assert result.duration_ms >= 0
-
-    def test_fail_missing_db(self, tmp_path):
-        probe = DatabaseProbe(str(tmp_path / "nope.db"))
-        result = probe.check()
-        assert result.passed is False
-        assert "missing" in result.message or "not found" in result.message or "unreadable" in result.message
 
 
 # ---- PostgresProbe --------------------------------------------------------

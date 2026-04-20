@@ -282,8 +282,8 @@ class SystemEventsCleanupModule(HeartbeatModule):
                 "SELECT to_regprocedure('cleanup_system_events(integer)') AS procedure_name"
             )
         except Exception:
-            self._cleanup_function_available = True
-            return True
+            self._cleanup_function_available = False
+            return False
         procedure_name = rows[0]["procedure_name"] if rows else None
         self._cleanup_function_available = procedure_name is not None
         return self._cleanup_function_available
@@ -299,6 +299,45 @@ class SystemEventsCleanupModule(HeartbeatModule):
                 self._cleanup_function_available = False
                 return _ok(self.name, t0)
             raise
+        return _ok(self.name, t0)
+
+
+class _IdempotencyLedgerReaperModule(HeartbeatModule):
+    """Heartbeat adapter for periodic idempotency ledger reaping."""
+
+    def __init__(self, conn) -> None:
+        self._conn = conn
+        self._reaper_function_available: bool | None = None
+
+    @property
+    def name(self) -> str:
+        return "idempotency_ledger_reaper"
+
+    def _has_reaper_function(self) -> bool:
+        if self._reaper_function_available is not None:
+            return self._reaper_function_available
+        try:
+            rows = self._conn.execute(
+                "SELECT to_regprocedure('reap_expired_idempotency_keys()') AS procedure_name"
+            )
+        except Exception:
+            self._reaper_function_available = False
+            return False
+        procedure_name = rows[0]["procedure_name"] if rows else None
+        self._reaper_function_available = procedure_name is not None
+        return self._reaper_function_available
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if not self._has_reaper_function():
+            return _ok(self.name, t0)
+        try:
+            self._conn.execute("SELECT reap_expired_idempotency_keys() AS reaped")
+        except Exception as exc:
+            if "reap_expired_idempotency_keys" in str(exc) and "does not exist" in str(exc):
+                self._reaper_function_available = False
+                return _ok(self.name, t0)
+            return _fail(self.name, t0, str(exc))
         return _ok(self.name, t0)
 
 
@@ -717,6 +756,7 @@ class HeartbeatRunner:
                 DataDictionaryProjector(self._conn),
                 _DatabaseMaintenanceModule(self._conn, embedder=self._embedder),
                 _AutoReviewFlushModule(self._conn),
+                _IdempotencyLedgerReaperModule(self._conn),
                 RelationshipMiner(self._conn, self._engine),
                 RollupGenerator(self._conn, self._engine),
                 SystemEventsCleanupModule(self._conn),

@@ -35,6 +35,7 @@ class PostgresEvidenceReader:
 
     database_url: str | None = None
     env: Mapping[str, str] | None = None
+    allow_legacy_missing_route_identity: bool = False
 
     def operator_frame_repository(self):
         """Return the canonical Postgres operator-frame authority for this reader."""
@@ -57,6 +58,17 @@ class PostgresEvidenceReader:
         raise PostgresStorageError(
             "postgres.read_loop_active",
             "sync current_state_for_run() requires an explicit non-async call boundary",
+            details={"run_id": run_id},
+        )
+
+    def resolved_run_id(self, run_id: str) -> str | None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.load_resolved_run_id(run_id=run_id))
+        raise PostgresStorageError(
+            "postgres.read_loop_active",
+            "sync resolved_run_id() requires an explicit non-async call boundary",
             details={"run_id": run_id},
         )
 
@@ -84,9 +96,58 @@ class PostgresEvidenceReader:
         )
         conn = await asyncpg.connect(database_url)
         try:
-            return await fetch_workflow_evidence_timeline(conn, run_id=run_id)
+            return await fetch_workflow_evidence_timeline(
+                conn,
+                run_id=run_id,
+                allow_legacy_missing_route_identity=self.allow_legacy_missing_route_identity,
+            )
         finally:
             await conn.close()
+
+    async def load_resolved_run_id(self, *, run_id: str) -> str | None:
+        from .connection import resolve_workflow_database_url
+
+        requested_run_id = str(run_id or "").strip()
+        if not requested_run_id:
+            raise PostgresStorageError(
+                "postgres.invalid_run_id",
+                "run_id must be a non-empty string",
+                details={"run_id": run_id},
+            )
+        database_url = (
+            resolve_workflow_database_url(
+                env={WORKFLOW_DATABASE_URL_ENV: self.database_url},
+            )
+            if self.database_url is not None
+            else resolve_workflow_database_url(env=self.env)
+        )
+        conn = await asyncpg.connect(database_url)
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT run_id
+                FROM workflow_runs
+                WHERE run_id = $1
+                   OR RIGHT(run_id, LENGTH($1)) = $1
+                ORDER BY CASE WHEN run_id = $1 THEN 0 ELSE 1 END, run_id
+                LIMIT 2
+                """,
+                requested_run_id,
+            )
+        finally:
+            await conn.close()
+        if not rows:
+            return None
+        if str(rows[0]["run_id"]) == requested_run_id or len(rows) == 1:
+            return str(rows[0]["run_id"])
+        raise PostgresStorageError(
+            "postgres.ambiguous_run_id_suffix",
+            "run_id suffix matches multiple workflow_runs rows",
+            details={
+                "run_id": requested_run_id,
+                "matches": [str(row["run_id"]) for row in rows],
+            },
+        )
 
     async def load_current_state(self, *, run_id: str) -> str | None:
         from .connection import resolve_workflow_database_url
@@ -126,6 +187,7 @@ def _route_identity_from_lineage(
     fallback_workflow_id: str,
     fallback_run_id: str,
     fallback_request_id: str,
+    allow_legacy_missing_route_identity: bool = False,
 ) -> tuple[RouteIdentity, tuple[DataQualityIssue, ...]]:
     issues: list[DataQualityIssue] = []
 
@@ -133,6 +195,16 @@ def _route_identity_from_lineage(
     lineage = _json_value(raw_lineage) if raw_lineage is not None else None
 
     if not isinstance(lineage, Mapping):
+        if not allow_legacy_missing_route_identity:
+            raise PostgresStorageError(
+                "postgres.missing_route_identity",
+                "persisted evidence row is missing route_identity",
+                details={
+                    "kind": kind,
+                    "row_id": row_id,
+                    "evidence_seq": evidence_seq,
+                },
+            )
         issues.append(
             DataQualityIssue(
                 reason_code="workflow.inspect.missing_route_identity",
@@ -157,6 +229,17 @@ def _route_identity_from_lineage(
     def _required_str(field: str, fallback: str) -> str:
         value = lineage.get(field)
         if value is None:
+            if not allow_legacy_missing_route_identity:
+                raise PostgresStorageError(
+                    "postgres.missing_route_identity_field",
+                    f"persisted evidence row is missing route_identity.{field}",
+                    details={
+                        "kind": kind,
+                        "row_id": row_id,
+                        "evidence_seq": evidence_seq,
+                        "field": field,
+                    },
+                )
             issues.append(
                 DataQualityIssue(
                     reason_code="workflow.inspect.missing_lineage_field",
@@ -172,6 +255,17 @@ def _route_identity_from_lineage(
     def _required_int(field: str, fallback: int) -> int:
         value = lineage.get(field)
         if value is None:
+            if not allow_legacy_missing_route_identity:
+                raise PostgresStorageError(
+                    "postgres.missing_route_identity_field",
+                    f"persisted evidence row is missing route_identity.{field}",
+                    details={
+                        "kind": kind,
+                        "row_id": row_id,
+                        "evidence_seq": evidence_seq,
+                        "field": field,
+                    },
+                )
             issues.append(
                 DataQualityIssue(
                     reason_code="workflow.inspect.missing_lineage_field",
@@ -254,7 +348,11 @@ def _decision_refs(value: object) -> tuple[DecisionRef, ...]:
     return tuple(refs)
 
 
-def _event_from_row(row: asyncpg.Record) -> EvidenceRow:
+def _event_from_row(
+    row: asyncpg.Record,
+    *,
+    allow_legacy_missing_route_identity: bool,
+) -> EvidenceRow:
     payload = _json_value(row["payload"])
     if not isinstance(payload, Mapping):
         raise PostgresStorageError(
@@ -269,6 +367,7 @@ def _event_from_row(row: asyncpg.Record) -> EvidenceRow:
         fallback_workflow_id=str(row["workflow_id"]),
         fallback_run_id=str(row["run_id"]),
         fallback_request_id=str(row["request_id"]),
+        allow_legacy_missing_route_identity=allow_legacy_missing_route_identity,
     )
     transition_seq = int(payload.get("transition_seq") or route_identity.transition_seq)
     event = WorkflowEventV1(
@@ -299,7 +398,11 @@ def _event_from_row(row: asyncpg.Record) -> EvidenceRow:
     )
 
 
-def _receipt_from_row(row: asyncpg.Record) -> EvidenceRow:
+def _receipt_from_row(
+    row: asyncpg.Record,
+    *,
+    allow_legacy_missing_route_identity: bool,
+) -> EvidenceRow:
     inputs = _json_value(row["inputs"])
     outputs = _json_value(row["outputs"])
     if not isinstance(inputs, Mapping) or not isinstance(outputs, Mapping):
@@ -315,6 +418,7 @@ def _receipt_from_row(row: asyncpg.Record) -> EvidenceRow:
         fallback_workflow_id=str(row["workflow_id"]),
         fallback_run_id=str(row["run_id"]),
         fallback_request_id=str(row["request_id"]),
+        allow_legacy_missing_route_identity=allow_legacy_missing_route_identity,
     )
     transition_seq = int(inputs.get("transition_seq") or route_identity.transition_seq)
     receipt = ReceiptV1(
@@ -356,6 +460,7 @@ async def fetch_workflow_evidence_timeline(
     conn: asyncpg.Connection,
     *,
     run_id: str,
+    allow_legacy_missing_route_identity: bool = False,
 ) -> tuple[EvidenceRow, ...]:
     """Return one run's canonical persisted evidence rows in shared order."""
 
@@ -410,6 +515,18 @@ async def fetch_workflow_evidence_timeline(
         """,
         run_id,
     )
-    combined = [_event_from_row(row) for row in event_rows]
-    combined.extend(_receipt_from_row(row) for row in receipt_rows)
+    combined = [
+        _event_from_row(
+            row,
+            allow_legacy_missing_route_identity=allow_legacy_missing_route_identity,
+        )
+        for row in event_rows
+    ]
+    combined.extend(
+        _receipt_from_row(
+            row,
+            allow_legacy_missing_route_identity=allow_legacy_missing_route_identity,
+        )
+        for row in receipt_rows
+    )
     return tuple(sorted(combined, key=lambda item: (item.evidence_seq, item.row_id)))

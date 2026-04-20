@@ -21,7 +21,12 @@ class _MockConn:
 
     def execute(self, sql: str, *args: object) -> list[dict[str, Any]]:
         if "FROM memory_entities" in sql:
-            return list(self._entity_rows)
+            return [
+                row
+                for row in self._entity_rows
+                if str(row.get("entity_type") or "table") == "table"
+                and not bool(row.get("archived", False))
+            ]
         if "FROM memory_edges" in sql:
             table_entity_id = args[0] if args else None
             return [
@@ -49,6 +54,7 @@ def _table_row(
 ) -> dict[str, Any]:
     return {
         "id": entity_id,
+        "entity_type": "table",
         "name": name,
         "content": f"{name} summary",
         "metadata": {
@@ -79,6 +85,15 @@ def test_operation_query_data_dictionary_dispatch_returns_versioned_contract() -
                 updated_at=datetime(2026, 4, 16, 7, 0, tzinfo=timezone.utc),
                 approx_rows=10,
             ),
+            {
+                "id": "table:invoices",
+                "entity_type": "table",
+                "name": "invoices",
+                "content": "invoices summary",
+                "metadata": {"columns": [{"name": "id", "type": "uuid"}]},
+                "updated_at": datetime(2026, 4, 16, 6, 0, tzinfo=timezone.utc),
+                "archived": False,
+            },
         ],
         edge_rows=[
             {
@@ -86,6 +101,12 @@ def test_operation_query_data_dictionary_dispatch_returns_versioned_contract() -
                 "target_id": "table:customers",
                 "relation_type": "foreign_key",
                 "metadata": {"column": "customer_id"},
+            },
+            {
+                "source_id": "table:invoices",
+                "target_id": "table:orders",
+                "relation_type": "derived_from",
+                "metadata": {"trigger": "invoices_sync"},
             }
         ],
     )
@@ -101,8 +122,8 @@ def test_operation_query_data_dictionary_dispatch_returns_versioned_contract() -
     assert result["scope"] == "table"
     assert result["requested_table"] == "orders"
     assert result["count"] == 1
-    assert result["total_tables"] == 2
-    assert result["freshness"]["projection_updated_at_min"] == "2026-04-16T07:00:00+00:00"
+    assert result["total_tables"] == 3
+    assert result["freshness"]["projection_updated_at_min"] == "2026-04-16T06:00:00+00:00"
     assert result["freshness"]["projection_updated_at_max"] == "2026-04-16T08:00:00+00:00"
 
     table = result["tables"][0]
@@ -110,12 +131,33 @@ def test_operation_query_data_dictionary_dispatch_returns_versioned_contract() -
     assert table["column_count"] == 1
     assert table["relationships"]["depends_on"] == [
         {
+            "entity_id": "table:customers",
+            "entity_type": "table",
+            "name": "customers",
+            "summary": "customers summary",
             "table": "customers",
             "relation": "foreign_key",
+            "direction": "depends_on",
+            "source_id": "table:orders",
+            "target_id": "table:customers",
             "metadata": {"column": "customer_id"},
         }
     ]
-    assert table["relationship_counts"] == {"depends_on": 1, "referenced_by": 0}
+    assert table["relationships"]["referenced_by"] == [
+        {
+            "entity_id": "table:invoices",
+            "entity_type": "table",
+            "name": "invoices",
+            "summary": "invoices summary",
+            "table": "invoices",
+            "relation": "derived_from",
+            "direction": "referenced_by",
+            "source_id": "table:invoices",
+            "target_id": "table:orders",
+            "metadata": {"trigger": "invoices_sync"},
+        }
+    ]
+    assert table["relationship_counts"] == {"depends_on": 1, "referenced_by": 1}
     assert table["lifecycle"]["detail_level"] == "detail"
     assert table["lifecycle"]["contract_version"] == 1
 

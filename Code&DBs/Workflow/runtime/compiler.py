@@ -142,8 +142,8 @@ def compile_prose(
                 input_fingerprint=compile_provenance["input_fingerprint"],
             )
         except CompileArtifactError as exc:
-            logger.warning("Skipping reusable definition artifact: %s", exc)
-            reusable_definition = None
+            logger.error("Reusable definition artifact authority failed: %s", exc)
+            raise RuntimeError(f"compile_artifact.reuse_failed: {exc}") from exc
         if reusable_definition is not None:
             definition = json.loads(json.dumps(reusable_definition.payload, default=str))
             return _finalize_compile_result(
@@ -332,8 +332,8 @@ def compile_prose(
                 input_fingerprint=compile_provenance["input_fingerprint"],
             )
         except Exception as exc:
-            logger.warning("Failed to persist definition compile artifact: %s", exc)
-            errors.append(f"definition_artifact_persist_failed: {exc}")
+            logger.error("Definition compile artifact persistence failed: %s", exc)
+            raise RuntimeError(f"compile_artifact.persist_failed: {exc}") from exc
 
     return _finalize_compile_result(
         definition=definition,

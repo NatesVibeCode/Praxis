@@ -89,7 +89,18 @@ def data_dictionary_contract_descriptor() -> dict[str, Any]:
             "relationship_counts",
             "lifecycle",
         ],
-        "relationship_fields": ["table", "relation", "metadata"],
+        "relationship_fields": [
+            "entity_id",
+            "entity_type",
+            "name",
+            "summary",
+            "table",
+            "relation",
+            "direction",
+            "source_id",
+            "target_id",
+            "metadata",
+        ],
         "freshness_fields": [
             "generated_at",
             "projection_updated_at_min",
@@ -117,15 +128,31 @@ def build_data_dictionary_table(
 ) -> dict[str, Any]:
     """Normalize one table payload into the shared dictionary contract."""
 
+    def _normalize_relationship(edge: Mapping[str, Any]) -> dict[str, Any]:
+        entity_id = str(edge.get("entity_id") or "")
+        entity_type = str(edge.get("entity_type") or "")
+        name = str(edge.get("name") or edge.get("table") or "")
+        summary = str(edge.get("summary") or "")
+        return {
+            "entity_id": entity_id,
+            "entity_type": entity_type,
+            "name": name,
+            "summary": summary,
+            # Keep the legacy key for callers that still expect "table", but
+            # let it carry the actual linked object label.
+            "table": str(edge.get("table") or name),
+            "relation": str(edge.get("relation") or ""),
+            "direction": str(edge.get("direction") or ""),
+            "source_id": str(edge.get("source_id") or ""),
+            "target_id": str(edge.get("target_id") or ""),
+            "metadata": _normalize_mapping(edge.get("metadata")),
+        }
+
     normalized_relationships = {
         key: [
-            {
-                "table": str(edge.get("table") or ""),
-                "relation": str(edge.get("relation") or ""),
-                "metadata": _normalize_mapping(edge.get("metadata")),
-            }
+            _normalize_relationship(edge)
             for edge in list((relationships or {}).get(key, []))
-            if str(edge.get("table") or "").strip()
+            if str(edge.get("entity_id") or edge.get("table") or edge.get("name") or "").strip()
         ]
         for key in _RELATIONSHIP_KEYS
     }

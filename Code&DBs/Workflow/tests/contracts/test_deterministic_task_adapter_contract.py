@@ -6,7 +6,7 @@ import types
 from adapters import DeterministicTaskAdapter, DeterministicTaskRequest
 
 
-def test_deterministic_task_adapter_returns_declared_outputs() -> None:
+def test_deterministic_task_adapter_fails_closed_when_builder_missing() -> None:
     adapter = DeterministicTaskAdapter()
 
     result = adapter.execute(
@@ -20,15 +20,34 @@ def test_deterministic_task_adapter_returns_declared_outputs() -> None:
         )
     )
 
-    # Passthrough-echo contract: no `deterministic_builder` in input_payload
-    # means the adapter echoes `expected_outputs` back. This path MUST be
-    # observable — status stays "succeeded" for backward compatibility, but
-    # the reason_code is distinct and the outputs carry a `passthrough_echo`
-    # annotation so downstream consumers can detect that no real work ran.
+    assert result.status == "failed"
+    assert result.reason_code == "adapter.deterministic_builder_missing"
+    assert result.inputs["task_name"] == "prepare"
+    assert result.inputs["input_payload"] == {"answer": 42}
+    assert "deterministic_builder" in result.outputs["failure_reason"]
+    assert result.failure_code == "adapter.deterministic_builder_missing"
+
+
+def test_deterministic_task_adapter_returns_declared_outputs_with_explicit_passthrough() -> None:
+    adapter = DeterministicTaskAdapter()
+
+    result = adapter.execute(
+        request=DeterministicTaskRequest(
+            node_id="node_0",
+            task_name="prepare",
+            input_payload={"answer": 42, "allow_passthrough_echo": True},
+            expected_outputs={"result": "prepared"},
+            dependency_inputs={},
+            execution_boundary_ref="workspace.alpha",
+        )
+    )
+
+    # Passthrough-echo remains legal for smoke wiring, but only when the spec
+    # opts in explicitly.
     assert result.status == "succeeded"
     assert result.reason_code == "adapter.execution_passthrough_echo"
     assert result.inputs["task_name"] == "prepare"
-    assert result.inputs["input_payload"] == {"answer": 42}
+    assert result.inputs["input_payload"] == {"answer": 42, "allow_passthrough_echo": True}
     assert result.outputs == {"result": "prepared", "passthrough_echo": True}
     assert result.failure_code is None
 
@@ -40,7 +59,7 @@ def test_deterministic_task_adapter_preserves_dependency_inputs_in_normalized_re
         request=DeterministicTaskRequest(
             node_id="node_1",
             task_name="admit",
-            input_payload={"step": 1},
+            input_payload={"step": 1, "allow_passthrough_echo": True},
             expected_outputs={"result": "admitted"},
             dependency_inputs={"prepared_result": "prepared"},
             execution_boundary_ref="workspace.alpha",

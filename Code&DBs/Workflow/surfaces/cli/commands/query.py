@@ -1368,3 +1368,84 @@ def _research_command(args: list[str], *, stdout: TextIO) -> int:
         return exit_code
     print_json(stdout, payload)
     return exit_code
+
+
+# ---------------------------------------------------------------------------
+# workflow decompose <objective...> [--scope-files a,b,c] [--json]
+# ---------------------------------------------------------------------------
+
+def _render_decompose_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
+    if payload.get("error"):
+        print_json(stdout, payload)
+        return
+
+    stdout.write(
+        "DECOMPOSE\n"
+        f"  total_sprints: {payload.get('total_sprints', 0)}\n"
+        f"  total_estimate_minutes: {payload.get('total_estimate_minutes', 0)}\n"
+    )
+    critical_path = [str(step) for step in payload.get("critical_path", []) if str(step).strip()]
+    if critical_path:
+        stdout.write(f"  critical_path: {' -> '.join(critical_path)}\n")
+    sprints = payload.get("sprints", [])
+    if isinstance(sprints, list) and sprints:
+        stdout.write("  sprints:\n")
+        for sprint in sprints:
+            if not isinstance(sprint, dict):
+                continue
+            label = str(sprint.get("label") or "").strip() or "<unnamed>"
+            complexity = str(sprint.get("complexity") or "").strip() or "unknown"
+            estimate = sprint.get("estimate_minutes")
+            stdout.write(f"    - {label} ({complexity}, {estimate}m)\n")
+
+
+def _decompose_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow decompose <objective...>` via the canonical sprint decomposer."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow decompose <objective...> [--scope-files a,b,c] [--json]\n"
+            "\n"
+            "  Decompose one objective into micro-sprints using the canonical sprint decomposer.\n"
+            "  --scope-files   Optional comma-separated file list to bias the decomposition\n"
+            "  --json          Emit machine-readable JSON output\n"
+            "\n"
+            "  Examples:\n"
+            "    workflow decompose 'build real-time notifications'\n"
+            "    workflow decompose 'refactor auth flow' --scope-files src/auth.py,src/session.py\n"
+        )
+        return 2
+
+    objective_parts: list[str] = []
+    scope_files: list[str] = []
+    as_json = False
+    i = 0
+
+    while i < len(args):
+        token = args[i]
+        if token == "--scope-files" and i + 1 < len(args):
+            scope_files = [part.strip() for part in args[i + 1].split(",") if part.strip()]
+            i += 2
+            continue
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        objective_parts.append(token)
+        i += 1
+
+    objective = " ".join(objective_parts).strip()
+    if not objective:
+        stdout.write("error: objective is required\n")
+        return 2
+
+    params: dict[str, object] = {"objective": objective}
+    if scope_files:
+        params["scope_files"] = scope_files
+
+    exit_code, payload = run_cli_tool("praxis_decompose", params)
+    if as_json:
+        print_json(stdout, payload)
+        return exit_code
+    _render_decompose_payload(payload, stdout=stdout)
+    return exit_code

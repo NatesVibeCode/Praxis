@@ -44,6 +44,7 @@ __all__ = [
     "default_provider_slug",
     "default_llm_adapter_type",
     "default_adapter_type_for_provider",
+    "resolve_default_adapter_type",
     "default_model_for_provider",
     "resolve_adapter_economics",
     "resolve_api_endpoint",
@@ -69,7 +70,7 @@ try:
 except ImportError:
     _asyncpg = None  # type: ignore[assignment]
     _ASYNCPG_AVAILABLE = False
-    logger.info("asyncpg not installed — provider registry will use built-in profiles only")
+    logger.info("asyncpg not installed — provider registry cannot load DB authority")
 
 
 class ProviderRegistryError(RuntimeError):
@@ -95,7 +96,6 @@ class ProviderRegistryLoadTimeout(ProviderRegistryError):
 class RegistryLoadStatus(enum.Enum):
     UNLOADED = "unloaded"
     LOADED_FROM_DB = "loaded_from_db"
-    DEGRADED_BUILTIN = "degraded_builtin"
     LOAD_FAILED = "load_failed"
 
 
@@ -119,26 +119,6 @@ _DEFAULT_PROVIDER_PRIORITY: tuple[str, ...] = (
     "anthropic",
     "cursor",
 )
-
-
-def _register(profile: ProviderCLIProfile) -> None:
-    _REGISTRY[profile.provider_slug] = profile
-    _ALIAS_MAP[profile.binary] = profile.provider_slug
-    for alias in profile.aliases:
-        _ALIAS_MAP[alias] = profile.provider_slug
-
-
-for _builtin_profile in provider_transport.BUILTIN_PROVIDER_PROFILES:
-    _register(_builtin_profile)
-
-
-def _restore_builtin_registry() -> None:
-    _REGISTRY.clear()
-    _ALIAS_MAP.clear()
-    for profile in provider_transport.BUILTIN_PROVIDER_PROFILES:
-        _register(profile)
-    _ADAPTER_CONFIG.clear()
-    _ADAPTER_FAILURE_MAPPINGS.clear()
 
 
 def _clear_registry_state() -> None:
@@ -191,22 +171,6 @@ def _record_load_failure(error: str, *, log_level: str, message: str) -> None:
     else:
         logger.info(message)
     _load_status = RegistryLoadStatus.LOAD_FAILED
-    _load_error = error
-    _load_timestamp = time.monotonic()
-    _DB_LOADED = True
-
-
-def _record_degraded_builtin(error: str, *, log_level: str, message: str) -> None:
-    global _load_status, _load_error, _load_timestamp, _DB_LOADED
-
-    _restore_builtin_registry()
-    if log_level == "error":
-        logger.error(message)
-    elif log_level == "warning":
-        logger.warning(message)
-    else:
-        logger.info(message)
-    _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
     _load_error = error
     _load_timestamp = time.monotonic()
     _DB_LOADED = True
@@ -483,50 +447,53 @@ def _load_from_db() -> None:
             return
 
         if not _ASYNCPG_AVAILABLE:
-            _record_degraded_builtin(
+            _record_load_failure(
                 "asyncpg not installed",
                 log_level="warning",
-                message="provider execution registry: asyncpg unavailable — using built-in provider profiles",
+                message=(
+                    "provider execution registry: asyncpg unavailable; "
+                    "DB authority cannot be loaded"
+                ),
             )
             return
 
         try:
             db_url = _require_database_url()
         except RuntimeError as exc:
-            _record_degraded_builtin(
+            _record_load_failure(
                 str(exc),
                 log_level="warning",
-                message=f"provider execution registry: {exc} — using built-in provider profiles",
+                message=f"provider execution registry: {exc}; DB authority cannot be loaded",
             )
             return
 
         try:
             rows, config_rows, failure_rows = _run_async(_fetch_from_db(db_url))
         except ProviderRegistryLoadTimeout as exc:
-            _record_degraded_builtin(
+            _record_load_failure(
                 str(exc),
                 log_level="error",
-                message=f"provider execution registry: {exc} — using built-in provider profiles",
+                message=f"provider execution registry: {exc}; DB authority cannot be loaded",
             )
             return
         except Exception as exc:
-            _record_degraded_builtin(
+            _record_load_failure(
                 f"{type(exc).__name__}: {exc}",
                 log_level="error",
                 message=(
                     "provider execution registry: DB fetch failed "
-                    f"({type(exc).__name__}: {exc}) — using built-in provider profiles"
+                    f"({type(exc).__name__}: {exc}); DB authority cannot be loaded"
                 ),
             )
             return
 
         if not rows:
-            _record_degraded_builtin(
+            _record_load_failure(
                 "no active rows",
                 log_level="warning",
                 message=(
                     "provider execution registry: no active provider_cli_profiles in DB "
-                    "— using built-in provider profiles"
+                    "so no provider authority is available"
                 ),
             )
             return
@@ -555,12 +522,12 @@ def _load_from_db() -> None:
                 loaded_aliases[alias] = profile.provider_slug
 
         if not loaded_registry:
-            _record_degraded_builtin(
+            _record_load_failure(
                 f"all {len(rows)} rows failed validation",
                 log_level="error",
                 message=(
                     "provider execution registry: all "
-                    f"{len(rows)} DB rows failed validation — using built-in provider profiles. "
+                    f"{len(rows)} DB rows failed validation; no provider authority is available. "
                     f"Errors: {'; '.join(parse_errors)}"
                 ),
             )
@@ -601,6 +568,7 @@ def registry_health() -> dict[str, Any]:
     """Return current load status, error details, and provider count."""
 
     _load_from_db()
+    authority_available = _load_status == RegistryLoadStatus.LOADED_FROM_DB
     return {
         "status": _load_status.value,
         "error": _load_error,
@@ -608,6 +576,9 @@ def registry_health() -> dict[str, Any]:
         "provider_count": len(_REGISTRY),
         "providers": sorted(_REGISTRY.keys()),
         "asyncpg_available": _ASYNCPG_AVAILABLE,
+        "authority_available": authority_available,
+        "authority_source": "provider_cli_profiles" if authority_available else None,
+        "fallback_active": False,
     }
 
 
@@ -668,6 +639,21 @@ def default_adapter_type_for_provider(provider_slug: str) -> str | None:
         provider_slug,
         profiles=_REGISTRY,
     )
+
+
+def resolve_default_adapter_type(provider_slug: str | None = None) -> str:
+    """Resolve adapter defaults through one provider-aware registry authority."""
+
+    normalized_provider_slug = str(provider_slug or "").strip()
+    if (
+        normalized_provider_slug
+        and "/" not in normalized_provider_slug
+        and not normalized_provider_slug.startswith("auto/")
+    ):
+        provider_default = default_adapter_type_for_provider(normalized_provider_slug)
+        if provider_default is not None:
+            return provider_default
+    return default_llm_adapter_type()
 
 
 def default_model_for_provider(provider_slug: str) -> str | None:

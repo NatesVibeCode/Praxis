@@ -763,13 +763,7 @@ async def _exercise_default_path_failover_endpoint_adoption() -> None:
             "decision_ref": f"decision:endpoint:{suffix}",
         }
         reload_provider_registry_from_db()
-        if resolve_provider_adapter_contract("openai", "llm_task") is None:
-            provider_registry_authority._restore_builtin_registry()
-            provider_registry_authority._DB_LOADED = True
-            provider_registry_authority._load_status = (
-                provider_registry_authority.RegistryLoadStatus.DEGRADED_BUILTIN
-            )
-            provider_registry_authority._load_error = "integration fallback to builtin registry"
+        assert resolve_provider_adapter_contract("openai", "llm_task") is not None
         first_party_runtime = resolution.to_first_party_runtime_contract()
         assert first_party_runtime["kind"] == "default_path_first_party_runtime_contract"
         assert first_party_runtime["authorities"] == {

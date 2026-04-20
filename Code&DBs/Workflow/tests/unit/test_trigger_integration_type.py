@@ -128,6 +128,35 @@ class TestFireIntegrationTrigger:
 
         assert result is True
 
+    @pytest.mark.parametrize(
+        ("integration_status", "expected_error"),
+        [
+            ("skipped", "integration_skipped"),
+            ("failed", "integration_failed"),
+        ],
+    )
+    def test_returns_false_on_non_success(self, integration_status, expected_error, caplog):
+        conn = _FakeConn()
+        trigger = {
+            "id": "trig-6",
+            "integration_id": "notifications",
+            "integration_action": "send",
+            "integration_args": {},
+        }
+
+        with patch("runtime.integrations.execute_integration") as mock_exec:
+            mock_exec.return_value = {
+                "status": integration_status,
+                "summary": f"integration {integration_status}",
+                "error": None,
+            }
+            result = _fire_integration_trigger(
+                conn, trigger=trigger, event={"id": 1}, payload={},
+            )
+
+        assert result is False
+        assert expected_error in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # Depth limiting applies to integration triggers
@@ -239,6 +268,38 @@ class TestFireExceptionHandling:
             fired = _evaluate_workflow_triggers_for_event(conn, event=event)
 
         assert fired == 1
+
+    def test_skipped_integration_trigger_is_not_counted_as_fired(self):
+        trigger_rows = [
+            {
+                "id": "trig-skipped",
+                "workflow_id": None,
+                "filter": "{}",
+                "trigger_type": "integration",
+                "integration_id": "notifications",
+                "integration_action": "send",
+                "integration_args": "{}",
+                "definition": None,
+                "compiled_spec": None,
+                "workflow_name": None,
+            },
+        ]
+        conn = _FakeConn(trigger_rows)
+        event = {
+            "id": 1,
+            "event_type": "run.succeeded",
+            "payload": {"trigger_depth": 0},
+        }
+
+        with patch("runtime.integrations.execute_integration") as mock_exec:
+            mock_exec.return_value = {
+                "status": "skipped",
+                "summary": "Notifications are not configured; nothing was sent.",
+                "error": None,
+            }
+            fired = _evaluate_workflow_triggers_for_event(conn, event=event)
+
+        assert fired == 0
 
 
 class TestDepthLimiting:
