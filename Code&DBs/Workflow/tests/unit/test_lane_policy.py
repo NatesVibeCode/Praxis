@@ -198,3 +198,59 @@ def test_load_skips_empty_allowed_list() -> None:
     ]
     result = load_provider_lane_policies(_StubConn(rows))
     assert set(result) == {"openai"}
+
+
+def test_admit_llm_task_refused_when_budget_window_data_quality_error() -> None:
+    """Budget-window table reachable but an error-severity quality rule is failing.
+
+    Extends the fail-closed doctrine: authority data the operator has flagged
+    as broken must not drive paid-lane admission. Surfaces the reason code
+    ``lane.rejected.budget_window_data_quality_error`` so the trace names the
+    axis (authority-present-but-corrupt, distinct from authority-missing).
+    """
+    admitted, reason = admit_adapter_type(
+        _policies(), "openai", "llm_task", budget_window_data_quality_error=True,
+    )
+    assert admitted is False
+    assert reason == "lane.rejected.budget_window_data_quality_error"
+
+
+def test_admit_cli_llm_ignores_budget_window_data_quality_error() -> None:
+    """CLI has no paid-API ceiling — budget-window data quality doesn't gate it."""
+    admitted, reason = admit_adapter_type(
+        _policies(), "openai", "cli_llm", budget_window_data_quality_error=True,
+    )
+    assert admitted is True
+    assert reason == "lane.admitted"
+
+
+def test_authority_unreachable_wins_over_data_quality_error() -> None:
+    """When both authority gates fire, surface the more-fundamental missing-authority axis.
+
+    ``budget_authority_unreachable`` means the table itself is gone — we cannot
+    even read quality runs against it meaningfully. The reason code must reflect
+    the deeper gap rather than a derived data-quality signal.
+    """
+    admitted, reason = admit_adapter_type(
+        _policies(), "openai", "llm_task",
+        budget_authority_unreachable=True,
+        budget_window_data_quality_error=True,
+    )
+    assert admitted is False
+    assert reason == "lane.rejected.budget_authority_unreachable"
+
+
+def test_data_quality_error_wins_over_high_spend_pressure() -> None:
+    """Corrupt authority data is a stronger signal than pressure derived from it.
+
+    If the rows driving spend_pressure are in a failing-rule state, the
+    pressure reading may be meaningless — surface the data-quality axis so
+    the operator fixes the invariant rather than reading the pressure number.
+    """
+    admitted, reason = admit_adapter_type(
+        _policies(), "openai", "llm_task",
+        spend_pressure="high",
+        budget_window_data_quality_error=True,
+    )
+    assert admitted is False
+    assert reason == "lane.rejected.budget_window_data_quality_error"

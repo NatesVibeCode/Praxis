@@ -34,6 +34,9 @@ def insert_snapshot_fields(
     snapshot_id: str,
     fields: Iterable[dict[str, Any]],
 ) -> int:
+    """Bulk-insert snapshot fields. Uses parallel arrays for efficiency
+    (UNNEST'd in SQL); skips the `sources` column because text[][] isn't
+    a stable transport type and drift detection doesn't read it."""
     rows = list(fields)
     if not rows:
         return 0
@@ -41,18 +44,17 @@ def insert_snapshot_fields(
     field_paths = [r.get("field_path") or "" for r in rows]
     field_kinds = [r.get("field_kind") or "text" for r in rows]
     requireds = [bool(r.get("required", False)) for r in rows]
-    sources_lists = [list(r.get("sources") or []) for r in rows]
     conn.execute(
         """
         INSERT INTO data_dictionary_schema_snapshot_fields
-            (snapshot_id, object_kind, field_path, field_kind, required, sources)
-        SELECT $1::uuid, ok, fp, fk, req, src
-        FROM UNNEST($2::text[], $3::text[], $4::text[], $5::boolean[], $6::text[][])
-            AS t(ok, fp, fk, req, src)
+            (snapshot_id, object_kind, field_path, field_kind, required)
+        SELECT $1::uuid, ok, fp, fk, req
+        FROM UNNEST($2::text[], $3::text[], $4::text[], $5::boolean[])
+            AS t(ok, fp, fk, req)
         ON CONFLICT (snapshot_id, object_kind, field_path) DO NOTHING
         """,
         snapshot_id,
-        object_kinds, field_paths, field_kinds, requireds, sources_lists,
+        object_kinds, field_paths, field_kinds, requireds,
     )
     return len(rows)
 

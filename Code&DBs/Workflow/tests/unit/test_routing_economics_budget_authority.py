@@ -20,10 +20,22 @@ from runtime.routing_economics import (
 
 
 class _StubConn:
-    def __init__(self, rows):
-        self._rows = rows
+    """Returns a single row set for window queries; empty for quality queries.
 
-    def execute(self, _sql, *_params):
+    The loader issues two queries against different tables: the window
+    snapshot itself and the data-quality latest-run check. The quality check
+    dispatches on the SQL text marker ``data_dictionary_quality_runs`` so
+    window-focused tests keep their existing single-row-set shape without
+    seeing stray quality rows.
+    """
+
+    def __init__(self, rows, *, quality_rows=None):
+        self._rows = rows
+        self._quality_rows = quality_rows if quality_rows is not None else []
+
+    def execute(self, sql, *_params):
+        if "data_dictionary_quality_runs" in sql:
+            return self._quality_rows
         return self._rows
 
 
@@ -45,6 +57,28 @@ class _OtherPostgresErrorConn:
         err = asyncpg.PostgresError()
         err.sqlstate = "42501"  # insufficient_privilege
         raise err
+
+
+class _WindowOkQualityMissingConn:
+    """Window table present, quality tables missing (42P01 on the quality query).
+
+    Pins the fail-open contract for quality-infra absence: the authority
+    reachability gate on the primary window query is the primary fail-closed
+    guard; a missing quality table must not compound it into a blanket paid-
+    lane refusal. Keyed off the SQL text so the window query still returns
+    its empty-but-reachable result.
+    """
+
+    def __init__(self, window_rows):
+        self._window_rows = window_rows
+
+    def execute(self, sql, *_params):
+        if "data_dictionary_quality_runs" in sql:
+            import asyncpg
+            err = asyncpg.PostgresError()
+            err.sqlstate = "42P01"
+            raise err
+        return self._window_rows
 
 
 def _window_row(
@@ -152,3 +186,51 @@ def test_snapshot_factory_constants_are_reachable_vs_unreachable() -> None:
     assert BudgetAuthoritySnapshot.unreachable().reachable is False
     assert BudgetAuthoritySnapshot.empty().window_for(provider_policy_id="x") is None
     assert BudgetAuthoritySnapshot.unreachable().window_for(provider_policy_id="x") is None
+
+
+def test_snapshot_defaults_data_quality_ok_true() -> None:
+    """Without an explicit failing-rule signal, ``data_quality_ok`` defaults True.
+
+    ``empty`` and ``unreachable`` factories produce snapshots whose
+    ``data_quality_ok`` is the permissive default. The gate only refuses
+    when an error-severity rule is *actively* failing; unknown state reads
+    as benign on this axis (authority-reachability carries the primary
+    fail-closed semantics).
+    """
+    assert BudgetAuthoritySnapshot.empty().data_quality_ok is True
+    assert BudgetAuthoritySnapshot.unreachable().data_quality_ok is True
+
+
+def test_snapshot_data_quality_ok_when_quality_rows_report_zero_failing() -> None:
+    """Happy path: the quality query returns zero failing rules."""
+    snapshot = load_budget_authority_snapshot(_StubConn([], quality_rows=[{"failing": 0}]))
+
+    assert snapshot.reachable is True
+    assert snapshot.data_quality_ok is True
+
+
+def test_snapshot_data_quality_false_when_failing_rule_exists() -> None:
+    """Error-severity rule with latest run in ('fail','error') flips data_quality_ok to False.
+
+    This is the signal that drives ``lane.rejected.budget_window_data_quality_error``
+    at the admission gate: authority table reachable, but an operator-declared
+    invariant on its rows is failing, so paid-lane admission must refuse.
+    """
+    snapshot = load_budget_authority_snapshot(_StubConn([], quality_rows=[{"failing": 1}]))
+
+    assert snapshot.reachable is True
+    assert snapshot.data_quality_ok is False
+
+
+def test_snapshot_data_quality_ok_when_quality_tables_missing() -> None:
+    """Quality infrastructure absent (42P01) fails *open* on the quality axis.
+
+    The authority-reachability gate is the primary fail-closed guard. A
+    missing quality table must not compound into a blanket paid-lane
+    refusal — otherwise deploying a fresh env with no quality projector
+    yet would paralyse the paid lane.
+    """
+    snapshot = load_budget_authority_snapshot(_WindowOkQualityMissingConn([]))
+
+    assert snapshot.reachable is True
+    assert snapshot.data_quality_ok is True
