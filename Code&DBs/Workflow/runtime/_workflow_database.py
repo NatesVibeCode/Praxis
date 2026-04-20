@@ -275,4 +275,30 @@ def resolve_runtime_database_url(
     ).database_url
 
 
-__all__ = ["WorkflowDatabaseAuthority", "resolve_runtime_database_authority", "resolve_runtime_database_url"]
+def workflow_database_url_is_configured(
+    workflow_env: Mapping[str, str] | None = None,
+) -> bool:
+    """Return True when ``WORKFLOW_DATABASE_URL`` is present and non-empty.
+
+    Consumers that only need a presence check (e.g. heartbeat modules that
+    want to no-op when the workflow DB isn't wired up) should use this helper
+    instead of reading ``os.environ`` directly. It honors an explicit
+    ``workflow_env`` override first — falling back to the process environment —
+    which matches the pattern runtime modules already use when they accept an
+    injected env mapping for testability.
+    """
+
+    if workflow_env is not None:
+        candidate = workflow_env.get(_WORKFLOW_DATABASE_URL_ENV)
+        if isinstance(candidate, str) and candidate.strip():
+            return True
+    value = os.environ.get(_WORKFLOW_DATABASE_URL_ENV)
+    return bool(isinstance(value, str) and value.strip())
+
+
+__all__ = [
+    "WorkflowDatabaseAuthority",
+    "resolve_runtime_database_authority",
+    "resolve_runtime_database_url",
+    "workflow_database_url_is_configured",
+]

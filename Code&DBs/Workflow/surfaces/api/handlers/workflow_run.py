@@ -39,7 +39,7 @@ from ._shared import (
     _read_json_body,
     _serialize,
 )
-from surfaces._workflow_database import workflow_database_env_for_repo
+from surfaces._workflow_database import workflow_database_url_for_repo
 
 
 def _workflow_spec_mod():
@@ -1337,7 +1337,7 @@ def _handle_workflow_stream(request: Any, path: str) -> None:
 
         wakeup = threading.Event()
         try:
-            database_url = workflow_database_env_for_repo(REPO_ROOT)["WORKFLOW_DATABASE_URL"]
+            database_url = workflow_database_url_for_repo(REPO_ROOT)
         except PostgresConfigurationError:
             database_url = ""
         listener = start_run_wakeup_listener(

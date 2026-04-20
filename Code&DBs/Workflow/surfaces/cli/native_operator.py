@@ -30,6 +30,7 @@ from storage.postgres import PostgresEvidenceReader
 from surfaces.api import frontdoor, native_ops
 from surfaces.api import native_operator_surface
 from surfaces.api.operator_read import run_native_self_hosted_smoke
+from runtime._workflow_database import workflow_database_url_is_configured
 from surfaces._workflow_database import workflow_database_env_for_repo
 
 from .render import render_graph_lineage, render_graph_topology, render_inspection
@@ -795,7 +796,7 @@ def main(
 
     def _db_source() -> Mapping[str, str]:
         nonlocal source
-        if not str(source.get("WORKFLOW_DATABASE_URL") or "").strip():
+        if not workflow_database_url_is_configured(source):
             repo_root = Path(__file__).resolve().parents[4]
             source = workflow_database_env_for_repo(repo_root, env=source)
         return source

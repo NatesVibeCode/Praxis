@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from runtime._workflow_database import resolve_runtime_database_url
+
 
 class ProviderOnboardingCommand(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -21,9 +23,9 @@ def _resolved_database_url(subsystems: Any) -> str:
     env = getattr(subsystems, "_postgres_env", None)
     if callable(env):
         source = env()
-        database_url = str(source.get("WORKFLOW_DATABASE_URL") or "").strip()
-        if database_url:
-            return database_url
+        resolved = resolve_runtime_database_url(env=source, required=False)
+        if resolved:
+            return resolved
     raise RuntimeError("WORKFLOW_DATABASE_URL is required for provider onboarding")
 
 

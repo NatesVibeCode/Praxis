@@ -16,6 +16,7 @@ from collections.abc import Mapping
 
 from memory.engine import MemoryEngine
 
+from runtime._workflow_database import workflow_database_url_is_configured
 from runtime.heartbeat import (
     DuplicateScanner,
     GapScanner,
@@ -405,9 +406,7 @@ class _SemanticProjectionRefreshModule(HeartbeatModule):
         return "semantic_projection_refresh"
 
     def _has_workflow_authority(self) -> bool:
-        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
-            return True
-        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+        return workflow_database_url_is_configured(self._workflow_env)
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
@@ -442,9 +441,7 @@ class _AuthorityMemoryProjectionRefreshModule(HeartbeatModule):
         return "authority_memory_refresh"
 
     def _has_workflow_authority(self) -> bool:
-        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
-            return True
-        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+        return workflow_database_url_is_configured(self._workflow_env)
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
@@ -482,9 +479,7 @@ class _OperatorDecisionProjectionRefreshModule(HeartbeatModule):
         return "operator_decision_projection_refresh"
 
     def _has_workflow_authority(self) -> bool:
-        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
-            return True
-        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+        return workflow_database_url_is_configured(self._workflow_env)
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
@@ -521,9 +516,7 @@ class _DatasetCandidateRefreshModule(HeartbeatModule):
         return "dataset_candidate_refresh"
 
     def _has_workflow_authority(self) -> bool:
-        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
-            return True
-        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+        return workflow_database_url_is_configured(self._workflow_env)
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
@@ -558,9 +551,7 @@ class _BugCandidatesRefreshModule(HeartbeatModule):
         return "bug_candidates_refresh"
 
     def _has_workflow_authority(self) -> bool:
-        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
-            return True
-        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+        return workflow_database_url_is_configured(self._workflow_env)
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
@@ -597,9 +588,7 @@ class _DatasetCurationRefreshModule(HeartbeatModule):
         return "dataset_curation_refresh"
 
     def _has_workflow_authority(self) -> bool:
-        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
-            return True
-        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+        return workflow_database_url_is_configured(self._workflow_env)
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
@@ -639,9 +628,7 @@ class _DatasetStalenessReconcileModule(HeartbeatModule):
         return "dataset_staleness_reconcile"
 
     def _has_workflow_authority(self) -> bool:
-        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
-            return True
-        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+        return workflow_database_url_is_configured(self._workflow_env)
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()

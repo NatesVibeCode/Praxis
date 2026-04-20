@@ -23,6 +23,7 @@ from runtime.workflow._admission import _execute_admitted_graph_run
 from storage.postgres import PostgresEvidenceReader, connect_workflow_database
 from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 from surfaces.api import frontdoor, native_ops
+from surfaces._workflow_database import workflow_database_url_for_repo
 from ._operator_helpers import _run_async
 from ._operator_repository import _repo_root
 
@@ -103,12 +104,13 @@ _SMOKE_REQUIRED_RECEIPT_TYPE = "workflow_completion_receipt"
 
 def _default_smoke_runtime_env() -> dict[str, str]:
     source_env = os.environ
-    workflow_database_url = source_env.get("WORKFLOW_DATABASE_URL")
-    if not workflow_database_url:
+    try:
+        workflow_database_url = workflow_database_url_for_repo(_repo_root(), env=source_env)
+    except Exception as exc:
         raise frontdoor.NativeFrontdoorError(
             "operator_flow.authority_missing",
             "WORKFLOW_DATABASE_URL must be set to load the native smoke contract",
-        )
+        ) from exc
     raw_env = {
         "WORKFLOW_DATABASE_URL": workflow_database_url,
         **{

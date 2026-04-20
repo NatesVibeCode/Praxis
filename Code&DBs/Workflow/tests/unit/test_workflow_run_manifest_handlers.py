@@ -755,8 +755,8 @@ def test_workflow_stream_uses_shared_run_wakeup_listener(monkeypatch) -> None:
     monkeypatch.setattr(workflow_unified, "get_run_status", lambda *_args, **_kwargs: statuses.pop(0))
     monkeypatch.setattr(
         workflow_run,
-        "workflow_database_env_for_repo",
-        lambda _repo: {"WORKFLOW_DATABASE_URL": "postgresql://example"},
+        "workflow_database_url_for_repo",
+        lambda _repo: "postgresql://example",
     )
 
     listener_calls: list[dict[str, Any]] = []
