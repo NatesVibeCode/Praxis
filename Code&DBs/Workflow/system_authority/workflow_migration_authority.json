@@ -96,7 +96,12 @@
     "165_integration_registry_updated_at.sql",
     "166_data_dictionary_authority.sql",
     "167_scratch_agent_runtime_lane.sql",
-    "168_openrouter_provider_authority_repair.sql"
+    "168_openrouter_provider_authority_repair.sql",
+    "169_data_dictionary_lineage.sql",
+    "170_data_dictionary_classifications.sql",
+    "171_data_dictionary_quality_rules.sql",
+    "172_data_dictionary_stewardship.sql",
+    "173_schema_migrations.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2580,6 +2585,128 @@
         "object_type": "row",
         "object_name": "provider_model_candidates.candidate.openrouter.auto"
       }
+    ],
+    "169_data_dictionary_lineage.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_lineage"
+      },
+      {
+        "object_type": "view",
+        "object_name": "data_dictionary_lineage_effective"
+      },
+      {
+        "object_type": "function",
+        "object_name": "notify_data_dictionary_lineage_change"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_data_dictionary_lineage_notify"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_lineage_src"
+      }
+    ],
+    "170_data_dictionary_classifications.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_classifications"
+      },
+      {
+        "object_type": "view",
+        "object_name": "data_dictionary_classifications_effective"
+      },
+      {
+        "object_type": "function",
+        "object_name": "notify_data_dictionary_classification_change"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_data_dictionary_classifications_notify"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_classifications_tag"
+      }
+    ],
+    "171_data_dictionary_quality_rules.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_quality_rules"
+      },
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_quality_runs"
+      },
+      {
+        "object_type": "view",
+        "object_name": "data_dictionary_quality_rules_effective"
+      },
+      {
+        "object_type": "view",
+        "object_name": "data_dictionary_quality_latest_runs"
+      },
+      {
+        "object_type": "function",
+        "object_name": "notify_data_dictionary_quality_rule_change"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_data_dictionary_quality_rules_notify"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_quality_runs_rule"
+      }
+    ],
+    "172_data_dictionary_stewardship.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_stewardship"
+      },
+      {
+        "object_type": "view",
+        "object_name": "data_dictionary_stewardship_effective"
+      },
+      {
+        "object_type": "function",
+        "object_name": "notify_data_dictionary_stewardship_change"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_data_dictionary_stewardship_notify"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_stewardship_id"
+      }
+    ],
+    "173_schema_migrations.sql": [
+      {
+        "object_type": "table",
+        "object_name": "schema_migrations"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "schema_migrations.schema_migrations_filename_nonblank"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "schema_migrations.schema_migrations_sha256_shape"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "schema_migrations.schema_migrations_bootstrap_role_check"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_schema_migrations_applied_at"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_schema_migrations_bootstrap_role"
+      }
     ]
   },
   "policy_buckets": {
@@ -2680,7 +2807,12 @@
       "165_integration_registry_updated_at.sql",
       "166_data_dictionary_authority.sql",
       "167_scratch_agent_runtime_lane.sql",
-      "168_openrouter_provider_authority_repair.sql"
+      "168_openrouter_provider_authority_repair.sql",
+      "169_data_dictionary_lineage.sql",
+      "170_data_dictionary_classifications.sql",
+      "171_data_dictionary_quality_rules.sql",
+      "172_data_dictionary_stewardship.sql",
+      "173_schema_migrations.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",
@@ -2783,5 +2915,108 @@
     ],
     "deprecated": [],
     "dead": []
+  },
+  "tie_break_order": {
+    "012": [
+      "012_execution_leases.sql",
+      "012_task_type_route_eligibility.sql"
+    ],
+    "024": [
+      "024_authority_checkpoints.sql",
+      "024_task_type_routing.sql"
+    ],
+    "028": [
+      "028_conversations.sql",
+      "028_unified_workflow_jobs.sql"
+    ],
+    "029": [
+      "029_dispatch_consolidation_fixes.sql",
+      "029_workflows.sql"
+    ],
+    "033": [
+      "033_failure_category_metrics.sql",
+      "033_file_storage.sql"
+    ],
+    "034": [
+      "034_failure_zone_columns.sql",
+      "034_reference_catalog.sql"
+    ],
+    "040": [
+      "040_control_commands.sql",
+      "040_debate_metrics.sql"
+    ],
+    "042": [
+      "042_roadmap_item_registry_paths.sql",
+      "042_workflow_control_command_types.sql"
+    ],
+    "046": [
+      "046_provider_model_candidate_profiles.sql",
+      "046_workflow_surface_rename.sql"
+    ],
+    "057": [
+      "057_compile_spine_authority.sql",
+      "057_remove_legacy_dispatch_completion_triggers.sql"
+    ],
+    "062": [
+      "062_add_research_task_type_route_profile.sql",
+      "062_db_backed_runtime_state.sql"
+    ],
+    "063": [
+      "063_drop_system_events_processed.sql",
+      "063_remove_stale_anthropic_provider_disabled_eligibility.sql"
+    ],
+    "064": [
+      "064_prune_stale_completion_functions.sql",
+      "064_self_maintaining_memory_authority.sql"
+    ],
+    "065": [
+      "065_daily_maintenance_review_dispatch.sql",
+      "065_execution_packet_authority.sql"
+    ],
+    "066": [
+      "066_maintenance_signal_control.sql",
+      "066_memory_proof_graph_refinements.sql"
+    ],
+    "091": [
+      "091_control_operator_frame_uniqueness.sql",
+      "091_openrouter_deepseek_onboarding.sql"
+    ],
+    "093": [
+      "093_deepseek_direct_provider.sql",
+      "093_memory_exact_duplicate_repair.sql"
+    ],
+    "094": [
+      "094_model_capability_audit.sql",
+      "094_provider_profile_capabilities.sql"
+    ],
+    "095": [
+      "095_ipaas_rate_limit_config.sql",
+      "095_model_profile_auto_seed_trigger.sql"
+    ],
+    "096": [
+      "096_ipaas_webhook_ingestion.sql",
+      "096_workflow_submission_acceptance.sql"
+    ],
+    "099": [
+      "099_task_type_profile_authority.sql",
+      "099_webhook_notify_trigger.sql"
+    ],
+    "100": [
+      "100_adapter_config_authority.sql",
+      "100_task_type_profile_scope_defaults.sql",
+      "100_webhook_system_events_bridge.sql"
+    ],
+    "101": [
+      "101_analysis_classify_routing.sql",
+      "101_model_sync_authority.sql"
+    ],
+    "102": [
+      "102_connector_integration_bridge.sql",
+      "102_pg_trgm_extension.sql"
+    ],
+    "107": [
+      "107_name_cleanup_praxis_branding.sql",
+      "107_workflow_notifications_resource_telemetry.sql"
+    ]
   }
 }

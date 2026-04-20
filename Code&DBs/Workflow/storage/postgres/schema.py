@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from functools import lru_cache
+import hashlib
 import json
 import logging
 import time
@@ -13,11 +14,13 @@ import asyncpg
 
 from storage._generated_workflow_migration_authority import (
     WORKFLOW_FULL_BOOTSTRAP_SEQUENCE as _GENERATED_WORKFLOW_FULL_BOOTSTRAP_SEQUENCE,
+    WORKFLOW_MIGRATION_POLICIES as _GENERATED_WORKFLOW_MIGRATION_POLICIES,
     WORKFLOW_SCHEMA_READINESS_SEQUENCE as _GENERATED_WORKFLOW_SCHEMA_READINESS_SEQUENCE,
 )
 from storage.migrations import (
     WorkflowMigrationError,
     WorkflowMigrationExpectedObject,
+    workflow_bootstrap_migration_sql_text,
     workflow_migration_expected_objects,
     workflow_migrations_root,
     workflow_migration_path,
@@ -28,6 +31,18 @@ from storage.migrations import (
 from .validators import PostgresSchemaError
 
 _CONTROL_PLANE_SCHEMA_FILENAME = "001_v1_control_plane.sql"
+_SCHEMA_MIGRATIONS_FILENAME = "173_schema_migrations.sql"
+_SCHEMA_MIGRATIONS_APPLIED_BY_BOOTSTRAP = "schema_bootstrap"
+_SCHEMA_MIGRATIONS_ENSURE_DDL = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    filename         text        NOT NULL PRIMARY KEY,
+    content_sha256   text        NOT NULL,
+    applied_at       timestamptz NOT NULL DEFAULT now(),
+    applied_by       text        NOT NULL,
+    bootstrap_role   text        NOT NULL,
+    metadata         jsonb       NOT NULL DEFAULT '{}'::jsonb
+)
+""".strip()
 _DUPLICATE_SQLSTATES = {"42P07", "42701", "42710"}
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 _SCHEMA_BOOTSTRAP_LOCK_POLL_INTERVAL_S = 0.25
@@ -98,6 +113,44 @@ class WorkflowSchemaReadiness:
     @property
     def missing_relations(self) -> tuple[str, ...]:
         return tuple(item.object_name for item in self.missing_objects)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowMigrationAppliedRow:
+    """One apply-tracking row recorded in ``schema_migrations``."""
+
+    filename: str
+    content_sha256: str
+    applied_at: object  # datetime-like (asyncpg hands back a datetime)
+    applied_by: str
+    bootstrap_role: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowMigrationAudit:
+    """Declared-vs-applied diff against ``schema_migrations``.
+
+    ``declared`` is the canonical full-bootstrap sequence in manifest order.
+    ``applied`` is the set of filenames with an apply-tracking row. Derived
+    views:
+
+    * ``missing``  — declared filenames with no apply-tracking row; the
+      bootstrap may never have run against this database.
+    * ``drifted`` — applied filenames whose on-disk sha256 no longer matches
+      the recorded sha256; the file was edited after it was first applied.
+    * ``extra``   — filenames in ``applied`` that are not in the current
+      declared manifest; usually a rename/retire in the authority file.
+    """
+
+    declared: tuple[str, ...]
+    applied: tuple[WorkflowMigrationAppliedRow, ...]
+    missing: tuple[str, ...]
+    drifted: tuple[WorkflowMigrationAppliedRow, ...]
+    extra: tuple[WorkflowMigrationAppliedRow, ...]
+
+    @property
+    def is_clean(self) -> bool:
+        return not (self.missing or self.drifted or self.extra)
 
 
 def _control_plane_schema_path():
@@ -500,7 +553,103 @@ async def _acquire_schema_bootstrap_lock(conn: asyncpg.Connection) -> float:
         await asyncio.sleep(_SCHEMA_BOOTSTRAP_LOCK_POLL_INTERVAL_S)
 
 
+def _workflow_migration_policy_for(filename: str) -> str:
+    """Resolve the policy bucket for a migration, defaulting to canonical.
+
+    Used to populate ``schema_migrations.bootstrap_role`` when recording an
+    apply. Must match the policy bucket at apply time; fall back to
+    ``canonical`` when unclassified (only reachable for files outside the
+    generated authority, which should already have been rejected upstream).
+    """
+
+    policy = _GENERATED_WORKFLOW_MIGRATION_POLICIES.get(filename)
+    if policy in {"canonical", "bootstrap_only"}:
+        return policy
+    return "canonical"
+
+
+async def _ensure_schema_migrations_table(conn: asyncpg.Connection) -> None:
+    """Eagerly materialize the apply-tracking table before any apply-tracking INSERT.
+
+    The 173_schema_migrations.sql migration creates this table as part of the
+    canonical manifest. But migrations that run earlier in the same bootstrap
+    pass also want to record their apply, so we create it inline first and
+    trust CREATE TABLE IF NOT EXISTS to be idempotent. 173 itself is a no-op
+    once this has run.
+    """
+
+    try:
+        async with conn.transaction():
+            await conn.execute(_SCHEMA_MIGRATIONS_ENSURE_DDL)
+    except asyncpg.PostgresError as exc:
+        if _is_duplicate_object_error(exc):
+            return
+        raise PostgresSchemaError(
+            "postgres.schema_bootstrap_failed",
+            "failed to ensure schema_migrations apply-tracking table exists",
+            details={"sqlstate": getattr(exc, "sqlstate", None)},
+        ) from exc
+
+
+async def _record_migration_apply(
+    conn: asyncpg.Connection,
+    filename: str,
+    *,
+    applied_by: str = _SCHEMA_MIGRATIONS_APPLIED_BY_BOOTSTRAP,
+) -> None:
+    """Record a successful migration apply.
+
+    Computes sha256 of the migration's SQL text at apply time so later drift
+    between disk content and recorded hash is detectable. Uses ON CONFLICT DO
+    UPDATE because re-applies (idempotent DDL) should refresh the recorded
+    sha and applied_at instead of producing duplicate rows.
+    """
+
+    try:
+        sql_text = workflow_bootstrap_migration_sql_text(filename)
+    except WorkflowMigrationError as exc:
+        # The statements for this file already applied. If we cannot re-read
+        # the text for sha hashing, fall back to logging and continue — the
+        # apply completed and failing here would leave the system stuck.
+        logger.warning(
+            "schema_migrations apply-tracking sha read failed for %s (%s); skipping row",
+            filename,
+            exc.reason_code,
+        )
+        return
+    sha256 = hashlib.sha256(sql_text.encode("utf-8")).hexdigest()
+    policy = _workflow_migration_policy_for(filename)
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO schema_migrations (
+                    filename, content_sha256, applied_by, bootstrap_role
+                ) VALUES ($1, $2, $3, $4)
+                ON CONFLICT (filename) DO UPDATE
+                SET content_sha256 = EXCLUDED.content_sha256,
+                    applied_at     = now(),
+                    applied_by     = EXCLUDED.applied_by,
+                    bootstrap_role = EXCLUDED.bootstrap_role
+                """,
+                filename,
+                sha256,
+                applied_by,
+                policy,
+            )
+    except asyncpg.PostgresError as exc:
+        # Apply-tracking must not block schema bootstrap on first-install paths
+        # where schema_migrations itself has yet to exist. Log and continue; a
+        # subsequent bootstrap pass will land the row once the table exists.
+        logger.warning(
+            "schema_migrations apply-tracking insert failed for %s (sqlstate=%s); continuing",
+            filename,
+            getattr(exc, "sqlstate", None),
+        )
+
+
 async def _bootstrap_migration(conn: asyncpg.Connection, filename: str) -> None:
+    await _ensure_schema_migrations_table(conn)
     for statement in workflow_bootstrap_migration_statements(filename):
         if _is_transaction_wrapper_statement(statement):
             continue
@@ -519,6 +668,7 @@ async def _bootstrap_migration(conn: asyncpg.Connection, filename: str) -> None:
                     "statement": statement[:120],
                 },
             ) from exc
+    await _record_migration_apply(conn, filename)
 
 
 async def bootstrap_control_plane_schema(conn: asyncpg.Connection) -> None:
@@ -909,4 +1059,88 @@ async def inspect_workflow_schema(
         expected_objects=expected_objects,
         missing_objects=missing_objects,
         missing_by_migration=missing_by_migration,
+    )
+
+
+async def workflow_migration_audit(conn: asyncpg.Connection) -> WorkflowMigrationAudit:
+    """Diff the declared full-bootstrap manifest against ``schema_migrations``.
+
+    Returns a structured audit report. If the apply-tracking table does not
+    exist yet (pre-173 databases), the audit reports every declared migration
+    as ``missing`` with an empty ``applied`` list rather than erroring; that
+    is the signal to operators that apply-tracking has never been wired.
+    """
+
+    declared = tuple(_GENERATED_WORKFLOW_FULL_BOOTSTRAP_SEQUENCE)
+    table_exists = await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_class cls
+            JOIN pg_catalog.pg_namespace ns
+              ON ns.oid = cls.relnamespace
+            WHERE ns.nspname = 'public'
+              AND cls.relname = 'schema_migrations'
+              AND cls.relkind IN ('r', 'p')
+        )
+        """
+    )
+    if not table_exists:
+        return WorkflowMigrationAudit(
+            declared=declared,
+            applied=(),
+            missing=declared,
+            drifted=(),
+            extra=(),
+        )
+
+    rows = await conn.fetch(
+        """
+        SELECT filename, content_sha256, applied_at, applied_by, bootstrap_role
+        FROM schema_migrations
+        ORDER BY filename
+        """
+    )
+    applied_rows = tuple(
+        WorkflowMigrationAppliedRow(
+            filename=str(row["filename"]),
+            content_sha256=str(row["content_sha256"]),
+            applied_at=row["applied_at"],
+            applied_by=str(row["applied_by"]),
+            bootstrap_role=str(row["bootstrap_role"]),
+        )
+        for row in rows
+    )
+    applied_by_name = {row.filename: row for row in applied_rows}
+    declared_set = set(declared)
+
+    missing = tuple(
+        filename for filename in declared if filename not in applied_by_name
+    )
+    extra = tuple(
+        row for row in applied_rows if row.filename not in declared_set
+    )
+
+    drifted_list: list[WorkflowMigrationAppliedRow] = []
+    for filename in declared:
+        row = applied_by_name.get(filename)
+        if row is None:
+            continue
+        try:
+            sql_text = workflow_bootstrap_migration_sql_text(filename)
+        except WorkflowMigrationError:
+            # Declared but missing on disk — reported via the manifest check
+            # elsewhere; do not double-report here.
+            continue
+        expected_sha = hashlib.sha256(sql_text.encode("utf-8")).hexdigest()
+        if expected_sha != row.content_sha256:
+            drifted_list.append(row)
+    drifted = tuple(drifted_list)
+
+    return WorkflowMigrationAudit(
+        declared=declared,
+        applied=applied_rows,
+        missing=missing,
+        drifted=drifted,
+        extra=extra,
     )

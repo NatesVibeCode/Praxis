@@ -468,14 +468,166 @@ def test_bootstrap_migration_skips_commented_transaction_wrappers(
 
     asyncio.run(postgres_schema._bootstrap_migration(conn, "demo.sql"))
 
-    assert len(conn.executed) == 1
-    executed_query, executed_params = conn.executed[0]
+    # _bootstrap_migration now issues the schema_migrations ensure-table DDL
+    # up front; the migration's own statement is the second execute call.
+    # "demo.sql" is not in the generated manifest so the apply-tracking INSERT
+    # is skipped (logged warning), leaving exactly two executes.
+    assert len(conn.executed) == 2
+    ensure_query, _ = conn.executed[0]
+    assert "CREATE TABLE IF NOT EXISTS schema_migrations" in ensure_query
+    executed_query, executed_params = conn.executed[1]
     assert "CREATE TABLE demo (id INT)" in executed_query
     assert "BEGIN" not in executed_query
     assert "COMMIT" not in executed_query
     assert executed_params == ()
-    assert conn.transaction_entries == 1
-    assert conn.transaction_exits == 1
+    assert conn.transaction_entries == 2
+    assert conn.transaction_exits == 2
+
+
+class _FakeApplyTrackingConn(_FakeAsyncConn):
+    """Fake conn that captures execute calls and serves a configurable schema_migrations state."""
+
+    def __init__(self, *, schema_migrations_exists: bool = True) -> None:
+        super().__init__()
+        self._schema_migrations_exists = schema_migrations_exists
+        self.rows: list[dict[str, object]] = []
+
+    async def fetch(self, query: str, *params: object):
+        if "FROM schema_migrations" in query:
+            return list(self.rows)
+        return []
+
+    async def fetchval(self, query: str, *params: object):
+        if "pg_class" in query and "schema_migrations" in query:
+            return self._schema_migrations_exists
+        return None
+
+
+def test_bootstrap_migration_inserts_apply_tracking_row(monkeypatch) -> None:
+    conn = _FakeApplyTrackingConn()
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_bootstrap_migration_statements",
+        lambda filename: ("CREATE TABLE IF NOT EXISTS synthetic_example (id int);",),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_bootstrap_migration_sql_text",
+        lambda filename: "-- synthetic\nCREATE TABLE IF NOT EXISTS synthetic_example (id int);\n",
+    )
+
+    asyncio.run(postgres_schema._bootstrap_migration(conn, "173_schema_migrations.sql"))
+
+    # The applier should have issued: (1) ensure-table DDL, (2) the migration
+    # statement, and (3) the apply-tracking INSERT. The first is idempotent
+    # CREATE TABLE IF NOT EXISTS; the last is the INSERT ... ON CONFLICT.
+    statements = [query for query, _ in conn.executed]
+    assert any(
+        "CREATE TABLE IF NOT EXISTS schema_migrations" in q for q in statements
+    ), statements
+    insert_calls = [
+        (query, params)
+        for query, params in conn.executed
+        if "INSERT INTO schema_migrations" in query
+    ]
+    assert len(insert_calls) == 1, insert_calls
+    insert_query, insert_params = insert_calls[0]
+    assert "ON CONFLICT (filename) DO UPDATE" in insert_query
+    filename_arg, sha_arg, applied_by_arg, policy_arg = insert_params
+    assert filename_arg == "173_schema_migrations.sql"
+    assert len(sha_arg) == 64 and all(c in "0123456789abcdef" for c in sha_arg)
+    assert applied_by_arg == "schema_bootstrap"
+    assert policy_arg in {"canonical", "bootstrap_only"}
+
+
+def test_workflow_migration_audit_reports_empty_when_table_missing() -> None:
+    conn = _FakeApplyTrackingConn(schema_migrations_exists=False)
+
+    audit = asyncio.run(postgres_schema.workflow_migration_audit(conn))
+
+    assert audit.applied == ()
+    assert audit.declared and len(audit.missing) == len(audit.declared)
+    assert audit.is_clean is False
+
+
+def test_workflow_migration_audit_flags_drift_when_sha_mismatch(monkeypatch) -> None:
+    conn = _FakeApplyTrackingConn(schema_migrations_exists=True)
+    declared = ("173_schema_migrations.sql",)
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "_GENERATED_WORKFLOW_FULL_BOOTSTRAP_SEQUENCE",
+        declared,
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_bootstrap_migration_sql_text",
+        lambda filename: "ON-DISK CONTENTS",
+    )
+    conn.rows = [
+        {
+            "filename": "173_schema_migrations.sql",
+            "content_sha256": "0" * 64,  # deliberately does not match "ON-DISK CONTENTS"
+            "applied_at": None,
+            "applied_by": "schema_bootstrap",
+            "bootstrap_role": "canonical",
+        }
+    ]
+
+    audit = asyncio.run(postgres_schema.workflow_migration_audit(conn))
+
+    assert len(audit.drifted) == 1
+    assert audit.drifted[0].filename == "173_schema_migrations.sql"
+    assert audit.missing == ()
+    assert audit.extra == ()
+    assert audit.is_clean is False
+
+
+def test_workflow_migration_audit_reports_extra_rows(monkeypatch) -> None:
+    conn = _FakeApplyTrackingConn(schema_migrations_exists=True)
+    declared = ("173_schema_migrations.sql",)
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "_GENERATED_WORKFLOW_FULL_BOOTSTRAP_SEQUENCE",
+        declared,
+    )
+
+    import hashlib as _hashlib
+
+    def _sql(filename: str) -> str:
+        if filename == "173_schema_migrations.sql":
+            return "SQL"
+        raise postgres_schema.WorkflowMigrationError("x", "y")
+
+    monkeypatch.setattr(
+        postgres_schema, "workflow_bootstrap_migration_sql_text", _sql
+    )
+    sha_current = _hashlib.sha256(b"SQL").hexdigest()
+    conn.rows = [
+        {
+            "filename": "173_schema_migrations.sql",
+            "content_sha256": sha_current,
+            "applied_at": None,
+            "applied_by": "schema_bootstrap",
+            "bootstrap_role": "canonical",
+        },
+        {
+            "filename": "999_retired.sql",
+            "content_sha256": "a" * 64,
+            "applied_at": None,
+            "applied_by": "schema_bootstrap",
+            "bootstrap_role": "canonical",
+        },
+    ]
+
+    audit = asyncio.run(postgres_schema.workflow_migration_audit(conn))
+
+    assert {r.filename for r in audit.extra} == {"999_retired.sql"}
+    assert audit.missing == ()
+    assert audit.drifted == ()
+    assert audit.is_clean is False
 
 
 def test_acquire_schema_bootstrap_lock_logs_wait_holder_details(
