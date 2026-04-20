@@ -416,8 +416,12 @@ class _FakeBugTracker:
             "observability_gaps": [],
         }
 
-    def replay_bug(self, bug_id, *, receipt_limit=5):
-        packet = self.failure_packet(bug_id, receipt_limit=receipt_limit)
+    def replay_bug(self, bug_id, *, receipt_limit=5, allow_backfill=True):
+        packet = self.failure_packet(
+            bug_id,
+            receipt_limit=receipt_limit,
+            allow_backfill=allow_backfill,
+        )
         if packet is None:
             return None
         return {

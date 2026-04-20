@@ -1060,7 +1060,7 @@ class TestEvidencePackets:
         monkeypatch.setattr(
             tracker,
             "failure_packet",
-            lambda bug_id, receipt_limit=5: {
+            lambda bug_id, receipt_limit=5, **_kwargs: {
                 "bug": bug,
                 "signature": {"fingerprint": "fp-alpha"},
                 "observability_state": "complete",
@@ -1123,7 +1123,7 @@ class TestEvidencePackets:
         monkeypatch.setattr(
             tracker,
             "failure_packet",
-            lambda bug_id, receipt_limit=5: {
+            lambda bug_id, receipt_limit=5, **_kwargs: {
                 "bug": bug,
                 "signature": {"fingerprint": "fp-fallback"},
                 "observability_state": "degraded",

@@ -140,7 +140,7 @@ def test_workflow_env_bootstrap_matches_docker_python_authority(
         str(authority.database_url),
         authority.source,
     )
-    assert resolved_url == "postgresql://127.0.0.1:6543/praxis"
+    assert resolved_url == "postgresql://postgres@127.0.0.1:6543/praxis"
     assert resolved_source == "docker"
 
 

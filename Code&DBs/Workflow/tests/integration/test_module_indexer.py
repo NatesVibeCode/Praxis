@@ -275,6 +275,8 @@ def test_index_codebase_upserts_embedding_in_same_statement(monkeypatch):
     assert result == {
         "indexed": 1,
         "skipped": 0,
+        "pruned_orphans": 0,
+        "pruned_missing": 0,
         "total": 1,
         "observability_state": "complete",
         "errors": (),

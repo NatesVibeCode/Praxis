@@ -82,6 +82,16 @@ class TestPostgresProbe:
 
     def test_internal_database_resolution_fails_closed_without_authority(self, monkeypatch):
         monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+        monkeypatch.setattr(
+            _mod,
+            "resolve_workflow_database_url",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                _mod.PostgresConfigurationError(
+                    "postgres.config_missing",
+                    "WORKFLOW_DATABASE_URL must be set",
+                )
+            ),
+        )
         assert _mod._resolve_database_url(None) is None
 
 

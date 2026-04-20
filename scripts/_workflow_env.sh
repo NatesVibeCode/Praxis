@@ -39,7 +39,7 @@ workflow_resolve_database_env_json() {
     return 1
   }
 
-  local workflow_root="${workflow_env_repo_root}/CodeDBs/Workflow"
+  local workflow_root="${workflow_env_repo_root}/Code&DBs/Workflow"
   local pythonpath="${workflow_root}"
   if [ -n "${PYTHONPATH:-}" ]; then
     pythonpath="${pythonpath}:${PYTHONPATH}"

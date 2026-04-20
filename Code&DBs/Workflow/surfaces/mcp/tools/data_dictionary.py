@@ -143,6 +143,19 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "surface": "general",
                 "tier": "advanced",
                 "recommended_alias": None,
+                "examples": [
+                    {
+                        "description": "List available data dictionary object kinds.",
+                        "input": {"action": "list"},
+                    },
+                    {
+                        "description": "Describe one object kind with merged field descriptors.",
+                        "input": {
+                            "action": "describe",
+                            "object_kind": "workflow_runs",
+                        },
+                    },
+                ],
                 "when_to_use": (
                     "Browse or edit field descriptors for any injected object kind."
                 ),

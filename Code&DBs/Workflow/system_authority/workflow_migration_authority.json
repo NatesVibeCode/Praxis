@@ -2433,12 +2433,12 @@
     ],
     "158_authority_memory_projection_vocabulary.sql": [
       {
-        "object_type": "column",
-        "object_name": "memory_entities.authority_domain"
+        "object_type": "constraint",
+        "object_name": "memory_entities.ck_memory_entities_type"
       },
       {
-        "object_type": "column",
-        "object_name": "memory_edges.authority_domain"
+        "object_type": "constraint",
+        "object_name": "memory_edges.ck_memory_edges_relation_type"
       }
     ],
     "159_provider_lane_policy.sql": [
@@ -2474,11 +2474,11 @@
     "162_split_fanout_and_loop.sql": [
       {
         "object_type": "row",
-        "object_name": "surface_catalog_registry.workflow_runtime.split_fanout"
+        "object_name": "surface_catalog_registry.think-fan-out"
       },
       {
         "object_type": "row",
-        "object_name": "surface_catalog_registry.workflow_runtime.loop"
+        "object_name": "surface_catalog_registry.think-loop"
       }
     ],
     "163_dataset_candidate_score_history.sql": [

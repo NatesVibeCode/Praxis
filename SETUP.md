@@ -14,17 +14,20 @@ Complete installation and configuration reference.
 The fastest path. Requires Docker and Docker Compose.
 
 ```bash
-# Start Postgres with pgvector
+# Start the app services
 docker compose up -d
 
 # Wait for healthy
 docker compose ps  # should show "healthy"
 
+# The stack uses the host launchd Postgres instance at `postgresql://localhost:5432/praxis`.
+# It does not start its own database container.
+
 # Install Python deps
 pip install -r Code\&DBs/Workflow/requirements.runtime.txt
 
 # Run migrations
-WORKFLOW_DATABASE_URL=postgresql://postgres@localhost:5432/praxis \
+WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis \
   python Code\&DBs/Workflow/storage/postgres/migrate.py
 
 # Copy and edit env
@@ -32,7 +35,7 @@ cp .env.example .env
 # Add your API keys to .env
 
 # Launch
-WORKFLOW_DATABASE_URL=postgresql://postgres@localhost:5432/praxis \
+WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis \
   python -m uvicorn surfaces.api.native_operator_surface:app \
     --host 0.0.0.0 --port 8420
 ```

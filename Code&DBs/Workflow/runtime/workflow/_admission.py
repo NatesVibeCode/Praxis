@@ -721,7 +721,7 @@ def _execute_admitted_graph_run(
     if not isinstance(request_envelope, Mapping):
         raise RuntimeError(f"graph runtime run {run_id!r} has invalid request_envelope")
     request = _graph_request_from_envelope(request_envelope)
-    registry = _graph_registry_for_request(request)
+    registry = _graph_registry_from_authority(conn, request)
     intake_outcome = WorkflowIntakePlanner(registry=registry).plan(request=request)
     if intake_outcome.run_id != run_id:
         raise RuntimeError(
@@ -748,6 +748,61 @@ def _execute_admitted_graph_run(
     finally:
         evidence_writer.close_blocking()
     return failure or execution_result
+
+
+def _graph_registry_from_authority(
+    conn: SyncPostgresConnection,
+    request: WorkflowRequest,
+) -> RegistryResolver:
+    """Load the admitted graph registry from durable registry authority rows."""
+
+    workspace_ref = str(request.workspace_ref or "").strip()
+    runtime_profile_ref = str(request.runtime_profile_ref or "").strip()
+    if not workspace_ref or workspace_ref.lower() == "none":
+        workspace_ref = _default_workspace_ref()
+    if not runtime_profile_ref or runtime_profile_ref.lower() == "none":
+        runtime_profile_ref = _default_runtime_profile_ref()
+    workspace_rows = conn.execute(
+        """
+        SELECT workspace_ref, repo_root, workdir
+        FROM registry_workspace_authority
+        WHERE workspace_ref = $1
+        ORDER BY workspace_ref
+        """,
+        workspace_ref,
+    )
+    runtime_profile_rows = conn.execute(
+        """
+        SELECT runtime_profile_ref, model_profile_id, provider_policy_id, sandbox_profile_ref
+        FROM registry_runtime_profile_authority
+        WHERE runtime_profile_ref = $1
+        ORDER BY runtime_profile_ref
+        """,
+        runtime_profile_ref,
+    )
+    if not workspace_rows or not runtime_profile_rows:
+        return _graph_registry_for_request(request)
+    workspace_records = [
+        WorkspaceAuthorityRecord(
+            workspace_ref=str(row["workspace_ref"]),
+            repo_root=str(row["repo_root"]),
+            workdir=str(row["workdir"]),
+        )
+        for row in workspace_rows
+    ]
+    runtime_profile_records = [
+        RuntimeProfileAuthorityRecord(
+            runtime_profile_ref=str(row["runtime_profile_ref"]),
+            model_profile_id=str(row["model_profile_id"]),
+            provider_policy_id=str(row["provider_policy_id"]),
+            sandbox_profile_ref=str(row["sandbox_profile_ref"] or ""),
+        )
+        for row in runtime_profile_rows
+    ]
+    return RegistryResolver(
+        workspace_records={workspace_ref: workspace_records},
+        runtime_profile_records={runtime_profile_ref: runtime_profile_records},
+    )
 
 
 def _graph_registry_for_request(request: WorkflowRequest) -> RegistryResolver:

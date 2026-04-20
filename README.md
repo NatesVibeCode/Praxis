@@ -13,8 +13,10 @@ Praxis Engine is an autonomous workflow runner that executes multi-job DAG workf
 git clone https://github.com/your-org/praxis.git
 cd praxis
 
-# 2. Start Postgres with pgvector
+# 2. Start the app services
 docker compose up -d
+# The stack uses the host launchd Postgres instance at `postgresql://localhost:5432/praxis`.
+# It does not start its own database container.
 
 # 3. Configure environment
 cp .env.example .env

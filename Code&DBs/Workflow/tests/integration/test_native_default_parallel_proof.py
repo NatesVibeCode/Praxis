@@ -42,10 +42,10 @@ def _native_instance() -> NativeWorkflowInstance:
 
 def _schedule_row(as_of: datetime) -> dict[str, object]:
     return {
-        "schedule_definition_id": "schedule_definition.loop.parallel_proof",
-        "workflow_class_id": "workflow_class.loop.parallel_proof",
-        "schedule_name": "loop-parallel-proof",
-        "schedule_kind": "loop",
+        "schedule_definition_id": "schedule_definition.fanout.parallel_proof",
+        "workflow_class_id": "workflow_class.fanout.parallel_proof",
+        "schedule_name": "fanout-parallel-proof",
+        "schedule_kind": "fanout",
         "status": "active",
         "cadence_policy": {
             "cadence": "manual",
@@ -57,7 +57,7 @@ def _schedule_row(as_of: datetime) -> dict[str, object]:
         "target_ref": "workspace.alpha",
         "effective_from": as_of - timedelta(minutes=5),
         "effective_to": None,
-        "decision_ref": "decision:schedule:loop-parallel-proof",
+        "decision_ref": "decision:schedule:fanout-parallel-proof",
         "created_at": as_of,
     }
 
@@ -65,10 +65,10 @@ def _schedule_row(as_of: datetime) -> dict[str, object]:
 def _dispatch_rows(as_of: datetime) -> tuple[dict[str, object], ...]:
     return (
         {
-            "workflow_class_id": "workflow_class.loop.parallel_proof",
-            "class_name": "loop",
-            "class_kind": "loop",
-            "workflow_lane_id": "workflow_lane.loop",
+            "workflow_class_id": "workflow_class.fanout.parallel_proof",
+            "class_name": "fanout",
+            "class_kind": "fanout",
+            "workflow_lane_id": "workflow_lane.fanout",
             "status": "active",
             "queue_shape": {
                 "max_parallel": 2,
@@ -80,7 +80,7 @@ def _dispatch_rows(as_of: datetime) -> tuple[dict[str, object], ...]:
             "review_required": False,
             "effective_from": as_of - timedelta(minutes=5),
             "effective_to": None,
-            "decision_ref": "decision:workflow-class:loop-parallel-proof",
+            "decision_ref": "decision:workflow-class:fanout-parallel-proof",
             "created_at": as_of,
         },
         {
@@ -108,8 +108,8 @@ def _dispatch_rows(as_of: datetime) -> tuple[dict[str, object], ...]:
 def _run_window_rows(as_of: datetime) -> tuple[dict[str, object], ...]:
     return (
         {
-            "recurring_run_window_id": "recurring_run_window.loop.parallel_proof",
-            "schedule_definition_id": "schedule_definition.loop.parallel_proof",
+            "recurring_run_window_id": "recurring_run_window.fanout.parallel_proof",
+            "schedule_definition_id": "schedule_definition.fanout.parallel_proof",
             "window_started_at": as_of - timedelta(minutes=5),
             "window_ended_at": as_of + timedelta(minutes=5),
             "window_status": "active",
@@ -119,8 +119,8 @@ def _run_window_rows(as_of: datetime) -> tuple[dict[str, object], ...]:
             "created_at": as_of,
         },
         {
-            "recurring_run_window_id": "recurring_run_window.loop.parallel_proof.alt",
-            "schedule_definition_id": "schedule_definition.loop.parallel_proof",
+            "recurring_run_window_id": "recurring_run_window.fanout.parallel_proof.alt",
+            "schedule_definition_id": "schedule_definition.fanout.parallel_proof",
             "window_started_at": as_of - timedelta(minutes=15),
             "window_ended_at": as_of - timedelta(minutes=10),
             "window_status": "inactive",
@@ -197,11 +197,11 @@ def test_native_default_parallel_proof_uses_stored_class_authority_and_native_tr
     }
     assert proof_packet["parallel_wave"] == {
         "target_ref": "workspace.alpha",
-        "schedule_kind": "loop",
-        "schedule_definition_id": "schedule_definition.loop.parallel_proof",
-        "workflow_class_id": "workflow_class.loop.parallel_proof",
-        "workflow_class_name": "loop",
-        "workflow_lane_id": "workflow_lane.loop",
+        "schedule_kind": "fanout",
+        "schedule_definition_id": "schedule_definition.fanout.parallel_proof",
+        "workflow_class_id": "workflow_class.fanout.parallel_proof",
+        "workflow_class_name": "fanout",
+        "workflow_lane_id": "workflow_lane.fanout",
         "parallel_task_refs": ["node_0", "node_1"],
         "max_parallel": 2,
     }
@@ -255,13 +255,13 @@ def test_native_default_parallel_proof_uses_stored_class_authority_and_native_tr
 
     payload = frontdoor.inspect_schedule(
         target_ref="workspace.alpha",
-        schedule_kind="loop",
+        schedule_kind="fanout",
         env=env,
         as_of=as_of,
     )
 
     catalog = asyncio.run(PostgresWorkflowClassRepository(conn).load_catalog(as_of=as_of))
-    loop_class = catalog.resolve(class_name="loop")
+    parallel_class = catalog.resolve(class_name="fanout")
     parallel_wave = proof_packet["parallel_wave"]
 
     assert payload["native_instance"] == {
@@ -284,18 +284,18 @@ def test_native_default_parallel_proof_uses_stored_class_authority_and_native_tr
     assert payload["schedule"]["workflow_class"]["workflow_class_id"] == parallel_wave[
         "workflow_class_id"
     ]
-    assert payload["schedule"]["workflow_class"]["class_name"] == "loop"
-    assert payload["schedule"]["workflow_class"]["workflow_lane_id"] == "workflow_lane.loop"
+    assert payload["schedule"]["workflow_class"]["class_name"] == "fanout"
+    assert payload["schedule"]["workflow_class"]["workflow_lane_id"] == "workflow_lane.fanout"
     assert payload["schedule"]["workflow_class"]["queue_shape"]["max_parallel"] == 2
     assert payload["schedule"]["workflow_class"]["review_required"] is False
 
-    assert catalog.class_names == ("loop", "smoke")
-    assert loop_class.workflow_class_id == parallel_wave["workflow_class_id"]
-    assert loop_class.queue_shape == {
+    assert catalog.class_names == ("fanout", "smoke")
+    assert parallel_class.workflow_class_id == parallel_wave["workflow_class_id"]
+    assert parallel_class.queue_shape == {
         "max_parallel": 2,
         "wave_kind": "parallel_default",
     }
-    assert loop_class.review_required is False
+    assert parallel_class.review_required is False
 
     assert len(parallel_wave["parallel_task_refs"]) == parallel_wave["max_parallel"] == 2
     assert proof_packet["native_truth_surfaces"] == [

@@ -45,11 +45,14 @@ _ROW_EXPECTATION_KEY_COLUMNS = {
     "registry_runtime_profile_authority": "runtime_profile_ref",
     "registry_sandbox_profile_authority": "sandbox_profile_ref",
     "registry_workspace_authority": "workspace_ref",
+    "surface_catalog_registry": "catalog_item_id",
     "workflow_definitions": "workflow_definition_id",
     "workflow_definition_nodes": "workflow_definition_node_id",
     "workflow_definition_edges": "workflow_definition_edge_id",
 }
-_STRUCTURAL_EXPECTED_OBJECT_TYPES = frozenset({"table", "index", "column", "constraint", "function"})
+_STRUCTURAL_EXPECTED_OBJECT_TYPES = frozenset(
+    {"table", "index", "column", "constraint", "function", "view", "trigger"}
+)
 _ABSENCE_EXPECTED_OBJECT_TYPE_PREFIX = "absent_"
 _BOOTSTRAP_BASELINE_ANCHOR_OBJECTS = (
     WorkflowMigrationExpectedObject(object_type="table", object_name="workflows"),
@@ -260,6 +263,21 @@ async def _workflow_expected_object_exists(
             object_name,
         )
         return row is not None
+    if effective_type == "view":
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM pg_catalog.pg_class AS cls
+            JOIN pg_catalog.pg_namespace AS ns
+                ON ns.oid = cls.relnamespace
+            WHERE ns.nspname = 'public'
+              AND cls.relname = $1
+              AND cls.relkind IN ('v', 'm')
+            LIMIT 1
+            """,
+            object_name,
+        )
+        return row is not None
     if effective_type == "index":
         row = await conn.fetchrow(
             """
@@ -334,6 +352,43 @@ async def _workflow_expected_object_exists(
                 ON ns.oid = proc.pronamespace
             WHERE ns.nspname = 'public'
               AND proc.proname = $1
+            LIMIT 1
+            """,
+            object_name,
+        )
+        return row is not None
+    if effective_type == "trigger":
+        relation_name, _, trigger_name = object_name.partition(".")
+        if relation_name and trigger_name:
+            row = await conn.fetchrow(
+                """
+                SELECT 1
+                FROM pg_catalog.pg_trigger AS trg
+                JOIN pg_catalog.pg_class AS cls
+                    ON cls.oid = trg.tgrelid
+                JOIN pg_catalog.pg_namespace AS ns
+                    ON ns.oid = cls.relnamespace
+                WHERE ns.nspname = 'public'
+                  AND cls.relname = $1
+                  AND trg.tgname = $2
+                  AND NOT trg.tgisinternal
+                LIMIT 1
+                """,
+                relation_name,
+                trigger_name,
+            )
+            return row is not None
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM pg_catalog.pg_trigger AS trg
+            JOIN pg_catalog.pg_class AS cls
+                ON cls.oid = trg.tgrelid
+            JOIN pg_catalog.pg_namespace AS ns
+                ON ns.oid = cls.relnamespace
+            WHERE ns.nspname = 'public'
+              AND trg.tgname = $1
+              AND NOT trg.tgisinternal
             LIMIT 1
             """,
             object_name,
@@ -550,6 +605,7 @@ async def inspect_control_plane_schema(
               AND (
                   (expected.object_type = 'table' AND cls.relkind IN ('r', 'p'))
                   OR (expected.object_type = 'index' AND cls.relkind = 'i')
+                  OR (expected.object_type = 'view' AND cls.relkind IN ('v', 'm'))
               )
         )
         AND NOT (
@@ -581,6 +637,41 @@ async def inspect_control_plane_schema(
                       OR (
                           position('.' in expected.object_name) = 0
                           AND con.conname = expected.object_name
+                      )
+                  )
+            )
+        )
+        AND NOT (
+            expected.object_type = 'function'
+            AND EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_proc AS proc
+                JOIN pg_catalog.pg_namespace AS ns
+                    ON ns.oid = proc.pronamespace
+                WHERE ns.nspname = 'public'
+                  AND proc.proname = expected.object_name
+            )
+        )
+        AND NOT (
+            expected.object_type = 'trigger'
+            AND EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_trigger AS trg
+                JOIN pg_catalog.pg_class AS cls
+                    ON cls.oid = trg.tgrelid
+                JOIN pg_catalog.pg_namespace AS ns
+                    ON ns.oid = cls.relnamespace
+                WHERE ns.nspname = 'public'
+                  AND NOT trg.tgisinternal
+                  AND (
+                      (
+                          position('.' in expected.object_name) > 0
+                          AND cls.relname = split_part(expected.object_name, '.', 1)
+                          AND trg.tgname = split_part(expected.object_name, '.', 2)
+                      )
+                      OR (
+                          position('.' in expected.object_name) = 0
+                          AND trg.tgname = expected.object_name
                       )
                   )
             )
@@ -664,6 +755,7 @@ async def inspect_workflow_schema(
                   AND (
                       (expected.object_type = 'table' AND cls.relkind IN ('r', 'p'))
                       OR (expected.object_type = 'index' AND cls.relkind = 'i')
+                      OR (expected.object_type = 'view' AND cls.relkind IN ('v', 'm'))
                   )
             )
             AND NOT (
@@ -695,6 +787,30 @@ async def inspect_workflow_schema(
                           OR (
                               position('.' in expected.object_name) = 0
                               AND con.conname = expected.object_name
+                          )
+                      )
+                )
+            )
+            AND NOT (
+                expected.object_type = 'trigger'
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_trigger AS trg
+                    JOIN pg_catalog.pg_class AS cls
+                        ON cls.oid = trg.tgrelid
+                    JOIN pg_catalog.pg_namespace AS ns
+                        ON ns.oid = cls.relnamespace
+                    WHERE ns.nspname = 'public'
+                      AND NOT trg.tgisinternal
+                      AND (
+                          (
+                              position('.' in expected.object_name) > 0
+                              AND cls.relname = split_part(expected.object_name, '.', 1)
+                              AND trg.tgname = split_part(expected.object_name, '.', 2)
+                          )
+                          OR (
+                              position('.' in expected.object_name) = 0
+                              AND trg.tgname = expected.object_name
                           )
                       )
                 )

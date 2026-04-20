@@ -13,6 +13,7 @@ from adapters.cli_llm import CLILLMAdapter
 import adapters.credentials as credentials_mod
 from adapters.credentials import CredentialResolutionError, resolve_credential
 from adapters.deterministic import AdapterRegistry, DeterministicTaskRequest
+from adapters.middleware import _WrappedAdapter
 from adapters.llm_client import LLMClientError
 import adapters.llm_task as llm_task_mod
 from adapters.llm_task import LLMTaskAdapter
@@ -149,7 +150,9 @@ def test_adapter_registry_resolves_llm_task() -> None:
     llm = LLMTaskAdapter(credential_env={})
     registry = AdapterRegistry(llm_task_adapter=llm)
     resolved = registry.resolve(adapter_type="llm_task")
-    assert resolved is llm
+    assert isinstance(resolved, _WrappedAdapter)
+    assert resolved._inner is llm
+    assert resolved.executor_type == llm.executor_type
 
 
 def test_adapter_registry_still_resolves_deterministic_task() -> None:
@@ -162,7 +165,9 @@ def test_adapter_registry_resolves_cli_llm() -> None:
     cli = CLILLMAdapter()
     registry = AdapterRegistry(cli_llm_adapter=cli)
     resolved = registry.resolve(adapter_type="cli_llm")
-    assert resolved is cli
+    assert isinstance(resolved, _WrappedAdapter)
+    assert resolved._inner is cli
+    assert resolved.executor_type == cli.executor_type
 
 
 def test_cli_adapter_fails_closed_without_prompt() -> None:

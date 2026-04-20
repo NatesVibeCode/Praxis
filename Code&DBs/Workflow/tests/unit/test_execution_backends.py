@@ -108,6 +108,11 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
         "augment_cli_command_for_workflow_mcp",
         lambda **kwargs: list(kwargs["command_parts"]),
     )
+    monkeypatch.setattr(
+        execution_backends,
+        "workflow_mcp_workspace_overlays",
+        lambda **_kwargs: [],
+    )
 
     result = execution_backends.execute_cli(
         _agent(),

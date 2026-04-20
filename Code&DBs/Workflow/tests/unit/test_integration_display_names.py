@@ -49,6 +49,7 @@ def test_list_integrations_exposes_branded_display_name_for_praxis_tools() -> No
             "provider": "mcp",
             "auth_status": "connected",
             "source": "mcp_tool",
+            "catalog_dispatch": False,
             "health_status": None,
             "error_rate": None,
             "actions": [{"action": "kickoff", "description": "Start a run"}],

@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,9 +33,34 @@ from adapters.deterministic import (
 from contracts.domain import WorkflowRequest
 from receipts.evidence import AppendOnlyWorkflowEvidenceWriter, EvidenceRow
 from runtime.workflow import WorkflowSpec, _build_workflow_graph, _build_registry
+import runtime.workflow.runtime_setup as runtime_setup
 from runtime.workflow_projection import project_workflow_result
 from runtime.execution import RuntimeOrchestrator
 from runtime.intake import WorkflowIntakePlanner
+
+_WORKSPACE_REF = "workspace.test.workflow_graph"
+_RUNTIME_PROFILE_REF = "runtime_profile.test.workflow_graph"
+
+
+def _workflow_spec(**kwargs) -> WorkflowSpec:
+    kwargs.setdefault("workspace_ref", _WORKSPACE_REF)
+    kwargs.setdefault("runtime_profile_ref", _RUNTIME_PROFILE_REF)
+    return WorkflowSpec(**kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _fake_runtime_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        runtime_setup,
+        "resolve_native_runtime_profile_config",
+        lambda _runtime_profile_ref: SimpleNamespace(
+            workspace_ref=_WORKSPACE_REF,
+            workdir="/tmp",
+            model_profile_id="model_profile.test.workflow_graph",
+            provider_policy_id="provider_policy.test.workflow_graph",
+            sandbox_profile_ref="sandbox_profile.test.workflow_graph",
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +144,7 @@ class TestDispatchGraphBuild:
     """Verify graph construction from WorkflowSpec."""
 
     def test_basic_graph_has_context_llm_terminal(self):
-        spec = WorkflowSpec(prompt="test")
+        spec = _workflow_spec(prompt="test")
         request = _build_workflow_graph(spec)
         node_ids = [n.node_id for n in request.nodes]
         assert "context" in node_ids
@@ -126,19 +152,19 @@ class TestDispatchGraphBuild:
         assert "terminal" in node_ids
 
     def test_scope_write_adds_writer_node(self):
-        spec = WorkflowSpec(prompt="test", scope_write=["a.py"], workdir="/tmp")
+        spec = _workflow_spec(prompt="test", scope_write=["a.py"], workdir="/tmp")
         request = _build_workflow_graph(spec)
         node_ids = [n.node_id for n in request.nodes]
         assert "writer" in node_ids
 
     def test_no_scope_write_skips_writer(self):
-        spec = WorkflowSpec(prompt="test")
+        spec = _workflow_spec(prompt="test")
         request = _build_workflow_graph(spec)
         node_ids = [n.node_id for n in request.nodes]
         assert "writer" not in node_ids
 
     def test_verify_bindings_adds_verifier_node(self):
-        spec = WorkflowSpec(
+        spec = _workflow_spec(
             prompt="test",
             verify_refs=["verify_ref.python.py_compile.a.py.test"],
             workdir="/tmp",
@@ -148,7 +174,7 @@ class TestDispatchGraphBuild:
         assert "verifier" in node_ids
 
     def test_content_hash_is_stable(self):
-        spec = WorkflowSpec(prompt="test", scope_write=["a.py"], workdir="/tmp")
+        spec = _workflow_spec(prompt="test", scope_write=["a.py"], workdir="/tmp")
         r1 = _build_workflow_graph(spec)
         r2 = _build_workflow_graph(spec)
         assert r1.definition_hash == r2.definition_hash
@@ -156,8 +182,8 @@ class TestDispatchGraphBuild:
         assert r1.workflow_id != r2.workflow_id
 
     def test_different_graphs_have_different_hashes(self):
-        s1 = WorkflowSpec(prompt="test")
-        s2 = WorkflowSpec(prompt="test", scope_write=["a.py"], workdir="/tmp")
+        s1 = _workflow_spec(prompt="test")
+        s2 = _workflow_spec(prompt="test", scope_write=["a.py"], workdir="/tmp")
         r1 = _build_workflow_graph(s1)
         r2 = _build_workflow_graph(s2)
         assert r1.definition_hash != r2.definition_hash
@@ -173,7 +199,7 @@ class TestDispatchGraphExecution:
         return str(tmp_path)
 
     def test_full_graph_executes_all_nodes(self, workspace):
-        spec = WorkflowSpec(
+        spec = _workflow_spec(
             prompt="Add farewell",
             provider_slug="mock",
             adapter_type="cli_llm",
@@ -213,7 +239,7 @@ class TestDispatchGraphExecution:
             assert nr.status == "succeeded", f"{nr.node_id} failed: {nr.failure_code}"
 
     def test_evidence_recorded_per_node(self, workspace):
-        spec = WorkflowSpec(
+        spec = _workflow_spec(
             prompt="Add farewell",
             workdir=workspace,
             scope_write=["greeting.py"],
@@ -245,7 +271,7 @@ class TestDispatchGraphExecution:
         assert len(set(seqs)) == len(seqs)  # no duplicates
 
     def test_file_written_by_graph(self, workspace):
-        spec = WorkflowSpec(
+        spec = _workflow_spec(
             prompt="Add farewell",
             workdir=workspace,
             scope_write=["greeting.py"],
@@ -281,7 +307,7 @@ class TestDispatchProjection:
         workspace = str(tmp_path)
         (tmp_path / "greeting.py").write_text("pass\n")
 
-        spec = WorkflowSpec(
+        spec = _workflow_spec(
             prompt="Add farewell",
             provider_slug="mock",
             model_slug="mock-model",

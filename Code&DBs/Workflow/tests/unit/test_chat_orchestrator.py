@@ -69,7 +69,17 @@ def test_resolve_model_accepts_single_route_chain_entry(monkeypatch) -> None:
         "runtime.chat_orchestrator._resolve_api_key",
         lambda provider, *, required=True: f"{provider}-key",
     )
-    _FakeRouter.result = [SimpleNamespace(provider_slug="openai", model_slug="gpt-5.4")]
+    monkeypatch.setattr(
+        "runtime.lane_policy.load_provider_lane_policies",
+        lambda _pg: {},
+    )
+    _FakeRouter.result = [
+        SimpleNamespace(
+            provider_slug="openai",
+            model_slug="gpt-5.4",
+            adapter_type="llm_task",
+        )
+    ]
 
     orchestrator = ChatOrchestrator(object(), _REPO_ROOT)
 

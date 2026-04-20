@@ -44,6 +44,15 @@ if [[ "${{1-}}" == "-c" ]]; then
   exit 0
 fi
 
+if [[ "${{1-}}" == "-" ]]; then
+  if [[ -n "${{WORKFLOW_AUTHORITY_JSON-}}" ]]; then
+    printf '%s\n%s\n' 'postgresql://postgres@localhost:5432/praxis' 'test'
+  else
+    printf '{{"database_url":"postgresql://postgres@localhost:5432/praxis","authority_source":"test"}}\n'
+  fi
+  exit 0
+fi
+
 printf 'unexpected invocation: %s\\n' "$*" >&2
 exit 1
 """

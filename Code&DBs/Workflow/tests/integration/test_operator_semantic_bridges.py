@@ -420,25 +420,28 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
             env=env,
         )
 
-        assert payload["semantic_bridge_backfill"] == {
-            "as_of": as_of.isoformat(),
-            "object_relations": {
-                "processed": 2,
-                "recorded": 1,
-                "retracted": 0,
-                "tombstoned": 1,
-            },
-            "operator_decisions": {
-                "processed": 2,
-                "recorded": 1,
-                "skipped_unscoped": 1,
-            },
-            "roadmap_items": {
-                "processed": 1,
-                "recorded": 4,
-                "retracted": 0,
-            },
+        summary = payload["semantic_bridge_backfill"]
+        assert summary["as_of"] == as_of.isoformat()
+        assert summary["object_relations"] == {
+            "processed": 2,
+            "recorded": 1,
+            "retracted": 0,
+            "tombstoned": 1,
         }
+        assert summary["operator_decisions"] == {
+            "processed": 2,
+            "recorded": 1,
+            "skipped_unscoped": 1,
+        }
+        assert summary["roadmap_items"] == {
+            "processed": 1,
+            "recorded": 4,
+            "retracted": 0,
+        }
+        assert summary["authority_memory_refresh"]["projection_id"] == "authority_memory_projection"
+        assert summary["authority_memory_refresh"]["total_upserted"] >= 0
+        assert summary["authority_memory_refresh"]["total_deactivated"] >= 0
+        assert "by_projection" in summary["authority_memory_refresh"]
 
         active_relation_row = await conn.fetchrow(
             """

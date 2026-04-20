@@ -10,12 +10,12 @@ native_operator_repo_root="$(cd "$native_operator_common_dir/.." && pwd)"
 # shellcheck source=_workflow_env.sh
 source "$native_operator_repo_root/scripts/_workflow_env.sh"
 
-native_operator_workflow_root="$native_operator_repo_root/CodeDBs/Workflow"
+native_operator_workflow_root="$native_operator_repo_root/Code&DBs/Workflow"
 native_operator_runtime_profiles_config="$native_operator_repo_root/config/runtime_profiles.json"
 native_operator_runtime_profile_ref="praxis"
 native_operator_instance_name="praxis"
 native_operator_workflow_database_url=""
-native_operator_local_postgres_data_dir="$native_operator_repo_root/CodeDBs/Databases/postgres-dev/data"
+native_operator_local_postgres_data_dir="$native_operator_repo_root/Code&DBs/Databases/postgres-dev/data"
 native_operator_receipts_dir="$native_operator_repo_root/artifacts/runtime_receipts"
 native_operator_topology_dir="$native_operator_repo_root/artifacts/runtime_topology"
 
@@ -96,6 +96,17 @@ native_operator_assert_expected_env() {
   fi
 }
 
+native_operator_reject_ambient_contract_env() {
+  local env_name
+  while IFS= read -r env_name; do
+    [ -n "$env_name" ] || continue
+    if [ "${!env_name+x}" = x ]; then
+      echo "native operator wrappers reject ambient $env_name override: wrapper owns this contract value" >&2
+      return 1
+    fi
+  done < <(native_operator_contract_keys)
+}
+
 native_operator_derive_env() {
   native_operator_require_file \
     "$native_operator_runtime_profiles_config" \
@@ -103,6 +114,8 @@ native_operator_derive_env() {
 
   native_operator_assert_expected_env PRAXIS_RUNTIME_PROFILES_CONFIG "$native_operator_runtime_profiles_config" || return 1
   export PRAXIS_RUNTIME_PROFILES_CONFIG="$native_operator_runtime_profiles_config"
+
+  native_operator_reject_ambient_contract_env || return 1
 
   workflow_load_repo_env || return 1
   native_operator_workflow_database_url="$WORKFLOW_DATABASE_URL"
