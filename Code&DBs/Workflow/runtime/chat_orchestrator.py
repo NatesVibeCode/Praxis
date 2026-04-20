@@ -523,8 +523,13 @@ class ChatOrchestrator:
                 continue
 
             decision_pressure = str(getattr(decision, "spend_pressure", "") or "") or None
+            decision_budget_unreachable = bool(
+                getattr(decision, "budget_authority_unreachable", False)
+            )
             admitted, reason = admit_adapter_type(
-                lane_policies, provider, adapter_type, spend_pressure=decision_pressure,
+                lane_policies, provider, adapter_type,
+                spend_pressure=decision_pressure,
+                budget_authority_unreachable=decision_budget_unreachable,
             )
             if not admitted:
                 _log.info(
@@ -618,13 +623,15 @@ class ChatOrchestrator:
 
 
 def _resolve_api_key(provider: str, *, required: bool = True) -> str | None:
-    """Resolve a provider API key from authoritative env var mappings."""
+    """Resolve a provider API key via the Keychain-first resolver."""
+    from adapters.keychain import resolve_secret
     from registry.provider_execution_registry import resolve_api_key_env_vars
 
+    env = dict(os.environ)
     for env_var in resolve_api_key_env_vars(provider):
-        value = str(os.environ.get(env_var, "")).strip()
+        value = resolve_secret(env_var, env=env)
         if value:
-            return value
+            return value.strip() or None
     if required:
         raise RuntimeError(f"no configured API key env var is set for provider {provider!r}")
     return None

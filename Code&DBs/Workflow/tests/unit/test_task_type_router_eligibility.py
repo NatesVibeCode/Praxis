@@ -142,6 +142,8 @@ class _FakeConn:
             return list(self._eligibility_rows)
         if "FROM provider_lane_policy" in sql:
             return []
+        if "provider_budget_windows" in sql:
+            return []
         if "FROM task_type_routing" in sql:
             assert params
             assert params[0] == "build"

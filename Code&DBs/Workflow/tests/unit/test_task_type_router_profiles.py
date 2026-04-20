@@ -9,6 +9,7 @@ from runtime.task_type_router import TaskRouteAuthorityError
 
 
 def _passthrough_economics(**kwargs):
+    budget_authority = kwargs.get("budget_authority")
     return {
         "adapter_type": kwargs.get("adapter_type") or "cli",
         "billing_mode": "owned_compute",
@@ -18,6 +19,7 @@ def _passthrough_economics(**kwargs):
         "budget_status": "",
         "prefer_prepaid": True,
         "allow_payg_fallback": True,
+        "budget_authority_unreachable": not getattr(budget_authority, "reachable", True),
     }
 
 
@@ -83,6 +85,8 @@ class _FakeConn:
         if "FROM task_type_route_eligibility" in sql:
             return []
         if "FROM provider_lane_policy" in sql:
+            return []
+        if "provider_budget_windows" in sql:
             return []
         if "FROM provider_model_candidates" in sql:
             return [
@@ -454,8 +458,14 @@ def test_explicit_slug_uses_runtime_profile_budget_authority(monkeypatch) -> Non
 
     def _budget_aware_economics(**kwargs):
         calls.append(dict(kwargs))
-        provider_policy_id = str(kwargs.get("provider_policy_id") or "")
-        budget_window = kwargs.get("budget_windows", {}).get(provider_policy_id)
+        provider_policy_id = kwargs.get("provider_policy_id")
+        budget_authority = kwargs.get("budget_authority")
+        budget_window = None
+        if budget_authority is not None:
+            budget_window = budget_authority.window_for(
+                provider_policy_id=provider_policy_id,
+                provider_slug=kwargs.get("provider_slug"),
+            )
         return {
             "adapter_type": kwargs.get("adapter_type") or "cli",
             "billing_mode": "owned_compute",
@@ -465,6 +475,7 @@ def test_explicit_slug_uses_runtime_profile_budget_authority(monkeypatch) -> Non
             "budget_status": str((budget_window or {}).get("budget_status") or ""),
             "prefer_prepaid": True,
             "allow_payg_fallback": not bool(budget_window),
+            "budget_authority_unreachable": not getattr(budget_authority, "reachable", True),
         }
 
     monkeypatch.setitem(TaskTypeRouter.resolve.__globals__, "_resolve_route_economics", _budget_aware_economics)
@@ -478,7 +489,10 @@ def test_explicit_slug_uses_runtime_profile_budget_authority(monkeypatch) -> Non
 
     assert calls
     assert calls[0]["provider_policy_id"] == "provider_policy.openai"
-    assert "provider_policy.openai" in calls[0]["budget_windows"]
+    snapshot = calls[0]["budget_authority"]
+    assert snapshot is not None
+    assert snapshot.reachable is True
+    assert snapshot.window_for(provider_policy_id="provider_policy.openai") is not None
     assert decision.spend_pressure == "high"
     assert decision.budget_status == "limited"
     assert decision.allow_payg_fallback is False

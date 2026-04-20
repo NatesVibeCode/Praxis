@@ -34,8 +34,9 @@ from .route_authority_snapshot import (
 )
 from .composite_scorer import CompositeScorer, ScaleFn
 from .routing_economics import (
+    BudgetAuthoritySnapshot,
     economic_rationale as _economic_rationale,
-    load_provider_budget_windows as _load_provider_budget_windows,
+    load_budget_authority_snapshot as _load_budget_authority_snapshot,
     resolve_route_economics as _resolve_route_economics,
     row_effective_marginal_cost as _row_effective_marginal_cost,
 )
@@ -304,6 +305,11 @@ class TaskRouteDecision:
     budget_status: str = ""
     prefer_prepaid: bool = False
     allow_payg_fallback: bool = False
+    # True iff the budget-window authority table was unreachable when this
+    # decision was built. Downstream lane admission (chat_orchestrator +
+    # _apply_lane_policy) must refuse paid lanes when this is set —
+    # see runtime.lane_policy.admit_adapter_type.
+    budget_authority_unreachable: bool = False
 
 
 @dataclass(frozen=True)
@@ -571,7 +577,6 @@ class TaskTypeRouter:
         if task_type:
             self._check_permission(task_type, model, provider)
         provider_policy_id: str | None = None
-        budget_windows: dict[str, dict[str, Any]] = {}
         if runtime_profile_ref:
             for candidate in self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref):
                 if (
@@ -579,15 +584,17 @@ class TaskTypeRouter:
                     and str(candidate.get("model_slug") or "") == model
                 ):
                     provider_policy_id = str(candidate.get("provider_policy_id") or "").strip() or None
-                    if provider_policy_id:
-                        budget_windows = self._load_provider_budget_windows({provider_policy_id})
                     break
+        # BUG-6B34915A: explicit routes must consult the same budget-window
+        # authority as auto routes. The snapshot carries by-provider-ref
+        # lookups so we don't need provider_policy_id when it isn't known.
+        budget_authority = self._load_budget_authority_snapshot()
         economics = _resolve_route_economics(
             provider_slug=provider,
             adapter_type=None,
             provider_policy_id=provider_policy_id,
             raw_cost_per_m_tokens=0.0,
-            budget_windows=budget_windows,
+            budget_authority=budget_authority,
             default_adapter=self._default_adapter_for_provider(provider),
         )
         resolved_adapter_type = str(
@@ -611,6 +618,9 @@ class TaskTypeRouter:
             budget_status=str(economics.get("budget_status") or ""),
             prefer_prepaid=bool(economics.get("prefer_prepaid", False)),
             allow_payg_fallback=bool(economics.get("allow_payg_fallback", False)),
+            budget_authority_unreachable=bool(
+                economics.get("budget_authority_unreachable", False)
+            ),
         )
 
     def resolve_explicit_eligibility(
@@ -761,8 +771,8 @@ class TaskTypeRouter:
         return [dict(row) for row in rows]
 
 
-    def _load_provider_budget_windows(self, provider_policy_ids: set[str]) -> dict[str, dict[str, Any]]:
-        return _load_provider_budget_windows(self._conn, provider_policy_ids)
+    def _load_budget_authority_snapshot(self) -> BudgetAuthoritySnapshot:
+        return _load_budget_authority_snapshot(self._conn)
 
     def _build_profile_task_rows(
         self,
@@ -774,9 +784,7 @@ class TaskTypeRouter:
         route_rows = self._load_task_route_rows(task_type)
         state_by_key = {(str(row["provider_slug"]), str(row["model_slug"])): row for row in route_rows}
         catalog_candidates = list(self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref))
-        budget_windows = self._load_provider_budget_windows(
-            {str(c.get("provider_policy_id")) for c in catalog_candidates if c.get("provider_policy_id")}
-        )
+        budget_authority = self._load_budget_authority_snapshot()
         built_rows: list[dict[str, Any]] = []
         for candidate in catalog_candidates:
             key = (candidate["provider_slug"], candidate["model_slug"])
@@ -805,14 +813,18 @@ class TaskTypeRouter:
             benchmark_name = str(explicit_override.get("benchmark_name") or "") if explicit_override else ""
             raw_cost_per_m_tokens = _base_cost_per_m_tokens(candidate, state_row=state_row)
             provider_slug = str(candidate["provider_slug"])
-            economics = _resolve_route_economics(
-                provider_slug=provider_slug,
-                adapter_type=str(candidate["adapter_type"]) if candidate.get("adapter_type") else None,
-                provider_policy_id=str(candidate["provider_policy_id"]) if candidate.get("provider_policy_id") else None,
-                raw_cost_per_m_tokens=raw_cost_per_m_tokens,
-                budget_windows=budget_windows,
-                default_adapter=self._default_adapter_for_provider(provider_slug),
-            )
+            try:
+                economics = _resolve_route_economics(
+                    provider_slug=provider_slug,
+                    adapter_type=str(candidate["adapter_type"]) if candidate.get("adapter_type") else None,
+                    provider_policy_id=str(candidate["provider_policy_id"]) if candidate.get("provider_policy_id") else None,
+                    raw_cost_per_m_tokens=raw_cost_per_m_tokens,
+                    budget_authority=budget_authority,
+                    default_adapter=self._default_adapter_for_provider(provider_slug),
+                )
+            except RuntimeError as exc:
+                logger.debug("skipping candidate %s/%s: %s", provider_slug, candidate.get("model_slug"), exc)
+                continue
             rationale = str(explicit_override.get("rationale") or "") if explicit_override is not None else (
                 f"auto-derived: {affinity_bucket} affinity for {task_type}; "
                 f"route_tier={candidate.get('route_tier') or 'unknown'}; "
@@ -954,9 +966,7 @@ class TaskTypeRouter:
     ) -> list[TaskRouteDecision]:
         rows: list[dict[str, Any]] = []
         catalog_candidates = list(self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref))
-        budget_windows = self._load_provider_budget_windows(
-            {str(c.get("provider_policy_id")) for c in catalog_candidates if c.get("provider_policy_id")}
-        )
+        budget_authority = self._load_budget_authority_snapshot()
         for candidate in catalog_candidates:
             if _normalize_auto_route_key(str(candidate.get(profile_column) or "")) != profile_value:
                 continue
@@ -967,14 +977,18 @@ class TaskTypeRouter:
             profile_rank = int(candidate.get(profile_rank_column) or 99)
             raw_cost_per_m_tokens = _base_cost_per_m_tokens(candidate, state_row=None)
             provider_slug = str(candidate["provider_slug"])
-            economics = _resolve_route_economics(
-                provider_slug=provider_slug,
-                adapter_type=str(candidate["adapter_type"]) if candidate.get("adapter_type") else None,
-                provider_policy_id=str(candidate["provider_policy_id"]) if candidate.get("provider_policy_id") else None,
-                raw_cost_per_m_tokens=raw_cost_per_m_tokens,
-                budget_windows=budget_windows,
-                default_adapter=self._default_adapter_for_provider(provider_slug),
-            )
+            try:
+                economics = _resolve_route_economics(
+                    provider_slug=provider_slug,
+                    adapter_type=str(candidate["adapter_type"]) if candidate.get("adapter_type") else None,
+                    provider_policy_id=str(candidate["provider_policy_id"]) if candidate.get("provider_policy_id") else None,
+                    raw_cost_per_m_tokens=raw_cost_per_m_tokens,
+                    budget_authority=budget_authority,
+                    default_adapter=self._default_adapter_for_provider(provider_slug),
+                )
+            except RuntimeError as exc:
+                logger.debug("skipping candidate %s/%s: %s", provider_slug, candidate.get("model_slug"), exc)
+                continue
             rows.append({
                 "provider_slug": candidate["provider_slug"],
                 "model_slug": candidate["model_slug"],
@@ -1026,6 +1040,9 @@ class TaskTypeRouter:
                 budget_status=str(row.get("budget_status") or ""),
                 prefer_prepaid=bool(row.get("prefer_prepaid", False)),
                 allow_payg_fallback=bool(row.get("allow_payg_fallback", False)),
+                budget_authority_unreachable=bool(
+                    row.get("budget_authority_unreachable", False)
+                ),
             )
             for row in rows
         ]
@@ -1063,8 +1080,15 @@ class TaskTypeRouter:
             provider = str(row.get("provider_slug") or "")
             adapter_type = str(row.get("adapter_type") or self._default_adapter_for_provider(provider))
             spend_pressure = str(row.get("spend_pressure") or "") or None
+            budget_authority_unreachable = bool(
+                row.get("budget_authority_unreachable", False)
+            )
             admitted, reason = admit_adapter_type(
-                policies, provider, adapter_type, spend_pressure=spend_pressure,
+                policies,
+                provider,
+                adapter_type,
+                spend_pressure=spend_pressure,
+                budget_authority_unreachable=budget_authority_unreachable,
             )
             if admitted:
                 kept.append(row)
@@ -1080,17 +1104,18 @@ class TaskTypeRouter:
                 f"auto/{task_type}: all candidates rejected by provider lane policy "
                 f"({'; '.join(rejected)})"
             )
-        # Zero-marginal-cost routes (subscription_included, prepaid_credit,
-        # owned_compute) are always preferred: stable-sort so prepaid rows
-        # precede metered rows regardless of benchmark/cost rerank. The
-        # sort keys off billing_mode, not adapter_type, so a metered CLI
-        # correctly ranks as failover and a prepaid API correctly ranks
-        # as primary.
+        # Explicit operator rows (route_source='explicit') lead the chain —
+        # an operator writing a task_type_routing row is pinning intent that
+        # overrides cost-first preferences. Within explicit and within
+        # derived, zero-marginal-cost routes (subscription_included,
+        # prepaid_credit, owned_compute) rank before metered rows. Stable-sort
+        # preserves the rerank ordering within each bucket.
         from runtime.routing_economics import _PREPAID_BILLING_MODES
         kept.sort(
-            key=lambda r: 0
-            if str(r.get("billing_mode") or "").strip() in _PREPAID_BILLING_MODES
-            else 1
+            key=lambda r: (
+                0 if str(r.get("route_source") or "derived") == "explicit" else 1,
+                0 if str(r.get("billing_mode") or "").strip() in _PREPAID_BILLING_MODES else 1,
+            )
         )
         return kept
 

@@ -1025,7 +1025,7 @@ def test_route_economics_preserves_zero_cost_for_prepaid_lanes(monkeypatch) -> N
         adapter_type=None,
         provider_policy_id=None,
         raw_cost_per_m_tokens=8.75,
-        budget_windows={},
+        budget_authority=routing_economics_mod.BudgetAuthoritySnapshot.empty(),
         default_adapter="cli_llm",
     )
 
@@ -1049,7 +1049,7 @@ def test_route_economics_defaults_missing_payg_fallback_to_false(monkeypatch) ->
         adapter_type=None,
         provider_policy_id=None,
         raw_cost_per_m_tokens=8.75,
-        budget_windows={},
+        budget_authority=routing_economics_mod.BudgetAuthoritySnapshot.empty(),
         default_adapter="cli_llm",
     )
 
@@ -1090,7 +1090,7 @@ def test_route_economics_prefers_prepaid_adapter_over_metered_default(monkeypatc
         adapter_type=None,
         provider_policy_id=None,
         raw_cost_per_m_tokens=8.75,
-        budget_windows={},
+        budget_authority=routing_economics_mod.BudgetAuthoritySnapshot.empty(),
         default_adapter="llm_task",
     )
 

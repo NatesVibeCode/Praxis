@@ -149,6 +149,48 @@ def test_budget_gate_runs_before_policy_gate() -> None:
     assert reason == "lane.rejected.budget_exhausted"
 
 
+def test_admit_llm_task_refused_when_budget_authority_unreachable() -> None:
+    """Missing provider_budget_windows = schema drift must not silently open the paid lane.
+
+    Pins BUG-2D3AECF3: the authority table being absent (sqlstate 42P01) surfaces
+    as ``budget_authority_unreachable=True`` on the snapshot; admit_adapter_type
+    fails closed for llm_task so the operator sees the authority gap instead of
+    a permissive route.
+    """
+    admitted, reason = admit_adapter_type(
+        _policies(), "openai", "llm_task", budget_authority_unreachable=True,
+    )
+    assert admitted is False
+    assert reason == "lane.rejected.budget_authority_unreachable"
+
+
+def test_admit_cli_llm_ignores_budget_authority_unreachable() -> None:
+    """CLI has no paid-API ceiling — authority state doesn't gate it."""
+    admitted, reason = admit_adapter_type(
+        _policies(), "openai", "cli_llm", budget_authority_unreachable=True,
+    )
+    assert admitted is True
+    assert reason == "lane.admitted"
+
+
+def test_authority_unreachable_wins_over_high_spend_pressure() -> None:
+    """When both signals fire, surface the more-actionable authority gap.
+
+    ``budget_authority_unreachable`` means we cannot trust any spend-pressure
+    reading, so the reason code must reflect the authority gap rather than an
+    exhaustion signal derived from stale/empty state.
+    """
+    admitted, reason = admit_adapter_type(
+        _policies(),
+        "openai",
+        "llm_task",
+        spend_pressure="high",
+        budget_authority_unreachable=True,
+    )
+    assert admitted is False
+    assert reason == "lane.rejected.budget_authority_unreachable"
+
+
 def test_load_skips_empty_allowed_list() -> None:
     rows = [
         {"provider_slug": "bad", "allowed_adapter_types": [], "overridable": False},

@@ -12,7 +12,7 @@ def _passthrough_economics(
     adapter_type,
     provider_policy_id,
     raw_cost_per_m_tokens: float,
-    budget_windows,
+    budget_authority,
     default_adapter=None,
 ) -> dict:
     """Stand-in for _resolve_route_economics that surfaces raw cost as effective cost."""
@@ -25,6 +25,7 @@ def _passthrough_economics(
         "budget_status": "",
         "prefer_prepaid": False,
         "allow_payg_fallback": True,
+        "budget_authority_unreachable": not getattr(budget_authority, "reachable", True),
     }
 
 
@@ -121,6 +122,8 @@ class _FakeConn:
         if "FROM task_type_route_eligibility" in sql:
             return []
         if "FROM provider_lane_policy" in sql:
+            return []
+        if "provider_budget_windows" in sql:
             return []
         if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
             return None

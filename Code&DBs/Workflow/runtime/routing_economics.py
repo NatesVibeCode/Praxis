@@ -2,10 +2,35 @@
 
 Covers budget spend pressure, marginal cost computation, economic rationale,
 and billing mode analysis.  DB I/O is limited to loading budget windows.
+
+Budget-authority contract
+-------------------------
+
+``provider_budget_windows`` is the policy authority for paid-lane admission.
+Callers must never treat missing authority as a permissive empty policy —
+otherwise schema drift silently opens paid routes. The typed
+:class:`BudgetAuthoritySnapshot` carries three states explicitly:
+
+* ``reachable=True`` with a window for a provider — known pressure drives
+  admission.
+* ``reachable=True`` without a window for a provider — authority exists,
+  pre-seed / no-policy state, spend pressure is ``"unknown"`` and paid
+  lanes are admitted under the current policy-less defaults.
+* ``reachable=False`` — the ``provider_budget_windows`` table is missing
+  (sqlstate ``42P01``). Paid lane (``llm_task``) admission MUST fail closed;
+  downstream consumers route through
+  :func:`runtime.lane_policy.admit_adapter_type` with
+  ``budget_authority_unreachable=True``.
+
+Closes BUG-2D3AECF3 (architecture) and BUG-6B34915A (wiring — the explicit
+provider/model route path must load budget authority by provider_slug even
+when no ``provider_policy_id`` is known upfront).
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Mapping
 
 from asyncpg import PostgresError
 from registry.provider_execution_registry import (
@@ -20,6 +45,11 @@ if TYPE_CHECKING:
 _PREPAID_BILLING_MODES = frozenset({"subscription_included", "prepaid_credit", "owned_compute"})
 _ADAPTER_COST_ORDER = ("cli_llm", "llm_task")
 _UNDEFINED_TABLE_SQLSTATE = "42P01"
+
+
+def _provider_ref_from_slug(provider_slug: str) -> str:
+    """Canonical provider_ref used in provider_budget_windows rows."""
+    return f"provider.{(provider_slug or '').strip()}"
 
 
 # ---------------------------------------------------------------------------
@@ -103,16 +133,95 @@ def economic_rationale(row: dict[str, Any]) -> str:
 # Budget window loading
 # ---------------------------------------------------------------------------
 
-def load_provider_budget_windows(
+_EMPTY_MAPPING: Mapping[str, Mapping[str, Any]] = MappingProxyType({})
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetAuthoritySnapshot:
+    """Typed snapshot of ``provider_budget_windows`` authority.
+
+    Keeping the authority-reachability signal on the snapshot is what lets
+    paid-lane admission fail closed on schema drift. Consumers must read
+    ``reachable`` before treating an empty window set as permissive.
+
+    The two indexes keep equivalent data keyed differently:
+
+    * ``windows_by_provider_policy`` — direct lookup by
+      ``provider_policies.provider_policy_id``; used by the auto-chain path
+      that already threads ``provider_policy_id`` through the candidate
+      catalog.
+    * ``windows_by_provider_ref`` — lookup by ``provider.{provider_slug}``;
+      used by the explicit ``provider/model`` path that cannot assume a
+      policy id is known. Without this, BUG-6B34915A re-emerges.
+    """
+
+    windows_by_provider_policy: Mapping[str, Mapping[str, Any]]
+    windows_by_provider_ref: Mapping[str, Mapping[str, Any]]
+    reachable: bool
+
+    @classmethod
+    def unreachable(cls) -> "BudgetAuthoritySnapshot":
+        """Authority table missing — paid lane admission must fail closed."""
+        return cls(
+            windows_by_provider_policy=_EMPTY_MAPPING,
+            windows_by_provider_ref=_EMPTY_MAPPING,
+            reachable=False,
+        )
+
+    @classmethod
+    def empty(cls) -> "BudgetAuthoritySnapshot":
+        """Authority reachable but no relevant windows loaded (test default)."""
+        return cls(
+            windows_by_provider_policy=_EMPTY_MAPPING,
+            windows_by_provider_ref=_EMPTY_MAPPING,
+            reachable=True,
+        )
+
+    def window_for_policy(
+        self, provider_policy_id: str | None
+    ) -> Mapping[str, Any] | None:
+        if not provider_policy_id:
+            return None
+        return self.windows_by_provider_policy.get(str(provider_policy_id))
+
+    def window_for_provider_slug(
+        self, provider_slug: str | None
+    ) -> Mapping[str, Any] | None:
+        if not provider_slug:
+            return None
+        return self.windows_by_provider_ref.get(_provider_ref_from_slug(provider_slug))
+
+    def window_for(
+        self,
+        *,
+        provider_policy_id: str | None = None,
+        provider_slug: str | None = None,
+    ) -> Mapping[str, Any] | None:
+        """Lookup most-specific window; policy id wins when both resolve."""
+        return self.window_for_policy(provider_policy_id) or self.window_for_provider_slug(
+            provider_slug
+        )
+
+
+def load_budget_authority_snapshot(
     conn: "SyncPostgresConnection",
-    provider_policy_ids: set[str],
-) -> dict[str, dict[str, Any]]:
-    if not provider_policy_ids:
-        return {}
+) -> BudgetAuthoritySnapshot:
+    """Load the current budget-window authority snapshot.
+
+    Loads the most recent window per ``provider_policy_id`` and indexes it by
+    both ``provider_policy_id`` and ``provider_ref`` so consumers can look up
+    by whichever axis they already have. Callers never need to know the
+    policy-id mapping.
+
+    If ``provider_budget_windows`` is missing (sqlstate ``42P01``), returns
+    :meth:`BudgetAuthoritySnapshot.unreachable` so downstream paid-lane
+    admission can fail closed instead of silently opening.
+    """
     try:
         rows = conn.execute(
             """SELECT DISTINCT ON (provider_policy_id)
                       provider_policy_id,
+                      provider_ref,
                       budget_status,
                       request_limit,
                       requests_used,
@@ -124,21 +233,30 @@ def load_provider_budget_windows(
                       window_ended_at,
                       created_at
                FROM public.provider_budget_windows
-               WHERE provider_policy_id = ANY($1::text[])
                ORDER BY provider_policy_id,
                         window_ended_at DESC NULLS LAST,
                         created_at DESC NULLS LAST""",
-            list(sorted(provider_policy_ids)),
         )
     except PostgresError as exc:
         if getattr(exc, "sqlstate", None) == _UNDEFINED_TABLE_SQLSTATE:
-            return {}
+            return BudgetAuthoritySnapshot.unreachable()
         raise
-    return {
-        str(row["provider_policy_id"]): dict(row)
-        for row in rows or []
-        if row.get("provider_policy_id")
-    }
+    by_policy: dict[str, Mapping[str, Any]] = {}
+    by_ref: dict[str, Mapping[str, Any]] = {}
+    for raw in rows or []:
+        window = dict(raw)
+        policy_id = str(window.get("provider_policy_id") or "").strip()
+        provider_ref = str(window.get("provider_ref") or "").strip()
+        frozen = MappingProxyType(window)
+        if policy_id:
+            by_policy[policy_id] = frozen
+        if provider_ref:
+            by_ref[provider_ref] = frozen
+    return BudgetAuthoritySnapshot(
+        windows_by_provider_policy=MappingProxyType(by_policy),
+        windows_by_provider_ref=MappingProxyType(by_ref),
+        reachable=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -151,20 +269,29 @@ def resolve_route_economics(
     adapter_type: str | None,
     provider_policy_id: str | None,
     raw_cost_per_m_tokens: float,
-    budget_windows: dict[str, dict[str, Any]],
+    budget_authority: BudgetAuthoritySnapshot,
     default_adapter: str | None = None,
 ) -> dict[str, Any]:
     """Pick the cheapest viable adapter and compute effective marginal cost.
 
     Returns a dict with keys: adapter_type, billing_mode, budget_bucket,
     effective_marginal_cost, spend_pressure, budget_status, prefer_prepaid,
-    allow_payg_fallback.
+    allow_payg_fallback, budget_authority_unreachable.
+
+    ``budget_authority_unreachable`` propagates the authority-missing state so
+    :func:`runtime.lane_policy.admit_adapter_type` can refuse paid lanes when
+    ``provider_budget_windows`` is gone (schema drift). Auto and explicit
+    paths both route through here, so the gate is uniform.
     """
     if default_adapter is None:
         default_adapter = resolve_default_adapter_type(provider_slug)
 
-    budget_window = budget_windows.get(provider_policy_id or "")
+    budget_window = budget_authority.window_for(
+        provider_policy_id=provider_policy_id,
+        provider_slug=provider_slug,
+    )
     spend_pressure = budget_spend_pressure(budget_window)
+    authority_unreachable = not budget_authority.reachable
 
     candidate_adapters: list[str] = []
     normalized_adapter_type = (adapter_type or "").strip().lower()
@@ -208,6 +335,7 @@ def resolve_route_economics(
             "budget_status": str((budget_window or {}).get("budget_status") or ""),
             "prefer_prepaid": bool(economics.get("prefer_prepaid", False)),
             "allow_payg_fallback": bool(economics.get("allow_payg_fallback", False)),
+            "budget_authority_unreachable": authority_unreachable,
         })
 
     options.sort(

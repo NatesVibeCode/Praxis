@@ -77,27 +77,41 @@ def admit_adapter_type(
     adapter_type: str,
     *,
     spend_pressure: str | None = None,
+    budget_authority_unreachable: bool = False,
 ) -> tuple[bool, str]:
     """Decide whether a route may use ``adapter_type`` for ``provider_slug``.
 
     Returns ``(admitted, reason_code)``. Reason codes:
 
-    - ``lane.admitted``                — in allowed set
-    - ``lane.rejected.not_allowed``    — policy exists, adapter not in set
-    - ``lane.rejected.unknown_adapter``— adapter_type is not a known lane
+    - ``lane.admitted``                 — in allowed set
+    - ``lane.rejected.not_allowed``     — policy exists, adapter not in set
+    - ``lane.rejected.unknown_adapter`` — adapter_type is not a known lane
     - ``lane.rejected.budget_exhausted``— paid lane, spend_pressure=high
-    - ``lane.admitted.no_policy``      — no policy row, fail open (pre-seed)
+    - ``lane.rejected.budget_authority_unreachable``
+                                        — paid lane, budget-window authority
+                                          table is missing (schema drift);
+                                          fail closed per BUG-2D3AECF3
+    - ``lane.admitted.no_policy``       — no policy row, fail open (pre-seed)
 
     ``spend_pressure`` is a hard gate for ``llm_task`` only: when the
     provider's paid-API budget window is exhausted (``high``), the route is
     refused regardless of allow-list. CLI is free, so the budget gate does
     not apply to ``cli_llm``.
+
+    ``budget_authority_unreachable`` is the sibling gate for the same paid
+    lane: when :class:`runtime.routing_economics.BudgetAuthoritySnapshot`
+    reports that ``provider_budget_windows`` is missing, admitting paid
+    routes would turn schema drift into silent paid-lane opening. Refused
+    with reason ``lane.rejected.budget_authority_unreachable`` so the
+    trace surfaces the authority gap explicitly.
     """
     normalized = (adapter_type or "").strip().lower()
     if normalized not in KNOWN_ADAPTER_TYPES:
         return False, "lane.rejected.unknown_adapter"
 
     if normalized == "llm_task":
+        if budget_authority_unreachable:
+            return False, "lane.rejected.budget_authority_unreachable"
         pressure = (spend_pressure or "").strip().lower()
         if pressure == "high":
             return False, "lane.rejected.budget_exhausted"
