@@ -1,13 +1,13 @@
 # Praxis MCP Tools
 
-Praxis exposes 72 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 75 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
 - `workflow tools list`
 - `workflow tools search <text> [--exact]`
-- `workflow tools describe <tool|alias>`
-- `workflow tools call <tool|alias> --input-json '{...}'`
+- `workflow tools describe <tool|alias|entrypoint>`
+- `workflow tools call <tool|alias|entrypoint> --input-json '{...}'`
 - single-result searches print the direct describe and entrypoint commands
 
 ## Catalog Summary
@@ -21,6 +21,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
 | `praxis_friction` | `evidence` | `advanced` | - | `read` | View the friction ledger — a record of every time a guardrail blocked or warned about an action (scope violations, secret leaks, policy bounces). |
 | `praxis_receipts` | `evidence` | `advanced` | - | `read` | Search through past workflow results and analyze costs. Every workflow run produces receipts — this tool lets you search them by keyword and analyze token/cost spending. |
+| `praxis_audit_primitive` | `general` | `advanced` | - | `read` | Generic scan/plan/resolve surface for platform audits (wiring, governance, drift). Call action='playbook' first to read the structured usage guide; then 'registered' to discover audits/patterns, 'plan' to see findings + proposed actions, 'apply' to execute auto-safe patterns. Code-editing patterns are gated behind autorun_ok=False and never fire from 'apply'. |
 | `praxis_data_dictionary` | `general` | `advanced` | - | `read` | Unified data dictionary authority. Auto-projects field descriptors for every injected object (tables, object_types, integrations, datasets, ingest payloads, operator decisions, receipts, MCP tools). Operator overrides win over projected rows. |
 | `praxis_data_dictionary_classifications` | `general` | `advanced` | - | `read` | Classification / tag authority for data dictionary objects. Auto-projected from name heuristics (PII detectors, credential tokens, owner columns) and structural type hints. Operator tags take precedence. |
 | `praxis_data_dictionary_drift` | `general` | `advanced` | - | `read` | Schema-drift detector for the data dictionary. Snapshots the field inventory each heartbeat, diffs successive snapshots, and reports cross-axis impact (PII dropped, downstream consumers affected, quality rules orphaned, stewards to notify). High-severity drift (P0/P1) auto-files dedupe-keyed governance bugs. |
@@ -29,6 +30,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_data_dictionary_lineage` | `general` | `advanced` | - | `read` | Directed lineage graph over data dictionary objects. Auto-projected from Postgres FK constraints, view dependencies, dataset_promotions, integration manifests, and MCP tool input schemas. Operator-authored edges take precedence. |
 | `praxis_data_dictionary_quality` | `general` | `advanced` | - | `read` | Declarative data-quality rules + their runs. Auto-projected from Postgres schema (NOT NULL, UNIQUE, FK referential checks) with operator overrides. |
 | `praxis_data_dictionary_stewardship` | `general` | `advanced` | - | `read` | Stewardship authority for data dictionary objects. Auto-projected from audit-column names, namespace prefix → service owner, and known projector modules. Operator stewards take precedence. |
+| `praxis_data_dictionary_wiring_audit` | `general` | `advanced` | - | `read` | Wiring + hard-path audit over Praxis. Reports two classes of issue that bloat attention and/or break on VPS migration: (1) hardcoded paths / localhost / ports in source; (2) unwired authority rows — operator decisions nothing cites, and data-dictionary tables zero code references. No automatic bug filing; the output is a report the operator reviews. |
 | `praxis_governance` | `governance` | `advanced` | - | `read` | Safety checks before launching a workflow. Scan prompts for leaked secrets (API keys, tokens, passwords) or verify that a set of file paths falls within allowed scope. |
 | `praxis_heal` | `governance` | `advanced` | - | `read` | Diagnose why a workflow job failed and get a recommended recovery action: retry (transient error), escalate (needs human attention), skip (non-critical), or halt (stop the pipeline). |
 | `praxis_integration` | `integration` | `advanced` | `workflow integration` | `launch`, `read`, `write` | Call, list, or describe registered integrations (API connectors, webhooks, and other external services). |
@@ -44,11 +46,11 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_daily_heartbeat` | `operations` | `advanced` | `workflow heartbeat` | `read` | Run one daily-heartbeat probe cycle on demand and persist the results to heartbeat_runs + heartbeat_probe_snapshots. Probes cover provider CLI usage (claude/codex/gemini latency + token counts), connector liveness (catalog health), credential expiry (keychain/env API keys + OAuth tokens), and MCP server liveness (stdio initialize handshake). |
 | `praxis_dataset` | `operations` | `stable` | `workflow dataset` | `read`, `write` | Praxis dataset refinery: turn evidence-linked execution receipts into curated, lineage-preserving training and eval data for specialist SLMs (slm/review first). |
 | `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
-| `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, memory graph health, and projection freshness (event-log cursors + process-cache refresh lag). |
+| `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, memory graph health, and projection freshness (event-log cursors + process-cache refresh lag) with SLA alerts and a read-side circuit-breaker verdict. |
 | `praxis_heartbeat` | `operations` | `advanced` | - | `read`, `write` | Run or check the knowledge graph maintenance cycle. The heartbeat syncs receipts, bugs, constraints, and friction events into the knowledge graph, mines relationships between entities, generates daily/weekly rollups, and archives stale nodes. |
 | `praxis_metrics_reset` | `operations` | `advanced` | - | `write` | Reset observability metrics through explicit operator maintenance authority. |
 | `praxis_orient` | `operations` | `curated` | `workflow orient` | `read` | Fresh-agent orientation: returns the canonical orient payload (standing orders, authority envelope, tool guidance, recent activity, endpoints, health). The single best first call for any LLM agent or operator waking up cold against Praxis. Delegates to the same authority that serves POST /orient so HTTP and MCP consumers see identical shape. |
-| `praxis_reload` | `operations` | `advanced` | - | `write` | Clear all in-process caches so DB and config changes take effect without restarting Claude Desktop. |
+| `praxis_reload` | `operations` | `advanced` | - | `write` | Clear in-process caches and optionally importlib.reload runtime modules so DB, config, and code changes take effect without restarting the MCP subprocess. |
 | `praxis_semantic_bridges_backfill` | `operations` | `advanced` | - | `write` | Replay semantic bridges from canonical operator authority into semantic assertions. |
 | `praxis_semantic_projection_refresh` | `operations` | `advanced` | - | `write` | Refresh the semantic projection through explicit operator maintenance authority. |
 | `praxis_status_snapshot` | `operations` | `advanced` | - | `read` | Read the canonical workflow status snapshot — pass rate, failure mix, queue depth, and in-flight run summaries from receipt authority. |
@@ -57,6 +59,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_operator_architecture_policy` | `operator` | `advanced` | - | `write` | Record a durable architecture-policy decision in operator authority. |
 | `praxis_operator_closeout` | `operator` | `advanced` | - | `read`, `write` | Preview or commit proof-backed bug and roadmap closeout through the shared reconciliation gate. |
 | `praxis_operator_decisions` | `operator` | `advanced` | - | `read`, `write` | List or record canonical operator decisions through the shared operator_decisions table. |
+| `praxis_operator_ideas` | `operator` | `advanced` | - | `read`, `write` | Record, resolve, promote, or list pre-commitment operator ideas. Ideas are upstream of roadmap commitment: they may be rejected, superseded, archived, or promoted into existing roadmap items, but roadmap itself does not gain a canceled state. |
 | `praxis_operator_native_primary_cutover_gate` | `operator` | `advanced` | - | `write` | Admit a native primary cutover gate into operator-control decision and gate authority tables. |
 | `praxis_operator_relations` | `operator` | `advanced` | - | `write` | Record canonical functional areas and cross-object semantic relations. |
 | `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | Read one roadmap subtree and its dependency edges from DB-backed authority. |
@@ -174,7 +177,7 @@ Example input:
 - When to use: Inspect the bug tracker, run keyword or hybrid search, file a new bug, or drive replay-ready bug workflows.
 - When not to use: Do not use it for general system status or semantic knowledge search.
 - Recommended alias: `workflow bugs`
-- Selector: `action`; default `list`; values `list`, `file`, `search`, `stats`, `packet`, `history`, `replay`, `backfill_replay`, `attach_evidence`, `patch_resume`, `resolve`
+- Selector: `action`; default `list`; values `list`, `file`, `search`, `duplicate_check`, `stats`, `packet`, `history`, `replay`, `backfill_replay`, `attach_evidence`, `patch_resume`, `resolve`
 - Required args: (none)
 
 Example input:
@@ -253,6 +256,27 @@ Example input:
 
 ### General
 
+#### `praxis_audit_primitive`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_audit_primitive`
+- CLI schema help: `workflow tools describe praxis_audit_primitive`
+- When to use: An audit-remediation job; a scheduled cleanup heartbeat; operator wants to know 'what can be fixed right now with zero risk?'. Always start with `playbook` + `plan` before any `apply`.
+- When not to use: Don't use for one-off fact-finding on a specific finding — that's what the individual audit tools (praxis_data_dictionary_wiring_audit, etc.) are for. Don't use for code-edit fixes — the primitive doesn't touch source files.
+- Selector: `action`; default `playbook`; values `playbook`, `registered`, `plan`, `apply`, `contracts`, `execute_contract`, `execute_all_contracts`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "playbook"
+}
+```
+
 #### `praxis_data_dictionary`
 
 - Surface: `general`
@@ -284,7 +308,7 @@ Example input:
 - CLI schema help: `workflow tools describe praxis_data_dictionary_classifications`
 - When to use: Identify which fields carry PII / credentials / ownership labels, or override heuristic tags with operator authority.
 - When not to use: Not a field descriptor browser — use praxis_data_dictionary for field-level reads and operator overrides.
-- Selector: `action`; default `summary`; values `summary`, `describe`, `by_tag`, `set`, `clear`, `reproject`
+- Selector: `action`; default `summary`; values `summary`, `describe`, `by_tag`, `tags`, `set`, `clear`, `reproject`
 - Required args: (none)
 
 Example input:
@@ -420,6 +444,27 @@ Example input:
 ```json
 {
   "action": "summary"
+}
+```
+
+#### `praxis_data_dictionary_wiring_audit`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary_wiring_audit`
+- CLI schema help: `workflow tools describe praxis_data_dictionary_wiring_audit`
+- When to use: Before VPS migration, or any time the platform feels noisy — the report separates 'attention debt' (unwired authority) from 'deployment debt' (hardcoded paths).
+- When not to use: Don't use to fix things — this is read-only lint. For fixes, the findings point you at file:line locations to edit or authority rows to retire.
+- Selector: `action`; default `all`; values `all`, `hard_paths`, `decisions`, `orphans`, `trend`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "all"
 }
 ```
 
@@ -1038,6 +1083,28 @@ Example input:
 }
 ```
 
+#### `praxis_operator_ideas`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow tools call praxis_operator_ideas`
+- CLI schema help: `workflow tools describe praxis_operator_ideas`
+- When to use: Capture pre-commitment ideas, reject/supersede/archive them, or promote them into committed roadmap items.
+- When not to use: Do not use it as a substitute for committed roadmap work; use praxis_operator_write once scope is committed.
+- Selector: `action`; default `list`; values `list`, `file`, `resolve`, `promote`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "list",
+  "limit": 25
+}
+```
+
 #### `praxis_operator_native_primary_cutover_gate`
 
 - Surface: `operator`
@@ -1094,7 +1161,7 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow tools call praxis_operator_roadmap_view`
 - CLI schema help: `workflow tools describe praxis_operator_roadmap_view`
-- When to use: Read one roadmap subtree, its dependency edges, and semantic-first external neighbors without mutating roadmap authority.
+- When to use: Read one roadmap subtree, derived clusters, dependency edges, and semantic-first external neighbors without mutating roadmap authority.
 - When not to use: Do not use it to commit roadmap changes.
 - Selector: none
 - Required args: (none)

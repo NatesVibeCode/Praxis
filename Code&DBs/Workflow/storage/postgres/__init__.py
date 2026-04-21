@@ -95,6 +95,7 @@ from .receipt_repository import PostgresReceiptRepository
 from .evidence_repository import PostgresEvidenceRepository
 from .compile_artifact_repository import PostgresCompileArtifactRepository
 from .command_repository import PostgresCommandRepository
+from .debate_metrics_repository import PostgresDebateMetricsRepository
 from .friction_repository import PostgresFrictionRepository
 from .uploaded_file_repository import PostgresUploadedFileRepository
 from .operator_idea_repository import PostgresOperatorIdeaRepository
@@ -138,6 +139,7 @@ __all__ = [
     "PostgresBugEvidenceRepository",
     "PostgresConfigurationError",
     "PostgresCommandRepository",
+    "PostgresDebateMetricsRepository",
     "PostgresFrictionRepository",
     "PostgresMemoryGraphRepository",
     "PostgresObservabilityMaintenanceRepository",

@@ -661,32 +661,87 @@ def _dry_run_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _chain_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow chain <spec1.json> <spec2.json> ...`.
+    """Handle `workflow chain <coordination.json>` or legacy `<spec1> <spec2> ...`.
 
-    Submits multiple specs as a sequential chain where each job depends
-    on the previous one succeeding. Returns JSON array of job_ids.
+    Two modes:
+
+    1. **Coordination-program mode** (preferred, for multi-wave DAGs): one
+       positional arg pointing at a coordination JSON (``config/cascade/chain/*.json``)
+       whose top-level object has a ``waves`` key. Submits via the durable
+       ``WorkflowChainProgram`` command bus (BUG-61881910).
+
+    2. **Legacy sequential mode**: two or more spec paths. Each job depends on
+       the previous one succeeding. Uses ``submit_chain``.
+
+    The two shapes are distinguished by (a) arg count and (b) JSON content.
     """
 
     import json as _json
-
-    from runtime.workflow_spec import load_workflow_spec
-    from runtime.job_dependencies import submit_chain
+    from pathlib import Path as _Path
 
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow chain <spec1.json> <spec2.json> ...\n"
+            "usage: workflow chain <coordination.json>\n"
+            "       workflow chain <spec1.json> <spec2.json> ...\n"
             "\n"
-            "Submit multiple specs as a sequential job chain.\n"
-            "Each job depends on the previous one succeeding.\n"
+            "Coordination-program mode: single JSON with a top-level 'waves' key\n"
+            "(e.g. config/cascade/chain/mobile_oversight_program.json) is submitted\n"
+            "via the durable multi-wave chain command bus.\n"
+            "\n"
+            "Legacy sequential mode: two or more spec paths submit a job chain where\n"
+            "each job depends on the previous one succeeding.\n"
+            "\n"
+            "Options (coordination-program mode only):\n"
+            "  --no-adopt-active   do not adopt an already-active chain for this program\n"
         )
         return 2
 
-    if len(args) < 2:
+    # Strip coordination-program-only flags before file detection.
+    adopt_active = True
+    positional: list[str] = []
+    for arg in args:
+        if arg == "--no-adopt-active":
+            adopt_active = False
+        elif arg in {"--adopt-active"}:
+            adopt_active = True
+        else:
+            positional.append(arg)
+
+    # --- Coordination-program detection --------------------------------
+    if len(positional) == 1:
+        coord_path = positional[0]
+        path_obj = _Path(coord_path)
+        if not path_obj.exists():
+            stdout.write(f"error: spec file not found: {coord_path}\n")
+            return 1
+        try:
+            raw = _json.loads(path_obj.read_text(encoding="utf-8"))
+        except _json.JSONDecodeError as exc:
+            stdout.write(f"error: invalid JSON in {coord_path}: {exc}\n")
+            return 1
+        if isinstance(raw, dict) and "waves" in raw:
+            return _submit_coordination_chain(
+                coord_path,
+                adopt_active=adopt_active,
+                stdout=stdout,
+            )
+        # Single file but not a coordination program → legacy requires 2+.
+        stdout.write(
+            "error: legacy chain mode requires at least 2 spec files, "
+            "or a single coordination-program JSON with a top-level 'waves' key\n"
+        )
+        return 2
+
+    # --- Legacy sequential chain ---------------------------------------
+    from runtime.workflow_spec import load_workflow_spec
+    from runtime.job_dependencies import submit_chain
+
+    if len(positional) < 2:
         stdout.write("error: chain requires at least 2 spec files\n")
         return 2
 
     specs = []
-    for spec_path in args:
+    for spec_path in positional:
         try:
             spec = load_workflow_spec(spec_path)
             specs.append(spec)
@@ -704,6 +759,75 @@ def _chain_command(args: list[str], *, stdout: TextIO) -> int:
         return 1
 
     stdout.write(_json.dumps(job_ids, indent=2) + "\n")
+    return 0
+
+
+def _submit_coordination_chain(
+    coordination_path: str,
+    *,
+    adopt_active: bool,
+    stdout: TextIO,
+) -> int:
+    """Submit a durable multi-wave WorkflowChainProgram via the command bus.
+
+    This is the CLI frontdoor for ``config/cascade/chain/<program>.json``
+    coordination JSONs (BUG-61881910). Symmetric with ``workflow run`` for
+    single specs — both go through a durable request/render command bus path.
+    """
+    import json as _json
+
+    from runtime.control_commands import (
+        render_workflow_chain_submit_response,
+        request_workflow_chain_submit_command,
+    )
+
+    try:
+        from surfaces.mcp.subsystems import _subs  # type: ignore[import-not-found]
+        pg_conn = _subs.get_pg_conn()
+    except Exception:
+        # Fall back to direct storage bootstrap when running outside the
+        # MCP server process (e.g. headless terminal launches).
+        from storage.postgres.connection import get_sync_postgres_connection
+        pg_conn = get_sync_postgres_connection()
+
+    try:
+        from runtime.workflow_chain import WorkflowChainError
+    except ImportError:
+        WorkflowChainError = Exception  # type: ignore[assignment]
+
+    import os as _os
+    repo_root = _os.environ.get("PRAXIS_REPO_ROOT") or _os.getcwd()
+
+    try:
+        command = request_workflow_chain_submit_command(
+            pg_conn,
+            requested_by_kind="cli",
+            requested_by_ref="workflow.chain",
+            coordination_path=coordination_path,
+            repo_root=repo_root,
+            adopt_active=adopt_active,
+        )
+        result = render_workflow_chain_submit_response(
+            pg_conn,
+            command,
+            coordination_path=coordination_path,
+        )
+    except WorkflowChainError as exc:
+        stdout.write(_json.dumps(
+            {"status": "failed", "error": str(exc)}, default=str, indent=2
+        ) + "\n")
+        return 1
+    except Exception as exc:
+        stdout.write(_json.dumps(
+            {"status": "failed", "error": f"{type(exc).__name__}: {exc}"},
+            default=str, indent=2,
+        ) + "\n")
+        return 1
+
+    stdout.write(_json.dumps(result, default=str, indent=2) + "\n")
+    status_value = str(result.get("status") or "").lower()
+    if status_value in {"failed", "approval_required"}:
+        return 1
     return 0
 
 

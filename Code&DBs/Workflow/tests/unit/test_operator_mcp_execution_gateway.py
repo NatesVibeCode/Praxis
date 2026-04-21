@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from storage.postgres.validators import PostgresConfigurationError
 from surfaces.mcp.tools import operator
 
 
@@ -81,6 +82,30 @@ def test_mcp_operator_closeout_normalizes_missing_sequences(monkeypatch) -> None
     assert captured["operation_name"] == "operator.work_item_closeout"
     assert captured["payload"]["bug_ids"] == []
     assert captured["payload"]["roadmap_item_ids"] == []
+
+
+def test_mcp_operator_catalog_tool_returns_structured_error_when_authority_unavailable(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _raise_unavailable(*_args, **_kwargs):
+        raise PostgresConfigurationError(
+            "postgres.authority_unavailable",
+            "WORKFLOW_DATABASE_URL authority unavailable",
+            details={"operation": "operator.replay_ready_bugs"},
+        )
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _raise_unavailable)
+
+    result = operator.tool_praxis_replay_ready_bugs({"limit": 10})
+
+    assert result == {
+        "error": "WORKFLOW_DATABASE_URL authority unavailable",
+        "error_code": "postgres.authority_unavailable",
+        "operation_name": "operator.replay_ready_bugs",
+        "details": {"operation": "operator.replay_ready_bugs"},
+    }
 
 
 def test_mcp_operator_ideas_uses_operation_catalog_gateway(monkeypatch) -> None:

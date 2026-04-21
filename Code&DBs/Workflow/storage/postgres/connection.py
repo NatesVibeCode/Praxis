@@ -16,7 +16,9 @@ from .validators import PostgresConfigurationError, PostgresStorageError
 from storage.migrations import workflow_compile_authority_readiness_tables
 
 WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
+WORKFLOW_POOL_ACQUIRE_TIMEOUT_ENV = "WORKFLOW_POOL_ACQUIRE_TIMEOUT_S"
 _POSTGRES_SCHEMES = ("postgresql://", "postgres://")
+_DEFAULT_POOL_ACQUIRE_TIMEOUT_S = 5.0
 
 _workflow_pool: asyncpg.Pool | None = None
 _workflow_pool_dsn: str | None = None
@@ -61,6 +63,41 @@ def _normalize_authority_error(
             f"{type(exc).__name__}: {exc}"
         ),
         details=details,
+    )
+
+
+def _pool_acquire_timeout_s() -> float:
+    raw_value = os.environ.get(WORKFLOW_POOL_ACQUIRE_TIMEOUT_ENV)
+    if raw_value is None:
+        return _DEFAULT_POOL_ACQUIRE_TIMEOUT_S
+    try:
+        timeout = float(raw_value)
+    except (TypeError, ValueError):
+        return _DEFAULT_POOL_ACQUIRE_TIMEOUT_S
+    return timeout if timeout > 0 else _DEFAULT_POOL_ACQUIRE_TIMEOUT_S
+
+
+def _pool_acquire_timeout_error(
+    exc: BaseException,
+    *,
+    operation: str,
+    timeout_s: float,
+    database_url: str | None,
+) -> PostgresConfigurationError:
+    return PostgresConfigurationError(
+        "postgres.pool_acquire_timeout",
+        (
+            "Postgres connection pool acquire timed out "
+            f"after {timeout_s:g}s during {operation}"
+        ),
+        details={
+            "environment_variable": WORKFLOW_DATABASE_URL_ENV,
+            "database_url": database_url or "",
+            "operation": operation,
+            "timeout_s": timeout_s,
+            "cause_type": type(exc).__name__,
+            "cause_message": str(exc),
+        },
     )
 
 
@@ -252,6 +289,7 @@ class SyncPostgresConnection:
         self._pool = pool
         self._singleton_managed = pool is _workflow_pool
         self._database_url = _workflow_pool_dsn if self._singleton_managed else None
+        self._pool_acquire_timeout_s = _pool_acquire_timeout_s()
         self._authority_scope = _workflow_authority_scope or _WorkflowAuthorityScope(
             cache_key=f"workflow_pool:{id(pool)}",
         )
@@ -269,35 +307,63 @@ class SyncPostgresConnection:
         self._authority_cache_key = self._authority_scope.cache_key
         return self._pool
 
+    async def _with_connection(self, operation: str, callback):
+        try:
+            async with self._pool_handle().acquire(timeout=self._pool_acquire_timeout_s) as conn:
+                return await callback(conn)
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            raise _pool_acquire_timeout_error(
+                exc,
+                operation=operation,
+                timeout_s=self._pool_acquire_timeout_s,
+                database_url=self._database_url,
+            ) from exc
+
     def execute(self, query: str, *args) -> list:
         async def _do():
-            async with self._pool_handle().acquire() as conn:
-                return await conn.fetch(query, *args)
+            return await self._with_connection(
+                "execute",
+                lambda conn: conn.fetch(query, *args),
+            )
         return _run_sync(_do())
 
     def fetch(self, query: str, *args) -> list:
         async def _do():
-            async with self._pool_handle().acquire() as conn:
-                return await conn.fetch(query, *args)
+            return await self._with_connection(
+                "fetch",
+                lambda conn: conn.fetch(query, *args),
+            )
         return _run_sync(_do())
 
     def fetchrow(self, query: str, *args):
         async def _do():
-            async with self._pool_handle().acquire() as conn:
-                return await conn.fetchrow(query, *args)
+            return await self._with_connection(
+                "fetchrow",
+                lambda conn: conn.fetchrow(query, *args),
+            )
         return _run_sync(_do())
 
     def fetchval(self, query: str, *args):
         async def _do():
-            async with self._pool_handle().acquire() as conn:
-                return await conn.fetchval(query, *args)
+            return await self._with_connection(
+                "fetchval",
+                lambda conn: conn.fetchval(query, *args),
+            )
         return _run_sync(_do())
 
     @contextmanager
     def transaction(self):
         async def _begin():
             pool = self._pool_handle()
-            conn = await pool.acquire()
+            try:
+                conn = await pool.acquire(timeout=self._pool_acquire_timeout_s)
+            except (asyncio.TimeoutError, TimeoutError) as exc:
+                raise _pool_acquire_timeout_error(
+                    exc,
+                    operation="transaction.begin",
+                    timeout_s=self._pool_acquire_timeout_s,
+                    database_url=self._database_url,
+                ) from exc
             tx = conn.transaction()
             await tx.start()
             return pool, conn, tx
@@ -319,14 +385,18 @@ class SyncPostgresConnection:
 
     def execute_many(self, query: str, args_list: list):
         async def _do():
-            async with self._pool_handle().acquire() as conn:
-                await conn.executemany(query, args_list)
+            return await self._with_connection(
+                "execute_many",
+                lambda conn: conn.executemany(query, args_list),
+            )
         _run_sync(_do())
 
     def execute_script(self, sql: str):
         async def _do():
-            async with self._pool_handle().acquire() as conn:
-                await conn.execute(sql)
+            return await self._with_connection(
+                "execute_script",
+                lambda conn: conn.execute(sql),
+            )
         _run_sync(_do())
 
     def close(self) -> None:

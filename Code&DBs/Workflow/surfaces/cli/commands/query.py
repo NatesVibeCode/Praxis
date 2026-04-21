@@ -823,20 +823,22 @@ def _query_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 # ---------------------------------------------------------------------------
-# workflow bugs [list|search|stats] — bug tracker surface
+# workflow bugs [list|search|duplicate_check|stats] — bug tracker surface
 # ---------------------------------------------------------------------------
 
 def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow bugs [list|search <query>|stats] [--status S] [--severity S] [--json]`."""
+    """Handle `workflow bugs [list|search <query>|duplicate_check <query>|stats] ...`."""
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
             "usage: workflow bugs "
-            "[list|search <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve] "
+            "[list|search <query>|duplicate_check <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve] "
             "[--status S] [--severity S] [--limit N] [--json]\n"
             "\n"
             "  list               List bugs (default: open only)\n"
             "  search <query>     Hybrid bug search (Postgres FTS plus vector ranking when enabled)\n"
+            "  duplicate_check <query>\n"
+            "                     Fast title-like duplicate check without replay or cluster enrichment\n"
             "  stats              Bug counts by category/severity/status\n"
             "  file               File a new bug\n"
             "  history            Show bug history and linked evidence\n"
@@ -854,6 +856,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "\n"
             "  Examples:\n"
             "    workflow bugs list --severity P1\n"
+            "    workflow bugs duplicate_check 'routing timeout'\n"
             "    workflow bugs search routing\n"
             "    workflow bugs search timeout --status OPEN --limit 5\n"
             "    workflow bugs stats\n"
@@ -874,7 +877,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     if args and not args[0].startswith("-"):
         action = args[0].replace("-", "_")
         i = 1
-        if action == "search" and i < len(args) and not args[i].startswith("-"):
+        if action in {"search", "duplicate_check"} and i < len(args) and not args[i].startswith("-"):
             search_query = args[i]
             i += 1
 
@@ -1083,6 +1086,8 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     params["limit"] = limit
     if action == "search":
         params["title"] = search_query
+    if action == "duplicate_check":
+        params["title_like"] = search_query
     if status_filter:
         params["status"] = status_filter
     if severity_filter:
@@ -1091,7 +1096,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
         params["open_only"] = True
 
     exit_code, payload = run_cli_tool("praxis_bugs", params)
-    if as_json or action == "stats" or action not in {"list", "search"}:
+    if as_json or action == "stats" or action not in {"list", "search", "duplicate_check"}:
         print_json(stdout, payload)
         return exit_code
     render_bug_payload(payload, stdout=stdout)

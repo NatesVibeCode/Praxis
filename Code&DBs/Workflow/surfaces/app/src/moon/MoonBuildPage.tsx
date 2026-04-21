@@ -1594,6 +1594,15 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                   margin: '0 auto',
                   minHeight: MOON_LAYOUT.minGraphHeight,
                 }}
+                onClick={(e) => {
+                  // Focus-lineage deselect: clicking the bare canvas
+                  // background restores the rest state. Nodes and edge
+                  // pods stop propagation via their own click handlers,
+                  // so this only fires on empty canvas clicks.
+                  if (e.target === e.currentTarget && state.viewMode !== 'run') {
+                    dispatch({ type: 'SELECT_NODE', nodeId: null });
+                  }
+                }}
               >
                 <MoonEdges
                   edges={viewModel.edges}
@@ -1614,13 +1623,25 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       ? `${control.label} path`
                       : control.label;
 
+                    // Focus-lineage dim: edge gate pods outside the selected
+                    // lineage drop to near-invisible so their "On success /
+                    // On any / Else path" labels stop shouting when the user
+                    // is inspecting a different branch. inLineage defaults
+                    // true at rest, so nothing dims until a node is selected.
+                    const gateOpacity = control.edge.inLineage ? 1 : 0.2;
                     return (
                       <div
                         key={control.edge.id}
                         className={`moon-graph-gate moon-graph-gate--${control.tone}${isSelected ? ' moon-graph-gate--selected' : ''}${isDragOver ? ' moon-graph-gate--drag-over' : ''}${control.edge.gateFamily ? ` moon-graph-gate--family-${control.edge.gateFamily}` : ''}`}
-                        style={{ left: control.centerX, top: control.centerY }}
+                        style={{
+                          left: control.centerX,
+                          top: control.centerY,
+                          opacity: gateOpacity,
+                          transition: 'opacity 240ms ease',
+                        }}
                         data-drop-edge={control.edge.id}
                         data-gate-family={control.edge.gateFamily || undefined}
+                        data-in-lineage={control.edge.inLineage || undefined}
                       >
                           <button
                             type="button"
@@ -1721,13 +1742,18 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       previewTargetId === node.id ? 'moon-graph-node--drag-over' : '',
                       multiplicityAttr ? `moon-graph-node--stack moon-graph-node--stack-${multiplicityAttr}` : '',
                     ].filter(Boolean).join(' ');
+                    // Focus-lineage dim: nodes outside the selected lineage
+                    // fade to ghost. inLineage defaults true when nothing is
+                    // selected, so rest-state opacity is unchanged.
+                    const nodeOpacity = node.inLineage ? 1 : 0.28;
                     return (
                       <div
                         key={node.id}
                         className={nodeClass}
-                        style={position}
+                        style={{ ...position, opacity: nodeOpacity, transition: 'opacity 240ms ease' }}
                         data-drop-node={node.id}
                         data-multiplicity={multiplicityAttr || undefined}
+                        data-in-lineage={node.inLineage || undefined}
                         onClick={() => handleNodeClick(node.id, isSelected)}
                         onPointerDown={state.viewMode === 'run' ? undefined : e => startNodeDrag(e, node)}
                       >

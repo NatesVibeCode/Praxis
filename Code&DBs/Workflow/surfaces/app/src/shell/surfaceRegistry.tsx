@@ -173,6 +173,12 @@ export function buildShellTabs(state: ShellState): ShellTabDescriptor[] {
       closable: false,
     },
     {
+      id: 'costs',
+      label: STATIC_SURFACES.costs.getTabLabel(state),
+      kind: STATIC_SURFACES.costs.kindLabel,
+      closable: false,
+    },
+    {
       id: 'atlas',
       label: STATIC_SURFACES.atlas.getTabLabel(state),
       kind: STATIC_SURFACES.atlas.kindLabel,

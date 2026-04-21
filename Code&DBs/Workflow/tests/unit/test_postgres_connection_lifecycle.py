@@ -15,6 +15,24 @@ class _FakePool:
         self.closed = True
 
 
+class _TimeoutAcquireContext:
+    async def __aenter__(self):
+        raise TimeoutError("no pooled connections available")
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class _ExhaustedPool(_FakePool):
+    def __init__(self, label: str) -> None:
+        super().__init__(label)
+        self.acquire_timeout = None
+
+    def acquire(self, *, timeout=None):
+        self.acquire_timeout = timeout
+        return _TimeoutAcquireContext()
+
+
 def test_get_workflow_pool_rotates_when_dsn_changes(monkeypatch) -> None:
     connection_mod.shutdown_workflow_pool()
     created: list[_FakePool] = []
@@ -122,6 +140,21 @@ def test_sync_connection_rebinds_closed_singleton_pool(monkeypatch) -> None:
     )
 
     assert conn._pool_handle() is second
+
+
+def test_sync_connection_pool_acquire_timeout_is_typed(monkeypatch) -> None:
+    monkeypatch.setenv(connection_mod.WORKFLOW_POOL_ACQUIRE_TIMEOUT_ENV, "0.25")
+    pool = _ExhaustedPool("postgresql://example")
+    conn = connection_mod.SyncPostgresConnection(pool)
+
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        conn.fetchval("SELECT 1")
+
+    assert pool.acquire_timeout == 0.25
+    assert exc_info.value.reason_code == "postgres.pool_acquire_timeout"
+    assert exc_info.value.details["operation"] == "fetchval"
+    assert exc_info.value.details["timeout_s"] == 0.25
+    assert "after 0.25s" in str(exc_info.value)
 
 
 def test_resolve_workflow_authority_cache_key_sanitizes_database_identity() -> None:

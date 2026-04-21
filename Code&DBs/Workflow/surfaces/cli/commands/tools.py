@@ -198,6 +198,21 @@ def _render_tools_search_no_matches(
         stdout.write("  rerun without one or more filters to widen the catalog slice\n")
 
 
+def _split_tool_reference_and_flags(args: list[str]) -> tuple[str, list[str]]:
+    """Split a tool reference from trailing flags.
+
+    Tool entrypoints can contain spaces, so we treat the leading non-flag
+    tokens as the tool reference and leave the rest for option parsing.
+    """
+
+    reference_tokens: list[str] = []
+    for index, arg in enumerate(args):
+        if arg.startswith("--"):
+            return " ".join(reference_tokens).strip(), args[index:]
+        reference_tokens.append(arg)
+    return " ".join(reference_tokens).strip(), []
+
+
 def _tools_help_text(topic: str | None = None) -> str:
     if topic is None:
         return _tools_quickstart_text()
@@ -225,19 +240,21 @@ def _tools_help_text(topic: str | None = None) -> str:
     if topic == "describe":
         return "\n".join(
             [
-                "usage: workflow tools describe <tool|alias> [--json]",
+                "usage: workflow tools describe <tool|alias|entrypoint> [--json]",
                 "",
                 "Show the canonical entrypoint, input schema, and example input for one tool.",
                 "Tip: accepts a unique prefix of the alias, tool name, or entrypoint.",
+                "Tip: multi-word entrypoints such as `workflow query` can be passed directly without quotes.",
             ]
         )
     if topic == "call":
         return "\n".join(
             [
-                "usage: workflow tools call <tool|alias> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]",
+                "usage: workflow tools call <tool|alias|entrypoint> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]",
                 "",
                 "Execute a tool directly from the catalog.",
                 "Tip: add --yes for write or launch tools; add --workflow-token when the catalog requires it.",
+                "Tip: multi-word entrypoints such as `workflow query` can be passed directly without quotes.",
             ]
         )
     return "\n".join(
@@ -285,6 +302,7 @@ def _tools_quickstart_text() -> str:
         [
             f"Catalog size: {len(definitions)} tools",
             "Tip: run `workflow tools list --json` for machine-readable discovery.",
+            "Tip: list/search JSON include when_to_use and when_not_to_use guidance for each tool.",
             "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
             "Tip: add `--exact` when you already know the alias, tool name, or entrypoint.",
             "Tip: if a search returns no matches, the CLI prints broadening hints instead of leaving you at zero.",
@@ -296,6 +314,24 @@ def _tools_quickstart_text() -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _tool_catalog_brief_payload(definition: McpToolDefinition) -> dict[str, object]:
+    return {
+        "name": definition.name,
+        "surface": definition.cli_surface,
+        "tier": definition.cli_tier,
+        "recommended_alias": definition.cli_recommended_alias,
+        "entrypoint": definition.cli_entrypoint,
+        "describe_command": definition.cli_describe_command,
+        "risk_levels": list(definition.risk_levels),
+        "selector_field": definition.selector_field,
+        "selector_enum": list(definition.selector_enum),
+        "required_args": list(definition.required_args),
+        "description": definition.description,
+        "when_to_use": definition.cli_when_to_use,
+        "when_not_to_use": definition.cli_when_not_to_use,
+    }
 
 
 def _tools_command(args: list[str], *, stdout: TextIO) -> int:
@@ -409,19 +445,7 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
     definitions = _filtered_tools(surface=surface, tier=tier, risk=risk)
     if as_json:
         payload = _attach_tool_list_interpretive_context([
-            {
-                "name": definition.name,
-                "surface": definition.cli_surface,
-                "tier": definition.cli_tier,
-                "recommended_alias": definition.cli_recommended_alias,
-                "entrypoint": definition.cli_entrypoint,
-                "describe_command": definition.cli_describe_command,
-                "risk_levels": list(definition.risk_levels),
-                "selector_field": definition.selector_field,
-                "selector_enum": list(definition.selector_enum),
-                "required_args": list(definition.required_args),
-                "description": definition.description,
-            }
+            _tool_catalog_brief_payload(definition)
             for definition in definitions
         ])
         print_json(stdout, payload)
@@ -499,14 +523,8 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
             stdout,
             [
                 {
-                    "name": definition.name,
-                    "surface": definition.cli_surface,
-                    "tier": definition.cli_tier,
-                    "entrypoint": definition.cli_entrypoint,
-                    "describe_command": definition.cli_describe_command,
-                    "recommended_alias": definition.cli_recommended_alias,
+                    **_tool_catalog_brief_payload(definition),
                     "badges": list(definition.cli_badges),
-                    "when_to_use": definition.cli_when_to_use,
                 }
                 for definition in definitions
             ],
@@ -557,10 +575,17 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
 
 def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
     if not args:
-        stdout.write("usage: workflow tools describe <tool|alias> [--json]\n")
+        stdout.write("usage: workflow tools describe <tool|alias|entrypoint> [--json]\n")
         return 2
-    tool_name = args[0].strip()
-    as_json = "--json" in args[1:]
+    tool_name, remainder = _split_tool_reference_and_flags(args)
+    if not tool_name:
+        stdout.write("usage: workflow tools describe <tool|alias|entrypoint> [--json]\n")
+        return 2
+    as_json = "--json" in remainder
+    unknown_args = [arg for arg in remainder if arg != "--json"]
+    if unknown_args:
+        stdout.write(f"unknown argument: {unknown_args[0]}\n")
+        return 2
     definition, candidates = _resolve_tool_definition(tool_name)
     if definition is None:
         return _render_tool_lookup_failure(tool_name, candidates, stdout=stdout)
@@ -625,10 +650,15 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
 def _tools_call_command(args: list[str], *, stdout: TextIO) -> int:
     if not args:
         stdout.write(
-            "usage: workflow tools call <tool|alias> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]\n"
+            "usage: workflow tools call <tool|alias|entrypoint> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]\n"
         )
         return 2
-    tool_name = args[0].strip()
+    tool_name, remainder = _split_tool_reference_and_flags(args)
+    if not tool_name:
+        stdout.write(
+            "usage: workflow tools call <tool|alias|entrypoint> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]\n"
+        )
+        return 2
     definition, candidates = _resolve_tool_definition(tool_name)
     if definition is None:
         return _render_tool_lookup_failure(tool_name, candidates, stdout=stdout)
@@ -637,24 +667,24 @@ def _tools_call_command(args: list[str], *, stdout: TextIO) -> int:
     input_file = None
     workflow_token = ""
     confirmed = False
-    i = 1
-    while i < len(args):
-        if args[i] == "--input-json" and i + 1 < len(args):
-            input_json = args[i + 1]
+    i = 0
+    while i < len(remainder):
+        if remainder[i] == "--input-json" and i + 1 < len(remainder):
+            input_json = remainder[i + 1]
             i += 2
-        elif args[i] == "--input-file" and i + 1 < len(args):
-            input_file = args[i + 1]
+        elif remainder[i] == "--input-file" and i + 1 < len(remainder):
+            input_file = remainder[i + 1]
             i += 2
-        elif args[i] == "--workflow-token" and i + 1 < len(args):
-            workflow_token = args[i + 1]
+        elif remainder[i] == "--workflow-token" and i + 1 < len(remainder):
+            workflow_token = remainder[i + 1]
             i += 2
-        elif args[i] == "--yes":
+        elif remainder[i] == "--yes":
             confirmed = True
             i += 1
-        elif args[i] == "--json":
+        elif remainder[i] == "--json":
             i += 1
         else:
-            stdout.write(f"unknown argument: {args[i]}\n")
+            stdout.write(f"unknown argument: {remainder[i]}\n")
             return 2
 
     if input_json is not None and input_file is not None:

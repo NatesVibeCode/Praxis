@@ -202,7 +202,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '192_heartbeat_probe_kind_model_retirement.sql',
  '193_native_self_hosted_smoke_workspace_repair.sql',
  '194_projection_freshness_sla_config.sql',
- '195_operator_ideas_authority.sql')
+ '195_operator_ideas_authority.sql',
+ '196_workflow_control_commands_view.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -421,7 +422,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '192_heartbeat_probe_kind_model_retirement.sql',
  '193_native_self_hosted_smoke_workspace_repair.sql',
  '194_projection_freshness_sla_config.sql',
- '195_operator_ideas_authority.sql')
+ '195_operator_ideas_authority.sql',
+ '196_workflow_control_commands_view.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -619,7 +621,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '192_heartbeat_probe_kind_model_retirement.sql',
                '193_native_self_hosted_smoke_workspace_repair.sql',
                '194_projection_freshness_sla_config.sql',
-               '195_operator_ideas_authority.sql'),
+               '195_operator_ideas_authority.sql',
+               '196_workflow_control_commands_view.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -841,6 +844,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '193_native_self_hosted_smoke_workspace_repair.sql': 'canonical',
  '194_projection_freshness_sla_config.sql': 'canonical',
  '195_operator_ideas_authority.sql': 'canonical',
+ '196_workflow_control_commands_view.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -2509,7 +2513,8 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                       ('constraint', 'roadmap_items_source_idea_fkey'),
                                       ('index', 'roadmap_items_source_idea_idx'),
                                       ('row',
-                                       'operation_catalog_registry.operator.ideas'))}
+                                       'operation_catalog_registry.operator.ideas')),
+ '196_workflow_control_commands_view.sql': (('view', 'workflow_control_commands'),)}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -3818,7 +3823,8 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
    ('column', 'roadmap_items.source_idea_id'),
    ('constraint', 'roadmap_items_source_idea_fkey'),
    ('index', 'roadmap_items_source_idea_idx'),
-   ('row', 'operation_catalog_registry.operator.ideas'))))
+   ('row', 'operation_catalog_registry.operator.ideas'))),
+ ('196_workflow_control_commands_view.sql', (('view', 'workflow_control_commands'),)))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_task_type_route_eligibility.sql'),
  '024': ('024_authority_checkpoints.sql', '024_task_type_routing.sql'),

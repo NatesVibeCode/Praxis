@@ -74,6 +74,26 @@ def _result(**overrides) -> WorkflowResult:
     return WorkflowResult(**defaults)
 
 
+def test_workflow_spec_construction_does_not_resolve_registry_defaults(monkeypatch):
+    from runtime.workflow import orchestrator as orchestrator_module
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "default_provider_slug",
+        lambda: (_ for _ in ()).throw(AssertionError("provider registry touched")),
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "resolve_default_adapter_type",
+        lambda _provider_slug=None: (_ for _ in ()).throw(AssertionError("adapter registry touched")),
+    )
+
+    spec = WorkflowSpec(prompt="test")
+
+    assert spec.provider_slug is None
+    assert spec.adapter_type is None
+
+
 def test_apply_workflow_preflight_returns_circuit_breaker_failure(monkeypatch):
     from runtime.workflow import _workflow_policy as policy_module
 

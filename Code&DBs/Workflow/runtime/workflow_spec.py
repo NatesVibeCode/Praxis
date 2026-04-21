@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from .workflow import WorkflowSpec as RuntimeWorkflowSpec
 
 _log = logging.getLogger(__name__)
+_PRE_RELOAD_WORKFLOW_SPEC_ERROR = globals().get("WorkflowSpecError")
+_PRE_RELOAD_WORKFLOW_SPEC = globals().get("WorkflowSpec")
 
 # ---------------------------------------------------------------------------
 # New authoring format field sets
@@ -103,10 +105,25 @@ class WorkflowSpec:
         if not isinstance(raw, dict):
             raise WorkflowSpecError(f"Spec file must contain a JSON object: {path}")
 
+        return cls.from_dict(raw)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "WorkflowSpec":
+        """Build a WorkflowSpec from an already-parsed raw dict.
+
+        Mirrors ``load()`` but skips the path validation and JSON read so callers
+        holding a dict (standalone scripts, MCP surfaces, ad hoc validation) can
+        coerce without writing to disk.
+        """
+        if not isinstance(raw, dict):
+            raise WorkflowSpecError(
+                f"WorkflowSpec.from_dict expects a dict; got {type(raw).__name__}"
+            )
+
         if _is_new_authoring_format(raw):
             return cls._load_new_format(raw)
 
-        _log.debug("Loading spec in legacy format: %s", path)
+        _log.debug("Loading spec dict in legacy format")
         return cls._load_legacy_format(raw)
 
     # ------------------------------------------------------------------
@@ -331,6 +348,35 @@ class WorkflowSpec:
             "runtime_profile_ref": self.runtime_profile_ref,
             "job_labels": [job["label"] for job in self.jobs],
         }
+
+
+def _preserve_reloaded_class_identity(previous: object, current: type) -> type:
+    """Update a pre-reload class object in place when importlib.reload runs.
+
+    The MCP hot-reload path reloads this module while CLI/test callers may
+    already hold ``WorkflowSpec`` or ``WorkflowSpecError`` references imported
+    from facade modules. Rebinding the module name alone leaves those callers
+    pointed at stale classes, so update the old class object with the new
+    implementation and keep it as the exported authority.
+    """
+
+    if not isinstance(previous, type):
+        return current
+    for name, value in current.__dict__.items():
+        if name in {"__dict__", "__weakref__"}:
+            continue
+        setattr(previous, name, value)
+    return previous
+
+
+WorkflowSpecError = _preserve_reloaded_class_identity(
+    _PRE_RELOAD_WORKFLOW_SPEC_ERROR,
+    WorkflowSpecError,
+)
+WorkflowSpec = _preserve_reloaded_class_identity(
+    _PRE_RELOAD_WORKFLOW_SPEC,
+    WorkflowSpec,
+)
 
 
 # ---------------------------------------------------------------------------

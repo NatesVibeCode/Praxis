@@ -2,55 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import uuid
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING
-
-import threading
+from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
 
 _log = logging.getLogger(__name__)
-
-_DEBATE_METRICS_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS debate_round_metrics (
-    debate_run_id TEXT NOT NULL,
-    debate_id TEXT NOT NULL,
-    round_number INTEGER NOT NULL CHECK (round_number > 0),
-    persona_position INTEGER NOT NULL DEFAULT 0 CHECK (persona_position >= 0),
-    round_id TEXT NOT NULL,
-    persona TEXT NOT NULL,
-    word_count INTEGER NOT NULL CHECK (word_count >= 0),
-    claim_count INTEGER NOT NULL CHECK (claim_count >= 0),
-    evidence_citations INTEGER NOT NULL CHECK (evidence_citations >= 0),
-    quality_score REAL NOT NULL CHECK (quality_score >= 0.0 AND quality_score <= 1.0),
-    duration_seconds REAL NOT NULL CHECK (duration_seconds >= 0.0),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (debate_run_id, round_number, persona_position)
-);
-CREATE INDEX IF NOT EXISTS debate_round_metrics_debate_idx
-    ON debate_round_metrics (debate_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS debate_round_metrics_run_idx
-    ON debate_round_metrics (debate_run_id, round_number, persona_position);
-CREATE TABLE IF NOT EXISTS debate_consensus (
-    debate_run_id TEXT PRIMARY KEY,
-    debate_id TEXT NOT NULL,
-    total_rounds INTEGER NOT NULL CHECK (total_rounds >= 0),
-    consensus_points JSONB NOT NULL DEFAULT '[]'::jsonb,
-    disagreements JSONB NOT NULL DEFAULT '[]'::jsonb,
-    avg_quality REAL NOT NULL CHECK (avg_quality >= 0.0 AND avg_quality <= 1.0),
-    synthesis_quality REAL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS debate_consensus_debate_idx
-    ON debate_consensus (debate_id, updated_at DESC);
-"""
-
 
 @dataclass(frozen=True)
 class DebateRoundMetrics:
@@ -114,8 +75,6 @@ class DebateMetricsCollector:
         self._round_positions: dict[str, list[tuple[int, int]]] = {}
         self._conn = conn
         self._debate_run_id = uuid.uuid4().hex[:16]
-        self._schema_initialized = False
-        self._schema_lock = threading.Lock()
         self._persistence_disabled = False
         self._persisted_round_keys: set[tuple[str, int, int]] = set()
         self._persisted_consensus_runs: set[str] = set()
@@ -144,17 +103,10 @@ class DebateMetricsCollector:
             _log.warning("debate metrics persistence disabled: %s", exc)
             return None
 
-    def _ensure_schema(self, conn: "SyncPostgresConnection") -> None:
-        if self._schema_initialized:
-            return
-        with self._schema_lock:
-            if self._schema_initialized:
-                return
-            execute_script = getattr(conn, "execute_script", None)
-            if execute_script is None:
-                raise RuntimeError("debate metrics connection does not support execute_script()")
-            execute_script(_DEBATE_METRICS_SCHEMA_SQL)
-            self._schema_initialized = True
+    def _repository(self, conn: "SyncPostgresConnection"):
+        from storage.postgres import PostgresDebateMetricsRepository
+
+        return PostgresDebateMetricsRepository(conn)
 
     def _persist_round(
         self,
@@ -170,37 +122,18 @@ class DebateMetricsCollector:
         if conn is None:
             return
         try:
-            self._ensure_schema(conn)
-            conn.execute(
-                """
-                INSERT INTO debate_round_metrics (
-                    debate_run_id, debate_id, round_number, persona_position,
-                    round_id, persona, word_count, claim_count,
-                    evidence_citations, quality_score, duration_seconds, created_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-                ON CONFLICT (debate_run_id, round_number, persona_position) DO UPDATE SET
-                    debate_id = EXCLUDED.debate_id,
-                    round_id = EXCLUDED.round_id,
-                    persona = EXCLUDED.persona,
-                    word_count = EXCLUDED.word_count,
-                    claim_count = EXCLUDED.claim_count,
-                    evidence_citations = EXCLUDED.evidence_citations,
-                    quality_score = EXCLUDED.quality_score,
-                    duration_seconds = EXCLUDED.duration_seconds,
-                    created_at = NOW()
-                """,
-                self._debate_run_id,
-                metric.debate_id,
-                round_number,
-                persona_position,
-                metric.round_id,
-                metric.persona,
-                metric.word_count,
-                metric.claim_count,
-                metric.evidence_citations,
-                metric.quality_score,
-                metric.duration_seconds,
+            self._repository(conn).upsert_round_metric(
+                debate_run_id=self._debate_run_id,
+                debate_id=metric.debate_id,
+                round_number=round_number,
+                persona_position=persona_position,
+                round_id=metric.round_id,
+                persona=metric.persona,
+                word_count=metric.word_count,
+                claim_count=metric.claim_count,
+                evidence_citations=metric.evidence_citations,
+                quality_score=metric.quality_score,
+                duration_seconds=metric.duration_seconds,
             )
             self._persisted_round_keys.add((self._debate_run_id, round_number, persona_position))
         except Exception as exc:
@@ -219,31 +152,14 @@ class DebateMetricsCollector:
         if conn is None:
             return
         try:
-            self._ensure_schema(conn)
-            conn.execute(
-                """
-                INSERT INTO debate_consensus (
-                    debate_run_id, debate_id, total_rounds,
-                    consensus_points, disagreements, avg_quality,
-                    synthesis_quality, created_at, updated_at
-                )
-                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, NOW(), NOW())
-                ON CONFLICT (debate_run_id) DO UPDATE SET
-                    debate_id = EXCLUDED.debate_id,
-                    total_rounds = EXCLUDED.total_rounds,
-                    consensus_points = EXCLUDED.consensus_points,
-                    disagreements = EXCLUDED.disagreements,
-                    avg_quality = EXCLUDED.avg_quality,
-                    synthesis_quality = EXCLUDED.synthesis_quality,
-                    updated_at = NOW()
-                """,
-                self._debate_run_id,
-                metric.debate_id,
-                metric.total_rounds,
-                json.dumps(list(metric.consensus_points)),
-                json.dumps(list(metric.disagreements)),
-                metric.avg_quality,
-                metric.synthesis_quality,
+            self._repository(conn).upsert_consensus_metric(
+                debate_run_id=self._debate_run_id,
+                debate_id=metric.debate_id,
+                total_rounds=metric.total_rounds,
+                consensus_points=metric.consensus_points,
+                disagreements=metric.disagreements,
+                avg_quality=metric.avg_quality,
+                synthesis_quality=metric.synthesis_quality,
             )
             self._persisted_consensus_runs.add(self._debate_run_id)
         except Exception as exc:

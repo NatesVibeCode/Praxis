@@ -9,6 +9,19 @@ from unittest.mock import patch
 from surfaces.api import rest
 
 
+def test_workflow_run_request_construction_does_not_resolve_registry_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(
+        rest,
+        "_default_workflow_provider_slug",
+        lambda: (_ for _ in ()).throw(AssertionError("provider registry touched")),
+    )
+
+    req = rest.WorkflowRunRequest(prompt="Draft the support report")
+
+    assert req.provider_slug is None
+    assert req.adapter_type is None
+
+
 def test_submit_queue_job_uses_command_bus_helper(tmp_path, monkeypatch) -> None:
     temp_dir = tmp_path / "artifacts" / "workflow"
     temp_dir.mkdir(parents=True, exist_ok=True)

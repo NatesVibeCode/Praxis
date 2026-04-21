@@ -86,12 +86,13 @@ describe('AppShell', () => {
     expect(screen.getByText('App builder')).toBeInTheDocument();
   });
 
-  test('switches into the cost summary surface from the shell tabs', async () => {
+  test('switches into the cost summary surface from the shell navigation menu', async () => {
     render(<AppShell />);
 
     await screen.findByText('Dashboard Surface');
 
-    fireEvent.click(screen.getByRole('tab', { name: /cost summary/i }));
+    fireEvent.click(screen.getByRole('button', { name: /workspace new/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /cost summary/i }));
 
     await screen.findByText('Costs Surface');
     expect(screen.getByText('Cost ledger')).toBeInTheDocument();

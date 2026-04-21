@@ -50,7 +50,10 @@ def _slow_http_server(
             del format, args
             return
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    except PermissionError as exc:
+        pytest.skip(f"loopback HTTP bind unavailable in this sandbox: {exc}")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -100,7 +103,10 @@ def _slow_streaming_http_server(
             del format, args
             return
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    try:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    except PermissionError as exc:
+        pytest.skip(f"loopback HTTP bind unavailable in this sandbox: {exc}")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

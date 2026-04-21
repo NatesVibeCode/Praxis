@@ -97,6 +97,10 @@ function renderBlocks(blocks: Block[]): string {
 }
 
 export function MarkdownRenderer({ content }: { content: string }) {
+  if (!content) {
+    return <div className="ws-md" />;
+  }
+
   const lines = (content ?? '').split('\n');
   const blocks: Block[] = [];
   const listStack: Array<{ indent: number; list: ListBlock }> = [];

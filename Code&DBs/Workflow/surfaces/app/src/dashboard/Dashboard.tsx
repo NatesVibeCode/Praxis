@@ -531,47 +531,6 @@ export function Dashboard({
       .filter((workflow): workflow is Workflow => workflow !== undefined),
   }));
 
-  const summaryCards = [
-    {
-      eyebrow: 'Runs today',
-      value: loading ? '...' : String(summary.runs_24h),
-      detail: summary.active_runs > 0 ? `${summary.active_runs} running right now` : 'No active runs at the moment',
-      tone: 'accent',
-    },
-    {
-      eyebrow: 'Queue depth',
-      value: loading ? '...' : String(summary.queue.depth),
-      detail: summary.queue.error
-        ? `Queue probe error: ${summary.queue.error}`
-        : summary.queue.status === 'critical'
-          ? `${summary.queue.utilization_pct}% of the critical threshold is in use`
-          : summary.queue.status === 'warning'
-            ? `${summary.queue.utilization_pct}% of the critical threshold is in use`
-            : summary.queue.depth > 0
-              ? `${summary.queue.pending} pending and ${summary.queue.ready} ready`
-              : 'No pending or ready jobs',
-      tone: summary.queue.status === 'critical' ? 'danger' : summary.queue.status === 'warning' ? 'warning' : 'neutral',
-    },
-    {
-      eyebrow: 'Pass rate',
-      value: loading ? '...' : formatPassRate(summary.pass_rate_24h),
-      detail: health.copy,
-      tone: health.tone,
-    },
-    {
-      eyebrow: 'Top agent',
-      value: loading ? '...' : formatAgentName(summary.top_agent),
-      detail: summary.models_online > 0 ? `${summary.models_online} leaderboard entries visible` : 'Waiting on leaderboard data',
-      tone: 'neutral',
-    },
-    {
-      eyebrow: 'Knowledge base',
-      value: `${instanceFiles.length}`,
-      detail: instanceFiles.length > 0 ? 'Reference files attached to this surface' : 'No instance files attached yet',
-      tone: 'neutral',
-    },
-  ];
-
   return (
     <div className="dash-page">
       <aside className="dash-sidebar">
@@ -742,41 +701,19 @@ export function Dashboard({
                     <strong>{loading ? '...' : summary.models_online}</strong>
                   </div>
                   <div className="dash-hero-card__stat">
+                    <span>Top agent</span>
+                    <strong>{loading ? '...' : formatAgentName(summary.top_agent)}</strong>
+                  </div>
+                  <div className="dash-hero-card__stat">
                     <span>Queue</span>
                     <strong>{loading ? '...' : summary.queue.depth}</strong>
                   </div>
                 </div>
               </div>
 
-              <div className="dash-hero-card">
-                <div className="dash-hero-card__eyebrow">High-signal defaults</div>
-                <div className="dash-guidance">
-                  <div className="dash-guidance__item">
-                    <strong>Describe first</strong>
-                    <span>Use the operating model path when you know the outcome but not the implementation.</span>
-                  </div>
-                  <div className="dash-guidance__item">
-                    <strong>Builder second</strong>
-                    <span>Open the builder when you want to author steps and execution rules directly.</span>
-                  </div>
-                  <div className="dash-guidance__item">
-                    <strong>Attach context</strong>
-                    <span>Drop reference files into the knowledge base so the workspace can act with context.</span>
-                  </div>
-                </div>
-              </div>
             </div>
           </section>
 
-          <section className="dash-metrics">
-            {summaryCards.map((card) => (
-              <article key={card.eyebrow} className={`dash-metric dash-metric--${card.tone}`}>
-                <div className="dash-metric__eyebrow">{card.eyebrow}</div>
-                <div className="dash-metric__value">{card.value}</div>
-                <div className="dash-metric__detail">{card.detail}</div>
-              </article>
-            ))}
-          </section>
 
           <div className="dash-board">
             <div className="dash-board__main">

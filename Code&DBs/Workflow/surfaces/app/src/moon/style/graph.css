@@ -41,22 +41,21 @@
 
 .moon-graph-node__label {
   position: absolute;
-  top: calc(var(--moon-node-size) + 14px);
+  top: calc(var(--moon-node-size) + 10px);
   left: 50%;
   transform: translateX(-50%);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
   font-size: var(--moon-font-size-sm);
   font-weight: 600;
   letter-spacing: 0.02em;
-  line-height: 1.35;
+  line-height: 1.3;
   text-align: center;
-  color: var(--moon-fg-muted);
+  color: var(--moon-fg);
   pointer-events: none;
-  max-width: 18ch;
-  overflow: hidden;
-  opacity: 0.8;
+  max-width: 22ch;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  opacity: 0.92;
   transition: opacity 200ms ease, color 200ms ease;
 }
 

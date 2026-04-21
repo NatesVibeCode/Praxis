@@ -216,10 +216,17 @@ def history_summary(*, bug_id: str, packet: dict[str, Any]) -> dict[str, Any]:
     return {
         "bug_id": bug_id,
         "signature": packet.get("signature"),
+        "observability_state": packet.get("observability_state"),
+        "observability_gaps": packet.get("observability_gaps"),
+        "errors": packet.get("errors"),
+        "trace": packet.get("trace"),
+        "latest_receipt": packet.get("latest_receipt"),
+        "fallback_receipts": packet.get("fallback_receipts"),
         "blast_radius": packet.get("blast_radius"),
         "historical_fixes": packet.get("historical_fixes"),
         "fix_verification": packet.get("fix_verification"),
         "replay_context": packet.get("replay_context"),
+        "provenance_backfill": packet.get("provenance_backfill"),
         "resume_context": packet.get("resume_context"),
         "semantic_neighbors": packet.get("semantic_neighbors"),
         "agent_actions": {

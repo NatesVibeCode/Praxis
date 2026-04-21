@@ -199,7 +199,66 @@ def _requires_reviewed_execution_manifest(raw_snapshot: dict[str, object] | None
 # Extracted functions (lines ~260-1114 of unified.py)
 # ---------------------------------------------------------------------------
 
+def build_platform_context(repo_root: str) -> str:
+    """Platform-context block injected into worker-bound prompts.
+
+    BUG-D3CD86B8: moved from a private function in _execution_core.py so
+    preview and execution share one authority. Previously preview built
+    messages without this context, but real execution prepended it, making
+    preview's rendered_prompt drift from what the backend actually sees.
+    """
+    try:
+        from runtime._workflow_database import resolve_runtime_database_url
+
+        database_url = str(resolve_runtime_database_url(required=False) or "unavailable")
+    except Exception:
+        database_url = "unavailable"
+    return (
+        "--- PLATFORM CONTEXT ---\n"
+        f"Host repo root (persistence/output authority): {repo_root}\n"
+        "Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as /workspace.\n"
+        "Use the live command workspace for shell commands and relative paths; do not assume the host repo path exists inside the sandbox.\n"
+        f"Database: {database_url}\n"
+        "--- END PLATFORM CONTEXT ---"
+    )
+
+
+def assemble_full_prompt(
+    *,
+    prompt: str,
+    platform_context: str,
+    execution_context_shard_text: str,
+    execution_bundle_text: str,
+) -> str:
+    """Single-source prompt assembly matching execution-core's concatenation
+    order: prompt + platform_context + execution_context_shard + bundle.
+
+    BUG-D3CD86B8: sharing this helper between preview and execution keeps
+    preview's rendered_full_prompt byte-identical to what the backend sees.
+    The parity guarantee is: if preview and execution are called with the
+    same inputs, both paths produce the same final string.
+    """
+    parts: list[str] = []
+    if prompt:
+        parts.append(prompt)
+    if platform_context:
+        parts.append(platform_context)
+    if execution_context_shard_text:
+        parts.append(execution_context_shard_text)
+    if execution_bundle_text:
+        parts.append(execution_bundle_text)
+    return "\n\n".join(parts)
+
+
 def _execution_model_messages(job: dict[str, object]) -> list[dict[str, str]]:
+    """Build preview/helper messages WITHOUT platform_context.
+
+    Historical note (BUG-D3CD86B8): this helper is kept for backward
+    compatibility with callers that want the pre-platform-context prompt
+    shape. The true backend-bound prompt should be assembled via
+    ``assemble_full_prompt`` — preview now exposes both so operators can
+    see the pre-platform and the final backend-bound forms side-by-side.
+    """
     execution_context = job.get("_execution_context")
     execution_context_text = _render_execution_context_shard(execution_context)
     execution_bundle = job.get("_execution_bundle")
@@ -970,6 +1029,64 @@ def _verification_artifact_refs(
     return list(dict.fromkeys(refs))
 
 
+def _ensure_execution_packet_revisions(
+    *,
+    raw_snapshot: dict,
+    spec,
+    workflow_id: str,
+    run_id: str,
+) -> tuple[str, str]:
+    """Return (definition_revision, plan_revision), synthesizing deterministic
+    fallbacks when the raw snapshot is missing them.
+
+    BUG-D384AB69: queue-spec and chain-submitted runs don't carry
+    definition_revision / plan_revision in the raw snapshot (those are
+    graph-runtime fields). Rather than silently skipping execution packet
+    persistence — which loses diagnostic context for every non-graph run —
+    synthesize deterministic fallbacks from the spec itself. Graph runs
+    still win because their explicit values are used as-is.
+
+    Side effect: stamps the resolved revisions onto ``raw_snapshot`` so
+    downstream reads stay consistent.
+    """
+    definition_revision = str(raw_snapshot.get("definition_revision") or "").strip()
+    plan_revision = str(raw_snapshot.get("plan_revision") or "").strip()
+    if definition_revision and plan_revision:
+        return definition_revision, plan_revision
+
+    from runtime.compile_reuse import stable_hash
+
+    spec_jobs = raw_snapshot.get("jobs")
+    if not isinstance(spec_jobs, list):
+        spec_jobs = [dict(j) for j in getattr(spec, "jobs", ()) or ()]
+    canonicalized_jobs = []
+    for job in spec_jobs:
+        if not isinstance(job, dict):
+            continue
+        canonicalized_jobs.append(
+            {k: v for k, v in job.items() if k not in {"_route_plan"}}
+        )
+    spec_fingerprint = {
+        "workflow_id": workflow_id,
+        "name": raw_snapshot.get("name") or getattr(spec, "name", ""),
+        "task_type": raw_snapshot.get("task_type") or getattr(spec, "task_type", ""),
+        "jobs": canonicalized_jobs,
+    }
+    if not definition_revision:
+        definition_revision = f"def_{stable_hash(spec_fingerprint)[:16]}"
+    if not plan_revision:
+        plan_revision = f"plan_{stable_hash({'definition_revision': definition_revision, 'fingerprint': spec_fingerprint})[:16]}"
+    raw_snapshot["definition_revision"] = definition_revision
+    raw_snapshot["plan_revision"] = plan_revision
+    logger.info(
+        "Synthesized execution-packet revisions for run %s: definition=%s plan=%s (BUG-D384AB69 fallback)",
+        run_id,
+        definition_revision,
+        plan_revision,
+    )
+    return definition_revision, plan_revision
+
+
 def _build_execution_packet(
     *,
     conn: SyncPostgresConnection,
@@ -984,14 +1101,12 @@ def _build_execution_packet(
 ) -> dict[str, object] | None:
     from runtime.idempotency import canonical_hash
 
-    definition_revision = str(raw_snapshot.get("definition_revision") or "").strip()
-    plan_revision = str(raw_snapshot.get("plan_revision") or "").strip()
-    if not definition_revision or not plan_revision:
-        logger.warning(
-            "Skipping execution packet persistence for run %s because definition_revision or plan_revision is missing",
-            run_id,
-        )
-        return None
+    definition_revision, plan_revision = _ensure_execution_packet_revisions(
+        raw_snapshot=raw_snapshot,
+        spec=spec,
+        workflow_id=workflow_id,
+        run_id=run_id,
+    )
 
     provenance = dict(provenance or {})
     spec_file_inputs = provenance.get("file_inputs") if isinstance(provenance.get("file_inputs"), dict) else {}

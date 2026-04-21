@@ -28,6 +28,8 @@ from ._context_building import (
     _runtime_execution_context_shard,
     _terminal_failure_classification,
     _verification_artifact_refs,
+    assemble_full_prompt,
+    build_platform_context,
 )
 from runtime.receipt_store import proof_metrics
 from runtime.scope_resolver import resolve_scope
@@ -497,9 +499,10 @@ def execute_job(
         else None
     )
 
-    # Single prompt assembly path: prompt + platform context + shard + bundle
-    platform_context = _build_platform_context(execution_repo_root)
-    full_prompt = f"{prompt}\n\n{platform_context}" if platform_context else prompt
+    # Single prompt assembly path: prompt + platform context + shard + bundle.
+    # BUG-D3CD86B8: shared with preview via assemble_full_prompt so preview
+    # can surface the exact backend-bound string instead of drifting.
+    platform_context = build_platform_context(execution_repo_root)
 
     if execution_context_shard is None:
         execution_context_shard = _runtime_execution_context_shard(
@@ -509,12 +512,6 @@ def execute_job(
             repo_root=execution_repo_root,
         )
     execution_context_shard_text = _render_execution_context_shard(execution_context_shard)
-    if execution_context_shard_text:
-        full_prompt = (
-            f"{full_prompt}\n\n{execution_context_shard_text}"
-            if full_prompt
-            else execution_context_shard_text
-        )
 
     if execution_bundle is None:
         execution_bundle = _runtime_execution_bundle(
@@ -530,8 +527,13 @@ def execute_job(
             "fork_ownership": fork_ownership,
         }
     execution_bundle_text = render_execution_bundle(execution_bundle)
-    if execution_bundle_text:
-        full_prompt = f"{full_prompt}\n\n{execution_bundle_text}" if full_prompt else execution_bundle_text
+
+    full_prompt = assemble_full_prompt(
+        prompt=prompt,
+        platform_context=platform_context,
+        execution_context_shard_text=execution_context_shard_text,
+        execution_bundle_text=execution_bundle_text,
+    )
 
     workflow_id_for_run = str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or run_id
     approval_required = bool(execution_bundle.get("approval_required")) if isinstance(execution_bundle, dict) else False
@@ -942,17 +944,13 @@ def _execute_api(
 
 
 def _build_platform_context(repo_root: str) -> str:
-    """Minimal platform context injected into prompts."""
-    try:
-        database_url = str(resolve_runtime_database_url(required=False) or "unavailable")
-    except Exception:
-        database_url = "unavailable"
-    return f"""--- PLATFORM CONTEXT ---
-Host repo root (persistence/output authority): {repo_root}
-Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as /workspace.
-Use the live command workspace for shell commands and relative paths; do not assume the host repo path exists inside the sandbox.
-Database: {database_url}
---- END PLATFORM CONTEXT ---"""
+    """Backward-compat alias for build_platform_context.
+
+    BUG-D3CD86B8: the canonical assembler now lives in _context_building.py
+    so preview and execution share one authority. Any remaining callers of
+    this private name still get the same string.
+    """
+    return build_platform_context(repo_root)
 
 
 

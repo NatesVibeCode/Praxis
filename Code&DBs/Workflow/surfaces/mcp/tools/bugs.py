@@ -42,7 +42,20 @@ def _normalize_filed_severity(bt_mod, raw_severity: object):
     return _bug_contract.parse_bug_severity(bt_mod, raw_severity) or bt_mod.BugSeverity.P2
 
 
-_SESSION_BLOCKED_ACTIONS = frozenset({"list", "search", "stats", "backfill_replay"})
+_SESSION_BLOCKED_ACTIONS = frozenset(
+    {"list", "search", "duplicate_check", "stats", "backfill_replay"}
+)
+
+
+def _structured_runtime_error(exc: Exception, *, action: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "error": str(exc),
+        "error_code": getattr(exc, "reason_code", f"bugs.{action}.failed"),
+    }
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict) and details:
+        payload["details"] = details
+    return payload
 
 
 def tool_praxis_bugs(params: dict) -> dict:
@@ -58,8 +71,11 @@ def tool_praxis_bugs(params: dict) -> dict:
                      "Allowed actions: file, resolve, attach_evidence, packet, history, replay, patch_resume."
         }
 
-    bt = _subs.get_bug_tracker()
-    bt_mod = _subs.get_bug_tracker_mod()
+    try:
+        bt = _subs.get_bug_tracker()
+        bt_mod = _subs.get_bug_tracker_mod()
+    except Exception as exc:
+        return _structured_runtime_error(exc, action=str(action))
     resolved_statuses = {
         bt_mod.BugStatus.FIXED,
         bt_mod.BugStatus.WONT_FIX,
@@ -102,6 +118,18 @@ def tool_praxis_bugs(params: dict) -> dict:
                 body=params,
                 serialize_bug=_compact_bug,
                 default_limit=20,
+                parse_status=_parse_bug_status,
+                parse_severity=_parse_bug_severity,
+                parse_category=_parse_bug_category,
+            )
+
+        if action == "duplicate_check":
+            return _bug_contract.duplicate_check_payload(
+                bt=bt,
+                bt_mod=bt_mod,
+                body=params,
+                serialize_bug=_compact_bug,
+                default_limit=10,
                 parse_status=_parse_bug_status,
                 parse_severity=_parse_bug_severity,
                 parse_category=_parse_bug_category,
@@ -150,6 +178,8 @@ def tool_praxis_bugs(params: dict) -> dict:
             )
     except ValueError as exc:
         return {"error": str(exc)}
+    except Exception as exc:
+        return _structured_runtime_error(exc, action=str(action))
 
     return {"error": f"Unknown bug action: {action}"}
 
@@ -170,6 +200,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  List open bugs:    praxis_bugs(action='list', status='OPEN')\n"
                 "  File a new bug:    praxis_bugs(action='file', title='TaskAssembler fails on empty manifests', "
                 "severity='P1', description='...')\n"
+                "  Fast dedupe:       praxis_bugs(action='duplicate_check', title_like='routing timeout')\n"
                 "  Search for a bug:  praxis_bugs(action='search', title='routing')\n"
                 "  Search open bugs:  praxis_bugs(action='search', title='timeout', status='OPEN')\n"
                 "  Packet for a bug:  praxis_bugs(action='packet', bug_id='BUG-1234')\n"
@@ -189,8 +220,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "Operation: 'list', 'file', 'search', 'stats', 'packet', 'history', 'replay', 'backfill_replay', 'attach_evidence', 'patch_resume', or 'resolve'. Use resolve+verifier_ref to prove and close FIXED bugs in one mutation.",
-                        "enum": ["list", "file", "search", "stats", "packet", "history", "replay", "backfill_replay", "attach_evidence", "patch_resume", "resolve"],
+                        "description": "Operation: 'list', 'file', 'search', 'duplicate_check', 'stats', 'packet', 'history', 'replay', 'backfill_replay', 'attach_evidence', 'patch_resume', or 'resolve'. Use duplicate_check for cheap title-like dedupe; use resolve+verifier_ref to prove and close FIXED bugs in one mutation.",
+                        "enum": ["list", "file", "search", "duplicate_check", "stats", "packet", "history", "replay", "backfill_replay", "attach_evidence", "patch_resume", "resolve"],
                     },
                     "bug_id": {"type": "string", "description": "Bug id (for resolve)."},
                     "title": {"type": "string", "description": "Bug title (for file/search)."},
@@ -199,7 +230,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "category": {"type": "string", "description": "Bug category for list/file actions: SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER."},
                     "title_like": {
                         "type": "string",
-                        "description": "Substring match across title/description/summary (case-insensitive, for list).",
+                        "description": "Substring match across title/description/summary (case-insensitive, for list and duplicate_check).",
                     },
                     "open_only": {
                         "type": "boolean",

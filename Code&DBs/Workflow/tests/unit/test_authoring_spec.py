@@ -81,6 +81,61 @@ def test_does_not_detect_legacy_as_new():
 
 
 # ---------------------------------------------------------------------------
+# from_dict — raw dict coercion path (BUG-C50252DD regression)
+# ---------------------------------------------------------------------------
+
+def test_from_dict_new_format_builds_spec_without_file_io():
+    """Callers holding a parsed dict can coerce directly — no tempfile needed."""
+    raw = _minimal_spec()
+    spec = WorkflowSpec.from_dict(raw)
+    assert spec.name == "test-workflow"
+    assert spec.task_type == "code_generation"
+    assert spec.jobs, "from_dict must build at least one job"
+    # _raw should round-trip so downstream consumers (graph compiler, etc.) work.
+    assert spec._raw.get("name") == "test-workflow"
+
+
+def test_from_dict_rejects_non_dict_input_with_clear_error():
+    with pytest.raises(WorkflowSpecError) as exc_info:
+        WorkflowSpec.from_dict("not-a-dict")  # type: ignore[arg-type]
+    assert "dict" in str(exc_info.value).lower()
+
+
+def test_validate_workflow_spec_accepts_raw_dict_and_does_not_crash():
+    """BUG-C50252DD regression: passing a raw dict must not raise AttributeError.
+
+    The front-door validator is used from standalone scripts and MCP surfaces
+    that may hold a dict (not a WorkflowSpec). It must coerce cleanly.
+    """
+    from runtime.workflow_validation import validate_workflow_spec
+
+    class _StubConn:
+        """Stand-in pg_conn; validate may short-circuit before touching it."""
+
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("stub conn should not be reached for this test")
+
+        def fetch(self, *args, **kwargs):
+            raise RuntimeError("stub conn should not be reached for this test")
+
+    raw = _minimal_spec()
+    # Should not raise AttributeError (the BUG-C50252DD symptom).
+    # We accept *any* dict result — validity depends on live DB authority,
+    # which we're not mocking here. The regression is specifically about
+    # crashing on dict input, not about the full validation pipeline.
+    try:
+        result = validate_workflow_spec(raw, pg_conn=_StubConn())
+    except AttributeError as exc:
+        pytest.fail(f"validate_workflow_spec crashed on raw dict: {exc}")
+    except Exception:
+        # Downstream authority errors are fine for this regression; the only
+        # forbidden outcome is AttributeError on 'dict' has no attribute 'summary'.
+        pass
+    else:
+        assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
 # Loading — basic
 # ---------------------------------------------------------------------------
 

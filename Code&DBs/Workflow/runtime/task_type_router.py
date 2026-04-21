@@ -154,6 +154,20 @@ _ELIGIBILITY_SQL = """
     ORDER BY effective_from DESC, task_route_eligibility_id DESC
 """
 
+# BUG-DD1D48B1: route selection must honor provider_transport_admissions so
+# providers whose default adapter transport is denied by policy (e.g.
+# anthropic.llm_task per decision.2026-04-20.anthropic-cli-only-restored)
+# never surface as a route candidate. Without this filter the router
+# happily emits anthropic/claude-opus-4-6 for auto/review, the worker hits
+# the Anthropic HTTP API with an unauthenticated key, and a whole batch
+# collapses on 401 before any work starts.
+_PROVIDER_TRANSPORT_ADMISSION_SQL = """
+    SELECT provider_slug, adapter_type, admitted_by_policy, policy_reason, decision_ref
+    FROM provider_transport_admissions
+    WHERE provider_slug = ANY($1::text[])
+      AND adapter_type = ANY($2::text[])
+"""
+
 
 def _state_int(state_row: dict[str, Any] | None, key: str) -> int:
     return int(state_row.get(key) or 0) if state_row is not None else 0
@@ -316,6 +330,53 @@ class TaskRouteDecision:
     # budget_authority_unreachable, reason code
     # lane.rejected.budget_window_data_quality_error.
     budget_window_data_quality_error: bool = False
+
+
+def _resolve_default_adapter_for_router(router: Any, provider_slug: str) -> str:
+    resolver = getattr(router, "_default_adapter_for_provider", None)
+    if callable(resolver):
+        return str(resolver(provider_slug))
+    injected_default = getattr(router, "_default_adapter_type", None)
+    if injected_default:
+        return str(injected_default)
+    return resolve_default_adapter_type(provider_slug)
+
+
+def _provider_registry_authority_available() -> bool:
+    from registry.provider_execution_registry import registry_health
+
+    try:
+        return bool(registry_health().get("authority_available", False))
+    except RuntimeError:
+        return False
+
+
+def _explicit_route_transport_unknown_economics(
+    *,
+    adapter_type: str,
+    raw_cost_per_m_tokens: float,
+    budget_authority: BudgetAuthoritySnapshot,
+) -> dict[str, Any]:
+    """Fail-closed economics when transport registry is unreachable.
+
+    Explicit route resolution still needs to expose budget authority state.
+    If the candidate row already names the adapter but the transport registry
+    cannot prove economics, keep the decision inspectable while refusing any
+    implicit PAYG fallback.
+    """
+
+    return {
+        "adapter_type": adapter_type,
+        "billing_mode": "metered_api",
+        "budget_bucket": "unknown",
+        "effective_marginal_cost": float(raw_cost_per_m_tokens or 0.0),
+        "spend_pressure": "unknown",
+        "budget_status": "",
+        "prefer_prepaid": False,
+        "allow_payg_fallback": False,
+        "budget_authority_unreachable": not budget_authority.reachable,
+        "budget_window_data_quality_error": not budget_authority.data_quality_ok,
+    }
 
 
 @dataclass(frozen=True)
@@ -583,26 +644,49 @@ class TaskTypeRouter:
         if task_type:
             self._check_permission(task_type, model, provider)
         provider_policy_id: str | None = None
-        if runtime_profile_ref:
-            for candidate in self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref):
-                if (
-                    str(candidate.get("provider_slug") or "") == provider
-                    and str(candidate.get("model_slug") or "") == model
-                ):
-                    provider_policy_id = str(candidate.get("provider_policy_id") or "").strip() or None
-                    break
+        candidate_adapter_type: str | None = None
+        candidate_cost_per_m_tokens = 0.0
+        for candidate in self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref):
+            if (
+                str(candidate.get("provider_slug") or "") == provider
+                and str(candidate.get("model_slug") or "") == model
+            ):
+                provider_policy_id = str(candidate.get("provider_policy_id") or "").strip() or None
+                candidate_adapter_type = str(candidate.get("adapter_type") or "").strip() or None
+                candidate_cost_per_m_tokens = float(candidate.get("cost_per_m_tokens") or 0.0)
+                break
         # BUG-6B34915A: explicit routes must consult the same budget-window
         # authority as auto routes. The snapshot carries by-provider-ref
         # lookups so we don't need provider_policy_id when it isn't known.
         budget_authority = self._load_budget_authority_snapshot()
-        economics = _resolve_route_economics(
-            provider_slug=provider,
-            adapter_type=None,
-            provider_policy_id=provider_policy_id,
-            raw_cost_per_m_tokens=0.0,
-            budget_authority=budget_authority,
-            default_adapter=self._default_adapter_for_provider(provider),
-        )
+        try:
+            economics = _resolve_route_economics(
+                provider_slug=provider,
+                adapter_type=candidate_adapter_type,
+                provider_policy_id=provider_policy_id,
+                raw_cost_per_m_tokens=candidate_cost_per_m_tokens,
+                budget_authority=budget_authority,
+                default_adapter=candidate_adapter_type or self._default_adapter_for_provider(provider),
+            )
+        except RuntimeError as exc:
+            message = str(exc)
+            registry_blocked = (
+                "provider execution registry has no authoritative provider profiles" in message
+                or "has no supported adapter for routing economics" in message
+            )
+            if (
+                candidate_adapter_type
+                and not budget_authority.reachable
+                and registry_blocked
+                and not _provider_registry_authority_available()
+            ):
+                economics = _explicit_route_transport_unknown_economics(
+                    adapter_type=candidate_adapter_type,
+                    raw_cost_per_m_tokens=candidate_cost_per_m_tokens,
+                    budget_authority=budget_authority,
+                )
+            else:
+                raise
         resolved_adapter_type = str(
             economics.get("adapter_type") or self._default_adapter_for_provider(provider)
         )
@@ -721,6 +805,9 @@ class TaskTypeRouter:
                 "provider_slug": str(row["provider_slug"]),
                 "model_slug": str(row["model_slug"]),
                 "priority": int(row.get("priority") or 999),
+                "provider_policy_id": str(row.get("provider_policy_id") or "").strip() or None,
+                "adapter_type": str(row.get("adapter_type") or "").strip() or None,
+                "cost_per_m_tokens": float(row.get("cost_per_m_tokens") or 0.0),
                 "route_tier": _normalize_auto_route_key(str(row.get("route_tier") or "")),
                 "route_tier_rank": int(row.get("route_tier_rank") or 99),
                 "latency_class": _normalize_auto_route_key(str(row.get("latency_class") or "")),
@@ -944,6 +1031,11 @@ class TaskTypeRouter:
             runtime_profile_ref=runtime_profile_ref,
         )
         rows = self._apply_route_eligibility(task_type, rows, as_of=self._now_factory())
+        # BUG-DD1D48B1: drop candidates whose default adapter transport is
+        # denied by provider_transport_admissions (e.g. anthropic.llm_task
+        # under the CLI-only standing order). Keeps auto/review from being
+        # routed to Anthropic HTTP and collapsing on 401.
+        rows = self._apply_provider_transport_admission_filter(task_type, rows)
         if not rows:
             raise ValueError(f"No permitted models for task type '{task_type}'")
         policy = self._policy_for(task_type)
@@ -1011,6 +1103,10 @@ class TaskTypeRouter:
                 **economics,
             })
         rows = self._apply_route_eligibility(profile_value, rows, as_of=self._now_factory())
+        # BUG-DD1D48B1: same admission filter as _resolve_chain — auto/*
+        # profile resolution is the hot path for auto/review routes, so the
+        # filter must live here too, not only on explicit task-type routes.
+        rows = self._apply_provider_transport_admission_filter(profile_value, rows)
         if not rows:
             raise ValueError(f"No permitted models for auto/{profile_value}")
         rows = _rerank_rows(rows, prefer_cost, self._policy)
@@ -1087,7 +1183,7 @@ class TaskTypeRouter:
         rejected: list[str] = []
         for row in rows:
             provider = str(row.get("provider_slug") or "")
-            adapter_type = str(row.get("adapter_type") or self._default_adapter_for_provider(provider))
+            adapter_type = str(row.get("adapter_type") or _resolve_default_adapter_for_router(self, provider))
             spend_pressure = str(row.get("spend_pressure") or "") or None
             budget_authority_unreachable = bool(
                 row.get("budget_authority_unreachable", False)
@@ -1140,6 +1236,94 @@ class TaskTypeRouter:
                 0 if str(r.get("billing_mode") or "").strip() in _PREPAID_BILLING_MODES else 1,
             )
         )
+        return kept
+
+    def _apply_provider_transport_admission_filter(
+        self,
+        task_type: str,
+        rows: list[Any],
+    ) -> list[Any]:
+        """BUG-DD1D48B1: drop candidates whose resolved default adapter_type
+        has admitted_by_policy=false in provider_transport_admissions.
+
+        The classic failure the filter prevents: auto/review resolves to
+        anthropic/claude-opus-4-6; the worker's default adapter for
+        anthropic is llm_task (HTTP); provider_transport_admissions has
+        that row marked admitted_by_policy=false per the CLI-only policy;
+        but without this filter the route is emitted anyway and the worker
+        hits Anthropic with an invalid HTTP key, collapsing on 401.
+
+        If provider_transport_admissions is missing entirely (fresh clone
+        before migrations), the filter is a no-op — fail open so we don't
+        break non-provider-admitted environments.
+        """
+        if not rows:
+            return rows
+        provider_slugs = sorted({str(row["provider_slug"]) for row in rows})
+        # Resolve the default adapter each provider would use. For most
+        # providers this is a single constant, but we compute per-provider
+        # to respect any router-injected overrides.
+        adapter_by_provider: dict[str, str] = {}
+        for provider_slug in provider_slugs:
+            try:
+                adapter_by_provider[provider_slug] = _resolve_default_adapter_for_router(
+                    self, provider_slug
+                )
+            except Exception:
+                # Unknown adapter means we can't decide admission — pass through.
+                adapter_by_provider[provider_slug] = ""
+        adapter_types = sorted({a for a in adapter_by_provider.values() if a})
+        if not adapter_types:
+            return rows
+        try:
+            admission_rows = self._conn.execute(
+                _PROVIDER_TRANSPORT_ADMISSION_SQL,
+                list(provider_slugs),
+                list(adapter_types),
+            )
+        except PostgresError as exc:
+            if getattr(exc, "sqlstate", None) == _UNDEFINED_TABLE_SQLSTATE:
+                logger.debug(
+                    "provider_transport_admissions table missing; skipping admission filter"
+                )
+                return rows
+            raise
+        admission_index: dict[tuple[str, str], dict[str, Any]] = {
+            (str(r["provider_slug"]), str(r["adapter_type"])): dict(r)
+            for r in admission_rows
+        }
+        kept: list[Any] = []
+        for row in rows:
+            provider_slug = str(row["provider_slug"])
+            adapter_type = adapter_by_provider.get(provider_slug, "")
+            if not adapter_type:
+                kept.append(row)
+                continue
+            admission = admission_index.get((provider_slug, adapter_type))
+            if admission is None:
+                # No row at all — we don't assume denial; pass through and let
+                # preflight / downstream handlers surface the missing-admission
+                # case. The goal of this filter is to block explicitly-denied
+                # admissions, not invent them.
+                kept.append(row)
+                continue
+            if bool(admission.get("admitted_by_policy")):
+                kept.append(row)
+                continue
+            reason = str(admission.get("policy_reason") or "").strip()
+            decision_ref = str(admission.get("decision_ref") or "").strip()
+            logger.warning(
+                "AUTO ROUTE BLOCKED: auto/%s -> %s/%s because "
+                "provider_transport_admissions.admitted_by_policy=false for "
+                "(%s, %s); reason=%r decision_ref=%r",
+                task_type,
+                provider_slug,
+                row["model_slug"],
+                provider_slug,
+                adapter_type,
+                reason,
+                decision_ref,
+            )
         return kept
 
     def _apply_route_eligibility(

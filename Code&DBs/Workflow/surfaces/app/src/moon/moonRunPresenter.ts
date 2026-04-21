@@ -19,7 +19,7 @@ import type {
   GraphLayout,
   LayoutNode,
 } from './moonBuildPresenter';
-import { RANK_SPACING, COLUMN_SPACING, glyphFromLabel } from './moonBuildPresenter';
+import { RANK_SPACING, COLUMN_SPACING, glyphFromLabel, computeLineage } from './moonBuildPresenter';
 
 // --- Status mapping ---
 
@@ -224,6 +224,7 @@ export function presentRun(
     totalNodes: 0,
     resolvedNodes: 0,
     blockedNodes: 0,
+    focusActive: false,
   };
   if (!run || !run.graph || !run.graph.nodes.length) return empty;
 
@@ -232,6 +233,10 @@ export function presentRun(
   const criticalPath = computeCriticalPath(graph);
   const pathSet = new Set(criticalPath);
   const pathIndexMap = new Map(criticalPath.map((id, i) => [id, i]));
+  const lineageEdges = graph.edges.map((e) => ({ from_node_id: e.from, to_node_id: e.to }));
+  const lineage = computeLineage(selectedJobId, lineageEdges, graph.nodes.map((n) => n.id));
+  const focusActive = lineage !== null;
+  const isInLineage = (id: string) => !focusActive || lineage!.has(id);
 
   // Index jobs by label so we can attach duration/cost when rendering.
   const jobsByLabel = new Map<string, RunJob>();
@@ -269,6 +274,7 @@ export function presentRun(
       rank: pos.rank,
       multiplicity: null,
       outgoingEdgeCount: outgoingByNode.get(n.id) || 0,
+      inLineage: isInLineage(n.id),
     };
   });
 
@@ -298,6 +304,7 @@ export function presentRun(
       gateState: 'empty' as const,
       siblingCount: sm.count,
       siblingIndex: sm.index,
+      inLineage: isInLineage(e.from) && isInLineage(e.to),
     };
   });
 
@@ -328,6 +335,7 @@ export function presentRun(
     totalNodes,
     resolvedNodes,
     blockedNodes,
+    focusActive,
   };
 }
 

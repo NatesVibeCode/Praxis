@@ -71,6 +71,10 @@ def test_resolve_model_accepts_single_route_chain_entry(monkeypatch) -> None:
         lambda provider, *, required=True: f"{provider}-key",
     )
     monkeypatch.setattr(
+        "runtime.chat_orchestrator._resolve_http_endpoint",
+        lambda provider, model=None: "https://api.openai.com/v1/chat/completions",
+    )
+    monkeypatch.setattr(
         "runtime.lane_policy.load_provider_lane_policies",
         lambda _pg: {},
     )

@@ -64,6 +64,8 @@ from ._context_building import (
     _execution_model_messages,
     _render_execution_context_shard,
     _shadow_packet_inspection_from_rows,
+    assemble_full_prompt,
+    build_platform_context,
 )
 from runtime.workflow.execution_bundle import render_execution_bundle
 from runtime.dynamic_timeout import (
@@ -1187,6 +1189,20 @@ def preview_workflow_execution(
             ),
             None,
         )
+        # BUG-D3CD86B8: compute the exact backend-bound prompt (prompt +
+        # platform_context + shard + bundle) via the shared assembler so
+        # preview no longer drifts from execution. rendered_user_prompt keeps
+        # the pre-platform-context form for debugging parity; rendered_full_prompt
+        # is what the worker actually sends to the backend.
+        _preview_platform_context = build_platform_context(preview_repo_root)
+        _preview_shard_text = _render_execution_context_shard(context_shard)
+        _preview_bundle_text = render_execution_bundle(execution_bundle)
+        rendered_full_prompt = assemble_full_prompt(
+            prompt=str(job.get("prompt") or ""),
+            platform_context=_preview_platform_context,
+            execution_context_shard_text=_preview_shard_text,
+            execution_bundle_text=_preview_bundle_text,
+        )
         job_workdir = str(job.get("workdir") or raw_snapshot.get("workdir") or "").strip()
         if not job_workdir:
             raise ValueError(
@@ -1218,6 +1234,9 @@ def preview_workflow_execution(
             "rendered_user_prompt": rendered_user_prompt,
             "rendered_system_prompt": rendered_system_prompt,
             "rendered_prompt": rendered_user_prompt,
+            # BUG-D3CD86B8: backend-bound prompt the worker actually sends.
+            "rendered_full_prompt": rendered_full_prompt,
+            "rendered_platform_context": _preview_platform_context,
             "execution_context_shard": context_shard,
             "rendered_execution_context_shard": _render_execution_context_shard(context_shard),
             "execution_bundle": execution_bundle,
@@ -1228,8 +1247,29 @@ def preview_workflow_execution(
             "skill_refs": _normalize_paths(execution_bundle.get("skill_refs")),
             "completion_contract": dict(execution_bundle.get("completion_contract") or {}),
             "workspace": {
+                # Pre-existing fields — host-side values echoed from the spec.
+                # Kept for back-compat with callers that read workspace.repo_root.
                 "repo_root": preview_repo_root,
                 "workdir": job_workdir,
+                # BUG-31C147A8: truthful labels for what these values really are.
+                "host_repo_root": preview_repo_root,
+                "host_workdir": job_workdir,
+                # BUG-31C147A8: sharded runs replace repo_root/workdir with
+                # materialized_repo_root/materialized_workdir resolved from the
+                # fork/worktree binding at execution time. Preview cannot know
+                # this binding yet, so mark it explicitly unresolved rather
+                # than fabricating a host path that will be wrong inside the
+                # worker sandbox.
+                "materialized": {
+                    "status": "unresolved_until_execution",
+                    "note": (
+                        "materialized_repo_root and materialized_workdir are resolved from the "
+                        "active fork/worktree binding in runtime/workflow/_execution_core.py. "
+                        "For sharded workflows the worker sees paths like /workspace/... — NOT "
+                        "the host_repo_root above. Use host_* fields only to understand where "
+                        "output/receipts will land on the host."
+                    ),
+                },
                 "workspace_ref": workspace_ref,
                 "runtime_profile_ref": runtime_profile_ref,
             },
@@ -1248,7 +1288,19 @@ def preview_workflow_execution(
         "phase": str(getattr(spec, "phase", "build") or "build"),
         "total_jobs": len(getattr(spec, "jobs", []) or []),
         "workspace": {
+            # Pre-existing; host-side value — preserved for back-compat.
             "repo_root": preview_repo_root,
+            # BUG-31C147A8: truthful companion fields so callers can tell the
+            # host path from the materialized-at-execution path.
+            "host_repo_root": preview_repo_root,
+            "materialized": {
+                "status": "unresolved_until_execution",
+                "note": (
+                    "materialized_repo_root resolves from the active fork/worktree binding "
+                    "at execution time (runtime/workflow/_execution_core.py). Sharded workflows "
+                    "see a different path (e.g. /workspace) inside the worker sandbox."
+                ),
+            },
             "workspace_ref": workspace_ref,
             "runtime_profile_ref": runtime_profile_ref,
         },

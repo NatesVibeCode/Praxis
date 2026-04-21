@@ -141,6 +141,47 @@ describe('presentRun', () => {
     expect(vm.selectedNode?.ringState).toBe('run-active');
   });
 
+  test('focus lineage defaults to rest state without a valid selection', () => {
+    const run = makeRun({
+      graph: {
+        nodes: [
+          { id: 'a', label: 'a', type: '', adapter: '', position: 0, status: 'succeeded' },
+          { id: 'b', label: 'b', type: '', adapter: '', position: 1, status: 'running' },
+        ],
+        edges: [{ id: 'e', from: 'a', to: 'b', type: 'sequence' }],
+      },
+    });
+    const vm = presentRun(run, 'missing');
+    expect(vm.focusActive).toBe(false);
+    expect(vm.nodes.every((node) => node.inLineage)).toBe(true);
+    expect(vm.edges.every((edge) => edge.inLineage)).toBe(true);
+  });
+
+  test('selected run node narrows lineage to ancestors and descendants', () => {
+    const run = makeRun({
+      graph: {
+        nodes: [
+          { id: 'a', label: 'a', type: '', adapter: '', position: 0, status: 'succeeded' },
+          { id: 'b', label: 'b', type: '', adapter: '', position: 1, status: 'running' },
+          { id: 'c', label: 'c', type: '', adapter: '', position: 2, status: 'pending' },
+          { id: 'side', label: 'side', type: '', adapter: '', position: 1, status: 'pending' },
+        ],
+        edges: [
+          { id: 'e-a-b', from: 'a', to: 'b', type: 'sequence' },
+          { id: 'e-b-c', from: 'b', to: 'c', type: 'sequence' },
+          { id: 'e-a-side', from: 'a', to: 'side', type: 'sequence' },
+        ],
+      },
+    });
+    const vm = presentRun(run, 'b');
+    expect(vm.focusActive).toBe(true);
+    expect(vm.nodes.filter((node) => node.inLineage).map((node) => node.id).sort()).toEqual(['a', 'b', 'c']);
+    expect(vm.nodes.find((node) => node.id === 'side')?.inLineage).toBe(false);
+    expect(vm.edges.find((edge) => edge.id === 'e-a-b')?.inLineage).toBe(true);
+    expect(vm.edges.find((edge) => edge.id === 'e-b-c')?.inLineage).toBe(true);
+    expect(vm.edges.find((edge) => edge.id === 'e-a-side')?.inLineage).toBe(false);
+  });
+
   test('activeNode prefers running over pending', () => {
     const run = makeRun({
       graph: {

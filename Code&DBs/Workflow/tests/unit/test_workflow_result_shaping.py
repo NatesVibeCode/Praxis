@@ -57,6 +57,7 @@ def test_project_single_dispatch_result_wraps_projection(monkeypatch):
         prompt="test",
         provider_slug="openai",
         model_slug="gpt-5.4",
+        adapter_type="cli_llm",
         label="job-a",
         capabilities=["ops"],
         reviews_workflow_id="review_run",

@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 
 import { MoonNodeDetail } from './MoonNodeDetail';
 import type { OrbitEdge, OrbitNode } from './moonBuildPresenter';
@@ -14,6 +14,14 @@ vi.mock('../shared/hooks/useObjectTypes', () => ({
 }));
 
 describe('MoonNodeDetail', () => {
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(() => {}));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test('renders gate panel with condition mode and remove button for configured conditional gates', () => {
     const onApplyGate = vi.fn();
 
@@ -220,11 +228,15 @@ describe('MoonNodeDetail', () => {
 
     // Two-click confirm: first click primes the button, second fires the action.
     const removeButton = screen.getByRole('button', { name: 'Remove gate' });
-    fireEvent.click(removeButton);
+    await act(async () => {
+      fireEvent.click(removeButton);
+    });
     const confirmButton = await screen.findByRole('button', { name: 'Click again to remove' });
-    fireEvent.click(confirmButton);
+    await act(async () => {
+      fireEvent.click(confirmButton);
+    });
 
-    await vi.waitFor(() => expect(onCommitGraphAction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onCommitGraphAction).toHaveBeenCalledTimes(1));
 
     const [committedGraph, meta] = onCommitGraphAction.mock.calls[0];
     expect(meta.label).toBe('Remove gate');
@@ -323,7 +335,7 @@ describe('MoonNodeDetail', () => {
     expect(screen.getByLabelText('Persistence targets field: store.research_notes')).toBeInTheDocument();
   });
 
-  test('webhook trigger steps still show contract data fields under block properties', () => {
+  test('webhook trigger steps still show contract data fields under block properties', async () => {
     const node: OrbitNode = {
       id: 'n-hook',
       kind: 'step',
@@ -374,7 +386,10 @@ describe('MoonNodeDetail', () => {
     );
 
     expect(screen.getByText('Trigger config')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /show advanced contract fields/i }));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/api/moon/pickers/payload-fields'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /show advanced contract fields/i }));
+    });
     expect(screen.getByLabelText('Required inputs')).toBeInTheDocument();
     expect(screen.getByLabelText('Outputs')).toBeInTheDocument();
     expect(screen.getByLabelText('Persistence targets')).toBeInTheDocument();

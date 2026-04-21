@@ -91,7 +91,7 @@ def _default_test_database_url() -> str:
         return resolve_workflow_database_url(
             env={"WORKFLOW_DATABASE_URL": explicit_test_url.strip()},
         )
-    runtime_database_url = resolve_runtime_database_url(required=True)
+    runtime_database_url = resolve_runtime_database_url(required=False)
     if not runtime_database_url:
         return resolve_workflow_database_url(
             env={"WORKFLOW_DATABASE_URL": _DEFAULT_TEST_DATABASE_URL},

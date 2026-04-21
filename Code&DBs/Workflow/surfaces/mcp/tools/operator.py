@@ -22,12 +22,27 @@ def _parse_iso_datetime(value: object, *, field_name: str) -> datetime:
     return parsed
 
 
+def _structured_runtime_error(exc: Exception, *, operation_name: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "error": str(exc),
+        "error_code": getattr(exc, "reason_code", f"{operation_name}.failed"),
+        "operation_name": operation_name,
+    }
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict) and details:
+        payload["details"] = details
+    return payload
+
+
 def _execute_catalog_tool(*, operation_name: str, payload: dict[str, Any]) -> dict:
-    return execute_operation_from_subsystems(
-        _subs,
-        operation_name=operation_name,
-        payload=payload,
-    )
+    try:
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name=operation_name,
+            payload=payload,
+        )
+    except Exception as exc:
+        return _structured_runtime_error(exc, operation_name=operation_name)
 
 
 def _optional_sequence_payload(params: dict[str, Any], field_name: str) -> Any:

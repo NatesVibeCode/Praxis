@@ -160,7 +160,14 @@ describe('FIX #6 – 60 s timeout', () => {
 
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse({ id: 'conv-1' }))
-      .mockImplementationOnce(() => new Promise(() => {/* never */}));
+      .mockImplementationOnce((_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = (init as RequestInit).signal;
+          signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        }),
+      );
 
     const { result } = renderHook(() => useChat());
 

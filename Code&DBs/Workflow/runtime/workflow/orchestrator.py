@@ -20,7 +20,7 @@ import sys
 import time
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -88,7 +88,7 @@ class WorkflowSpec:
     """Minimal spec for a single workflow run. This is what the operator provides."""
 
     prompt: str
-    provider_slug: str = field(default_factory=default_provider_slug)
+    provider_slug: str | None = None
     model_slug: str | None = None
     tier: str | None = None  # "frontier", "mid", "economy", "auto" — overrides provider_slug/model_slug
     adapter_type: str | None = None
@@ -110,9 +110,9 @@ class WorkflowSpec:
     plan_revision: str | None = None
 
     def __post_init__(self) -> None:
-        if self.adapter_type is None or not self.adapter_type.strip():
-            object.__setattr__(self, "adapter_type", resolve_default_adapter_type(self.provider_slug))
-        elif self.adapter_type != self.adapter_type.strip():
+        if self.provider_slug is not None and self.provider_slug != self.provider_slug.strip():
+            object.__setattr__(self, "provider_slug", self.provider_slug.strip())
+        if self.adapter_type is not None and self.adapter_type != self.adapter_type.strip():
             object.__setattr__(self, "adapter_type", self.adapter_type.strip())
     packet_provenance: dict[str, Any] | None = None
     output_schema: dict | None = None
@@ -302,16 +302,24 @@ def _attach_spec_metadata(result: WorkflowResult, spec: WorkflowSpec) -> Workflo
 
 
 def _resolve_execution_authority(spec: WorkflowSpec) -> WorkflowSpec:
-    """Resolve native authority only at the execution boundary."""
+    """Resolve provider, adapter, and native authority at the execution boundary."""
 
-    if spec.workspace_ref and spec.runtime_profile_ref:
-        return spec
+    provider_slug = spec.provider_slug or default_provider_slug()
+    adapter_type = spec.adapter_type or resolve_default_adapter_type(provider_slug)
 
-    workspace_ref, runtime_profile_ref = default_native_authority_refs()
+    workspace_ref = spec.workspace_ref
+    runtime_profile_ref = spec.runtime_profile_ref
+    if not workspace_ref or not runtime_profile_ref:
+        default_workspace_ref, default_runtime_profile_ref = default_native_authority_refs()
+        workspace_ref = workspace_ref or default_workspace_ref
+        runtime_profile_ref = runtime_profile_ref or default_runtime_profile_ref
+
     return replace(
         spec,
-        workspace_ref=spec.workspace_ref or workspace_ref,
-        runtime_profile_ref=spec.runtime_profile_ref or runtime_profile_ref,
+        provider_slug=provider_slug,
+        adapter_type=adapter_type,
+        workspace_ref=workspace_ref,
+        runtime_profile_ref=runtime_profile_ref,
     )
 
 
@@ -324,20 +332,19 @@ def _run_workflow_core(spec: WorkflowSpec) -> WorkflowResult:
     Graph: context_compiler → llm → output_parser [→ file_writer] [→ verifier] → terminal
     """
 
+    resolved_spec = _resolve_execution_authority(spec)
     start_ns = time.monotonic_ns()
     started_at = _utc_now()
     context = WorkflowExecutionContext(
-        provider_slug=spec.provider_slug,
-        model_slug=spec.model_slug,
-        adapter_type=spec.adapter_type,
+        provider_slug=resolved_spec.provider_slug,
+        model_slug=resolved_spec.model_slug,
+        adapter_type=resolved_spec.adapter_type,
         started_at=started_at,
         start_ns=start_ns,
     )
-    preflight_result = apply_workflow_preflight(spec, context=context, run_id_factory=_unique_id)
+    preflight_result = apply_workflow_preflight(resolved_spec, context=context, run_id_factory=_unique_id)
     if preflight_result is not None:
-        return _finalize_workflow_result(_attach_spec_metadata(preflight_result, spec))
-
-    resolved_spec = _resolve_execution_authority(spec)
+        return _finalize_workflow_result(_attach_spec_metadata(preflight_result, resolved_spec))
 
     # 1. Build the workflow graph — each step is a node
     request = _build_workflow_graph(resolved_spec)

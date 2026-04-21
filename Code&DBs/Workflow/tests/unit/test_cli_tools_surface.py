@@ -20,10 +20,30 @@ def _tool_definition(
     *,
     description: str,
     recommended_alias: str | None = None,
+    surface: str | None = None,
+    tier: str | None = None,
+    when_to_use: str | None = None,
+    when_not_to_use: str | None = None,
 ) -> McpToolDefinition:
     metadata: dict[str, object] = {"description": description}
     if recommended_alias is not None:
         metadata["cli"] = {"recommended_alias": recommended_alias}
+    if surface is not None or tier is not None:
+        metadata.setdefault("cli", {})
+        cli_metadata = metadata["cli"]
+        assert isinstance(cli_metadata, dict)
+        if surface is not None:
+            cli_metadata["surface"] = surface
+        if tier is not None:
+            cli_metadata["tier"] = tier
+    if when_to_use is not None or when_not_to_use is not None:
+        metadata.setdefault("cli", {})
+        cli_metadata = metadata["cli"]
+        assert isinstance(cli_metadata, dict)
+        if when_to_use is not None:
+            cli_metadata["when_to_use"] = when_to_use
+        if when_not_to_use is not None:
+            cli_metadata["when_not_to_use"] = when_not_to_use
     return McpToolDefinition(
         name=name,
         module_name="surfaces.mcp.tools.test",
@@ -50,16 +70,20 @@ def test_tools_list_json_can_attach_interpretive_context(monkeypatch: pytest.Mon
         tools_commands,
         "get_tool_catalog",
         lambda: {
-            "praxis_query": _tool_definition(
-                "praxis_query",
+            "praxis_query_test": _tool_definition(
+                "praxis_query_test",
                 description="Primary query surface for operator questions.",
                 recommended_alias="query",
+                surface="query",
+                tier="stable",
+                when_to_use="Ask questions about repo state, receipts, and derived workflow context.",
+                when_not_to_use="Do not use it for direct tool execution or HTTP route browsing.",
             ),
         },
     )
 
     def _attach(rows):
-        assert rows[0]["name"] == "praxis_query"
+        assert rows[0]["name"] == "praxis_query_test"
         rows[0]["interpretive_context"] = {"authority_mode": "interpretive"}
         return rows
 
@@ -71,17 +95,19 @@ def test_tools_list_json_can_attach_interpretive_context(monkeypatch: pytest.Mon
     payload = json.loads(stdout.getvalue())
     assert payload == [
         {
-            "name": "praxis_query",
+            "name": "praxis_query_test",
             "surface": "query",
             "tier": "stable",
             "recommended_alias": "query",
             "entrypoint": "workflow query",
-            "describe_command": "workflow tools describe praxis_query",
+            "describe_command": "workflow tools describe praxis_query_test",
             "risk_levels": ["read"],
             "selector_field": None,
             "selector_enum": [],
             "required_args": [],
             "description": "Primary query surface for operator questions.",
+            "when_to_use": "Ask questions about repo state, receipts, and derived workflow context.",
+            "when_not_to_use": "Do not use it for direct tool execution or HTTP route browsing.",
             "interpretive_context": {"authority_mode": "interpretive"},
         }
     ]
@@ -96,6 +122,7 @@ def test_tools_root_shows_quickstart() -> None:
     assert "Tool discovery quickstart:" in rendered
     assert "workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]" in rendered
     assert "workflow tools help <tool|alias>" in rendered
+    assert "list/search JSON include when_to_use and when_not_to_use guidance for each tool." in rendered
     assert "search results are relevance-ranked" in rendered.lower()
     assert "unique prefix" in rendered.lower()
     assert "workflow mcp" in rendered
@@ -144,10 +171,14 @@ def test_tools_search_prioritizes_exact_alias_matches(monkeypatch: pytest.Monkey
                 "praxis_alpha",
                 description="General help that mentions query for broader discovery.",
             ),
-            "praxis_query": _tool_definition(
-                "praxis_query",
+            "praxis_query_test": _tool_definition(
+                "praxis_query_test",
                 description="Primary query surface for operator questions.",
                 recommended_alias="query",
+                surface="query",
+                tier="stable",
+                when_to_use="Ask questions about repo state, receipts, and derived workflow context.",
+                when_not_to_use="Do not use it for direct tool execution or HTTP route browsing.",
             ),
         },
     )
@@ -156,7 +187,7 @@ def test_tools_search_prioritizes_exact_alias_matches(monkeypatch: pytest.Monkey
     assert workflow_cli_main(["tools", "search", "query", "--json"], stdout=stdout) == 0
 
     payload = json.loads(stdout.getvalue())
-    assert [row["name"] for row in payload] == ["praxis_query", "praxis_alpha"]
+    assert [row["name"] for row in payload] == ["praxis_query_test", "praxis_alpha"]
 
 
 def test_tools_search_exact_mode_returns_only_direct_matches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,10 +199,14 @@ def test_tools_search_exact_mode_returns_only_direct_matches(monkeypatch: pytest
                 "praxis_alpha",
                 description="General help that mentions query for broader discovery.",
             ),
-            "praxis_query": _tool_definition(
-                "praxis_query",
+            "praxis_query_test": _tool_definition(
+                "praxis_query_test",
                 description="Primary query surface for operator questions.",
                 recommended_alias="query",
+                surface="query",
+                tier="stable",
+                when_to_use="Ask questions about repo state, receipts, and derived workflow context.",
+                when_not_to_use="Do not use it for direct tool execution or HTTP route browsing.",
             ),
         },
     )
@@ -180,14 +215,16 @@ def test_tools_search_exact_mode_returns_only_direct_matches(monkeypatch: pytest
     assert workflow_cli_main(["tools", "search", "query", "--exact", "--json"], stdout=stdout) == 0
 
     payload = json.loads(stdout.getvalue())
-    assert [row["name"] for row in payload] == ["praxis_query"]
-    assert payload[0]["describe_command"] == "workflow tools describe praxis_query"
+    assert [row["name"] for row in payload] == ["praxis_query_test"]
+    assert payload[0]["describe_command"] == "workflow tools describe praxis_query_test"
+    assert payload[0]["when_to_use"] == "Ask questions about repo state, receipts, and derived workflow context."
+    assert payload[0]["when_not_to_use"] == "Do not use it for direct tool execution or HTTP route browsing."
 
     stdout = StringIO()
     assert workflow_cli_main(["tools", "search", "workflow query", "--exact", "--json"], stdout=stdout) == 0
 
     payload = json.loads(stdout.getvalue())
-    assert [row["name"] for row in payload] == ["praxis_query"]
+    assert [row["name"] for row in payload] == ["praxis_query_test"]
 
 
 def test_tools_search_single_match_prints_next_step(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -368,6 +405,28 @@ def test_tools_describe_accepts_unique_prefix(monkeypatch: pytest.MonkeyPatch) -
     assert "describe_command: workflow tools describe praxis_query" in rendered
 
 
+def test_tools_describe_accepts_multiword_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tools_commands, "get_definition", lambda tool_name: None)
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "describe", "workflow", "query"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "praxis_query" in rendered
+    assert "entrypoint: workflow query" in rendered
+
+
 def test_tools_list_plain_output_highlights_entrypoints() -> None:
     stdout = StringIO()
 
@@ -509,6 +568,49 @@ def test_tools_call_accepts_recommended_alias(monkeypatch: pytest.MonkeyPatch) -
         [
             "tools",
             "call",
+            "query",
+            "--input-json",
+            '{"question":"what failed"}',
+        ],
+        stdout=stdout,
+    ) == 0
+
+    assert captured == {
+        "tool_name": "praxis_query",
+        "params": {"question": "what failed"},
+        "workflow_token": "",
+    }
+
+
+def test_tools_call_accepts_multiword_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        captured["workflow_token"] = workflow_token
+        return 0, {"ok": True}
+
+    monkeypatch.setattr(tools_commands, "get_definition", lambda tool_name: None)
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    monkeypatch.setattr(tools_commands, "run_cli_tool", _run_cli_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(
+        [
+            "tools",
+            "call",
+            "workflow",
             "query",
             "--input-json",
             '{"question":"what failed"}',

@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+"""Launch and track multiple Praxis workflow runs from the terminal.
+
+Replaces the /praxis-multi-workflow slash command so you don't need
+Claude Code in the loop. Shells out to `praxis workflow` for every action,
+so the durable authority is still Praxis.db and Praxis Engine.
+
+Examples
+--------
+  praxis-multi-workflow spec1.queue.json spec2.queue.json
+  praxis-multi-workflow specs/           # every *.queue.json in the dir
+  praxis-multi-workflow specs/ --follow  # block until every run terminates
+  praxis-multi-workflow --list
+  praxis-multi-workflow --status run_abc123
+  praxis-multi-workflow wave observe
+  praxis-multi-workflow wave start sprint_42
+  praxis-multi-workflow wave record sprint_42 job_a:pass,job_b:fail
+
+Exit codes
+----------
+  0   every launched run reached a success-shaped terminal state
+  1   one or more runs failed / validation rejected a spec
+  2   usage error / missing spec file
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+PRAXIS = os.environ.get("PRAXIS_BIN", "praxis")
+TERMINAL_OK = {"succeeded", "completed", "ok", "success", "passed"}
+TERMINAL_BAD = {"failed", "error", "rejected", "dead_letter", "cancelled", "canceled"}
+TERMINAL = TERMINAL_OK | TERMINAL_BAD
+
+
+# ── Shell plumbing ───────────────────────────────────────────────────────────
+
+
+def _run(args: list[str], *, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
+    """Run `praxis workflow ...` and return the completed process."""
+    cmd = [PRAXIS, "workflow", *args]
+    return subprocess.run(
+        cmd,
+        check=check,
+        text=True,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+    )
+
+
+def _run_json(args: list[str]) -> dict | list | None:
+    """Run a command that accepts --json and parse the stdout payload."""
+    proc = _run([*args, "--json"], check=False)
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+# ── Spec resolution ──────────────────────────────────────────────────────────
+
+
+def resolve_specs(paths: list[str]) -> list[Path]:
+    specs: list[Path] = []
+    for raw in paths:
+        p = Path(raw).expanduser()
+        if p.is_dir():
+            matches = sorted([*p.glob("*.queue.json"), *p.glob("*.spec.json")])
+            if not matches:
+                print(f"warn: {p} has no *.queue.json or *.spec.json files", file=sys.stderr)
+            specs.extend(matches)
+        elif p.is_file():
+            specs.append(p)
+        else:
+            print(f"error: spec not found: {p}", file=sys.stderr)
+            sys.exit(2)
+    if not specs:
+        print("error: no specs resolved", file=sys.stderr)
+        sys.exit(2)
+    return specs
+
+
+# ── Actions ──────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Launch:
+    spec: Path
+    run_id: str | None
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.run_id is not None
+
+
+def validate(spec: Path, check_gates: bool) -> bool:
+    args = ["validate", str(spec)]
+    if check_gates:
+        args.append("--check-gates")
+    proc = _run(args, check=False)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stdout or "")
+        sys.stderr.write(proc.stderr or "")
+        return False
+    return True
+
+
+def launch(spec: Path) -> Launch:
+    proc = _run(["run", str(spec)], check=False)
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout or "").strip().splitlines()[-1:] or ["unknown error"]
+        return Launch(spec=spec, run_id=None, error=msg[0])
+
+    run_id = None
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Heuristics: most CLIs echo "run_id: xxx" or a bare id on a line starting with "run_".
+        lowered = line.lower()
+        if "run_id" in lowered:
+            parts = line.replace(":", " ").split()
+            for tok in parts:
+                if tok.startswith("run_") or tok.startswith("wfr_"):
+                    run_id = tok.strip().rstrip(",;")
+                    break
+        elif line.startswith(("run_", "wfr_")) and " " not in line:
+            run_id = line.rstrip(",;")
+        if run_id:
+            break
+
+    if not run_id:
+        # last resort: try the JSON variant
+        payload = _run_json(["run", str(spec)])
+        if isinstance(payload, dict):
+            run_id = payload.get("run_id") or payload.get("id")
+
+    if not run_id:
+        return Launch(spec=spec, run_id=None, error="launched but could not parse run_id")
+    return Launch(spec=spec, run_id=run_id)
+
+
+def status(run_id: str) -> dict:
+    payload = _run_json(["run-status", run_id])
+    if isinstance(payload, dict):
+        return payload
+    # fallback: raw text
+    proc = _run(["run-status", run_id], check=False)
+    return {"run_id": run_id, "raw": (proc.stdout or "").strip()}
+
+
+def state_of(payload: dict) -> str:
+    for key in ("state", "status", "current_state", "run_state"):
+        v = payload.get(key)
+        if isinstance(v, str) and v:
+            return v.lower()
+    return "unknown"
+
+
+# ── Follow loop ──────────────────────────────────────────────────────────────
+
+
+def follow(launches: list[Launch], interval: int) -> int:
+    """Poll until every ok launch hits a terminal state. Returns exit code."""
+    pending = {l.run_id: l for l in launches if l.ok}
+    if not pending:
+        return 1
+
+    seen: dict[str, str] = {}
+    rc_any_bad = 0
+
+    while pending:
+        for run_id, launch in list(pending.items()):
+            s = state_of(status(run_id))
+            if seen.get(run_id) != s:
+                print(f"  {run_id}  [{s}]  ← {launch.spec.name}")
+                seen[run_id] = s
+            if s in TERMINAL:
+                if s in TERMINAL_BAD:
+                    rc_any_bad = 1
+                del pending[run_id]
+        if pending:
+            time.sleep(interval)
+
+    return rc_any_bad
+
+
+# ── Commands ─────────────────────────────────────────────────────────────────
+
+
+def cmd_launch(ns: argparse.Namespace) -> int:
+    specs = resolve_specs(ns.specs)
+
+    if not ns.skip_validate:
+        print(f"→ validating {len(specs)} spec(s)")
+        for spec in specs:
+            ok = validate(spec, check_gates=ns.check_gates)
+            flag = "✓" if ok else "✗"
+            print(f"  {flag} {spec}")
+            if not ok and not ns.keep_going:
+                return 1
+        if ns.validate_only:
+            return 0
+
+    print(f"→ launching {len(specs)} run(s)")
+    launches: list[Launch] = []
+    for spec in specs:
+        L = launch(spec)
+        if L.ok:
+            print(f"  ✓ {L.run_id}  ← {spec}")
+        else:
+            print(f"  ✗ {spec}  ({L.error})")
+        launches.append(L)
+
+        if ns.sequential and L.ok:
+            print(f"  … waiting on {L.run_id}")
+            follow([L], interval=ns.poll_interval)
+
+    if ns.follow and not ns.sequential:
+        print(f"→ following {sum(1 for l in launches if l.ok)} run(s)")
+        rc = follow(launches, interval=ns.poll_interval)
+    else:
+        rc = 0 if all(l.ok for l in launches) else 1
+
+    failed = [l for l in launches if not l.ok]
+    if failed:
+        print(f"\n{len(failed)} launch(es) failed:", file=sys.stderr)
+        for l in failed:
+            print(f"  - {l.spec}: {l.error}", file=sys.stderr)
+        rc = 1
+
+    if ns.json:
+        print(json.dumps({
+            "launches": [
+                {"spec": str(l.spec), "run_id": l.run_id, "error": l.error}
+                for l in launches
+            ],
+            "exit": rc,
+        }, indent=2))
+
+    return rc
+
+
+def cmd_status(ns: argparse.Namespace) -> int:
+    payload = status(ns.run_id)
+    print(json.dumps(payload, indent=2, default=str))
+    return 0 if state_of(payload) not in TERMINAL_BAD else 1
+
+
+def cmd_list(ns: argparse.Namespace) -> int:
+    # prefer JSON; fall back to passthrough
+    payload = _run_json(["active"])
+    if payload is not None:
+        print(json.dumps(payload, indent=2, default=str))
+        return 0
+    proc = _run(["active"], check=False, capture=False)
+    return proc.returncode
+
+
+def cmd_wave(ns: argparse.Namespace) -> int:
+    call = ["tools", "call", "praxis_wave", "--input-json"]
+    payload: dict = {"action": ns.wave_action}
+    if ns.wave_id:
+        payload["wave_id"] = ns.wave_id
+    if ns.jobs:
+        payload["jobs"] = ns.jobs
+    proc = _run([*call, json.dumps(payload), "--yes"], check=False, capture=False)
+    return proc.returncode
+
+
+# ── CLI ──────────────────────────────────────────────────────────────────────
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="praxis-multi-workflow",
+        description="Launch and track multiple Praxis workflow runs.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Typical flows:\n"
+            "  praxis-multi-workflow specs/ --follow\n"
+            "  praxis-multi-workflow launch a.queue.json b.queue.json --sequential\n"
+            "  praxis-multi-workflow status run_abc\n"
+            "  praxis-multi-workflow list\n"
+            "  praxis-multi-workflow wave observe\n"
+            "\n"
+            "A bare file or directory argument is shorthand for `launch`.\n"
+        ),
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    # launch (explicit)
+    pla = sub.add_parser("launch", help="validate + launch one or more specs")
+    pla.add_argument("specs", nargs="+", help="spec file(s) or directory(ies) of specs")
+    pla.add_argument("--validate-only", action="store_true", help="validate and exit")
+    pla.add_argument("--skip-validate", action="store_true", help="do not run validate before launch")
+    pla.add_argument("--check-gates", action="store_true", help="pass --check-gates to validate")
+    pla.add_argument("--keep-going", action="store_true", help="do not abort on first validate failure")
+    pla.add_argument("--sequential", action="store_true", help="wait for each run before launching next")
+    pla.add_argument("--follow", action="store_true", help="poll all runs until terminal")
+    pla.add_argument("--poll-interval", type=int, default=15, help="seconds between status polls (default 15)")
+    pla.add_argument("--json", action="store_true", help="emit machine-readable summary")
+    pla.set_defaults(_handler=cmd_launch)
+
+    # status <run_id>
+    ps = sub.add_parser("status", help="show one run's status")
+    ps.add_argument("run_id")
+    ps.set_defaults(_handler=cmd_status)
+
+    # list
+    pl = sub.add_parser("list", help="show active runs")
+    pl.set_defaults(_handler=cmd_list)
+
+    # wave <action> [wave_id] [jobs]
+    pw = sub.add_parser("wave", help="wave coordination (observe|start|next|record)")
+    pw.add_argument("wave_action", choices=["observe", "start", "next", "record"])
+    pw.add_argument("wave_id", nargs="?", default=None)
+    pw.add_argument("jobs", nargs="?", default=None, help='e.g. "job_a:pass,job_b:fail"')
+    pw.set_defaults(_handler=cmd_wave)
+
+    return p
+
+
+_SUBCOMMANDS = {"launch", "status", "list", "wave", "-h", "--help"}
+
+
+def _looks_like_spec(arg: str) -> bool:
+    """Bare path shorthand: `praxis-multi-workflow foo.json` → `launch foo.json`."""
+    if arg in _SUBCOMMANDS or arg.startswith("-"):
+        return False
+    if arg.endswith((".json", ".queue.json", ".spec.json")):
+        return True
+    p = Path(arg).expanduser()
+    return p.exists()
+
+
+def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    # Shorthand: if the first non-flag arg looks like a spec path, inject `launch`.
+    for tok in raw:
+        if tok.startswith("-"):
+            continue
+        if _looks_like_spec(tok):
+            raw = ["launch", *raw]
+        break
+
+    if not raw:
+        build_parser().print_help()
+        return 2
+
+    ns = build_parser().parse_args(raw)
+    return ns._handler(ns)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

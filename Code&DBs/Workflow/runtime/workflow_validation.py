@@ -336,7 +336,12 @@ def _authority_error_result(spec, message: str) -> dict[str, Any]:
 
 
 def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
-    """Validate a loaded workflow spec against live Postgres authority."""
+    """Validate a loaded workflow spec against live Postgres authority.
+
+    Accepts either a ``WorkflowSpec`` instance or a raw dict (which is coerced
+    via ``WorkflowSpec.from_dict``). This is the front-door validator used by
+    MCP surfaces, CLI tools, and standalone scripts — so dicts must not crash.
+    """
     from contracts.domain import validate_workflow_request
     from registry.agent_config import AgentRegistry
     from registry.native_runtime_profile_sync import (
@@ -348,6 +353,17 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
         compile_graph_workflow_request,
         spec_uses_graph_runtime,
     )
+    from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
+
+    if isinstance(spec, dict):
+        try:
+            spec = WorkflowSpec.from_dict(spec)
+        except WorkflowSpecError as exc:
+            return {
+                "valid": False,
+                "error": f"invalid workflow spec dict: {exc}",
+                "reason_code": "workflow.spec.invalid_dict",
+            }
 
     summary = spec.summary()
     if spec_uses_graph_runtime(getattr(spec, "_raw", {})):

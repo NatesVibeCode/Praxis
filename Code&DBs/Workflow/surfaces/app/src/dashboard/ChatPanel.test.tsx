@@ -10,31 +10,53 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, act, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { cleanup, render, screen, fireEvent, act, within } from '@testing-library/react';
+import { vi, type MockedFunction } from 'vitest';
 import { ChatPanel } from './ChatPanel';
+
+const jest = vi;
+
+const userEvent = {
+  setup: () => ({
+    async type(element: HTMLElement, text: string) {
+      const input = element as HTMLInputElement | HTMLTextAreaElement;
+      const maxLength = Number(input.getAttribute('maxlength'));
+      const value = `${input.value ?? ''}${text}`;
+      fireEvent.change(input, {
+        target: { value: Number.isFinite(maxLength) && maxLength >= 0 ? value.slice(0, maxLength) : value },
+      });
+      await Promise.resolve();
+    },
+    async click(element: HTMLElement) {
+      fireEvent.click(element);
+      await Promise.resolve();
+    },
+  }),
+};
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-jest.mock('../workspace/useChat');
-jest.mock('../workspace/MarkdownRenderer', () => ({
+vi.mock('../workspace/useChat', () => ({
+  useChat: vi.fn(),
+}));
+vi.mock('../workspace/MarkdownRenderer', () => ({
   MarkdownRenderer: ({ content }: { content: string }) => (
     <span data-testid="markdown">{content}</span>
   ),
 }));
-jest.mock('../workspace/ToolResultRenderer', () => ({
+vi.mock('../workspace/ToolResultRenderer', () => ({
   ToolResultRenderer: ({ result }: { result: unknown }) => (
     <span data-testid="tool-result">{JSON.stringify(result)}</span>
   ),
 }));
 // Suppress CSS import errors in jsdom.
-jest.mock('./chat-panel.css', () => ({}), { virtual: true });
+vi.mock('./chat-panel.css', () => ({}), { virtual: true });
 
 import { useChat } from '../workspace/useChat';
 
-const mockUseChat = useChat as jest.MockedFunction<typeof useChat>;
+const mockUseChat = useChat as MockedFunction<typeof useChat>;
 
 // ---------------------------------------------------------------------------
 // Default mock state factory
@@ -60,6 +82,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   jest.clearAllMocks();
 });
 
@@ -401,8 +424,8 @@ describe('general rendering', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Something broke');
   });
 
-  it('does not render panel content when open=false', () => {
+  it('hides the mounted panel content when open=false', () => {
     render(<ChatPanel open={false} onClose={jest.fn()} />);
-    expect(screen.queryByText(/ask about workflows/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { hidden: true })).toHaveAttribute('aria-hidden', 'true');
   });
 });

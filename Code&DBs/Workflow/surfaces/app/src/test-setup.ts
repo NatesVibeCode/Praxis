@@ -18,6 +18,10 @@ if (typeof Element !== 'undefined' && typeof Element.prototype.scrollTo !== 'fun
   Element.prototype.scrollTo = function () {};
 }
 
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = function () {};
+}
+
 const globalExpect = (globalThis as { expect?: { extend?: (nextMatchers: Record<string, unknown>) => void } }).expect;
 if (typeof globalExpect?.extend === 'function') {
   globalExpect.extend(matchers);

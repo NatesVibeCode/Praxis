@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Praxis Engine — The autonomous engineering control plane</title>
-  <meta name="description" content="An autonomous engineering control plane. Software systems that author, test, and repair themselves — governed by explicit policy, auditable by design." />
+  <title>Praxis Engine - The autonomous engineering control plane</title>
+  <meta name="description" content="An autonomous engineering control plane. Software systems that author, test, and repair themselves - governed by explicit policy, auditable by design." />
 
   <meta property="og:type" content="website" />
   <meta property="og:title" content="Praxis Engine" />
@@ -15,17 +15,23 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet" />
 
   <style>
     :root {
-      --bg: #0a0a0a;
-      --bg-edge: #050505;
-      --fg: #f5f5f5;
-      --fg-dim: #8a8a8a;
-      --fg-faint: #3a3a3a;
-      --rule: #1a1a1a;
-      --accent: #ffffff;
+      --bg: #080908;
+      --bg-panel: #101211;
+      --bg-rail: #151715;
+      --fg: #f5f2eb;
+      --fg-dim: #ada69a;
+      --fg-muted: #726d65;
+      --rule: #272a26;
+      --accent: #e8f7dc;
+      --blue: #8fb8ff;
+      --green: #9be58f;
+      --amber: #f0c35d;
+      --error: #ff8c6b;
+      --shadow: rgba(0, 0, 0, 0.42);
     }
 
     * { box-sizing: border-box; }
@@ -47,44 +53,151 @@
       display: flex;
       flex-direction: column;
       background:
-        radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.03) 0%, transparent 55%),
-        linear-gradient(180deg, var(--bg) 0%, var(--bg-edge) 100%);
+        linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+        linear-gradient(180deg, #0c0e0c 0%, #070807 52%, #050605 100%);
+      background-size: 72px 72px, 72px 72px, auto;
     }
 
     .mono { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; }
 
-    .wrap {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      max-width: 680px;
-      margin: 0 auto;
-      padding: 48px 32px 32px;
+    .page-shell {
       width: 100%;
+      overflow: hidden;
     }
+
+    .hero {
+      position: relative;
+      min-height: min(780px, 88vh);
+      padding: 32px clamp(20px, 4vw, 56px) 0;
+      border-bottom: 1px solid var(--rule);
+      isolation: isolate;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -2;
+      background:
+        linear-gradient(120deg, rgba(8, 9, 8, 0.62), rgba(8, 9, 8, 0.18) 48%, rgba(8, 9, 8, 0.86)),
+        linear-gradient(180deg, rgba(8, 9, 8, 0) 0%, rgba(8, 9, 8, 0.72) 100%);
+    }
+
+    .hero__inner {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      min-height: calc(min(780px, 88vh) - 112px);
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .system-map {
+      position: absolute;
+      inset: 18% -4% 8% 36%;
+      z-index: -1;
+      opacity: 0.84;
+      pointer-events: none;
+    }
+
+    .system-map::before,
+    .system-map::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, transparent 0 12%, rgba(143, 184, 255, 0.36) 12% 12.2%, transparent 12.2% 34%, rgba(155, 229, 143, 0.32) 34% 34.2%, transparent 34.2% 58%, rgba(240, 195, 93, 0.32) 58% 58.2%, transparent 58.2%),
+        linear-gradient(0deg, transparent 0 18%, rgba(255, 255, 255, 0.16) 18% 18.2%, transparent 18.2% 48%, rgba(255, 255, 255, 0.12) 48% 48.2%, transparent 48.2% 78%, rgba(255, 255, 255, 0.12) 78% 78.2%, transparent 78.2%);
+      mask-image: linear-gradient(90deg, transparent, black 14%, black 82%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, transparent, black 14%, black 82%, transparent);
+    }
+
+    .system-map::after {
+      inset: 11% 8% 16% 2%;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+      background-size: 96px 76px;
+    }
+
+    .map-node {
+      position: absolute;
+      width: clamp(72px, 9vw, 132px);
+      min-height: 44px;
+      display: grid;
+      align-content: center;
+      gap: 4px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      background: rgba(13, 15, 14, 0.72);
+      box-shadow: 0 18px 60px var(--shadow);
+      color: var(--fg);
+      font-size: 10px;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .map-node::after {
+      content: "";
+      width: 30px;
+      height: 2px;
+      background: currentColor;
+      opacity: 0.52;
+    }
+
+    .map-node:nth-child(1) { top: 4%; left: 12%; color: var(--blue); }
+    .map-node:nth-child(2) { top: 29%; left: 48%; color: var(--green); }
+    .map-node:nth-child(3) { top: 58%; left: 24%; color: var(--amber); }
+    .map-node:nth-child(4) { top: 74%; left: 68%; color: var(--fg); }
 
     header.brand {
       display: flex;
-      flex-direction: column;
       align-items: flex-start;
-      margin-bottom: 64px;
+      justify-content: space-between;
+      gap: 24px;
+      padding-top: 4px;
+    }
+
+    .brand__note {
+      margin-top: 8px;
+      color: var(--fg-muted);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
     }
 
     .logomark {
-      width: 240px;
+      width: clamp(164px, 20vw, 238px);
       height: auto;
       flex-shrink: 0;
       display: block;
     }
 
+    .hero__content {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      max-width: 760px;
+      padding: clamp(72px, 12vh, 132px) 0 clamp(48px, 9vh, 88px);
+    }
+
+    .eyebrow {
+      margin: 0 0 18px;
+      color: var(--accent);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
 
     h1 {
-      font-size: clamp(32px, 5.2vw, 52px);
+      font-size: 104px;
       font-weight: 600;
-      letter-spacing: -0.02em;
-      line-height: 1.08;
-      margin: 0 0 24px;
+      letter-spacing: 0;
+      line-height: 0.94;
+      margin: 0 0 28px;
       color: var(--fg);
       text-wrap: balance;
     }
@@ -95,28 +208,32 @@
     }
 
     .lede {
-      font-size: clamp(16px, 2vw, 18px);
-      line-height: 1.55;
+      font-size: 22px;
+      line-height: 1.42;
       color: var(--fg-dim);
-      max-width: 52ch;
-      margin: 0 0 48px;
+      max-width: 54ch;
+      margin: 0 0 34px;
       text-wrap: pretty;
+    }
+
+    .capture-area {
+      width: min(100%, 580px);
     }
 
     form.capture {
       display: flex;
-      gap: 8px;
-      max-width: 480px;
-      margin-bottom: 20px;
+      gap: 10px;
+      width: 100%;
+      margin-bottom: 14px;
     }
 
     input[type="email"] {
       flex: 1;
-      background: transparent;
+      background: rgba(5, 6, 5, 0.72);
       color: var(--fg);
-      border: 1px solid var(--fg-faint);
-      border-radius: 4px;
-      padding: 14px 16px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 6px;
+      padding: 15px 16px;
       font-family: inherit;
       font-size: 15px;
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -135,8 +252,8 @@
       background: var(--fg);
       color: var(--bg);
       border: 1px solid var(--fg);
-      border-radius: 4px;
-      padding: 14px 22px;
+      border-radius: 6px;
+      padding: 15px 24px;
       font-family: inherit;
       font-size: 15px;
       font-weight: 500;
@@ -157,42 +274,231 @@
     }
 
     .status.ok { color: var(--fg); }
-    .status.err { color: #ff8c6b; }
+    .status.err { color: var(--error); }
 
-    .meta {
-      margin-top: 72px;
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
+    .proof-strip {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border-top: 1px solid var(--rule);
+      border-left: 1px solid var(--rule);
+      background: rgba(8, 9, 8, 0.72);
+      backdrop-filter: blur(18px);
+    }
+
+    .proof-item {
+      min-height: 106px;
+      padding: 22px clamp(18px, 3vw, 30px);
+      border-right: 1px solid var(--rule);
+      display: grid;
+      align-content: center;
+      gap: 8px;
+    }
+
+    .proof-item strong {
+      color: var(--fg);
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 1.1;
+    }
+
+    .proof-item span {
       font-family: 'JetBrains Mono', ui-monospace, monospace;
       font-size: 11px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--fg-dim);
-      padding-top: 24px;
-      border-top: 1px solid var(--rule);
-      gap: 16px;
-      flex-wrap: wrap;
     }
 
-    .meta span { white-space: nowrap; }
+    .section {
+      width: min(calc(100% - 40px), 1180px);
+      margin: 0 auto;
+      padding: 104px 0;
+    }
+
+    .section + .section {
+      border-top: 1px solid var(--rule);
+    }
+
+    .section__header {
+      display: grid;
+      grid-template-columns: minmax(160px, 0.34fr) minmax(0, 1fr);
+      gap: clamp(28px, 6vw, 88px);
+      align-items: start;
+      margin-bottom: 36px;
+    }
+
+    .section__kicker {
+      margin: 8px 0 0;
+      color: var(--fg-muted);
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0;
+      color: var(--fg);
+      font-size: 56px;
+      font-weight: 600;
+      letter-spacing: 0;
+      line-height: 1;
+      text-wrap: balance;
+    }
+
+    .capability-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--rule);
+      border: 1px solid var(--rule);
+    }
+
+    .capability {
+      min-height: 260px;
+      padding: clamp(22px, 3vw, 32px);
+      background: linear-gradient(180deg, rgba(21, 23, 21, 0.96), rgba(12, 14, 12, 0.96));
+      border-radius: 0;
+      display: grid;
+      align-content: space-between;
+      gap: 32px;
+    }
+
+    .capability__index {
+      color: var(--fg-muted);
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 11px;
+      letter-spacing: 0.16em;
+    }
+
+    .capability h3 {
+      margin: 0 0 14px;
+      color: var(--fg);
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    .capability p {
+      margin: 0;
+      color: var(--fg-dim);
+      line-height: 1.62;
+    }
+
+    .loop {
+      display: grid;
+      grid-template-columns: minmax(0, 0.78fr) minmax(280px, 0.42fr);
+      gap: clamp(32px, 7vw, 96px);
+      align-items: start;
+    }
+
+    .loop__copy p {
+      margin: 24px 0 0;
+      color: var(--fg-dim);
+      font-size: 18px;
+      line-height: 1.62;
+      max-width: 62ch;
+    }
+
+    .loop-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border-top: 1px solid var(--rule);
+    }
+
+    .loop-list li {
+      display: grid;
+      grid-template-columns: 52px 1fr;
+      gap: 18px;
+      padding: 22px 0;
+      border-bottom: 1px solid var(--rule);
+      color: var(--fg-dim);
+    }
+
+    .loop-list strong {
+      color: var(--fg);
+      font-weight: 600;
+    }
+
+    .loop-list span {
+      color: var(--accent);
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+    }
 
     footer {
-      padding: 24px 32px;
+      border-top: 1px solid var(--rule);
+      padding: 28px clamp(20px, 4vw, 56px);
       font-family: 'JetBrains Mono', ui-monospace, monospace;
       font-size: 10px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
-      color: var(--fg-faint);
+      color: var(--fg-muted);
       text-align: center;
     }
 
+    @media (max-width: 860px) {
+      .hero {
+        min-height: auto;
+        padding-top: 24px;
+      }
+
+      .hero__inner {
+        min-height: auto;
+      }
+
+      .system-map {
+        inset: 24% -28% 14% 18%;
+        opacity: 0.42;
+      }
+
+      .brand__note { display: none; }
+
+      .hero__content {
+        padding: 76px 0 58px;
+      }
+
+      h1 {
+        font-size: 72px;
+      }
+
+      .lede {
+        font-size: 20px;
+      }
+
+      h2 {
+        font-size: 40px;
+      }
+
+      .section {
+        padding: 76px 0;
+      }
+
+      .capability-grid,
+      .loop,
+      .section__header {
+        grid-template-columns: 1fr;
+      }
+    }
+
     @media (max-width: 520px) {
-      header.brand { margin-bottom: 48px; }
-      .logomark { width: 180px; }
+      .hero { padding-inline: 18px; }
+      .logomark { width: 128px; }
+      .hero__content { padding: 44px 0 40px; }
+      h1 { font-size: 48px; }
+      h2 { font-size: 32px; }
+      .lede { font-size: 18px; }
+      .proof-item { min-height: 84px; padding: 14px 10px; }
+      .proof-item strong { font-size: 16px; }
+      .proof-item span { font-size: 9px; }
       form.capture { flex-direction: column; }
       button[type="submit"] { width: 100%; }
-      .meta { flex-direction: column; gap: 8px; }
+      .section { width: calc(100% - 36px); }
+      .loop-list li { grid-template-columns: 42px 1fr; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -201,10 +507,19 @@
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header class="brand">
-      <!-- Praxis premium logo lockup: mark + PRAXIS wordmark, inverted for dark bg -->
-      <svg class="logomark" viewBox="108 93 292 327" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Praxis Engine">
+  <div class="page-shell">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="system-map" aria-hidden="true">
+        <span class="map-node">Author</span>
+        <span class="map-node">Verify</span>
+        <span class="map-node">Repair</span>
+        <span class="map-node">Audit</span>
+      </div>
+
+      <div class="hero__inner">
+        <header class="brand">
+          <!-- Praxis premium logo lockup: mark + PRAXIS wordmark, inverted for dark bg -->
+          <svg class="logomark" viewBox="108 93 292 327" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Praxis Engine">
         <g fill="none" stroke="currentColor" stroke-linejoin="miter" stroke-linecap="square">
           <path d="M 130 100 L 370 100 L 370 188 M 370 252 L 370 340 L 130 340 L 130 252 M 130 188 L 130 100" stroke-width="10" />
           <line x1="130" y1="220" x2="370" y2="220" stroke-width="7" />
@@ -225,36 +540,100 @@
         <g fill="currentColor">
           <path d="M110.504 363.192H128.591Q132.468 363.192 136.077 363.952Q139.688 364.712 142.423 366.498Q145.16 368.284 146.793 371.286Q148.428 374.288 148.428 378.772Q148.428 383.864 146.68 386.98Q144.932 390.096 141.968 391.806Q139.004 393.516 135.089 394.124Q131.176 394.731 126.92 394.731H120.08V417H110.504ZM125.856 386.524Q127.908 386.524 130.112 386.372Q132.316 386.22 134.178 385.46Q136.04 384.7 137.218 383.18Q138.396 381.66 138.396 378.924Q138.396 376.416 137.332 374.933Q136.268 373.452 134.596 372.654Q132.924 371.856 130.872 371.628Q128.82 371.4 126.92 371.4H120.08V386.524Z" /><path d="M161.94 363.192H180.636Q184.512 363.192 188.122 363.914Q191.732 364.636 194.543 366.384Q197.356 368.132 199.028 371.096Q200.7 374.06 200.7 378.62Q200.7 384.472 197.47 388.424Q194.24 392.376 188.236 393.212L202.524 417H190.972L178.508 394.2H171.516V417H161.94ZM178.964 385.992Q181.016 385.992 183.068 385.802Q185.12 385.612 186.83 384.89Q188.54 384.168 189.604 382.686Q190.668 381.204 190.668 378.544Q190.668 376.188 189.68 374.744Q188.692 373.3 187.096 372.578Q185.5 371.856 183.562 371.628Q181.624 371.4 179.8 371.4H171.516V385.992Z" /><path d="M232.224 363.192H240.508L263.688 417H252.744L247.728 404.688H224.396L219.532 417H208.816ZM244.384 396.48 236.1 374.592 227.664 396.48Z" /><path d="M287.84 388.88 269.904 363.192H281.988L294.68 383.104L307.219 363.192H318.847L301.216 388.88L320.748 417H308.587L294.376 394.276L280.24 417H268.688Z" /><path d="M331.524 363.192H341.099V417H331.524Z" /><path d="M384.251 374.744Q382.731 372.54 380.186 371.514Q377.64 370.488 374.828 370.488Q373.155 370.488 371.597 370.868Q370.039 371.248 368.785 372.084Q367.532 372.92 366.772 374.25Q366.012 375.58 366.012 377.404Q366.012 380.14 367.912 381.584Q369.811 383.028 372.623 384.092Q375.436 385.156 378.78 386.144Q382.123 387.132 384.936 388.88Q387.748 390.628 389.648 393.515Q391.548 396.404 391.548 401.192Q391.548 405.524 389.952 408.754Q388.356 411.984 385.658 414.111Q382.96 416.24 379.388 417.304Q375.816 418.368 371.864 418.368Q366.847 418.368 362.212 416.696Q357.575 415.024 354.231 411.072L361.452 404.08Q363.2 406.74 366.049 408.222Q368.9 409.704 372.092 409.704Q373.763 409.704 375.435 409.248Q377.107 408.792 378.476 407.88Q379.844 406.968 380.679 405.562Q381.515 404.156 381.515 402.332Q381.515 399.368 379.616 397.772Q377.715 396.176 374.904 395.073Q372.092 393.972 368.748 392.984Q365.404 391.996 362.592 390.286Q359.78 388.576 357.88 385.726Q355.979 382.876 355.979 378.088Q355.979 373.908 357.689 370.868Q359.4 367.828 362.174 365.813Q364.948 363.8 368.52 362.812Q372.092 361.824 375.816 361.824Q380.072 361.824 384.062 363.116Q388.051 364.408 391.243 367.372Z" />
         </g>
-      </svg>
-    </header>
+          </svg>
+          <div class="brand__note mono">Private beta / 2026</div>
+        </header>
 
-    <main>
-      <h1><span class="hl">The autonomous engineering control plane.</span></h1>
-      <p class="lede">
-        Software systems that author, test, and repair themselves — governed by explicit
-        policy, auditable by design. Private beta launching 2026.
-      </p>
+        <main class="hero__content">
+          <p class="eyebrow mono">Autonomous engineering control plane</p>
+          <h1 id="hero-title"><span class="hl">Praxis Engine</span></h1>
+          <p class="lede">
+            Software systems that author, test, and repair themselves under explicit
+            policy, with durable receipts for every decision.
+          </p>
 
-      <form class="capture" id="signup" novalidate>
-        <input
-          type="email"
-          id="email"
-          name="email"
-          placeholder="you@domain.com"
-          autocomplete="email"
-          required
-          aria-label="Email address"
-        />
-        <button type="submit" id="submit">Notify me</button>
-      </form>
-      <div class="status mono" id="status" aria-live="polite">&nbsp;</div>
-
-      <div class="meta">
-        <span>STATUS · PRIVATE BETA</span>
-        <span>LAUNCH · 2026</span>
-        <span>BUILT IN · BELLINGHAM, WA</span>
+          <div class="capture-area">
+            <form class="capture" id="signup" novalidate>
+              <input
+                type="email"
+                id="email"
+                name="email"
+                placeholder="you@domain.com"
+                autocomplete="email"
+                required
+                aria-label="Email address"
+              />
+              <button type="submit" id="submit">Notify me</button>
+            </form>
+            <div class="status mono" id="status" aria-live="polite">&nbsp;</div>
+          </div>
+        </main>
       </div>
-    </main>
+
+      <div class="proof-strip" aria-label="Praxis status">
+        <div class="proof-item">
+          <strong>Private beta</strong>
+          <span>Status</span>
+        </div>
+        <div class="proof-item">
+          <strong>2026</strong>
+          <span>Launch window</span>
+        </div>
+        <div class="proof-item">
+          <strong>Bellingham, WA</strong>
+          <span>Built in</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="capabilities-title">
+      <div class="section__header">
+        <p class="section__kicker">Control surface</p>
+        <h2 id="capabilities-title">Make autonomous work inspectable before it is powerful.</h2>
+      </div>
+
+      <div class="capability-grid">
+        <article class="capability">
+          <span class="capability__index">01 / Authority</span>
+          <div>
+            <h3>Explicit policy</h3>
+            <p>Runs move through declared gates, scoped permissions, and observable state instead of ambient process magic.</p>
+          </div>
+        </article>
+        <article class="capability">
+          <span class="capability__index">02 / Execution</span>
+          <div>
+            <h3>Agent workflows</h3>
+            <p>Planning, coding, testing, and repair become coordinated jobs with typed inputs and recoverable outcomes.</p>
+          </div>
+        </article>
+        <article class="capability">
+          <span class="capability__index">03 / Evidence</span>
+          <div>
+            <h3>Durable receipts</h3>
+            <p>Every action leaves a queryable trail so future agents can resume from facts, not folklore.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section loop" aria-labelledby="loop-title">
+      <div class="loop__copy">
+        <p class="section__kicker">Operating loop</p>
+        <h2 id="loop-title">One authority model from intent to repair.</h2>
+        <p>
+          Praxis treats orchestration as a systems layer: state transitions, tool routing,
+          verification, and audit records stay in the control plane where operators and
+          future runs can inspect them.
+        </p>
+      </div>
+      <ol class="loop-list">
+        <li><span>01</span><strong>Declare the work and its boundaries.</strong></li>
+        <li><span>02</span><strong>Route jobs through explicit tool authority.</strong></li>
+        <li><span>03</span><strong>Verify outcomes against machine-readable evidence.</strong></li>
+        <li><span>04</span><strong>Record receipts so the next run starts grounded.</strong></li>
+      </ol>
+    </section>
   </div>
 
   <footer>
@@ -287,11 +666,11 @@
           body: JSON.stringify({ email, source: 'landing', ts: Date.now() }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        status.textContent = '✓ you\'re on the list';
+        status.textContent = 'ok you\'re on the list';
         status.className = 'status mono ok';
         emailInput.value = '';
       } catch (err) {
-        status.textContent = '! could not submit — try again';
+        status.textContent = '! could not submit - try again';
         status.className = 'status mono err';
       } finally {
         button.disabled = false;

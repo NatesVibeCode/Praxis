@@ -68,7 +68,10 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
 
   useEffect(() => {
     if (!open) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const scrollIntoView = messagesEndRef.current?.scrollIntoView;
+    if (typeof scrollIntoView === 'function') {
+      scrollIntoView.call(messagesEndRef.current, { behavior: 'smooth', block: 'end' });
+    }
   }, [open, messages, streamingText, loading]);
 
   const handleSend = useCallback(() => {
@@ -97,6 +100,8 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
         aria-hidden={!open}
         aria-label="Chat panel"
       >
+        {open && (
+          <>
         <div className="chat-panel__header">
           <div className="chat-panel__title">Ask Anything</div>
           <button className="chat-panel__close" type="button" onClick={onClose} aria-label="Close chat">
@@ -214,6 +219,8 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
             {loading ? 'Sending...' : 'Send'}
           </button>
         </div>
+          </>
+        )}
       </aside>
     </>
   );

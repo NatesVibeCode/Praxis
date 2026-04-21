@@ -33,8 +33,9 @@ Does not own:
 
 The CLI is a frontdoor, not the product brain. It should expose the direct
 entrypoint for a tool when that path exists, and fall back to
-`workflow tools call <tool|alias>` when it does not.
+`workflow tools call <tool|alias|entrypoint>` when it does not.
 
 For catalog-backed tools, the `workflow tools describe` and `workflow tools call`
-commands accept either the canonical tool id or the recommended alias shown by
-`praxis workflow tools list`.
+commands accept the canonical tool id, the recommended alias shown by
+`praxis workflow tools list`, or the direct CLI entrypoint such as
+`workflow query`.

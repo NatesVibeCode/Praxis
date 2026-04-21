@@ -15,68 +15,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-def _auto_seal_text_only(
-    conn: "SyncPostgresConnection",
-    *,
-    run_id: str,
-    workflow_id: str,
-    job_label: str,
-    attempt_no: int,
-    summary: str,
-    result_kind: str,
-    execution_bundle: dict[str, Any] | None = None,
-    verification_artifact_refs: list[str] | None = None,
-) -> dict[str, Any]:
-    """Insert a minimal submission row for text-only output (no write_scope).
-
-    Bypasses the baseline-comparison pipeline entirely. Used when the agent
-    produced text output but no baseline was captured because the job has
-    no write_scope (research, debate, architecture tasks).
-    """
-    from runtime.workflow.artifact_contracts import evaluate_submission_acceptance
-    from storage.postgres.workflow_submission_repository import (
-        PostgresWorkflowSubmissionRepository,
-    )
-
-    # Truncate summary to 250k chars to stay within DB limits
-    truncated = summary[:250_000] if len(summary) > 250_000 else summary
-    acceptance_contract = (
-        dict(execution_bundle.get("acceptance_contract"))
-        if isinstance(execution_bundle, dict)
-        and isinstance(execution_bundle.get("acceptance_contract"), dict)
-        else {}
-    )
-    acceptance_status, acceptance_report = evaluate_submission_acceptance(
-        submission={
-            "summary": truncated,
-            "verification_artifact_refs": list(verification_artifact_refs or []),
-        },
-        acceptance_contract=acceptance_contract,
-    )
-    repository = PostgresWorkflowSubmissionRepository(conn)
-    return repository.record_submission(
-        run_id=run_id,
-        workflow_id=workflow_id,
-        job_label=job_label,
-        attempt_no=attempt_no,
-        result_kind=result_kind,
-        summary=truncated,
-        primary_paths=[],
-        comparison_status="text_only",
-        comparison_report="",
-        acceptance_status=acceptance_status,
-        acceptance_report=acceptance_report,
-        verification_artifact_refs=list(verification_artifact_refs or []),
-    )
-
-
 @dataclass
 class SubmissionGateResult:
     submission_state: dict[str, Any] | None
     final_status: str        # "succeeded" | "failed"
     final_error_code: str    # "" when succeeded
     result: dict[str, Any]   # execution result dict, may have stderr appended
+
+
+def _result_with_stderr(result: dict[str, Any], message: str) -> dict[str, Any]:
+    return {
+        **result,
+        "stderr": (
+            str(result.get("stderr") or "")
+            + f"\n{message}"
+        ).strip(),
+    }
 
 
 def resolve_submission_for_job(
@@ -186,56 +140,29 @@ def resolve_submission_for_job(
                     "Auto-sealed submission for %s/%s (result_kind=%s)",
                     run_id, job_label, result_kind,
                 )
-            except WorkflowSubmissionServiceError:
-                # Baseline-dependent seal failed (no write_scope / no baseline).
-                # Fall back to a direct text-only submission insert.
-                try:
-                    submission_state = _auto_seal_text_only(
-                        conn,
-                        run_id=run_id,
-                        workflow_id=workflow_id or run_id,
-                        job_label=job_label,
-                        attempt_no=attempt_no,
-                        summary=output_text,
-                        result_kind=result_kind,
-                        execution_bundle=execution_bundle,
-                        verification_artifact_refs=verification_artifact_refs,
-                    )
-                    logger.info(
-                        "Auto-sealed text-only submission for %s/%s",
-                        run_id, job_label,
-                    )
-                except Exception as exc2:
-                    logger.warning(
-                        "Text-only auto-seal failed for %s/%s: %s",
-                        run_id, job_label, exc2,
-                    )
-            except Exception as exc:
+            except WorkflowSubmissionServiceError as exc:
+                final_status = "failed"
+                final_error_code = (
+                    str(getattr(exc, "reason_code", "") or "").strip()
+                    or "workflow_submission.auto_seal_failed"
+                )
+                result = _result_with_stderr(
+                    result,
+                    f"submission auto-seal failed: {exc}",
+                )
                 logger.warning(
                     "Auto-seal failed for %s/%s: %s", run_id, job_label, exc
                 )
-                # Fall back to direct text-only insert (same as WorkflowSubmissionServiceError path)
-                try:
-                    submission_state = _auto_seal_text_only(
-                        conn,
-                        run_id=run_id,
-                        workflow_id=workflow_id or run_id,
-                        job_label=job_label,
-                        attempt_no=attempt_no,
-                        summary=output_text,
-                        result_kind=result_kind,
-                        execution_bundle=execution_bundle,
-                        verification_artifact_refs=verification_artifact_refs,
-                    )
-                    logger.info(
-                        "Auto-sealed text-only submission (fallback) for %s/%s",
-                        run_id, job_label,
-                    )
-                except Exception as exc2:
-                    logger.warning(
-                        "Text-only fallback seal failed for %s/%s: %s",
-                        run_id, job_label, exc2,
-                    )
+            except Exception as exc:
+                final_status = "failed"
+                final_error_code = "workflow_submission.auto_seal_failed"
+                result = _result_with_stderr(
+                    result,
+                    f"submission auto-seal failed: {type(exc).__name__}: {exc}",
+                )
+                logger.warning(
+                    "Auto-seal failed for %s/%s: %s", run_id, job_label, exc
+                )
 
     # ── Stage 2b: re-check for agent-sealed submission before enforcing ────
     # The agent may have sealed a submission via MCP during execution that
@@ -248,8 +175,22 @@ def resolve_submission_for_job(
                 job_label=job_label,
                 attempt_no=attempt_no,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            final_status = "failed"
+            final_error_code = "workflow_submission.lookup_failed"
+            result = _result_with_stderr(
+                result,
+                (
+                    "submission lookup failed before final enforcement: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            )
+            logger.warning(
+                "submission final lookup failed for %s/%s: %s",
+                run_id,
+                job_label,
+                exc,
+            )
 
     # ── Stage 3: enforce the contract ───────────────────────────────────────
     if final_status == "succeeded" and submission_required and submission_state is None:

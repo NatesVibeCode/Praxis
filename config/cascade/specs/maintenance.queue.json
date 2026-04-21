@@ -1,0 +1,88 @@
+{
+  "spec_version": "1.0",
+  "name": "maintenance",
+  "workflow_id": "maintenance_2026_04_20",
+  "phase": "maintenance",
+  "outcome_goal": "Six audits filed findings as bugs or operator_decisions; three kernel consolidations (secret, sandbox, adapter) landed on public via verifier-gated PRs; tiered maintenance cron deployed into HeartbeatOrchestrator.",
+  "anti_requirements": [
+    "Do NOT put API keys in plaintext .env — keychain-first only.",
+    "Do NOT merge a kernel PR with any red verifier.",
+    "Do NOT force-push, reset public, or skip hooks.",
+    "Do NOT touch files outside each job's stated targets.",
+    "Do NOT delete live facades before migrating callers."
+  ],
+  "jobs": [
+    {
+      "id": "a1_security_review",
+      "label": "a1_security_review",
+      "agent": "auto/review",
+      "prompt": "Run the security-review skill against the high-trust seams. Targets: Code&DBs/Workflow/runtime/sandbox_runtime.py; adapters/docker_runner.py; runtime/workflow/execution_backends.py; runtime/integrations/connector_executor.py; runtime/integrations/webhook.py; runtime/integration_manifest.py; surfaces/api/operator_write.py; surfaces/mcp/tools/operator.py; surfaces/api/rest.py. File a canonical bug per finding with signature 'security-review-$(date -I)-<category>'. If a seam is intentionally accepted, file operator_decisions key 'decision.2026-04-20.security-review-ack-<category>'. Done when every category has either a bug or an ack decision.",
+      "verify_command": "bash -lc \"bugs=$(praxis workflow bugs --signature-contains security-review-$(date -I) --state-in-open 2>/dev/null | wc -l | tr -d ' '); acks=$(psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key LIKE 'decision.%.security-review-ack-%' AND effective_to IS NULL\\\"); test ${bugs:-0} -ge 3 -o ${acks:-0} -ge 1\""
+    },
+    {
+      "id": "a2_secret_audit",
+      "label": "a2_secret_audit",
+      "agent": "auto/review",
+      "prompt": "Audit every credential read path. Targets: adapters/keychain.py; adapters/credentials.py; adapters/oauth_lifecycle.py; registry/provider_execution_registry.py; runtime/integrations/connector_executor.py; runtime/workflow/execution_backends.py; memory/ingest.py. Search with: rg 'api[_-]?key|OPENAI_API_KEY|ANTHROPIC_API_KEY|DEEPSEEK_API_KEY|GEMINI_API_KEY|resolve_credential|keychain' --type py 'Code&DBs/Workflow' -l. File operator_decisions key 'decision.2026-04-20.secret-path-inventory' whose rationale contains callsite_count=<N>, keychain_backed=<list>, non_keychain=<list>. File bugs for any plaintext secret path.",
+      "verify_command": "bash -lc \"hits=$(rg 'api[_-]?key|OPENAI_API_KEY|ANTHROPIC_API_KEY|DEEPSEEK_API_KEY|GEMINI_API_KEY|resolve_credential|keychain' --type py 'Code&DBs/Workflow' -l | wc -l | tr -d ' '); recorded=$(psql postgresql://localhost:5432/praxis -tAc \\\"SELECT COALESCE(substring(rationale FROM 'callsite_count=([0-9]+)'),'0') FROM operator_decisions WHERE decision_key='decision.2026-04-20.secret-path-inventory' ORDER BY decided_at DESC LIMIT 1\\\"); test \\\"$hits\\\" = \\\"$recorded\\\"\""
+    },
+    {
+      "id": "a3_dead_code",
+      "label": "a3_dead_code",
+      "agent": "auto/review",
+      "prompt": "Delete only symbols with grep/discover evidence of zero live callers. Targets: runtime/__init__.py __getattr__; runtime/execution/__init__.py; runtime/workflow/__init__.py; tests/unit/test_supervisor_compatibility.py; any file matching *_compat*, *_shim*, legacy_*. Standing order: unused shims before live facades. Produce a net-negative branch diff. PR description must show symbol -> evidence command -> zero-caller result.",
+      "verify_command": "bash -lc \"git diff --stat public..HEAD | tail -1 | rg 'deletions' >/dev/null && pytest -q && praxis workflow discover reindex --yes\""
+    },
+    {
+      "id": "a4_dependency_audit",
+      "label": "a4_dependency_audit",
+      "agent": "auto/review",
+      "prompt": "Run dependency hygiene. Targets: Code&DBs/Workflow/pyproject.toml; requirements.runtime.txt; surfaces/app/package.json; surfaces/app/package-lock.json; surfaces/cloudflare_sandbox_bridge/package.json. Run pip-audit and npm audit --audit-level=high. Land patch-only bumps (verifier-gated). File bugs 'dep-audit::<package>' for minor/major bumps and unresolved advisories. Done when both audits exit 0 or every remaining non-patch action is a bug.",
+      "verify_command": "bash -lc \"cd 'Code&DBs/Workflow' && pip-audit && cd surfaces/app && npm audit --audit-level=high\""
+    },
+    {
+      "id": "a5_input_validation",
+      "label": "a5_input_validation",
+      "agent": "auto/review",
+      "prompt": "Build the trust-boundary validation matrix. Targets: surfaces/api/rest.py; surfaces/api/agent_sessions.py; surfaces/api/handlers/_dispatch.py; surfaces/mcp/tools/operator.py; surfaces/mcp/tools/workflow.py; contracts/domain.py. For each endpoint record endpoint, input_type, validator, failure behavior, gap. Persist operator_decisions key 'decision.2026-04-20.input-validation-matrix' (rationale must contain endpoint_validation_matrix and endpoint_count=<N>). File bugs 'input-validation::<endpoint>' for gaps.",
+      "verify_command": "bash -lc \"psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key='decision.2026-04-20.input-validation-matrix' AND rationale LIKE '%endpoint_validation_matrix%'\\\" | rg '^1$'\""
+    },
+    {
+      "id": "a6_contract_drift",
+      "label": "a6_contract_drift",
+      "agent": "auto/review",
+      "prompt": "Audit typed-contract drift. Targets: contracts/domain.py; contracts/data_contracts.py; runtime/dependency_contract.py; runtime/build_planning_contract.py; runtime/topology_contract.py; runtime/workflow/submission_contract.py; adapters/provider_types.py. For each contract, name producer, consumer, serialization boundary, current tests, missing coverage, drift risks. Add focused round-trip tests where scope is clear; file bugs 'contract-drift::<contract>' where broader fixes are needed.",
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k contract"
+    },
+    {
+      "id": "a7_secret_kernel",
+      "label": "a7_secret_kernel",
+      "agent": "auto/build",
+      "prompt": "Create branch praxis/kernel-secret from public. Consolidate secret access behind adapters/keychain.py; export resolve_secret(name, *, scope). Replace direct os.environ.get reads for API_KEY/SECRET/TOKEN outside keychain with resolve_secret. Touched: adapters/credentials.py; registry/provider_execution_registry.py; runtime/integrations/connector_executor.py; runtime/workflow/execution_backends.py; tests/integration/test_secret_kernel.py. File 'decision.2026-04-20.kernel-secret-consolidation'. Open PR to public referencing the decision row; do not merge if verifier is red.",
+      "verify_command": "bash -lc \"PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_secret_kernel.py' && ! rg 'os\\.environ\\.get\\(.*(API_KEY|SECRET|TOKEN)' 'Code&DBs/Workflow' --type py -g '!adapters/keychain.py'\""
+    },
+    {
+      "id": "a8_sandbox_kernel",
+      "label": "a8_sandbox_kernel",
+      "agent": "auto/build",
+      "prompt": "Create branch praxis/kernel-sandbox from public. Consolidate RuntimeBoundaryError authority into runtime/sandbox_runtime.py. Touched: runtime/sandbox_runtime.py; runtime/workflow/execution_backends.py; runtime/workflow/execution_policy.py; adapters/docker_runner.py. execution_backends.py and execution_policy.py may assemble payloads only. Respect Docker-only sandbox authority. File 'decision.2026-04-20.kernel-sandbox-consolidation'. Open PR to public; do not merge if verifier red.",
+      "verify_command": "bash -lc \"PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k sandbox && bad=$(rg 'raise RuntimeBoundaryError' 'Code&DBs/Workflow' --type py -l | grep -v 'runtime/sandbox_runtime.py' || true); test -z \\\"$bad\\\"\""
+    },
+    {
+      "id": "a9_adapter_kernel",
+      "label": "a9_adapter_kernel",
+      "agent": "auto/build",
+      "depends_on": ["a7_secret_kernel"],
+      "prompt": "After a7_secret_kernel lands on public, branch praxis/kernel-adapter from updated public. Converge HTTP transport into adapters/http_transport.py. Touched: adapters/http_transport.py; adapters/provider_transport.py; adapters/llm_client.py; adapters/mcp_task.py; runtime/integrations/connector_executor.py; runtime/integrations/webhook.py; tests/integration/test_adapter_kernel.py. Only http_transport.py may call httpx/requests/aiohttp directly. Use resolve_secret from a7. File 'decision.2026-04-20.kernel-adapter-consolidation'. Open PR to public; do not merge if verifier red.",
+      "verify_command": "bash -lc \"PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_adapter_kernel.py' && bad=$(rg 'httpx\\.|requests\\.|aiohttp\\.' 'Code&DBs/Workflow' --type py -l | grep -v 'adapters/http_transport.py' || true); test -z \\\"$bad\\\"\""
+    },
+    {
+      "id": "b_maintenance_cron",
+      "label": "b_maintenance_cron",
+      "agent": "auto/build",
+      "prompt": "Create branch praxis/maintenance-cron. Build a tiered maintenance cron inside the existing HeartbeatRunner + CronScheduler; do NOT add a new scheduler. Tiered autonomy: safe auto-commits (dead-code deletions re-verified stale, patch dep bumps, missing registry rows, stale-decision closeouts, doc drift) land on branch praxis/maintenance with verifier-gated push; risky findings (behavior changes, security, kernel/schema/sandbox/adapter/secret paths, minor/major dep bumps) escalate to praxis_bugs + operator_decisions and never commit. Deliverables: migration 193_maintenance_action_ledger.sql (action_id UUID PK, cycle_id, module, target, action_kind CHECK IN ('auto_commit','escalate_bug','escalate_decision','noop','heal','close'), diff_hash, verifier_result JSONB, commit_sha, bug_id, decision_scope, created_at); migration 194 widening heartbeat scope CHECK to admit 'active_run_health','ready_bug_replay','build_forward','registry_wiring','safe_commit' (follow migration 192 pattern); five new HeartbeatModule subclasses + EscalationRouter helper added to runtime/heartbeat.py following existing shape; register modules in runtime/heartbeat_runner.py with cadence (5min for active_run_health + ready_bug_replay; hourly for build_forward + registry_wiring; daily 04:00 UTC for safe_commit); launchd plist com.praxis.maintenance-cron.plist + scripts/install_maintenance_cron.sh modeled on install_daily_heartbeat.sh; CLI 'praxis operate maintenance {status,run,--dry-run}' in surfaces/cli/commands/operate.py; unit tests per module (rollback-isolated); integration test tests/integration/test_maintenance_cron_end_to_end.py asserting heal fires on stuck run, bug closes via decision, safe commit lands on praxis/maintenance with PR, risky candidate files bug and does not commit. File 'decision.2026-04-20.maintenance-cron-v1'. Open PR to public; do not merge if verifier red.",
+      "verify_command": "bash -lc \"PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_heartbeat_active_run_health.py' 'Code&DBs/Workflow/tests/unit/test_heartbeat_ready_bug_replay.py' 'Code&DBs/Workflow/tests/unit/test_heartbeat_build_forward.py' 'Code&DBs/Workflow/tests/unit/test_heartbeat_registry_wiring.py' 'Code&DBs/Workflow/tests/unit/test_heartbeat_safe_commit.py' 'Code&DBs/Workflow/tests/integration/test_maintenance_cron_end_to_end.py' && psql postgresql://localhost:5432/praxis -tAc \\\"SELECT to_regclass('public.maintenance_action_ledger') IS NOT NULL\\\" | grep -q t\""
+    }
+  ],
+  "verify_command": "bash -lc \"psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key IN ('decision.2026-04-20.secret-path-inventory','decision.2026-04-20.input-validation-matrix','decision.2026-04-20.kernel-secret-consolidation','decision.2026-04-20.kernel-sandbox-consolidation','decision.2026-04-20.kernel-adapter-consolidation','decision.2026-04-20.maintenance-cron-v1') AND effective_to IS NULL\\\" | rg '^6$'\""
+}

@@ -185,7 +185,15 @@ def test_register_success(tmp_path):
 
     fake_mod = _make_module("artifacts.connectors.stripe.client", StripeClient)
     pg = MagicMock()
-    pg.execute.return_value = [{"connector_id": "conn_test"}]
+
+    def _fake_execute(query: str, *args):
+        if "INSERT INTO api_schemas" in query:
+            return [{"schema_id": "schema_test"}]
+        if "INSERT INTO connector_registry" in query:
+            return [{"connector_id": "conn_test"}]
+        return []
+
+    pg.execute.side_effect = _fake_execute
 
     with patch("runtime.integrations.connector_registrar._CONNECTORS_DIR", tmp_path):
         with patch(
@@ -198,9 +206,11 @@ def test_register_success(tmp_path):
     assert result["slug"] == "stripe"
     assert len(result["capabilities"]) > 0
 
-    # connector_registry + integration_registry upserts + verification_spec update
-    assert pg.execute.call_count == 3
+    # schema registry + connector_registry + integration_registry + verification_spec update
+    assert pg.execute.call_count == 7
     calls = [str(c) for c in pg.execute.call_args_list]
+    assert any("api_schemas" in c for c in calls)
+    assert any("api_endpoints" in c for c in calls)
     assert any("connector_registry" in c for c in calls)
     assert any("integration_registry" in c for c in calls)
 

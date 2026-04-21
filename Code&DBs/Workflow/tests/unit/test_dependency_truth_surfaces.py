@@ -153,7 +153,7 @@ def test_orient_advertises_catalog_backed_cli(monkeypatch) -> None:
     assert f"There are currently {tool_count} catalog-backed tools" in instructions
     assert "workflow tools list" in instructions
     assert "workflow health" in instructions
-    assert "workflow tools call <tool|alias>" in instructions
+    assert "workflow tools call <tool|alias|entrypoint>" in instructions
     assert "write/dispatch flows require `--yes`" in instructions
     assert "workflow query" in instructions
     assert "workflow architecture scan" in instructions
@@ -261,7 +261,7 @@ def test_orient_projects_mandatory_authority_envelope(monkeypatch) -> None:
         "operator_decision.architecture_policy.orient.authority_envelope_tool_guidance"
     )
     assert tool_guidance["preferred_operator_surface"]["command_prefix"] == "workflow"
-    assert tool_guidance["catalog"]["schema_command"] == "workflow tools describe <tool|alias>"
+    assert tool_guidance["catalog"]["schema_command"] == "workflow tools describe <tool|alias|entrypoint>"
     assert tool_guidance["catalog"]["directive"].startswith("Inspect the live catalog")
     primary_read_commands = {item["command"] for item in tool_guidance["primary_reads"]}
     assert {

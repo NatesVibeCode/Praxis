@@ -83,8 +83,8 @@ export type GateState = 'empty' | 'proposed' | 'configured' | 'blocked' | 'passe
 
 // --- Graph layout ---
 
-export const RANK_SPACING = 160;   // horizontal: distance between steps
-export const COLUMN_SPACING = 120; // vertical: distance between parallel branches
+export const RANK_SPACING = 200;   // horizontal: distance between steps
+export const COLUMN_SPACING = 168; // vertical: distance between parallel branches — needs to fit 2-line labels between sibling rings
 
 export interface LayoutNode {
   id: string;
@@ -132,6 +132,13 @@ export interface OrbitNode {
   multiplicity: NodeMultiplicity | null;
   /** Number of outgoing edges that leave this node in the graph. */
   outgoingEdgeCount: number;
+  /**
+   * True when a node is selected AND this node lies on its lineage
+   * (ancestors + self + descendants). When no node is selected, every
+   * OrbitNode carries inLineage=true so rendering stays at the rest state.
+   * Drives the focus-lineage presenter: non-lineage nodes dim to ghost.
+   */
+  inLineage: boolean;
 }
 
 export interface OrbitEdge {
@@ -157,6 +164,13 @@ export interface OrbitEdge {
    * tell the outermost and innermost blades apart.
    */
   siblingIndex: number;
+  /**
+   * True when a node is selected AND both endpoints are on the selection's
+   * lineage. When no node is selected, every edge carries inLineage=true.
+   * Drives stroke opacity and gate-label reveal for the focus-lineage
+   * presenter.
+   */
+  inLineage: boolean;
 }
 
 export interface DockContent {
@@ -193,6 +207,13 @@ export interface MoonBuildViewModel {
   totalNodes: number;
   resolvedNodes: number;
   blockedNodes: number;
+  /**
+   * True when a user-selected node is active and has produced a non-empty
+   * lineage. Lets renderers tell "nothing selected → full rest state" from
+   * "selection active → dim anything outside inLineage". Mirrors the
+   * selectedNodeId input: stays false when the caller passes null.
+   */
+  focusActive: boolean;
 }
 
 function branchSideScore(edge: BuildEdge): number {
@@ -437,6 +458,17 @@ export function extractLayout(payload: BuildPayload): GraphLayout {
     }
   }
 
+  // Per-layer positions are centered around y=0 for visual balance, which
+  // leaves top-column nodes at negative y. The canvas container starts at
+  // y=0, so negative-y nodes would overflow its top edge and clip. Shift
+  // every position down by minY so the topmost node lands at y=0 while
+  // relative spacing stays intact.
+  const rawYs = [...positions.values()].map(p => p.y);
+  const minY = rawYs.length ? Math.min(...rawYs) : 0;
+  if (minY !== 0) {
+    for (const lnode of positions.values()) lnode.y -= minY;
+  }
+
   const layers = sortedRanks.map(r => ({ rank: r, nodeIds: layerMap.get(r)! }));
   const xs = [...positions.values()].map(p => p.x);
   const ys = [...positions.values()].map(p => p.y);
@@ -444,8 +476,54 @@ export function extractLayout(payload: BuildPayload): GraphLayout {
     nodes: positions,
     layers,
     width: xs.length ? Math.max(...xs) + RANK_SPACING : 0,
-    height: ys.length ? Math.max(...ys) - Math.min(...ys) + COLUMN_SPACING : 0,
+    height: ys.length ? Math.max(...ys) + COLUMN_SPACING : 0,
   };
+}
+
+/**
+ * Selection-driven lineage: the set of nodes that are ancestors of the
+ * selected node, the selected node itself, and its descendants. Drives the
+ * focus-lineage presenter by letting the canvas dim everything outside.
+ *
+ * Returns null when selectedId is null or not present in the graph — callers
+ * should treat null as "no focus, render all nodes/edges at rest state".
+ */
+export function computeLineage(
+  selectedId: string | null,
+  edges: readonly Pick<BuildEdge, 'from_node_id' | 'to_node_id'>[],
+  nodeIds: readonly string[],
+): Set<string> | null {
+  if (!selectedId) return null;
+  const nodeIdSet = new Set(nodeIds);
+  if (!nodeIdSet.has(selectedId)) return null;
+
+  const forwardAdj = new Map<string, string[]>();
+  const backwardAdj = new Map<string, string[]>();
+  for (const id of nodeIds) {
+    forwardAdj.set(id, []);
+    backwardAdj.set(id, []);
+  }
+  for (const e of edges) {
+    forwardAdj.get(e.from_node_id)?.push(e.to_node_id);
+    backwardAdj.get(e.to_node_id)?.push(e.from_node_id);
+  }
+
+  const lineage = new Set<string>([selectedId]);
+  const walk = (adj: Map<string, string[]>) => {
+    const stack = [selectedId];
+    while (stack.length) {
+      const id = stack.pop()!;
+      for (const next of adj.get(id) || []) {
+        if (!lineage.has(next)) {
+          lineage.add(next);
+          stack.push(next);
+        }
+      }
+    }
+  };
+  walk(forwardAdj);
+  walk(backwardAdj);
+  return lineage;
 }
 
 // --- Main presenter ---
@@ -466,7 +544,7 @@ export function presentBuild(
     nodes: [], edges: [], dominantPath: [], layout: emptyLayout,
     release: { readiness: 'draft', blockers: [], projectedJobs: [], checklist: [] },
     dockContent: null, selectedNode: null, activeNode: null, firstUnresolvedId: null,
-    totalNodes: 0, resolvedNodes: 0, blockedNodes: 0,
+    totalNodes: 0, resolvedNodes: 0, blockedNodes: 0, focusActive: false,
   };
   if (!payload) return empty;
 
@@ -477,6 +555,9 @@ export function presentBuild(
   const layout = extractLayout(payload);
   const pathSet = new Set(dominantPath);
   const pathIndexMap = new Map(dominantPath.map((id, i) => [id, i]));
+  const lineage = computeLineage(selectedNodeId, rawEdges, rawNodes.map(n => n.node_id));
+  const focusActive = lineage !== null;
+  const isInLineage = (id: string) => !focusActive || lineage!.has(id);
 
   // Build run status overlay: match job labels to node titles
   const runStatusByTitle = new Map<string, string>();
@@ -524,6 +605,7 @@ export function presentBuild(
       rank: layout.nodes.get(n.node_id)?.rank ?? 0,
       multiplicity: nodeToMultiplicity(n),
       outgoingEdgeCount: outgoingByNode.get(n.node_id) || 0,
+      inLineage: isInLineage(n.node_id),
     };
   });
 
@@ -578,6 +660,7 @@ export function presentBuild(
       gateConfig: release.config ? { ...release.config as Record<string, unknown> } : undefined,
       siblingCount: siblingMeta.count,
       siblingIndex: siblingMeta.index,
+      inLineage: isInLineage(e.from_node_id) && isInLineage(e.to_node_id),
     };
   });
 
@@ -650,6 +733,6 @@ export function presentBuild(
   return {
     nodes, edges, dominantPath, layout, release: { readiness, blockers, projectedJobs, checklist },
     dockContent, selectedNode, activeNode, firstUnresolvedId,
-    totalNodes: nodes.length, resolvedNodes, blockedNodes,
+    totalNodes: nodes.length, resolvedNodes, blockedNodes, focusActive,
   };
 }

@@ -1022,6 +1022,18 @@ def handle_bugs(
                 parse_category=parse_bug_category,
             )
 
+        if action == "duplicate_check":
+            return _bug_contract.duplicate_check_payload(
+                bt=bt,
+                bt_mod=bt_mod,
+                body=body,
+                serialize_bug=_bug_to_dict,
+                default_limit=10,
+                parse_status=parse_bug_status,
+                parse_severity=parse_bug_severity,
+                parse_category=parse_bug_category,
+            )
+
         if action == "stats":
             return _bug_contract.stats_payload(bt=bt, serialize=_serialize)
 

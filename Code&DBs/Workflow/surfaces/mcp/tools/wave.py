@@ -10,6 +10,38 @@ from ..helpers import _serialize
 _PLACEHOLDER_WAVE_IDS = frozenset({"wave_abc123"})
 
 
+def _parse_start_jobs(jobs_spec: str) -> list[dict]:
+    """Parse the start-action jobs grammar.
+
+    BUG-B9325BED: praxis_wave start previously ignored jobs= and raised
+    KeyError for any wave_id that had not been pre-defined via add_wave.
+    Per architecture-policy::wave-orchestration::start-accepts-jobs-string
+    the tool must auto-define the wave from the jobs list.
+
+    Grammar:
+        "a1,a2,a3"                — three jobs, no intra-wave deps
+        "a1,a2|a1,a3|a2"          — a2 depends on a1; a3 depends on a2
+
+    The pipe separator is used instead of ':' because ':' is already the
+    outcome separator in the record action's jobs grammar. Labels are
+    stripped; empty entries are ignored.
+    """
+    jobs: list[dict] = []
+    for raw in (jobs_spec or "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        if "|" in raw:
+            parts = [p.strip() for p in raw.split("|") if p.strip()]
+            if not parts:
+                continue
+            label, *deps = parts
+            jobs.append({"label": label, "depends_on": deps})
+        else:
+            jobs.append({"label": raw, "depends_on": []})
+    return jobs
+
+
 def _resolve_wave_id(orch, params: dict, *, action: str) -> tuple[str, str | None]:
     requested = str(params.get("wave_id", "") or "").strip()
     if requested and requested not in _PLACEHOLDER_WAVE_IDS:
@@ -58,10 +90,44 @@ def tool_praxis_wave(params: dict) -> dict:
         wave_id, note = _resolve_wave_id(orch, params, action=action)
         if not wave_id:
             return {"error": note or "wave_id is required for start"}
+        # BUG-B9325BED: if the wave isn't defined yet, auto-define it from the
+        # jobs= grammar instead of raising KeyError. This implements
+        # architecture-policy::wave-orchestration::start-accepts-jobs-string.
+        defined_note: str | None = None
+        if wave_id not in orch._waves:  # inspect the orch's internal registry
+            jobs_spec = str(params.get("jobs", "") or "").strip()
+            if not jobs_spec:
+                return {
+                    "error": (
+                        f"Wave {wave_id} is not defined and no jobs= string was supplied. "
+                        "Supply jobs='a1,a2,a3' (optionally 'a1,a2|a1' for deps) to auto-define, "
+                        "or call add_wave explicitly first."
+                    ),
+                    "reason_code": "wave.start.undefined_and_no_jobs",
+                }
+            parsed_jobs = _parse_start_jobs(jobs_spec)
+            if not parsed_jobs:
+                return {
+                    "error": f"jobs='{jobs_spec}' did not parse to any job labels",
+                    "reason_code": "wave.start.jobs_parse_empty",
+                }
+            orch.add_wave(wave_id=wave_id, jobs=parsed_jobs)
+            defined_note = (
+                f"auto-defined wave {wave_id} with {len(parsed_jobs)} job(s) "
+                "per wave-orchestration start-accepts-jobs-string policy"
+            )
         try:
             ws = orch.start_wave(wave_id)
-            payload = {"wave_id": ws.wave_id, "status": ws.status.value, "started": True}
-            if note:
+            payload: dict[str, Any] = {
+                "wave_id": ws.wave_id,
+                "status": ws.status.value,
+                "started": True,
+            }
+            if defined_note and note:
+                payload["note"] = f"{defined_note}; {note}"
+            elif defined_note:
+                payload["note"] = defined_note
+            elif note:
                 payload["note"] = note
             return payload
         except RuntimeError as e:
@@ -117,10 +183,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "USE WHEN: you're orchestrating multi-phase work where later jobs depend on earlier "
                 "ones completing successfully.\n\n"
                 "WORKFLOW:\n"
-                "  1. praxis_wave(action='observe')                    — see current wave state\n"
-                "  2. praxis_wave(action='start', wave_id='wave_1')    — begin a new wave\n"
-                "  3. praxis_wave(action='next')                       — get jobs ready on the current/only wave\n"
-                "  4. praxis_wave(action='record', jobs='build:pass,test:fail')  — record results on the current/only wave\n\n"
+                "  1. praxis_wave(action='observe')                                          — see current wave state\n"
+                "  2. praxis_wave(action='start', wave_id='wave_1', jobs='a,b,c|a')          — auto-define + begin a new wave\n"
+                "     (jobs grammar for start: comma-separated labels; 'b|a' means b depends on a)\n"
+                "  3. praxis_wave(action='next')                                             — get jobs ready on the current/only wave\n"
+                "  4. praxis_wave(action='record', jobs='build:pass,test:fail')              — record results on the current/only wave\n\n"
                 "DO NOT USE: for simple flat workflow launches (use praxis_workflow). Waves are for complex "
                 "multi-step pipelines with explicit dependency tracking."
             ),
@@ -133,7 +200,14 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "enum": ["observe", "start", "next", "record"],
                     },
                     "wave_id": {"type": "string", "description": "Wave identifier (for start/next/record)."},
-                    "jobs": {"type": "string", "description": "Job results for record, format: 'label:pass,label2:fail'."},
+                    "jobs": {
+                        "type": "string",
+                        "description": (
+                            "For start: comma-separated job labels to auto-define the wave, "
+                            "e.g. 'a1,a2,a3'. Use '|' to declare intra-wave deps: 'a1,a2|a1,a3|a2'. "
+                            "For record: job outcomes, format 'label:pass,label2:fail'."
+                        ),
+                    },
                 },
                 "required": ["action"],
             },

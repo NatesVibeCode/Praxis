@@ -196,7 +196,8 @@
     "192_heartbeat_probe_kind_model_retirement.sql",
     "193_native_self_hosted_smoke_workspace_repair.sql",
     "194_projection_freshness_sla_config.sql",
-    "195_operator_ideas_authority.sql"
+    "195_operator_ideas_authority.sql",
+    "196_workflow_control_commands_view.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -4938,6 +4939,12 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.operator.ideas"
       }
+    ],
+    "196_workflow_control_commands_view.sql": [
+      {
+        "object_type": "view",
+        "object_name": "workflow_control_commands"
+      }
     ]
   },
   "policy_buckets": {
@@ -5138,7 +5145,8 @@
       "192_heartbeat_probe_kind_model_retirement.sql",
       "193_native_self_hosted_smoke_workspace_repair.sql",
       "194_projection_freshness_sla_config.sql",
-      "195_operator_ideas_authority.sql"
+      "195_operator_ideas_authority.sql",
+      "196_workflow_control_commands_view.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

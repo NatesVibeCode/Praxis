@@ -26,6 +26,11 @@ from runtime.workflow.decision_context import decision_workspace_overlays
 from runtime.workspace_paths import workflow_root
 
 
+logger = logging.getLogger(__name__)
+_PRE_RELOAD_PROVIDER_SLOT_ACQUISITION_ERROR = globals().get(
+    "ProviderSlotAcquisitionError"
+)
+
 _WORKFLOW_MODEL_NETWORK_ENV = "PRAXIS_WORKFLOW_MODEL_NETWORK"
 _EXECUTION_BUNDLE_ENV = "PRAXIS_EXECUTION_BUNDLE"
 _ALLOWED_MCP_TOOLS_ENV = "PRAXIS_ALLOWED_MCP_TOOLS"
@@ -234,16 +239,64 @@ def provider_slot_bypass():
         _PROVIDER_SLOT_BYPASS.reset(token)
 
 
+class ProviderSlotAcquisitionError(RuntimeError):
+    """Raised when the provider load balancer cannot resolve a slot.
+
+    BUG-3C9ECE97: distinct from the normal "at capacity" path (which
+    returns ``False`` from the slot context manager). This signals that
+    the load balancer itself — the admission authority — is unreachable
+    or broken. Callers must fail closed with a structured failure dict,
+    not silently treat admission as granted.
+    """
+
+    def __init__(self, provider_slug: str, cause: BaseException):
+        self.provider_slug = provider_slug
+        RuntimeError.__init__(
+            self,
+            f"load balancer unavailable for provider={provider_slug!r}: {cause}"
+        )
+
+
+if isinstance(_PRE_RELOAD_PROVIDER_SLOT_ACQUISITION_ERROR, type):
+    _PRE_RELOAD_PROVIDER_SLOT_ACQUISITION_ERROR.__doc__ = (
+        ProviderSlotAcquisitionError.__doc__
+    )
+    _PRE_RELOAD_PROVIDER_SLOT_ACQUISITION_ERROR.__init__ = (
+        ProviderSlotAcquisitionError.__init__
+    )
+    ProviderSlotAcquisitionError = _PRE_RELOAD_PROVIDER_SLOT_ACQUISITION_ERROR
+
+
 def _provider_slot(provider_slug: str):
-    """Acquire the provider concurrency slot unless a parent already owns it."""
+    """Acquire the provider concurrency slot unless a parent already owns it.
+
+    Returns a context manager whose ``__enter__`` yields ``True`` on slot
+    granted or ``False`` when the provider is at capacity.
+
+    The explicit ``provider_slot_bypass()`` contextvar is the only
+    supported admission bypass — used by nested calls that already hold
+    the parent's slot. Infrastructure failures (load balancer offline,
+    Postgres down behind the balancer, etc.) are NOT a bypass case; they
+    raise :class:`ProviderSlotAcquisitionError` so the caller fails
+    closed with a structured error.
+    """
 
     if _PROVIDER_SLOT_BYPASS.get() or not provider_slug:
         return nullcontext(True)
     try:
         return get_load_balancer().slot(provider_slug)
     except Exception as exc:
-        logger.debug("load_balancer unavailable for %s: %s", provider_slug, exc)
-        return nullcontext(True)
+        # BUG-3C9ECE97: never mask load-balancer failures as admission
+        # success. The previous branch returned nullcontext(True) on any
+        # exception, which let infrastructure outages silently overcommit
+        # providers. Surface a typed error so call sites can emit a
+        # structured failure record and so tests can pin the contract.
+        logger.warning(
+            "provider slot acquisition failed for %s (load balancer unavailable): %s",
+            provider_slug,
+            exc,
+        )
+        raise ProviderSlotAcquisitionError(provider_slug, exc) from exc
 
 
 def _provider_capacity_failure(provider_slug: str) -> dict[str, Any]:
@@ -253,6 +306,30 @@ def _provider_capacity_failure(provider_slug: str) -> dict[str, Any]:
         "stdout": "",
         "stderr": f"Provider at capacity: {provider_slug}",
         "error_code": "route.unhealthy",
+    }
+
+
+def _provider_slot_acquisition_failure(
+    provider_slug: str,
+    exc: BaseException,
+) -> dict[str, Any]:
+    """Structured failure record for a :class:`ProviderSlotAcquisitionError`.
+
+    Uses ``error_code=provider_slot_acquisition_error`` (distinct from
+    ``route.unhealthy``) so dashboards and healers can tell
+    infrastructure-level admission outages apart from simple capacity
+    pressure.
+    """
+
+    return {
+        "status": "failed",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": (
+            f"Provider slot acquisition failed (load balancer unavailable) "
+            f"for {provider_slug}: {exc}"
+        ),
+        "error_code": "provider_slot_acquisition_error",
     }
 
 
@@ -449,7 +526,11 @@ def execute_cli(
 ) -> dict[str, Any]:
     """Run workflow-managed CLI models through the normalized sandbox contract."""
     provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
-    with _provider_slot(provider_slug) as acquired:
+    try:
+        slot_cm = _provider_slot(provider_slug)
+    except ProviderSlotAcquisitionError as exc:
+        return _provider_slot_acquisition_failure(provider_slug, exc)
+    with slot_cm as acquired:
         if not acquired:
             return _provider_capacity_failure(provider_slug)
 
@@ -606,7 +687,11 @@ def execute_api(
     """Execute provider-backed API work inside the selected sandbox provider."""
     resolved_workdir = workdir or os.getcwd()
     provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
-    with _provider_slot(provider_slug) as acquired:
+    try:
+        slot_cm = _provider_slot(provider_slug)
+    except ProviderSlotAcquisitionError as exc:
+        return _provider_slot_acquisition_failure(provider_slug, exc)
+    with slot_cm as acquired:
         if not acquired:
             return _provider_capacity_failure(provider_slug)
 

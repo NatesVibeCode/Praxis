@@ -191,40 +191,152 @@ def tool_dag_health(params: dict, _progress_emitter=None) -> dict:
     return tool_praxis_health(params, _progress_emitter=_progress_emitter)
 
 
+# BUG-FE3A8255: allowlist for importlib.reload of runtime code modules.
+# Only pure-function/pure-logic modules with no process-wide state (pools,
+# registries bound to handler closures, launchd-facing threads) are included.
+# Adding a module here is an opt-in decision that the module is safe to
+# re-execute mid-process.
+_RUNTIME_RELOAD_ALLOWLIST_PREFIXES: tuple[str, ...] = (
+    "runtime.workflow_spec",
+    "runtime.workflow_validation",
+    "runtime.workflow_chain",
+    "runtime.workflow._context_building",
+    "runtime.capability.",     # resolver, plan envelope, lifecycle
+    "runtime.compile_reuse",
+    "runtime.idempotency",
+    "runtime.job_dependencies",
+    "runtime.workflow_trigger_handlers",
+)
+
+
+def _module_is_reload_allowed(module_name: str) -> bool:
+    return any(
+        module_name == prefix.rstrip(".") or module_name.startswith(prefix)
+        for prefix in _RUNTIME_RELOAD_ALLOWLIST_PREFIXES
+    )
+
+
+def _reload_runtime_modules(requested: list[str] | None) -> dict:
+    """importlib.reload over an allowlisted set of pure runtime modules.
+
+    BUG-FE3A8255: operator hot-fix flow needs a lighter alternative to a full
+    MCP subprocess restart after editing a runtime/*.py file. Only modules
+    declared safe in `_RUNTIME_RELOAD_ALLOWLIST_PREFIXES` are reloadable —
+    anything else raises a structured error so we never silently reload a
+    state-bearing module that would leave handler closures half-bound.
+    """
+    import importlib
+    import sys
+
+    if requested is None:
+        # Default: reload every allowlisted module already imported.
+        targets = sorted(
+            name
+            for name in list(sys.modules)
+            if _module_is_reload_allowed(name)
+        )
+    else:
+        targets = []
+        rejected: list[str] = []
+        for name in requested:
+            name = str(name or "").strip()
+            if not name:
+                continue
+            if not _module_is_reload_allowed(name):
+                rejected.append(name)
+                continue
+            targets.append(name)
+        if rejected:
+            return {
+                "reloaded": [],
+                "failed": [],
+                "rejected": rejected,
+                "reason_code": "runtime.reload.module_not_allowlisted",
+                "allowlist_prefixes": list(_RUNTIME_RELOAD_ALLOWLIST_PREFIXES),
+            }
+
+    reloaded: list[str] = []
+    failed: list[dict] = []
+    for name in targets:
+        module = sys.modules.get(name)
+        if module is None:
+            # Not yet imported — nothing to reload.
+            continue
+        try:
+            importlib.reload(module)
+            reloaded.append(name)
+        except Exception as exc:
+            failed.append({"module": name, "error": f"{type(exc).__name__}: {exc}"})
+    return {
+        "reloaded": reloaded,
+        "failed": failed,
+        "count": len(reloaded),
+        "allowlist_prefixes": list(_RUNTIME_RELOAD_ALLOWLIST_PREFIXES),
+    }
+
+
 def tool_praxis_reload(params: dict) -> dict:
-    """Clear all in-process caches so DB and config changes take effect without restart."""
+    """Clear in-process caches and optionally importlib.reload runtime modules.
+
+    BUG-FE3A8255: added `scope` + `modules` parameters so a hot-fixed runtime
+    module (e.g. a patched validator) can take effect without a full MCP
+    subprocess restart.
+
+    Parameters:
+        scope: "caches" (default, back-compat) | "runtime_modules" | "all"
+        modules: optional list of runtime module names to reload. If omitted
+            and scope includes runtime_modules, every allowlisted module
+            already in sys.modules is reloaded.
+    """
+    params = dict(params or {})
+    scope = str(params.get("scope") or "caches").strip().lower()
+    if scope not in {"caches", "runtime_modules", "all"}:
+        return {
+            "error": f"invalid scope '{scope}'; expected one of caches|runtime_modules|all",
+            "reason_code": "runtime.reload.invalid_scope",
+        }
+    modules_param = params.get("modules")
+    if modules_param is not None and not isinstance(modules_param, list):
+        return {
+            "error": "modules must be a list of module name strings",
+            "reason_code": "runtime.reload.invalid_modules_param",
+        }
+
     cleared: list[str] = []
+    if scope in {"caches", "all"}:
+        # 1. model_profiles context window cache
+        try:
+            import registry.model_context_limits as mcl
+            mcl._model_profiles_cache = None
+            mcl._model_profiles_loaded = False
+            cleared.append("model_context_limits")
+        except Exception as exc:
+            cleared.append(f"model_context_limits: FAILED ({exc})")
 
-    # 1. model_profiles context window cache
-    try:
-        import registry.model_context_limits as mcl
-        mcl._model_profiles_cache = None
-        mcl._model_profiles_loaded = False
-        cleared.append("model_context_limits")
-    except Exception as exc:
-        cleared.append(f"model_context_limits: FAILED ({exc})")
+        # 2. MCP tool catalog lru_cache
+        try:
+            from surfaces.mcp.catalog import get_tool_catalog, resolve_tool_entry
+            get_tool_catalog.cache_clear()
+            resolve_tool_entry.cache_clear()
+            cleared.append("mcp_catalog")
+        except Exception as exc:
+            cleared.append(f"mcp_catalog: FAILED ({exc})")
 
-    # 2. MCP tool catalog lru_cache
-    try:
-        from surfaces.mcp.catalog import get_tool_catalog, resolve_tool_entry
-        get_tool_catalog.cache_clear()
-        resolve_tool_entry.cache_clear()
-        cleared.append("mcp_catalog")
-    except Exception as exc:
-        cleared.append(f"mcp_catalog: FAILED ({exc})")
+        # 3. Agent registry (no persistent cache, but force a fresh load on next access)
+        #    The registry is constructed per-call in load_from_postgres, so clearing
+        #    model_profiles is sufficient — it's the only thing that causes silent drops.
 
-    # 3. Agent registry (no persistent cache, but force a fresh load on next access)
-    #    The registry is constructed per-call in load_from_postgres, so clearing
-    #    model_profiles is sufficient — it's the only thing that causes silent drops.
+        # 4. Context cache
+        try:
+            get_context_cache().clear()
+            cleared.append("context_cache")
+        except Exception as exc:
+            cleared.append(f"context_cache: FAILED ({exc})")
 
-    # 4. Context cache
-    try:
-        get_context_cache().clear()
-        cleared.append("context_cache")
-    except Exception as exc:
-        cleared.append(f"context_cache: FAILED ({exc})")
-
-    return {"reloaded": cleared, "count": len(cleared)}
+    result: dict[str, Any] = {"reloaded": cleared, "count": len(cleared), "scope": scope}
+    if scope in {"runtime_modules", "all"}:
+        result["runtime_modules"] = _reload_runtime_modules(modules_param)
+    return result
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
@@ -253,17 +365,39 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_reload,
         {
             "description": (
-                "Clear all in-process caches so DB and config changes take effect "
-                "without restarting Claude Desktop.\n\n"
+                "Clear in-process caches and optionally importlib.reload runtime modules "
+                "so DB, config, and code changes take effect without restarting the MCP subprocess.\n\n"
                 "USE WHEN: you just applied a migration, updated native runtime authority, "
-                "added a model to provider_model_candidates, or changed anything in Postgres "
-                "that the MCP server caches on first load.\n\n"
-                "EXAMPLE: praxis_reload()\n\n"
-                "Clears: model_profiles context windows, MCP tool catalog, context cache."
+                "added a model to provider_model_candidates, or EDITED a runtime/*.py module "
+                "whose fix isn't visible through the MCP surface yet (BUG-FE3A8255).\n\n"
+                "PARAMETERS:\n"
+                "  scope: 'caches' (default, back-compat) | 'runtime_modules' | 'all'\n"
+                "  modules: optional list of allowlisted runtime module names; if omitted "
+                "and scope includes runtime_modules, every allowlisted module already in "
+                "sys.modules is reloaded.\n\n"
+                "EXAMPLES:\n"
+                "  praxis_reload()                                         # caches only\n"
+                "  praxis_reload(scope='all')                              # caches + every allowlisted runtime module\n"
+                "  praxis_reload(scope='runtime_modules', modules=['runtime.workflow_validation'])\n\n"
+                "Clears (caches): model_profiles context windows, MCP tool catalog, context cache.\n"
+                "Reloads (runtime_modules): allowlisted pure-runtime modules only — state-bearing "
+                "modules (pools, registries) are rejected with reason_code "
+                "'runtime.reload.module_not_allowlisted'."
             ),
             "inputSchema": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": ["caches", "runtime_modules", "all"],
+                        "description": "What to refresh. 'caches' is back-compat default.",
+                    },
+                    "modules": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of allowlisted module names to reload.",
+                    },
+                },
             },
         },
     ),

@@ -1992,3 +1992,117 @@ def test_spawn_frontdoor_uses_detached_launcher_for_async_submit(
         "success_prefix": "Child workflow spawned",
         "emit_parent": True,
     }
+
+
+# ---------------------------------------------------------------------------
+# BUG-61881910: `praxis workflow chain` must accept a coordination-program JSON
+# ---------------------------------------------------------------------------
+
+
+def test_chain_frontdoor_detects_coordination_program(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A single coordination-program JSON (with top-level 'waves') must route
+    to the durable WorkflowChainProgram submit path — not the legacy
+    'requires 2+ specs' error."""
+
+    # Minimal coordination-program shape.
+    coord = {
+        "program": "test_program",
+        "why": "regression",
+        "validate_order": ["config/cascade/specs/s1.json"],
+        "waves": [
+            {"wave_id": "w1", "specs": ["config/cascade/specs/s1.json"]}
+        ],
+    }
+    coord_path = tmp_path / "test_chain.json"
+    coord_path.write_text(json.dumps(coord))
+
+    captured: dict[str, object] = {}
+
+    def _fake_request(pg_conn, **kwargs):  # noqa: ARG001
+        captured.update(kwargs)
+        return SimpleNamespace(command_id="cmd_test", command_type="workflow.chain.submit")
+
+    def _fake_render(pg_conn, command, **kwargs):  # noqa: ARG001
+        return {"status": "submitted", "chain_id": "chain_test_123"}
+
+    # Patch the control_commands module imports lazily used inside the handler.
+    import runtime.control_commands as _cc
+    monkeypatch.setattr(_cc, "request_workflow_chain_submit_command", _fake_request)
+    monkeypatch.setattr(_cc, "render_workflow_chain_submit_response", _fake_render)
+
+    # Provide a fake pg_conn through _subs.
+    import surfaces.mcp.subsystems as _subs_mod
+    monkeypatch.setattr(_subs_mod, "_subs", _FakeSubsystems())
+
+    stdout = StringIO()
+    exit_code = workflow_cli_main(["chain", str(coord_path)], stdout=stdout)
+    assert exit_code == 0, f"unexpected failure: {stdout.getvalue()!r}"
+    payload = json.loads(stdout.getvalue())
+    assert payload == {"status": "submitted", "chain_id": "chain_test_123"}
+    assert captured["coordination_path"] == str(coord_path)
+    assert captured["requested_by_kind"] == "cli"
+    assert captured["adopt_active"] is True
+
+
+def test_chain_frontdoor_no_adopt_active_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--no-adopt-active must flow through to the submit command."""
+
+    coord = {
+        "program": "test_program",
+        "validate_order": [],
+        "waves": [{"wave_id": "w1", "specs": []}],
+    }
+    coord_path = tmp_path / "test_chain.json"
+    coord_path.write_text(json.dumps(coord))
+
+    captured: dict[str, object] = {}
+
+    def _fake_request(pg_conn, **kwargs):  # noqa: ARG001
+        captured.update(kwargs)
+        return SimpleNamespace(command_id="cmd_test", command_type="workflow.chain.submit")
+
+    def _fake_render(pg_conn, command, **kwargs):  # noqa: ARG001
+        return {"status": "submitted", "chain_id": "chain_test_456"}
+
+    import runtime.control_commands as _cc
+    monkeypatch.setattr(_cc, "request_workflow_chain_submit_command", _fake_request)
+    monkeypatch.setattr(_cc, "render_workflow_chain_submit_response", _fake_render)
+
+    import surfaces.mcp.subsystems as _subs_mod
+    monkeypatch.setattr(_subs_mod, "_subs", _FakeSubsystems())
+
+    stdout = StringIO()
+    exit_code = workflow_cli_main(
+        ["chain", str(coord_path), "--no-adopt-active"], stdout=stdout
+    )
+    assert exit_code == 0
+    assert captured["adopt_active"] is False
+
+
+def test_chain_frontdoor_legacy_mode_still_requires_two_specs(
+    tmp_path: Path,
+) -> None:
+    """Backward-compat: a single non-coordination JSON (no 'waves' key) still
+    gets the legacy error hint."""
+
+    legacy_single = tmp_path / "only_one_spec.json"
+    legacy_single.write_text(json.dumps({"name": "solo", "jobs": []}))
+
+    stdout = StringIO()
+    exit_code = workflow_cli_main(["chain", str(legacy_single)], stdout=stdout)
+    assert exit_code == 2
+    assert "coordination-program JSON" in stdout.getvalue()
+
+
+def test_chain_frontdoor_help_mentions_coordination_and_legacy_modes() -> None:
+    stdout = StringIO()
+    exit_code = workflow_cli_main(["chain", "--help"], stdout=stdout)
+    assert exit_code == 2  # argparse convention for help
+    out = stdout.getvalue()
+    assert "coordination.json" in out.lower() or "coordination-program" in out.lower()
+    assert "spec1.json" in out  # legacy mode still documented
+    assert "--no-adopt-active" in out

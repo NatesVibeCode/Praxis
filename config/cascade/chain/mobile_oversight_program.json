@@ -1,0 +1,81 @@
+{
+  "program": "mobile_oversight",
+  "mode": "autonomous",
+  "why": "Eight-phase autonomous build of Praxis mobile oversight: from authority spine (WebAuthn, capability grants, blast-radius, policy-drift, autonomy-chain) through command-bus rewire, web push + public heartbeat, Cloudflare Tunnel home-origin + caffeinate, PWA Moon-styled surface, stolen-phone hardening + blast-radius halve, recurring maintenance healer cron, and Telegram wake-channel fallback. Parallel legs in waves 3/4 converge on phase 5; phase 6 depends on both tunnel and PWA; phase 7 enables autonomous heal/commit/advance after baseline is stable; phase 8 piggybacks escalation via Telegram.",
+  "validate_order": [
+    "config/cascade/specs/W_mobile_phase1_authority_spine_20260420.json",
+    "config/cascade/specs/W_mobile_phase2_command_bus_rewire_20260420.json",
+    "config/cascade/specs/W_mobile_phase3_push_and_status_20260421.json",
+    "config/cascade/specs/W_mobile_phase4_home_tunnel_20260421.json",
+    "config/cascade/specs/W_mobile_phase5_pwa_surface_20260422.json",
+    "config/cascade/specs/W_mobile_phase6_hardening_policies_20260423.json",
+    "config/cascade/specs/W_mobile_phase6_5_capacity_foundation_20260423.json",
+    "config/cascade/specs/W_mobile_phase7_maintenance_cron_20260423.json",
+    "config/cascade/specs/W_mobile_phase8_telegram_fallback_20260425.json"
+  ],
+  "waves": [
+    {
+      "wave_id": "phase1_authority_spine",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase1_authority_spine_20260420.json"
+      ],
+      "depends_on": []
+    },
+    {
+      "wave_id": "phase2_command_bus",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase2_command_bus_rewire_20260420.json"
+      ],
+      "depends_on": ["phase1_authority_spine"]
+    },
+    {
+      "wave_id": "phase3_push_and_status",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase3_push_and_status_20260421.json"
+      ],
+      "depends_on": ["phase2_command_bus"]
+    },
+    {
+      "wave_id": "phase4_home_tunnel",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase4_home_tunnel_20260421.json"
+      ],
+      "depends_on": ["phase3_push_and_status"]
+    },
+    {
+      "wave_id": "phase5_pwa_surface",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase5_pwa_surface_20260422.json"
+      ],
+      "depends_on": ["phase2_command_bus", "phase3_push_and_status"]
+    },
+    {
+      "wave_id": "phase6_hardening",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase6_hardening_policies_20260423.json"
+      ],
+      "depends_on": ["phase5_pwa_surface", "phase4_home_tunnel"]
+    },
+    {
+      "wave_id": "phase6_5_capacity",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase6_5_capacity_foundation_20260423.json"
+      ],
+      "depends_on": ["phase6_hardening"]
+    },
+    {
+      "wave_id": "phase7_maintenance_cron",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase7_maintenance_cron_20260423.json"
+      ],
+      "depends_on": ["phase6_5_capacity"]
+    },
+    {
+      "wave_id": "phase8_telegram",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase8_telegram_fallback_20260425.json"
+      ],
+      "depends_on": ["phase7_maintenance_cron"]
+    }
+  ]
+}

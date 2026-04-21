@@ -167,14 +167,14 @@ def _build_orient_tool_guidance(
             "kind": "catalog_backed_cli",
             "command_prefix": "workflow",
             "tool_count": tool_count,
-            "generic_call": "workflow tools call <tool|alias> --input-json '{...}'",
+            "generic_call": "workflow tools call <tool|alias|entrypoint> --input-json '{...}'",
             "unified_http_call": "POST /api/operate",
             "unified_http_catalog": "GET /api/operate/catalog",
         },
         "catalog": {
             "list_command": "workflow tools list",
             "search_command": "workflow tools search <text>",
-            "schema_command": "workflow tools describe <tool|alias>",
+            "schema_command": "workflow tools describe <tool|alias|entrypoint>",
             "http_catalog": "GET /api/operate/catalog",
             "directive": "Inspect the live catalog before guessing tool names or schemas.",
         },
@@ -574,7 +574,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                     ],
                 },
                 {
-                    "command": "workflow tools describe <tool|alias>",
+                    "command": "workflow tools describe <tool|alias|entrypoint>",
                     "description": "Inspect one tool's schema, risk, badges, and example payloads before calling it.",
                     "examples": [
                         "workflow tools describe praxis_query",
@@ -582,7 +582,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                     ],
                 },
                 {
-                    "command": "workflow tools call <tool|alias> --input-json '{...}'",
+                    "command": "workflow tools call <tool|alias|entrypoint> --input-json '{...}'",
                     "description": "Use the generic direct-call surface when no friendly alias fits or when you want exact schema control.",
                     "examples": [
                         "workflow tools call praxis_query --input-json '{\"question\":\"what is failing right now?\"}'",
@@ -652,12 +652,12 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "You are operating the Praxis Engine autonomous engineering control plane.\n"
             "Prefer the catalog-backed `workflow` CLI as the default human/operator surface.\n"
             f"There are currently {tool_count} catalog-backed tools. Start with `workflow tools list`, "
-            "`workflow tools search <text>`, and `workflow tools describe <tool|alias>` when you need the current "
+            "`workflow tools search <text>`, and `workflow tools describe <tool|alias|entrypoint>` when you need the current "
             "surface instead of memorizing a static list. Use `--exact` when you already know the alias or entrypoint.\n"
             f"For common reads, go straight to `{query_tool.cli_entrypoint}`, `{health_tool.cli_entrypoint}`, "
             f"`{discover_tool.cli_entrypoint}`, `{recall_tool.cli_entrypoint}`, `{bugs_tool.cli_entrypoint}`, "
             "and `workflow architecture scan` when you need exact boundary evidence.\n"
-            "Use `workflow tools call <tool|alias> --input-json '{...}'` as the generic fallback when no direct alias fits.\n"
+            "Use `workflow tools call <tool|alias|entrypoint> --input-json '{...}'` as the generic fallback when no direct alias fits.\n"
             "CLI guardrails are intentional: write/dispatch flows require `--yes`, and session-only tools require a "
             "workflow token.\n"
             "SEARCH BEFORE YOU BUILD: Before writing any new function, module, class, or pattern, "

@@ -296,6 +296,52 @@ def search_bugs_payload(
     return payload
 
 
+def duplicate_check_payload(
+    *,
+    bt: Any,
+    bt_mod: Any,
+    body: Mapping[str, Any],
+    serialize_bug: BugSerializer,
+    default_limit: int = 10,
+    parse_status: BugParser = parse_bug_status,
+    parse_severity: BugParser = parse_bug_severity,
+    parse_category: BugParser = parse_bug_category,
+) -> dict[str, Any]:
+    title_like = str(body.get("title_like") or body.get("title") or "").strip()
+    if not title_like:
+        raise ValueError("title or title_like is required for duplicate_check")
+    limit = max(1, int(body.get("limit", default_limit) or default_limit))
+    bugs = bt.list_bugs(
+        status=parse_status(bt_mod, body.get("status")),
+        severity=parse_severity(bt_mod, body.get("severity")),
+        category=parse_category(bt_mod, body.get("category")),
+        title_like=title_like,
+        tags=_normalize_tags(body.get("tags")),
+        exclude_tags=_normalize_tags(body.get("exclude_tags")),
+        open_only=bool(body.get("open_only", True)),
+        limit=limit,
+        **_source_issue_filter_kwargs(body),
+    )
+    bug_dicts = [serialize_bug(bug) for bug in bugs]
+    return {
+        "duplicates": bug_dicts,
+        "bugs": bug_dicts,
+        "count": len(bug_dicts),
+        "returned_count": len(bug_dicts),
+        "query": {
+            "title_like": title_like,
+            "open_only": bool(body.get("open_only", True)),
+            "limit": limit,
+        },
+        "enrichment": {
+            "clusters": False,
+            "replay_state": False,
+            "semantic_search": False,
+            "reason_code": "bug.duplicate_check.fast_title_like",
+        },
+    }
+
+
 def stats_payload(*, bt: Any, serialize: Serializer) -> dict[str, Any]:
     return {"stats": serialize(bt.stats())}
 
@@ -522,6 +568,7 @@ __all__ = [
     "annotate_bug_dicts_with_replay_state",
     "attach_evidence_payload",
     "backfill_replay_payload",
+    "duplicate_check_payload",
     "file_bug_payload",
     "history_payload",
     "list_bugs_payload",

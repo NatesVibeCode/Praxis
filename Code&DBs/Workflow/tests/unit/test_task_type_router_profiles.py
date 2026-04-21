@@ -86,6 +86,8 @@ class _FakeConn:
             return []
         if "FROM provider_lane_policy" in sql:
             return []
+        if "FROM provider_transport_admissions" in sql:
+            return []
         if "provider_budget_windows" in sql:
             return []
         if "FROM provider_model_candidates" in sql:
@@ -219,6 +221,8 @@ class _CatalogProfileConn:
         if "FROM task_type_route_eligibility" in sql:
             return []
         if "FROM provider_lane_policy" in sql:
+            return []
+        if "FROM provider_transport_admissions" in sql:
             return []
         if "provider_budget_windows" in sql:
             return [{

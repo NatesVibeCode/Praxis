@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import runtime.debate_metrics as debate_metrics
@@ -62,7 +63,7 @@ def test_collector_persists_round_and_consensus_without_losing_memory() -> None:
 
     assert round_metrics == [first, second]
     assert persisted_consensus == consensus
-    assert len(conn.scripts) == 1
+    assert conn.scripts == []
     assert any("INSERT INTO debate_round_metrics" in stmt for stmt, _ in conn.statements)
     assert any("INSERT INTO debate_consensus" in stmt for stmt, _ in conn.statements)
 
@@ -97,11 +98,19 @@ def test_run_debate_threads_metrics_connection_through_persistence_path(monkeypa
     assert result.metrics is not None
     assert len(result.metrics["rounds"]) == 2
     assert result.metrics["synthesis"] is not None
-    assert len(conn.scripts) == 1
+    assert conn.scripts == []
     round_inserts = [sql for sql, _ in conn.statements if "INSERT INTO debate_round_metrics" in sql]
     consensus_inserts = [sql for sql, _ in conn.statements if "INSERT INTO debate_consensus" in sql]
     assert len(round_inserts) == 2
     assert len(consensus_inserts) == 1
+
+
+def test_debate_metrics_runtime_does_not_own_postgres_schema_or_writes() -> None:
+    source = Path(debate_metrics.__file__).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE" not in source
+    assert "INSERT INTO debate_round_metrics" not in source
+    assert "INSERT INTO debate_consensus" not in source
 
 
 def test_workflow_debate_command_passes_metrics_connection(monkeypatch) -> None:

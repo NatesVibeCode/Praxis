@@ -211,9 +211,16 @@ class TestCredentialFallback:
                 auth_shape={"token_url": "http://insecure.com/token"},
             )
 
-    def test_resolve_credential_without_conn_uses_env(self):
+    def test_resolve_credential_without_conn_uses_env(self, monkeypatch):
         """Without conn, falls back to env var lookup."""
+        import adapters.credentials as credentials_mod
         from adapters.credentials import resolve_credential
+
+        monkeypatch.setattr(
+            credentials_mod,
+            "resolve_api_key_env_vars",
+            lambda provider_hint: ("ANTHROPIC_API_KEY",) if provider_hint == "anthropic" else (),
+        )
 
         cred = resolve_credential(
             "secret.test.anthropic",

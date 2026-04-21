@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from storage.postgres.validators import PostgresConfigurationError
 
 _mod_path = Path(__file__).resolve().parents[2] / "runtime" / "bug_tracker.py"
 _spec = importlib.util.spec_from_file_location("bug_tracker_read_only", _mod_path)
@@ -17,6 +18,8 @@ BugSeverity = _mod.BugSeverity
 BugTracker = _mod.BugTracker
 
 from surfaces.api.handlers import _bug_surface_contract as bug_contract
+from surfaces.mcp.tools import bugs as mcp_bugs
+from runtime import bug_evidence
 
 
 @pytest.fixture
@@ -120,3 +123,112 @@ def test_bug_surface_packet_history_replay_are_read_only() -> None:
         ("packet:BUG-READONLY:3", False),
         ("replay:BUG-READONLY:4", False),
     ]
+
+
+def test_bug_history_summary_exposes_authoritative_degraded_state() -> None:
+    packet = {
+        "signature": {"authority": "bug_record_fallback", "fingerprint_scope": "bug_only"},
+        "observability_state": "degraded",
+        "observability_gaps": ("bug.evidence_links.missing", "receipt.missing"),
+        "errors": ({"scope": "receipts", "reason_code": "receipts.query_failed"},),
+        "trace": {"run_ids": (), "receipt_ids": ()},
+        "latest_receipt": None,
+        "fallback_receipts": (),
+        "replay_context": {"source": "missing", "ready": False},
+        "provenance_backfill": {
+            "bug_id": "BUG-HISTORY",
+            "reason_code": "bug.replay_backfill.skipped_read_only",
+        },
+        "agent_actions": {
+            "replay": {"reason_code": "bug.replay_missing_run_context"},
+        },
+    }
+
+    history = bug_evidence.history_summary(bug_id="BUG-HISTORY", packet=packet)
+
+    assert history["observability_state"] == "degraded"
+    assert history["observability_gaps"] == (
+        "bug.evidence_links.missing",
+        "receipt.missing",
+    )
+    assert history["errors"] == (
+        {"scope": "receipts", "reason_code": "receipts.query_failed"},
+    )
+    assert history["trace"] == {"run_ids": (), "receipt_ids": ()}
+    assert history["provenance_backfill"]["reason_code"] == (
+        "bug.replay_backfill.skipped_read_only"
+    )
+
+
+def test_duplicate_check_uses_fast_title_like_list_path() -> None:
+    class _Bug:
+        bug_id = "BUG-DUPE"
+        title = "Routing timeout"
+
+    class _Tracker:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def list_bugs(self, **kwargs):
+            self.calls.append(kwargs)
+            return [_Bug()]
+
+        def search(self, *_args, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("duplicate_check must not use enriched search")
+
+        def replay_hint(self, *_args, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("duplicate_check must not load replay state")
+
+    tracker = _Tracker()
+
+    payload = bug_contract.duplicate_check_payload(
+        bt=tracker,
+        bt_mod=_mod,
+        body={"title_like": "Routing", "limit": 3},
+        serialize_bug=lambda bug: {"bug_id": bug.bug_id, "title": bug.title},
+    )
+
+    assert payload["enrichment"] == {
+        "clusters": False,
+        "replay_state": False,
+        "semantic_search": False,
+        "reason_code": "bug.duplicate_check.fast_title_like",
+    }
+    assert payload["bugs"] == [{"bug_id": "BUG-DUPE", "title": "Routing timeout"}]
+    assert tracker.calls == [
+        {
+            "status": None,
+            "severity": None,
+            "category": None,
+            "title_like": "Routing",
+            "tags": None,
+            "exclude_tags": None,
+            "open_only": True,
+            "limit": 3,
+        }
+    ]
+
+
+def test_mcp_bug_tool_returns_structured_error_when_bug_authority_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _UnavailableSubs:
+        def get_bug_tracker(self):
+            raise PostgresConfigurationError(
+                "postgres.authority_unavailable",
+                "WORKFLOW_DATABASE_URL authority unavailable",
+                details={"operation": "get_bug_tracker"},
+            )
+
+        def get_bug_tracker_mod(self):
+            raise AssertionError("bug tracker module should not be loaded after authority failure")
+
+    monkeypatch.setattr(mcp_bugs, "_subs", _UnavailableSubs())
+
+    payload = mcp_bugs.tool_praxis_bugs({"action": "stats"})
+
+    assert payload == {
+        "error": "WORKFLOW_DATABASE_URL authority unavailable",
+        "error_code": "postgres.authority_unavailable",
+        "details": {"operation": "get_bug_tracker"},
+    }

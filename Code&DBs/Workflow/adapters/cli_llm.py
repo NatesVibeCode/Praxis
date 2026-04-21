@@ -152,7 +152,7 @@ PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
 
 def _resolve_provider(
     payload: dict[str, Any],
-    default_provider: str,
+    default_provider: str | None,
 ) -> str:
     """Resolve provider_slug from payload. Uses registry alias map.
 
@@ -173,7 +173,9 @@ def _resolve_provider(
         if resolved:
             return resolved
 
-    return default_provider
+    if default_provider:
+        return default_provider
+    return default_provider_slug()
 
 
 def _payload_adapter_type(payload: Mapping[str, Any]) -> str | None:
@@ -282,6 +284,8 @@ def _invoke_cli(
         )
 
     binary = binary_override or resolve_binary(provider_slug)
+    if binary is None and prefer_docker:
+        binary = profile.binary
     if binary is None:
         raise CLIAdapterError(
             "cli_adapter.binary_not_found",
@@ -413,7 +417,7 @@ class CLILLMAdapter(BaseNodeAdapter):
         prefer_docker: bool = True,
         conn_factory=None,
     ) -> None:
-        self._default_provider = default_provider or default_provider_slug()
+        self._default_provider = default_provider
         self._default_model = default_model
         self._default_timeout = default_timeout
         self._binary_overrides = binary_overrides or {}

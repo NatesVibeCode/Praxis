@@ -121,8 +121,17 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
         const baseWidth = isSelected ? style.baseWidth + 0.75 : style.baseWidth;
         const width = Math.max(1, baseWidth * fanThin);
 
+        // Focus-lineage dim: when a selection has reduced this edge out of
+        // the lineage set, drop opacity so attention collapses to the chain
+        // the user is inspecting. edge.inLineage is true by default when no
+        // selection is active, so rest-state rendering is unchanged.
+        const groupOpacity = edge.inLineage ? 1 : 0.22;
         return (
-          <g key={edge.id} filter={isFlowing ? 'url(#moon-edge-glow)' : undefined}>
+          <g
+            key={edge.id}
+            filter={isFlowing ? 'url(#moon-edge-glow)' : undefined}
+            style={{ opacity: groupOpacity, transition: 'opacity 240ms ease' }}
+          >
             <path
               d={geometry.path}
               stroke="transparent"

@@ -74,6 +74,15 @@ def test_default_test_database_url_derives_from_runtime_authority(
     )
 
 
+def test_default_test_database_url_falls_back_when_runtime_authority_blank(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("WORKFLOW_TEST_DATABASE_URL", raising=False)
+    monkeypatch.setattr(runtime_db, "resolve_runtime_database_url", lambda required=True: None)
+
+    assert pg_test_conn._default_test_database_url() == "postgresql://postgres@localhost:5432/praxis_test"
+
+
 def test_default_test_database_url_honors_explicit_test_authority(
     monkeypatch,
 ) -> None:

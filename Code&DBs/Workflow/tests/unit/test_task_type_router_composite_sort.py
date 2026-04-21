@@ -123,6 +123,8 @@ class _FakeConn:
             return []
         if "FROM provider_lane_policy" in sql:
             return []
+        if "FROM provider_transport_admissions" in sql:
+            return []
         if "provider_budget_windows" in sql:
             return []
         if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):

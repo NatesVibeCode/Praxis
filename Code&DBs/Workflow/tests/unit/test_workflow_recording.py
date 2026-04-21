@@ -328,7 +328,13 @@ def test_emit_workflow_events_use_capability_event_logger(monkeypatch):
         ),
     )
 
-    spec = WorkflowSpec(prompt="test", provider_slug="openai", model_slug="gpt-5.4", label="job-a")
+    spec = WorkflowSpec(
+        prompt="test",
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="cli_llm",
+        label="job-a",
+    )
     success = _result(run_id="run_ok", provider_slug="openai", model_slug="gpt-5.4")
     failed = _result(
         run_id="run_fail",

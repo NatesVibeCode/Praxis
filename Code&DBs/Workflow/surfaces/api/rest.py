@@ -42,7 +42,6 @@ from pydantic import BaseModel, Field, ValidationError
 
 from registry.provider_execution_registry import (
     default_provider_slug,
-    resolve_default_adapter_type,
 )
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
@@ -769,10 +768,6 @@ def _default_workflow_provider_slug() -> str:
     return default_provider_slug()
 
 
-def _default_workflow_adapter_type() -> str:
-    return resolve_default_adapter_type()
-
-
 def _normalize_operate_mode(value: object) -> str:
     mode = str(value or "call").strip().lower().replace("-", "_")
     if mode in {"call", "command", "query"}:
@@ -999,10 +994,10 @@ class WorkflowRunRequest(BaseModel):
     """Body for POST /api/workflow-runs."""
 
     prompt: str
-    provider_slug: str = Field(default_factory=_default_workflow_provider_slug)
+    provider_slug: str | None = None
     model_slug: str | None = None
     tier: str | None = None
-    adapter_type: str = Field(default_factory=_default_workflow_adapter_type)
+    adapter_type: str | None = None
     timeout: int = 300
     workdir: str | None = None
     max_tokens: int = 4096
@@ -1046,7 +1041,7 @@ class WorkflowStepRequest(BaseModel):
 
     name: str
     prompt: str
-    adapter_type: str = Field(default_factory=_default_workflow_adapter_type)
+    adapter_type: str | None = None
     provider_slug: str | None = None
     model_slug: str | None = None
     tier: str | None = None
@@ -3353,8 +3348,10 @@ def submit_queue_job(req: QueueSubmitRequest) -> dict[str, Any]:
     """Submit a one-job workflow through the workflow command bus."""
     label = req.spec.label or "api_queue_job"
     task_type = req.spec.task_type or "build"
-    if req.spec.model_slug:
+    if req.spec.model_slug and req.spec.provider_slug:
         agent = f"{req.spec.provider_slug}/{req.spec.model_slug}"
+    elif req.spec.model_slug:
+        agent = f"{_default_workflow_provider_slug()}/{req.spec.model_slug}"
     else:
         agent = f"auto/{task_type}"
     spec = {

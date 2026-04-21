@@ -112,9 +112,10 @@ def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
     rendered = capsys.readouterr().out
     assert (
         "workflow bugs "
-        "[list|search <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve]"
+        "[list|search <query>|duplicate_check <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve]"
     ) in rendered
     assert "file               File a new bug" in rendered
+    assert "duplicate_check <query>" in rendered
     assert "attach_evidence    Attach canonical evidence to a bug" in rendered
     assert "resolve            Mark an existing bug fixed, deferred, or won't-fix; FIXED may run verifier proof" in rendered
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 from typing import Any
 import uuid
@@ -118,7 +118,7 @@ class CompiledSpec:
     temperature: float = 0.0
     provider_slug: str | None = None
     model_slug: str | None = None
-    adapter_type: str = field(default_factory=_default_llm_adapter)
+    adapter_type: str | None = None
     workspace_ref: str | None = None
     runtime_profile_ref: str | None = None
     max_retries: int = 0

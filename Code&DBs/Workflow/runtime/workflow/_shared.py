@@ -74,6 +74,12 @@ def _circuit_breakers():
         return _CIRCUIT_BREAKERS
     try:
         return get_circuit_breakers()
+    except OSError as exc:
+        logger.warning(
+            "Circuit breaker gate unavailable; skipping provider preflight: %s",
+            exc,
+        )
+        return None
     except RuntimeError as exc:
         message = str(exc)
         if "requires explicit WORKFLOW_DATABASE_URL Postgres authority" not in message:

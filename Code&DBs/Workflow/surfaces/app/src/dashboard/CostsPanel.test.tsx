@@ -56,7 +56,7 @@ describe('CostsPanel', () => {
     render(<CostsPanel onBack={() => undefined} onViewRun={onViewRun} />);
 
     await screen.findByText('Cost Summary');
-    expect(screen.getByText('$27.25')).toBeInTheDocument();
+    expect(await screen.findByText('$27.25')).toBeInTheDocument();
     expect(screen.getByText('12,000')).toBeInTheDocument();
     expect(screen.getByText('8,000')).toBeInTheDocument();
     expect(screen.getByText('Ledger Records')).toBeInTheDocument();

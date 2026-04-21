@@ -33,7 +33,10 @@ describe('MarkdownRenderer', () => {
       />,
     );
 
-    expect(screen.getByText(/const foo = 1;/).closest('code')).toHaveTextContent('    const foo = 1;\n\treturn foo;');
+    expect(screen.getByText(/const foo = 1;/).closest('code')).toHaveTextContent(
+      '    const foo = 1;\n\treturn foo;',
+      { normalizeWhitespace: false },
+    );
   });
 
   test('adds noopener noreferrer and target blank to external links', () => {

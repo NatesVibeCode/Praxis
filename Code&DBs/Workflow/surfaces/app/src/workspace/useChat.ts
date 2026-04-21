@@ -28,6 +28,15 @@ interface ParsedSseEvent {
   data: any;
 }
 
+function makeAbortError(): Error {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('Request aborted', 'AbortError');
+  }
+  const error = new Error('Request aborted');
+  error.name = 'AbortError';
+  return error;
+}
+
 function parseSseEventBlock(block: string): ParsedSseEvent | null {
   const normalized = block.replace(/\r\n/g, '\n');
   if (!normalized.trim()) {
@@ -215,15 +224,33 @@ export function useChat() {
     }, FETCH_TIMEOUT_MS);
 
     try {
-      const res = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': EVENT_STREAM_CONTENT_TYPE,
-        },
-        body: JSON.stringify({ content, selection_context: selectionContext }),
-        signal: controller.signal,
+      let abortListener: (() => void) | null = null;
+      const abortPromise = new Promise<never>((_resolve, reject) => {
+        const rejectAbort = () => reject(makeAbortError());
+        if (controller.signal.aborted) {
+          rejectAbort();
+          return;
+        }
+        abortListener = rejectAbort;
+        controller.signal.addEventListener('abort', rejectAbort, { once: true });
       });
+      const res = await Promise.race([
+        fetch(`/api/chat/conversations/${conversationId}/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': EVENT_STREAM_CONTENT_TYPE,
+          },
+          body: JSON.stringify({ content, selection_context: selectionContext }),
+          signal: controller.signal,
+        }),
+        abortPromise,
+      ])
+        .finally(() => {
+          if (abortListener) {
+            controller.signal.removeEventListener('abort', abortListener);
+          }
+        });
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -328,9 +355,12 @@ export function useChat() {
       }
     } finally {
       clearTimeout(timeoutId);
-      // FIX #5: always reset streamingText on completion or error.
-      setStreamingText('');
-      setLoading(false);
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        // FIX #5: always reset streamingText on completion or error.
+        setStreamingText('');
+        setLoading(false);
+      }
     }
   }, [appendChatResponse, conversationId]);
 
