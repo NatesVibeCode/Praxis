@@ -26,6 +26,18 @@
   --warning: #d29922;
   --danger: #f85149;
 
+  /*
+   * Status-scale tokens — platform-wide semantic run/job states. Platform
+   * surfaces (primitives, modules, the dashboard) use these; Moon surfaces
+   * use the monochrome --moon-status-* scale defined in moon-tokens.css.
+   */
+  --status-pending: #484f58;
+  --status-idle: #8b949e;
+  --status-active: #58a6ff;
+  --status-ok: var(--success);
+  --status-failed: var(--danger);
+  --status-cancelled: #8b949e;
+
   /* Surfaces */
   --surface-hover: rgba(255, 255, 255, 0.04);
   --surface-muted: rgba(255, 255, 255, 0.03);

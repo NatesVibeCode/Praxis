@@ -11,8 +11,16 @@ from runtime.projection_freshness import (
     OUTBOX_CURSOR,
     PROCESS_CACHE,
     ProjectionFreshness,
+    ProjectionFreshnessSlaPolicy,
+    READ_SIDE_CIRCUIT_CLOSED,
+    READ_SIDE_CIRCUIT_OPEN,
+    SLA_CRITICAL,
+    SLA_HEALTHY,
+    SLA_UNKNOWN,
+    SLA_WARNING,
     collect_projection_freshness,
     collect_projection_freshness_sync,
+    evaluate_projection_freshness_sla,
     sample_event_log_cursor_freshness,
     sample_event_log_cursor_freshness_sync,
     sample_outbox_cursor_freshness,
@@ -275,6 +283,107 @@ def test_projection_freshness_to_json_only_includes_variant_fields() -> None:
     assert outbox_payload["run_id"] == "r"
     assert "channel" not in outbox_payload
     assert "cache_key" not in outbox_payload
+
+
+def test_projection_freshness_sla_reports_healthy_when_samples_are_current() -> None:
+    policy = ProjectionFreshnessSlaPolicy(
+        warning_staleness_seconds=300.0,
+        critical_staleness_seconds=900.0,
+        warning_lag_events=0,
+        critical_lag_events=100,
+    )
+    report = evaluate_projection_freshness_sla(
+        (
+            ProjectionFreshness(
+                projection_id="semantic_current_assertions",
+                source_kind=EVENT_LOG_CURSOR,
+                observed_at=_BASE_NOW,
+                staleness_seconds=1.0,
+                lag_events=0,
+            ),
+        ),
+        policy=policy,
+    )
+
+    assert report.status == SLA_HEALTHY
+    assert report.read_side_circuit_breaker == READ_SIDE_CIRCUIT_CLOSED
+    assert report.alert_count == 0
+    assert report.to_json()["policy"]["policy_source"] == "platform_config"
+
+
+def test_projection_freshness_sla_warns_on_any_event_lag() -> None:
+    policy = ProjectionFreshnessSlaPolicy(
+        warning_staleness_seconds=300.0,
+        critical_staleness_seconds=900.0,
+        warning_lag_events=0,
+        critical_lag_events=100,
+    )
+    report = evaluate_projection_freshness_sla(
+        (
+            ProjectionFreshness(
+                projection_id="bug_candidates_current",
+                source_kind=EVENT_LOG_CURSOR,
+                observed_at=_BASE_NOW,
+                staleness_seconds=4.0,
+                lag_events=1,
+            ),
+        ),
+        policy=policy,
+    )
+
+    assert report.status == SLA_WARNING
+    assert report.read_side_circuit_breaker == READ_SIDE_CIRCUIT_CLOSED
+    assert report.alerts[0].reason_code == "projection_lag_events_warning"
+
+
+def test_projection_freshness_sla_opens_read_side_circuit_on_critical_breach() -> None:
+    policy = ProjectionFreshnessSlaPolicy(
+        warning_staleness_seconds=300.0,
+        critical_staleness_seconds=900.0,
+        warning_lag_events=0,
+        critical_lag_events=100,
+    )
+    report = evaluate_projection_freshness_sla(
+        (
+            ProjectionFreshness(
+                projection_id="operator_decisions_current",
+                source_kind=EVENT_LOG_CURSOR,
+                observed_at=_BASE_NOW,
+                staleness_seconds=901.0,
+                lag_events=2,
+            ),
+        ),
+        policy=policy,
+    )
+
+    assert report.status == SLA_CRITICAL
+    assert report.read_side_circuit_breaker == READ_SIDE_CIRCUIT_OPEN
+    assert report.alerts[0].reason_code == "projection_staleness_seconds_critical"
+    assert report.alerts[0].read_side_circuit_breaker == READ_SIDE_CIRCUIT_OPEN
+
+
+def test_projection_freshness_sla_marks_unmeasured_samples_unknown() -> None:
+    policy = ProjectionFreshnessSlaPolicy(
+        warning_staleness_seconds=300.0,
+        critical_staleness_seconds=900.0,
+        warning_lag_events=0,
+        critical_lag_events=100,
+    )
+    report = evaluate_projection_freshness_sla(
+        (
+            ProjectionFreshness(
+                projection_id="route_authority_snapshot",
+                source_kind=PROCESS_CACHE,
+                observed_at=_BASE_NOW,
+                staleness_seconds=None,
+                cache_key="workflow_pool:test",
+            ),
+        ),
+        policy=policy,
+    )
+
+    assert report.status == SLA_UNKNOWN
+    assert report.unknown_projection_ids == ("route_authority_snapshot",)
 
 
 def test_route_authority_iter_states_tracks_refresh_and_invalidate() -> None:

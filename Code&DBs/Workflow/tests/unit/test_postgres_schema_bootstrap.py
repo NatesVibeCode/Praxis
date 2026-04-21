@@ -103,6 +103,10 @@ def _control_readiness(*, bootstrapped: bool) -> postgres_schema.ControlPlaneSch
     )
 
 
+def test_platform_config_rows_are_schema_readiness_authority() -> None:
+    assert postgres_schema._ROW_EXPECTATION_KEY_COLUMNS["platform_config"] == "config_key"
+
+
 def test_bootstrap_workflow_schema_skips_advisory_lock_when_schema_is_ready(
     monkeypatch,
 ) -> None:
@@ -482,6 +486,46 @@ def test_bootstrap_migration_skips_commented_transaction_wrappers(
     assert executed_params == ()
     assert conn.transaction_entries == 2
     assert conn.transaction_exits == 2
+
+
+def test_bootstrap_migration_skips_comment_only_statements(
+    monkeypatch,
+) -> None:
+    conn = _FakeAsyncConn()
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_bootstrap_migration_statements",
+        lambda _filename: (
+            "-- verification:\n-- SELECT count(*) FROM demo",
+            "/* trailing notes */",
+            "CREATE TABLE demo (id INT)",
+        ),
+    )
+
+    asyncio.run(postgres_schema._bootstrap_migration(conn, "demo.sql"))
+
+    executed_queries = [query for query, _params in conn.executed]
+    assert len(executed_queries) == 2
+    assert "CREATE TABLE IF NOT EXISTS schema_migrations" in executed_queries[0]
+    assert executed_queries[1] == "CREATE TABLE demo (id INT)"
+    assert conn.transaction_entries == 2
+    assert conn.transaction_exits == 2
+
+
+def test_schema_migrations_bootstrap_contract_declares_constraints() -> None:
+    statements = postgres_schema.workflow_bootstrap_migration_statements(
+        "173_schema_migrations.sql"
+    )
+    migration_sql = "\n".join(statements)
+
+    for constraint_name in (
+        "schema_migrations_filename_nonblank",
+        "schema_migrations_sha256_shape",
+        "schema_migrations_bootstrap_role_check",
+    ):
+        assert constraint_name in postgres_schema._SCHEMA_MIGRATIONS_ENSURE_DDL
+        assert f"ADD CONSTRAINT {constraint_name}" in migration_sql
 
 
 class _FakeApplyTrackingConn(_FakeAsyncConn):

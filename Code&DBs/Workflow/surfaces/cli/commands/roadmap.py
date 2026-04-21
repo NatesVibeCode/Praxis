@@ -30,6 +30,7 @@ def _help_text() -> str:
             "      Run-scoped operator views (require a workflow run id).",
             "  Command:",
             "    workflow roadmap write <preview|validate|commit> --title <title> --intent-brief <brief> [options]",
+            "      Options include --proof-kind capability_delivered_by_decision_filing for capability rows delivered by a decided operator decision.",
             "    workflow roadmap closeout <preview|commit> [--bug-id <id>]... [--roadmap-item-id <id>]...",
             "",
             "Tip: `view` is read-only; write and closeout mutate state only when action is commit.",
@@ -180,6 +181,8 @@ def _roadmap_write_command(args: list[str], *, stdout: TextIO) -> int:
             params["outcome_gate"] = value
         elif flag == "--acceptance-criteria-json":
             params["acceptance_criteria"] = _parse_json_flag(flag, value)
+        elif flag == "--proof-kind":
+            params["proof_kind"] = value
         else:
             stdout.write(f"unknown argument: {flag}\n")
             return 2

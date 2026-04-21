@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { RunDetail, RunJob } from '../dashboard/useLiveRunSnapshot';
+import { MoonStatusRing } from './MoonStatusRing';
+import { statusState, statusLabel, TERMINAL_STATES, type MoonStatusState } from './moonStatus';
 
 interface Props {
   run: RunDetail | null;
@@ -10,28 +12,6 @@ interface Props {
   onExit: () => void;
   onCancel?: () => void;
 }
-
-const RUN_STATUS_COLOR: Record<string, string> = {
-  succeeded: '#3fb950',
-  running: '#58a6ff',
-  failed: '#f85149',
-  cancelled: '#8b949e',
-  queued: '#484f58',
-  loading: '#484f58',
-};
-
-const JOB_STATUS_COLOR: Record<string, string> = {
-  succeeded: '#3fb950',
-  running: '#58a6ff',
-  claimed: '#58a6ff',
-  failed: '#f85149',
-  dead_letter: '#f85149',
-  blocked: '#f85149',
-  parent_failed: '#f85149',
-  pending: '#484f58',
-  ready: '#8b949e',
-  cancelled: '#8b949e',
-};
 
 const TERMINAL_JOB_STATUSES = new Set<RunJob['status']>([
   'succeeded',
@@ -98,9 +78,9 @@ export function MoonRunOverlay({
       )
     : null;
 
-  const runStatus = run?.status ?? (loading ? 'loading' : 'queued');
-  const isTerminal = runStatus === 'succeeded' || runStatus === 'failed' || runStatus === 'cancelled';
-  const statusColor = RUN_STATUS_COLOR[runStatus] ?? '#8b949e';
+  const runStatusRaw = run?.status ?? (loading ? 'loading' : 'queued');
+  const runState: MoonStatusState = statusState(runStatusRaw);
+  const isTerminal = TERMINAL_STATES.has(runState) && runState !== 'idle';
 
   const totalJobs = jobs.length || run?.total_jobs || 0;
   const completedJobs = jobs.length
@@ -133,8 +113,9 @@ export function MoonRunOverlay({
               <div className="moon-run-overlay__summary-run-id">{run.run_id}</div>
             )}
           </div>
-          <span className="moon-run-overlay__summary-pill" style={{ borderColor: statusColor, color: statusColor }}>
-            {runStatus}
+          <span className={`moon-run-overlay__summary-pill moon-run-overlay__summary-pill--${runState}`}>
+            <MoonStatusRing status={runState} size={10} />
+            <span>{statusLabel(runState)}</span>
           </span>
           {!isTerminal && onCancel && (
             <button
@@ -185,7 +166,6 @@ export function MoonRunOverlay({
           <div className="moon-run-overlay__job-list">
             {jobs.map((job) => {
               const selected = selectedJob?.id === job.id || selectedJobId === job.label || selectedJobId === String(job.id);
-              const color = JOB_STATUS_COLOR[job.status] ?? '#484f58';
               return (
                 <button
                   key={job.id}
@@ -194,7 +174,7 @@ export function MoonRunOverlay({
                   onClick={() => onSelectJob(selected ? null : jobSelectionId(job))}
                   aria-pressed={selected}
                 >
-                  <span className="moon-run-overlay__job-dot" style={{ background: color }} />
+                  <MoonStatusRing status={job.status} size={14} halo={selected} />
                   <span className="moon-run-overlay__job-label">{job.label}</span>
                   <span className="moon-run-overlay__job-status">{job.status}</span>
                   {(job.duration_ms > 0 || job.last_error_code) && (
@@ -219,10 +199,7 @@ export function MoonRunOverlay({
       {selectedJob && (
         <aside className="moon-run-overlay__receipt" aria-label="Job receipt">
           <header className="moon-run-overlay__receipt-head">
-            <span
-              className="moon-run-overlay__receipt-dot"
-              style={{ background: JOB_STATUS_COLOR[selectedJob.status] ?? '#484f58' }}
-            />
+            <MoonStatusRing status={selectedJob.status} size={14} />
             <span className="moon-run-overlay__receipt-label">{selectedJob.label}</span>
             <button
               type="button"

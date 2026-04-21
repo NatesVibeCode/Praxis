@@ -27,6 +27,14 @@ EVENT_LOG_CURSOR = "event_log_cursor"
 PROCESS_CACHE = "process_cache"
 OUTBOX_CURSOR = "outbox_cursor"
 
+SLA_HEALTHY = "healthy"
+SLA_WARNING = "warning"
+SLA_CRITICAL = "critical"
+SLA_UNKNOWN = "unknown"
+
+READ_SIDE_CIRCUIT_CLOSED = "closed"
+READ_SIDE_CIRCUIT_OPEN = "open"
+
 
 class _AsyncConnection(Protocol):
     async def fetchrow(self, query: str, *args: object) -> Any: ...
@@ -127,6 +135,179 @@ class ProjectionFreshness:
                 ),
             )
         return payload
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionFreshnessSlaPolicy:
+    """Operator policy for deciding whether read-model freshness is acceptable."""
+
+    warning_staleness_seconds: float
+    critical_staleness_seconds: float
+    warning_lag_events: int
+    critical_lag_events: int
+    policy_source: str = "platform_config"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "warning_staleness_seconds": self.warning_staleness_seconds,
+            "critical_staleness_seconds": self.critical_staleness_seconds,
+            "warning_lag_events": self.warning_lag_events,
+            "critical_lag_events": self.critical_lag_events,
+            "policy_source": self.policy_source,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionFreshnessAlert:
+    """One projection freshness breach with the exact SLA clause that fired."""
+
+    projection_id: str
+    status: str
+    reason_code: str
+    source_kind: str
+    staleness_seconds: float | None
+    lag_events: int | None
+    read_side_circuit_breaker: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "projection_id": self.projection_id,
+            "status": self.status,
+            "reason_code": self.reason_code,
+            "source_kind": self.source_kind,
+            "staleness_seconds": self.staleness_seconds,
+            "lag_events": self.lag_events,
+            "read_side_circuit_breaker": self.read_side_circuit_breaker,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionFreshnessSlaReport:
+    """Aggregated SLA verdict for read-model freshness samples."""
+
+    status: str
+    read_side_circuit_breaker: str
+    policy: ProjectionFreshnessSlaPolicy
+    sample_count: int
+    alert_count: int
+    alerts: tuple[ProjectionFreshnessAlert, ...]
+    unknown_projection_ids: tuple[str, ...] = ()
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "kind": "projection_freshness_sla",
+            "status": self.status,
+            "read_side_circuit_breaker": self.read_side_circuit_breaker,
+            "sample_count": self.sample_count,
+            "alert_count": self.alert_count,
+            "unknown_projection_ids": list(self.unknown_projection_ids),
+            "policy": self.policy.to_json(),
+            "alerts": [alert.to_json() for alert in self.alerts],
+        }
+
+
+def _sample_lag_events(sample: ProjectionFreshness) -> int | None:
+    if sample.source_kind in {EVENT_LOG_CURSOR, OUTBOX_CURSOR}:
+        return sample.lag_events
+    return None
+
+
+def _sample_alert(
+    sample: ProjectionFreshness,
+    *,
+    policy: ProjectionFreshnessSlaPolicy,
+) -> ProjectionFreshnessAlert | None:
+    lag_events = _sample_lag_events(sample)
+    staleness_seconds = sample.staleness_seconds
+
+    if lag_events is not None and lag_events >= policy.critical_lag_events:
+        return ProjectionFreshnessAlert(
+            projection_id=sample.projection_id,
+            status=SLA_CRITICAL,
+            reason_code="projection_lag_events_critical",
+            source_kind=sample.source_kind,
+            staleness_seconds=staleness_seconds,
+            lag_events=lag_events,
+            read_side_circuit_breaker=READ_SIDE_CIRCUIT_OPEN,
+        )
+    if (
+        staleness_seconds is not None
+        and staleness_seconds >= policy.critical_staleness_seconds
+    ):
+        return ProjectionFreshnessAlert(
+            projection_id=sample.projection_id,
+            status=SLA_CRITICAL,
+            reason_code="projection_staleness_seconds_critical",
+            source_kind=sample.source_kind,
+            staleness_seconds=staleness_seconds,
+            lag_events=lag_events,
+            read_side_circuit_breaker=READ_SIDE_CIRCUIT_OPEN,
+        )
+    if lag_events is not None and lag_events > policy.warning_lag_events:
+        return ProjectionFreshnessAlert(
+            projection_id=sample.projection_id,
+            status=SLA_WARNING,
+            reason_code="projection_lag_events_warning",
+            source_kind=sample.source_kind,
+            staleness_seconds=staleness_seconds,
+            lag_events=lag_events,
+            read_side_circuit_breaker=READ_SIDE_CIRCUIT_CLOSED,
+        )
+    if (
+        staleness_seconds is not None
+        and staleness_seconds >= policy.warning_staleness_seconds
+    ):
+        return ProjectionFreshnessAlert(
+            projection_id=sample.projection_id,
+            status=SLA_WARNING,
+            reason_code="projection_staleness_seconds_warning",
+            source_kind=sample.source_kind,
+            staleness_seconds=staleness_seconds,
+            lag_events=lag_events,
+            read_side_circuit_breaker=READ_SIDE_CIRCUIT_CLOSED,
+        )
+    return None
+
+
+def evaluate_projection_freshness_sla(
+    samples: tuple[ProjectionFreshness, ...],
+    *,
+    policy: ProjectionFreshnessSlaPolicy,
+) -> ProjectionFreshnessSlaReport:
+    """Evaluate projection samples into alerts and a read-side gate verdict."""
+
+    alerts = tuple(
+        alert
+        for sample in samples
+        for alert in (_sample_alert(sample, policy=policy),)
+        if alert is not None
+    )
+    unknown_projection_ids = tuple(
+        sample.projection_id
+        for sample in samples
+        if sample.staleness_seconds is None and _sample_lag_events(sample) in (None, 0)
+    )
+    if any(alert.status == SLA_CRITICAL for alert in alerts):
+        status = SLA_CRITICAL
+        read_side_circuit_breaker = READ_SIDE_CIRCUIT_OPEN
+    elif alerts:
+        status = SLA_WARNING
+        read_side_circuit_breaker = READ_SIDE_CIRCUIT_CLOSED
+    elif unknown_projection_ids:
+        status = SLA_UNKNOWN
+        read_side_circuit_breaker = READ_SIDE_CIRCUIT_CLOSED
+    else:
+        status = SLA_HEALTHY
+        read_side_circuit_breaker = READ_SIDE_CIRCUIT_CLOSED
+    return ProjectionFreshnessSlaReport(
+        status=status,
+        read_side_circuit_breaker=read_side_circuit_breaker,
+        policy=policy,
+        sample_count=len(samples),
+        alert_count=len(alerts),
+        alerts=alerts,
+        unknown_projection_ids=unknown_projection_ids,
+    )
 
 
 async def sample_event_log_cursor_freshness(
@@ -511,8 +692,18 @@ __all__ = [
     "OUTBOX_CURSOR",
     "PROCESS_CACHE",
     "ProjectionFreshness",
+    "ProjectionFreshnessAlert",
+    "ProjectionFreshnessSlaPolicy",
+    "ProjectionFreshnessSlaReport",
+    "READ_SIDE_CIRCUIT_CLOSED",
+    "READ_SIDE_CIRCUIT_OPEN",
+    "SLA_CRITICAL",
+    "SLA_HEALTHY",
+    "SLA_UNKNOWN",
+    "SLA_WARNING",
     "collect_projection_freshness",
     "collect_projection_freshness_sync",
+    "evaluate_projection_freshness_sla",
     "sample_event_log_cursor_freshness",
     "sample_event_log_cursor_freshness_sync",
     "sample_outbox_cursor_freshness",

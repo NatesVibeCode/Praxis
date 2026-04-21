@@ -3763,10 +3763,6 @@ class OperatorControlFrontdoor:
                     if row.get("item_kind") == "capability"
                     and row.get("decision_ref") is not None
                     and str(row.get("decision_ref") or "").strip()
-                    and _roadmap_acceptance_proof_kind(
-                        row.get("acceptance_criteria")
-                    )
-                    == _CAPABILITY_DELIVERED_BY_DECISION_FILING
                 )
                 if ref
             )
@@ -3906,7 +3902,6 @@ class OperatorControlFrontdoor:
                     if (
                         decision_ref_value is not None
                         and item_kind == "capability"
-                        and declares_decision_filing_proof
                     )
                     else None
                 )
@@ -3926,7 +3921,11 @@ class OperatorControlFrontdoor:
                             "next_status": _ROADMAP_COMPLETED_STATUS,
                             "next_lifecycle": _ROADMAP_COMPLETED_LIFECYCLE,
                             "reason_codes": [
-                                "capability_delivered_by_decision_filing_proof_present",
+                                (
+                                    "capability_delivered_by_decision_filing_proof_present"
+                                    if declares_decision_filing_proof
+                                    else "capability_delivered_by_decision_ref_proof_present"
+                                ),
                             ],
                             "evidence_refs": [
                                 {
@@ -3947,12 +3946,16 @@ class OperatorControlFrontdoor:
                 if source_bug_id is None:
                     if (
                         item_kind == "capability"
-                        and declares_decision_filing_proof
                         and decision_ref_value is not None
                     ):
-                        reason_codes.append(
-                            "capability_decision_filing_proof_not_decided"
-                        )
+                        if decision_proof is None:
+                            reason_codes.append(
+                                (
+                                    "capability_decision_filing_proof_not_decided"
+                                    if declares_decision_filing_proof
+                                    else "capability_decision_ref_not_decided"
+                                )
+                            )
                     else:
                         reason_codes.append("missing_source_bug")
                 elif source_bug_id not in proof_bug_ids:
@@ -3984,6 +3987,7 @@ class OperatorControlFrontdoor:
                     "bug_requires_passed_verification": True,
                     "roadmap_requires_source_bug_fix_proof": True,
                     "roadmap_requires_bug_fix_proof": True,
+                    "roadmap_capability_without_bug_accepts_decided_decision_ref": True,
                     "roadmap_bug_link_authorities": [
                         "roadmap_items.source_bug_id",
                         "operator_object_relations.active_roadmap_item_to_bug",

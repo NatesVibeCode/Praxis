@@ -14,6 +14,10 @@ if (!('ResizeObserver' in globalThis)) {
   });
 }
 
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollTo !== 'function') {
+  Element.prototype.scrollTo = function () {};
+}
+
 const globalExpect = (globalThis as { expect?: { extend?: (nextMatchers: Record<string, unknown>) => void } }).expect;
 if (typeof globalExpect?.extend === 'function') {
   globalExpect.extend(matchers);

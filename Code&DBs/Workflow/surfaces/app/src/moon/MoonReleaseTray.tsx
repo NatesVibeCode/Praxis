@@ -32,6 +32,8 @@ interface Props {
   onWorkflowCreated?: (workflowId: string) => void;
 }
 
+type PillState = 'blocked' | 'plan-needed' | 'stale' | 'ready' | 'dispatching' | 'confirming' | 'done' | 'error';
+
 function disabledReason(release: ReleaseStatus, payload: BuildPayload | null, jobCount: number): string | null {
   if (!payload) return 'No workflow — build first';
   const hasDefinition = payload.definition && Object.keys(payload.definition).length > 0;
@@ -59,6 +61,7 @@ export function MoonReleaseTray({
   const [plannedRelease, setPlannedRelease] = useState<PlannedReleaseState | null>(null);
   const [planInvalidated, setPlanInvalidated] = useState(false);
   const [confirmingDispatch, setConfirmingDispatch] = useState(false);
+  const [planExpanded, setPlanExpanded] = useState(false);
 
   const releaseSource = useMemo(() => resolveReleasePlanSource(payload), [payload]);
   const releaseFingerprint = releaseSource?.fingerprint ?? null;
@@ -72,14 +75,19 @@ export function MoonReleaseTray({
   const jobs = activePlannedRelease ? plannedJobs : projectedJobs;
   const triggers = payload?.compiled_spec_projection?.compiled_spec?.triggers || [];
   const hasFullPlan = activePlannedRelease !== null;
-  const agentSummary = plannedJobs.reduce<Record<string, number>>((acc, job) => {
+  const agentSummary = (hasFullPlan ? plannedJobs : projectedJobs).reduce<Record<string, number>>((acc, job) => {
     const agent = job.agent || 'auto/build';
     acc[agent] = (acc[agent] || 0) + 1;
     return acc;
   }, {});
-  const agentSummaryText = Object.entries(agentSummary)
-    .map(([agent, count]) => `${agent} (${count})`)
-    .join(', ');
+  const topAgents = Object.entries(agentSummary)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 2)
+    .map(([agent, count]) => agentSummary[agent] > 1 ? `${agent}×${count}` : agent)
+    .join(' · ');
+  const triggerSummary = triggers.length > 0
+    ? (triggers[0].event_type || triggers[0].source_ref || 'trigger')
+    : 'no trigger';
 
   useEffect(() => {
     releaseFingerprintRef.current = releaseFingerprint;
@@ -127,14 +135,10 @@ export function MoonReleaseTray({
       setPlanning(false);
     }
   }, [onWorkflowCreated, releaseSource, workflowId]);
+
   const reason = disabledReason(release, payload, jobs.length);
   const canPlan = !reason;
   const canDispatch = !reason && hasFullPlan && plannedJobs.length > 0;
-  const planGuidance = planInvalidated
-    ? 'The workflow changed after preview. Preview plan again before dispatch.'
-    : !hasFullPlan && !dispatchResult
-      ? 'Plan the release to lock the final job list before dispatch.'
-      : null;
 
   const handleDispatch = useCallback(() => {
     if (!canDispatch) return;
@@ -178,59 +182,181 @@ export function MoonReleaseTray({
     }
   }, [workflowId, activePlannedRelease, onDispatchSuccess, onViewRun, onWorkflowCreated]);
 
+  // Pill state drives the ring geometry & animation. One visual per mode.
+  const pillState: PillState = dispatchError
+    ? 'error'
+    : dispatchResult
+      ? 'done'
+      : dispatching
+        ? 'dispatching'
+        : confirmingDispatch
+          ? 'confirming'
+          : reason
+            ? 'blocked'
+            : planInvalidated
+              ? 'stale'
+              : !hasFullPlan
+                ? 'plan-needed'
+                : 'ready';
+
+  const summaryLine = reason
+    ? reason
+    : `${jobs.length} job${jobs.length === 1 ? '' : 's'}${topAgents ? ` · ${topAgents}` : ''} · triggered by ${triggerSummary}`;
+
+  const passedChecks = release.checklist.filter(c => c.passed).length;
+  const totalChecks = release.checklist.length;
+  const failedChecks = release.checklist.filter(c => !c.passed);
+  const firstBlocker = release.blockers[0];
+
   return (
     <>
       <button className="moon-dock__close" onClick={onClose} aria-label="Close release tray">&times;</button>
       <div className="moon-dock__title">Release</div>
       <div className="moon-dock__sep" />
 
-      <div className="moon-release__columns">
-        {/* Column 1: What fires */}
-        <div className="moon-release__col">
-          <div className="moon-release__panel">
-            <div className="moon-dock__section-label">
-              Projected jobs ({jobs.length})
+      <div className={`moon-release moon-release--${pillState}`}>
+        {/* Summary row — the charged statement of intent. */}
+        <div className="moon-release__summary" aria-live="polite">
+          <span className="moon-release__summary-line">{summaryLine}</span>
+          {totalChecks > 0 && (
+            <span className="moon-release__summary-checks" aria-label={`${passedChecks} of ${totalChecks} checks passed`}>
+              {passedChecks}/{totalChecks} checks
+            </span>
+          )}
+        </div>
+
+        {/* The commit pill itself — rotating dotted ring around a wide button.
+            Ring language tracks the edge-grammar (dashed = after_any). */}
+        <div className={`moon-release__pill moon-release__pill--${pillState}`}>
+          <span className="moon-release__pill-ring" aria-hidden="true" />
+          <span className="moon-release__pill-ring moon-release__pill-ring--inner" aria-hidden="true" />
+          {dispatchResult ? (
+            <div className="moon-release__pill-inner moon-release__pill-inner--done">
+              <span className="moon-release__pill-label">Run dispatched</span>
+              <button
+                type="button"
+                className="moon-release__run-link"
+                onClick={() => onViewRun?.(dispatchResult)}
+              >
+                View run
+              </button>
             </div>
-            {jobs.length > 0 ? jobs.map((j: any, i: number) => (
-              <div key={i} className="moon-release__job">
-                <div className="moon-release__job-main">
-                  <span className="moon-release__job-label">{j.label || `job-${i}`}</span>
-                  <span className="moon-release__job-agent">{j.agent || 'auto/build'}</span>
-                </div>
-                {hasFullPlan && j.depends_on?.length > 0 && (
-                  <span className="moon-release__job-meta">
-                    after: {j.depends_on.join(', ')}
-                  </span>
-                )}
-                {hasFullPlan && j.prompt && (
-                  <span className="moon-release__job-meta moon-release__job-meta--truncate">
-                    {j.prompt.slice(0, 80)}{j.prompt.length > 80 ? '...' : ''}
-                  </span>
-                )}
+          ) : confirmingDispatch && activePlannedRelease ? (
+            <div className="moon-release__pill-inner moon-release__pill-inner--confirming">
+              <span className="moon-release__pill-label">
+                Commit {plannedJobs.length} job{plannedJobs.length === 1 ? '' : 's'}?
+              </span>
+              <div className="moon-release__pill-actions">
+                <button
+                  type="button"
+                  className="moon-release__pill-btn moon-release__pill-btn--cancel"
+                  onClick={() => setConfirmingDispatch(false)}
+                  disabled={dispatching}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="moon-release__pill-btn moon-release__pill-btn--confirm"
+                  onClick={handleConfirmDispatch}
+                  disabled={dispatching}
+                >
+                  Confirm Release
+                </button>
               </div>
-            )) : (
-              <div className="moon-dock__empty">No jobs yet.</div>
-            )}
+            </div>
+          ) : !hasFullPlan ? (
+            <>
+              <button
+                type="button"
+                className="moon-release__pill-inner moon-release__pill-inner--plan"
+                onClick={handlePlan}
+                disabled={planning || !canPlan}
+                aria-label="Preview plan"
+              >
+                <span className="moon-release__pill-label">
+                  {planning ? 'Previewing…' : 'Preview plan'}
+                </span>
+                <span className="moon-release__pill-sub">
+                  {planInvalidated ? 'plan went stale' : 'lock the final job list'}
+                </span>
+              </button>
+              {/* Ghost dispatch affordance — tells you what the pill becomes
+                  after preview, without being clickable yet. */}
+              <button
+                type="button"
+                className="moon-release__pill-ghost"
+                aria-label="Dispatch"
+                disabled
+                tabIndex={-1}
+              >
+                Dispatch
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="moon-release__pill-inner moon-release__pill-inner--dispatch"
+              onClick={handleDispatch}
+              disabled={dispatching || !canDispatch}
+              aria-label="Dispatch"
+            >
+              <span className="moon-release__pill-label">
+                {dispatching ? 'Dispatching…' : 'Dispatch'}
+              </span>
+              <span className="moon-release__pill-sub">
+                sweep the ring closed
+              </span>
+            </button>
+          )}
+        </div>
 
-            {triggers.length > 0 && (
-              <>
-                <div className="moon-dock__section-label moon-release__section-spacer">
-                  Triggers ({triggers.length})
-                </div>
-                {triggers.map((t, i) => (
-                  <div key={i} className="moon-release__job moon-release__job--trigger">
-                    <div className="moon-release__job-main">
-                      <span className="moon-release__job-label">{t.event_type || t.source_ref || 'trigger'}</span>
-                      {t.source_ref && <span className="moon-release__job-agent">{t.source_ref}</span>}
-                    </div>
-                  </div>
-                ))}
-              </>
+        {/* Stale/blocker hint — inline beneath the pill, never a separate pane. */}
+        {planInvalidated && !dispatchResult && (
+          <div className="moon-release__hint moon-release__hint--stale">
+            The workflow changed after preview. Preview plan again before dispatch.
+          </div>
+        )}
+        {firstBlocker && !dispatchResult && (
+          <div className="moon-release__hint moon-release__hint--blocker">
+            <span className="moon-release__hint-dot" aria-hidden="true" />
+            <span>{firstBlocker.message}</span>
+            {firstBlocker.nodeIds.length > 0 && onSelectNode && (
+              <button
+                type="button"
+                className="moon-release__hint-link"
+                onClick={() => onSelectNode(firstBlocker.nodeIds[0])}
+              >
+                locate
+              </button>
             )}
+            {release.blockers.length > 1 && (
+              <span className="moon-release__hint-more">+{release.blockers.length - 1} more</span>
+            )}
+          </div>
+        )}
+        {dispatchError && (
+          <div className="moon-release__hint moon-release__hint--error">
+            {dispatchError}
+          </div>
+        )}
 
-            {jobs.length > 0 && (
-              <>
-                <div className="moon-dock__section-label moon-release__section-spacer">Route</div>
+        {/* Expandable plan preview — collapsed by default. */}
+        {(jobs.length > 0 || failedChecks.length > 0) && !dispatchResult && (
+          <details
+            className="moon-release__plan"
+            open={planExpanded}
+            onToggle={(e) => setPlanExpanded((e.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary className="moon-release__plan-summary">
+              <span>Show plan</span>
+              <span className="moon-release__plan-summary-meta">
+                {hasFullPlan ? 'planned' : 'projected'}
+              </span>
+            </summary>
+            <div className="moon-release__plan-body">
+              {/* Route ribbon — ordered step labels, one line. */}
+              {jobs.length > 0 && (
                 <div className="moon-release__route">
                   {jobs.map((j: any, i: number) => (
                     <React.Fragment key={i}>
@@ -239,133 +365,59 @@ export function MoonReleaseTray({
                     </React.Fragment>
                   ))}
                 </div>
-              </>
-            )}
-          </div>
-        </div>
+              )}
 
-        {/* Column 2: Readiness + blockers */}
-        <div className="moon-release__col">
-          <div className="moon-release__panel">
-            <div className="moon-dock__section-label">Readiness</div>
-
-            <div className="moon-proof-checks">
-              {release.checklist.map((item, i) => (
-                <div key={i} className="moon-proof-check">
-                  <div className={`moon-proof-dot${!item.passed ? ' moon-proof-dot--blocked' : ''}`} />
-                  <span>{item.message}</span>
-                  {!item.passed && item.nodeId && onSelectNode && (
-                    <button
-                      className="moon-dock-form__btn moon-dock-form__btn--small"
-                      onClick={() => {
-                        onSelectNode(item.nodeId!);
-                        if (item.dock && onOpenDock) onOpenDock(item.dock);
-                      }}
-                    >
-                      Fix
-                    </button>
-                  )}
+              {/* Jobs. Compact rows, full metadata only when planned. */}
+              {jobs.length > 0 && (
+                <div className="moon-release__plan-jobs">
+                  {jobs.map((j: any, i: number) => (
+                    <div key={i} className="moon-release__job">
+                      <div className="moon-release__job-main">
+                        <span className="moon-release__job-label">{j.label || `job-${i}`}</span>
+                        <span className="moon-release__job-agent">{j.agent || 'auto/build'}</span>
+                      </div>
+                      {hasFullPlan && j.depends_on?.length > 0 && (
+                        <span className="moon-release__job-meta">
+                          after: {j.depends_on.join(', ')}
+                        </span>
+                      )}
+                      {hasFullPlan && j.prompt && (
+                        <span className="moon-release__job-meta moon-release__job-meta--truncate">
+                          {j.prompt.slice(0, 80)}{j.prompt.length > 80 ? '…' : ''}
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+
+              {/* Failing checklist items — keep the "Fix" affordance for fast jumps. */}
+              {failedChecks.length > 0 && (
+                <div className="moon-release__plan-checks">
+                  <div className="moon-dock__section-label">Unblock</div>
+                  {failedChecks.map((item, i) => (
+                    <div key={i} className="moon-proof-check">
+                      <div className="moon-proof-dot moon-proof-dot--blocked" />
+                      <span>{item.message}</span>
+                      {item.nodeId && onSelectNode && (
+                        <button
+                          type="button"
+                          className="moon-dock-form__btn moon-dock-form__btn--small"
+                          onClick={() => {
+                            onSelectNode(item.nodeId!);
+                            if (item.dock && onOpenDock) onOpenDock(item.dock);
+                          }}
+                        >
+                          Fix
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-
-            {release.blockers.length > 0 && (
-              <>
-                <div className="moon-dock__section-label moon-release__section-spacer">
-                  Blockers
-                </div>
-                {release.blockers.map((b, i) => (
-                  <div key={i} className="moon-release__blocker">
-                    <span>{b.message}</span>
-                    {b.nodeIds.length > 0 && (
-                      <span className="moon-release__blocker-nodes">
-                        {b.nodeIds.join(', ')}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Column 3: Plan + Dispatch */}
-        <div className="moon-release__col moon-release__col--dispatch">
-          <div className="moon-release__panel moon-release__panel--dispatch">
-            <div className="moon-dock__section-label">Dispatch</div>
-
-            {!hasFullPlan && !dispatchResult && (
-              <button
-                className="moon-release__dispatch-btn moon-release__dispatch-btn--secondary"
-                onClick={handlePlan}
-                disabled={planning || !canPlan}
-              >
-                {planning ? 'Planning...' : 'Preview plan'}
-              </button>
-            )}
-
-            {dispatchResult ? (
-              <div className="moon-release__result">
-                <div className="moon-release__result-label">Run dispatched</div>
-                <button
-                  className="moon-release__run-link"
-                  onClick={() => onViewRun?.(dispatchResult)}
-                >
-                  View Run
-                </button>
-              </div>
-            ) : (
-              <>
-                <button
-                  className={`moon-release__dispatch-btn${canDispatch ? ' moon-release__dispatch-btn--ready' : ''}`}
-                  onClick={handleDispatch}
-                  disabled={dispatching || !canDispatch}
-                >
-                  {dispatching ? 'Dispatching...' : 'Dispatch'}
-                </button>
-                {planGuidance && (
-                  <div className="moon-release__blocked-reason">
-                    {planGuidance}
-                  </div>
-                )}
-                {confirmingDispatch && activePlannedRelease && (
-                  <div className="moon-release__confirm">
-                    <div className="moon-release__confirm-title">Confirm release</div>
-                    <div className="moon-release__confirm-body">
-                      {plannedJobs.length} job{plannedJobs.length === 1 ? '' : 's'} will be dispatched.
-                    </div>
-                    <div className="moon-release__confirm-meta">
-                      Agents: {agentSummaryText}
-                    </div>
-                    <div className="moon-release__confirm-actions">
-                      <button
-                        className="moon-release__dispatch-btn moon-release__dispatch-btn--ready"
-                        onClick={handleConfirmDispatch}
-                        disabled={dispatching}
-                      >
-                        Confirm Release
-                      </button>
-                      <button
-                        className="moon-dock-form__btn"
-                        onClick={() => setConfirmingDispatch(false)}
-                        disabled={dispatching}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {reason && (
-                  <div className="moon-release__blocked-reason">{reason}</div>
-                )}
-              </>
-            )}
-
-            {dispatchError && (
-              <div className="moon-dock-form__error">{dispatchError}</div>
-            )}
-          </div>
-        </div>
+          </details>
+        )}
       </div>
     </>
   );

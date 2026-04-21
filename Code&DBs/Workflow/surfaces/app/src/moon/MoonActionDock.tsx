@@ -111,6 +111,32 @@ export function MoonActionDock({
     [familyFilter, visibleCatalogModels],
   );
   const primaryCatalog = filteredCatalog.filter(({ policy }) => policy.tier === 'primary');
+  const primaryCatalogAll = useMemo(
+    () => visibleCatalogModels.filter(({ policy }) => policy.tier === 'primary'),
+    [visibleCatalogModels],
+  );
+  // Count primary catalog items per family — drives the grammar-rail counts.
+  const familyCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const { item } of primaryCatalogAll) {
+      const fam = item.family || 'other';
+      out[fam] = (out[fam] ?? 0) + 1;
+    }
+    return out;
+  }, [primaryCatalogAll]);
+  // Which families are represented in the "suggested next" set — rail chips
+  // for those families get a subtle pulse to tell you where the grammar wants
+  // to go next. No color, just motion.
+  const suggestedFamilies = useMemo(() => {
+    const fams = new Set<string>();
+    for (const id of suggestedCatalogIds) {
+      const match = visibleCatalogModels.find(m => m.item.id === id
+        || m.item.actionValue === id
+        || m.item.id.includes(id));
+      if (match?.item.family) fams.add(match.item.family);
+    }
+    return fams;
+  }, [suggestedCatalogIds, visibleCatalogModels]);
   const surfaceStats = useMemo(() => ({
     stepTotal: catalogSummary.nodeTotal,
     stepCore: surfaceSummary.nodeCounts.primary,
@@ -289,34 +315,60 @@ export function MoonActionDock({
         <div className="moon-action__catalog-header">
           <div>
             <div className="moon-dock__section-label">Catalog</div>
-            <div className="moon-action__catalog-subtitle">Core actions available to this builder.</div>
+            <div className="moon-action__catalog-subtitle">
+              {primaryCatalogAll.length} primary · {surfaceStats.stepCore}/{surfaceStats.stepTotal} step · {surfaceStats.gateCore}/{surfaceStats.gateTotal} gate
+              {(surfaceStats.stepOther + surfaceStats.gateOther) > 0 && ` · ${surfaceStats.stepOther + surfaceStats.gateOther} other`}
+            </div>
           </div>
-          <span className="moon-action__catalog-count">{primaryCatalog.length}</span>
-        </div>
-        <div className="moon-action__catalog-stats" aria-label="Catalog surface summary">
-          <div className="moon-action__catalog-stat">
-            <span>{surfaceStats.stepCore}<small>/{surfaceStats.stepTotal}</small></span>
-            <em>core steps</em>
-          </div>
-          <div className="moon-action__catalog-stat">
-            <span>{surfaceStats.gateCore}<small>/{surfaceStats.gateTotal}</small></span>
-            <em>core gates</em>
-          </div>
-          <div className="moon-action__catalog-stat">
-            <span>{surfaceStats.stepOther + surfaceStats.gateOther}</span>
-            <em>other</em>
-          </div>
-        </div>
-        <div className="moon-catalog__filters">
-          {filterableFamilies.map(f => (
+          {familyFilter && (
             <button
-              key={f}
-              className={`moon-catalog__filter${familyFilter === f ? ' moon-catalog__filter--active' : ''}`}
-              onClick={() => setFamilyFilter(familyFilter === f ? null : f)}
-            >{FAMILY_LABELS[f]}</button>
-          ))}
+              type="button"
+              className="moon-grammar-rail__clear"
+              onClick={() => setFamilyFilter(null)}
+              aria-label="Clear family filter"
+            >
+              all families
+            </button>
+          )}
         </div>
-        
+
+        {/* Grammar rail — the workflow vocabulary as a left-to-right flow.
+            trigger → gather → think → act → control. Each chip scopes the
+            catalog grid. Suggested families get a subtle pulse to bias the
+            builder toward the next natural step. */}
+        <div className="moon-grammar-rail" role="tablist" aria-label="Catalog families">
+          {DOCK_FAMILIES.map((family, i) => {
+            const count = familyCounts[family] ?? 0;
+            const isActive = familyFilter === family;
+            const isAvailable = count > 0 || filterableFamilies.includes(family);
+            const isSuggested = suggestedFamilies.has(family);
+            const cls = [
+              'moon-grammar-rail__chip',
+              `moon-grammar-rail__chip--${family}`,
+              isActive ? 'moon-grammar-rail__chip--active' : '',
+              isSuggested && !isActive ? 'moon-grammar-rail__chip--suggested' : '',
+              !isAvailable ? 'moon-grammar-rail__chip--empty' : '',
+            ].filter(Boolean).join(' ');
+            return (
+              <React.Fragment key={family}>
+                {i > 0 && <span className="moon-grammar-rail__link" aria-hidden="true" />}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  disabled={!isAvailable}
+                  className={cls}
+                  onClick={() => setFamilyFilter(isActive ? null : family)}
+                  title={`${FAMILY_LABELS[family]} — ${count} item${count === 1 ? '' : 's'}`}
+                >
+                  <span className="moon-grammar-rail__label">{FAMILY_LABELS[family]}</span>
+                  <span className="moon-grammar-rail__count">{count}</span>
+                </button>
+              </React.Fragment>
+            );
+          })}
+        </div>
+
         {suggestedLoading && (
           <div className="moon-action__suggestion-loading">
             <span className="moon-spinner" /> Finding suggestions...

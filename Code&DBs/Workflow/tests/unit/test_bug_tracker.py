@@ -1103,6 +1103,7 @@ class TestEvidencePackets:
         assert replay["reason_code"] == "bug.replay_loaded"
         assert replay["packet_ready"] is True
         assert replay["replay"].run_id == "run-alpha"
+        assert replay["path_break"] is None
         assert replay["tooling"]["replay"]["arguments"] == {
             "action": "replay",
             "bug_id": bug.bug_id,

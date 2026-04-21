@@ -69,7 +69,7 @@ def _request() -> WorkflowRequest:
                 display_name="prepare",
                 inputs={
                     "task_name": "prepare",
-                    "input_payload": {"step": 0},
+                    "input_payload": {"step": 0, "allow_passthrough_echo": True},
                 },
                 expected_outputs={"result": "prepared"},
                 success_condition={"status": "success"},
@@ -88,7 +88,7 @@ def _request() -> WorkflowRequest:
                 display_name="admit",
                 inputs={
                     "task_name": "admit",
-                    "input_payload": {"step": 1},
+                    "input_payload": {"step": 1, "allow_passthrough_echo": True},
                 },
                 expected_outputs={"result": "admitted"},
                 success_condition={"status": "success"},

@@ -22,7 +22,6 @@ from typing import Any
 from .provider_types import ProviderAdapterContract, ProviderCLIProfile
 
 KNOWN_LLM_ADAPTER_TYPES = frozenset({"cli_llm", "llm_task"})
-_DEFAULT_PROVIDER_PRIORITY: tuple[str, ...] = ("openai", "anthropic", "google", "cursor", "cursor_local")
 
 
 class AdapterEconomicsAuthorityError(RuntimeError):
@@ -794,19 +793,6 @@ def resolve_api_key_env_vars(
     if profile is None:
         return ()
     return tuple(env_var for env_var in profile.api_key_env_vars if env_var)
-
-
-def builtin_default_provider_slug(
-    profiles: Mapping[str, ProviderCLIProfile],
-) -> str:
-    """Return the stable built-in provider default for soft request scaffolding."""
-
-    if not profiles:
-        raise RuntimeError("no builtin provider profiles are available")
-    for provider_slug in _DEFAULT_PROVIDER_PRIORITY:
-        if provider_slug in profiles:
-            return provider_slug
-    return next(iter(profiles))
 
 
 def resolve_mcp_args_template(

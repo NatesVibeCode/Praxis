@@ -39,6 +39,14 @@ import {
 } from './moonPrimitives';
 import { useObjectTypes } from '../shared/hooks/useObjectTypes';
 import type { UiActionTarget } from '../control/uiActionLedger';
+import {
+  MoonPickerInput,
+  MoonCronBuilder,
+  MoonLocalHistoryRail,
+  recordMoonHistory,
+  MoonJsonEditor,
+  MoonConfirmButton,
+} from './MoonPickers';
 
 export interface AuthorityActionMeta {
   label: string;
@@ -106,6 +114,24 @@ const BRANCH_OP_OPTIONS = [
 ] as const;
 
 const BRANCH_OP_LABELS = new Map(BRANCH_OP_OPTIONS.map((option) => [option.value, option.label]));
+
+/** Short, grammar-first label for an edge family — used by the context ribbon.
+ *  Matches the edge-family tokens so the ribbon reads like the canvas. */
+function ribbonFamilyLabel(family: string): string {
+  switch (family) {
+    case 'after_any':
+    case 'after_success':
+      return 'after';
+    case 'after_failure':
+      return 'on fail';
+    case 'conditional':
+      return 'branch';
+    case 'sequence':
+      return 'then';
+    default:
+      return family.replace(/_/g, ' ');
+  }
+}
 
 interface TriggerFilterFieldRow {
   id: string;
@@ -460,6 +486,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   const [nodeSaveLoading, setNodeSaveLoading] = useState(false);
   const [nodeSaveError, setNodeSaveError] = useState<string | null>(null);
   const [showAdvancedContractFields, setShowAdvancedContractFields] = useState(false);
+  const [payloadFieldSuggestions, setPayloadFieldSuggestions] = useState<Array<{ key: string; label: string; samples: string[] }>>([]);
 
   const buildNode = node
     ? (buildGraph?.nodes || []).find(graphNode => graphNode.node_id === node.id) || null
@@ -559,6 +586,43 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
       ),
     [buildGraph, node?.id, objectTypes, content, contractSuggestionExtras],
   );
+
+  // Context ribbon — upstream producers and downstream consumers for the
+  // selected node. Edge family drives the connector tone (after, on-fail,
+  // branch) so the builder can read the structural grammar at a glance.
+  const contextRibbon = useMemo(() => {
+    if (!node || !buildGraph) return null;
+    const edges = buildGraph.edges || [];
+    const nodes = buildGraph.nodes || [];
+    const titleFor = (id: string): string => {
+      const n = nodes.find((x) => x.node_id === id);
+      return (n?.title || id || '').trim() || id;
+    };
+    type Neighbor = { nodeId: string; title: string; family: string; edgeId: string };
+    const upstream: Neighbor[] = [];
+    const downstream: Neighbor[] = [];
+    for (const edge of edges) {
+      const release = normalizeBuildEdgeRelease(edge);
+      const family = release.family || 'after_any';
+      if (edge.to_node_id === node.id && edge.from_node_id) {
+        upstream.push({
+          nodeId: edge.from_node_id,
+          title: titleFor(edge.from_node_id),
+          family,
+          edgeId: edge.edge_id,
+        });
+      } else if (edge.from_node_id === node.id && edge.to_node_id) {
+        downstream.push({
+          nodeId: edge.to_node_id,
+          title: titleFor(edge.to_node_id),
+          family,
+          edgeId: edge.edge_id,
+        });
+      }
+    }
+    if (upstream.length === 0 && downstream.length === 0) return null;
+    return { upstream, downstream };
+  }, [buildGraph, node]);
 
   const triggerFilterFingerprint = useMemo(() => {
     try {
@@ -700,6 +764,36 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     setInvokePayloadText(formatJsonValue(integrationArgs.payload ?? integrationArgs.input ?? integrationArgs.inputs));
     setGenericIntegrationArgsText(formatJsonObject(integrationArgs));
   }, [buildNode, integrationArgs, node?.summary, node?.title]);
+
+  useEffect(() => {
+    if (!isTriggerNode) return;
+    let cancelled = false;
+    const qs = triggerSourceRef.trim()
+      ? `?source_ref=${encodeURIComponent(triggerSourceRef.trim())}`
+      : '';
+    fetch(`/api/moon/pickers/payload-fields${qs}`)
+      .then(async (response) => {
+        if (!response.ok) return [] as Array<{ key: string; label: string; samples: string[] }>;
+        const body = await response.json().catch(() => ({}));
+        const fields = Array.isArray(body?.fields) ? body.fields : [];
+        return fields
+          .map((entry: any) => ({
+            key: typeof entry?.key === 'string' ? entry.key : '',
+            label: typeof entry?.label === 'string' && entry.label ? entry.label : (typeof entry?.key === 'string' ? entry.key : ''),
+            samples: Array.isArray(entry?.samples) ? entry.samples.filter((s: any) => typeof s === 'string') : [],
+          }))
+          .filter((entry: { key: string }) => Boolean(entry.key));
+      })
+      .then((items) => {
+        if (!cancelled) setPayloadFieldSuggestions(items);
+      })
+      .catch(() => {
+        if (!cancelled) setPayloadFieldSuggestions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isTriggerNode, triggerSourceRef, node?.id]);
 
   useEffect(() => {
     if (!isWorkflowInvokeRoute) return;
@@ -1126,6 +1220,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
       } else if (onUpdateBuildGraph) {
         await onUpdateBuildGraph(nextGraph);
       }
+      if (workflowId && node.id && nodePrompt.trim()) {
+        recordMoonHistory(`prompt:${workflowId}:${node.id}`, nodePrompt);
+      }
     } catch (e: any) {
       setNodeSaveError(e.message || 'Failed to save properties');
     } finally {
@@ -1160,6 +1257,8 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     webhookMethod,
     webhookTimeoutText,
     webhookUrl,
+    workflowId,
+    triggerRoute,
   ]);
 
   const handleEdgeConditionModeChange = useCallback((nextMode: BranchConditionMode) => {
@@ -1234,6 +1333,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
       } else if (onUpdateBuildGraph) {
         await onUpdateBuildGraph(nextGraph);
       }
+      if (workflowId && selectedEdge?.id && edgeConditionMode === 'json' && edgeConditionText.trim()) {
+        recordMoonHistory(`condition:${workflowId}:${selectedEdge.id}`, edgeConditionText);
+      }
     } catch (e: any) {
       setEdgeConditionError(e.message || 'Failed to save branch condition');
     } finally {
@@ -1252,6 +1354,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     onCommitGraphAction,
     onUpdateBuildGraph,
     selectedEdge,
+    workflowId,
   ]);
 
   const handleClearGate = useCallback(async () => {
@@ -1409,14 +1512,24 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       ) : null}
                     </>
                   ) : (
-                    <textarea
-                      className="moon-dock-form__input"
-                      value={edgeConditionText}
-                      onChange={e => setEdgeConditionText(e.target.value)}
-                      placeholder="Branch condition JSON"
-                      rows={8}
-                      style={{ minHeight: 132, resize: 'vertical' }}
-                    />
+                    <>
+                      <MoonJsonEditor
+                        value={edgeConditionText}
+                        onChange={setEdgeConditionText}
+                        placeholder={'Branch condition JSON\n{\n  "op": "eq",\n  "key": "env",\n  "value": "prod"\n}'}
+                        rows={8}
+                        minHeight={132}
+                        ariaLabel="Branch condition JSON"
+                      />
+                      {workflowId && selectedEdge?.id && (
+                        <MoonLocalHistoryRail
+                          scopeKey={`condition:${workflowId}:${selectedEdge.id}`}
+                          currentValue={edgeConditionText}
+                          onRestore={(value) => setEdgeConditionText(value)}
+                          label="Previous branch conditions (this device)"
+                        />
+                      )}
+                    </>
                   )}
                 </div>
                 <div className="moon-dock-form__actions">
@@ -1435,13 +1548,13 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
             {selectedEdge.gateState !== 'empty' && (
               <>
                 <div className="moon-dock-form__actions">
-                  <button
-                    className="moon-dock-form__btn"
-                    onClick={handleClearGate}
+                  <MoonConfirmButton
+                    label={gateClearLoading ? <><span className="moon-spinner" /> Removing...</> : 'Remove gate'}
+                    confirmLabel="Click again to remove"
+                    primedHint="Removes the gate for good"
                     disabled={gateClearLoading || !buildGraph || !canCommitGraph}
-                  >
-                    {gateClearLoading ? <><span className="moon-spinner" /> Removing...</> : 'Remove gate'}
-                  </button>
+                    onConfirm={handleClearGate}
+                  />
                 </div>
                 {gateClearError && <div className="moon-dock-form__error">{gateClearError}</div>}
               </>
@@ -1459,6 +1572,45 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
         <div className="moon-dock__empty">Select a node or gate.</div>
       ) : node ? (
         <>
+          {/* Context ribbon — upstream producers and downstream consumers.
+              Edge families show up as tone modifiers on the connector, so you
+              can read the structural grammar without opening every edge. */}
+          {contextRibbon && (
+            <div className="moon-detail__ribbon" aria-label="Node context">
+              <div className="moon-detail__ribbon-col moon-detail__ribbon-col--upstream">
+                <div className="moon-dock__section-label moon-detail__ribbon-heading">Receives</div>
+                {contextRibbon.upstream.length === 0 ? (
+                  <div className="moon-detail__ribbon-empty">origin</div>
+                ) : (
+                  contextRibbon.upstream.map((n) => (
+                    <div key={n.edgeId} className={`moon-detail__ribbon-item moon-detail__ribbon-item--${n.family}`}>
+                      <span className="moon-detail__ribbon-dot" aria-hidden="true" />
+                      <span className="moon-detail__ribbon-label">{n.title}</span>
+                      <span className="moon-detail__ribbon-family">{ribbonFamilyLabel(n.family)}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="moon-detail__ribbon-center">
+                <span className="moon-detail__ribbon-center-dot" aria-hidden="true" />
+                <span className="moon-detail__ribbon-center-label">{node.title || 'this'}</span>
+              </div>
+              <div className="moon-detail__ribbon-col moon-detail__ribbon-col--downstream">
+                <div className="moon-dock__section-label moon-detail__ribbon-heading">Produces</div>
+                {contextRibbon.downstream.length === 0 ? (
+                  <div className="moon-detail__ribbon-empty">terminal</div>
+                ) : (
+                  contextRibbon.downstream.map((n) => (
+                    <div key={n.edgeId} className={`moon-detail__ribbon-item moon-detail__ribbon-item--${n.family}`}>
+                      <span className="moon-detail__ribbon-family">{ribbonFamilyLabel(n.family)}</span>
+                      <span className="moon-detail__ribbon-label">{n.title}</span>
+                      <span className="moon-detail__ribbon-dot" aria-hidden="true" />
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
           {isTriggerNode && (
             <div className="moon-dock-section-card">
               <div className="moon-dock-section-card__header">
@@ -1474,13 +1626,10 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
               {triggerRoute === TRIGGER_SCHEDULE_ROUTE ? (
                 <>
                   <label className="moon-dock-form__label" htmlFor="moon-trigger-cron">Schedule</label>
-                  <input
+                  <MoonCronBuilder
                     id="moon-trigger-cron"
-                    className="moon-dock-form__input"
-                    type="text"
                     value={triggerCronExpression}
-                    onChange={e => setTriggerCronExpression(e.target.value)}
-                    placeholder="@daily or 0 9 * * *"
+                    onChange={setTriggerCronExpression}
                   />
                 </>
               ) : (
@@ -1488,29 +1637,38 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   <label className="moon-dock-form__label" htmlFor="moon-trigger-source-ref">
                     Source reference
                   </label>
-                  <input
+                  <MoonPickerInput
                     id="moon-trigger-source-ref"
-                    className="moon-dock-form__input"
-                    type="text"
                     value={triggerSourceRef}
-                    onChange={e => setTriggerSourceRef(e.target.value)}
-                    placeholder="e.g. connector or table id"
+                    onChange={setTriggerSourceRef}
+                    placeholder={triggerRoute === TRIGGER_WEBHOOK_ROUTE ? 'Choose a webhook endpoint' : 'Optional source identifier'}
+                    suggestionsUrl={triggerRoute === TRIGGER_WEBHOOK_ROUTE ? '/api/moon/pickers/webhook-sources' : undefined}
+                    suggestionsKey="sources"
+                    hint={triggerRoute === TRIGGER_WEBHOOK_ROUTE
+                      ? 'Pick one of your registered webhook endpoints. New endpoints appear after you create them in the Integrations panel.'
+                      : undefined}
+                    ariaLabel="Trigger source reference"
                   />
                 </>
               )}
               <div className="moon-dock-subsection">
                 <div className="moon-dock__section-label" style={{ marginTop: 0 }}>Event filter</div>
                 {triggerNeedsJsonEditor ? (
-                  <textarea
+                  <MoonJsonEditor
                     id="moon-trigger-event-filter"
-                    className="moon-dock-form__input"
                     value={triggerFilterText}
-                    onChange={e => setTriggerFilterText(e.target.value)}
-                    onBlur={handleTriggerJsonBlur}
-                    placeholder='{"env": "prod"}'
+                    onChange={(next) => { setTriggerFilterText(next); }}
+                    onValid={() => handleTriggerJsonBlur()}
+                    placeholder={'Event filter JSON\n{\n  "env": "prod"\n}'}
                     rows={6}
-                    style={{ minHeight: 110, resize: 'vertical' }}
-                    aria-label="Trigger filter JSON"
+                    minHeight={110}
+                    ariaLabel="Trigger filter JSON"
+                    templates={[
+                      { label: 'env = "prod"', snippet: '"env": "prod"' },
+                      { label: 'priority = "high"', snippet: '"priority": "high"' },
+                      { label: 'dry_run = false', snippet: '"dry_run": false' },
+                      { label: 'source = "api"', snippet: '"source": "api"' },
+                    ]}
                   />
                 ) : (
                   <>
@@ -1548,13 +1706,13 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     {activeTriggerFilterRow && (
                       <div className="moon-trigger-pill-editor">
                         <div className="moon-dock-form__row" style={{ marginBottom: 4 }}>
-                          <input
-                            className="moon-dock-form__input"
-                            type="text"
+                          <MoonPickerInput
                             value={activeTriggerFilterRow.key}
-                            onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { key: event.target.value })}
+                            onChange={(next) => updateTriggerFilterRow(activeTriggerFilterRow.id, { key: next })}
                             placeholder="Payload field, e.g. env"
-                            style={{ marginBottom: 0 }}
+                            extraSuggestions={payloadFieldSuggestions.map((f) => ({ value: f.key, label: f.label }))}
+                            ariaLabel="Payload field name"
+                            style={{ flex: 1, marginBottom: 0 }}
                           />
                           <select
                             className="moon-dock-form__select"
@@ -1570,12 +1728,15 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                           </select>
                         </div>
                         {activeTriggerFilterRow.valueType !== 'null' && (
-                          <input
-                            className="moon-dock-form__input"
-                            type="text"
+                          <MoonPickerInput
                             value={activeTriggerFilterRow.valueText}
-                            onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: event.target.value })}
+                            onChange={(next) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: next })}
                             placeholder="Expected value, e.g. prod"
+                            extraSuggestions={
+                              (payloadFieldSuggestions.find((f) => f.key === activeTriggerFilterRow.key.trim())?.samples || [])
+                                .map((sample) => ({ value: sample, label: sample }))
+                            }
+                            ariaLabel="Expected payload value"
                             style={{ marginBottom: 4 }}
                           />
                         )}
@@ -1651,12 +1812,21 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     rows={6}
                     style={{ minHeight: 132, resize: 'vertical' }}
                   />
-                  <input
-                    className="moon-dock-form__input"
-                    type="text"
+                  {node?.id && workflowId && (
+                    <MoonLocalHistoryRail
+                      scopeKey={`prompt:${workflowId}:${node.id}`}
+                      currentValue={nodePrompt}
+                      onRestore={(value) => setNodePrompt(value)}
+                      label="Previous prompts (this device)"
+                    />
+                  )}
+                  <MoonPickerInput
                     value={nodeHandoffTarget}
-                    onChange={e => setNodeHandoffTarget(e.target.value)}
+                    onChange={setNodeHandoffTarget}
                     placeholder="Handoff target (optional)"
+                    suggestionsUrl="/api/moon/pickers/authorities"
+                    suggestionsKey="authorities"
+                    ariaLabel="Handoff target"
                   />
                 </div>
               )}
@@ -1777,22 +1947,36 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       <option key={method} value={method}>{method}</option>
                     ))}
                   </select>
-                  <textarea
-                    className="moon-dock-form__input"
+                  <MoonJsonEditor
                     value={webhookHeadersText}
-                    onChange={e => setWebhookHeadersText(e.target.value)}
+                    onChange={setWebhookHeadersText}
                     placeholder={'Headers JSON\n{\n  "Authorization": "Bearer ..."\n}'}
                     rows={5}
-                    style={{ minHeight: 118, resize: 'vertical' }}
+                    minHeight={118}
+                    ariaLabel="Webhook headers JSON"
+                    templates={[
+                      { label: 'Authorization: Bearer …', snippet: '"Authorization": "Bearer YOUR_TOKEN"' },
+                      { label: 'Content-Type: application/json', snippet: '"Content-Type": "application/json"' },
+                      { label: 'Accept: application/json', snippet: '"Accept": "application/json"' },
+                      { label: 'X-Webhook-Token', snippet: '"X-Webhook-Token": "YOUR_TOKEN"' },
+                      { label: 'X-Request-Id template', snippet: '"X-Request-Id": "{{run_id}}"' },
+                      { label: 'User-Agent: Praxis', snippet: '"User-Agent": "Praxis/1.0"' },
+                    ]}
                   />
                   {showHttpRequestBody && (
-                    <textarea
-                      className="moon-dock-form__input"
+                    <MoonJsonEditor
                       value={webhookBodyText}
-                      onChange={e => setWebhookBodyText(e.target.value)}
+                      onChange={setWebhookBodyText}
                       placeholder={selectedHttpRequestPreset.bodyPlaceholder}
                       rows={5}
-                      style={{ minHeight: 118, resize: 'vertical' }}
+                      minHeight={118}
+                      ariaLabel="Webhook request body"
+                      allowNonObject
+                      templates={[
+                        { label: 'Empty object { }', snippet: '{}', replace: true },
+                        { label: 'event_type + payload', snippet: '"event_type": "updated",\n  "payload": {}' },
+                        { label: 'run_id pass-through', snippet: '"run_id": "{{run_id}}"' },
+                      ]}
                     />
                   )}
                   <input
@@ -1846,13 +2030,20 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       Workflows without a current execution plan stay hidden from this picker.
                     </div>
                   )}
-                  <textarea
-                    className="moon-dock-form__input"
+                  <MoonJsonEditor
                     value={invokePayloadText}
-                    onChange={e => setInvokePayloadText(e.target.value)}
-                    placeholder={'Payload JSON or text\n{\n  "ticket_id": "{{ticket_id}}"\n}'}
+                    onChange={setInvokePayloadText}
+                    placeholder={'Payload JSON\n{\n  "ticket_id": "{{ticket_id}}"\n}'}
                     rows={5}
-                    style={{ minHeight: 118, resize: 'vertical' }}
+                    minHeight={118}
+                    ariaLabel="Invoke payload JSON"
+                    allowNonObject
+                    templates={[
+                      { label: 'Empty {}', snippet: '{}', replace: true },
+                      { label: 'ticket_id passthrough', snippet: '"ticket_id": "{{ticket_id}}"' },
+                      { label: 'run_id passthrough', snippet: '"run_id": "{{run_id}}"' },
+                      { label: 'payload.* passthrough', snippet: '"payload": "{{payload}}"' },
+                    ]}
                   />
                 </div>
               )}
@@ -1860,13 +2051,13 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
               {isIntegrationRoute && !isNotificationRoute && !isWebhookRoute && !isWorkflowInvokeRoute && (
                 <div className="moon-dock-subsection">
                   <div className="moon-dock__section-label" style={{ marginTop: 0 }}>Integration properties</div>
-                  <textarea
-                    className="moon-dock-form__input"
+                  <MoonJsonEditor
                     value={genericIntegrationArgsText}
-                    onChange={e => setGenericIntegrationArgsText(e.target.value)}
+                    onChange={setGenericIntegrationArgsText}
                     placeholder={'Integration args JSON\n{\n  "mode": "default"\n}'}
                     rows={6}
-                    style={{ minHeight: 132, resize: 'vertical' }}
+                    minHeight={132}
+                    ariaLabel="Integration args JSON"
                   />
                 </div>
               )}
@@ -2204,7 +2395,7 @@ function BindingCard({
     }
   }, [binding.binding_id, binding.source_label, onCommitAuthorityAction, onMutate]);
 
-  const stateColor = isAccepted ? '#3fb950' : isRejected ? 'var(--moon-error)' : 'var(--moon-fg-muted)';
+  const stateColor = isAccepted ? 'var(--moon-status-ok)' : isRejected ? 'var(--moon-error)' : 'var(--moon-fg-muted)';
 
   return (
     <div className={`moon-dock__item${isRejected ? ' moon-dock__item--muted' : ''}`}>
@@ -2224,7 +2415,7 @@ function BindingCard({
             <>
               {binding.accepted_target.enrichment.integration_name}
               {binding.accepted_target.enrichment.auth_status && (
-                <span style={{ marginLeft: 6, fontSize: 10, color: binding.accepted_target.enrichment.auth_status === 'connected' ? '#3fb950' : 'var(--moon-fg-muted)' }}>
+                <span style={{ marginLeft: 6, fontSize: 10, color: binding.accepted_target.enrichment.auth_status === 'connected' ? 'var(--moon-status-ok)' : 'var(--moon-fg-muted)' }}>
                   ({binding.accepted_target.enrichment.auth_status})
                 </span>
               )}
@@ -2260,7 +2451,7 @@ function BindingCard({
             >
               {target.enrichment?.integration_name || target.label || target.target_ref || 'Target'}
               {target.enrichment?.auth_status ? (
-                <span className="moon-dock__item-desc" style={{ marginLeft: 6, color: target.enrichment.auth_status === 'connected' ? '#3fb950' : 'var(--moon-fg-muted)' }}>
+                <span className="moon-dock__item-desc" style={{ marginLeft: 6, color: target.enrichment.auth_status === 'connected' ? 'var(--moon-status-ok)' : 'var(--moon-fg-muted)' }}>
                   ({target.enrichment.auth_status})
                 </span>
               ) : target.kind ? (

@@ -1,10 +1,9 @@
-"""Unit tests for the roadmap `proof_kind` opt-in plumbing.
+"""Unit tests for the roadmap `proof_kind` write/read plumbing.
 
-The `proof_kind = 'capability_delivered_by_decision_filing'` marker on a roadmap
-row's `acceptance_criteria` is the only opt-in the closeout gate honors to skip
-the `source_bug` + `validates_fix` evidence requirement. These tests pin the
-surface-level helpers that construct / read that marker so the opt-in cannot
-regress silently.
+The `proof_kind = 'capability_delivered_by_decision_filing'` marker remains a
+more explicit acceptance-criteria annotation for decision-delivered capability
+rows. Closeout can also use a decided `decision_ref` directly for capability
+rows without a source bug, but these helpers still pin the marker shape.
 """
 
 from __future__ import annotations

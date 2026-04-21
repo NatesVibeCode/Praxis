@@ -227,10 +227,11 @@ def resolve_token(
             cred = resolve_credential(credential_ref, conn=pg, integration_id=integration_id)
             return cred.api_key
         except Exception as exc:
-            logger.debug("credential resolution failed for %s: %s", integration_id, exc)
+            logger.warning("credential resolution failed for %s: %s", integration_id, exc)
+            return None
 
-    # Fall back to env-var lookup through the standard chain:
-    # .env → macOS Keychain (service=praxis) → os.environ.
+    # Fall back to env-var lookup only when the manifest itself declares
+    # env-var auth rather than a credential_ref.
     env_var = str(auth_shape.get("env_var", "")).strip()
     if env_var:
         from adapters.keychain import resolve_secret

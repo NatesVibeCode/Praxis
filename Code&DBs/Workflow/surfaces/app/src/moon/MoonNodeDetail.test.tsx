@@ -14,7 +14,7 @@ vi.mock('../shared/hooks/useObjectTypes', () => ({
 }));
 
 describe('MoonNodeDetail', () => {
-  test('uses dropdown controls for conditional gates and still applies gate changes', () => {
+  test('renders gate panel with condition mode and remove button for configured conditional gates', () => {
     const onApplyGate = vi.fn();
 
     const selectedEdge: OrbitEdge = {
@@ -27,6 +27,8 @@ describe('MoonNodeDetail', () => {
       gateLabel: 'Then',
       gateFamily: 'conditional',
       branchReason: 'then',
+      siblingCount: 2,
+      siblingIndex: 0,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {
@@ -124,14 +126,19 @@ describe('MoonNodeDetail', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Gate type')).toBeInTheDocument();
+    // Gate panel header is shown
+    expect(screen.getByText('Gate')).toBeInTheDocument();
+    // Conditional branch editor is shown with its route display and condition-mode select
+    expect(screen.getByLabelText('Branch routes')).toBeInTheDocument();
     expect(screen.getByLabelText('Condition mode')).toBeInTheDocument();
+    // Old tab-style composer/JSON mode buttons are gone — replaced by the select
     expect(screen.queryByRole('button', { name: 'Composer' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'JSON' })).not.toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText('Gate type'), { target: { value: 'after_failure' } });
-
-    expect(onApplyGate).toHaveBeenCalledWith('edge-trigger-next', 'after_failure');
+    // Remove gate button is present since the gate is configured
+    expect(screen.getByRole('button', { name: 'Remove gate' })).toBeInTheDocument();
+    // Gate-type selection now happens via drag-and-drop from the catalog (MoonBuildPage),
+    // so onApplyGate is not triggered from within the detail panel.
+    expect(onApplyGate).not.toHaveBeenCalled();
   });
 
   test('Remove gate clears conditional branch pair and commits a normal release', async () => {
@@ -147,6 +154,8 @@ describe('MoonNodeDetail', () => {
       gateLabel: 'Then',
       gateFamily: 'conditional',
       branchReason: 'then',
+      siblingCount: 2,
+      siblingIndex: 0,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {
@@ -209,8 +218,11 @@ describe('MoonNodeDetail', () => {
       />,
     );
 
+    // Two-click confirm: first click primes the button, second fires the action.
     const removeButton = screen.getByRole('button', { name: 'Remove gate' });
     fireEvent.click(removeButton);
+    const confirmButton = await screen.findByRole('button', { name: 'Click again to remove' });
+    fireEvent.click(confirmButton);
 
     await vi.waitFor(() => expect(onCommitGraphAction).toHaveBeenCalledTimes(1));
 
@@ -232,6 +244,8 @@ describe('MoonNodeDetail', () => {
       kind: 'sequence',
       isOnDominantPath: true,
       gateState: 'empty',
+      siblingCount: 1,
+      siblingIndex: 0,
     };
 
     render(
@@ -264,11 +278,12 @@ describe('MoonNodeDetail', () => {
       ringState: 'decided-grounded',
       isOnDominantPath: true,
       issueCount: 0,
-
       dominantPathIndex: 0,
       x: 0,
       y: 0,
       rank: 0,
+      multiplicity: null,
+      outgoingEdgeCount: 0,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {
@@ -318,12 +333,13 @@ describe('MoonNodeDetail', () => {
       ringState: 'decided-grounded',
       isOnDominantPath: true,
       issueCount: 0,
-
       dominantPathIndex: 0,
       x: 0,
       y: 0,
       rank: 0,
       route: 'trigger/webhook',
+      multiplicity: null,
+      outgoingEdgeCount: 0,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {
@@ -378,12 +394,13 @@ describe('MoonNodeDetail', () => {
       ringState: 'decided-grounded',
       isOnDominantPath: true,
       issueCount: 0,
-
       dominantPathIndex: 0,
       x: 0,
       y: 0,
       rank: 0,
       route: longRoute,
+      multiplicity: null,
+      outgoingEdgeCount: 0,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {

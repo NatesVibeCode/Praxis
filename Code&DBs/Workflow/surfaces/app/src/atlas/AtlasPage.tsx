@@ -32,6 +32,8 @@ async function probeAtlas(): Promise<AtlasStatus> {
 
 export function AtlasPage() {
   const [status, setStatus] = useState<AtlasStatus | null>(null);
+  const [frameReady, setFrameReady] = useState(false);
+  const [frameIssue, setFrameIssue] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +44,45 @@ export function AtlasPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!status?.ok) {
+      setFrameReady(false);
+      setFrameIssue(null);
+      return;
+    }
+
+    setFrameReady(false);
+    setFrameIssue(null);
+
+    let reported = false;
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data;
+      if (!data || data.type !== 'praxis-atlas-status') return;
+      if (data.ok) {
+        reported = true;
+        setFrameReady(true);
+        setFrameIssue(null);
+        return;
+      }
+      reported = true;
+      setFrameReady(false);
+      setFrameIssue(typeof data.detail === 'string' ? data.detail : 'Atlas runtime reported a render failure.');
+    };
+
+    window.addEventListener('message', onMessage);
+    const timer = window.setTimeout(() => {
+      if (!reported) {
+        setFrameIssue((current) => current ?? 'Atlas loaded, but the graph runtime has not reported ready yet.');
+      }
+    }, 8000);
+
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.clearTimeout(timer);
+    };
+  }, [status?.ok]);
 
   if (status === null) {
     return (
@@ -67,15 +108,63 @@ export function AtlasPage() {
   }
 
   return (
-    <iframe
-      title="Praxis knowledge atlas"
-      src="/api/atlas.html"
+    <div
       style={{
-        width: '100%',
-        height: '100%',
-        border: 0,
+        position: 'absolute',
+        inset: 0,
+        minHeight: 0,
         background: '#0b0d12',
       }}
-    />
+    >
+      <iframe
+        title="Praxis knowledge atlas"
+        src="/api/atlas.html"
+        onError={() => {
+          setFrameReady(false);
+          setFrameIssue('Atlas iframe failed to load.');
+        }}
+        style={{
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          border: 0,
+          background: '#0b0d12',
+        }}
+      />
+      {(!frameReady || frameIssue) && (
+        <div
+          aria-live="polite"
+          style={{
+            position: 'absolute',
+            right: 16,
+            bottom: 16,
+            maxWidth: 360,
+            padding: '12px 14px',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: 8,
+            background: 'rgba(9, 10, 13, 0.88)',
+            color: '#f3efe6',
+            boxShadow: '0 18px 42px rgba(0, 0, 0, 0.34)',
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.16em',
+              textTransform: 'uppercase',
+              color: frameIssue ? '#fbbf24' : '#9299ab',
+              marginBottom: 4,
+            }}
+          >
+            {frameIssue ? 'Atlas render check' : 'Rendering Atlas'}
+          </div>
+          <div style={{ fontSize: 12, lineHeight: 1.45, color: '#d8d2c5' }}>
+            {frameIssue ?? 'Waiting for the graph canvas to report ready.'}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

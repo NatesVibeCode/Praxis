@@ -9,8 +9,16 @@ from surfaces.cli.commands.operate import _metrics_command
 
 
 class _FakeHistory:
-    def summary(self) -> dict[str, float | int]:
-        return {"total_workflows": 2, "succeeded": 1, "failed": 1, "pass_rate": 0.5}
+    def summary(self) -> dict[str, object]:
+        return {
+            "total_workflows": 2,
+            "succeeded": 1,
+            "failed": 1,
+            "pass_rate": 0.5,
+            "workflow_history_source": "metrics",
+            "workflow_history_status": "complete",
+            "workflow_history_error": None,
+        }
 
     def recent_workflows(self, limit: int = 20):  # noqa: ARG002
         return [
@@ -110,6 +118,8 @@ def test_build_dashboard_surfaces_observability_block(monkeypatch):
 
     rendered = dashboard_mod.format_dashboard(data)
     assert "dashboard_summary:" in rendered
+    assert "workflow_history_source=metrics" in rendered
+    assert "workflow_history_status=complete" in rendered
     assert "observability_digest:" in rendered
     assert "failure_mix:" in rendered
     assert "route_health:" in rendered

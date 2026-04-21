@@ -154,3 +154,86 @@ def test_native_operator_roadmap_write_forwards_proof_kind(monkeypatch) -> None:
 
     assert captured["payload"]["proof_kind"] == "capability_delivered_by_decision_filing"
     assert captured["payload"]["item_kind"] == "capability"
+
+
+def test_native_operator_db_health_resolves_repo_database_env(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _workflow_database_env_for_repo(repo_root, *, env):
+        captured["repo_root"] = repo_root
+        captured["resolver_env"] = env
+        return {
+            "WORKFLOW_DATABASE_URL": "postgresql://repo.example/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "repo_env:/tmp/repo/.env",
+        }
+
+    def _health(*, env, bootstrap=False):
+        captured["health_env"] = env
+        captured["bootstrap"] = bootstrap
+        return {"ok": True, "bootstrap": bootstrap}
+
+    monkeypatch.setattr(
+        native_operator,
+        "workflow_database_env_for_repo",
+        _workflow_database_env_for_repo,
+    )
+    monkeypatch.setattr(native_operator.frontdoor, "health", _health)
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            ["native-operator", "db-health"],
+            env={},
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert json.loads(stdout.getvalue()) == {"ok": True, "bootstrap": False}
+    assert captured["resolver_env"] == {}
+    assert captured["health_env"] == {
+        "WORKFLOW_DATABASE_URL": "postgresql://repo.example/praxis",
+        "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "repo_env:/tmp/repo/.env",
+    }
+    assert captured["bootstrap"] is False
+
+
+def test_native_operator_db_bootstrap_resolves_repo_database_env(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _workflow_database_env_for_repo(repo_root, *, env):
+        captured["resolver_env"] = env
+        return {
+            "WORKFLOW_DATABASE_URL": "postgresql://repo.example/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "repo_env:/tmp/repo/.env",
+        }
+
+    def _health(*, env, bootstrap=False):
+        captured["health_env"] = env
+        captured["bootstrap"] = bootstrap
+        return {"ok": True, "bootstrap": bootstrap}
+
+    monkeypatch.setattr(
+        native_operator,
+        "workflow_database_env_for_repo",
+        _workflow_database_env_for_repo,
+    )
+    monkeypatch.setattr(native_operator.frontdoor, "health", _health)
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            ["native-operator", "db-bootstrap"],
+            env={},
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert json.loads(stdout.getvalue()) == {"ok": True, "bootstrap": True}
+    assert captured["resolver_env"] == {}
+    assert captured["health_env"] == {
+        "WORKFLOW_DATABASE_URL": "postgresql://repo.example/praxis",
+        "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "repo_env:/tmp/repo/.env",
+    }
+    assert captured["bootstrap"] is True

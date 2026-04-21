@@ -20,6 +20,19 @@ Single Postgres database: `postgresql://localhost:5432/praxis`
 - Migrations live under `Code&DBs/Databases/migrations/workflow/`
 - pgvector extension is enabled for vector similarity search
 
+## Fresh Clone Bootstrap
+
+If Praxis.db is missing, empty, or cannot answer the standing-order query, do
+not infer private operator policy from this file. Run:
+
+```bash
+./scripts/bootstrap
+```
+
+Then orient again through `praxis workflow query "status"` or `POST /orient`.
+Until Praxis.db answers, stay inside the public fresh-clone scope from
+`README.md`, `SETUP.md`, and `config/runtime_profiles.json`.
+
 ## Tool Authority
 
 Praxis exposes a live surface of catalog-backed tools.

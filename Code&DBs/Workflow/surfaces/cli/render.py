@@ -6,6 +6,7 @@ from observability.read_models import (
     GraphTopologyNode,
     GraphTopologyReadModel,
     InspectionReadModel,
+    ReplayPathBreak,
     ReplayReadModel,
 )
 from runtime._helpers import _append_indexed_lines, _format_bool
@@ -32,6 +33,27 @@ def _format_optional_text(value: str | None) -> str:
 
 def _format_optional_int(value: int | None) -> str:
     return "-" if value is None else str(value)
+
+
+def _append_path_break_lines(
+    lines: list[str],
+    path_break: ReplayPathBreak | None,
+) -> None:
+    if path_break is None:
+        lines.append("path_break: -")
+        return
+    lines.extend(
+        [
+            f"path_break.reason_code: {path_break.reason_code}",
+            f"path_break.missing_ref: {path_break.missing_ref}",
+            f"path_break.break_kind: {path_break.break_kind}",
+            f"path_break.transition_seq: {_format_optional_int(path_break.transition_seq)}",
+            f"path_break.node_id: {_format_optional_text(path_break.node_id)}",
+            f"path_break.evidence_seq: {_format_optional_int(path_break.evidence_seq)}",
+            f"path_break.expected: {_format_optional_text(path_break.expected)}",
+            f"path_break.observed: {_format_optional_text(path_break.observed)}",
+        ]
+    )
 
 
 def _append_node_lines(lines: list[str], node: GraphTopologyNode, index: int) -> None:
@@ -217,4 +239,5 @@ def render_replay(view: ReplayReadModel) -> str:
         f"operator_frame_source: {view.operator_frame_source}",
         f"operator_frames_count: {len(view.operator_frames)}",
     ]
+    _append_path_break_lines(lines, view.path_break)
     return "\n".join(lines)

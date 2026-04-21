@@ -100,3 +100,25 @@ def test_replay_fails_closed_when_canonical_evidence_is_incomplete(claim_receive
     assert "transition:1:receipt" in view.completeness.missing_evidence_refs
     assert view.admitted_definition_ref is None
     assert view.terminal_reason == "runtime.replay_incomplete"
+    assert view.path_break is not None
+    assert view.path_break.missing_ref == "transition:1:receipt"
+    assert view.path_break.reason_code == "evidence.receipt_missing"
+    assert view.path_break.transition_seq == 1
+
+
+def test_replay_surfaces_runtime_terminal_state_as_first_break(claim_received_proof) -> None:
+    writer = AppendOnlyWorkflowEvidenceWriter()
+    writer.append_workflow_event(claim_received_proof.event)
+    writer.append_receipt(claim_received_proof.receipt)
+
+    view = replay_run(
+        run_id=claim_received_proof.route_identity.run_id,
+        canonical_evidence=writer.evidence_timeline(claim_received_proof.route_identity.run_id),
+    )
+
+    assert view.completeness.is_complete is False
+    assert view.path_break is not None
+    assert view.path_break.missing_ref == "runtime:terminal_state"
+    assert view.path_break.reason_code == "runtime.terminal_state_missing"
+    assert view.path_break.break_kind == "runtime"
+    assert view.path_break.observed == "latest runtime status claim_received"

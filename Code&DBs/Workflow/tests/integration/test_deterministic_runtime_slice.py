@@ -47,6 +47,7 @@ def _request(
                     "task_name": "prepare",
                     "input_payload": {
                         "step": 0,
+                        "allow_passthrough_echo": True,
                         "force_failure": first_node_force_failure,
                     },
                 },
@@ -67,7 +68,7 @@ def _request(
                 display_name="admit",
                 inputs={
                     "task_name": "admit",
-                    "input_payload": {"step": 1},
+                    "input_payload": {"step": 1, "allow_passthrough_echo": True},
                 },
                 expected_outputs={"result": "admitted"},
                 success_condition={"status": "success"},

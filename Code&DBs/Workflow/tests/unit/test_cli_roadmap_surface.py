@@ -91,6 +91,45 @@ def test_roadmap_write_commit_routes_to_command_tool(monkeypatch: pytest.MonkeyP
     assert payload["action"] == "commit"
 
 
+def test_roadmap_write_forwards_proof_kind(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"ok": True, "action": params.get("action")}
+
+    monkeypatch.setattr(roadmap_commands, "run_cli_tool", _fake_run_cli_tool)
+    stdout = StringIO()
+
+    assert (
+        workflow_cli_main(
+            [
+                "roadmap",
+                "write",
+                "validate",
+                "--title",
+                "Attach bounded interpretive context to tool catalog surfaces",
+                "--intent-brief",
+                "Capability delivered by an operator decision filing",
+                "--slug",
+                "attach.bounded.interpretive.context.to.tool.catalog.surfaces",
+                "--decision-ref",
+                "architecture-policy::interpretive-context::attach-bounded-context-to-agent-surfaces",
+                "--item-kind",
+                "capability",
+                "--proof-kind",
+                "capability_delivered_by_decision_filing",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured["tool_name"] == "praxis_operator_write"
+    assert captured["params"]["proof_kind"] == "capability_delivered_by_decision_filing"
+
+
 def test_roadmap_closeout_preview_routes_to_command_tool(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

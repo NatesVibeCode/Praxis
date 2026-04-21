@@ -17,7 +17,7 @@ For fresh clones:
 ./scripts/bootstrap
 ```
 
-This script is idempotent. It creates `.venv`, installs dependencies, symlinks `scripts/praxis` into `~/.local/bin`, runs `db-bootstrap` (full migration set), and runs the native self-hosted smoke. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
+This script is idempotent. It creates `.env` when no repo DB authority exists, creates the target Postgres database, enables `pgvector`, creates `.venv`, installs dependencies, symlinks `scripts/praxis` into `~/.local/bin`, runs `db-bootstrap` (full migration set plus fresh-install authority seed), starts the REST API, and validates/submits/streams `examples/hello_world.queue.json`. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
 
 ## Docker Setup
 
@@ -73,17 +73,17 @@ See the [pgvector install notes](https://github.com/pgvector/pgvector#installati
 
 ### Store API Keys in Keychain
 
-Praxis resolves keys in this precedence order: **macOS Keychain** (service `praxis`) → **environment variable**. On macOS, prefer Keychain — do not put real secrets in `.env`.
+Praxis resolves keys in this precedence order: explicit env passed by a caller, **macOS Keychain** (account `praxis`, service `<ENV_VAR_NAME>`), process environment, then `.env` as a last-resort local fallback. On macOS, prefer Keychain — do not put real secrets in `.env`.
 
 ```bash
-security add-generic-password -a "praxis" -s "praxis" -l "ANTHROPIC_API_KEY" \
-  -w "sk-ant-..." -U
+security add-generic-password -U -a "praxis" -s "ANTHROPIC_API_KEY" \
+  -w "sk-ant-..."
 
-security add-generic-password -a "praxis" -s "praxis" -l "OPENAI_API_KEY" \
-  -w "sk-..." -U
+security add-generic-password -U -a "praxis" -s "OPENAI_API_KEY" \
+  -w "sk-..."
 
-security add-generic-password -a "praxis" -s "praxis" -l "GEMINI_API_KEY" \
-  -w "AI..." -U
+security add-generic-password -U -a "praxis" -s "GEMINI_API_KEY" \
+  -w "AI..."
 ```
 
 ### Install and Run
@@ -96,14 +96,13 @@ python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -r Code\&DBs/Workflow/requirements.runtime.txt
 
-# Bootstrap the DB (migrations + bootstrap_only data)
+# Bootstrap the DB (migrations + fresh-install authority seed)
 ./scripts/native-bootstrap.sh
 
 # Launch the API server
-#   PYTHONPATH is REQUIRED — the API module is rooted at Code&DBs/Workflow
+#   PYTHONPATH is REQUIRED - the API module is rooted at Code&DBs/Workflow
 PYTHONPATH="Code&DBs/Workflow" \
-  python -m uvicorn surfaces.api.native_operator_surface:app \
-    --host 0.0.0.0 --port 8420
+  python -m surfaces.api.server --host 0.0.0.0 --port 8420
 ```
 
 ## Linux Setup
@@ -150,13 +149,12 @@ pip install -r Code\&DBs/Workflow/requirements.runtime.txt
 ./scripts/native-bootstrap.sh
 
 PYTHONPATH="Code&DBs/Workflow" \
-  python -m uvicorn surfaces.api.native_operator_surface:app \
-    --host 0.0.0.0 --port 8420
+  python -m surfaces.api.server --host 0.0.0.0 --port 8420
 ```
 
 ## Database Bootstrap
 
-Migrations live in `Code&DBs/Databases/migrations/workflow/` — the repo is currently at migration **189**. They run in order, are idempotent, and are split into `canonical` (always applied) and `bootstrap_only` (applied on fresh instances). The classification is authored by `_generated_workflow_migration_authority.py`.
+Migrations live in `Code&DBs/Databases/migrations/workflow/` — the repo is currently at migration **193**. They run in order, are idempotent, and are split into `canonical` (always applied) and `bootstrap_only` (applied on fresh instances). The classification is authored by `_generated_workflow_migration_authority.py`; fresh-install runtime rows are then reconciled from `config/runtime_profiles.json`.
 
 ```bash
 # Apply everything — idempotent
@@ -250,7 +248,7 @@ Verify with: `praxis_health()`
 ./scripts/native-smoke.sh
 
 # API health (requires running API server)
-curl http://localhost:8420/health
+curl http://localhost:8420/api/health
 
 # Full status
 curl -X POST http://localhost:8420/orient
@@ -286,7 +284,7 @@ ERROR: extension "vector" is not available
 ```
 
 - Docker: use `pgvector/pgvector:pg16` image (included in docker-compose.yml)
-- macOS: `brew install pgvector`
+- macOS: use `brew install pgvector/brew/pgvector`, or build from source against `postgresql@16`
 - Linux: `sudo apt install postgresql-16-pgvector`
 
 Then: `psql praxis -c "CREATE EXTENSION IF NOT EXISTS vector;"`
@@ -298,7 +296,7 @@ ProviderRegistryError: no eligible provider
 ```
 
 At least one API key must be set. Verify:
-- macOS: `security find-generic-password -s "praxis" -l "ANTHROPIC_API_KEY" -w`
+- macOS: `security find-generic-password -a "praxis" -s "ANTHROPIC_API_KEY" -w`
 - Linux: `echo $ANTHROPIC_API_KEY`
 
 ### Port already in use
@@ -313,7 +311,7 @@ Change the port: `PRAXIS_API_PORT=8421` or find the existing process: `lsof -i :
 
 Migrations are idempotent. Re-run:
 ```bash
-python Code\&DBs/Workflow/storage/postgres/migrate.py
+./scripts/native-bootstrap.sh
 ```
 
-If a specific migration fails, check the SQL file in `Code&DBs/Databases/migrations/workflow/` for manual review.
+If a specific migration fails, check the SQL file in `Code&DBs/Databases/migrations/workflow/` and the generated authority in `Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py`.

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from adapters.provider_types import ProviderCLIProfile
+from adapters import provider_transport
 import registry.provider_execution_registry as provider_registry_mod
 import runtime.health as runtime_health
 from runtime.workflow import runtime_setup as workflow_runtime_setup
@@ -124,6 +125,10 @@ def test_default_provider_slug_raises_without_configured_priority_provider(monke
         execution_registry.default_provider_slug()
 
 
+def test_transport_no_longer_exposes_orphaned_default_provider_helper() -> None:
+    assert not hasattr(provider_transport, "builtin_default_provider_slug")
+
+
 def test_provider_transport_probe_fails_when_runtime_registry_lacks_adapter(monkeypatch) -> None:
     monkeypatch.setattr(
         "runtime.workflow._adapter_registry.runtime_supports_workflow_adapter_type",
@@ -154,7 +159,11 @@ def test_provider_transport_probe_fails_when_runtime_registry_lacks_adapter(monk
     assert check.details["runtime_adapter_supported"] is False
 
 
-def test_workflow_runtime_uses_one_adapter_registry_authority() -> None:
+def test_workflow_runtime_uses_one_adapter_registry_authority(monkeypatch) -> None:
+    monkeypatch.setattr("adapters.cli_llm.default_provider_slug", lambda: "openai")
+    monkeypatch.setattr("adapters.llm_task.default_provider_slug", lambda: "openai")
+    monkeypatch.setattr(provider_registry_mod, "default_provider_slug", lambda: "openai")
+
     setup_registry = workflow_runtime_setup._build_adapter_registry(
         SimpleNamespace(
             adapter_type="cli_llm",

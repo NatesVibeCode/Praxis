@@ -6,7 +6,6 @@ plus the LISTEN/NOTIFY background listener for instant wakeups.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import threading
@@ -45,11 +44,6 @@ def _advance_background_workflow_chains(conn: "SyncPostgresConnection") -> int:
     from runtime.workflow_chain import advance_workflow_chains
 
     return advance_workflow_chains(conn)
-
-
-def _graph_run_lock_key(run_id: str) -> int:
-    digest = hashlib.sha256(f"workflow_graph_run:{run_id}".encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], "big", signed=True)
 
 
 def _list_ready_graph_runs(
@@ -355,24 +349,25 @@ def run_worker_loop(
         run_id = str(run_row.get("run_id") or "").strip()
         if not run_id:
             return
-        lock_key = _graph_run_lock_key(run_id)
-        lock_rows = thread_conn.execute(
-            "SELECT pg_try_advisory_lock($1::bigint) AS locked",
-            lock_key,
-        )
-        locked = bool(lock_rows and bool(dict(lock_rows[0]).get("locked")))
-        if not locked:
-            return
         try:
             logger.info("Worker executing admitted graph run %s", run_id)
             result = _execute_admitted_graph_run(thread_conn, run_id=run_id)
+            if isinstance(result, Mapping):
+                status = str(result.get("status") or "").strip().lower()
+                if status == "locked":
+                    logger.info("Graph run %s is already locked by another executor", run_id)
+                    return
+            else:
+                status = str(getattr(result, "status", "") or "").strip().lower()
+                if status == "locked":
+                    logger.info("Graph run %s is already locked by another executor", run_id)
+                    return
             # Silent-failure guard: if execution returned without transitioning the
             # run state out of claim_accepted (e.g. route.unhealthy, intake.rejected,
             # or any early-exit failure_result), force it to 'failed' so operators
             # aren't left with a run stuck in claim_accepted forever.
             reason_code = None
             if isinstance(result, Mapping):
-                status = str(result.get("status") or "").strip().lower()
                 if status in {"failed", "rejected", "error"}:
                     reason_code = (
                         str(result.get("reason_code") or "").strip()
@@ -380,7 +375,6 @@ def run_worker_loop(
                         or "workflow.silent_failure"
                     )
             else:
-                status = str(getattr(result, "status", "") or "").strip().lower()
                 if status in {"failed", "rejected", "error"}:
                     reason_code = (
                         str(getattr(result, "reason_code", "") or "").strip()
@@ -418,14 +412,6 @@ def run_worker_loop(
                 exc,
                 exc_info=True,
             )
-        finally:
-            try:
-                thread_conn.execute(
-                    "SELECT pg_advisory_unlock($1::bigint)",
-                    lock_key,
-                )
-            except Exception:
-                logger.debug("Graph advisory unlock failed for %s", run_id, exc_info=True)
 
     # Two pools: unlimited for remote transport, capped for local transport
     api_pool = ThreadPoolExecutor(max_workers=64, thread_name_prefix="api-worker")

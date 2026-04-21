@@ -97,12 +97,16 @@ def test_workflow_database_bootstrap_falls_back_to_explicit_authority_when_dev_p
         missing_by_migration={},
     )
     bootstrap_calls: list[object] = []
+    seed_calls: list[object] = []
 
     async def _inspect(_conn: object):
         return readiness
 
     async def _bootstrap(conn: object):
         bootstrap_calls.append(conn)
+
+    async def _seed(conn: object):
+        seed_calls.append(conn)
 
     monkeypatch.setattr(dev_postgres, "local_postgres_bootstrap", _disabled_dev_postgres)
     monkeypatch.setattr(
@@ -122,6 +126,10 @@ def test_workflow_database_bootstrap_falls_back_to_explicit_authority_when_dev_p
     )
     monkeypatch.setattr(storage_postgres, "inspect_workflow_schema", _inspect)
     monkeypatch.setattr(pg_schema, "bootstrap_workflow_schema", _bootstrap)
+    monkeypatch.setattr(
+        "storage.postgres.fresh_install_seed.seed_fresh_install_authority_async",
+        _seed,
+    )
 
     status = workflow_boot.workflow_database_status(
         env={"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test"},
@@ -129,6 +137,7 @@ def test_workflow_database_bootstrap_falls_back_to_explicit_authority_when_dev_p
     )
 
     assert bootstrap_calls == [fake_conn]
+    assert seed_calls == [fake_conn]
     assert status.database_reachable is True
     assert status.schema_bootstrapped is True
     assert status.missing_schema_objects == ()

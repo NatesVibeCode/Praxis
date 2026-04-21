@@ -226,7 +226,7 @@ class PostgresRegistryAuthorityRepository:
             field_name="provider_policy_id",
         )
         sandbox_profile_ref = _require_text(
-            record.sandbox_profile_ref or record.runtime_profile_ref,
+            record.sandbox_profile_ref,
             field_name="sandbox_profile_ref",
         )
         try:

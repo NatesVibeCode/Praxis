@@ -14,6 +14,7 @@ from .read_models import (
     OperatorFrameReadModel,
     ProjectionCompleteness,
     ProjectionWatermark,
+    ReplayPathBreak,
     ReplayReadModel,
 )
 from .graph_lineage import graph_lineage_run
@@ -125,6 +126,7 @@ __all__ = [
     "render_cutover_graph_status",
     "render_cutover_scoreboard",
     "render_operator_cockpit",
+    "ReplayPathBreak",
     "ReplayReadModel",
     "render_operator_status",
     "inspect_run",

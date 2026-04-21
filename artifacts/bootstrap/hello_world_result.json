@@ -1,0 +1,40 @@
+{
+  "status": "queued",
+  "command_status": "succeeded",
+  "command_id": "control.command.249fe3a899c4",
+  "approval_required": false,
+  "run_id": "workflow_468d484719cd",
+  "stream_url": "/api/workflow-runs/workflow_468d484719cd/stream",
+  "status_url": "/api/workflow-runs/workflow_468d484719cd/status",
+  "spec_name": "Hello World",
+  "total_jobs": 1,
+  "result_ref": "workflow_run:workflow_468d484719cd",
+  "run_status": "queued",
+  "status_source": "live_snapshot",
+  "run_metrics": {
+    "completed_jobs": 0,
+    "total_jobs": 1,
+    "elapsed_seconds": 0.0,
+    "health_state": "healthy",
+    "job_status_counts": {
+      "ready": 1
+    },
+    "total_cost_usd": 0.0,
+    "total_duration_ms": 0,
+    "total_tokens_in": 0,
+    "total_tokens_out": 0
+  },
+  "recovery": {
+    "mode": "monitor",
+    "reason": "Run is queued and waiting for a claim.",
+    "recommended_tool": {
+      "name": "praxis_workflow",
+      "arguments": {
+        "action": "status",
+        "run_id": "workflow_468d484719cd"
+      }
+    }
+  },
+  "job_id": "cli",
+  "workflow_id": "hello_world"
+}

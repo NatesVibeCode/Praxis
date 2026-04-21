@@ -23,6 +23,14 @@ class CLIExecutionPolicy:
 def provider_cli_needs_network(profile: object | None) -> bool:
     if profile is None:
         return False
+    lane_policies = getattr(profile, "lane_policies", None)
+    if isinstance(lane_policies, Mapping):
+        cli_policy = lane_policies.get("cli_llm")
+        if isinstance(cli_policy, Mapping):
+            transport_kind = str(cli_policy.get("transport_kind", "") or "").strip().lower()
+            execution_topology = str(cli_policy.get("execution_topology", "") or "").strip().lower()
+            if transport_kind == "cli" or execution_topology == "local_cli":
+                return True
     api_endpoint = str(getattr(profile, "api_endpoint", "") or "").strip()
     api_protocol_family = str(getattr(profile, "api_protocol_family", "") or "").strip()
     api_key_env_vars = tuple(getattr(profile, "api_key_env_vars", ()) or ())

@@ -500,6 +500,238 @@ def test_work_item_closeout_accepts_operator_relation_as_roadmap_bug_link(monkey
     assert payload["skipped"]["roadmap_items"] == []
 
 
+def test_work_item_closeout_accepts_decided_decision_ref_for_capability_without_bug(
+    monkeypatch,
+) -> None:
+    resolved_at = datetime(2026, 4, 9, 17, 0, tzinfo=timezone.utc)
+
+    async def _fetch_bug_rows_for_closeout(self, conn, bug_ids):
+        del self, conn, bug_ids
+        return ()
+
+    async def _fetch_roadmap_rows_for_closeout(
+        self,
+        conn,
+        roadmap_item_ids: tuple[str, ...],
+        source_bug_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn, source_bug_ids
+        assert roadmap_item_ids == ("roadmap_item.closeout.decision",)
+        return (
+            {
+                "roadmap_item_id": "roadmap_item.closeout.decision",
+                "title": "Decision-backed capability",
+                "status": "active",
+                "lifecycle": "planned",
+                "item_kind": "capability",
+                "source_bug_id": None,
+                "decision_ref": "architecture-policy::example::decision-backed-capability",
+                "acceptance_criteria": {},
+                "completed_at": None,
+                "updated_at": resolved_at,
+            },
+        )
+
+    async def _fetch_bug_evidence_for_closeout(
+        self,
+        conn,
+        bug_ids: tuple[str, ...],
+    ) -> dict[str, tuple[dict[str, str], ...]]:
+        del self, conn
+        assert bug_ids == ()
+        return {}
+
+    async def _fetch_decision_proof_for_closeout(
+        self,
+        conn,
+        decision_refs: tuple[str, ...],
+    ) -> dict[str, dict[str, object]]:
+        del self, conn
+        assert decision_refs == (
+            "architecture-policy::example::decision-backed-capability",
+        )
+        return {
+            "architecture-policy::example::decision-backed-capability": {
+                "operator_decision_id": "architecture-policy::example::decision-backed-capability",
+                "decision_key": "example::decision-backed-capability",
+                "decision_kind": "architecture_policy",
+                "decision_status": "decided",
+            }
+        }
+
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_rows_for_closeout",
+        _fetch_bug_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_rows_for_closeout",
+        _fetch_roadmap_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_evidence_for_closeout",
+        _fetch_bug_evidence_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_decision_proof_for_closeout",
+        _fetch_decision_proof_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_bug_relation_rows_for_closeout",
+        _fetch_no_relation_rows_for_closeout,
+    )
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=lambda env=None: asyncio.sleep(0, result=_NoSqlConnectionProxy()),
+    )
+
+    payload = asyncio.run(
+        frontdoor.reconcile_work_item_closeout_async(
+            action="preview",
+            bug_ids=(),
+            roadmap_item_ids=("roadmap_item.closeout.decision",),
+        )
+    )
+
+    assert (
+        payload["proof_threshold"][
+            "roadmap_capability_without_bug_accepts_decided_decision_ref"
+        ]
+        is True
+    )
+    assert payload["candidates"]["roadmap_items"] == [
+        {
+            "roadmap_item_id": "roadmap_item.closeout.decision",
+            "source_bug_id": None,
+            "source_bug_link_source": None,
+            "source_bug_relation_id": None,
+            "current_status": "active",
+            "current_lifecycle": "planned",
+            "next_status": "completed",
+            "next_lifecycle": "completed",
+            "reason_codes": [
+                "capability_delivered_by_decision_ref_proof_present",
+            ],
+            "evidence_refs": [
+                {
+                    "kind": "operator_decision",
+                    "ref": "architecture-policy::example::decision-backed-capability",
+                    "role": "capability_delivered_decision",
+                    "decision_key": "example::decision-backed-capability",
+                    "decision_kind": "architecture_policy",
+                    "decision_status": "decided",
+                }
+            ],
+        }
+    ]
+    assert payload["skipped"]["roadmap_items"] == []
+
+
+def test_work_item_closeout_does_not_report_missing_decision_proof_when_already_completed(
+    monkeypatch,
+) -> None:
+    completed_at = datetime(2026, 4, 9, 17, 0, tzinfo=timezone.utc)
+
+    async def _fetch_bug_rows_for_closeout(self, conn, bug_ids):
+        del self, conn, bug_ids
+        return ()
+
+    async def _fetch_roadmap_rows_for_closeout(
+        self,
+        conn,
+        roadmap_item_ids: tuple[str, ...],
+        source_bug_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn, source_bug_ids
+        assert roadmap_item_ids == ("roadmap_item.closeout.completed",)
+        return (
+            {
+                "roadmap_item_id": "roadmap_item.closeout.completed",
+                "title": "Completed decision-backed capability",
+                "status": "completed",
+                "lifecycle": "completed",
+                "item_kind": "capability",
+                "source_bug_id": None,
+                "decision_ref": "architecture-policy::example::completed-capability",
+                "acceptance_criteria": {},
+                "completed_at": completed_at,
+                "updated_at": completed_at,
+            },
+        )
+
+    async def _fetch_bug_evidence_for_closeout(
+        self,
+        conn,
+        bug_ids: tuple[str, ...],
+    ) -> dict[str, tuple[dict[str, str], ...]]:
+        del self, conn
+        assert bug_ids == ()
+        return {}
+
+    async def _fetch_decision_proof_for_closeout(
+        self,
+        conn,
+        decision_refs: tuple[str, ...],
+    ) -> dict[str, dict[str, object]]:
+        del self, conn
+        assert decision_refs == ("architecture-policy::example::completed-capability",)
+        return {
+            "architecture-policy::example::completed-capability": {
+                "operator_decision_id": "architecture-policy::example::completed-capability",
+                "decision_key": "example::completed-capability",
+                "decision_kind": "architecture_policy",
+                "decision_status": "decided",
+            }
+        }
+
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_rows_for_closeout",
+        _fetch_bug_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_rows_for_closeout",
+        _fetch_roadmap_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_evidence_for_closeout",
+        _fetch_bug_evidence_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_decision_proof_for_closeout",
+        _fetch_decision_proof_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_bug_relation_rows_for_closeout",
+        _fetch_no_relation_rows_for_closeout,
+    )
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=lambda env=None: asyncio.sleep(0, result=_NoSqlConnectionProxy()),
+    )
+
+    payload = asyncio.run(
+        frontdoor.reconcile_work_item_closeout_async(
+            action="preview",
+            bug_ids=(),
+            roadmap_item_ids=("roadmap_item.closeout.completed",),
+        )
+    )
+
+    assert payload["candidates"]["roadmap_items"] == []
+    assert payload["skipped"]["roadmap_items"][0]["reason_codes"] == [
+        "already_completed"
+    ]
+
+
 def test_work_item_closeout_requires_passed_fix_verification(monkeypatch) -> None:
     async def _fetch_bug_rows_for_closeout(self, conn, bug_ids):
         del conn, bug_ids

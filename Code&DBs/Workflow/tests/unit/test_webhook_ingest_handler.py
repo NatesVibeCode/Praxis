@@ -43,6 +43,79 @@ def test_webhook_conn_uses_shared_surface_database_authority(monkeypatch) -> Non
     assert captured["pool"] == "pool"
 
 
+def test_create_webhook_endpoint_rejects_mixed_targets(monkeypatch) -> None:
+    monkeypatch.setattr(webhook_ingest, "_webhook_conn", lambda: (_ for _ in ()).throw(AssertionError("_webhook_conn should not be called")))
+
+    class _FakeRequest:
+        async def json(self) -> dict[str, object]:
+            return {
+                "slug": "stripe",
+                "provider": "stripe",
+                "target_workflow_id": "workflow-abc",
+                "target_integration_id": "notifications",
+                "target_integration_action": "send",
+            }
+
+    response = asyncio.run(webhook_ingest.create_webhook_endpoint(_FakeRequest()))
+    payload = json.loads(response.body.decode("utf-8"))
+
+    assert response.status_code == 400
+    assert "mutually exclusive" in payload["error"]
+
+
+def test_create_webhook_endpoint_registers_integration_target(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRepository:
+        def __init__(self, conn) -> None:
+            self.conn = conn
+
+        def upsert_webhook_endpoint(self, **kwargs) -> dict[str, object]:
+            captured["upsert"] = kwargs
+            return {"endpoint_id": "endpoint-123", "slug": kwargs["slug"]}
+
+        def ensure_webhook_workflow_trigger(self, **kwargs) -> None:
+            captured["workflow_trigger"] = kwargs
+
+        def ensure_webhook_integration_trigger(self, **kwargs) -> None:
+            captured["integration_trigger"] = kwargs
+
+    monkeypatch.setattr(webhook_ingest, "_webhook_conn", lambda: object())
+    monkeypatch.setattr(webhook_ingest, "PostgresWebhookRepository", _FakeRepository)
+
+    class _FakeRequest:
+        async def json(self) -> dict[str, object]:
+            return {
+                "slug": "stripe",
+                "provider": "stripe",
+                "target_integration_id": "notifications",
+                "target_integration_action": "send",
+                "target_integration_args": {"channel": "slack"},
+                "enabled": True,
+            }
+
+    response = asyncio.run(webhook_ingest.create_webhook_endpoint(_FakeRequest()))
+    payload = json.loads(response.body.decode("utf-8"))
+
+    assert response.status_code == 200
+    assert payload == {
+        "endpoint_id": "endpoint-123",
+        "slug": "stripe",
+        "status": "registered",
+    }
+    assert captured["upsert"]["target_workflow_id"] is None
+    assert captured["upsert"]["target_integration_id"] == "notifications"
+    assert captured["upsert"]["target_integration_action"] == "send"
+    assert captured["upsert"]["target_integration_args"] == {"channel": "slack"}
+    assert "workflow_trigger" not in captured
+    assert captured["integration_trigger"] == {
+        "endpoint_id": "endpoint-123",
+        "integration_id": "notifications",
+        "integration_action": "send",
+        "integration_args": {"channel": "slack"},
+    }
+
+
 def test_webhook_ingest_emits_canonical_system_event(monkeypatch) -> None:
     emitted: dict[str, object] = {}
     inserted: dict[str, object] = {}

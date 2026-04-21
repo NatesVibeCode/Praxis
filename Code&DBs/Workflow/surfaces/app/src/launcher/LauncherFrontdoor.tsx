@@ -45,13 +45,12 @@ interface LauncherRecoverPayload {
   failure_reason?: string | null;
 }
 
-function readinessLabel(ok: boolean | undefined, positive: string = 'Ready'): string {
-  return ok ? positive : 'Needs recovery';
-}
-
-function serviceTone(ok: boolean | undefined): string {
-  if (ok === undefined) return 'launcher-card launcher-card--checking';
-  return ok ? 'launcher-card launcher-card--healthy' : 'launcher-card launcher-card--degraded';
+interface Satellite {
+  id: string;
+  label: string;
+  detail: string;
+  ok: boolean | undefined;
+  meta: string;
 }
 
 export function LauncherFrontdoor() {
@@ -118,249 +117,186 @@ export function LauncherFrontdoor() {
     return () => window.clearInterval(timer);
   }, [loadStatus, recovering, status]);
 
-  const readinessCards = useMemo(() => {
+  const satellites = useMemo<Satellite[]>(() => {
     if (!status) {
       return [
-        {
-          title: APP_CONFIG.databaseName,
-          detail: 'Database truth and schema authority',
-          ok: undefined,
-          meta: 'Checking',
-        },
-        {
-          title: 'Praxis API',
-          detail: 'Suite API and launcher origin',
-          ok: undefined,
-          meta: 'Checking',
-        },
-        {
-          title: APP_CONFIG.engineName,
-          detail: 'Workflow execution lane and orient surface',
-          ok: undefined,
-          meta: 'Checking',
-        },
-        {
-          title: 'MCP Bridge',
-          detail: 'Always-on /mcp JSON-RPC surface',
-          ok: undefined,
-          meta: 'Checking',
-        },
-        {
-          title: 'Praxis UI',
-          detail: 'Suite shell mounted at /app',
-          ok: undefined,
-          meta: 'Checking',
-        },
-        {
-          title: 'Dependency Truth',
-          detail: 'Runtime manifest completeness',
-          ok: undefined,
-          meta: 'Checking',
-        },
+        { id: 'db', label: APP_CONFIG.databaseName, detail: 'authority', ok: undefined, meta: 'checking' },
+        { id: 'api', label: 'API', detail: 'suite origin', ok: undefined, meta: 'checking' },
+        { id: 'engine', label: APP_CONFIG.engineName, detail: 'workflow lane', ok: undefined, meta: 'checking' },
+        { id: 'mcp', label: 'MCP', detail: 'tool bridge', ok: undefined, meta: 'checking' },
+        { id: 'ui', label: 'UI', detail: 'suite shell', ok: undefined, meta: 'checking' },
+        { id: 'deps', label: 'Deps', detail: 'manifest truth', ok: undefined, meta: 'checking' },
       ];
     }
-    const doctor = status?.doctor ?? {};
+    const doctor = status.doctor ?? {};
     const databaseReady = Boolean(doctor.database_reachable)
       && Boolean(doctor.workflow_operational ?? doctor.schema_bootstrapped);
     return [
+      { id: 'db', label: APP_CONFIG.databaseName, detail: 'authority', ok: databaseReady, meta: databaseReady ? 'bound' : 'needs recovery' },
+      { id: 'api', label: 'API', detail: 'suite origin', ok: Boolean(doctor.api_server_ready), meta: doctor.api_server_ready ? 'ready' : 'down' },
+      { id: 'engine', label: APP_CONFIG.engineName, detail: 'workflow lane', ok: Boolean(doctor.workflow_api_ready), meta: doctor.workflow_api_ready ? 'ready' : 'down' },
+      { id: 'mcp', label: 'MCP', detail: 'tool bridge', ok: Boolean(doctor.mcp_bridge_ready), meta: doctor.mcp_bridge_ready ? 'bounded' : 'down' },
+      { id: 'ui', label: 'UI', detail: 'suite shell', ok: Boolean(doctor.ui_ready), meta: doctor.ui_ready ? 'ready' : 'down' },
       {
-        title: APP_CONFIG.databaseName,
-        detail: 'Database truth and schema authority',
-        ok: databaseReady,
-        meta: readinessLabel(databaseReady, 'Bound'),
-      },
-      {
-        title: 'Praxis API',
-        detail: 'Suite API and launcher origin',
-        ok: Boolean(doctor.api_server_ready),
-        meta: readinessLabel(doctor.api_server_ready),
-      },
-      {
-        title: APP_CONFIG.engineName,
-        detail: 'Workflow execution lane and orient surface',
-        ok: Boolean(doctor.workflow_api_ready),
-        meta: readinessLabel(doctor.workflow_api_ready),
-      },
-      {
-        title: 'MCP Bridge',
-        detail: 'Always-on /mcp JSON-RPC surface',
-        ok: Boolean(doctor.mcp_bridge_ready),
-        meta: readinessLabel(doctor.mcp_bridge_ready, 'Bounded'),
-      },
-      {
-        title: 'Praxis UI',
-        detail: 'Suite shell mounted at /app',
-        ok: Boolean(doctor.ui_ready),
-        meta: readinessLabel(doctor.ui_ready),
-      },
-      {
-        title: 'Dependency Truth',
-        detail: 'Runtime manifest completeness',
+        id: 'deps',
+        label: 'Deps',
+        detail: 'manifest truth',
         ok: Boolean(doctor.dependency_truth?.ok),
-        meta: doctor.dependency_truth?.ok
-          ? 'Manifest clean'
-          : `${doctor.dependency_truth?.missing_count ?? 0} missing`,
+        meta: doctor.dependency_truth?.ok ? 'clean' : `${doctor.dependency_truth?.missing_count ?? 0} missing`,
       },
     ];
   }, [status]);
 
   const serviceList = status?.services ?? [];
-  const readyCount = readinessCards.filter((card) => card.ok === true).length;
-  const attentionCount = readinessCards.filter((card) => card.ok === false).length;
-  const checkingCount = readinessCards.filter((card) => card.ok === undefined).length;
-  const platformTone = error
+  const readyCount = satellites.filter((s) => s.ok === true).length;
+  const failing = satellites.filter((s) => s.ok === false);
+  const checkingCount = satellites.filter((s) => s.ok === undefined).length;
+  const nucleusState: 'breathing' | 'checking' | 'degraded' | 'recovering' = error
     ? 'degraded'
-    : loading || recovering || checkingCount > 0
-      ? 'checking'
-      : status?.ready
-        ? 'healthy'
-        : 'degraded';
-  const platformLabel = error
-    ? 'Offline'
     : recovering
-      ? 'Recovering'
+      ? 'recovering'
       : loading || checkingCount > 0
-        ? 'Checking'
+        ? 'checking'
         : status?.ready
-          ? 'Ready'
-          : 'Degraded';
+          ? 'breathing'
+          : 'degraded';
+  const statusLine = loading
+    ? `Checking ${APP_CONFIG.name}…`
+    : error
+      ? error
+      : recoveryMessage || (failing.length > 0
+        ? `${failing.length} subsystem${failing.length === 1 ? '' : 's'} need attention`
+        : 'Authority connected — opening suite.');
 
-  // Auto-navigate to the app when healthy — launcher becomes a pass-through
+  // Auto-navigate to the app when healthy — launcher becomes a pass-through.
   useEffect(() => {
     if (status && !loading && !error && status.ready && !recovering) {
       navigateToShell();
     }
   }, [status, loading, error, recovering]);
 
+  // Satellite ring geometry: even spacing around the nucleus, lower-half
+  // reserved so the label doesn't fight the statusline.
+  const satelliteCount = satellites.length;
+  const radius = 172;
+  const center = 220;
+  const satellitePositions = satellites.map((s, i) => {
+    // Spread across the upper 220° arc from 160° to 380° (i.e. 200° → 20°).
+    const spread = 220;
+    const start = -110; // degrees from 12 o'clock
+    const deg = satelliteCount === 1 ? start + spread / 2 : start + (spread * i) / (satelliteCount - 1);
+    const rad = (deg * Math.PI) / 180;
+    return {
+      ...s,
+      x: center + radius * Math.sin(rad),
+      y: center - radius * Math.cos(rad),
+    };
+  });
+
   return (
-    <div className="launcher-shell">
+    <div className={`launcher-shell launcher-shell--${nucleusState}`}>
       <div className="launcher-backdrop" />
-      <div className="launcher-page">
-        <section className={`launcher-hero launcher-hero--${platformTone}`}>
-          <div className="launcher-hero-grid">
-            <div className="launcher-logo-panel">
-              <img className="launcher-logo" src={praxisLockup} alt="Praxis logo" />
-              <div className="launcher-logo-caption">
-                <span>Authority</span>
-                <strong>{APP_CONFIG.databaseName}</strong>
-              </div>
-            </div>
-
-            <div className="launcher-copy-panel">
-              <div className="launcher-kicker">{APP_CONFIG.name}</div>
-              <div className="launcher-heading-row">
-                <div>
-                  <h1>{APP_CONFIG.suiteName}</h1>
-                  <p>
-                    Suite shell for {APP_CONFIG.engineName} execution and {APP_CONFIG.databaseName} state truth.
-                  </p>
-                </div>
-                <div className={`launcher-pill launcher-pill--${platformTone}`}>{platformLabel}</div>
-              </div>
-
-              <div className="launcher-authority-strip">
-                <div className="launcher-authority-item">
-                  <span>Suite</span>
-                  <strong>{APP_CONFIG.suiteName}</strong>
-                </div>
-                <div className="launcher-authority-item">
-                  <span>Engine</span>
-                  <strong>{APP_CONFIG.engineName}</strong>
-                </div>
-                <div className="launcher-authority-item">
-                  <span>Data</span>
-                  <strong>{APP_CONFIG.databaseName}</strong>
-                </div>
-                <div className="launcher-authority-item">
-                  <span>Readiness</span>
-                  <strong>{readyCount}/{readinessCards.length} bound</strong>
-                </div>
-              </div>
-
-              <div className="launcher-actions">
-                <button
-                  type="button"
-                  className="launcher-primary"
-                  onClick={() => navigateToShell()}
-                >
-                  Open Praxis
-                </button>
-                <a className="launcher-secondary" href={status?.dashboard_url ?? '/app'}>
-                  Overview
-                </a>
-                <a className="launcher-secondary" href={status?.api_docs_url ?? '/docs'}>
-                  API Docs
-                </a>
-                <button
-                  type="button"
-                  className="launcher-secondary"
-                  onClick={() => void runRecovery('launch')}
-                  disabled={recovering}
-                >
-                  Retry Recovery
-                </button>
-              </div>
-
-              <div className="launcher-statusline" aria-live="polite">
-                <span className={`launcher-statusline__dot launcher-statusline__dot--${platformTone}`} />
-                <span>
-                  {loading
-                    ? 'Checking suite status...'
-                    : error
-                      ? error
-                      : recoveryMessage || (attentionCount > 0
-                        ? `${attentionCount} readiness check${attentionCount === 1 ? '' : 's'} need recovery.`
-                        : 'Praxis authority connected.')}
-                </span>
-              </div>
-            </div>
+      <div className="launcher-nucleus-frame">
+        <div className="launcher-nucleus-wrap" role="group" aria-label="Praxis readiness">
+          {/* Concentric rings — aspirational geometry. The innermost is the
+              nucleus (auth), the outer ring pulses when the system is healthy.
+              Ring lines are muted; color stays monochrome. */}
+          <div className={`launcher-nucleus launcher-nucleus--${nucleusState}`} aria-hidden="true">
+            <span className="launcher-nucleus__halo" />
+            <span className="launcher-nucleus__ring" />
+            <span className="launcher-nucleus__core" />
           </div>
-        </section>
 
-        <section className="launcher-grid">
-          {readinessCards.map((card) => (
-            <article key={card.title} className={serviceTone(card.ok)}>
-              <div className="launcher-card__title">{card.title}</div>
-              <div className="launcher-card__detail">{card.detail}</div>
-              <div className="launcher-card__meta">{card.meta}</div>
-            </article>
-          ))}
-        </section>
-
-        <section className="launcher-service-panel">
-          <div className="launcher-section-header">
-            <div>
-              <h2>Runtime services</h2>
-              <p>Launchd state plus semantic readiness, without pretending ports are proof.</p>
-            </div>
-            <div className="launcher-summary">
-              {status?.service_summary?.total ?? serviceList.length} tracked
+          {/* Lockup sits on top of the nucleus — the brand IS the core until
+              the suite opens. */}
+          <div className="launcher-nucleus__brand">
+            <img className="launcher-nucleus__logo" src={praxisLockup} alt={`${APP_CONFIG.suiteName} lockup`} />
+            <div className="launcher-nucleus__caption">
+              <span>Authority</span>
+              <strong>{APP_CONFIG.databaseName}</strong>
             </div>
           </div>
 
-          <div className="launcher-service-list">
-            {serviceList.length > 0 ? (
-              serviceList.map((service) => (
+          {/* Satellites — six subsystems as small hollow rings. Failing
+              satellites earn coral + subtle pull toward the center. */}
+          <div className="launcher-satellites" role="list" aria-label="Subsystem readiness">
+            {satellitePositions.map((sat) => {
+              const toneClass = sat.ok === true
+                ? 'launcher-satellite--ok'
+                : sat.ok === false
+                  ? 'launcher-satellite--failed'
+                  : 'launcher-satellite--checking';
+              return (
+                <div
+                  key={sat.id}
+                  className={`launcher-satellite ${toneClass}`}
+                  style={{ left: sat.x, top: sat.y }}
+                  role="listitem"
+                  aria-label={`${sat.label}: ${sat.meta}`}
+                >
+                  <span className="launcher-satellite__dot" />
+                  <span className="launcher-satellite__label">{sat.label}</span>
+                  <span className="launcher-satellite__meta">{sat.meta}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="launcher-nucleus-footer">
+          <div className={`launcher-nucleus-statusline launcher-nucleus-statusline--${nucleusState}`} aria-live="polite">
+            {statusLine}
+          </div>
+          <div className="launcher-nucleus-actions">
+            <button
+              type="button"
+              className="launcher-nucleus-primary"
+              onClick={() => navigateToShell()}
+              disabled={!status?.ready && !error}
+            >
+              Open {APP_CONFIG.suiteName}
+            </button>
+            {(failing.length > 0 || error) && (
+              <button
+                type="button"
+                className="launcher-nucleus-recover"
+                onClick={() => void runRecovery('launch')}
+                disabled={recovering}
+              >
+                {recovering ? 'Recovering…' : 'Recover'}
+              </button>
+            )}
+            <a className="launcher-nucleus-secondary" href={status?.api_docs_url ?? '/docs'}>
+              API
+            </a>
+            <span className="launcher-nucleus-readiness" aria-label="Readiness summary">
+              {readyCount}/{satellites.length} bound
+            </span>
+          </div>
+        </div>
+
+        {/* Legacy service inventory — tucked below the fold, collapsed unless
+            things are broken. Keeps the info available without cluttering
+            the first impression. */}
+        {(failing.length > 0 || serviceList.length > 0) && (
+          <details className="launcher-service-details">
+            <summary>Runtime service inventory ({status?.service_summary?.total ?? serviceList.length})</summary>
+            <div className="launcher-service-list">
+              {serviceList.map((service) => (
                 <div key={service.label} className="launcher-service-row">
+                  <span className={`launcher-service-dot launcher-service-dot--${service.state}`} />
                   <div className="launcher-service-copy">
-                    <span className={`launcher-service-dot launcher-service-dot--${service.state}`} />
-                    <div>
-                      <div className="launcher-service-name">{service.name}</div>
-                      <div className="launcher-service-label">{service.label}</div>
-                    </div>
+                    <div className="launcher-service-name">{service.name}</div>
+                    <div className="launcher-service-label">{service.label}</div>
                   </div>
                   <div className={`launcher-service-state launcher-service-state--${service.state}`}>
                     {service.port ? `:${service.port}` : 'internal'} · {service.state}
                   </div>
                 </div>
-              ))
-            ) : (
-              <div className="launcher-service-empty">
-                {loading ? 'Waiting for service inventory...' : 'No runtime services reported by launcher status.'}
-              </div>
-            )}
-          </div>
-        </section>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
     </div>
   );

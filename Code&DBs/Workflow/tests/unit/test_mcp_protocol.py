@@ -127,6 +127,37 @@ def test_tools_list_honors_allowed_tool_filter():
     assert set(names) == {"praxis_query", "praxis_status_snapshot"}
 
 
+def test_tools_list_can_attach_interpretive_context(monkeypatch):
+    def _attach(tools):
+        tools = [dict(tool) for tool in tools]
+        tools[0]["interpretive_context"] = {"authority_mode": "interpretive"}
+        return tools
+
+    monkeypatch.setattr(protocol, "_attach_tools_list_interpretive_context", _attach)
+
+    response = protocol.handle_request(
+        {"jsonrpc": "2.0", "id": 17, "method": "tools/list"},
+        allowed_tool_names=["praxis_query"],
+    )
+
+    assert response is not None
+    tools = response["result"]["tools"]
+    assert len(tools) == 1
+    assert tools[0]["name"] == "praxis_query"
+    assert tools[0]["interpretive_context"] == {"authority_mode": "interpretive"}
+
+
+def test_tools_list_context_attachment_is_non_blocking(monkeypatch):
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("dictionary unavailable")
+
+    monkeypatch.setattr(protocol, "attach_interpretive_context_to_items", _raise)
+
+    tools = [{"name": "praxis_query", "description": "Query", "inputSchema": {}}]
+
+    assert protocol._attach_tools_list_interpretive_context(tools) is tools
+
+
 def test_tools_call_rejects_unallowed_tool_before_execution():
     response = protocol.handle_request(
         {

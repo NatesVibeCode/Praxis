@@ -7,6 +7,13 @@ from surfaces.api import frontdoor, native_ops, operator_read
 
 
 @dataclass
+class _FakeInspection:
+    current_state: str
+    terminal_reason: str
+    node_timeline: list[str]
+
+
+@dataclass
 class _FakeFrontdoorService:
     request_calls: list[dict[str, object]]
     status_calls: list[dict[str, object]]
@@ -199,3 +206,123 @@ def test_run_local_operator_flow_uses_frontdoor_health_database_payloads(
             "env": env,
         }
     ]
+
+
+def test_execute_smoke_run_waits_for_worker_owned_locked_execution(monkeypatch) -> None:
+    env = {
+        "WORKFLOW_DATABASE_URL": "postgresql://nate@localhost:5432/praxis",
+        "PRAXIS_RUNTIME_PROFILE": "praxis",
+    }
+    seen: dict[str, object] = {}
+
+    class _FakeConn:
+        def close(self) -> None:
+            seen["closed"] = True
+
+    class _FakeEvidenceReader:
+        def __init__(self, *, env):
+            seen["reader_env"] = dict(env)
+
+    class _FakeOrchestrator:
+        def __init__(self, *, evidence_reader):
+            seen["evidence_reader"] = evidence_reader
+
+        def inspect_run(self, *, run_id):
+            seen["inspected_run_id"] = run_id
+            return _FakeInspection(
+                current_state="succeeded",
+                terminal_reason="runtime.workflow_succeeded",
+                node_timeline=[
+                    "node_0:running",
+                    "node_0:succeeded",
+                    "node_1:running",
+                    "node_1:succeeded",
+                ],
+            )
+
+    monkeypatch.setattr(smoke_service, "get_workflow_pool", lambda *, env: object())
+    monkeypatch.setattr(smoke_service, "SyncPostgresConnection", lambda pool: _FakeConn())
+    monkeypatch.setattr(
+        smoke_service,
+        "_execute_admitted_graph_run",
+        lambda conn, *, run_id: {
+            "status": "locked",
+            "reason_code": "workflow.graph_run_already_locked",
+        },
+    )
+    monkeypatch.setattr(smoke_service, "PostgresEvidenceReader", _FakeEvidenceReader)
+    monkeypatch.setattr(smoke_service, "RuntimeOrchestrator", _FakeOrchestrator)
+
+    result = smoke_service._execute_smoke_run(run_id="run:locked", env=env)
+
+    assert result == {
+        "current_state": "succeeded",
+        "terminal_reason": "runtime.workflow_succeeded",
+        "node_order": ["node_0", "node_1"],
+    }
+    assert seen["closed"] is True
+    assert seen["reader_env"] == env
+    assert seen["inspected_run_id"] == "run:locked"
+
+
+def test_load_smoke_registry_uses_logical_workspace_identity(monkeypatch) -> None:
+    env = {
+        "WORKFLOW_DATABASE_URL": "postgresql://nate@localhost:5432/praxis",
+        "PRAXIS_RUNTIME_PROFILE": "praxis",
+    }
+    request_payload = {
+        "workspace_ref": "praxis",
+        "runtime_profile_ref": "praxis",
+    }
+    seen: dict[str, object] = {}
+
+    class _FakeConn:
+        async def fetch(self, query, *args):
+            if "FROM registry_workspace_authority" in query:
+                assert args == ("praxis",)
+                return [
+                    {
+                        "workspace_ref": "praxis",
+                        "repo_root": "/Users/nate/Praxis",
+                        "workdir": "/workspace",
+                    }
+                ]
+            if "FROM registry_runtime_profile_authority" in query:
+                assert args == ("praxis",)
+                return [
+                    {
+                        "runtime_profile_ref": "praxis",
+                        "model_profile_id": "model_profile.praxis.default",
+                        "provider_policy_id": "provider_policy.praxis.default",
+                        "sandbox_profile_ref": "sandbox_profile.praxis.default",
+                    }
+                ]
+            raise AssertionError(f"unexpected query: {query}")
+
+        async def close(self) -> None:
+            seen["closed"] = True
+
+    async def _connect_workflow_database(*, env):
+        seen["env"] = dict(env)
+        return _FakeConn()
+
+    async def _bootstrap_registry_authority_schema(conn):
+        seen["bootstrapped"] = conn
+
+    monkeypatch.setattr(smoke_service, "connect_workflow_database", _connect_workflow_database)
+    monkeypatch.setattr(
+        smoke_service,
+        "bootstrap_registry_authority_schema",
+        _bootstrap_registry_authority_schema,
+    )
+
+    registry = smoke_service._load_smoke_registry(env=env, request_payload=request_payload)
+
+    workspace = registry.resolve_workspace(workspace_ref="praxis")
+    assert workspace.repo_root == "praxis"
+    assert workspace.workdir == "praxis"
+    assert registry.resolve_runtime_profile(
+        runtime_profile_ref="praxis",
+    ).sandbox_profile_ref == "sandbox_profile.praxis.default"
+    assert seen["env"] == env
+    assert seen["closed"] is True

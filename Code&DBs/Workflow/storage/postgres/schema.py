@@ -40,7 +40,13 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     applied_at       timestamptz NOT NULL DEFAULT now(),
     applied_by       text        NOT NULL,
     bootstrap_role   text        NOT NULL,
-    metadata         jsonb       NOT NULL DEFAULT '{}'::jsonb
+    metadata         jsonb       NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT schema_migrations_filename_nonblank
+        CHECK (btrim(filename) <> ''),
+    CONSTRAINT schema_migrations_sha256_shape
+        CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT schema_migrations_bootstrap_role_check
+        CHECK (bootstrap_role IN ('canonical', 'bootstrap_only'))
 )
 """.strip()
 _DUPLICATE_SQLSTATES = {"42P07", "42701", "42710"}
@@ -52,6 +58,7 @@ _ROW_EXPECTATION_KEY_COLUMNS = {
     "operation_catalog_registry": "operation_name",
     "operation_catalog_source_policy_registry": "source_kind",
     "operator_decisions": "operator_decision_id",
+    "platform_config": "config_key",
     "provider_cli_profiles": "provider_slug",
     "provider_lane_policy": "provider_slug",
     "provider_model_candidates": "candidate_ref",
@@ -246,6 +253,10 @@ def _strip_leading_sql_comments(statement: str) -> str:
 def _is_transaction_wrapper_statement(statement: str) -> bool:
     normalized = _strip_leading_sql_comments(statement).strip().rstrip(";").strip().lower()
     return normalized in {"begin", "begin transaction", "commit"}
+
+
+def _is_comment_only_statement(statement: str) -> bool:
+    return not _strip_leading_sql_comments(statement).strip()
 
 
 def _schema_bootstrap_monotonic() -> float:
@@ -651,6 +662,8 @@ async def _record_migration_apply(
 async def _bootstrap_migration(conn: asyncpg.Connection, filename: str) -> None:
     await _ensure_schema_migrations_table(conn)
     for statement in workflow_bootstrap_migration_statements(filename):
+        if _is_comment_only_statement(statement):
+            continue
         if _is_transaction_wrapper_statement(statement):
             continue
         try:

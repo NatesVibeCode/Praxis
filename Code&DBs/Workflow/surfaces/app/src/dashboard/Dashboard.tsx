@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { APP_CONFIG } from '../config';
 import praxisSymbol from '../assets/praxis-symbol-inverse.svg';
+import { MoonWorkflowSilhouette } from './MoonWorkflowSilhouette';
 import './dashboard.css';
 
 interface Workflow {
@@ -193,12 +194,29 @@ function WorkflowCard({
   const badge = wf.dashboard_badge || { label: 'Draft', class_name: 'wf-card__badge--draft' };
   const workflowKind = wf.definition_type === 'operating_model' ? 'Operating model' : 'Workflow';
   const hasRun = Boolean(wf.latest_run?.run_id);
+  // Silhouette: we don't have graph shape on the dashboard payload yet, so
+  // the face comes from what we do have — trigger kind, cron vs event, and
+  // last-run outcome. Widen the API later to emit a real shape hash.
+  const hasTrigger = Boolean(wf.trigger?.enabled);
+  const isCron = Boolean(wf.trigger?.cron_expression);
+  const silhouetteNodeCount = hasRun ? 3 : 2;
 
   return (
     <article className="wf-card">
       <div className="wf-card__header">
         <div className="wf-card__identity">
-          <div className="wf-card__eyebrow">{workflowKind}</div>
+          <div className="wf-card__eyebrow-row">
+            <MoonWorkflowSilhouette
+              nodeCount={silhouetteNodeCount}
+              hasTrigger={hasTrigger}
+              isCron={isCron}
+              lastRunStatus={wf.latest_run?.status}
+              width={72}
+              height={18}
+              label={`${wf.name} silhouette`}
+            />
+            <div className="wf-card__eyebrow">{workflowKind}</div>
+          </div>
           <div className="wf-card__name">{wf.name}</div>
         </div>
         <span className={`wf-card__badge ${badge.class_name}`}>{badge.label}</span>

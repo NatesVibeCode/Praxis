@@ -4,6 +4,36 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import runtime.workflow_status as workflow_status
+from runtime.workflow.orchestrator import WorkflowResult
+
+
+def _workflow_result(run_id: str, *, status: str = "succeeded", finished_at: datetime | None = None) -> WorkflowResult:
+    finished = finished_at or datetime(2099, 1, 4, 12, 0, tzinfo=timezone.utc)
+    return WorkflowResult(
+        run_id=run_id,
+        status=status,
+        reason_code=status,
+        completion="done" if status == "succeeded" else None,
+        outputs={"cost_usd": 0.5, "total_cost_usd": 0.5},
+        evidence_count=1,
+        started_at=finished,
+        finished_at=finished,
+        latency_ms=100,
+        provider_slug="anthropic",
+        model_slug="claude-3",
+        adapter_type="cli_llm",
+        failure_code=None if status == "succeeded" else "timeout",
+        attempts=1,
+        label=None,
+        task_type=None,
+        capabilities=None,
+        author_model="anthropic/claude-3",
+        reviews_workflow_id=None,
+        review_target_modules=None,
+        parent_run_id=None,
+        persisted=True,
+        sync_status="complete",
+    )
 
 
 def test_workflow_history_reads_from_metrics_view(monkeypatch) -> None:
@@ -61,3 +91,26 @@ def test_workflow_history_reads_from_metrics_view(monkeypatch) -> None:
     assert summary["pass_rate"] == 0.5
     assert summary["total_cost_usd"] == 2.25
     assert summary["last_5"][0]["run_id"] == "run_new"
+    assert summary["workflow_history_source"] == "metrics"
+    assert summary["workflow_history_status"] == "complete"
+    assert summary["workflow_history_error"] is None
+
+
+def test_workflow_history_reports_degraded_source_when_metrics_view_fails(monkeypatch) -> None:
+    history = workflow_status.WorkflowHistory(max_size=10)
+    history.record_workflow(_workflow_result("run_fallback", status="failed"))
+
+    def _raise(*args, **kwargs):  # noqa: ARG001
+        raise RuntimeError("metrics view offline")
+
+    monkeypatch.setattr(
+        workflow_status,
+        "get_workflow_metrics_view",
+        lambda: SimpleNamespace(recent_workflows=_raise),
+    )
+
+    summary = history.summary()
+    assert summary["total_workflows"] == 1
+    assert summary["workflow_history_source"] == "fallback"
+    assert summary["workflow_history_status"] == "degraded"
+    assert summary["workflow_history_error"] == "RuntimeError: metrics view offline"

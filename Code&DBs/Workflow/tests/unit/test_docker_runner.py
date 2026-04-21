@@ -120,12 +120,33 @@ class TestProcessIsolation:
 
 
 def test_cli_auth_env_forward_is_provider_scoped(monkeypatch):
+    monkeypatch.setattr(
+        docker_runner,
+        "resolve_api_key_env_vars",
+        lambda provider_slug: {
+            "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"),
+            "openai": ("OPENAI_API_KEY",),
+            "cursor": ("CURSOR_API_KEY",),
+            "cursor_local": ("CURSOR_API_KEY",),
+            "openrouter": ("OPENROUTER_API_KEY",),
+        }.get(provider_slug, ()),
+    )
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setenv("GOOGLE_API_KEY", "google-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
 
     assert docker_runner._cli_auth_env_forward("google") == {"GEMINI_API_KEY": "gemini-test-key"}
     assert docker_runner._cli_auth_env_forward("openai") == {"OPENAI_API_KEY": "openai-test-key"}
+
+
+def test_cli_auth_env_forward_keeps_anthropic_oauth_forwarding(monkeypatch):
+    monkeypatch.setattr(docker_runner, "resolve_api_key_env_vars", lambda _provider_slug: ())
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-oauth-token")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "anthropic-auth-token")
+
+    assert docker_runner._cli_auth_env_forward("anthropic") == {
+        "CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-token"
+    }
 
 
 def test_run_model_fails_closed_when_docker_is_unavailable(monkeypatch):

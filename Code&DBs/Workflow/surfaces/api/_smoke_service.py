@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -11,8 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from registry.domain import RegistryResolver
-from registry.repository import bootstrap_registry_authority_schema, load_registry_resolver
+from registry.domain import (
+    RegistryResolver,
+    RuntimeProfileAuthorityRecord,
+    WorkspaceAuthorityRecord,
+)
+from registry.repository import bootstrap_registry_authority_schema
 from runtime.execution import RuntimeOrchestrator
 from runtime.instance import (
     PRAXIS_RUNTIME_PROFILE_ENV,
@@ -100,6 +105,10 @@ _SMOKE_PATH_ENV_NAMES = {
 _SMOKE_REQUIRED_TERMINAL_STATE = "succeeded"
 _SMOKE_REQUIRED_NODE_ORDER = ("node_0", "node_1")
 _SMOKE_REQUIRED_RECEIPT_TYPE = "workflow_completion_receipt"
+_SMOKE_EXECUTION_LOCKED_STATE = "locked"
+_SMOKE_TERMINAL_STATES = {"succeeded", "failed", "cancelled", "dead_letter"}
+_SMOKE_LOCK_WAIT_TIMEOUT_SECONDS = 30.0
+_SMOKE_LOCK_WAIT_INTERVAL_SECONDS = 0.25
 
 
 def _default_smoke_runtime_env() -> dict[str, str]:
@@ -298,13 +307,62 @@ async def _load_smoke_registry_async(
     conn = await connect_workflow_database(env=env)
     try:
         await bootstrap_registry_authority_schema(conn)
-        return await load_registry_resolver(
-            conn,
-            workspace_refs=(workspace_ref,),
-            runtime_profile_refs=(runtime_profile_ref,),
+        workspace_rows = await conn.fetch(
+            """
+            SELECT workspace_ref, repo_root, workdir
+            FROM registry_workspace_authority
+            WHERE workspace_ref = $1
+            ORDER BY workspace_ref
+            """,
+            workspace_ref,
+        )
+        runtime_profile_rows = await conn.fetch(
+            """
+            SELECT runtime_profile_ref, model_profile_id, provider_policy_id, sandbox_profile_ref
+            FROM registry_runtime_profile_authority
+            WHERE runtime_profile_ref = $1
+            ORDER BY runtime_profile_ref
+            """,
+            runtime_profile_ref,
         )
     finally:
         await conn.close()
+    if not workspace_rows:
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.registry_authority_missing",
+            "native smoke registry workspace authority row is missing",
+            details={"workspace_ref": workspace_ref},
+        )
+    if not runtime_profile_rows:
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.registry_authority_missing",
+            "native smoke registry runtime profile authority row is missing",
+            details={"runtime_profile_ref": runtime_profile_ref},
+        )
+    workspace_records = [
+        WorkspaceAuthorityRecord(
+            workspace_ref=str(row["workspace_ref"]),
+            # Native smoke can submit on the host while the worker executes in
+            # docker. Physical repo_root/workdir values are materialization
+            # details; the admitted context identity must stay host-agnostic.
+            repo_root=str(row["workspace_ref"]),
+            workdir=str(row["workspace_ref"]),
+        )
+        for row in workspace_rows
+    ]
+    runtime_profile_records = [
+        RuntimeProfileAuthorityRecord(
+            runtime_profile_ref=str(row["runtime_profile_ref"]),
+            model_profile_id=str(row["model_profile_id"]),
+            provider_policy_id=str(row["provider_policy_id"]),
+            sandbox_profile_ref=str(row["sandbox_profile_ref"] or ""),
+        )
+        for row in runtime_profile_rows
+    ]
+    return RegistryResolver(
+        workspace_records={workspace_ref: workspace_records},
+        runtime_profile_records={runtime_profile_ref: runtime_profile_records},
+    )
 
 
 def _load_smoke_registry(
@@ -465,6 +523,42 @@ def _normalize_execution_result(result: object) -> dict[str, Any]:
     }
 
 
+def _node_order_from_timeline(node_timeline: object) -> list[str]:
+    node_order: list[str] = []
+    if not isinstance(node_timeline, (list, tuple)):
+        return node_order
+    for entry in node_timeline:
+        node_id = str(entry).split(":", 1)[0].strip()
+        if node_id and node_id not in node_order:
+            node_order.append(node_id)
+    return node_order
+
+
+def _wait_for_locked_smoke_execution(
+    *,
+    run_id: str,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    reader = PostgresEvidenceReader(env=env)
+    deadline = time.monotonic() + _SMOKE_LOCK_WAIT_TIMEOUT_SECONDS
+    while True:
+        inspection = RuntimeOrchestrator(evidence_reader=reader).inspect_run(run_id=run_id)
+        node_order = _node_order_from_timeline(inspection.node_timeline)
+        if inspection.current_state in _SMOKE_TERMINAL_STATES:
+            return {
+                "current_state": inspection.current_state,
+                "terminal_reason": inspection.terminal_reason,
+                "node_order": node_order,
+            }
+        if time.monotonic() >= deadline:
+            return {
+                "current_state": _SMOKE_EXECUTION_LOCKED_STATE,
+                "terminal_reason": "workflow.graph_run_already_locked",
+                "node_order": node_order,
+            }
+        time.sleep(_SMOKE_LOCK_WAIT_INTERVAL_SECONDS)
+
+
 def _execute_smoke_run(
     *,
     run_id: str,
@@ -476,7 +570,10 @@ def _execute_smoke_run(
             result = _execute_admitted_graph_run(conn, run_id=run_id)
         finally:
             conn.close()
-    return _normalize_execution_result(result)
+    execution = _normalize_execution_result(result)
+    if execution["current_state"] == _SMOKE_EXECUTION_LOCKED_STATE:
+        return _wait_for_locked_smoke_execution(run_id=run_id, env=env)
+    return execution
 
 
 def _load_smoke_proof(
@@ -491,11 +588,7 @@ def _load_smoke_proof(
         run_id=run_id,
         limit=64,
     )
-    node_order: list[str] = []
-    for entry in inspection.node_timeline:
-        node_id = str(entry).split(":", 1)[0].strip()
-        if node_id and node_id not in node_order:
-            node_order.append(node_id)
+    node_order = _node_order_from_timeline(inspection.node_timeline)
     first_evidence_seq = canonical_evidence[0].evidence_seq if canonical_evidence else None
     last_evidence_seq = canonical_evidence[-1].evidence_seq if canonical_evidence else None
     last_outbox_row = outbox_batch.rows[-1] if outbox_batch.rows else None

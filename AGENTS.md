@@ -25,6 +25,21 @@ ORDER BY decided_at DESC;
 "
 ```
 
+## Fresh clone / empty DB fallback
+
+If the database is not created yet, has no `operator_decisions` rows, or cannot
+answer the standing-order query, do not invent operator-local policy from
+sidecar docs. Run:
+
+```
+./scripts/bootstrap
+```
+
+Then repeat the orientation query. Until the DB answers, stay inside the public
+fresh-clone scope from `README.md`, `SETUP.md`, and `config/runtime_profiles.json`.
+Treat private operator decisions, local provider assumptions, and workspace
+exceptions as unavailable unless they are present in Praxis.db.
+
 ## Why this matters
 
 Praxis.db is the cross-harness source of truth. Codex, Claude, Gemini, and Cursor all read the same `operator_decisions` table. Anything that lives only in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.cursorrules` is proprietary sidecar drift. Operator authority lives in Postgres.

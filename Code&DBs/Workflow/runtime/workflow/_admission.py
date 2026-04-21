@@ -703,6 +703,32 @@ def _execute_admitted_graph_run(
     *,
     run_id: str,
 ) -> object:
+    lock_key = _graph_run_lock_key(run_id)
+    with conn.transaction() as graph_conn:
+        lock_rows = graph_conn.execute(
+            "SELECT pg_try_advisory_xact_lock($1::bigint) AS locked",
+            lock_key,
+        )
+        locked = bool(lock_rows and bool(dict(lock_rows[0]).get("locked")))
+        if not locked:
+            return {
+                "run_id": run_id,
+                "status": "locked",
+                "reason_code": "workflow.graph_run_already_locked",
+            }
+        return _execute_admitted_graph_run_locked(graph_conn, run_id=run_id)
+
+
+def _graph_run_lock_key(run_id: str) -> int:
+    digest = hashlib.sha256(f"workflow_graph_run:{run_id}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+def _execute_admitted_graph_run_locked(
+    conn: SyncPostgresConnection,
+    *,
+    run_id: str,
+) -> object:
     rows = conn.execute(
         """SELECT request_envelope, current_state
            FROM workflow_runs
@@ -785,8 +811,11 @@ def _graph_registry_from_authority(
     workspace_records = [
         WorkspaceAuthorityRecord(
             workspace_ref=str(row["workspace_ref"]),
-            repo_root=str(row["repo_root"]),
-            workdir=str(row["workdir"]),
+            # Graph runtime evidence must rebuild the same admitted context
+            # hash in the host CLI and docker worker. Physical paths from the
+            # DB row are execution materialization details, not bundle identity.
+            repo_root=str(row["workspace_ref"]),
+            workdir=str(row["workspace_ref"]),
         )
         for row in workspace_rows
     ]

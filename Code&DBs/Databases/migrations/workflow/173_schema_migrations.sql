@@ -44,6 +44,39 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
         CHECK (bootstrap_role IN ('canonical', 'bootstrap_only'))
 );
 
+DO $$
+BEGIN
+    ALTER TABLE schema_migrations
+        ADD CONSTRAINT schema_migrations_filename_nonblank
+        CHECK (btrim(filename) <> '');
+EXCEPTION
+    WHEN duplicate_object THEN
+        NULL;
+END
+$$;
+
+DO $$
+BEGIN
+    ALTER TABLE schema_migrations
+        ADD CONSTRAINT schema_migrations_sha256_shape
+        CHECK (content_sha256 ~ '^[0-9a-f]{64}$');
+EXCEPTION
+    WHEN duplicate_object THEN
+        NULL;
+END
+$$;
+
+DO $$
+BEGIN
+    ALTER TABLE schema_migrations
+        ADD CONSTRAINT schema_migrations_bootstrap_role_check
+        CHECK (bootstrap_role IN ('canonical', 'bootstrap_only'));
+EXCEPTION
+    WHEN duplicate_object THEN
+        NULL;
+END
+$$;
+
 COMMENT ON TABLE schema_migrations IS
     'Apply-tracking for canonical workflow migrations. One row per successful apply of a file in Code&DBs/Databases/migrations/workflow/. Written by storage/postgres/schema.py::_bootstrap_migration.';
 COMMENT ON COLUMN schema_migrations.filename IS

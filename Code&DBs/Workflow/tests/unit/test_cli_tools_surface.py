@@ -45,6 +45,48 @@ def test_tools_list_json_exposes_catalog() -> None:
     assert any(row["entrypoint"] == "workflow query" for row in payload)
 
 
+def test_tools_list_json_can_attach_interpretive_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+
+    def _attach(rows):
+        assert rows[0]["name"] == "praxis_query"
+        rows[0]["interpretive_context"] = {"authority_mode": "interpretive"}
+        return rows
+
+    monkeypatch.setattr(tools_commands, "_attach_tool_list_interpretive_context", _attach)
+
+    stdout = StringIO()
+    assert workflow_cli_main(["tools", "list", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert payload == [
+        {
+            "name": "praxis_query",
+            "surface": "query",
+            "tier": "stable",
+            "recommended_alias": "query",
+            "entrypoint": "workflow query",
+            "describe_command": "workflow tools describe praxis_query",
+            "risk_levels": ["read"],
+            "selector_field": None,
+            "selector_enum": [],
+            "required_args": [],
+            "description": "Primary query surface for operator questions.",
+            "interpretive_context": {"authority_mode": "interpretive"},
+        }
+    ]
+
+
 def test_tools_root_shows_quickstart() -> None:
     stdout = StringIO()
 
@@ -247,6 +289,37 @@ def test_tools_describe_surfaces_cli_metadata() -> None:
     assert "describe_command: workflow tools describe praxis_query" in rendered
     assert "workflow_token_required: no" in rendered
     assert '"question"' in rendered
+
+
+def test_tools_describe_json_includes_interpretive_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tools_commands,
+        "get_definition",
+        lambda _tool_name: _tool_definition(
+            "praxis_query",
+            description="Primary query surface for operator questions.",
+            recommended_alias="query",
+        ),
+    )
+    monkeypatch.setattr(
+        tools_commands,
+        "_tool_interpretive_context",
+        lambda _definition: {
+            "authority_mode": "interpretive",
+            "items": [{"object_kind": "tool:praxis_query"}],
+        },
+    )
+
+    stdout = StringIO()
+    assert workflow_cli_main(["tools", "describe", "query", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["interpretive_context"] == {
+        "authority_mode": "interpretive",
+        "items": [{"object_kind": "tool:praxis_query"}],
+    }
 
 
 def test_tools_describe_praxis_bugs_smoke() -> None:

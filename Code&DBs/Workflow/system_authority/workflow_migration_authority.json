@@ -191,7 +191,11 @@
     "183_codex_skip_git_repo_check.sql",
     "184_anthropic_cli_candidates.sql",
     "189_oversight_instrumentation.sql",
-    "190_surface_catalog_gate_icons.sql"
+    "190_surface_catalog_gate_icons.sql",
+    "191_provider_model_retirement_ledger.sql",
+    "192_heartbeat_probe_kind_model_retirement.sql",
+    "193_native_self_hosted_smoke_workspace_repair.sql",
+    "194_projection_freshness_sla_config.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -4783,10 +4787,10 @@
         "object_name": "idx_data_dictionary_wiring_audit_snapshots_taken"
       }
     ],
+    "182_audit_exclusions.sql": [],
     "182_restore_anthropic_cli_only.sql": [],
     "183_codex_skip_git_repo_check.sql": [],
     "184_anthropic_cli_candidates.sql": [],
-    "182_audit_exclusions.sql": [],
     "189_oversight_instrumentation.sql": [
       {
         "object_type": "table",
@@ -4829,7 +4833,41 @@
         "object_name": "idx_session_blast_radius_run"
       }
     ],
-    "190_surface_catalog_gate_icons.sql": []
+    "190_surface_catalog_gate_icons.sql": [],
+    "191_provider_model_retirement_ledger.sql": [
+      {
+        "object_type": "table",
+        "object_name": "provider_model_retirement_ledger"
+      },
+      {
+        "object_type": "index",
+        "object_name": "provider_model_retirement_ledger_provider_slug_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "provider_model_retirement_ledger_effective_date_idx"
+      }
+    ],
+    "192_heartbeat_probe_kind_model_retirement.sql": [],
+    "193_native_self_hosted_smoke_workspace_repair.sql": [],
+    "194_projection_freshness_sla_config.sql": [
+      {
+        "object_type": "row",
+        "object_name": "platform_config.observability.projection_freshness.warning_staleness_seconds"
+      },
+      {
+        "object_type": "row",
+        "object_name": "platform_config.observability.projection_freshness.critical_staleness_seconds"
+      },
+      {
+        "object_type": "row",
+        "object_name": "platform_config.observability.projection_freshness.warning_lag_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "platform_config.observability.projection_freshness.critical_lag_events"
+      }
+    ]
   },
   "policy_buckets": {
     "canonical": [
@@ -5024,7 +5062,11 @@
       "183_codex_skip_git_repo_check.sql",
       "184_anthropic_cli_candidates.sql",
       "189_oversight_instrumentation.sql",
-      "190_surface_catalog_gate_icons.sql"
+      "190_surface_catalog_gate_icons.sql",
+      "191_provider_model_retirement_ledger.sql",
+      "192_heartbeat_probe_kind_model_retirement.sql",
+      "193_native_self_hosted_smoke_workspace_repair.sql",
+      "194_projection_freshness_sla_config.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

@@ -39,14 +39,10 @@ _PRAXIS_DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 # intentionally omitted here and from the CLI profile's api_key_env_vars so
 # the worker cannot fall through to a direct API call even if the env var is
 # present in the host shell.
-_PROVIDER_AUTH_ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
-    "anthropic": ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"),
-    "openai": ("OPENAI_API_KEY",),
-    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"),
-    "cursor": ("CURSOR_API_KEY",),
-    "cursor_local": ("CURSOR_API_KEY",),
-    "openrouter": ("OPENROUTER_API_KEY",),
-}
+_ANTHROPIC_OAUTH_ENV_CANDIDATES: tuple[str, ...] = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_AUTH_TOKEN",
+)
 
 
 def _cli_auth_env_forward(provider_slug: str | None) -> dict[str, str]:
@@ -56,7 +52,10 @@ def _cli_auth_env_forward(provider_slug: str | None) -> dict[str, str]:
         return {}
 
     forwarded: dict[str, str] = {}
-    candidates = _PROVIDER_AUTH_ENV_CANDIDATES.get(normalized_provider) or resolve_api_key_env_vars(normalized_provider)
+    if normalized_provider == "anthropic":
+        candidates = _ANTHROPIC_OAUTH_ENV_CANDIDATES
+    else:
+        candidates = resolve_api_key_env_vars(normalized_provider)
     for key in candidates:
         value = os.environ.get(key)
         if value:

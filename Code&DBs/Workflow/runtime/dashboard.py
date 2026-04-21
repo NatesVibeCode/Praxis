@@ -35,7 +35,7 @@ def build_dashboard() -> dict[str, Any]:
 
     Returns:
         dict with keys:
-            - workflow_summary: total, succeeded, failed, pass_rate
+            - workflow_summary: total, succeeded, failed, pass_rate, workflow_history_source, workflow_history_status
             - cost_summary: total_cost_usd, by_agent
             - circuit_states: per-provider state
             - route_health: consecutive failures per provider
@@ -155,7 +155,11 @@ def build_dashboard() -> dict[str, Any]:
         if state.get("state") == "HALF_OPEN"
     )
 
-    observability_blocked = bool(route_health_error or leaderboard_error)
+    observability_blocked = bool(
+        route_health_error
+        or leaderboard_error
+        or dispatch_data.get("metrics_query_failed")
+    )
 
     if observability_blocked:
         system_health = "degraded"
@@ -172,6 +176,10 @@ def build_dashboard() -> dict[str, Any]:
             "succeeded": dispatch_data.get("succeeded", 0),
             "failed": dispatch_data.get("failed", 0),
             "pass_rate": round(dispatch_data.get("pass_rate", 0.0) * 100, 1),
+            "workflow_history_source": dispatch_data.get("workflow_history_source", "metrics"),
+            "workflow_history_status": dispatch_data.get("workflow_history_status", "complete"),
+            "workflow_history_error": dispatch_data.get("workflow_history_error"),
+            "metrics_query_failed": bool(dispatch_data.get("metrics_query_failed", False)),
         },
         "cost_summary": {
             "total_cost_usd": cost_data.get("total_cost_usd", 0.0),
@@ -215,6 +223,9 @@ def format_dashboard(data: dict[str, Any]) -> str:
     total_workflows = dispatch.get("total_workflows", 0)
     pass_rate = dispatch.get("pass_rate", 0.0)
     total_cost = costs.get("total_cost_usd", 0.0)
+    workflow_history_source = dispatch.get("workflow_history_source", "metrics")
+    workflow_history_status = dispatch.get("workflow_history_status", "complete")
+    workflow_history_error = dispatch.get("workflow_history_error")
 
     summary_line = "\n".join(
         [
@@ -223,6 +234,13 @@ def format_dashboard(data: dict[str, Any]) -> str:
             f"  total_workflows={total_workflows}",
             f"  pass_rate_pct={pass_rate:.1f}",
             f"  total_cost_usd={total_cost:.2f}",
+            f"  workflow_history_source={workflow_history_source}",
+            f"  workflow_history_status={workflow_history_status}",
+            *(
+                [f"  workflow_history_error={workflow_history_error}"]
+                if workflow_history_error
+                else []
+            ),
         ]
     )
 

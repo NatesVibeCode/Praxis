@@ -29,6 +29,10 @@ from runtime.primitive_contracts import bug_open_status_values
 _FILED_BY = "governance_compliance_heartbeat"
 _SOURCE_KIND = "governance"
 _CATEGORY = BugCategory.ARCHITECTURE
+_PRIMARY_CONSUMER = "llm"
+_REVIEW_PLANE = "none_inline"
+_ESCALATION_PLANE = "canonical_bug_or_operator_decision"
+_ESCALATION_MODEL = "automated_resolve_else_escalate_when_unresolvable"
 
 # Severity is now impact-weighted:
 #   downstream_count >= 10  → P1 (high blast radius)
@@ -52,6 +56,12 @@ class GovernanceViolation:
         if self.rule_kind:
             return f"governance.{self.policy}.{self.object_kind}.{self.rule_kind}"
         return f"governance.{self.policy}.{self.object_kind}"
+
+    @property
+    def review_dedupe_key(self) -> str:
+        subject = self.object_kind
+        issue_type = self.policy if not self.rule_kind else f"{self.policy}:{self.rule_kind}"
+        return f"data_dictionary::{subject}::{issue_type}"
 
     def to_bug_title(self) -> str:
         if self.policy == "pii_without_owner":
@@ -90,6 +100,11 @@ class GovernanceViolation:
             "rule_kind": self.rule_kind,
             "details": dict(self.details),
             "decision_ref": self.decision_ref,
+            "review_dedupe_key": self.review_dedupe_key,
+            "primary_consumer": _PRIMARY_CONSUMER,
+            "review_plane": _REVIEW_PLANE,
+            "escalation_plane": _ESCALATION_PLANE,
+            "escalation_model": _ESCALATION_MODEL,
         }
 
 

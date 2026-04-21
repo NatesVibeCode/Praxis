@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from runtime.workflow import execution_backends
 
 
@@ -64,6 +66,34 @@ def _sandbox_result(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+@pytest.fixture(autouse=True)
+def _stub_provider_api_key_names(monkeypatch) -> None:
+    mapping = {
+        "anthropic": ("ANTHROPIC_API_KEY",),
+        "cursor": ("CURSOR_API_KEY",),
+        "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "openai": ("OPENAI_API_KEY",),
+    }
+
+    def _env_vars(provider_slug: str) -> tuple[str, ...]:
+        return mapping.get(provider_slug, ())
+
+    monkeypatch.setattr(execution_backends, "_provider_api_key_names", _env_vars)
+    monkeypatch.setattr(execution_backends, "resolve_api_key_env_vars", _env_vars)
+
+
+def test_load_env_secret_from_keychain_uses_shared_secret_helper(monkeypatch) -> None:
+    env: dict[str, str] = {}
+    monkeypatch.setattr(
+        "adapters.keychain.resolve_secret",
+        lambda name, env=None: "keychain-secret" if name == "OPENAI_API_KEY" else None,
+    )
+
+    execution_backends._load_env_secret_from_keychain(env, "OPENAI_API_KEY")
+
+    assert env == {"OPENAI_API_KEY": "keychain-secret"}
 
 
 class _FakeLoadBalancer:

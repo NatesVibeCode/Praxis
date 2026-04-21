@@ -231,10 +231,12 @@ class RegistryResolver:
                 "registry.boundary_violation",
                 f"runtime profile boundary incomplete for ref={runtime_profile_ref!r}",
             )
-        sandbox_profile_ref = (
-            str(candidate.sandbox_profile_ref or "").strip()
-            or candidate.runtime_profile_ref
-        )
+        sandbox_profile_ref = str(candidate.sandbox_profile_ref or "").strip()
+        if not sandbox_profile_ref:
+            raise RegistryBoundaryError(
+                "registry.boundary_violation",
+                f"runtime profile sandbox_profile_ref missing for ref={runtime_profile_ref!r}",
+            )
         return RuntimeProfile(
             runtime_profile_ref=candidate.runtime_profile_ref,
             model_profile_id=candidate.model_profile_id,

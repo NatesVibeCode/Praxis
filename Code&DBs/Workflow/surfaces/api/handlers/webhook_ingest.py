@@ -24,6 +24,25 @@ def _webhook_conn() -> SyncPostgresConnection:
 async def create_webhook_endpoint(request: Request) -> JSONResponse:
     """Register a new webhook endpoint. Auto-creates workflow_trigger if target_workflow_id is set."""
     body = await request.json()
+
+    target_workflow_id = body.get("target_workflow_id")
+    target_integration_id = body.get("target_integration_id")
+    target_integration_action = body.get("target_integration_action")
+    target_integration_args = body.get("target_integration_args")
+
+    has_workflow_target = bool(target_workflow_id)
+    has_integration_target = bool(target_integration_id or target_integration_action)
+    if has_workflow_target and has_integration_target:
+        return JSONResponse(
+            {
+                "error": (
+                    "target_workflow_id is mutually exclusive with "
+                    "target_integration_id/target_integration_action"
+                )
+            },
+            status_code=400,
+        )
+
     conn = _webhook_conn()
     repository = PostgresWebhookRepository(conn)
 
@@ -33,25 +52,28 @@ async def create_webhook_endpoint(request: Request) -> JSONResponse:
         secret_env_var=body.get("secret_env_var"),
         signature_header=body.get("signature_header"),
         signature_algorithm=body.get("signature_algorithm", "hmac-sha256"),
-        target_workflow_id=body.get("target_workflow_id"),
+        target_workflow_id=target_workflow_id,
         target_trigger_id=body.get("target_trigger_id"),
+        target_integration_id=target_integration_id,
+        target_integration_action=target_integration_action,
+        target_integration_args=target_integration_args,
         filter_expression=body.get("filter_expression"),
         transform_spec=body.get("transform_spec"),
         enabled=body.get("enabled", True),
     )
 
     if endpoint.get("endpoint_id"):
-        if body.get("target_workflow_id"):
+        if has_workflow_target:
             repository.ensure_webhook_workflow_trigger(
                 endpoint_id=endpoint["endpoint_id"],
-                workflow_id=body["target_workflow_id"],
+                workflow_id=target_workflow_id,
             )
-        elif body.get("target_integration_id") and body.get("target_integration_action"):
+        elif has_integration_target:
             repository.ensure_webhook_integration_trigger(
                 endpoint_id=endpoint["endpoint_id"],
-                integration_id=body["target_integration_id"],
-                integration_action=body["target_integration_action"],
-                integration_args=body.get("target_integration_args"),
+                integration_id=target_integration_id,
+                integration_action=target_integration_action,
+                integration_args=target_integration_args,
             )
 
     return JSONResponse({

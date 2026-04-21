@@ -2544,6 +2544,54 @@ def test_persist_graph_submission_evidence_advances_route_identity_from_intake(m
     assert captured["admission_proof"].transition_seq == 2
 
 
+def test_graph_registry_from_authority_uses_logical_workspace_identity_for_bundle_hash() -> None:
+    class _RegistryConn:
+        def execute(self, query: str, *args):
+            if "FROM registry_workspace_authority" in query:
+                assert args == ("praxis",)
+                return [
+                    {
+                        "workspace_ref": "praxis",
+                        "repo_root": "/Users/nate/Praxis",
+                        "workdir": "/workspace",
+                    }
+                ]
+            if "FROM registry_runtime_profile_authority" in query:
+                assert args == ("praxis",)
+                return [
+                    {
+                        "runtime_profile_ref": "praxis",
+                        "model_profile_id": "model_profile.codex",
+                        "provider_policy_id": "provider_policy.default",
+                        "sandbox_profile_ref": "sandbox_profile.praxis.default",
+                    }
+                ]
+            raise AssertionError(f"unexpected query: {query}")
+
+    registry = _admission_mod._graph_registry_from_authority(
+        _RegistryConn(),
+        SimpleNamespace(workspace_ref="praxis", runtime_profile_ref="praxis"),
+    )
+
+    workspace = registry.resolve_workspace(workspace_ref="praxis")
+    runtime_profile = registry.resolve_runtime_profile(runtime_profile_ref="praxis")
+    bundle = registry.resolve_context_bundle(
+        workflow_id="workflow.graph",
+        run_id="run:workflow.graph:alpha",
+        workspace=workspace,
+        runtime_profile=runtime_profile,
+        bundle_version=1,
+    )
+
+    assert workspace.repo_root == "praxis"
+    assert workspace.workdir == "praxis"
+    assert bundle.bundle_payload["workspace"] == {
+        "repo_root": "praxis",
+        "workdir": "praxis",
+        "workspace_ref": "praxis",
+    }
+
+
 def test_graph_adapter_registry_prefers_docker_for_cli_llm() -> None:
     registry = _admission_mod._graph_adapter_registry(
         SimpleNamespace(nodes=[SimpleNamespace(adapter_type="cli_llm")])
@@ -4537,12 +4585,14 @@ def test_run_worker_loop_dispatches_claim_accepted_graph_runs(monkeypatch):
             return []
 
     class _ThreadConn:
+        @contextmanager
+        def transaction(self):
+            yield self
+
         def execute(self, query: str, *args):
             normalized = " ".join(query.split())
-            if normalized.startswith("SELECT pg_try_advisory_lock"):
+            if normalized.startswith("SELECT pg_try_advisory_xact_lock"):
                 return [{"locked": True}]
-            if normalized.startswith("SELECT pg_advisory_unlock"):
-                return [{"released": True}]
             return []
 
     class _FakeListener:
@@ -4619,7 +4669,7 @@ def test_graph_run_lock_key_is_signed_bigint_safe() -> None:
         "run:deterministic_smoke:004c3b09c0bf189b",
         "run:mcp_workflow_live_proof_20260413:3e0c93573e6b1290",
     ):
-        key = _wloop_mod._graph_run_lock_key(run_id)
+        key = _admission_mod._graph_run_lock_key(run_id)
         assert lower <= key <= upper
 
 
@@ -4644,12 +4694,14 @@ def test_run_worker_loop_fails_failing_graph_runs_closed_without_retry(monkeypat
             return []
 
     class _ThreadConn:
+        @contextmanager
+        def transaction(self):
+            yield self
+
         def execute(self, query: str, *args):
             normalized = " ".join(query.split())
-            if normalized.startswith("SELECT pg_try_advisory_lock"):
+            if normalized.startswith("SELECT pg_try_advisory_xact_lock"):
                 return [{"locked": True}]
-            if normalized.startswith("SELECT pg_advisory_unlock"):
-                return [{"released": True}]
             if normalized.startswith("UPDATE workflow_runs SET current_state = 'failed'"):
                 state["run_state"] = "failed"
                 return [{"workflow_id": "workflow.graph", "request_id": "request.graph"}]
@@ -4781,12 +4833,14 @@ def test_run_worker_loop_does_not_starve_runnable_graph_runs_behind_backoffed_ru
             return []
 
     class _ThreadConn:
+        @contextmanager
+        def transaction(self):
+            yield self
+
         def execute(self, query: str, *args):
             normalized = " ".join(query.split())
-            if normalized.startswith("SELECT pg_try_advisory_lock"):
+            if normalized.startswith("SELECT pg_try_advisory_xact_lock"):
                 return [{"locked": True}]
-            if normalized.startswith("SELECT pg_advisory_unlock"):
-                return [{"released": True}]
             if normalized.startswith("UPDATE workflow_runs SET current_state = 'failed'"):
                 state["run_old_state"] = "failed"
                 return [{"workflow_id": "workflow.old", "request_id": "request.old"}]
@@ -4928,12 +4982,14 @@ def test_run_worker_loop_fails_poisoned_graph_run_closed(monkeypatch):
             return []
 
     class _ThreadConn:
+        @contextmanager
+        def transaction(self):
+            yield self
+
         def execute(self, query: str, *args):
             normalized = " ".join(query.split())
-            if normalized.startswith("SELECT pg_try_advisory_lock"):
+            if normalized.startswith("SELECT pg_try_advisory_xact_lock"):
                 return [{"locked": True}]
-            if normalized.startswith("SELECT pg_advisory_unlock"):
-                return [{"released": True}]
             if normalized.startswith("UPDATE workflow_runs SET current_state = 'failed'"):
                 state["current_state"] = "failed"
                 state["terminal_reason_code"] = args[1]

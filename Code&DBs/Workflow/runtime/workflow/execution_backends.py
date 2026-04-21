@@ -49,16 +49,13 @@ def _load_env_secret_from_keychain(env: dict[str, str], key_name: str) -> None:
     if key_name in env and str(env.get(key_name, "")).strip():
         return
     try:
-        value = subprocess.run(
-            ["security", "find-generic-password", "-s", key_name, "-w"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        from adapters.keychain import resolve_secret
+
+        value = resolve_secret(key_name, env=env)
     except Exception:
         return
-    if value.returncode == 0 and value.stdout.strip():
-        env[key_name] = value.stdout.strip()
+    if value:
+        env[key_name] = value.strip()
 
 
 def _resolve_api_key_env_name(provider_slug: str, env: dict[str, str]) -> str | None:

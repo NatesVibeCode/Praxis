@@ -1,25 +1,103 @@
 #!/usr/bin/env bash
 # Praxis fresh-clone bootstrap.
 #
-# Takes a fresh clone from zero to a verified install in one command:
-#   1. Verify python3.14 + postgres are reachable.
-#   2. Create .venv at repo root and install requirements.runtime.txt.
-#   3. Symlink scripts/praxis into ~/.local/bin so `praxis` is on PATH.
-#   4. Run db-bootstrap (via scripts/native-bootstrap.sh) -> full migration set.
-#   5. Run the native self-hosted smoke (via scripts/native-smoke.sh).
+# Takes a fresh clone from zero to a verified native install in one command:
+#   1. Resolve a repo-local database authority, creating .env when absent.
+#   2. Create the target Postgres database and enable pgvector.
+#   3. Create .venv and install requirements.runtime.txt.
+#   4. Symlink scripts/praxis into ~/.local/bin.
+#   5. Run DB bootstrap and fresh-install seed via the native operator surface.
+#   6. Start the REST API on PRAXIS_API_PORT.
+#   7. Validate, submit, and stream examples/hello_world.queue.json.
 #
-# Idempotent: re-running on a healthy install is a no-op.
+# Idempotent: re-running on a healthy install preserves existing authority.
 # Roadmap: roadmap_item.fresh.instance.onboarding.readiness.bootstrap.one.command.fresh.clone
 
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
+workflow_root="$repo_root/Code&DBs/Workflow"
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 ok()   { printf '  \033[1;32m[ok]\033[0m %s\n' "$*"; }
 warn() { printf '  \033[1;33m[warn]\033[0m %s\n' "$*"; }
 die()  { printf '  \033[1;31m[fail]\033[0m %s\n' "$*" >&2; exit 1; }
+
+without_contract_env() {
+  env -u WORKFLOW_DATABASE_URL -u WORKFLOW_DATABASE_AUTHORITY_SOURCE "$@"
+}
+
+ensure_repo_env_file() {
+  local repo_env="$repo_root/.env"
+  if [ -f "$repo_env" ]; then
+    ok ".env already declares repo-local runtime authority"
+    return 0
+  fi
+
+  local bootstrap_database_url="${WORKFLOW_DATABASE_URL:-postgresql://localhost:5432/praxis}"
+  umask 077
+  {
+    printf '# Created by ./scripts/bootstrap for repo-local Praxis runtime authority.\n'
+    printf 'WORKFLOW_DATABASE_URL=%s\n' "$bootstrap_database_url"
+    printf 'PRAXIS_API_PORT=%s\n' "${PRAXIS_API_PORT:-8420}"
+  } > "$repo_env"
+  ok "created .env with WORKFLOW_DATABASE_URL=$bootstrap_database_url"
+}
+
+resolve_database_authority() {
+  without_contract_env \
+    REPO_ROOT="$repo_root" \
+    PYTHONPATH="$workflow_root${PYTHONPATH:+:$PYTHONPATH}" \
+    "$python_bin" - <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+from surfaces._workflow_database import workflow_database_authority_for_repo
+
+try:
+    authority = workflow_database_authority_for_repo(
+        Path(os.environ["REPO_ROOT"]),
+        env=os.environ,
+    )
+except Exception as exc:
+    sys.stderr.write(f"{type(exc).__name__}: {exc}\n")
+    raise SystemExit(1)
+
+print(authority.database_url)
+print(authority.source)
+PY
+}
+
+parse_database_authority() {
+  WORKFLOW_DATABASE_URL="$database_url" "$python_bin" - <<'PY'
+import os
+from urllib.parse import urlsplit, urlunsplit
+
+database_url = os.environ["WORKFLOW_DATABASE_URL"]
+parts = urlsplit(database_url)
+database_name = parts.path.lstrip("/") or "praxis"
+maintenance_url = urlunsplit((parts.scheme, parts.netloc, "/postgres", parts.query, parts.fragment))
+print(database_name)
+print(maintenance_url)
+PY
+}
+
+probe_api() {
+  local url="$1"
+  "$python_bin" - "$url" <<'PY' >/dev/null 2>&1
+import sys
+from urllib.request import urlopen
+
+try:
+    with urlopen(sys.argv[1], timeout=2) as response:
+        raise SystemExit(0 if 200 <= response.status < 500 else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+}
 
 # --- Step 1: prereqs ---------------------------------------------------------
 step "Checking prerequisites"
@@ -35,20 +113,36 @@ if ! command -v psql >/dev/null 2>&1; then
 fi
 ok "psql at $(command -v psql)"
 
-if ! pg_isready -h localhost -p 5432 >/dev/null 2>&1; then
-  die "Postgres not reachable at localhost:5432. Start it (e.g. brew services start postgresql@16)."
-fi
-ok "postgres reachable on localhost:5432"
+ensure_repo_env_file
+database_authority="$(
+  resolve_database_authority
+)" || die "could not resolve WORKFLOW_DATABASE_URL from repo authority"
+database_url="$(printf '%s\n' "$database_authority" | sed -n '1p')"
+database_authority_source="$(printf '%s\n' "$database_authority" | sed -n '2p')"
+ok "database authority: $database_authority_source"
 
-# pgvector check — the workflow_database resolver will fail loudly later if it's missing,
-# but give the user an earlier, friendlier signal.
-if ! psql -h localhost -p 5432 -d postgres -tAc \
-      "SELECT 1 FROM pg_available_extensions WHERE name='vector';" 2>/dev/null | grep -q 1; then
-  warn "pgvector extension not visible via pg_available_extensions; db-bootstrap will fail if it's truly absent."
-  warn "macOS install: https://github.com/pgvector/pgvector#installation-notes"
-else
-  ok "pgvector extension available"
+database_meta="$(parse_database_authority)"
+database_name="$(printf '%s\n' "$database_meta" | sed -n '1p')"
+maintenance_url="$(printf '%s\n' "$database_meta" | sed -n '2p')"
+
+if ! pg_isready -d "$maintenance_url" >/dev/null 2>&1; then
+  die "Postgres maintenance database is not reachable for $maintenance_url. Start Postgres, then rerun ./scripts/bootstrap."
 fi
+ok "postgres maintenance database reachable"
+
+step "Preparing workflow database"
+psql "$maintenance_url" -v ON_ERROR_STOP=1 -v db_name="$database_name" >/dev/null <<'SQL'
+SELECT format('CREATE DATABASE %I', :'db_name')
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_database WHERE datname = :'db_name'
+)\gexec
+SQL
+ok "database ready: $database_name"
+
+if ! psql "$database_url" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS vector;' >/dev/null; then
+  die "pgvector is not installed for $database_name. Install pgvector, then rerun ./scripts/bootstrap."
+fi
+ok "pgvector extension enabled"
 
 # --- Step 2: venv + dependencies --------------------------------------------
 step "Setting up .venv"
@@ -64,9 +158,9 @@ fi
 # shellcheck disable=SC1091
 source "$venv_dir/bin/activate"
 
-requirements="$repo_root/Code&DBs/Workflow/requirements.runtime.txt"
+requirements="$workflow_root/requirements.runtime.txt"
 if [ ! -f "$requirements" ]; then
-  die "missing $requirements — is this the Praxis repo root?"
+  die "missing $requirements - is this the Praxis repo root?"
 fi
 
 pip install --quiet --upgrade pip
@@ -82,7 +176,7 @@ shim_target="$local_bin/praxis"
 shim_source="$repo_root/scripts/praxis"
 
 if [ ! -x "$shim_source" ]; then
-  die "scripts/praxis is not executable — run chmod +x scripts/praxis"
+  die "scripts/praxis is not executable - run chmod +x scripts/praxis"
 fi
 
 if [ -L "$shim_target" ] && [ "$(readlink "$shim_target")" = "$shim_source" ]; then
@@ -100,25 +194,117 @@ case ":$PATH:" in
 esac
 
 # --- Step 4: db-bootstrap ---------------------------------------------------
-step "Running db-bootstrap (migrations + bootstrap_only data)"
-"$script_dir/native-bootstrap.sh" >/dev/null
+step "Running db-bootstrap (schema + fresh-install authority seed)"
+without_contract_env "$script_dir/native-bootstrap.sh" >/dev/null
 ok "db-bootstrap completed"
 
-# --- Step 5: smoke ----------------------------------------------------------
+# --- Step 5: native smoke ---------------------------------------------------
 step "Running native self-hosted smoke"
-if "$script_dir/native-smoke.sh" >/dev/null; then
-  ok "smoke passed"
+if without_contract_env "$script_dir/native-smoke.sh" >/dev/null; then
+  ok "native smoke passed"
 else
-  die "smoke failed — run ./scripts/native-smoke.sh for full output"
+  die "native smoke failed - run ./scripts/native-smoke.sh for full output"
+fi
+
+# --- Step 6: REST API -------------------------------------------------------
+step "Starting REST API"
+api_host="${PRAXIS_API_HOST:-127.0.0.1}"
+api_port="${PRAXIS_API_PORT:-8420}"
+api_probe_host="$api_host"
+if [ "$api_probe_host" = "0.0.0.0" ]; then
+  api_probe_host="127.0.0.1"
+fi
+api_health_url="http://$api_probe_host:$api_port/api/health"
+api_state_dir="$repo_root/artifacts/bootstrap"
+api_pid_file="$api_state_dir/api.pid"
+api_log_file="$api_state_dir/api.log"
+mkdir -p "$api_state_dir"
+
+if probe_api "$api_health_url"; then
+  ok "REST API already healthy at $api_health_url"
+else
+  without_contract_env \
+    PYTHONPATH="$workflow_root${PYTHONPATH:+:$PYTHONPATH}" \
+    PRAXIS_API_HOST="$api_host" \
+    PRAXIS_API_PORT="$api_port" \
+    "$venv_dir/bin/python" -m surfaces.api.server \
+      --host "$api_host" \
+      --port "$api_port" \
+      > "$api_log_file" 2>&1 &
+  api_pid="$!"
+  printf '%s\n' "$api_pid" > "$api_pid_file"
+
+  for _ in $(seq 1 30); do
+    if probe_api "$api_health_url"; then
+      ok "REST API healthy at $api_health_url (pid $api_pid)"
+      break
+    fi
+    if ! kill -0 "$api_pid" >/dev/null 2>&1; then
+      die "REST API exited during startup. See $api_log_file"
+    fi
+    sleep 1
+  done
+
+  if ! probe_api "$api_health_url"; then
+    die "REST API did not become healthy at $api_health_url. See $api_log_file"
+  fi
+fi
+
+# --- Step 7: hello-world smoke ---------------------------------------------
+step "Running hello_world quickstart smoke"
+hello_spec="$repo_root/examples/hello_world.queue.json"
+if [ ! -f "$hello_spec" ]; then
+  die "missing $hello_spec"
+fi
+
+without_contract_env "$script_dir/praxis" workflow validate "$hello_spec" >/dev/null
+ok "hello_world spec validated"
+
+hello_result_file="$api_state_dir/hello_world_result.json"
+rm -f "$hello_result_file"
+if without_contract_env "$script_dir/praxis" workflow run "$hello_spec" \
+    --fresh \
+    --result-file "$hello_result_file" \
+    --foreground-submit >/dev/null; then
+  ok "hello_world submitted"
+else
+  die "hello_world submit failed"
+fi
+
+hello_run_id="$(
+  "$python_bin" - "$hello_result_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text(encoding="utf-8"))
+run_id = str(payload.get("run_id") or "").strip()
+if not run_id:
+    raise SystemExit(1)
+print(run_id)
+PY
+)" || die "hello_world result file did not contain run_id"
+
+hello_timeout="${PRAXIS_BOOTSTRAP_SMOKE_TIMEOUT:-120}"
+if without_contract_env "$script_dir/praxis" workflow stream "$hello_run_id" \
+    --timeout "$hello_timeout" \
+    --poll-interval 2 >/dev/null; then
+  ok "hello_world smoke passed"
+else
+  die "hello_world smoke failed or timed out for $hello_run_id"
 fi
 
 # --- Done -------------------------------------------------------------------
-cat <<'DONE'
+cat <<DONE
 
 ==> Bootstrap complete.
 
+API:
+  http://$api_probe_host:$api_port/api/health
+
 Next:
-  praxis workflow query "status"                    # orient
+  praxis workflow query "status"
   praxis workflow run examples/hello_world.queue.json
   (cd Code\&DBs/Workflow/surfaces/app && npm install && npm run dev)   # Moon UI
 

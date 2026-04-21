@@ -1,7 +1,9 @@
 .app-shell {
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(243, 238, 228, 0.09), transparent 24%),
     radial-gradient(circle at top right, rgba(88, 166, 255, 0.08), transparent 18%),

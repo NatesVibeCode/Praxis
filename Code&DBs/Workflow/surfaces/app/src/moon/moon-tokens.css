@@ -105,6 +105,42 @@
     --moon-state-error: var(--moon-palette-error);
     --moon-state-warning: var(--moon-palette-amber);
 
+    /*
+     * ---- Run/job status scale ----
+     *
+     * Moon's visual language is monochrome + coral-for-failure. Status is
+     * carried by FILL density and motion, not hue. The scale below is the
+     * single source of truth for any surface that shows a running/idle/
+     * succeeded/failed state (build-view ghosts, run-view job tiles, the
+     * dashboard thumbnails, the launcher nucleus satellites).
+     *
+     * pending  — queued; ring visible at the dimmest opacity.
+     * idle     — ready-to-run; same ring, slightly warmer (reads as "waiting
+     *            its turn" vs. "hasn't been noticed yet").
+     * active   — running/claimed; outline stays white, motion (rotating
+     *            dash, conic sweep) communicates life. NO hue shift.
+     * ok       — succeeded; outline fills to full white. This is the
+     *            moment the shape "locks."
+     * failed   — failed/blocked/dead_letter/parent_failed. The only hue
+     *            permitted on the canvas. Softened coral, not alarm red.
+     *
+     * Platform surfaces outside Moon (modules/primitives that show status
+     * dots with traffic-light semantics) should use --status-* tokens in
+     * styles/tokens.css instead — those keep a calibrated palette for
+     * category differentiation.
+     */
+    --moon-status-pending: var(--moon-muted-slate);
+    --moon-status-idle: var(--moon-palette-foreground-muted);
+    --moon-status-active: var(--moon-color-white);
+    --moon-status-ok: var(--moon-color-white);
+    --moon-status-failed: var(--moon-danger);
+    --moon-status-cancelled: var(--moon-palette-foreground-muted);
+    --moon-status-pending-soft: var(--moon-white-a08);
+    --moon-status-idle-soft: var(--moon-white-a12);
+    --moon-status-active-soft: var(--moon-white-a25);
+    --moon-status-ok-soft: var(--moon-white-a20);
+    --moon-status-failed-soft: var(--moon-danger-a22);
+
     --moon-surface-card-strong: rgba(255, 255, 255, 0.025);
     --moon-glass-bg: rgba(20, 20, 20, 0.4);
     --moon-glass-border: rgba(255, 255, 255, 0.08);

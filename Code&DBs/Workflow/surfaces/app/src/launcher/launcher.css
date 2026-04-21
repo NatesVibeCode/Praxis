@@ -1,9 +1,23 @@
+/*
+ * Launcher frontdoor — single breathing nucleus.
+ *
+ * Design: the user should know at a glance whether Praxis is ready. No
+ * checklist. No per-subsystem cards. Instead: one central nucleus that
+ * either breathes (healthy) or flattens (degraded), with a ring of small
+ * satellites whose ONLY job is to attract attention when THEY are the
+ * failing one. A healthy system looks quiet. A broken one looks like a
+ * single coral satellite pulling on the ring.
+ */
+
 .launcher-shell {
   position: relative;
   min-height: 100vh;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 18%),
+    radial-gradient(ellipse at center, rgba(255, 255, 255, 0.035), transparent 55%),
     linear-gradient(180deg, #050505 0%, #0b0b0b 48%, #050505 100%);
 }
 
@@ -11,463 +25,439 @@
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.96), transparent 92%);
-  pointer-events: none;
-}
-
-.launcher-page {
-  position: relative;
-  z-index: 1;
-  width: min(1220px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 28px 0 48px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.launcher-hero,
-.launcher-service-panel {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius);
-  background:
-    linear-gradient(180deg, rgba(18, 18, 18, 0.96), rgba(10, 10, 10, 0.98));
-  box-shadow: 0 32px 88px rgba(0, 0, 0, 0.34);
-  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
-}
-
-.launcher-hero:hover,
-.launcher-service-panel:hover {
-  border-color: rgba(243, 238, 228, 0.16);
-  box-shadow: 0 36px 100px rgba(0, 0, 0, 0.38);
-}
-
-.launcher-hero {
-  padding: 0;
-  overflow: hidden;
-}
-
-.launcher-hero--healthy {
-  border-color: rgba(63, 185, 80, 0.22);
-}
-
-.launcher-hero--checking {
-  border-color: rgba(210, 153, 34, 0.2);
-}
-
-.launcher-hero--degraded {
-  border-color: rgba(248, 81, 73, 0.24);
-}
-
-.launcher-hero-grid {
-  display: grid;
-  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
-  gap: 0;
-  align-items: stretch;
-}
-
-.launcher-logo-panel,
-.launcher-copy-panel {
-  position: relative;
-  min-height: 100%;
-  overflow: hidden;
-}
-
-.launcher-logo-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  align-items: center;
-  justify-content: center;
-  min-height: 360px;
-  padding: 26px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(135deg, rgba(243, 238, 228, 0.08), transparent 34%),
-    rgba(255, 255, 255, 0.025);
-}
-
-.launcher-logo {
-  width: min(100%, 250px);
-  height: auto;
-  display: block;
-}
-
-.launcher-logo-caption {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.launcher-logo-caption span {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.launcher-logo-caption strong {
-  color: var(--text);
-  font-size: 12px;
-}
-
-.launcher-copy-panel {
-  padding: 30px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 42%),
-    rgba(10, 10, 10, 0.92);
-}
-
-.launcher-copy-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  background-image:
     linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(135deg, transparent 22%, rgba(0, 0, 0, 0.62), transparent 76%);
-  opacity: 0.7;
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.9), transparent 72%);
   pointer-events: none;
 }
 
-.launcher-copy-panel::after {
-  content: "";
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  width: 96px;
-  height: 96px;
-  border-top: 2px solid rgba(255, 255, 255, 0.08);
-  border-right: 2px solid rgba(255, 255, 255, 0.08);
-  pointer-events: none;
-}
-
-.launcher-copy-panel > * {
+.launcher-nucleus-frame {
   position: relative;
   z-index: 1;
-}
-
-.launcher-kicker {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.launcher-heading-row {
-  display: flex;
-  gap: 18px;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.launcher-heading-row h1 {
-  margin: 0;
-  font-size: clamp(36px, 6vw, 62px);
-  line-height: 0.96;
-  letter-spacing: 0;
-}
-
-.launcher-heading-row p {
-  margin-top: 12px;
-  max-width: 640px;
-  color: var(--text-muted);
-  font-size: 15px;
-  line-height: 1.6;
-}
-
-.launcher-authority-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.launcher-authority-item {
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 32px;
+  padding: 48px 24px;
+  width: min(520px, 100%);
 }
 
-.launcher-authority-item span {
+.launcher-nucleus-wrap {
+  position: relative;
+  width: 440px;
+  height: 440px;
+  flex-shrink: 0;
+}
+
+/* ---- Nucleus: three concentric rings, core is the brand lockup ---- */
+
+.launcher-nucleus {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 180px;
+  height: 180px;
+  pointer-events: none;
+}
+
+.launcher-nucleus__halo,
+.launcher-nucleus__ring,
+.launcher-nucleus__core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* Outer halo — breathes when healthy. Diameter scales, opacity tapers. */
+.launcher-nucleus__halo {
+  width: 180px;
+  height: 180px;
+  border: 1px solid rgba(243, 238, 228, 0.14);
+  box-shadow: 0 0 60px rgba(243, 238, 228, 0.06);
+}
+
+/* Middle ring — the steady authority line. */
+.launcher-nucleus__ring {
+  width: 128px;
+  height: 128px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: radial-gradient(circle, rgba(18, 18, 18, 0.82), rgba(10, 10, 10, 0.96));
+}
+
+/* Inner core — the fill. Cream-white when healthy, muted when not. */
+.launcher-nucleus__core {
+  width: 72px;
+  height: 72px;
+  background: radial-gradient(circle, rgba(243, 238, 228, 0.24), rgba(18, 18, 18, 0.0) 72%);
+  border: 1px solid rgba(243, 238, 228, 0.3);
+}
+
+/* State: breathing (all ok) — halo pulses gently. */
+.launcher-nucleus--breathing .launcher-nucleus__halo {
+  animation: launcher-nucleus-breath 3.4s ease-in-out infinite;
+}
+
+@keyframes launcher-nucleus-breath {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  50% { transform: translate(-50%, -50%) scale(1.06); opacity: 0.78; }
+}
+
+/* State: checking — core sweeps like the MoonStatusRing active state. */
+.launcher-nucleus--checking .launcher-nucleus__halo {
+  animation: launcher-nucleus-breath 2.4s ease-in-out infinite;
+  opacity: 0.65;
+}
+
+.launcher-nucleus--checking .launcher-nucleus__core::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(243, 238, 228, 0.5) 120deg, transparent 240deg);
+  animation: launcher-nucleus-spin 1.8s linear infinite;
+  -webkit-mask: radial-gradient(circle, transparent 56%, black 58%, black 70%, transparent 72%);
+          mask: radial-gradient(circle, transparent 56%, black 58%, black 70%, transparent 72%);
+}
+
+@keyframes launcher-nucleus-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* State: recovering — same as checking but the halo borrows concern. */
+.launcher-nucleus--recovering .launcher-nucleus__halo {
+  border-color: rgba(255, 138, 106, 0.24);
+  box-shadow: 0 0 60px rgba(255, 138, 106, 0.12);
+  animation: launcher-nucleus-breath 2s ease-in-out infinite;
+}
+
+.launcher-nucleus--recovering .launcher-nucleus__core::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 138, 106, 0.6) 120deg, transparent 240deg);
+  animation: launcher-nucleus-spin 1.2s linear infinite;
+  -webkit-mask: radial-gradient(circle, transparent 56%, black 58%, black 70%, transparent 72%);
+          mask: radial-gradient(circle, transparent 56%, black 58%, black 70%, transparent 72%);
+}
+
+/* State: degraded — halo holds at the weakest opacity, no pulse. */
+.launcher-nucleus--degraded .launcher-nucleus__halo {
+  border-color: rgba(255, 138, 106, 0.24);
+  box-shadow: 0 0 48px rgba(255, 138, 106, 0.08);
+  opacity: 0.5;
+}
+
+.launcher-nucleus--degraded .launcher-nucleus__ring {
+  border-color: rgba(255, 138, 106, 0.18);
+}
+
+/* ---- Brand lockup sitting on the core ---- */
+
+.launcher-nucleus__brand {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.launcher-nucleus__logo {
+  width: 112px;
+  height: auto;
+  display: block;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.6));
+}
+
+.launcher-nucleus__caption {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.launcher-nucleus__caption span {
   color: var(--text-muted);
 }
 
-.launcher-authority-item strong {
-  font-size: 14px;
-  font-weight: 700;
+.launcher-nucleus__caption strong {
   color: var(--text);
-  overflow-wrap: anywhere;
 }
 
-.launcher-pill {
-  flex: 0 0 auto;
-  min-width: 104px;
-  padding: 9px 12px;
-  border-radius: var(--radius);
-  font-size: 12px;
+/* ---- Satellites — six hollow dots on the outer ring ---- */
+
+.launcher-satellites {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.launcher-satellite {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+  transition: transform 300ms ease;
+}
+
+.launcher-satellite__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  background: rgba(12, 12, 12, 0.88);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.4);
+}
+
+.launcher-satellite__label {
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-align: center;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  border: 1px solid transparent;
+  color: var(--text-muted);
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.launcher-pill--healthy {
-  background: rgba(63, 185, 80, 0.12);
-  border-color: rgba(63, 185, 80, 0.22);
-  color: #8ff0a4;
+.launcher-satellite__meta {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  opacity: 0.72;
 }
 
-.launcher-pill--checking {
-  background: rgba(210, 153, 34, 0.12);
-  border-color: rgba(210, 153, 34, 0.24);
-  color: #ffd479;
+/* ok — the quiet state. No pull, no color, just presence. */
+.launcher-satellite--ok .launcher-satellite__dot {
+  border-color: rgba(243, 238, 228, 0.6);
+  background: rgba(243, 238, 228, 0.9);
 }
 
-.launcher-pill--degraded {
-  background: rgba(248, 81, 73, 0.12);
-  border-color: rgba(248, 81, 73, 0.24);
+/* checking — pulse softly so the user knows we're still looking. */
+.launcher-satellite--checking .launcher-satellite__dot {
+  animation: launcher-satellite-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes launcher-satellite-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+/* failed — coral rim, slightly larger, subtle ring-tug toward the center.
+   This is the ONLY satellite state that demands attention, which is the
+   entire point of this treatment. */
+.launcher-satellite--failed {
+  z-index: 3;
+}
+
+.launcher-satellite--failed .launcher-satellite__dot {
+  border-color: #ff8a6a;
+  border-width: 2px;
+  width: 14px;
+  height: 14px;
+  background: rgba(255, 138, 106, 0.14);
+  box-shadow:
+    0 0 0 3px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(255, 138, 106, 0.35);
+  animation: launcher-satellite-failed 2.2s ease-in-out infinite;
+}
+
+.launcher-satellite--failed .launcher-satellite__label,
+.launcher-satellite--failed .launcher-satellite__meta {
+  color: #ffaaa2;
+  opacity: 1;
+}
+
+@keyframes launcher-satellite-failed {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+/* ---- Footer: statusline + actions + readiness ---- */
+
+.launcher-nucleus-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+}
+
+.launcher-nucleus-statusline {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  max-width: 420px;
+  min-height: 18px;
+  transition: color 200ms ease;
+}
+
+.launcher-nucleus-statusline--degraded,
+.launcher-nucleus-statusline--recovering {
   color: #ffaaa2;
 }
 
-.launcher-actions {
+.launcher-nucleus-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
   gap: 12px;
 }
 
-.launcher-primary,
-.launcher-secondary {
+.launcher-nucleus-primary,
+.launcher-nucleus-recover,
+.launcher-nucleus-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 46px;
-  padding: 0 18px;
+  min-height: 40px;
+  padding: 0 20px;
   border-radius: var(--radius);
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
+  cursor: pointer;
   transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
 }
 
-.launcher-primary {
-  border: 1px solid rgba(243, 238, 228, 0.3);
+.launcher-nucleus-primary {
+  border: 1px solid rgba(243, 238, 228, 0.4);
   background: var(--accent);
   color: var(--text-inverse);
   box-shadow: 0 16px 40px rgba(243, 238, 228, 0.12);
 }
 
-.launcher-primary:disabled {
-  opacity: 0.45;
+.launcher-nucleus-primary:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
   box-shadow: none;
 }
 
-.launcher-secondary {
+.launcher-nucleus-recover {
+  border: 1px solid rgba(255, 138, 106, 0.5);
+  background: rgba(255, 138, 106, 0.12);
+  color: #ffaaa2;
+}
+
+.launcher-nucleus-secondary {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.03);
   color: var(--text);
 }
 
-.launcher-primary:hover:not(:disabled),
-.launcher-secondary:hover {
+.launcher-nucleus-primary:hover:not(:disabled),
+.launcher-nucleus-recover:hover:not(:disabled),
+.launcher-nucleus-secondary:hover {
   transform: translateY(-1px);
 }
 
-.launcher-primary:active:not(:disabled),
-.launcher-secondary:active {
-  transform: translateY(0);
-}
-
-.launcher-statusline {
-  min-height: 20px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.launcher-statusline__dot,
-.launcher-service-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--text-muted);
-  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.04);
-}
-
-.launcher-statusline__dot--healthy,
-.launcher-service-dot--running {
-  background: var(--success);
-}
-
-.launcher-statusline__dot--checking,
-.launcher-service-dot--idle {
-  background: var(--warning);
-}
-
-.launcher-statusline__dot--degraded,
-.launcher-service-dot--crashed,
-.launcher-service-dot--missing {
-  background: var(--danger);
-}
-
-.launcher-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 14px;
-}
-
-.launcher-card {
-  border-radius: var(--radius);
-  padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(18, 18, 18, 0.92);
-  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
-}
-
-.launcher-card--healthy {
-  box-shadow: inset 0 0 0 1px rgba(63, 185, 80, 0.12);
-}
-
-.launcher-card--checking {
-  box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.12);
-}
-
-.launcher-card--degraded {
-  box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.12);
-}
-
-.launcher-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(243, 238, 228, 0.16);
-}
-
-.launcher-card__title {
+.launcher-nucleus-readiness {
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--text-muted);
-}
-
-.launcher-card__detail {
-  margin-top: 14px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.launcher-card__meta {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.launcher-service-panel {
-  padding: 24px;
-}
-
-.launcher-section-header {
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.launcher-section-header h2 {
-  margin: 0;
-  font-size: 20px;
-}
-
-.launcher-section-header p {
-  margin-top: 8px;
-  color: var(--text-muted);
-}
-
-.launcher-summary {
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.03);
+}
+
+/* ---- Legacy service inventory (<details>, collapsed by default) ---- */
+
+.launcher-service-details {
+  width: 100%;
+  margin-top: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 16px;
+}
+
+.launcher-service-details summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   color: var(--text-muted);
-  font-size: 12px;
+  outline: none;
 }
 
 .launcher-service-list {
-  margin-top: 18px;
+  margin-top: 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .launcher-service-row {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   background: rgba(255, 255, 255, 0.02);
+  font-size: 12px;
 }
 
 .launcher-service-copy {
+  flex: 1;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 .launcher-service-name {
-  font-size: 14px;
-  font-weight: 700;
   color: var(--text);
+  font-weight: 600;
 }
 
 .launcher-service-label {
-  font-size: 12px;
   color: var(--text-muted);
-  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.launcher-service-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.launcher-service-dot--running {
+  background: var(--accent);
+}
+
+.launcher-service-dot--crashed,
+.launcher-service-dot--missing {
+  background: #ff8a6a;
 }
 
 .launcher-service-state {
-  flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-}
-
-.launcher-service-state--running {
-  color: #8ff0a4;
-}
-
-.launcher-service-state--idle {
-  color: #ffd479;
 }
 
 .launcher-service-state--crashed,
@@ -475,108 +465,32 @@
   color: #ffaaa2;
 }
 
-.launcher-service-empty {
-  padding: 18px;
-  border-radius: var(--radius);
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-@media (max-width: 840px) {
-  .launcher-page {
-    width: min(100% - 20px, 1220px);
-    padding-top: 20px;
+@media (prefers-reduced-motion: reduce) {
+  .launcher-nucleus--breathing .launcher-nucleus__halo,
+  .launcher-nucleus--checking .launcher-nucleus__halo,
+  .launcher-nucleus--recovering .launcher-nucleus__halo,
+  .launcher-satellite--checking .launcher-satellite__dot,
+  .launcher-satellite--failed .launcher-satellite__dot {
+    animation: none;
   }
-
-  .launcher-hero,
-  .launcher-service-panel {
-    border-radius: var(--radius);
-  }
-
-  .launcher-hero-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .launcher-logo-panel {
-    min-height: 220px;
-    border-right: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .launcher-logo {
-    width: min(100%, 220px);
-  }
-
-  .launcher-heading-row,
-  .launcher-section-header,
-  .launcher-service-row {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .launcher-heading-row {
-    gap: 12px;
-  }
-
-  .launcher-authority-item {
-    min-width: 0;
-  }
-
-  .launcher-authority-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .launcher-summary,
-  .launcher-pill {
-    align-self: flex-start;
-  }
-
-  .launcher-primary,
-  .launcher-secondary {
-    flex: 1 1 170px;
+  .launcher-nucleus--checking .launcher-nucleus__core::before,
+  .launcher-nucleus--recovering .launcher-nucleus__core::before {
+    animation: none;
+    display: none;
   }
 }
 
-@media (max-width: 640px) {
-  .launcher-hero {
-    padding: 0;
+@media (max-width: 520px) {
+  .launcher-nucleus-wrap {
+    width: min(360px, calc(100vw - 40px));
+    height: min(360px, calc(100vw - 40px));
   }
-
-  .launcher-copy-panel,
-  .launcher-logo-panel {
-    border-radius: 0;
+  .launcher-nucleus {
+    width: 140px;
+    height: 140px;
   }
-
-  .launcher-copy-panel {
-    padding: 18px;
-  }
-
-  .launcher-copy-panel::after {
-    width: 72px;
-    height: 72px;
-    top: 16px;
-    right: 16px;
-  }
-
-  .launcher-actions {
-    gap: 10px;
-  }
-
-  .launcher-primary,
-  .launcher-secondary {
-    width: 100%;
-  }
-
-  .launcher-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .launcher-authority-strip {
-    grid-template-columns: 1fr;
-  }
-
-  .launcher-card {
-    padding: 16px;
-  }
+  .launcher-nucleus__halo { width: 140px; height: 140px; }
+  .launcher-nucleus__ring { width: 100px; height: 100px; }
+  .launcher-nucleus__core { width: 60px; height: 60px; }
+  .launcher-nucleus__logo { width: 88px; }
 }

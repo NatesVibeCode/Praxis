@@ -800,6 +800,18 @@ button.dash-hero-card__stat--link:focus-visible {
   min-width: 0;
 }
 
+.wf-card__eyebrow-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 20px;
+}
+
+.wf-card__eyebrow-row .moon-workflow-silhouette {
+  display: block;
+  flex-shrink: 0;
+}
+
 .wf-card__name {
   margin-top: 8px;
   font-size: 18px;

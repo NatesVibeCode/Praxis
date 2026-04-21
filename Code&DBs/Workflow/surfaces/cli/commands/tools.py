@@ -5,6 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any, TextIO
 
+from runtime.interpretive_context import (
+    attach_interpretive_context_to_items,
+    build_tool_interpretive_context,
+    tool_catalog_item_candidates,
+)
 from surfaces.cli.mcp_tools import (
     format_badges,
     get_definition,
@@ -14,6 +19,11 @@ from surfaces.cli.mcp_tools import (
     run_cli_tool,
 )
 from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
+
+
+_TOOL_LIST_CONTEXT_LIMIT = 5
+_TOOL_LIST_CONTEXT_FIELD_LIMIT = 4
+_TOOL_DESCRIBE_CONTEXT_FIELD_LIMIT = 8
 
 
 def _normalize_search_text(value: str | None) -> str:
@@ -332,6 +342,40 @@ def _filtered_tools(
     return rows
 
 
+def _workflow_conn():
+    from storage.postgres import SyncPostgresConnection, get_workflow_pool
+
+    return SyncPostgresConnection(get_workflow_pool())
+
+
+def _tool_interpretive_context(definition: McpToolDefinition) -> dict[str, Any]:
+    try:
+        return build_tool_interpretive_context(
+            _workflow_conn(),
+            tool_name=definition.name,
+            reason="tool_catalog.describe",
+            max_fields_per_object=_TOOL_DESCRIBE_CONTEXT_FIELD_LIMIT,
+        )
+    except Exception:
+        return {}
+
+
+def _attach_tool_list_interpretive_context(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    try:
+        return attach_interpretive_context_to_items(
+            _workflow_conn(),
+            rows,
+            candidate_fn=tool_catalog_item_candidates,
+            max_context_items=_TOOL_LIST_CONTEXT_LIMIT,
+            max_objects_per_item=1,
+            max_fields_per_object=_TOOL_LIST_CONTEXT_FIELD_LIMIT,
+        )
+    except Exception:
+        return rows
+
+
 def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
     surface = None
     tier = "all"
@@ -357,7 +401,7 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
 
     definitions = _filtered_tools(surface=surface, tier=tier, risk=risk)
     if as_json:
-        payload = [
+        payload = _attach_tool_list_interpretive_context([
             {
                 "name": definition.name,
                 "surface": definition.cli_surface,
@@ -372,7 +416,7 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
                 "description": definition.description,
             }
             for definition in definitions
-        ]
+        ])
         print_json(stdout, payload)
         return 0
 
@@ -535,6 +579,9 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
         "examples": list(definition.cli_examples),
         "example_input": definition.example_input(),
     }
+    interpretive_context = _tool_interpretive_context(definition)
+    if interpretive_context:
+        payload["interpretive_context"] = interpretive_context
     if as_json:
         print_json(stdout, payload)
         return 0
@@ -562,6 +609,9 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
     stdout.write(json.dumps(definition.example_input(), indent=2, default=str) + "\n")
     stdout.write("input_schema:\n")
     stdout.write(json.dumps(definition.input_schema, indent=2, default=str) + "\n")
+    if interpretive_context:
+        stdout.write("interpretive_context:\n")
+        stdout.write(json.dumps(interpretive_context, indent=2, default=str) + "\n")
     return 0
 
 

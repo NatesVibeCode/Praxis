@@ -18,6 +18,10 @@ import traceback
 from collections.abc import Sequence
 from typing import Any, Callable, Optional
 
+from runtime.interpretive_context import (
+    attach_interpretive_context_to_items,
+    tool_catalog_item_candidates,
+)
 from storage.postgres import PostgresStorageError
 
 from .catalog import canonical_tool_name, get_tool_catalog, resolve_tool_entry
@@ -43,6 +47,8 @@ def _env_int(name: str, default: int) -> int:
 _MAX_TOOL_RESULT_TEXT_CHARS = _env_int("PRAXIS_MCP_TOOL_RESULT_CHAR_LIMIT", 200_000)
 _MAX_LOG_MESSAGE_CHARS = _env_int("PRAXIS_MCP_LOG_MESSAGE_CHAR_LIMIT", 16_000)
 _MAX_ERROR_MESSAGE_CHARS = _env_int("PRAXIS_MCP_ERROR_MESSAGE_CHAR_LIMIT", 32_000)
+_TOOLS_LIST_CONTEXT_LIMIT = 5
+_TOOLS_LIST_CONTEXT_FIELD_LIMIT = 4
 
 
 class _TransportDecodeError(Exception):
@@ -288,7 +294,30 @@ def handle_tools_list(request_id: Any, *, allowed_tool_names: object | None = No
         for _, definition in tools_dict.items()
         if allowed is None or definition.name in allowed
     ]
+    tools = _attach_tools_list_interpretive_context(tools)
     return _make_response(request_id, {"tools": tools})
+
+
+def _workflow_conn():
+    from storage.postgres import SyncPostgresConnection, get_workflow_pool
+
+    return SyncPostgresConnection(get_workflow_pool())
+
+
+def _attach_tools_list_interpretive_context(
+    tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    try:
+        return attach_interpretive_context_to_items(
+            _workflow_conn(),
+            tools,
+            candidate_fn=tool_catalog_item_candidates,
+            max_context_items=_TOOLS_LIST_CONTEXT_LIMIT,
+            max_objects_per_item=1,
+            max_fields_per_object=_TOOLS_LIST_CONTEXT_FIELD_LIMIT,
+        )
+    except Exception:
+        return tools
 
 
 def handle_tools_call(

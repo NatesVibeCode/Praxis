@@ -55,6 +55,27 @@ class _FakeTracker:
         pass
 
 
+def test_violation_payload_declares_llm_first_escalation_plane_and_dedupe_key() -> None:
+    violation = GovernanceViolation(
+        policy="error_rule_failing",
+        object_kind="table:workflow_runs",
+        rule_kind="not_null",
+    )
+
+    payload = violation.to_payload()
+
+    assert payload["decision_ref"] == (
+        "governance.error_rule_failing.table:workflow_runs.not_null"
+    )
+    assert payload["review_dedupe_key"] == (
+        "data_dictionary::table:workflow_runs::error_rule_failing:not_null"
+    )
+    assert payload["primary_consumer"] == "llm"
+    assert payload["review_plane"] == "none_inline"
+    assert payload["escalation_plane"] == "canonical_bug_or_operator_decision"
+    assert payload["escalation_model"] == "automated_resolve_else_escalate_when_unresolvable"
+
+
 @pytest.fixture
 def _audit_spy(monkeypatch) -> dict[str, Any]:
     """Intercept the repository writes and record arguments."""

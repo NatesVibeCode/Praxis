@@ -7,6 +7,8 @@ import {
   workflowRunStreamPath,
 } from '../dashboard/runApi';
 import { triggerWorkflow } from '../shared/buildController';
+import { MoonStatusRing } from './MoonStatusRing';
+import { statusState, statusLabel, TERMINAL_STATES } from './moonStatus';
 
 interface Props {
   runId: string;
@@ -14,19 +16,6 @@ interface Props {
   onClose: () => void;
   onSwitchRun?: (runId: string) => void;
 }
-
-const STATUS_DOT: Record<string, string> = {
-  succeeded: '#3fb950',
-  running: '#58a6ff',
-  claimed: '#58a6ff',
-  failed: '#f85149',
-  dead_letter: '#f85149',
-  blocked: '#f85149',
-  parent_failed: '#f85149',
-  pending: '#484f58',
-  ready: '#8b949e',
-  cancelled: '#8b949e',
-};
 
 const TERMINAL: Set<RunStatus> = new Set(['succeeded', 'failed', 'cancelled']);
 const TERMINAL_JOB_STATUSES = new Set<RunJob['status']>([
@@ -44,10 +33,9 @@ interface RunStreamEvent {
 }
 
 function JobRow({ job, onClick }: { job: RunJob; onClick?: () => void }) {
-  const color = STATUS_DOT[job.status] || '#484f58';
   return (
     <div className="moon-run__job" onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined}>
-      <span className="moon-run__dot" style={{ background: color }} />
+      <MoonStatusRing status={job.status} size={14} />
       <span className="moon-run__job-label">{job.label}</span>
       <span className="moon-run__job-status">{job.status}</span>
       {job.duration_ms > 0 && (
@@ -172,16 +160,15 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
     } catch { /* ignore */ }
   }, [runId, expandedJob]);
 
-  const statusColor = liveRun ? STATUS_DOT[liveRun.status] || '#484f58' : '#484f58';
-
   return (
     <>
       <button className="moon-dock__close" onClick={onClose} aria-label="Close run panel">&times;</button>
       <div className="moon-dock__title">
         Run
         {liveRun && (
-          <span className="moon-run__status-badge" style={{ background: statusColor, marginLeft: 8 }}>
-            {liveRun.status}
+          <span className="moon-run__status-chip" style={{ marginLeft: 8 }}>
+            <MoonStatusRing status={liveRun.status} size={10} />
+            <span>{statusLabel(statusState(liveRun.status))}</span>
           </span>
         )}
       </div>
@@ -244,7 +231,7 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
                   className="moon-run__history-item"
                   onClick={() => onSwitchRun?.(h.run_id)}
                 >
-                  <span className="moon-run__dot" style={{ background: STATUS_DOT[h.status] || '#484f58' }} />
+                  <MoonStatusRing status={h.status} size={12} />
                   <span className="moon-run__job-label">{h.spec_name || h.run_id.slice(0, 16)}</span>
                   <span className="moon-run__job-status">{h.status}</span>
                   <span className="moon-run__job-duration">{h.total_jobs} jobs</span>

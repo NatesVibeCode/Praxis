@@ -30,7 +30,6 @@ from storage.postgres import PostgresEvidenceReader
 from surfaces.api import frontdoor, native_ops
 from surfaces.api import native_operator_surface
 from surfaces.api.operator_read import run_native_self_hosted_smoke
-from runtime._workflow_database import workflow_database_url_is_configured
 from surfaces._workflow_database import workflow_database_env_for_repo
 
 from .render import render_graph_lineage, render_graph_topology, render_inspection
@@ -803,7 +802,8 @@ def main(
 
     def _db_source() -> Mapping[str, str]:
         nonlocal source
-        if not workflow_database_url_is_configured(source):
+        configured_url = source.get("WORKFLOW_DATABASE_URL")
+        if not isinstance(configured_url, str) or not configured_url.strip():
             repo_root = Path(__file__).resolve().parents[4]
             source = workflow_database_env_for_repo(repo_root, env=source)
         return source
@@ -812,10 +812,10 @@ def main(
         _emit_json(stdout, native_ops.show_instance_contract(env=source))
         return 0
     if isinstance(command, DbHealthCommand):
-        _emit_json(stdout, frontdoor.health(env=source))
+        _emit_json(stdout, frontdoor.health(env=_db_source()))
         return 0
     if isinstance(command, DbBootstrapCommand):
-        _emit_json(stdout, frontdoor.health(env=source, bootstrap=True))
+        _emit_json(stdout, frontdoor.health(env=_db_source(), bootstrap=True))
         return 0
     if isinstance(command, SmokeCommand):
         _emit_json(stdout, run_native_self_hosted_smoke())

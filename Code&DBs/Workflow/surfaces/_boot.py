@@ -193,6 +193,7 @@ def workflow_database_status(
             get_workflow_pool,
             resolve_workflow_database_url,
         )
+        from storage.postgres.fresh_install_seed import seed_fresh_install_authority_async
         from storage.postgres.schema import bootstrap_workflow_schema
 
         pool = get_workflow_pool(env=resolved_env)
@@ -201,6 +202,7 @@ def workflow_database_status(
             async with pool.acquire() as conn:
                 if bootstrap_requested:
                     await bootstrap_workflow_schema(conn)
+                    await seed_fresh_install_authority_async(conn)
                 return await inspect_workflow_schema(conn)
 
         readiness = _run_sync(_inspect())

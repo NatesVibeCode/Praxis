@@ -10,7 +10,11 @@ import uuid
 import pytest
 
 from _pg_test_conn import get_test_env
-from registry.domain import RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
+from registry.domain import (
+    RuntimeProfileAuthorityRecord,
+    SandboxProfileAuthorityRecord,
+    WorkspaceAuthorityRecord,
+)
 from registry.repository import (
     PostgresRegistryAuthorityRepository,
     bootstrap_registry_authority_schema,
@@ -97,8 +101,23 @@ def _runtime_profile_record(*, runtime_profile_ref: str) -> RuntimeProfileAuthor
         runtime_profile_ref=runtime_profile_ref,
         model_profile_id=f"model_profile.{runtime_profile_ref}.default",
         provider_policy_id=f"provider_policy.{runtime_profile_ref}.default",
-        sandbox_profile_ref=runtime_profile_ref,
+        sandbox_profile_ref=f"sandbox_profile.{runtime_profile_ref}.default",
     )
+
+
+def _sandbox_profile_record(*, runtime_profile_ref: str) -> SandboxProfileAuthorityRecord:
+    return SandboxProfileAuthorityRecord(
+        sandbox_profile_ref=f"sandbox_profile.{runtime_profile_ref}.default",
+        sandbox_provider="docker_local",
+        docker_image="praxis-worker:latest",
+        network_policy="provider_only",
+        workspace_materialization="copy",
+        secret_allowlist=("OPENAI_API_KEY",),
+        auth_mount_policy="provider_scoped",
+        timeout_profile="default",
+    )
+
+
 def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -174,6 +193,13 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
 
         repository = PostgresRegistryAuthorityRepository(conn)
         loop.run_until_complete(repository.upsert_workspace_authority(workspace_record))
+        loop.run_until_complete(
+            repository.upsert_sandbox_profile_authority(
+                _sandbox_profile_record(
+                    runtime_profile_ref=runtime_profile_record.runtime_profile_ref,
+                )
+            )
+        )
         loop.run_until_complete(repository.upsert_runtime_profile_authority(runtime_profile_record))
         resolver = loop.run_until_complete(
             load_registry_resolver(

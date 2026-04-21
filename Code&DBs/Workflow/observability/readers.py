@@ -13,7 +13,12 @@ from dataclasses import dataclass
 from receipts import EvidenceRow, ReceiptV1, WorkflowEventV1
 from runtime._helpers import _dedupe
 
-from .read_models import InspectionReadModel, OperatorFrameReadModel, ReplayReadModel
+from .read_models import (
+    InspectionReadModel,
+    OperatorFrameReadModel,
+    ReplayPathBreak,
+    ReplayReadModel,
+)
 from .read_models import ProjectionCompleteness, ProjectionWatermark
 
 __all__ = ["inspect_run", "replay_run"]
@@ -196,6 +201,225 @@ def _terminal_status(status: str | None) -> bool:
             "expired",
             "promoted",
         )
+    )
+
+
+_TRANSITION_EXPECTATIONS = {
+    "workflow_event": "workflow event in transition bundle",
+    "receipt": "receipt in transition bundle",
+    "bundle_size": "exactly one workflow event and one receipt in transition bundle",
+    "event_causation": "workflow event causation_id points to previous evidence row",
+    "bundle_order": "workflow event evidence_seq immediately precedes receipt evidence_seq",
+    "receipt_causation": "receipt causation_id points to workflow event id",
+    "claim_received": "complete claim_received transition bundle",
+    "admitted_definition_ref": "claim_received payload admitted_definition_ref",
+}
+
+_TRANSITION_REASON_CODES = {
+    "workflow_event": "evidence.workflow_event_missing",
+    "receipt": "evidence.receipt_missing",
+    "bundle_size": "evidence.transition_bundle_incomplete",
+    "event_causation": "evidence.event_causation_mismatch",
+    "bundle_order": "evidence.bundle_order_mismatch",
+    "receipt_causation": "evidence.receipt_causation_mismatch",
+    "claim_received": "replay.claim_received_missing",
+    "admitted_definition_ref": "replay.admitted_definition_ref_missing",
+}
+
+_NODE_EXPECTATIONS = {
+    "dependency_receipts": "node_started dependency_receipts matching admitted graph",
+    "dependency_source": "dependency receipt node_id matches declared source node",
+    "outcome": "node execution receipt terminal outcome",
+}
+
+_NODE_REASON_CODES = {
+    "dependency_receipts": "replay.node_dependency_receipts_missing",
+    "dependency_source": "replay.node_dependency_source_mismatch",
+    "outcome": "replay.node_outcome_missing",
+}
+
+
+def _transition_observed(bundle: _TransitionBundle | None) -> str:
+    if bundle is None:
+        return "no transition evidence"
+    parts: list[str] = []
+    if bundle.event is not None:
+        parts.append(f"workflow_event:{bundle.event.event_type}")
+    elif bundle.event_row is not None:
+        parts.append(f"workflow_event:{bundle.event_row.kind}")
+    else:
+        parts.append("workflow_event:missing")
+    if bundle.receipt is not None:
+        receipt_owner = bundle.receipt.node_id or "runtime"
+        parts.append(f"receipt:{receipt_owner}:{bundle.receipt.status}")
+    elif bundle.receipt_row is not None:
+        parts.append(f"receipt:{bundle.receipt_row.kind}")
+    else:
+        parts.append("receipt:missing")
+    return ", ".join(parts)
+
+
+def _transition_evidence_seq(bundle: _TransitionBundle | None) -> int | None:
+    if bundle is None:
+        return None
+    seqs = [
+        row.evidence_seq
+        for row in (bundle.event_row, bundle.receipt_row)
+        if row is not None
+    ]
+    return min(seqs) if seqs else None
+
+
+def _node_observed(slice_: _CanonicalEvidenceSlice, node_id: str) -> str:
+    statuses = [
+        f"{bundle.event.event_type}:{bundle.receipt.status}"
+        for bundle in _complete_bundles(slice_)
+        if bundle.event is not None
+        and bundle.receipt is not None
+        and bundle.receipt.node_id == node_id
+    ]
+    if statuses:
+        return ", ".join(statuses)
+    return "no complete node bundle"
+
+
+def _node_evidence_seq(slice_: _CanonicalEvidenceSlice, node_id: str) -> int | None:
+    seqs = [
+        _transition_evidence_seq(bundle)
+        for bundle in _complete_bundles(slice_)
+        if bundle.receipt is not None and bundle.receipt.node_id == node_id
+    ]
+    concrete = [seq for seq in seqs if seq is not None]
+    return min(concrete) if concrete else None
+
+
+def _runtime_observed(bundle: _TransitionBundle | None) -> str:
+    if bundle is None:
+        return "no runtime bundle"
+    if bundle.receipt is None:
+        return _transition_observed(bundle)
+    return f"latest runtime status {bundle.receipt.status}"
+
+
+def _int_or_none(value: str) -> int | None:
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _replay_path_break(
+    *,
+    missing_refs: Sequence[str],
+    slice_: _CanonicalEvidenceSlice,
+    latest_runtime_bundle: _TransitionBundle | None,
+) -> ReplayPathBreak | None:
+    """Select the first deterministic replay break from ordered missing refs."""
+
+    if not missing_refs:
+        return None
+    missing_ref = missing_refs[0]
+    bundles_by_transition = {bundle.transition_seq: bundle for bundle in slice_.bundles}
+    parts = missing_ref.split(":")
+
+    if len(parts) >= 3 and parts[0] == "transition":
+        transition_seq = _int_or_none(parts[1])
+        field = ":".join(parts[2:])
+        bundle = bundles_by_transition.get(transition_seq) if transition_seq is not None else None
+        return ReplayPathBreak(
+            reason_code=_TRANSITION_REASON_CODES.get(field, "replay.transition_contract_missing"),
+            missing_ref=missing_ref,
+            break_kind="transition",
+            transition_seq=transition_seq,
+            evidence_seq=_transition_evidence_seq(bundle),
+            expected=_TRANSITION_EXPECTATIONS.get(field, "complete transition contract"),
+            observed=_transition_observed(bundle),
+        )
+
+    if len(parts) >= 3 and parts[0] == "node":
+        node_id = parts[1]
+        field = ":".join(parts[2:])
+        return ReplayPathBreak(
+            reason_code=_NODE_REASON_CODES.get(field, "replay.node_contract_missing"),
+            missing_ref=missing_ref,
+            break_kind="node",
+            node_id=node_id,
+            evidence_seq=_node_evidence_seq(slice_, node_id),
+            expected=_NODE_EXPECTATIONS.get(field, "complete node replay contract"),
+            observed=_node_observed(slice_, node_id),
+        )
+
+    if missing_ref == "runtime:terminal_state":
+        return ReplayPathBreak(
+            reason_code="runtime.terminal_state_missing",
+            missing_ref=missing_ref,
+            break_kind="runtime",
+            evidence_seq=_transition_evidence_seq(latest_runtime_bundle),
+            expected="terminal runtime bundle with terminal receipt status",
+            observed=_runtime_observed(latest_runtime_bundle),
+        )
+
+    if missing_ref == "runtime:state":
+        return ReplayPathBreak(
+            reason_code="runtime.state_missing",
+            missing_ref=missing_ref,
+            break_kind="runtime",
+            expected="runtime state bundle",
+            observed=_runtime_observed(latest_runtime_bundle),
+        )
+
+    if missing_ref.startswith("receipt:"):
+        return ReplayPathBreak(
+            reason_code="replay.dependency_receipt_missing",
+            missing_ref=missing_ref,
+            break_kind="dependency_receipt",
+            expected="upstream dependency receipt in canonical evidence",
+            observed="receipt reference not found",
+        )
+
+    if len(parts) == 2 and parts[0] == "evidence_seq":
+        return ReplayPathBreak(
+            reason_code="evidence.sequence_gap",
+            missing_ref=missing_ref,
+            break_kind="evidence_sequence",
+            evidence_seq=_int_or_none(parts[1]),
+            expected="contiguous canonical evidence sequence",
+            observed="gap in evidence_seq timeline",
+        )
+
+    if missing_ref.startswith("run:") and missing_ref.endswith(":evidence_missing"):
+        return ReplayPathBreak(
+            reason_code="evidence.run_missing",
+            missing_ref=missing_ref,
+            break_kind="run_evidence",
+            expected="canonical evidence rows for run",
+            observed="no evidence rows",
+        )
+
+    if missing_ref.startswith("evidence_row:"):
+        return ReplayPathBreak(
+            reason_code="evidence.row_invalid",
+            missing_ref=missing_ref,
+            break_kind="evidence_row",
+            expected="EvidenceRow instance",
+            observed="non-EvidenceRow input",
+        )
+
+    if missing_ref.startswith("run_id:") or missing_ref.startswith("request_id:"):
+        return ReplayPathBreak(
+            reason_code="evidence.identity_mismatch",
+            missing_ref=missing_ref,
+            break_kind="identity",
+            expected="route identity and record identity agree",
+            observed="identity mismatch in canonical evidence",
+        )
+
+    return ReplayPathBreak(
+        reason_code="replay.missing_ref",
+        missing_ref=missing_ref,
+        break_kind="unknown",
+        expected="complete replay evidence contract",
+        observed="missing ref surfaced by replay completeness",
     )
 
 
@@ -391,8 +615,8 @@ def replay_run(
 
     runtime_bundles = _runtime_bundles(slice_)
     terminal_reason = None
+    latest_runtime_bundle = runtime_bundles[-1] if runtime_bundles else None
     if runtime_bundles:
-        latest_runtime_bundle = runtime_bundles[-1]
         latest_status = latest_runtime_bundle.receipt.status if latest_runtime_bundle.receipt is not None else None
         if _terminal_status(latest_status) and latest_runtime_bundle.event is not None:
             terminal_reason = latest_runtime_bundle.event.reason_code
@@ -406,6 +630,11 @@ def replay_run(
         is_complete=not missing_refs_tuple,
         missing_evidence_refs=missing_refs_tuple,
     )
+    path_break = _replay_path_break(
+        missing_refs=missing_refs_tuple,
+        slice_=slice_,
+        latest_runtime_bundle=latest_runtime_bundle,
+    )
     return ReplayReadModel(
         run_id=run_id,
         request_id=slice_.request_id,
@@ -416,6 +645,7 @@ def replay_run(
         node_outcomes=tuple(node_outcomes),
         admitted_definition_ref=admitted_definition_ref,
         terminal_reason=terminal_reason or "runtime.replay_incomplete",
+        path_break=path_break,
         operator_frame_source=operator_frame_source,
         operator_frames=tuple(operator_frames),
     )

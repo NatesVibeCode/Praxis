@@ -8,7 +8,7 @@ Praxis Engine is an autonomous workflow runner that executes multi-job DAG workf
 
 ## Quickstart
 
-One command. Requires Python 3.14 on `PATH`, Postgres 16+ with pgvector reachable at `localhost:5432`, and at least one LLM provider API key in your environment (or in macOS Keychain under service `praxis`).
+One command. Requires Python 3.14 on `PATH`, Postgres 16+ with pgvector reachable at `localhost:5432`, and at least one LLM provider API key in your environment (or in macOS Keychain with account `praxis` and service set to the env var name).
 
 ```bash
 git clone https://github.com/your-org/praxis.git
@@ -18,11 +18,14 @@ cd praxis
 
 `scripts/bootstrap` is idempotent. It:
 
-1. Verifies `python3.14` + `psql` + `pgvector`.
-2. Creates `.venv/` and installs `Code&DBs/Workflow/requirements.runtime.txt`.
-3. Symlinks `scripts/praxis` into `~/.local/bin/praxis` (add that to `PATH` if you don't already).
-4. Runs `scripts/native-bootstrap.sh` — applies all migrations and bootstrap-only data.
-5. Runs `scripts/native-smoke.sh` — verifies the install end to end.
+1. Creates `.env` with `WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis` when no repo DB authority exists.
+2. Creates the target Postgres database and enables `pgvector`.
+3. Creates `.venv/` and installs `Code&DBs/Workflow/requirements.runtime.txt`.
+4. Symlinks `scripts/praxis` into `~/.local/bin/praxis` (add that to `PATH` if you don't already).
+5. Runs `scripts/native-bootstrap.sh` — applies all migrations and the DB-backed fresh-install authority seed.
+6. Runs `scripts/native-smoke.sh` — verifies the native operator flow end to end.
+7. Starts the REST API on `PRAXIS_API_PORT` (default `8420`).
+8. Validates, submits, and streams `examples/hello_world.queue.json`.
 
 ### First run
 
@@ -32,22 +35,21 @@ Once bootstrap reports success:
 # Orient on current state (standing orders, status, open bugs)
 praxis workflow query "status"
 
-# Run the canonical smoke workflow
+# Run the canonical smoke workflow again if you want a fresh run
 praxis workflow run examples/hello_world.queue.json
 ```
 
 ### Launch the API server manually
 
-`native-bootstrap.sh` does not start the long-running API. Run it yourself when you want it up:
+`scripts/bootstrap` starts the API for you. To run it manually:
 
 ```bash
 source .venv/bin/activate
 PYTHONPATH="Code&DBs/Workflow" \
-  python -m uvicorn surfaces.api.native_operator_surface:app \
-    --host 0.0.0.0 --port 8420
+  python -m surfaces.api.server --host 0.0.0.0 --port 8420
 ```
 
-The server is ready when you see `Uvicorn running on http://0.0.0.0:8420`. `POST /orient` returns full runtime status.
+The server is ready when `GET /api/health` succeeds. `POST /orient` returns full runtime status.
 
 > **Note:** `PYTHONPATH="Code&DBs/Workflow"` is required because the API module is rooted there. Leaving it out gives you `ModuleNotFoundError: No module named 'surfaces'`.
 
@@ -214,7 +216,7 @@ Code&DBs/
       mcp/                  # MCP tool server
       app/                  # Dashboard UI (React/Vite)
   Databases/
-    migrations/workflow/    # SQL migrations (001-028)
+    migrations/workflow/    # SQL migrations (001-193+; generated authority controls order)
 config/
   runtime_profiles.json     # Provider/model routing config
 ```

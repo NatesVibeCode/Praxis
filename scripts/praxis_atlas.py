@@ -50,6 +50,85 @@ AREA_COLORS = {
 UNOWNED_COLOR = "#4a5068"
 EDGE_COLOR = "#3a3f4b"
 
+SCHEMA_AREA_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("authority", (
+        "operator_", "authority_", "object_", "semantic_", "registry_", "persona_",
+        "native_runtime", "workspace_authority", "runtime_profile_authority",
+    )),
+    ("build", (
+        "workflow_build_", "review_", "app_manifest", "manifest", "shape_family",
+    )),
+    ("scheduler", (
+        "workflow_run", "run_node", "run_edge", "schedule_", "recurring_",
+        "control_command", "workflow_chain", "workflow_job_runtime",
+    )),
+    ("compiler", (
+        "workflow_definition", "workflow_version", "uploaded_file", "compiler_",
+        "workflow_trigger",
+    )),
+    ("sandbox", (
+        "sandbox_", "execution_packet", "fork_", "worktree",
+    )),
+    ("routing", (
+        "provider_", "model_", "route_", "adapter_", "task_type_", "market_",
+    )),
+    ("circuits", (
+        "quality_", "failure_", "gate_", "eligibility", "health",
+    )),
+    ("outbox", (
+        "outbox", "event_log", "workflow_event", "system_event", "subscription_",
+        "idempotency_ledger",
+    )),
+    ("receipts", (
+        "receipt", "provenance", "probe_",
+    )),
+    ("memory", (
+        "memory_", "context_", "reference_catalog", "semantic_predicate",
+        "semantic_assertion",
+    )),
+    ("bugs", (
+        "bug", "issue", "evidence_link",
+    )),
+    ("roadmap", (
+        "roadmap_", "cutover_", "work_item_",
+    )),
+    ("governance", (
+        "credential_", "promotion_", "policy", "verification_", "verifier_",
+    )),
+    ("heal", (
+        "healing_", "healer_", "retry",
+    )),
+    ("discover", (
+        "discover", "search", "compile_index",
+    )),
+    ("debate", (
+        "debate_", "adversarial",
+    )),
+    ("moon", (
+        "moon_", "dashboard", "surface_catalog",
+    )),
+    ("mcp", (
+        "mcp_", "operation_catalog", "tool_", "capability_catalog",
+        "registry_calculation",
+    )),
+    ("cli", (
+        "cli_", "agent_", "render", "native_operator",
+    )),
+    ("integrations", (
+        "integration", "connector_", "webhook_", "oauth", "api_schema",
+    )),
+)
+
+
+def infer_schema_area(node_id: str, label: str, etype: str, preview: str, source: str) -> str | None:
+    if etype != "table" and not node_id.startswith("table:"):
+        return None
+    haystack = " ".join((node_id, label, preview, source)).lower()
+    for area, markers in SCHEMA_AREA_RULES:
+        if any(marker in haystack for marker in markers):
+            return area
+    return None
+
 
 def fetch_entities(cur) -> list[dict]:
     cur.execute(
@@ -228,7 +307,7 @@ def build_graph(*, database_url: str | None = None) -> dict:
     def add_node(node_id: str, label: str, etype: str, preview: str, source: str) -> None:
         if node_id in node_ids:
             return
-        area = node_area.get(node_id)
+        area = node_area.get(node_id) or infer_schema_area(node_id, label, etype, preview, source)
         color = AREA_COLORS.get(area, UNOWNED_COLOR) if area else UNOWNED_COLOR
         data = {
             "id": node_id,
@@ -386,46 +465,70 @@ HTML_TEMPLATE = r"""<!doctype html>
 <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
 <style>
   :root {
-    --bg: #16161e;
-    --bg-panel: #1a1b26;
-    --bg-elev: #1f2335;
-    --border: #292e42;
-    --text: #c0caf5;
-    --text-dim: #565f89;
-    --accent: #7aa2f7;
+    --bg: #090a0d;
+    --bg-panel: #11131a;
+    --bg-elev: #171a23;
+    --bg-control: #1b2030;
+    --border: #2b3140;
+    --border-strong: #485064;
+    --text: #f3efe6;
+    --text-soft: #d8d2c5;
+    --text-dim: #9299ab;
+    --accent: #f3efe6;
+    --accent-cool: #7dcfff;
   }
-  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); }
-  #app { display: grid; grid-template-columns: 240px 1fr 300px; grid-template-rows: 44px 1fr; height: 100vh; }
-  header { grid-column: 1 / 4; padding: 0 18px; background: var(--bg-panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 18px; }
-  header h1 { font-size: 14px; margin: 0; font-weight: 500; letter-spacing: 0.3px; }
-  header .counts { font-size: 11px; color: var(--text-dim); font-family: ui-monospace, monospace; }
-  header .hint { font-size: 11px; color: var(--text-dim); font-style: italic; }
-  #sidebar { background: var(--bg-panel); padding: 14px; overflow-y: auto; border-right: 1px solid var(--border); font-size: 12px; }
-  #sidebar h2 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); margin: 14px 0 6px; font-weight: 600; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  #app { display: grid; grid-template-columns: minmax(248px, 18vw) minmax(0, 1fr) minmax(300px, 23vw); grid-template-rows: 52px minmax(0, 1fr); height: 100vh; min-width: 920px; }
+  header { grid-column: 1 / 4; padding: 0 18px; background: rgba(17, 19, 26, 0.96); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22); z-index: 5; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: 0; color: var(--text); white-space: nowrap; }
+  header .counts { font-size: 11px; color: var(--text-dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  header .hint { font-size: 11px; color: var(--accent-cool); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #sidebar { background: rgba(17, 19, 26, 0.98); padding: 14px; overflow-y: auto; border-right: 1px solid var(--border); font-size: 12px; scrollbar-gutter: stable; }
+  #sidebar h2 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); margin: 16px 0 7px; font-weight: 700; }
   #sidebar h2:first-child { margin-top: 0; }
-  #sidebar label { display: flex; align-items: center; padding: 3px 0; cursor: pointer; gap: 7px; }
+  #sidebar label { display: flex; align-items: center; min-height: 24px; padding: 2px 0; cursor: pointer; gap: 8px; color: var(--text-soft); }
   #sidebar label:hover { color: white; }
-  #sidebar input[type=search] { width: 100%; padding: 6px 9px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; box-sizing: border-box; outline: none; }
-  #sidebar input[type=search]:focus { border-color: var(--accent); }
-  .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  #sidebar input[type=checkbox] { accent-color: var(--accent); }
+  #sidebar input[type=search] { width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border); background: #0c0e13; color: var(--text); font-size: 12px; box-sizing: border-box; outline: none; }
+  #sidebar input[type=search]:focus { border-color: var(--border-strong); box-shadow: 0 0 0 3px rgba(125, 207, 255, 0.08); }
+  .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16); }
   .edge-swatch { width: 22px; height: 2px; display: inline-block; flex-shrink: 0; position: relative; }
   .edge-swatch.dashed { background: transparent; border-top: 2px dashed currentColor; height: 0; }
   .edge-swatch.dotted { background: transparent; border-top: 2px dotted currentColor; height: 0; }
-  #cy { background: var(--bg); width: 100%; height: 100%; }
-  #detail { background: var(--bg-panel); padding: 14px; border-left: 1px solid var(--border); overflow-y: auto; font-size: 12px; }
-  #detail h2 { font-size: 14px; margin: 0 0 6px; font-weight: 500; }
+  #cy {
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+      var(--bg);
+    background-size: 32px 32px;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+  #cy.atlas-load-error { display: grid; place-items: center; padding: 28px; color: var(--text-dim); background: var(--bg); box-sizing: border-box; }
+  #detail { background: rgba(17, 19, 26, 0.98); padding: 18px; border-left: 1px solid var(--border); overflow-y: auto; font-size: 12px; scrollbar-gutter: stable; }
+  #detail h2 { font-size: 16px; margin: 0 0 8px; font-weight: 700; line-height: 1.25; color: var(--text); }
   #detail .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-  #detail .tag { font-size: 10px; padding: 2px 7px; border-radius: 8px; background: var(--bg-elev); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; }
+  #detail .tag { font-size: 10px; padding: 3px 7px; border-radius: 7px; background: var(--bg-elev); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; border: 1px solid rgba(255, 255, 255, 0.06); }
   #detail .tag.area { color: var(--accent); }
   #detail .src { color: var(--text-dim); font-size: 10px; margin-bottom: 10px; font-family: ui-monospace, monospace; word-break: break-all; }
-  #detail pre { white-space: pre-wrap; word-break: break-word; font-size: 11px; background: var(--bg); padding: 9px; border-radius: 5px; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); line-height: 1.5; }
-  #detail .empty { color: var(--text-dim); font-style: italic; font-size: 12px; }
+  #detail pre { white-space: pre-wrap; word-break: break-word; font-size: 11px; background: #0c0e13; padding: 10px; border-radius: 7px; max-height: 300px; overflow-y: auto; border: 1px solid var(--border); line-height: 1.55; color: var(--text-soft); }
+  #detail .empty { color: var(--text-dim); font-size: 12px; line-height: 1.6; }
   #detail .neighbors { margin-top: 14px; }
-  #detail .neighbors .nrow { padding: 4px 0; font-size: 11px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  #detail .neighbors .nrow { padding: 5px 0; font-size: 11px; display: flex; align-items: center; gap: 7px; cursor: pointer; color: var(--text-soft); }
   #detail .neighbors .nrow:hover { color: white; }
-  button { background: var(--bg-elev); color: var(--text); border: 1px solid var(--border); padding: 5px 9px; border-radius: 4px; font-size: 11px; cursor: pointer; }
-  button:hover { background: var(--border); color: white; }
+  button { background: var(--bg-control); color: var(--text-soft); border: 1px solid var(--border); padding: 6px 10px; border-radius: 7px; font-size: 11px; font-weight: 650; cursor: pointer; }
+  button:hover { border-color: var(--border-strong); background: #22283a; color: white; }
   .toolbar { margin-left: auto; display: flex; gap: 6px; }
+  .atlas-error-title { color: var(--text); font-weight: 700; margin-bottom: 6px; }
+  .atlas-error-copy { max-width: 46ch; line-height: 1.55; text-align: center; }
+  @media (max-width: 1040px) {
+    #app { min-width: 0; grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: 52px minmax(0, 1fr) 220px; }
+    header { grid-column: 1 / 3; }
+    #detail { grid-column: 1 / 3; border-left: 0; border-top: 1px solid var(--border); }
+    .toolbar button { padding-inline: 8px; }
+  }
 </style>
 </head>
 <body>
@@ -461,6 +564,42 @@ HTML_TEMPLATE = r"""<!doctype html>
 const GRAPH = __GRAPH_JSON__;
 const AREA_COLORS = __AREA_COLORS__;
 
+function notifyHost(payload) {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'praxis-atlas-status', ...payload }, window.location.origin);
+    }
+  } catch (_) {
+    // Host status is best-effort only; the atlas must still render standalone.
+  }
+}
+
+function showAtlasError(title, detail) {
+  const cyBox = document.getElementById('cy');
+  const detailBox = document.getElementById('detail');
+  if (cyBox) {
+    cyBox.classList.add('atlas-load-error');
+    cyBox.innerHTML =
+      '<div><div class="atlas-error-title"></div><div class="atlas-error-copy"></div></div>';
+    cyBox.querySelector('.atlas-error-title').textContent = title;
+    cyBox.querySelector('.atlas-error-copy').textContent = detail;
+  }
+  if (detailBox) {
+    detailBox.innerHTML = '<h2></h2><p class="empty"></p>';
+    detailBox.querySelector('h2').textContent = title;
+    detailBox.querySelector('.empty').textContent = detail;
+  }
+  notifyHost({ ok: false, detail: title + ': ' + detail });
+}
+
+if (typeof cytoscape !== 'function') {
+  showAtlasError(
+    'Atlas runtime unavailable',
+    'The graph library did not load, so the generated atlas cannot draw its canvas.'
+  );
+  throw new Error('Praxis atlas runtime unavailable: cytoscape missing');
+}
+
 // Counts
 const typeCounts = {};
 const areaCounts = {};
@@ -489,6 +628,32 @@ const RELATION_STYLES = {
   implements_build: { color: '#e0af68', style: 'solid'  },
   resolves_bug:     { color: '#f7768e', style: 'dotted' },
 };
+
+function stableHash(value) {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seedCirclePositions(nodes, radiusBase, spread) {
+  const sorted = nodes.sort((a, b) => String(a.id()).localeCompare(String(b.id())));
+  const count = Math.max(sorted.length, 1);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  sorted.forEach((node, index) => {
+    const h = stableHash(node.id());
+    const ring = 0.78 + ((h % 17) / 100);
+    const radius = radiusBase + spread * Math.sqrt((index + 1) / count);
+    const angle = index * golden + ((h % 29) / 29) * 0.22;
+    node.position({
+      x: Math.cos(angle) * radius * ring,
+      y: Math.sin(angle) * radius * ring,
+    });
+  });
+}
 
 function mkCheckbox(container, key, count, color, dataKey) {
   const label = document.createElement('label');
@@ -532,43 +697,45 @@ const cy = cytoscape({
   style: [
     { selector: 'node', style: {
       'background-color': 'data(color)',
-      'background-opacity': 0.85,
+      'background-opacity': 0.92,
       'label': 'data(label)',
-      'color': '#c0caf5',
-      'font-size': '9px',
-      'font-family': 'ui-monospace, monospace',
+      'color': '#f3efe6',
+      'font-size': '10px',
+      'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
       'text-valign': 'bottom',
       'text-halign': 'center',
-      'text-margin-y': 3,
+      'text-margin-y': 5,
       'width': 'data(size)',
       'height': 'data(size)',
-      'border-width': 0,
+      'border-width': 1,
+      'border-color': 'rgba(255, 255, 255, 0.22)',
+      'border-opacity': 0.35,
       'text-outline-width': 3,
-      'text-outline-color': '#16161e',
+      'text-outline-color': '#090a0d',
       'text-outline-opacity': 1,
-      'min-zoomed-font-size': 10,
+      'min-zoomed-font-size': 8,
       'text-opacity': 0,
     }},
     { selector: 'node[?is_area]', style: {
       'background-color': 'data(color)',
-      'background-opacity': 0.10,
+      'background-opacity': 0.14,
       'border-width': 2,
       'border-color': 'data(color)',
-      'border-opacity': 0.6,
+      'border-opacity': 0.74,
       'shape': 'round-rectangle',
       'label': 'data(label)',
-      'font-size': '15px',
+      'font-size': '16px',
       'font-weight': 700,
       'color': 'data(color)',
       'text-valign': 'center',
       'text-halign': 'center',
       'text-margin-y': 0,
       'text-opacity': 1,
-      'text-outline-width': 4,
-      'text-outline-color': '#16161e',
+      'text-outline-width': 5,
+      'text-outline-color': '#090a0d',
       'text-outline-opacity': 1,
       'min-zoomed-font-size': 0,
-      'padding': '22px',
+      'padding': '30px',
       'z-index': 1,
     }},
     { selector: 'node[?is_area].expanded', style: {
@@ -585,15 +752,27 @@ const cy = cytoscape({
       'border-color': '#f7768e',
       'text-opacity': 1,
     }},
+    { selector: 'node.fallback-node', style: {
+      'width': 'mapData(degree, 1, 8, 14, 30)',
+      'height': 'mapData(degree, 1, 8, 14, 30)',
+      'background-opacity': 0.96,
+      'border-width': 1,
+      'border-color': '#f3efe6',
+      'border-opacity': 0.28,
+      'font-size': '9px',
+      'text-margin-y': 5,
+      'min-zoomed-font-size': 7,
+      'z-index': 3,
+    }},
     { selector: 'node.hover', style: {
       'text-opacity': 1,
       'z-index': 10,
     }},
     { selector: 'edge', style: {
-      'width': 1,
-      'line-color': '#7e869e',
+      'width': 1.2,
+      'line-color': '#8f98ad',
       'curve-style': 'straight',
-      'opacity': 0.7,
+      'opacity': 0.72,
       'target-arrow-shape': 'none',
     }},
     { selector: 'edge[label = "depends_on"]', style: {
@@ -636,13 +815,19 @@ const cy = cytoscape({
       'curve-style': 'straight',
     }},
     { selector: 'edge[?is_aggregate]', style: {
-      'width': 'mapData(weight, 1, 40, 1.8, 7)',
-      'opacity': 0.7,
+      'width': 'mapData(weight, 1, 40, 2.0, 8)',
+      'opacity': 0.82,
       'curve-style': 'bezier',
       'control-point-step-size': 40,
       'target-arrow-shape': 'triangle-backcurve',
       'arrow-scale': 0.9,
       'z-index': 2,
+    }},
+    { selector: 'edge.fallback-edge', style: {
+      'width': 'mapData(weight, 1, 10, 1.1, 3.2)',
+      'opacity': 0.46,
+      'curve-style': 'bezier',
+      'control-point-step-size': 28,
     }},
     { selector: 'edge.highlight', style: {
       'opacity': 1,
@@ -666,9 +851,49 @@ const cy = cytoscape({
   minZoom: 0.1,
   maxZoom: 4,
 });
+window.__PRAXIS_ATLAS_CY__ = cy;
 
 // Progressive disclosure state
 const expandedAreas = new Set();
+let overviewLayoutGeneration = 0;
+
+function fitVisibleGraph(padding) {
+  const visible = cy.nodes().filter(n => n.style('display') !== 'none');
+  const target = visible.length ? visible : cy.nodes('[?is_area]');
+  if (target.length) {
+    cy.fit(target, padding);
+  }
+}
+
+function hasAreaOverview() {
+  return cy.nodes('[?is_area]').length > 0;
+}
+
+function syncFallbackMode() {
+  const fallback = !hasAreaOverview();
+  cy.nodes().not('[?is_area]').toggleClass('fallback-node', fallback);
+  cy.edges().not('.pull').toggleClass('fallback-edge', fallback);
+  return fallback;
+}
+
+function atlasAreaPositions() {
+  return cy.nodes('[?is_area]').map(n => ({
+    id: n.id(),
+    x: Math.round(n.position('x')),
+    y: Math.round(n.position('y')),
+  })).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function markAtlasReady() {
+  window.__PRAXIS_ATLAS_READY__ = true;
+  window.__PRAXIS_ATLAS_AREA_POSITIONS__ = atlasAreaPositions();
+  notifyHost({
+    ok: true,
+    nodes: GRAPH.nodes.length,
+    edges: realEdges,
+    aggregate_edges: aggEdges,
+  });
+}
 
 function syncExpandedClass() {
   cy.nodes('[?is_area]').forEach(a => {
@@ -681,7 +906,8 @@ function syncExpandedClass() {
 let labelMode = 'auto'; // auto | always | off
 function applyLabelMode() {
   const zoom = cy.zoom();
-  const show = labelMode === 'always' || (labelMode === 'auto' && zoom > 1.3);
+  const fallback = !hasAreaOverview();
+  const show = labelMode === 'always' || (labelMode === 'auto' && (fallback || zoom > 1.3));
   cy.nodes().not('[?is_area]').not('.hover').style('text-opacity', show ? 1 : 0);
 }
 cy.on('zoom', applyLabelMode);
@@ -692,8 +918,7 @@ document.getElementById('btn-labels').addEventListener('click', () => {
   applyLabelMode();
 });
 document.getElementById('btn-fit').addEventListener('click', () => {
-  const visible = cy.nodes().filter(n => n.style('display') !== 'none');
-  cy.fit(visible.length ? visible : cy.nodes('[?is_area]'), 60);
+  fitVisibleGraph(60);
 });
 
 document.getElementById('btn-expand-all').addEventListener('click', () => {
@@ -717,6 +942,10 @@ document.getElementById('btn-collapse-all').addEventListener('click', () => {
 
 function updateModeHint() {
   const hint = document.getElementById('mode-hint');
+  if (!hasAreaOverview()) {
+    hint.textContent = 'table dependency fallback';
+    return;
+  }
   const total = cy.nodes('[?is_area]').length;
   const n = expandedAreas.size;
   if (n === 0) hint.textContent = 'click an area to expand';
@@ -771,6 +1000,56 @@ function layoutArea(areaSlug) {
   if (name === 'circle') opts.radius = radius * 0.8;
   members.layout(opts).run();
   laidOutAreas.add(areaSlug);
+}
+
+function layoutFallback(animate) {
+  syncFallbackMode();
+  seedCirclePositions(cy.nodes().not('[?is_area]'), 120, 520);
+  let layout;
+  try {
+    layout = cy.elements().layout({
+    name: 'fcose',
+    animate: !!animate,
+    animationDuration: animate ? 400 : 0,
+    randomize: false,
+    nodeRepulsion: 90000,
+    idealEdgeLength: 160,
+    edgeElasticity: 0.12,
+    gravity: 0.08,
+    numIter: 2200,
+    packComponents: true,
+    uniformNodeDimensions: false,
+    nodeSeparation: 120,
+    fit: false,
+    });
+  } catch (error) {
+    showAtlasError('Atlas layout failed', error instanceof Error ? error.message : String(error));
+    return;
+  }
+  layout.one('layoutstop', () => {
+    cy.resize();
+    fitVisibleGraph(70);
+    applyLabelMode();
+    markAtlasReady();
+  });
+  layout.run();
+}
+
+function syncOverviewState() {
+  syncFallbackMode();
+  cy.nodes('[?is_area]').forEach(a => {
+    const p = a.position();
+    cy.nodes().filter(n => !n.data('is_area') && n.data('area') === a.data('area'))
+      .forEach(m => m.position({ x: p.x, y: p.y }));
+  });
+  laidOutAreas.clear();
+  expandedAreas.forEach(slug => layoutArea(slug));
+  syncExpandedClass();
+  applyFilters();
+  updateModeHint();
+  cy.resize();
+  fitVisibleGraph(80);
+  applyLabelMode();
 }
 
 // Click: area → toggle expand; non-area → detail pane
@@ -837,9 +1116,11 @@ document.getElementById('search').addEventListener('input', applyFilters);
 
 function applyFilters() {
   const activeAreas = new Set([...document.querySelectorAll('#area-filters input:checked')].map(i => i.dataset.area));
+  const hasAreaFilters = document.querySelectorAll('#area-filters input').length > 0;
   const activeTypes = new Set([...document.querySelectorAll('#type-filters input:checked')].map(i => i.dataset.type));
   const activeRelations = new Set([...document.querySelectorAll('#relation-filters input:checked')].map(i => i.dataset.relation));
   const q = (document.getElementById('search').value || '').toLowerCase().trim();
+  const overviewMode = hasAreaOverview();
 
   cy.nodes().forEach(n => {
     const d = n.data();
@@ -847,13 +1128,13 @@ function applyFilters() {
       n.style('display', activeAreas.has(d.area) ? 'element' : 'none');
       return;
     }
-    const areaOk = activeAreas.has(d.area || '(unowned)');
+    const areaOk = !hasAreaFilters || activeAreas.has(d.area || '(unowned)');
     const typeOk = activeTypes.has(d.type);
     const searchMatch = q && ((d.label || '').toLowerCase().includes(q) || (d.id || '').toLowerCase().includes(q));
     // Overview layer: non-area nodes hidden until their area is expanded
     // (or the user is actively searching for them).
-    const expanded = d.area && expandedAreas.has(d.area);
-    const visible = areaOk && typeOk && (expanded || searchMatch);
+    const expanded = !overviewMode || (d.area && expandedAreas.has(d.area));
+    const visible = areaOk && typeOk && (overviewMode ? (expanded || searchMatch) : (searchMatch || !q));
     n.style('display', visible ? 'element' : 'none');
   });
 
@@ -888,12 +1169,20 @@ function applyFilters() {
 // Overview layout: fcose on area nodes + aggregate edges only.
 // Non-area nodes get stacked at their area's position until expand.
 function layoutOverview(animate) {
+  if (!hasAreaOverview()) {
+    layoutFallback(animate);
+    return;
+  }
+  const generation = ++overviewLayoutGeneration;
   const areaEles = cy.nodes('[?is_area]').union(cy.edges('[?is_aggregate]'));
-  const layout = areaEles.layout({
+  seedCirclePositions(cy.nodes('[?is_area]'), 130, 580);
+  let layout;
+  try {
+    layout = areaEles.layout({
     name: 'fcose',
     animate: !!animate,
     animationDuration: animate ? 500 : 0,
-    randomize: true,
+    randomize: false,
     nodeRepulsion: 150000,
     idealEdgeLength: 260,
     edgeElasticity: 0.1,
@@ -903,34 +1192,43 @@ function layoutOverview(animate) {
     uniformNodeDimensions: false,
     nodeSeparation: 160,
     fit: false,
+    });
+  } catch (error) {
+    showAtlasError('Atlas layout failed', error instanceof Error ? error.message : String(error));
+    return;
+  }
+  layout.one('layoutstop', () => {
+    if (generation !== overviewLayoutGeneration) return;
+    syncOverviewState();
+    markAtlasReady();
   });
   layout.run();
-  // Stack members at their area position; layoutArea() spreads on expand.
-  cy.nodes('[?is_area]').forEach(a => {
-    const p = a.position();
-    cy.nodes().filter(n => !n.data('is_area') && n.data('area') === a.data('area'))
-      .forEach(m => m.position({ x: p.x, y: p.y }));
-  });
-  // Un-laid-out status so re-expand re-runs local layout.
-  laidOutAreas.clear();
-  // Previously-expanded areas need a layout re-run after re-positioning.
-  expandedAreas.forEach(slug => layoutArea(slug));
 }
 
 cy.ready(() => {
+  syncFallbackMode();
   layoutOverview(false);
   applyFilters();
   syncExpandedClass();
   updateModeHint();
-  cy.fit(cy.nodes('[?is_area]'), 80);
   applyLabelMode();
+  requestAnimationFrame(() => {
+    cy.resize();
+    if (!hasAreaOverview()) {
+      fitVisibleGraph(70);
+    }
+  });
+});
+
+window.addEventListener('resize', () => {
+  cy.resize();
+  fitVisibleGraph(80);
 });
 
 // Re-layout button re-runs overview (then re-expands any open areas).
 document.getElementById('btn-relayout').onclick = null;
 document.getElementById('btn-relayout').addEventListener('click', () => {
   layoutOverview(true);
-  setTimeout(() => cy.fit(cy.nodes('[?is_area]'), 80), 600);
 });
 </script>
 </body>

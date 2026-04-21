@@ -2593,6 +2593,11 @@ async def templates_get(request: Request) -> Response:
 async def search_get(request: Request) -> Response:
     return await _route_to_handler(request)
 
+# -- Moon pickers (read-only datalist-backed dropdowns) --
+@app.get("/api/moon/pickers/{rest_of_path:path}")
+async def moon_pickers_get(request: Request, rest_of_path: str) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/registries/search")
 async def registries_search_get(request: Request) -> Response:
     return await _route_to_handler(request)

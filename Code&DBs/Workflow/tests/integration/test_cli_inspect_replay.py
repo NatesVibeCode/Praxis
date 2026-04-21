@@ -84,6 +84,7 @@ def test_cli_replay_frontdoor_accepts_runtime_alias_for_service() -> None:
     assert "run_id: run.replay" in rendered
     assert "dependency_order: node_0, node_1" in rendered
     assert "terminal_reason: runtime.workflow_succeeded" in rendered
+    assert "path_break: -" in rendered
 
 
 def test_cli_inspect_frontdoor_self_wires_default_observability_service(monkeypatch) -> None:

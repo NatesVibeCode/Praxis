@@ -10,6 +10,10 @@ import json
 import re
 from typing import Any
 
+from runtime.interpretive_context import (
+    attach_interpretive_context_to_items,
+    discover_result_candidates,
+)
 from runtime.workspace_paths import strip_workflow_prefix
 
 from ..subsystems import _subs
@@ -34,6 +38,9 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
         limit = params.get("limit", 10)
         kind = params.get("kind")  # module, class, function, or None for all
         threshold = params.get("threshold", 0.3)
+        include_interpretive_context = params.get("include_interpretive_context", True)
+        max_context_results = params.get("max_context_results", 5)
+        max_context_fields = params.get("max_context_fields", 6)
 
         raw_results = indexer.search(
             query=query,
@@ -75,6 +82,22 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
                 entry["signature"] = r["signature"]
 
             clean.append(entry)
+
+        if include_interpretive_context:
+            try:
+                clean = attach_interpretive_context_to_items(
+                    _subs.get_pg_conn(),
+                    clean,
+                    candidate_fn=discover_result_candidates,
+                    max_context_items=int(
+                        5 if max_context_results is None else max_context_results
+                    ),
+                    max_fields_per_object=int(
+                        6 if max_context_fields is None else max_context_fields
+                    ),
+                )
+            except Exception:
+                pass
 
         return {
             "query": query,
@@ -187,6 +210,29 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "number",
                         "description": "Minimum cosine similarity (0-1, default 0.3).",
                         "default": 0.3,
+                    },
+                    "include_interpretive_context": {
+                        "type": "boolean",
+                        "description": (
+                            "Attach bounded interpretive data-dictionary context "
+                            "when a result maps to a cataloged object."
+                        ),
+                        "default": True,
+                    },
+                    "max_context_results": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum search results that may receive attached "
+                            "interpretive context."
+                        ),
+                        "default": 5,
+                    },
+                    "max_context_fields": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum fields per attached dictionary object."
+                        ),
+                        "default": 6,
                     },
                     "force": {
                         "type": "boolean",

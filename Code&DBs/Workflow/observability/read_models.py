@@ -19,6 +19,7 @@ __all__ = [
     "OperatorFrameReadModel",
     "ProjectionCompleteness",
     "ProjectionWatermark",
+    "ReplayPathBreak",
     "ReplayReadModel",
 ]
 
@@ -80,6 +81,20 @@ class InspectionReadModel(DerivedReadModel):
 
 
 @dataclass(frozen=True, slots=True)
+class ReplayPathBreak:
+    """First deterministic break that prevents replay from proving the full path."""
+
+    reason_code: str
+    missing_ref: str
+    break_kind: str
+    transition_seq: int | None = None
+    node_id: str | None = None
+    evidence_seq: int | None = None
+    expected: str | None = None
+    observed: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ReplayReadModel(DerivedReadModel):
     """Derived replay view for reconstructing a run from evidence."""
 
@@ -87,6 +102,7 @@ class ReplayReadModel(DerivedReadModel):
     node_outcomes: tuple[str, ...] = ()
     admitted_definition_ref: str | None = None
     terminal_reason: str | None = None
+    path_break: ReplayPathBreak | None = None
     operator_frame_source: str = "missing"
     operator_frames: tuple[OperatorFrameReadModel, ...] = ()
 

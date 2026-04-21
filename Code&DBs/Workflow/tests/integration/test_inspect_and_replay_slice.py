@@ -18,6 +18,15 @@ from registry.domain import (
 from runtime import RuntimeOrchestrator, WorkflowIntakePlanner
 
 
+def _deterministic_fixture_outputs(input_payload: dict[str, object]) -> dict[str, object]:
+    step = input_payload.get("step")
+    if step == 0:
+        return {"result": "prepared"}
+    if step == 1:
+        return {"result": "admitted"}
+    raise AssertionError(f"unexpected deterministic fixture step: {step!r}")
+
+
 def _request() -> WorkflowRequest:
     workspace_ref = "workspace.alpha"
     runtime_profile_ref = "runtime_profile.alpha"
@@ -37,7 +46,13 @@ def _request() -> WorkflowRequest:
                 display_name="prepare",
                 inputs={
                     "task_name": "prepare",
-                    "input_payload": {"step": 0},
+                    "input_payload": {
+                        "step": 0,
+                        "deterministic_builder": (
+                            "tests.integration.test_inspect_and_replay_slice."
+                            "_deterministic_fixture_outputs"
+                        ),
+                    },
                 },
                 expected_outputs={"result": "prepared"},
                 success_condition={"status": "success"},
@@ -56,7 +71,13 @@ def _request() -> WorkflowRequest:
                 display_name="admit",
                 inputs={
                     "task_name": "admit",
-                    "input_payload": {"step": 1},
+                    "input_payload": {
+                        "step": 1,
+                        "deterministic_builder": (
+                            "tests.integration.test_inspect_and_replay_slice."
+                            "_deterministic_fixture_outputs"
+                        ),
+                    },
                 },
                 expected_outputs={"result": "admitted"},
                 success_condition={"status": "success"},
@@ -152,6 +173,7 @@ def test_inspect_and_replay_readers_derive_complete_views_from_canonical_evidenc
     assert replay.dependency_order == ("node_0", "node_1")
     assert replay.node_outcomes == ("node_0:succeeded", "node_1:succeeded")
     assert replay.terminal_reason == "runtime.workflow_succeeded"
+    assert replay.path_break is None
 
 
 def test_inspect_and_replay_readers_surface_incomplete_evidence_with_watermark_and_missing_refs() -> None:
@@ -188,3 +210,8 @@ def test_inspect_and_replay_readers_surface_incomplete_evidence_with_watermark_a
     assert any(ref.startswith("receipt:receipt:run:workflow.alpha:") for ref in replay.completeness.missing_evidence_refs)
     assert "node:node_0:outcome" in replay.completeness.missing_evidence_refs
     assert "node:node_1:dependency_receipts" in replay.completeness.missing_evidence_refs
+    assert replay.path_break is not None
+    assert replay.path_break.missing_ref == "evidence_seq:12"
+    assert replay.path_break.reason_code == "evidence.sequence_gap"
+    assert replay.path_break.evidence_seq == 12
+    assert replay.path_break.expected == "contiguous canonical evidence sequence"

@@ -269,6 +269,124 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
     }
 
 
+def test_tool_dag_health_reports_projection_freshness_sla(monkeypatch) -> None:
+    from runtime import projection_freshness as projection_freshness_module
+    from runtime.projection_freshness import EVENT_LOG_CURSOR, ProjectionFreshness
+
+    class _FakeConfig:
+        def get_float(self, key: str) -> float:
+            values = {
+                "observability.projection_freshness.warning_staleness_seconds": 300.0,
+                "observability.projection_freshness.critical_staleness_seconds": 900.0,
+            }
+            return values[key]
+
+        def get_int(self, key: str) -> int:
+            values = {
+                "observability.projection_freshness.warning_lag_events": 0,
+                "observability.projection_freshness.critical_lag_events": 100,
+                "health.max_consecutive_failures": 3,
+            }
+            return values[key]
+
+    monkeypatch.setattr(
+        projection_freshness_module,
+        "collect_projection_freshness_sync",
+        lambda _conn: (
+            ProjectionFreshness(
+                projection_id="operator_decisions_current",
+                source_kind=EVENT_LOG_CURSOR,
+                observed_at=datetime(2026, 4, 17, tzinfo=timezone.utc),
+                staleness_seconds=901.0,
+                lag_events=2,
+            ),
+        ),
+    )
+    monkeypatch.setattr(health_tool, "get_registry_config", lambda: _FakeConfig())
+    monkeypatch.setattr(
+        health_tool,
+        "dependency_truth_report",
+        lambda scope="all": {"ok": True, "scope": scope},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "workflow_database_url_for_repo",
+        lambda repo_root, env=None: "postgresql://repo.test/workflow",
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "get_context_cache",
+        lambda: SimpleNamespace(stats=lambda: {"hit_rate": 0.0}),
+    )
+    monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
+    monkeypatch.setattr(
+        health_tool,
+        "query_transport_support",
+        lambda **_kwargs: {
+            "default_provider_slug": "openai",
+            "default_adapter_type": "cli_llm",
+            "support_basis": "provider_execution_registry",
+            "providers": [],
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "get_route_outcomes",
+        lambda: SimpleNamespace(summary=lambda **_kwargs: {"provider_count": 0}),
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "_subs",
+        SimpleNamespace(
+            get_health_mod=lambda: SimpleNamespace(
+                PostgresProbe=lambda db_url: _FakeProbe(("postgres", db_url)),
+                PostgresConnectivityProbe=lambda db_url: _FakeProbe(
+                    ("postgres_connectivity", db_url)
+                ),
+                DiskSpaceProbe=lambda path: _FakeProbe(("disk", path)),
+                ProviderTransportProbe=lambda provider_slug, adapter_type: _FakeProbe(
+                    ("provider_transport", provider_slug, adapter_type)
+                ),
+                PreflightRunner=_FakePreflightRunner,
+            ),
+            get_pg_conn=lambda: "pg-conn",
+            get_operator_panel=lambda: _FakePanel(),
+            get_memory_engine=lambda: None,
+        ),
+    )
+
+    result = health_tool.tool_dag_health({})
+
+    assert result["projection_freshness_sla"]["status"] == "critical"
+    assert result["projection_freshness_sla"]["read_side_circuit_breaker"] == "open"
+    assert result["projection_freshness_sla"]["policy"]["policy_source"] == "platform_config"
+    assert result["projection_freshness_sla"]["alerts"] == [
+        {
+            "projection_id": "operator_decisions_current",
+            "status": "critical",
+            "reason_code": "projection_staleness_seconds_critical",
+            "source_kind": "event_log_cursor",
+            "staleness_seconds": 901.0,
+            "lag_events": 2,
+            "read_side_circuit_breaker": "open",
+        }
+    ]
+
+
 def test_tool_dag_health_enriches_edge_endpoints_with_entity_context(monkeypatch) -> None:
     class _FakeConn:
         def execute(self, sql: str, *args):

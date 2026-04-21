@@ -1765,6 +1765,7 @@ class BugTracker:
             "historical_fixes": packet.get("historical_fixes"),
             "semantic_neighbors": packet.get("semantic_neighbors"),
             "tooling": {"replay": replay_action},
+            "path_break": None,
         }
         run_id = str(replay_context.get("run_id") or "").strip()
         if not replay_context.get("ready") or not run_id:
@@ -1798,6 +1799,7 @@ class BugTracker:
                 "ready": True,
                 "reason_code": "bug.replay_loaded",
                 "replay": replay_view,
+                "path_break": getattr(replay_view, "path_break", None),
             }
         )
         return response

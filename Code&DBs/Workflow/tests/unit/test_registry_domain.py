@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from registry.domain import (
+    RegistryBoundaryError,
     RegistryResolver,
     RuntimeProfileAuthorityRecord,
     WorkspaceAuthorityRecord,
@@ -46,3 +49,23 @@ def test_registry_resolver_resolves_context_bundle_with_explicit_sandbox_profile
     assert runtime_profile.sandbox_profile_ref == "sandbox_profile.alpha"
     assert bundle.sandbox_profile_ref == "sandbox_profile.alpha"
     assert bundle.bundle_payload["runtime_profile"]["sandbox_profile_ref"] == "sandbox_profile.alpha"
+
+
+def test_registry_resolver_fails_closed_when_sandbox_profile_ref_is_missing() -> None:
+    resolver = RegistryResolver(
+        runtime_profile_records={
+            "runtime_profile.alpha": (
+                RuntimeProfileAuthorityRecord(
+                    runtime_profile_ref="runtime_profile.alpha",
+                    model_profile_id="model_profile.alpha",
+                    provider_policy_id="provider_policy.alpha",
+                ),
+            ),
+        },
+    )
+
+    with pytest.raises(RegistryBoundaryError) as exc_info:
+        resolver.resolve_runtime_profile(runtime_profile_ref="runtime_profile.alpha")
+
+    assert exc_info.value.reason_code == "registry.boundary_violation"
+    assert "sandbox_profile_ref missing" in exc_info.value.details

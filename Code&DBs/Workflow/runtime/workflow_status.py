@@ -160,6 +160,62 @@ class WorkflowHistory:
         rows = metrics_view.recent_workflows(limit=limit)
         return tuple(_workflow_result_from_metric_row(row) for row in rows)
 
+    def _recent_workflows_snapshot(
+        self,
+        limit: int = 20,
+    ) -> tuple[tuple["WorkflowResult", ...], dict[str, Any]]:
+        """Return recent workflows plus the authority state used to assemble them."""
+        bounded_limit = max(0, int(limit))
+        if bounded_limit == 0:
+            return (), {
+                "workflow_history_source": "metrics",
+                "workflow_history_status": "complete",
+                "workflow_history_error": None,
+                "metrics_query_failed": False,
+            }
+
+        recent: dict[str, WorkflowResult] = {}
+        metrics_query_failed = False
+        metrics_query_error: str | None = None
+        try:
+            for result in self._recent_workflows_from_metrics(limit=max(bounded_limit, self._max_size)):
+                if result.run_id:
+                    recent[result.run_id] = result
+        except Exception as exc:
+            recent.clear()
+            metrics_query_failed = True
+            metrics_query_error = f"{type(exc).__name__}: {exc}"
+
+        fallback_included = False
+        for result in self._fallback_recent_workflows(limit=self._max_size):
+            if not result.run_id:
+                continue
+            current = recent.get(result.run_id)
+            if current is None or result.finished_at >= current.finished_at:
+                recent[result.run_id] = result
+                fallback_included = True
+
+        ordered = sorted(
+            recent.values(),
+            key=lambda item: (item.finished_at, item.run_id),
+            reverse=True,
+        )
+        if metrics_query_failed:
+            source = "fallback"
+            status = "degraded"
+        elif fallback_included:
+            source = "mixed"
+            status = "mixed"
+        else:
+            source = "metrics"
+            status = "complete"
+        return tuple(ordered[:bounded_limit]), {
+            "workflow_history_source": source,
+            "workflow_history_status": status,
+            "workflow_history_error": metrics_query_error,
+            "metrics_query_failed": metrics_query_failed,
+        }
+
     def recent_workflows(self, limit: int = 20) -> tuple["WorkflowResult", ...]:
         """Return the most recent workflow results, newest-first.
 
@@ -167,35 +223,12 @@ class WorkflowHistory:
         merged in only when it contains newer results that have not yet been
         persisted.
         """
-        bounded_limit = max(0, int(limit))
-        if bounded_limit == 0:
-            return ()
-
-        recent: dict[str, WorkflowResult] = {}
-        try:
-            for result in self._recent_workflows_from_metrics(limit=max(bounded_limit, self._max_size)):
-                if result.run_id:
-                    recent[result.run_id] = result
-        except Exception:
-            recent.clear()
-
-        for result in self._fallback_recent_workflows(limit=self._max_size):
-            if not result.run_id:
-                continue
-            current = recent.get(result.run_id)
-            if current is None or result.finished_at >= current.finished_at:
-                recent[result.run_id] = result
-
-        ordered = sorted(
-            recent.values(),
-            key=lambda item: (item.finished_at, item.run_id),
-            reverse=True,
-        )
-        return tuple(ordered[:bounded_limit])
+        recent, _ = self._recent_workflows_snapshot(limit=limit)
+        return recent
 
     def summary(self) -> dict[str, Any]:
         """Compact summary suitable for CLI / JSON rendering."""
-        recent = self.recent_workflows(limit=self._max_size)
+        recent, snapshot = self._recent_workflows_snapshot(limit=self._max_size)
         total = len(recent)
         succeeded = sum(1 for r in recent if r.status == "succeeded")
         failed = total - succeeded
@@ -233,6 +266,10 @@ class WorkflowHistory:
             "pass_rate": pass_rate,
             "total_cost_usd": round(total_cost, 6),
             "last_5": last_5,
+            "workflow_history_source": snapshot["workflow_history_source"],
+            "workflow_history_status": snapshot["workflow_history_status"],
+            "workflow_history_error": snapshot["workflow_history_error"],
+            "metrics_query_failed": snapshot["metrics_query_failed"],
         }
 
 

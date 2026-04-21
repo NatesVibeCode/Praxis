@@ -56,6 +56,9 @@ class PostgresWebhookRepository:
         signature_algorithm: str,
         target_workflow_id: str | None,
         target_trigger_id: str | None,
+        target_integration_id: str | None,
+        target_integration_action: str | None,
+        target_integration_args: Mapping[str, Any] | None,
         filter_expression: Mapping[str, Any] | None,
         transform_spec: Mapping[str, Any] | None,
         enabled: bool | None,
@@ -72,17 +75,26 @@ class PostgresWebhookRepository:
                     signature_algorithm,
                     target_workflow_id,
                     target_trigger_id,
+                    target_integration_id,
+                    target_integration_action,
+                    target_integration_args,
                     filter_expression,
                     transform_spec,
                     enabled
                 )
                 VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13
                 )
                 ON CONFLICT (slug) DO UPDATE SET
                     provider = EXCLUDED.provider,
                     secret_env_var = EXCLUDED.secret_env_var,
+                    signature_header = EXCLUDED.signature_header,
+                    signature_algorithm = EXCLUDED.signature_algorithm,
                     target_workflow_id = EXCLUDED.target_workflow_id,
+                    target_trigger_id = EXCLUDED.target_trigger_id,
+                    target_integration_id = EXCLUDED.target_integration_id,
+                    target_integration_action = EXCLUDED.target_integration_action,
+                    target_integration_args = EXCLUDED.target_integration_args,
                     filter_expression = EXCLUDED.filter_expression,
                     transform_spec = EXCLUDED.transform_spec,
                     enabled = EXCLUDED.enabled,
@@ -96,6 +108,11 @@ class PostgresWebhookRepository:
                 signature_algorithm or "hmac-sha256",
                 target_workflow_id,
                 target_trigger_id,
+                target_integration_id,
+                target_integration_action,
+                _encode_jsonb(target_integration_args or {}, field_name="target_integration_args")
+                if target_integration_args is not None
+                else None,
                 _encode_jsonb(filter_expression, field_name="filter_expression")
                 if filter_expression is not None
                 else None,

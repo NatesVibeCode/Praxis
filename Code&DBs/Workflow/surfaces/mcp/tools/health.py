@@ -19,6 +19,43 @@ from surfaces._workflow_database import workflow_database_url_for_repo
 from ..subsystems import _subs, REPO_ROOT, workflow_database_env
 from ..helpers import _serialize
 
+
+_PROJECTION_FRESHNESS_WARNING_STALENESS_SECONDS = 300.0
+_PROJECTION_FRESHNESS_CRITICAL_STALENESS_SECONDS = 900.0
+_PROJECTION_FRESHNESS_WARNING_LAG_EVENTS = 0
+_PROJECTION_FRESHNESS_CRITICAL_LAG_EVENTS = 100
+
+
+def _projection_freshness_sla_policy():
+    from runtime.projection_freshness import ProjectionFreshnessSlaPolicy
+
+    try:
+        config = get_registry_config()
+        return ProjectionFreshnessSlaPolicy(
+            warning_staleness_seconds=config.get_float(
+                "observability.projection_freshness.warning_staleness_seconds"
+            ),
+            critical_staleness_seconds=config.get_float(
+                "observability.projection_freshness.critical_staleness_seconds"
+            ),
+            warning_lag_events=config.get_int(
+                "observability.projection_freshness.warning_lag_events"
+            ),
+            critical_lag_events=config.get_int(
+                "observability.projection_freshness.critical_lag_events"
+            ),
+            policy_source="platform_config",
+        )
+    except Exception as exc:
+        return ProjectionFreshnessSlaPolicy(
+            warning_staleness_seconds=_PROJECTION_FRESHNESS_WARNING_STALENESS_SECONDS,
+            critical_staleness_seconds=_PROJECTION_FRESHNESS_CRITICAL_STALENESS_SECONDS,
+            warning_lag_events=_PROJECTION_FRESHNESS_WARNING_LAG_EVENTS,
+            critical_lag_events=_PROJECTION_FRESHNESS_CRITICAL_LAG_EVENTS,
+            policy_source=f"code_default_missing_platform_config:{type(exc).__name__}",
+        )
+
+
 def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     """Run health probes, return preflight + operator snapshot + lane recommendation."""
     hs_mod = _subs.get_health_mod()
@@ -73,12 +110,20 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         content_health = {"status": "error", "reason": str(exc)}
 
     try:
-        from runtime.projection_freshness import collect_projection_freshness_sync
+        from runtime.projection_freshness import (
+            collect_projection_freshness_sync,
+            evaluate_projection_freshness_sla,
+        )
 
         freshness_samples = collect_projection_freshness_sync(_subs.get_pg_conn())
         projection_freshness: Any = [sample.to_json() for sample in freshness_samples]
+        projection_freshness_sla: Any = evaluate_projection_freshness_sla(
+            freshness_samples,
+            policy=_projection_freshness_sla_policy(),
+        ).to_json()
     except Exception as exc:
         projection_freshness = {"status": "error", "reason": str(exc)}
+        projection_freshness_sla = {"status": "error", "reason": str(exc)}
 
     try:
         route_outcomes = get_route_outcomes()
@@ -126,6 +171,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         "content_health": content_health,
         "trend_observability": trend_observability,
         "projection_freshness": projection_freshness,
+        "projection_freshness_sla": projection_freshness_sla,
         "route_outcomes": route_outcomes_summary,
     }
 
@@ -178,7 +224,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Full system health check — Postgres connectivity, disk space, operator panel state, "
                 "workflow lane recommendations, context cache stats, memory graph health, and "
-                "projection freshness (event-log cursors + process-cache refresh lag).\n\n"
+                "projection freshness (event-log cursors + process-cache refresh lag) with SLA alerts "
+                "and a read-side circuit-breaker verdict.\n\n"
                 "USE WHEN: starting a session, things seem broken, or you want to verify the platform "
                 "is ready before launching a workflow. Includes route-outcome health, so you can see "
                 "which provider routes are actually failing. No parameters needed.\n\n"

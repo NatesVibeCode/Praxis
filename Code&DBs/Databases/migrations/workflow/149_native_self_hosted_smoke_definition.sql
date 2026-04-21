@@ -31,7 +31,10 @@ WITH smoke_definition AS (
                     'display_name', 'prepare',
                     'inputs', jsonb_build_object(
                         'task_name', 'prepare',
-                        'input_payload', jsonb_build_object('step', 0)
+                        'input_payload', jsonb_build_object(
+                            'step', 0,
+                            'allow_passthrough_echo', true
+                        )
                     ),
                     'expected_outputs', jsonb_build_object('result', 'prepared'),
                     'success_condition', jsonb_build_object('kind', 'always'),
@@ -53,7 +56,10 @@ WITH smoke_definition AS (
                     'display_name', 'persist',
                     'inputs', jsonb_build_object(
                         'task_name', 'persist',
-                        'input_payload', jsonb_build_object('step', 1)
+                        'input_payload', jsonb_build_object(
+                            'step', 1,
+                            'allow_passthrough_echo', true
+                        )
                     ),
                     'expected_outputs', jsonb_build_object('result', 'persisted'),
                     'success_condition', jsonb_build_object('kind', 'always'),
@@ -125,7 +131,10 @@ WITH smoke_definition AS (
             'display_name', 'prepare',
             'inputs', jsonb_build_object(
                 'task_name', 'prepare',
-                'input_payload', jsonb_build_object('step', 0)
+                'input_payload', jsonb_build_object(
+                    'step', 0,
+                    'allow_passthrough_echo', true
+                )
             ),
             'expected_outputs', jsonb_build_object('result', 'prepared'),
             'success_condition', jsonb_build_object('kind', 'always'),
@@ -147,7 +156,10 @@ WITH smoke_definition AS (
             'display_name', 'persist',
             'inputs', jsonb_build_object(
                 'task_name', 'persist',
-                'input_payload', jsonb_build_object('step', 1)
+                'input_payload', jsonb_build_object(
+                    'step', 1,
+                    'allow_passthrough_echo', true
+                )
             ),
             'expected_outputs', jsonb_build_object('result', 'persisted'),
             'success_condition', jsonb_build_object('kind', 'always'),

@@ -28,9 +28,10 @@ _conn = None
 _ready_database_url: str | None = None
 _ready_lock = threading.Lock()
 _AUTHORITY_UNAVAILABLE = "postgres.authority_unavailable"
+_CONFIG_MISSING = "postgres.config_missing"
 _DEFAULT_TEST_DATABASE = "praxis_test"
+_TEST_DATABASE_URL_ENV = "WORKFLOW_TEST_DATABASE_URL"
 _DEFAULT_TEST_DATABASE_URL = f"postgresql://postgres@localhost:5432/{_DEFAULT_TEST_DATABASE}"
-_DEFAULT_ADMIN_DATABASE_URL = "postgresql://postgres@localhost:5432/postgres"
 
 
 def _database_name_from_url(database_url: str) -> str:
@@ -38,10 +39,16 @@ def _database_name_from_url(database_url: str) -> str:
     return parsed.path.lstrip("/") or _DEFAULT_TEST_DATABASE
 
 
-def _admin_database_url_for(database_url: str) -> str:
+def _replace_database_name(database_url: str, database_name: str) -> str:
     parsed = urlsplit(database_url)
-    admin_path = "/postgres"
-    return urlunsplit((parsed.scheme, parsed.netloc, admin_path, parsed.query, parsed.fragment))
+    database_path = f"/{database_name}"
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, database_path, parsed.query, parsed.fragment)
+    )
+
+
+def _admin_database_url_for(database_url: str) -> str:
+    return _replace_database_name(database_url, "postgres")
 
 
 async def _probe_database(database_url: str) -> None:
@@ -74,10 +81,26 @@ async def _create_database_if_missing(*, admin_database_url: str, database_name:
 
 
 def _default_test_database_url() -> str:
+    from runtime._workflow_database import resolve_runtime_database_url
     from storage.postgres.connection import resolve_workflow_database_url
 
+    explicit_test_url = os.environ.get(_TEST_DATABASE_URL_ENV)
+    if isinstance(explicit_test_url, str) and explicit_test_url.strip():
+        return resolve_workflow_database_url(
+            env={"WORKFLOW_DATABASE_URL": explicit_test_url.strip()},
+        )
+    runtime_database_url = resolve_runtime_database_url(required=True)
+    if not runtime_database_url:
+        return resolve_workflow_database_url(
+            env={"WORKFLOW_DATABASE_URL": _DEFAULT_TEST_DATABASE_URL},
+        )
     return resolve_workflow_database_url(
-        env={"WORKFLOW_DATABASE_URL": _DEFAULT_TEST_DATABASE_URL},
+        env={
+            "WORKFLOW_DATABASE_URL": _replace_database_name(
+                runtime_database_url,
+                _DEFAULT_TEST_DATABASE,
+            )
+        },
     )
 
 
@@ -162,7 +185,11 @@ def _get_pool():
 
 def _skip_for_unavailable_authority(exc: BaseException) -> None:
     reason_code = getattr(exc, "reason_code", "")
-    if reason_code != _AUTHORITY_UNAVAILABLE:
+    unavailable = reason_code in {_AUTHORITY_UNAVAILABLE, _CONFIG_MISSING}
+    if isinstance(exc, asyncpg.InvalidAuthorizationSpecificationError):
+        unavailable = True
+        reason_code = reason_code or "postgres.invalid_authorization"
+    if not unavailable:
         return
     import pytest
 

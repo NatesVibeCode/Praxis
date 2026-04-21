@@ -29,7 +29,10 @@ WITH smoke_definition AS (
                         'task_name', 'prepare',
                         'provider_slug', 'openai',
                         'model_slug', 'gpt-5.4-mini',
-                        'input_payload', jsonb_build_object('step', 0)
+                        'input_payload', jsonb_build_object(
+                            'step', 0,
+                            'allow_passthrough_echo', true
+                        )
                     ),
                     'expected_outputs', jsonb_build_object('result', 'prepared'),
                     'success_condition', jsonb_build_object('kind', 'always'),
@@ -53,7 +56,10 @@ WITH smoke_definition AS (
                         'task_name', 'persist',
                         'provider_slug', 'openai',
                         'model_slug', 'gpt-5.4-mini',
-                        'input_payload', jsonb_build_object('step', 1)
+                        'input_payload', jsonb_build_object(
+                            'step', 1,
+                            'allow_passthrough_echo', true
+                        )
                     ),
                     'expected_outputs', jsonb_build_object('result', 'persisted'),
                     'success_condition', jsonb_build_object('kind', 'always'),
@@ -98,7 +104,10 @@ WITH smoke_nodes AS (
                 'task_name', 'prepare',
                 'provider_slug', 'openai',
                 'model_slug', 'gpt-5.4-mini',
-                'input_payload', jsonb_build_object('step', 0)
+                'input_payload', jsonb_build_object(
+                    'step', 0,
+                    'allow_passthrough_echo', true
+                )
             )
         ),
         jsonb_build_object(
@@ -107,7 +116,10 @@ WITH smoke_nodes AS (
                 'task_name', 'persist',
                 'provider_slug', 'openai',
                 'model_slug', 'gpt-5.4-mini',
-                'input_payload', jsonb_build_object('step', 1)
+                'input_payload', jsonb_build_object(
+                    'step', 1,
+                    'allow_passthrough_echo', true
+                )
             )
         )
     ) AS nodes

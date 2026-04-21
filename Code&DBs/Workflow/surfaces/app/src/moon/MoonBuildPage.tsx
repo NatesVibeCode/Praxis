@@ -1097,7 +1097,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
               : item.source === 'integration' && item.connectionStatus && item.connectionStatus !== 'connected'
                 ? item.connectionStatus
                 : truth.badge,
-            icon: <MoonGlyph type={item.icon} size={16} color={item.status === 'ready' ? 'currentColor' : '#8b949e'} />,
+            icon: <MoonGlyph type={item.icon} size={16} color={item.status === 'ready' ? 'currentColor' : 'var(--moon-status-idle)'} />,
             onSelect: () => handleTriggerSelect(item),
           };
         }),
@@ -1291,6 +1291,20 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     setCenterWidth(el.clientWidth);
     return () => ro.disconnect();
   }, []);
+
+  // Pan the canvas so the selected node is centered in the viewport.
+  const focusedNodeId = state.viewMode === 'run' ? state.selectedRunJobId : state.selectedNodeId;
+  useEffect(() => {
+    const container = centerRef.current;
+    if (!container || !focusedNodeId) return;
+    const el = container.querySelector<HTMLElement>(`[data-drop-node="${CSS.escape(focusedNodeId)}"]`);
+    if (!el) return;
+    const cRect = container.getBoundingClientRect();
+    const nRect = el.getBoundingClientRect();
+    const targetLeft = container.scrollLeft + (nRect.left + nRect.width / 2) - (cRect.left + cRect.width / 2);
+    const targetTop = container.scrollTop + (nRect.top + nRect.height / 2) - (cRect.top + cRect.height / 2);
+    container.scrollTo({ left: targetLeft, top: targetTop, behavior: 'smooth' });
+  }, [focusedNodeId, centerWidth]);
 
   // Translate chain so active node sits at visual center of container
   // Use 50% CSS fallback when JS measurement isn't ready yet

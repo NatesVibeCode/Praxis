@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { MoonGlyph } from './MoonGlyph';
+import { MoonPickerInput } from './MoonPickers';
 
 interface IntegrationRow {
   id: string;
@@ -310,12 +311,15 @@ export function MoonIntegrationsPanel() {
               />
 
               <label className="moon-dock-form__label" htmlFor="integrations-provider">Provider</label>
-              <input
+              <MoonPickerInput
                 id="integrations-provider"
-                className="moon-dock-form__input"
-                placeholder="http"
                 value={draft.provider}
-                onChange={(e) => setDraft((d) => ({ ...d, provider: e.target.value }))}
+                onChange={(next) => setDraft((d) => ({ ...d, provider: next }))}
+                placeholder="Choose a provider (http, stripe, slack, …)"
+                suggestionsUrl="/api/moon/pickers/integration-providers"
+                suggestionsKey="providers"
+                hint="Picking a known provider lets Moon apply the right auth shape and request defaults."
+                ariaLabel="Integration provider"
               />
 
               <div className="moon-dock__section-label" style={{ marginTop: 16 }}>Capabilities</div>

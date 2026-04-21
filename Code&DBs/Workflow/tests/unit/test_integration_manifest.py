@@ -18,6 +18,7 @@ from runtime.integration_manifest import (
     build_manifest_handler,
     load_manifests,
     manifest_to_registry_row,
+    resolve_token,
 )
 
 
@@ -176,6 +177,40 @@ class TestRegistryRow:
     def test_endpoint_templates_dict(self, manifest):
         row = manifest_to_registry_row(manifest)
         assert row["endpoint_templates"]["send"] == "https://api.example.com/send"
+
+
+# ---------------------------------------------------------------------------
+# Token resolution
+# ---------------------------------------------------------------------------
+
+class TestTokenResolution:
+    def test_resolve_token_does_not_fall_back_to_env_when_credential_ref_fails(self, monkeypatch):
+        monkeypatch.setattr(
+            "adapters.credentials.resolve_credential",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("credential_ref failed")),
+        )
+        monkeypatch.setattr(
+            "adapters.keychain.resolve_secret",
+            lambda *_args, **_kwargs: "env-token",
+        )
+
+        assert resolve_token(
+            {"credential_ref": "secret.demo.connector", "env_var": "TEST_API_KEY"},
+            pg=object(),
+            integration_id="demo-int",
+        ) is None
+
+    def test_resolve_token_still_uses_env_var_auth_when_no_credential_ref(self, monkeypatch):
+        monkeypatch.setattr(
+            "adapters.keychain.resolve_secret",
+            lambda *_args, **_kwargs: "env-token",
+        )
+
+        assert resolve_token(
+            {"env_var": "TEST_API_KEY"},
+            pg=object(),
+            integration_id="demo-int",
+        ) == "env-token"
 
 
 # ---------------------------------------------------------------------------

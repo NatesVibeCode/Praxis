@@ -1,9 +1,10 @@
 """Secret resolution with cross-platform support.
 
 Resolution order:
-  1. .env file (repo root)
-  2. macOS Keychain (service=praxis, account=<env_var_name>) — Darwin only
-  3. os.environ[<env_var_name>]
+  1. explicit env mapping, when supplied by a caller
+  2. macOS Keychain (account=praxis, service=<env_var_name>) — Darwin only
+  3. environment variable
+  4. .env file (repo root)
 
 To store a secret on macOS:
     security add-generic-password -U -a praxis -s <ENV_VAR_NAME> -w <secret_value>
@@ -142,21 +143,16 @@ def _keychain_available() -> bool:
 
 
 def resolve_secret(env_var_name: str, *, env: dict[str, str] | None = None) -> str | None:
-    """Resolve a secret: .env → Keychain → environment variable.
+    """Resolve a secret: explicit env → Keychain → environment → .env.
 
     This is the standard resolution function — use this instead of
     raw os.environ.get() for any secret/API key lookup.
     """
+    # 1. Explicit caller-provided env mapping.
     if env is not None:
         explicit_value = env.get(env_var_name, "").strip()
         if explicit_value:
             return explicit_value
-
-    # 1. .env file
-    dotenv = _load_dotenv()
-    value = dotenv.get(env_var_name, "").strip()
-    if value:
-        return value
 
     # 2. macOS Keychain
     if _keychain_available():
@@ -167,6 +163,12 @@ def resolve_secret(env_var_name: str, *, env: dict[str, str] | None = None) -> s
     # 3. Environment variable
     source = env if env is not None else os.environ
     value = source.get(env_var_name, "").strip()
+    if value:
+        return value
+
+    # 4. .env file
+    dotenv = _load_dotenv()
+    value = dotenv.get(env_var_name, "").strip()
     return value or None
 
 
@@ -175,7 +177,7 @@ def require_secret(env_var_name: str) -> str:
     value = resolve_secret(env_var_name)
     if not value:
         raise RuntimeError(
-            f"{env_var_name} not found. Set it in .env, environment, "
-            f"or macOS Keychain (service=praxis)"
+            f"{env_var_name} not found. Set it in macOS Keychain "
+            f"(account=praxis, service={env_var_name}), environment, or .env"
         )
     return value

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from adapters.keychain import resolve_secret
 from registry.provider_execution_registry import get_profile, resolve_default_adapter_type, supports_adapter
 from runtime._workflow_database import resolve_runtime_database_url
 from storage.postgres import PostgresConfigurationError, ensure_postgres_available
@@ -178,10 +179,11 @@ def _native_transport_ready_refs(
     if adapter_type == "llm_task":
         if not profile.api_endpoint or not profile.api_protocol_family:
             return None
+        secret_env = dict(os.environ)
         present_keys = tuple(
             env_name
             for env_name in profile.api_key_env_vars
-            if os.environ.get(env_name, "").strip()
+            if resolve_secret(env_name, env=secret_env)
         )
         if not present_keys:
             return None

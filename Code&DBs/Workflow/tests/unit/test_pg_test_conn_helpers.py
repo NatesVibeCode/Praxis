@@ -5,6 +5,7 @@ import pytest
 
 import storage.postgres as storage_postgres
 import storage.postgres.connection as pg_connection
+import runtime._workflow_database as runtime_db
 from storage.postgres.validators import PostgresConfigurationError
 
 
@@ -52,6 +53,41 @@ def test_resolve_test_env_bootstraps_default_database_when_runtime_override_blan
     env = pg_test_conn._resolve_test_env()
 
     assert env["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis_test"
+
+
+def test_default_test_database_url_derives_from_runtime_authority(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("WORKFLOW_TEST_DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        runtime_db,
+        "resolve_runtime_database_url",
+        lambda required=True: "postgresql://nate@localhost:5432/praxis?sslmode=disable",
+    )
+
+    assert (
+        pg_test_conn._default_test_database_url()
+        == "postgresql://nate@localhost:5432/praxis_test?sslmode=disable"
+    )
+
+
+def test_default_test_database_url_honors_explicit_test_authority(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "WORKFLOW_TEST_DATABASE_URL",
+        "postgresql://tester@localhost:5432/custom_test",
+    )
+    monkeypatch.setattr(
+        runtime_db,
+        "resolve_runtime_database_url",
+        lambda required=True: "postgresql://nate@localhost:5432/praxis",
+    )
+
+    assert (
+        pg_test_conn._default_test_database_url()
+        == "postgresql://tester@localhost:5432/custom_test"
+    )
 
 
 def test_transactional_test_conn_closes_connection(monkeypatch) -> None:

@@ -7,6 +7,7 @@ from registry.native_runtime_profile_sync import (
     _default_live_budget_window,
     _default_sync_conn,
     _latest_budget_window_sync,
+    _native_transport_ready_refs,
     _upsert_profile_authority_rows_sync,
 )
 from registry.runtime_profile_admission import _effective_provider_policy_name
@@ -81,7 +82,9 @@ def test_effective_provider_policy_name_defers_to_provider_refs_when_present() -
     )
 
 
-def test_native_transport_ready_degraded_candidate_is_admitted_for_native_profile(monkeypatch) -> None:
+def test_native_transport_ready_degraded_candidate_is_admitted_for_native_profile(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         "registry.runtime_profile_admission.is_native_runtime_profile_ref",
         lambda runtime_profile_ref: runtime_profile_ref == "praxis",
@@ -145,3 +148,33 @@ def test_default_sync_conn_uses_runtime_database_authority(monkeypatch) -> None:
         "WORKFLOW_DATABASE_URL": "postgresql://127.0.0.1:5432/praxis",
     }
     assert conn == captured["env"]
+
+
+def test_native_transport_ready_refs_uses_canonical_secret_resolver(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "registry.native_runtime_profile_sync.resolve_default_adapter_type",
+        lambda provider_slug: "llm_task",
+    )
+    monkeypatch.setattr(
+        "registry.native_runtime_profile_sync.supports_adapter",
+        lambda provider_slug, adapter_type: True,
+    )
+    monkeypatch.setattr(
+        "registry.native_runtime_profile_sync.get_profile",
+        lambda provider_slug: SimpleNamespace(
+            api_endpoint="https://api.openai.com/v1",
+            api_protocol_family="openai_responses",
+            api_key_env_vars=("OPENAI_API_KEY",),
+        ),
+    )
+    monkeypatch.setattr(
+        "registry.native_runtime_profile_sync.resolve_secret",
+        lambda env_name, env=None: (
+            "resolved-from-keychain" if env_name == "OPENAI_API_KEY" else None
+        ),
+    )
+
+    assert _native_transport_ready_refs("openai") == (
+        "transport:llm_task",
+        "env:OPENAI_API_KEY",
+    )

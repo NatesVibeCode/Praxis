@@ -46,6 +46,7 @@ from .read_models import (
     GraphTopologyReadModel,
     ProjectionCompleteness,
     ProjectionWatermark,
+    ReplayPathBreak,
 )
 from .readers import inspect_run, replay_run
 
@@ -161,6 +162,29 @@ def _format_optional_text(value: str | None) -> str:
 
 def _format_optional_int(value: int | None) -> str:
     return "-" if value is None else str(value)
+
+
+def _append_replay_path_break_lines(
+    lines: list[str],
+    *,
+    prefix: str,
+    path_break: ReplayPathBreak | None,
+) -> None:
+    if path_break is None:
+        lines.append(f"{prefix}: -")
+        return
+    lines.extend(
+        [
+            f"{prefix}.reason_code: {path_break.reason_code}",
+            f"{prefix}.missing_ref: {path_break.missing_ref}",
+            f"{prefix}.break_kind: {path_break.break_kind}",
+            f"{prefix}.transition_seq: {_format_optional_int(path_break.transition_seq)}",
+            f"{prefix}.node_id: {_format_optional_text(path_break.node_id)}",
+            f"{prefix}.evidence_seq: {_format_optional_int(path_break.evidence_seq)}",
+            f"{prefix}.expected: {_format_optional_text(path_break.expected)}",
+            f"{prefix}.observed: {_format_optional_text(path_break.observed)}",
+        ]
+    )
 
 
 def _node_id(kind: str, canonical_ref: str) -> str:
@@ -1926,6 +1950,7 @@ class NativeCutoverScoreboardReadModel:
     completeness: ProjectionCompleteness
     readiness_state: str
     readiness_reason: str | None
+    replay_path_break: ReplayPathBreak | None = None
 
 
 def _receipt_snapshot(
@@ -2114,6 +2139,7 @@ def cutover_scoreboard_run(
             ),
         ),
         readiness_reason=_readiness_reason(missing_refs),
+        replay_path_break=replay_view.path_break,
     )
 
 
@@ -2138,6 +2164,11 @@ def render_cutover_scoreboard(view: NativeCutoverScoreboardReadModel) -> str:
             f"readiness.state: {view.readiness_state}",
             f"readiness.reason: {_format_optional_text(view.readiness_reason)}",
         ]
+    )
+    _append_replay_path_break_lines(
+        lines,
+        prefix="replay_path_break",
+        path_break=view.replay_path_break,
     )
 
     lines.extend(
