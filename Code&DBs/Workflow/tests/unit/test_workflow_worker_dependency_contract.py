@@ -7,6 +7,36 @@ from surfaces.cli.commands import workflow as workflow_commands
 from runtime import workflow_worker
 
 
+def test_worker_concurrency_env_override_wins(monkeypatch) -> None:
+    monkeypatch.setattr(worker_loop, "_worker_cpu_count", lambda: 8)
+    monkeypatch.setattr(
+        worker_loop,
+        "_worker_available_memory_bytes",
+        lambda: 6 * 1024**3,
+    )
+
+    decision = worker_loop.resolve_worker_concurrency({"PRAXIS_WORKER_MAX_PARALLEL": "3"})
+
+    assert decision["max_concurrent"] == 3
+    assert decision["source"] == "env:PRAXIS_WORKER_MAX_PARALLEL"
+    assert decision["cpu_count"] == 8
+
+
+def test_worker_concurrency_auto_balances_cpu_and_memory(monkeypatch) -> None:
+    monkeypatch.setattr(worker_loop, "_worker_cpu_count", lambda: 6)
+    monkeypatch.setattr(
+        worker_loop,
+        "_worker_available_memory_bytes",
+        lambda: 5 * 1024**3,
+    )
+
+    decision = worker_loop.resolve_worker_concurrency({})
+
+    assert decision["max_concurrent"] == 2
+    assert decision["source"] == "resource:auto"
+    assert decision["memory_slot_bytes"] == 2 * 1024**3
+
+
 def test_start_worker_checks_dependency_contract_before_launch(monkeypatch) -> None:
     observed: dict[str, object] = {}
 
@@ -81,14 +111,16 @@ def test_queue_worker_command_uses_extracted_worker_loop(monkeypatch) -> None:
     monkeypatch.setattr(
         worker_loop,
         "run_worker_loop",
-        lambda conn, repo_root, *, poll_interval=2.0, worker_id=None, max_local_concurrent=4: observed.update(
-            {
-                "conn": conn,
-                "repo_root": repo_root,
-                "poll_interval": poll_interval,
-                "worker_id": worker_id,
-                "max_local_concurrent": max_local_concurrent,
-            }
+        lambda conn, repo_root, *, poll_interval=2.0, worker_id=None, max_local_concurrent=4: (
+            observed.update(
+                {
+                    "conn": conn,
+                    "repo_root": repo_root,
+                    "poll_interval": poll_interval,
+                    "worker_id": worker_id,
+                    "max_local_concurrent": max_local_concurrent,
+                }
+            )
         ),
     )
     stdout = StringIO()
@@ -101,3 +133,49 @@ def test_queue_worker_command_uses_extracted_worker_loop(monkeypatch) -> None:
     assert observed["poll_interval"] == 0.25
     assert observed["max_local_concurrent"] == 3
     assert str(observed["worker_id"]).startswith("workflow-worker-")
+
+
+def test_queue_worker_command_uses_resource_concurrency_when_unset(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(workflow_commands, "_workflow_runtime_conn", lambda: "fake-conn")
+    monkeypatch.setattr(
+        worker_loop,
+        "resolve_worker_concurrency",
+        lambda: {
+            "max_concurrent": 2,
+            "source": "resource:auto",
+            "cpu_count": 4,
+            "available_memory_bytes": 5 * 1024**3,
+            "memory_slot_bytes": 2 * 1024**3,
+        },
+    )
+    monkeypatch.setattr(
+        worker_loop,
+        "run_worker_loop",
+        lambda conn, repo_root, *, poll_interval=2.0, worker_id=None, max_local_concurrent=None: (
+            observed.update(
+                {
+                    "conn": conn,
+                    "repo_root": repo_root,
+                    "poll_interval": poll_interval,
+                    "worker_id": worker_id,
+                    "max_local_concurrent": max_local_concurrent,
+                }
+            )
+        ),
+    )
+    stdout = StringIO()
+
+    assert (
+        workflow_commands._queue_command(
+            ["worker", "--poll-interval", "0.25"],
+            stdout=stdout,
+        )
+        == 0
+    )
+    assert observed["conn"] == "fake-conn"
+    assert observed["poll_interval"] == 0.25
+    assert observed["max_local_concurrent"] is None
+    assert '"max_concurrent": 2' in stdout.getvalue()
+    assert '"concurrency_source": "resource:auto"' in stdout.getvalue()

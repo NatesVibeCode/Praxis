@@ -39,6 +39,7 @@ from storage.postgres.schema import (
     bootstrap_workflow_schema,
     inspect_control_plane_schema,
     inspect_workflow_schema,
+    workflow_migration_audit,
 )
 from storage.postgres.validators import PostgresConfigurationError, PostgresStorageError
 from surfaces.cli._db import cli_sync_conn
@@ -119,6 +120,7 @@ async def _schema_status_payload(*, scope: str) -> dict[str, Any]:
                 ],
             }
         readiness = await inspect_workflow_schema(conn)
+        migration_audit = await workflow_migration_audit(conn)
         return {
             "scope": scope,
             "bootstrapped": readiness.is_bootstrapped,
@@ -133,6 +135,13 @@ async def _schema_status_payload(*, scope: str) -> dict[str, Any]:
                     for item in objects
                 ]
                 for filename, objects in readiness.missing_by_migration.items()
+            },
+            "migration_audit": {
+                "declared_count": len(migration_audit.declared),
+                "applied_count": len(migration_audit.applied),
+                "missing": list(migration_audit.missing),
+                "drifted": [row.filename for row in migration_audit.drifted],
+                "extra": [row.filename for row in migration_audit.extra],
             },
         }
     finally:
@@ -248,7 +257,13 @@ def _schema_command(args: list[str], *, stdout: TextIO) -> int:
             payload = asyncio.run(_schema_status_payload(scope=scope))
         elif action == "plan":
             payload = asyncio.run(_schema_status_payload(scope=scope))
-            payload["pending_migrations"] = sorted(payload.get("missing_by_migration", {}).keys())
+            migration_audit = payload.get("migration_audit") or {}
+            payload["pending_migrations"] = sorted(
+                {
+                    *payload.get("missing_by_migration", {}).keys(),
+                    *migration_audit.get("missing", ()),
+                }
+            )
         elif action == "apply":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)

@@ -103,6 +103,19 @@ def _control_readiness(*, bootstrapped: bool) -> postgres_schema.ControlPlaneSch
     )
 
 
+def _migration_audit(
+    *,
+    missing: tuple[str, ...] = (),
+) -> postgres_schema.WorkflowMigrationAudit:
+    return postgres_schema.WorkflowMigrationAudit(
+        declared=missing,
+        applied=(),
+        missing=missing,
+        drifted=(),
+        extra=(),
+    )
+
+
 def test_platform_config_rows_are_schema_readiness_authority() -> None:
     assert postgres_schema._ROW_EXPECTATION_KEY_COLUMNS["platform_config"] == "config_key"
 
@@ -118,6 +131,11 @@ def test_bootstrap_workflow_schema_skips_advisory_lock_when_schema_is_ready(
         return _readiness(bootstrapped=True)
 
     monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(0, result=_migration_audit()),
+    )
 
     asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
 
@@ -125,6 +143,44 @@ def test_bootstrap_workflow_schema_skips_advisory_lock_when_schema_is_ready(
     assert conn.executed == []
     assert conn.transaction_entries == 0
     assert conn.transaction_exits == 0
+
+
+def test_bootstrap_workflow_schema_applies_missing_zero_object_migrations(
+    monkeypatch,
+) -> None:
+    conn = _FakeAsyncConn()
+    applied: list[str] = []
+
+    async def _bootstrap_migration(_conn, filename: str) -> None:
+        applied.append(filename)
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_workflow_schema",
+        lambda _conn: asyncio.sleep(0, result=_readiness(bootstrapped=True)),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_audit",
+        lambda _conn: asyncio.sleep(
+            0,
+            result=_migration_audit(
+                missing=("198_remove_unbacked_anthropic_haiku_runtime_model.sql",)
+            ),
+        ),
+    )
+    monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
+    monkeypatch.setattr(
+        postgres_schema,
+        "_acquire_schema_bootstrap_lock",
+        lambda _conn: asyncio.sleep(0, result=0.0),
+    )
+
+    asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
+
+    assert conn.transaction_entries == 1
+    assert conn.transaction_exits == 1
+    assert applied == ["198_remove_unbacked_anthropic_haiku_runtime_model.sql"]
 
 
 def test_bootstrap_workflow_schema_locks_and_applies_only_missing_migrations(

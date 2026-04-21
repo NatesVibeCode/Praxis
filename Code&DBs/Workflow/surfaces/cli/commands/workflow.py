@@ -2202,7 +2202,7 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
     list [--status pending] [--limit 50]
         List queued jobs, optionally filtered by status.
 
-    worker [--max-concurrent 4] [--poll-interval 2.0] [--capabilities a,b]
+    worker [--max-concurrent N] [--poll-interval 2.0] [--capabilities a,b]
         Start the workflow worker that polls and executes jobs.
 
     cancel <job_id>
@@ -2218,7 +2218,7 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
             "  submit <spec.json> [--priority N] [--max-attempts N]\n"
             "  stats\n"
             "  list [--status pending] [--limit 50]\n"
-            "  worker [--max-concurrent 4] [--poll-interval 2.0] [--capabilities a,b]\n"
+            "  worker [--max-concurrent N] [--poll-interval 2.0] [--capabilities a,b]\n"
             "  cancel <job_id>\n"
         )
         return 2
@@ -2396,7 +2396,7 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
         return 0
 
     if subcommand == "worker":
-        max_concurrent = 4
+        max_concurrent: int | None = None
         poll_interval = 2.0
         capabilities: list[str] | None = None
 
@@ -2408,6 +2408,11 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
                 except ValueError:
                     stdout.write(
                         f"error: --max-concurrent must be an integer, got: {sub_args[i + 1]}\n"
+                    )
+                    return 2
+                if max_concurrent < 1:
+                    stdout.write(
+                        f"error: --max-concurrent must be a positive integer, got: {sub_args[i + 1]}\n"
                     )
                     return 2
                 i += 2
@@ -2427,7 +2432,23 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
                 stdout.write(f"error: unknown argument: {sub_args[i]}\n")
                 return 2
 
-        from runtime.workflow._worker_loop import run_worker_loop
+        from runtime.workflow._worker_loop import resolve_worker_concurrency, run_worker_loop
+
+        try:
+            concurrency_decision = (
+                {
+                    "max_concurrent": max_concurrent,
+                    "source": "cli",
+                    "cpu_count": None,
+                    "available_memory_bytes": None,
+                    "memory_slot_bytes": None,
+                }
+                if max_concurrent is not None
+                else resolve_worker_concurrency()
+            )
+        except ValueError as exc:
+            stdout.write(f"error: {exc}\n")
+            return 2
 
         conn = _workflow_runtime_conn()
         worker_id = f"workflow-worker-{os.getpid()}"
@@ -2435,7 +2456,11 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
             _json.dumps(
                 {
                     "worker_id": worker_id,
-                    "max_concurrent": max_concurrent,
+                    "max_concurrent": concurrency_decision["max_concurrent"],
+                    "concurrency_source": concurrency_decision["source"],
+                    "cpu_count": concurrency_decision["cpu_count"],
+                    "available_memory_bytes": concurrency_decision["available_memory_bytes"],
+                    "memory_slot_bytes": concurrency_decision["memory_slot_bytes"],
                     "poll_interval_s": poll_interval,
                     "capabilities": capabilities,
                     "status": "starting",

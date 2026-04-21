@@ -7,6 +7,7 @@ from registry.native_runtime_profile_sync import (
     _default_live_budget_window,
     _default_sync_conn,
     _latest_budget_window_sync,
+    _live_candidates_sync,
     _native_transport_ready_refs,
     _upsert_profile_authority_rows_sync,
 )
@@ -101,6 +102,35 @@ def test_native_transport_ready_degraded_candidate_is_admitted_for_native_profil
         reason_code="provider_disabled",
         source_window_refs=["transport:cli_llm", "binary:/usr/local/bin/codex"],
     ) is False
+
+
+def test_live_candidates_filter_by_provider_slug_not_display_name() -> None:
+    class _CandidateConn:
+        def execute(self, query: str, *args: object) -> list[dict[str, object]]:
+            assert "candidate.provider_slug = ANY" in query
+            assert args[0] == ["anthropic"]
+            return [
+                {
+                    "candidate_ref": "candidate.anthropic.cli.claude-sonnet-4-6",
+                    "provider_ref": "provider.anthropic",
+                    "provider_name": "Anthropic (CLI)",
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-sonnet-4-6",
+                    "priority": 10,
+                }
+            ]
+
+    candidates = _live_candidates_sync(
+        _CandidateConn(),
+        _config(
+            provider_name="anthropic",
+            provider_names=("anthropic",),
+            allowed_models=("claude-sonnet-4-6",),
+        ),
+    )
+
+    assert candidates[0].provider_name == "Anthropic (CLI)"
+    assert candidates[0].provider_slug == "anthropic"
 
 
 def test_latest_budget_window_sync_synthesizes_default_when_missing() -> None:

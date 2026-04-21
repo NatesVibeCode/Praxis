@@ -209,16 +209,22 @@ def build_platform_context(repo_root: str) -> str:
     """
     try:
         from runtime._workflow_database import resolve_runtime_database_url
+        from runtime.primitive_contracts import redact_url
 
         database_url = str(resolve_runtime_database_url(required=False) or "unavailable")
+        database_ref = (
+            "unavailable"
+            if database_url == "unavailable"
+            else (redact_url(database_url) or "<configured>")
+        )
     except Exception:
-        database_url = "unavailable"
+        database_ref = "unavailable"
     return (
         "--- PLATFORM CONTEXT ---\n"
         f"Host repo root (persistence/output authority): {repo_root}\n"
         "Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as /workspace.\n"
         "Use the live command workspace for shell commands and relative paths; do not assume the host repo path exists inside the sandbox.\n"
-        f"Database: {database_url}\n"
+        f"Database: {database_ref}\n"
         "--- END PLATFORM CONTEXT ---"
     )
 

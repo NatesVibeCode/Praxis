@@ -201,7 +201,8 @@
     "194_projection_freshness_sla_config.sql",
     "195_operator_ideas_authority.sql",
     "196_workflow_control_commands_view.sql",
-    "197_no_synthetic_provider_auth.sql"
+    "197_no_synthetic_provider_auth.sql",
+    "198_remove_unbacked_anthropic_haiku_runtime_model.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5037,7 +5038,8 @@
         "object_name": "workflow_control_commands"
       }
     ],
-    "197_no_synthetic_provider_auth.sql": []
+    "197_no_synthetic_provider_auth.sql": [],
+    "198_remove_unbacked_anthropic_haiku_runtime_model.sql": []
   },
   "policy_buckets": {
     "canonical": [
@@ -5242,7 +5244,8 @@
       "194_projection_freshness_sla_config.sql",
       "195_operator_ideas_authority.sql",
       "196_workflow_control_commands_view.sql",
-      "197_no_synthetic_provider_auth.sql"
+      "197_no_synthetic_provider_auth.sql",
+      "198_remove_unbacked_anthropic_haiku_runtime_model.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

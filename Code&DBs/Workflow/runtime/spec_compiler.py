@@ -541,17 +541,19 @@ def compile_prompt_launch_spec(
         "system_prompt": system_prompt,
         "task_type": task_type,
     }
-    definition_revision = f"def_{stable_hash({
-        'graph_runtime_submit': True,
-        'phase': 'execute',
-        'jobs': [launch_job],
-    })[:16]}"
-    plan_revision = f"plan_{stable_hash({
-        'definition_revision': definition_revision,
-        'graph_runtime_submit': True,
-        'phase': 'execute',
-        'jobs': [launch_job],
-    })[:16]}"
+    definition_payload = {
+        "graph_runtime_submit": True,
+        "phase": "execute",
+        "jobs": [launch_job],
+    }
+    definition_revision = f"def_{stable_hash(definition_payload)[:16]}"
+    plan_payload = {
+        "definition_revision": definition_revision,
+        "graph_runtime_submit": True,
+        "phase": "execute",
+        "jobs": [launch_job],
+    }
+    plan_revision = f"plan_{stable_hash(plan_payload)[:16]}"
     packet_provenance = {
         "source_kind": "prompt_launch",
         "definition_row": {"definition_revision": definition_revision},

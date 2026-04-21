@@ -17,14 +17,14 @@ For fresh clones:
 ./scripts/bootstrap
 ```
 
-This script is idempotent. It creates `.env` when no repo DB authority exists, creates the target Postgres database, enables `pgvector`, creates `.venv`, installs dependencies, symlinks `scripts/praxis` into `~/.local/bin`, runs `db-bootstrap` (full migration set plus fresh-install authority seed), starts the REST API, and validates/submits/streams `examples/hello_world.queue.json`. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
+This script is idempotent. It creates `.env` when no repo DB authority exists, creates the target Postgres database, enables `pgvector`, creates `.venv`, installs dependencies, symlinks `scripts/praxis` into `~/.local/bin`, runs `db-bootstrap` (full migration set plus fresh-install authority seed), starts the REST API, and validates/submits/streams `examples/bootstrap_smoke.queue.json`. The bootstrap smoke is deterministic and provider-independent; `examples/hello_world.queue.json` remains the provider demo. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
 
 ## Docker Setup
 
 Requires Docker and Docker Compose. The compose stack does **not** include its own database. It uses `WORKFLOW_DATABASE_URL` from `.env` or the shell, so the database can be host-local, remote on the LAN, or any reachable Postgres 16+ instance with `pgvector`.
 
 ```bash
-# Start the app services (semantic-backend + api-server)
+# Start the cockpit services (semantic-backend + api-server + scheduler)
 docker compose up -d
 
 # Wait for healthy
@@ -34,7 +34,25 @@ docker compose ps
 ./scripts/bootstrap
 ```
 
-If nested Docker workers need to call the host-published API from Linux, set `PRAXIS_WORKFLOW_MCP_URL` to a reachable URL for `/mcp`. On Docker Desktop and OrbStack the default `http://host.docker.internal:8420/mcp` usually works.
+Default compose startup is cockpit-only. The workflow worker is an explicit
+execution-node profile so cockpit machines do not accidentally claim jobs from
+the shared database.
+
+Run the worker only on the machine that should execute workflow work:
+
+```bash
+docker compose --profile worker up -d --build workflow-worker
+docker compose logs -f workflow-worker
+```
+
+For day-to-day control, `./scripts/praxis start worker` targets the same
+execution-node service explicitly.
+
+If nested Docker workers need to call the host-published API from Linux, set `PRAXIS_WORKFLOW_MCP_URL` to a reachable URL for `/mcp`. On Docker Desktop and OrbStack the default `http://host.docker.internal:8420/mcp` usually works. Set `PRAXIS_WORKFLOW_MCP_SIGNING_SECRET` in `.env` to the same random value for the API and worker containers; `openssl rand -hex 32` is enough for local setups.
+
+On a two-machine LAN cluster, do not copy Apple Silicon Docker images from the
+M1 to an Intel/AMD Dell. Rebuild the images on the Dell from the repo checkout
+so the image architecture matches the worker host.
 
 ## macOS Native Setup
 
@@ -195,7 +213,7 @@ Located at `config/runtime_profiles.json`. Defines provider routing policy:
       "allowed_models": [
         "gpt-5.4",
         "claude-opus-4-7",
-        "claude-sonnet-4-7",
+        "claude-sonnet-4-6",
         "gemini-3.1-pro-preview"
       ],
       "repo_root": ".",
@@ -216,8 +234,10 @@ Located at `config/runtime_profiles.json`. Defines provider routing policy:
 | `PRAXIS_DOCKER_MEMORY` | `4g` | Memory limit for Docker workers |
 | `PRAXIS_DOCKER_CPUS` | `2` | CPU limit for Docker workers |
 | `PRAXIS_CLI_AUTH_HOME` | `$HOME` | Host directory containing `.codex`, `.claude`, and `.gemini` auth files for Docker workers |
-| `PRAXIS_WORKER_MAX_PARALLEL` | `4` | Local workflow worker slot cap used by the compose worker command |
+| `PRAXIS_WORKER_MAX_PARALLEL` | auto | Optional local workflow worker slot cap; unset derives slots from live CPU/RAM resources |
+| `PRAXIS_WORKFLOW_MAX_CONCURRENT_NODES` | auto | Compatibility alias for the same optional worker slot cap |
 | `PRAXIS_WORKFLOW_MCP_URL` | `http://host.docker.internal:8420/mcp` | MCP bridge URL for worker-launched model containers |
+| `PRAXIS_WORKFLOW_MCP_SIGNING_SECRET` | (none) | Shared secret used by the API and worker to mint and verify workflow MCP session tokens |
 
 ## MCP Setup
 

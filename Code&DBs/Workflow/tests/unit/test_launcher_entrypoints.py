@@ -44,7 +44,7 @@ def test_praxis_help_uses_canonical_command_name() -> None:
     assert "Usage: praxis <command> [service]" in completed.stdout
     assert "workflow ...            Canonical execution, query, and operator authority" in completed.stdout
     assert "db ...                  Schema authority plus SQL scaffolds" in completed.stdout
-    assert "launch                  Start Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
+    assert "launch                  Start cockpit Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
     assert "doctor --json           Emit semantic launcher readiness as JSON" in completed.stdout
     assert "start [service...]" in completed.stdout
     assert "scheduler" in completed.stdout
@@ -139,7 +139,7 @@ def test_praxis_ctl_help_preserves_alias_command_name() -> None:
     completed = _run_launcher_help("praxis-ctl")
 
     assert "Usage: praxis-ctl <command> [service]" in completed.stdout
-    assert "launch                  Start Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
+    assert "launch                  Start cockpit Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
     assert "doctor --json           Emit semantic launcher readiness as JSON" in completed.stdout
     assert "scripts/praxis-ctl remains a compatibility alias." in completed.stdout
 
@@ -176,9 +176,8 @@ def test_praxis_status_json_is_served_from_canonical_frontdoor(tmp_path: Path) -
                 "if [ \"$1\" = \"ps\" ] && [ \"$2\" = \"--format\" ] && [ \"$3\" = \"json\" ]; then",
                 "  cat <<'EOF'",
                 "[",
-                "  {\"Service\":\"postgres\",\"State\":\"running\",\"Publishers\":[{\"PublishedPort\":5432,\"TargetPort\":5432,\"Protocol\":\"tcp\",\"URL\":\"tcp://127.0.0.1\"}]},",
+                "  {\"Service\":\"semantic-backend\",\"State\":\"running\",\"Publishers\":[]},",
                 "  {\"Service\":\"api-server\",\"State\":\"running\",\"Publishers\":[{\"PublishedPort\":8420,\"TargetPort\":8420,\"Protocol\":\"tcp\",\"URL\":\"tcp://127.0.0.1\"}]},",
-                "  {\"Service\":\"workflow-worker\",\"State\":\"running\",\"Publishers\":[]},",
                 "  {\"Service\":\"scheduler\",\"State\":\"running\",\"Publishers\":[]}",
                 "]",
                 "EOF",
@@ -214,9 +213,8 @@ def test_praxis_status_json_is_served_from_canonical_frontdoor(tmp_path: Path) -
     assert payload["compatibility_alias"] == "scripts/praxis-ctl"
     assert payload["preferred_command"] == "praxis"
     assert [service["name"] for service in payload["services"]] == [
-        "postgres",
+        "semantic-backend",
         "api-server",
-        "workflow-worker",
         "scheduler",
     ]
 

@@ -687,20 +687,21 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "service_manager": "scripts/praxis",
             "compatibility_alias": "scripts/praxis-ctl",
             "commands": {
-                "launch": "praxis launch — start Docker services, probe launcher readiness, and open the launcher",
+                "launch": "praxis launch — start cockpit Docker services, probe launcher readiness, and open the launcher",
                 "doctor": "praxis doctor --json — emit launcher readiness as JSON",
                 "status": "praxis status — show Docker service state and semantic readiness",
-                "restart": "praxis restart [postgres|api|workflow-api|worker|scheduler] — restart services",
+                "restart": "praxis restart [semantic|api|workflow-api|worker|scheduler] — restart services",
                 "stop": "praxis stop — stop all services",
-                "logs": "praxis logs [postgres|api|workflow-api|worker|scheduler] — tail logs",
+                "logs": "praxis logs [semantic|api|workflow-api|worker|scheduler] — tail logs",
             },
             "services": [
-                {"label": "postgres", "port": 5432, "managed_by": "docker-compose"},
+                {"label": "postgres", "port": 5432, "managed_by": "external"},
+                {"label": "semantic-backend", "port": 8421, "managed_by": "docker-compose"},
                 {"label": "api-server", "port": 8420, "managed_by": "docker-compose"},
-                {"label": "workflow-worker", "managed_by": "docker-compose"},
+                {"label": "workflow-worker", "managed_by": "docker-compose profile: worker"},
                 {"label": "scheduler", "interval_sec": 60, "managed_by": "docker-compose"},
             ],
-            "notes": "scripts/praxis is the preferred launcher entrypoint; scripts/praxis-ctl remains a compatibility alias. Docker Compose owns postgres, api-server, workflow-worker, and scheduler. Native launchd install/setup control has been removed. Launcher and docs endpoints are projected by /orient#primitive_contracts.runtime_binding.http_endpoints.",
+            "notes": "scripts/praxis is the preferred launcher entrypoint; scripts/praxis-ctl remains a compatibility alias. Docker Compose owns cockpit services by default; workflow-worker is an explicit execution-node profile and Postgres is external authority via WORKFLOW_DATABASE_URL. Native launchd install/setup control has been removed. Launcher and docs endpoints are projected by /orient#primitive_contracts.runtime_binding.http_endpoints.",
         },
 }
 

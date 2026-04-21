@@ -55,6 +55,7 @@ services:
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
       PRAXIS_API_RELOAD: "0"
+      PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
       # Integration secrets hydrated from host Keychain at compose-up time
       # (bin/praxis-compose-env exports account="praxis" services into shell).
       # The MCP bridge runs inside this container, so integration HTTP calls
@@ -114,6 +115,8 @@ services:
       - scheduler
     restart: unless-stopped
   workflow-worker:
+    profiles:
+      - worker
     build:
       context: ./Code&DBs/Workflow
       dockerfile: docker/praxis-worker.Dockerfile
@@ -137,6 +140,7 @@ services:
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
       PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
       PRAXIS_WORKFLOW_MCP_URL: ${PRAXIS_WORKFLOW_MCP_URL:-http://host.docker.internal:8420/mcp}
+      PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
       # Single Anthropic auth authority: ~/.claude/.credentials.json is
       # mounted into the worker and is the only source of truth. We blank
       # every env-based Anthropic auth rail so the CLI cannot pick up a
@@ -161,5 +165,9 @@ services:
     command:
       - sh
       - -c
-      - exec python3 -m surfaces.cli.main queue worker --max-concurrent "$${PRAXIS_WORKER_MAX_PARALLEL:-2}"
+      - |
+        if [ -n "$${PRAXIS_WORKER_MAX_PARALLEL:-}" ]; then
+          exec python3 -m surfaces.cli.main queue worker --max-concurrent "$${PRAXIS_WORKER_MAX_PARALLEL}"
+        fi
+        exec python3 -m surfaces.cli.main queue worker
     restart: unless-stopped

@@ -614,7 +614,7 @@ def _live_candidates_sync(
                candidate.model_slug,
                candidate.priority
         FROM provider_model_candidates candidate
-        WHERE candidate.provider_name = ANY($1::text[])
+        WHERE candidate.provider_slug = ANY($1::text[])
           AND candidate.model_slug = ANY($2::text[])
           AND candidate.status = 'active'
         ORDER BY candidate.provider_slug,
@@ -669,7 +669,7 @@ async def _live_candidates_async(
                candidate.model_slug,
                candidate.priority
         FROM provider_model_candidates candidate
-        WHERE candidate.provider_name = ANY($1::text[])
+        WHERE candidate.provider_slug = ANY($1::text[])
           AND candidate.model_slug = ANY($2::text[])
           AND candidate.status = 'active'
         ORDER BY candidate.provider_slug,
@@ -724,7 +724,7 @@ def _live_route_states_sync(
         FROM route_eligibility_states eligibility
         JOIN provider_model_candidates candidate
           ON candidate.candidate_ref = eligibility.candidate_ref
-        WHERE candidate.provider_name = ANY($1::text[])
+        WHERE candidate.provider_slug = ANY($1::text[])
           AND candidate.model_slug = ANY($2::text[])
         ORDER BY candidate.model_slug,
                  eligibility.evaluated_at DESC,
@@ -765,7 +765,7 @@ async def _live_route_states_async(
         FROM route_eligibility_states eligibility
         JOIN provider_model_candidates candidate
           ON candidate.candidate_ref = eligibility.candidate_ref
-        WHERE candidate.provider_name = ANY($1::text[])
+        WHERE candidate.provider_slug = ANY($1::text[])
           AND candidate.model_slug = ANY($2::text[])
         ORDER BY candidate.model_slug,
                  eligibility.evaluated_at DESC,

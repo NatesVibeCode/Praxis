@@ -43,27 +43,28 @@ Authoritative namespaces:
   reconcile               Data reconcile authority
 
 Docker-only commands:
-  launch                  Start Docker services, probe launcher readiness, and optionally open /app
+  launch                  Start cockpit Docker services, probe launcher readiness, and optionally open /app
   doctor --json           Emit semantic launcher readiness as JSON
   repair-sync [run_id]    Re-run workflow sync for the latest degraded run or a specific run
   status [--json]         Show Docker service state and active workflows
-  start [service...]      Start Docker services (default: all)
-  stop [service...]       Stop Docker services (default: all)
-  restart [service...]    Restart Docker services (default: all)
-  logs [service...]       Show Docker logs (default: all, tail=200)
+  start [service...]      Start Docker services (default: cockpit)
+  stop [service...]       Stop Docker services (default: cockpit)
+  restart [service...]    Restart Docker services (default: cockpit)
+  logs [service...]       Show Docker logs (default: cockpit, tail=200)
 
 Other commands:
   workflow ...            Delegate to workflow CLI
   agent-run               Run the Praxis supervisor agent entrypoint
 
 Services:
-  postgres
+  semantic | semantic-backend
   api | api-server | server | workflow-api
   worker | workflow-worker | queue-worker
   scheduler
 
 Notes:
   - Native launchd install/setup control has been removed.
+  - workflow-worker is an explicit execution-node profile; default launch/start is cockpit-only.
   - ${PREFERRED_COMMAND_NAME} is the preferred launcher front door.
   - ${COMPATIBILITY_ALIAS_PATH} remains a compatibility alias.
 EOF
@@ -79,7 +80,11 @@ require_docker() {
 normalize_docker_service() {
     case "${1:-}" in
         postgres|pg)
-            echo "postgres"
+            echo "Postgres is external to this compose stack; set WORKFLOW_DATABASE_URL instead of starting a postgres service." >&2
+            exit 1
+            ;;
+        semantic|semantic-backend|embedding|embedding-backend)
+            echo "semantic-backend"
             ;;
         api|api-server|server|praxis-server|workflow-api)
             echo "api-server"
@@ -103,7 +108,7 @@ normalize_docker_service() {
 docker_services_from_args() {
     local normalized
     if [ "$#" -eq 0 ]; then
-        printf '%s\n' postgres api-server workflow-worker scheduler
+        printf '%s\n' semantic-backend api-server scheduler
         return
     fi
     for arg in "$@"; do
@@ -278,7 +283,7 @@ if raw:
 if isinstance(services, dict):
     services = [services]
 
-required = {"api-server", "scheduler", "semantic-backend", "workflow-worker"}
+required = {"api-server", "scheduler", "semantic-backend"}
 states = {}
 for service in services:
     name = str(service.get("Service") or service.get("Name") or "").strip()

@@ -126,6 +126,15 @@ def test_agent_sessions_surface_is_mounted(monkeypatch, tmp_path) -> None:
     assert agents_response.json() == []
 
 
+def test_agent_sessions_cwd_is_repo_relative_by_default(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("PRAXIS_AGENT_CWD", raising=False)
+    monkeypatch.delenv("PRAXIS_REPO_ROOT", raising=False)
+    assert rest.agent_sessions_app._claude_cwd() == rest.agent_sessions_app.PRAXIS_ROOT
+
+    monkeypatch.setenv("PRAXIS_REPO_ROOT", str(tmp_path))
+    assert rest.agent_sessions_app._claude_cwd() == tmp_path.resolve()
+
+
 def test_launcher_recover_endpoint_returns_structured_payload(monkeypatch) -> None:
     monkeypatch.setattr(
         rest.launcher_handlers,

@@ -34,8 +34,7 @@
         "claude-sonnet-4-6",
         "gemini-3.1-pro-preview",
         "gpt-5.4-mini",
-        "gemini-3-flash-preview",
-        "claude-haiku-4-5-20251001"
+        "gemini-3-flash-preview"
       ],
       "repo_root": ".",
       "workdir": ".",

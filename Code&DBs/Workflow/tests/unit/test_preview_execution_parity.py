@@ -20,6 +20,7 @@ materialized workspace as unresolved_until_execution with a clear note.
 
 from __future__ import annotations
 
+from runtime import _workflow_database
 from runtime.workflow._context_building import (
     assemble_full_prompt,
     build_platform_context,
@@ -39,6 +40,19 @@ def test_build_platform_context_contains_repo_root_and_workspace_note():
     # so a future refactor cannot silently drop it.
     assert "Command workspace" in ctx
     assert "/workspace" in ctx
+
+
+def test_build_platform_context_redacts_database_credentials(monkeypatch):
+    monkeypatch.setattr(
+        _workflow_database,
+        "resolve_runtime_database_url",
+        lambda *, required=False: "postgresql://praxis:secret@192.168.86.249:5432/praxis",
+    )
+
+    ctx = build_platform_context("/host/repo")
+
+    assert "postgresql://praxis:***@192.168.86.249:5432/praxis" in ctx
+    assert "secret" not in ctx
 
 
 def test_assemble_full_prompt_matches_execution_core_concatenation_order():

@@ -704,7 +704,9 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
     # look broken.
     readiness = await inspect_workflow_schema(conn)
     if readiness.is_bootstrapped:
-        return
+        migration_audit = await workflow_migration_audit(conn)
+        if not migration_audit.missing:
+            return
 
     async with conn.transaction():
         await _acquire_schema_bootstrap_lock(conn)
@@ -712,6 +714,10 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
         # bootstrap while we were waiting.
         readiness = await inspect_workflow_schema(conn)
         if readiness.is_bootstrapped:
+            migration_audit = await workflow_migration_audit(conn)
+            if migration_audit.missing:
+                for filename in migration_audit.missing:
+                    await _bootstrap_migration(conn, filename)
             return
         control_readiness = await inspect_control_plane_schema(conn)
         if not control_readiness.is_bootstrapped:

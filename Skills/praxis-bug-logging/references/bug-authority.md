@@ -62,6 +62,8 @@ Relevant implementation files:
 
 `praxis workflow tools call praxis_bugs --input-json '{"action":"file",...}'` maps to `BugTracker.file_bug(...)`.
 MCP tool `praxis_bugs` with input `{"action":"file",...}` maps to the same filing path when you are using the MCP surface directly.
+Direct MCP clients should use the catalog-backed tool shape, for example:
+`praxis_bugs(action="file", title="...", severity="P2", category="RUNTIME", description="...", filed_by="codex", source_kind="manual")`.
 
 Important behavior:
 

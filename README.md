@@ -25,7 +25,7 @@ cd praxis
 5. Runs `scripts/native-bootstrap.sh` — applies all migrations and the DB-backed fresh-install authority seed.
 6. Runs `scripts/native-smoke.sh` — verifies the native operator flow end to end.
 7. Starts the REST API on `PRAXIS_API_PORT` (default `8420`).
-8. Validates, submits, and streams `examples/hello_world.queue.json`.
+8. Validates, submits, and streams `examples/bootstrap_smoke.queue.json`, a deterministic worker smoke that does not depend on an LLM provider.
 
 ### First run
 
@@ -35,7 +35,10 @@ Once bootstrap reports success:
 # Orient on current state (standing orders, status, open bugs)
 praxis workflow query "status"
 
-# Run the canonical smoke workflow again if you want a fresh run
+# Run the deterministic bootstrap smoke again if you want a fresh run
+praxis workflow run examples/bootstrap_smoke.queue.json
+
+# Run the hello-world provider demo once provider credentials are ready
 praxis workflow run examples/hello_world.queue.json
 ```
 
@@ -67,9 +70,21 @@ Vite serves the UI and proxies API calls to the port in `PRAXIS_API_PORT` (defau
 
 ### Docker path (alternative)
 
-If you prefer containers, `docker compose up -d` brings up the runtime services. The stack does **not** start its own database container; it uses `WORKFLOW_DATABASE_URL` from `.env` or the shell. That URL may point at host-local Postgres, another LAN machine, or any reachable Postgres 16+ instance with `pgvector`.
+If you prefer containers, `docker compose up -d` brings up the cockpit services: semantic backend, API server, and scheduler. The stack does **not** start its own database container; it uses `WORKFLOW_DATABASE_URL` from `.env` or the shell. That URL may point at host-local Postgres, another LAN machine, or any reachable Postgres 16+ instance with `pgvector`.
 
-The worker also mounts CLI auth files from `PRAXIS_CLI_AUTH_HOME` when set, otherwise from `$HOME`. Set `PRAXIS_WORKER_MAX_PARALLEL` to cap local worker slots on small machines.
+The worker also mounts CLI auth files from `PRAXIS_CLI_AUTH_HOME` when set, otherwise from `$HOME`. Local worker slots are derived from the CPU and RAM visible to the worker; set `PRAXIS_WORKER_MAX_PARALLEL` only when you need an explicit cap.
+
+Execution workers are opt-in. Start a worker node explicitly on the machine that should do the work:
+
+```bash
+docker compose --profile worker up -d --build workflow-worker
+```
+
+The launcher alias is equivalent for day-to-day control:
+
+```bash
+./scripts/praxis start worker
+```
 
 ## Example Workflow Spec
 
@@ -126,7 +141,7 @@ The `agent` field uses `auto/` prefixes to route jobs to the best model for each
 | `auto/debate` | Adversarial analysis | Best reasoner |
 | `auto/research` | Deep research | Research-specialized model |
 
-The router resolves these to concrete provider/model pairs based on the provider registry and runtime profiles. You can also specify a provider directly: `"agent": "anthropic/claude-sonnet-4-7"`.
+The router resolves these to concrete provider/model pairs based on the provider registry and runtime profiles. You can also specify a provider directly: `"agent": "anthropic/claude-sonnet-4-6"`.
 
 ## MCP Integration
 

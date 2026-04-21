@@ -19,12 +19,12 @@ from typing import Literal
 
 _log = logging.getLogger(__name__)
 
-# One cheap model per provider — enough to detect rate limits.
-# The probe prompt is tiny so cost is negligible.
+# One lightweight model per provider — enough to detect rate limits.
+# The probe prompt is tiny so cost is negligible; Anthropic is CLI/subscription.
 _PROBE_MODELS: tuple[tuple[str, str], ...] = (
     ("google", "gemini-2.5-flash"),
     ("openai", "gpt-5.4-mini"),
-    ("anthropic", "claude-haiku-4-5-20251001"),
+    ("anthropic", "claude-sonnet-4-6"),
 )
 
 _PROBE_PROMPT = "Reply with the single word OK."

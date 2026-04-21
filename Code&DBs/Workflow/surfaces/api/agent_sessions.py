@@ -26,7 +26,14 @@ __all__ = ["app"]
 PRAXIS_ROOT = Path(__file__).resolve().parents[4]
 ARTIFACTS_DIR = PRAXIS_ROOT / "artifacts"
 AGENTS_DIR = ARTIFACTS_DIR / "agents"
-CLAUDE_CWD = Path("/Users/nate/Praxis")
+
+
+def _claude_cwd(env: dict[str, str] | None = None) -> Path:
+    source = env if env is not None else os.environ
+    configured = (source.get("PRAXIS_AGENT_CWD") or source.get("PRAXIS_REPO_ROOT") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return PRAXIS_ROOT
 
 _STREAM_IDLE_TIMEOUT = 5.0
 _TURN_TERMINATION_TIMEOUT = 2.0
@@ -208,7 +215,7 @@ async def _run_turn(agent_id: str, session_id: str, prompt: str) -> tuple[str, l
     print(f"[agent_sessions] launching claude agent={agent_id}", flush=True)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
-        cwd=str(CLAUDE_CWD),
+        cwd=str(_claude_cwd()),
         env=os.environ.copy(),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,

@@ -3,7 +3,10 @@
   "jobs": [
     {
       "label": "greet",
-      "agent": "auto/wiring",
+      "agent": "auto/chat",
+      "task_type": "general",
+      "submission_required": false,
+      "workdir": ".",
       "prompt": "Say hello and describe what Praxis Engine is in one sentence."
     }
   ]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import threading
 import time
 import uuid
@@ -29,9 +30,205 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_worker_loop"]
+__all__ = ["run_worker_loop", "resolve_worker_concurrency"]
 
 _GRAPH_FAILURE_BACKOFF_SECONDS = 30.0
+_WORKER_SLOT_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
+_CGROUP_UNLIMITED_MEMORY_THRESHOLD = 1 << 60
+_WORKER_CONCURRENCY_ENV_KEYS = (
+    "PRAXIS_WORKER_MAX_PARALLEL",
+    "PRAXIS_WORKFLOW_MAX_CONCURRENT_NODES",
+)
+
+
+def _read_text_file(path: str) -> str | None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return None
+
+
+def _parse_positive_int(raw: object, *, label: str) -> int:
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a positive integer, got: {raw}") from exc
+    if value < 1:
+        raise ValueError(f"{label} must be a positive integer, got: {raw}")
+    return value
+
+
+def _parse_cgroup_memory_limit(raw: str | None) -> int | None:
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value or value == "max":
+        return None
+    try:
+        limit = int(value)
+    except ValueError:
+        return None
+    if limit <= 0 or limit >= _CGROUP_UNLIMITED_MEMORY_THRESHOLD:
+        return None
+    return limit
+
+
+def _worker_cgroup_available_memory_bytes() -> int | None:
+    candidates: list[int] = []
+    v2_limit = _parse_cgroup_memory_limit(_read_text_file("/sys/fs/cgroup/memory.max"))
+    v2_current = _read_text_file("/sys/fs/cgroup/memory.current")
+    if v2_limit is not None and v2_current is not None:
+        try:
+            candidates.append(max(v2_limit - int(v2_current), 0))
+        except ValueError:
+            pass
+
+    v1_limit = _parse_cgroup_memory_limit(
+        _read_text_file("/sys/fs/cgroup/memory/memory.limit_in_bytes")
+    )
+    v1_current = _read_text_file("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+    if v1_limit is not None and v1_current is not None:
+        try:
+            candidates.append(max(v1_limit - int(v1_current), 0))
+        except ValueError:
+            pass
+    return min(candidates) if candidates else None
+
+
+def _worker_proc_available_memory_bytes() -> int | None:
+    raw = _read_text_file("/proc/meminfo")
+    if raw is None:
+        return None
+    for line in raw.splitlines():
+        if not line.startswith("MemAvailable:"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            return None
+        try:
+            return int(parts[1]) * 1024
+        except ValueError:
+            return None
+    return None
+
+
+def _worker_macos_available_memory_bytes() -> int | None:
+    try:
+        result = subprocess.run(
+            ["vm_stat"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+
+    page_size = 4096
+    pages: dict[str, int] = {}
+    for line in result.stdout.splitlines():
+        if "page size of" in line:
+            for token in line.split():
+                if token.isdigit():
+                    page_size = int(token)
+                    break
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        numeric = value.strip().rstrip(".").replace(".", "")
+        if numeric.isdigit():
+            pages[key.strip()] = int(numeric)
+
+    reclaimable_pages = (
+        pages.get("Pages free", 0)
+        + pages.get("Pages speculative", 0)
+        + pages.get("Pages inactive", 0)
+    )
+    if reclaimable_pages <= 0:
+        return None
+    return reclaimable_pages * page_size
+
+
+def _worker_available_memory_bytes() -> int | None:
+    candidates = [
+        value
+        for value in (
+            _worker_cgroup_available_memory_bytes(),
+            _worker_proc_available_memory_bytes(),
+        )
+        if value is not None
+    ]
+    if candidates:
+        return min(candidates)
+    return _worker_macos_available_memory_bytes()
+
+
+def _worker_cgroup_cpu_count() -> int | None:
+    cpu_max = _read_text_file("/sys/fs/cgroup/cpu.max")
+    if cpu_max:
+        parts = cpu_max.split()
+        if len(parts) >= 2 and parts[0] != "max":
+            try:
+                quota = int(parts[0])
+                period = int(parts[1])
+                if quota > 0 and period > 0:
+                    return max(1, (quota + period - 1) // period)
+            except ValueError:
+                pass
+
+    quota_raw = _read_text_file("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+    period_raw = _read_text_file("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+    if quota_raw is not None and period_raw is not None:
+        try:
+            quota = int(quota_raw)
+            period = int(period_raw)
+            if quota > 0 and period > 0:
+                return max(1, (quota + period - 1) // period)
+        except ValueError:
+            pass
+    return None
+
+
+def _worker_cpu_count() -> int:
+    return max(1, _worker_cgroup_cpu_count() or os.cpu_count() or 1)
+
+
+def resolve_worker_concurrency(
+    env: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """Resolve the local worker slot budget from explicit overrides or resources."""
+    resolved_env = os.environ if env is None else env
+    available_memory_bytes = _worker_available_memory_bytes()
+    cpu_count = _worker_cpu_count()
+
+    for key in _WORKER_CONCURRENCY_ENV_KEYS:
+        raw = str(resolved_env.get(key) or "").strip()
+        if not raw:
+            continue
+        max_concurrent = _parse_positive_int(raw, label=key)
+        return {
+            "max_concurrent": max_concurrent,
+            "source": f"env:{key}",
+            "cpu_count": cpu_count,
+            "available_memory_bytes": available_memory_bytes,
+            "memory_slot_bytes": _WORKER_SLOT_MEMORY_BYTES,
+        }
+
+    memory_slots = None
+    if available_memory_bytes is not None:
+        memory_slots = max(1, available_memory_bytes // _WORKER_SLOT_MEMORY_BYTES)
+    max_concurrent = cpu_count if memory_slots is None else min(cpu_count, memory_slots)
+    return {
+        "max_concurrent": max(1, max_concurrent),
+        "source": "resource:auto",
+        "cpu_count": cpu_count,
+        "available_memory_bytes": available_memory_bytes,
+        "memory_slot_bytes": _WORKER_SLOT_MEMORY_BYTES,
+    }
 
 
 def _evaluate_workflow_triggers(conn: "SyncPostgresConnection") -> int:
@@ -208,19 +405,46 @@ def run_worker_loop(
     repo_root: str,
     poll_interval: float = 2.0,
     worker_id: str | None = None,
-    max_local_concurrent: int = 4,
+    max_local_concurrent: int | None = None,
 ) -> None:
     """Main worker loop: claim jobs from workflow_jobs, execute concurrently.
 
     Remote transports run with unlimited concurrency (external calls).
-    Local transports are capped at max_local_concurrent (subprocess slots).
+    Local transports are capped by explicit slots or live CPU/RAM resources.
     Runs stale claim reaper every 60 seconds.
     """
     from concurrent.futures import ThreadPoolExecutor, Future
     from storage.postgres.connection import SyncPostgresConnection as _PG, get_workflow_pool
 
     worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
-    logger.info("Unified workflow worker started: %s (local_slots=%d)", worker_id, max_local_concurrent)
+    if max_local_concurrent is None:
+        concurrency_decision = resolve_worker_concurrency()
+        local_pool_max_workers = int(concurrency_decision["cpu_count"])
+        resource_managed_slots = concurrency_decision["source"] == "resource:auto"
+    else:
+        local_pool_max_workers = _parse_positive_int(
+            max_local_concurrent,
+            label="max_local_concurrent",
+        )
+        resource_managed_slots = False
+        concurrency_decision = {
+            "max_concurrent": local_pool_max_workers,
+            "source": "explicit",
+            "cpu_count": _worker_cpu_count(),
+            "available_memory_bytes": _worker_available_memory_bytes(),
+            "memory_slot_bytes": _WORKER_SLOT_MEMORY_BYTES,
+        }
+
+    initial_local_slot_budget = int(concurrency_decision["max_concurrent"])
+    logger.info(
+        "Unified workflow worker started: %s (local_slots=%d, pool_workers=%d, source=%s, cpu=%s, available_memory_bytes=%s)",
+        worker_id,
+        initial_local_slot_budget,
+        local_pool_max_workers,
+        concurrency_decision.get("source"),
+        concurrency_decision.get("cpu_count"),
+        concurrency_decision.get("available_memory_bytes"),
+    )
     _start_embedding_prewarm_for_worker()
 
     notification_wakeup = threading.Event()
@@ -413,9 +637,11 @@ def run_worker_loop(
                 exc_info=True,
             )
 
-    # Two pools: unlimited for remote transport, capped for local transport
+    # Two pools: unlimited for remote transport, capped for local transport.
+    # In resource-managed mode the pool can use the visible CPU allotment, while
+    # claim admission recomputes the live RAM/CPU slot budget before dispatch.
     api_pool = ThreadPoolExecutor(max_workers=64, thread_name_prefix="api-worker")
-    local_pool = ThreadPoolExecutor(max_workers=max_local_concurrent, thread_name_prefix="local-worker")
+    local_pool = ThreadPoolExecutor(max_workers=local_pool_max_workers, thread_name_prefix="local-worker")
 
     def _count_active(lane: str) -> int:
         return sum(1 for f, j in active_futures.items()
@@ -427,6 +653,23 @@ def run_worker_loop(
             for future, job in active_futures.items()
             if not future.done() and job.get("_transport_lane") == "graph_local"
         }
+
+    def _active_local_slots() -> int:
+        return _count_active("local") + len(_active_graph_runs())
+
+    def _local_slot_budget() -> int:
+        if not resource_managed_slots:
+            return local_pool_max_workers
+        try:
+            decision = resolve_worker_concurrency(env={})
+            return max(1, min(local_pool_max_workers, int(decision["max_concurrent"])))
+        except Exception as exc:
+            logger.warning(
+                "Worker resource concurrency refresh failed; using startup budget: %s",
+                exc,
+                exc_info=True,
+            )
+            return max(1, min(local_pool_max_workers, initial_local_slot_budget))
 
     try:
         while True:
@@ -490,7 +733,8 @@ def run_worker_loop(
                     notification_wakeup.clear()
                     _evaluate_background_consumers()
 
-                graph_slots = max_local_concurrent - _count_active("local") - len(_active_graph_runs())
+                local_slot_budget = _local_slot_budget()
+                graph_slots = local_slot_budget - _active_local_slots()
                 if graph_slots > 0:
                     now = time.monotonic()
                     scheduled_graph_runs = 0
@@ -558,7 +802,8 @@ def run_worker_loop(
 
                     job["_transport_lane"] = transport_lane
 
-                    if transport_lane == "local" and _count_active("local") >= max_local_concurrent:
+                    local_slot_budget = _local_slot_budget()
+                    if transport_lane == "local" and _active_local_slots() >= local_slot_budget:
                         # Can't take more local jobs — unclaim without touching attempt counter
                         # (attempt was incremented in CLAIM_QUERY; we must undo it since
                         # we never actually attempted execution)

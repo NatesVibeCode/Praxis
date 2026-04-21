@@ -1,0 +1,19 @@
+{
+  "name": "Bootstrap Smoke",
+  "workflow_id": "bootstrap_smoke",
+  "jobs": [
+    {
+      "label": "deterministic_worker_ready",
+      "adapter_type": "deterministic_task",
+      "inputs": {
+        "allow_passthrough_echo": true,
+        "smoke_check": "worker graph runtime can execute deterministic jobs"
+      },
+      "expected_outputs": {
+        "ok": true,
+        "component": "workflow-worker",
+        "authority": "graph-runtime"
+      }
+    }
+  ]
+}
