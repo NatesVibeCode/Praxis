@@ -1,0 +1,21 @@
+{
+  "spec_version": "1.0",
+  "name": "a4_dependency_audit",
+  "workflow_id": "a4_dependency_audit",
+  "queue_id": "audit-batch-2026-04-20-a4",
+  "phase": "maintenance",
+  "outcome_goal": "pip-audit and npm audit --audit-level=high both exit 0; patch-version bumps landed; minor/major bumps filed as bugs.",
+  "verify_command": "bash -lc \"cd 'Code&DBs/Workflow' && pip-audit && cd surfaces/app && npm audit --audit-level=high\"",
+  "jobs": [
+    {
+      "id": "a4_dependency_audit",
+      "label": "a4_dependency_audit",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "review",
+      "verify_refs": ["verify.audit_batch_20260420.a4_dependency_audit"],
+      "prompt": "Run dependency hygiene. Targets: Code&DBs/Workflow/pyproject.toml; Code&DBs/Workflow/requirements.runtime.txt; Code&DBs/Workflow/surfaces/app/package.json; Code&DBs/Workflow/surfaces/app/package-lock.json; Code&DBs/Workflow/surfaces/cloudflare_sandbox_bridge/package.json. Run pip-audit and npm audit --audit-level=high. Land patch-only bumps when verifier-gated. File bugs dep-audit::<package> for minor/major bumps and unresolved advisories. Done when both audits exit 0 or every remaining non-patch action is a bug. Transport constraint: use admitted CLI transport only; do not use llm_task, HTTP API routes, Anthropic routes, or deprecated Claude 4.6 slugs.",
+      "verify_command": "bash -lc \"cd 'Code&DBs/Workflow' && pip-audit && cd surfaces/app && npm audit --audit-level=high\""
+    }
+  ]
+}

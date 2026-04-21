@@ -44,7 +44,7 @@ Verified `praxis_wave` actions:
 Example:
 
 ```text
-praxis workflow tools call praxis_wave --input-json '{"action":"record","wave_id":"<wave_id>","jobs":"job_a:pass,job_b:fail"}'
+praxis workflow tools call praxis_wave --input-json '{"action":"record","wave_id":"<wave_id>","jobs":"job_a:pass,job_b:fail"}' --yes
 ```
 
 ## Rules

@@ -34,13 +34,17 @@
       "write_scope": [
         "docs/architecture/mobile_access_plan.md"
       ],
-      "verify_command": "test -f docs/architecture/mobile_access_plan.md && grep -q 'capability_grants' docs/architecture/mobile_access_plan.md && grep -q '_UI_RISK_HINT_TYPES' docs/architecture/mobile_access_plan.md"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave0.integrated.design"
+      ]
     },
     {
       "label": "wave0_migration_capability_ledger",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave0_integrated_design"],
+      "depends_on": [
+        "wave0_integrated_design"
+      ],
       "description": "Write migrations 185, 186, 187 per the design doc.",
       "outcome_goal": "Three migration files apply cleanly. Tables capability_grants, device_enrollments, approval_requests, webauthn_challenges exist. gate_evaluations has grant_ref + plan_envelope_hash columns. All registered in workflow_migration_authority.json.",
       "prompt": "Write the three migrations per docs/architecture/mobile_access_plan.md section 2.\n\n1. Code&DBs/Databases/migrations/workflow/185_mobile_capability_ledger.sql — capability_grants, device_enrollments, approval_requests with all columns, CHECK constraints, and indexes named.\n2. Code&DBs/Databases/migrations/workflow/186_gate_evaluations_grant_coverage.sql — ALTER TABLE gate_evaluations ADD COLUMN grant_ref TEXT NULL REFERENCES capability_grants(grant_id); ADD COLUMN plan_envelope_hash TEXT NULL; CREATE INDEX gate_evaluations_grant_ref_decided_at_idx ON gate_evaluations (grant_ref, decided_at DESC) WHERE grant_ref IS NOT NULL.\n3. Code&DBs/Databases/migrations/workflow/187_webauthn_challenges.sql — webauthn_challenges with expiry index.\n\nConstraints:\n- Idempotent (CREATE TABLE IF NOT EXISTS, ADD COLUMN IF NOT EXISTS).\n- Every CHECK constraint named.\n- ON DELETE RESTRICT on FKs — never cascade grant history.\n- COMMENT ON TABLE on each.\n- Register in Code&DBs/Workflow/system_authority/workflow_migration_authority.json and regenerate the Python generator artifact.",
@@ -57,13 +61,17 @@
         "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
         "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py"
       ],
-      "verify_command": "psql postgresql://localhost:5432/praxis -f 'Code&DBs/Databases/migrations/workflow/185_mobile_capability_ledger.sql' && psql postgresql://localhost:5432/praxis -f 'Code&DBs/Databases/migrations/workflow/186_gate_evaluations_grant_coverage.sql' && psql postgresql://localhost:5432/praxis -f 'Code&DBs/Databases/migrations/workflow/187_webauthn_challenges.sql' && psql postgresql://localhost:5432/praxis -c '\\d capability_grants' && psql postgresql://localhost:5432/praxis -c '\\d approval_requests' && psql postgresql://localhost:5432/praxis -c '\\d device_enrollments' && psql postgresql://localhost:5432/praxis -c '\\d webauthn_challenges' && psql postgresql://localhost:5432/praxis -c 'SELECT grant_ref, plan_envelope_hash FROM gate_evaluations LIMIT 0'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave0.migration.capability.ledger"
+      ]
     },
     {
       "label": "wave0_contract_types",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave0_migration_capability_ledger"],
+      "depends_on": [
+        "wave0_migration_capability_ledger"
+      ],
       "description": "Define frozen dataclasses mirroring table columns with from_row/to_row helpers.",
       "outcome_goal": "runtime/capability/types.py defines CapabilityGrant, PlanEnvelope, DeviceEnrollment, ApprovalRequest; plan_hash is deterministic across retries.",
       "prompt": "Create Code&DBs/Workflow/runtime/capability/ as a new package. Add:\n- __init__.py exporting the dataclasses.\n- types.py with @dataclass(frozen=True) definitions mirroring the table columns exactly:\n  - CapabilityGrant(grant_id, issued_by, subject_run_id, subject_job_id, plan_hash, allowed_operations: tuple[str,...], write_scope: tuple[str,...], read_scope: tuple[str,...], budget_ceiling_cents, budget_consumed_cents, expires_at, issued_at, revoked_at, device_enrollment_id, signature).\n  - PlanEnvelope(plan_hash, spec_path, allowed_operations, write_scope, read_scope, estimated_spend_cents, computed_at). Include classmethod from_intent(intent) with JSON-canonical sha256.\n  - DeviceEnrollment(enrollment_id, public_key_cose: bytes, credential_id: bytes, aaguid, sign_count, created_at, revoked_at, label).\n  - ApprovalRequest(request_id, run_id, job_label, intent_kind, intent_payload: Mapping, proposed_plan_envelope: PlanEnvelope, proposed_plan_hash, status: Literal['pending','ratified','revoked','expired'], created_at, decided_at, decided_by, resulting_grant_id).\n- errors.py with CapabilityExhaustedError, GrantNotCoveringIntentError, GrantExpiredError, StepUpRequiredError.\n\nNo SQL. Pure types. Unit test at tests/unit/test_capability_types.py: plan_hash determinism, key-order independence, round-trip to_row/from_row.",
@@ -77,13 +85,17 @@
         "Code&DBs/Workflow/runtime/capability/errors.py",
         "Code&DBs/Workflow/tests/unit/test_capability_types.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_capability_types.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave0.contract.types"
+      ]
     },
     {
       "label": "wave1_webauthn_endpoints",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave0_contract_types"],
+      "depends_on": [
+        "wave0_contract_types"
+      ],
       "description": "Implement WebAuthn register/assert/step-up ceremonies via py_webauthn and wire into surfaces/api/.",
       "outcome_goal": "A browser can call /auth/webauthn/register/begin, complete registration with a software authenticator, then /auth/webauthn/assert/begin and /complete produce a session-bound assertion. Challenges persisted in webauthn_challenges; consumed on completion.",
       "prompt": "Install py_webauthn (requirements.txt). Implement the ceremony as a standalone module.\n\nFiles:\n- runtime/webauthn/__init__.py\n- runtime/webauthn/ceremonies.py — generate_registration_options, verify_registration_response, generate_authentication_options, verify_authentication_response wrapping py_webauthn + persisting/consuming challenges via storage/postgres/webauthn_repository.py.\n- storage/postgres/webauthn_repository.py — PostgresWebauthnRepository with insert_challenge, consume_challenge, insert_enrollment, get_enrollment_by_credential_id, bump_sign_count, revoke_enrollment.\n- surfaces/api/handlers/webauthn_auth.py — aiohttp handlers for /auth/webauthn/register/begin, /complete, /auth/webauthn/assert/begin, /complete, /auth/bootstrap/exchange (single-use 5-min enrollment token).\n- Wire into surfaces/api/rest.py at the existing /auth/ handler registration site.\n\nConstraints:\n- RP ID configurable via env MOBILE_RP_ID (default 'localhost' for dev).\n- No bespoke signature scheme. Only py_webauthn's verified ceremony.\n- Bootstrap token single-use, 5-min TTL, stored hashed (not plaintext).\n- Step-up assertion = /auth/webauthn/assert/begin with purpose='step_up' and 30s expiry.\n- Tests at tests/integration/test_webauthn_ceremony.py using py_webauthn's in-memory software authenticator.",
@@ -101,13 +113,17 @@
         "Code&DBs/Workflow/tests/integration/test_webauthn_ceremony.py",
         "requirements.txt"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_webauthn_ceremony.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave1.webauthn.endpoints"
+      ]
     },
     {
       "label": "wave1_session_middleware",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave1_webauthn_endpoints"],
+      "depends_on": [
+        "wave1_webauthn_endpoints"
+      ],
       "description": "Session middleware binding /mobile/* and /approvals/* to a verified WebAuthn assertion.",
       "outcome_goal": "Any /mobile/* or /approvals/* request without a valid non-expired session cookie bound to a device_enrollments row returns 401. Bootstrap path remains open.",
       "prompt": "Add Code&DBs/Workflow/surfaces/api/_mobile_session.py middleware that:\n1. Reads httpOnly, SameSite=Strict session cookie 'praxis_mobile_session'.\n2. Looks up session in mobile_sessions (migration 188_mobile_sessions.sql: session_id PK, enrollment_id FK, issued_at, expires_at, revoked_at). Sessions issued after successful verify_authentication_response.\n3. Rejects revoked enrollment / expired session / missing cookie.\n4. Attaches authed enrollment_id to request state.\n5. For ratify/revoke: also require step-up assertion <30s in body.\n\nRegister on the mobile route group in rest.py. Allowlist /auth/bootstrap/exchange + /auth/webauthn/*.\n\nTests at tests/integration/test_mobile_session.py: missing cookie -> 401; revoked enrollment -> 401; valid session -> handler reached; ratify without step-up -> 403; ratify with stale (>30s) step-up -> 403.",
@@ -123,13 +139,17 @@
         "Code&DBs/Workflow/storage/postgres/webauthn_repository.py",
         "Code&DBs/Workflow/tests/integration/test_mobile_session.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_mobile_session.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave1.session.middleware"
+      ]
     },
     {
       "label": "wave2_plan_envelope_stamp",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave0_contract_types"],
+      "depends_on": [
+        "wave0_contract_types"
+      ],
       "description": "Stamp plan_hash on every submission intent at the chat_orchestrator entry point.",
       "outcome_goal": "chat_tools.request_workflow_submit_command computes a PlanEnvelope and attaches plan_hash to the ControlIntent BEFORE classify_control_intent runs. Hash is deterministic across retries.",
       "prompt": "Add Code&DBs/Workflow/runtime/capability/plan_envelope.py with:\n- compute_plan_hash(spec_path, allowed_operations, write_scope, read_scope, estimated_spend_cents) -> str (sha256 hex over JSON-canonical; sorted keys, normalized lists).\n- stamp_plan_envelope(intent, *, spec_path, write_scope, read_scope, estimated_spend_cents) -> tuple[ControlIntent, PlanEnvelope] — returns intent with plan_hash populated plus the envelope.\n\nModify ControlIntent at runtime/control_commands.py to add optional plan_hash and plan_envelope fields (default None; resolver will require them).\n\nModify runtime/chat_tools.py at request_workflow_submit_command (around line 461-467) to call stamp_plan_envelope BEFORE classify_control_intent. write_scope / read_scope come from the workflow spec's per-job fields; estimated_spend_cents from lane_policy.estimate_spend.\n\nTests at tests/unit/test_plan_envelope.py: determinism, key-order independence, sensitivity to write_scope change, stamp produces populated plan_hash.",
@@ -145,13 +165,17 @@
         "Code&DBs/Workflow/runtime/chat_tools.py",
         "Code&DBs/Workflow/tests/unit/test_plan_envelope.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_plan_envelope.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave2.plan.envelope.stamp"
+      ]
     },
     {
       "label": "wave2_capability_resolver",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave2_plan_envelope_stamp"],
+      "depends_on": [
+        "wave2_plan_envelope_stamp"
+      ],
       "description": "Resolver answering 'is this intent covered by an active grant?'",
       "outcome_goal": "resolve_capability_grant(intent, plan_hash, requested_by_ref) returns CoverageDecision. Expired, revoked, over-budget, missing plan_hash match, or uncovered command all yield covered=False.",
       "prompt": "Add Code&DBs/Workflow/runtime/capability/resolver.py:\n\n- CoverageDecision(covered: bool, grant_id: str | None, reason_code: str, remaining_budget_cents: int | None).\n- resolve_capability_grant(conn, intent, plan_hash, requested_by_ref) -> CoverageDecision.\n  SELECT * FROM capability_grants WHERE revoked_at IS NULL AND expires_at > now() AND plan_hash = %s AND %s = ANY(allowed_operations) ORDER BY expires_at DESC LIMIT 1.\n  No row -> (False, None, 'no_active_grant').\n  budget_consumed + estimated > budget_ceiling -> (False, grant_id, 'budget_exhausted').\n  intent.write_scope not subset of row.write_scope -> (False, grant_id, 'write_scope_outside_grant').\n  Else (True, grant_id, 'covered', remaining_budget_cents).\n- consume_grant_budget(conn, grant_id, spent_cents) — atomic UPDATE ... SET budget_consumed_cents = budget_consumed_cents + %s WHERE grant_id = %s AND budget_consumed_cents + %s <= budget_ceiling_cents; returns True if UPDATE matched else raises CapabilityExhaustedError.\n\nAdd storage/postgres/capability_repository.py with PostgresCapabilityRepository: insert_grant, get_active_grants_for_plan, revoke_grant, consume_budget.\n\nTests at tests/integration/test_capability_resolver.py using rollback-isolated conn: covered path, expired/revoked, plan_hash mismatch, budget exhausted, write_scope outside grant, concurrent consume race (second raises).",
@@ -166,13 +190,17 @@
         "Code&DBs/Workflow/storage/postgres/__init__.py",
         "Code&DBs/Workflow/tests/integration/test_capability_resolver.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_capability_resolver.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave2.capability.resolver"
+      ]
     },
     {
       "label": "wave2_blast_radius_tracker",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave2_capability_resolver"],
+      "depends_on": [
+        "wave2_capability_resolver"
+      ],
       "description": "Runtime instrumentation for session_blast_radius + mid-plan gate (debate pillar 4).",
       "outcome_goal": "Every file mutation, external call, and spend event updates the active session_blast_radius row. When any dimension crosses its threshold in session_blast_radius_policy (seeded 'default': 50 files, 5 MiB, 20 external calls, $10), the runtime opens a mid-plan approval_request and writes gate_triggered_at + gate_triggered_dim — regardless of grant coverage.",
       "prompt": "Migration 189_oversight_instrumentation.sql is already applied. This job wires the runtime.\n\nFiles to create:\n- runtime/capability/blast_radius.py:\n    - BlastRadiusSnapshot dataclass mirroring the table.\n    - open_session(conn, run_id) -> session_id: INSERT new active row.\n    - record_mutation(conn, session_id, files_delta, bytes_delta): atomic UPDATE ... RETURNING *. After update, call check_thresholds.\n    - record_external_call(conn, session_id, count_delta=1): bumps external_calls.\n    - record_spend(conn, session_id, spend_cents_delta): bumps spend_cents.\n    - check_thresholds(conn, row) -> ThresholdDecision: reads session_blast_radius_policy WHERE active=true.\n    - trigger_gate(conn, session_id, triggered_dim, plan_envelope): sets gate_triggered_at/dim, calls approval_lifecycle.open_approval_request with intent_kind='blast_radius_threshold_crossed', returns approval_requests.request_id.\n    - close_session(conn, session_id, reason).\n- storage/postgres/blast_radius_repository.py — thin CRUD.\n\nCall-site hooks (surgical):\n1. runtime/control_commands.py main execute-intent path: after successful mutation, record_mutation(files_delta=1, bytes_delta=len(new_content)).\n2. adapters/provider_transport.py every outbound HTTP call: record_external_call.\n3. runtime/capability/resolver.py consume_grant_budget: after atomic spend consume, also record_spend.\n\nTests at tests/integration/test_blast_radius_tracker.py using rollback-isolated conn: counters start at 0; atomic increment under concurrency; threshold crossing fires trigger_gate; subsequent bumps don't re-fire (idempotent gate_triggered_at); gate_triggered_dim records specific dimension; close_session + reopen works.",
@@ -190,13 +218,17 @@
         "Code&DBs/Workflow/runtime/capability/resolver.py",
         "Code&DBs/Workflow/tests/integration/test_blast_radius_tracker.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_blast_radius_tracker.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave2.blast.radius.tracker"
+      ]
     },
     {
       "label": "wave2_policy_drift_detector",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave2_capability_resolver"],
+      "depends_on": [
+        "wave2_capability_resolver"
+      ],
       "description": "Emit policy_drift_events whenever runtime attempts a violation of an active operator_decisions policy (debate pillar 3).",
       "outcome_goal": "Every path neutralized during the anthropic CLI-only cutover now also emits a policy_drift_events row tagged policy_id='providers::anthropic', decision_ref='decision.2026-04-20.anthropic-cli-only-restored', detector_kind='anthropic_api_call_attempt' BEFORE returning its neutralized response.",
       "prompt": "Migration 189 already applied; policy_drift_events exists.\n\nFiles to create:\n- runtime/capability/policy_drift.py:\n    - emit_drift(conn, *, policy_id, decision_ref, detector_kind, violator_path, violator_run_id=None, action_summary, remediation_hint=None) -> drift_event_id. Never raises (log+swallow on insert failure).\n    - recent_drift_count(conn, hours=24) -> int: SELECT count(*) WHERE resolved_at IS NULL AND detected_at > now() - make_interval(hours => %s).\n    - drift_events(conn, hours=24, limit=50) -> list[DriftEvent]: newest-first.\n    - resolve_drift(conn, drift_event_id, resolved_by).\n- storage/postgres/policy_drift_repository.py — thin CRUD.\n\nInstrument the five neutralized paths:\n1. runtime/task_assembler._call_haiku — if any caller reaches the anthropic branch, emit_drift + raise.\n2. adapters/provider_transport.py BUILTIN fallback — if anthropic client constructed with api_endpoint present, emit_drift.\n3. adapters/docker_runner.py — if ANTHROPIC_API_KEY added back to _PROVIDER_AUTH_ENV_CANDIDATES, emit_drift at container spawn.\n4. runtime/agent_spawner.py — same check on _PROVIDER_ENV_KEYS_FALLBACK.\n5. registry/provider_onboarding/_probe.py anthropic_models_list — if operator pastes api_endpoint reaching HTTP, emit_drift + return [].\n\nThe emitter records; the neutralization still returns its safe value. Drift is observability, not enforcement.\n\nTests at tests/integration/test_policy_drift_detector.py: emit creates row; DB failure returns None (doesn't raise); recent_drift_count respects resolved_at; simulated misroute (monkeypatch) records one drift before raising.",
@@ -218,13 +250,17 @@
         "Code&DBs/Workflow/registry/provider_onboarding/_probe.py",
         "Code&DBs/Workflow/tests/integration/test_policy_drift_detector.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_policy_drift_detector.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave2.policy.drift.detector"
+      ]
     },
     {
       "label": "wave2_autonomy_chain_ledger",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave2_capability_resolver"],
+      "depends_on": [
+        "wave2_capability_resolver"
+      ],
       "description": "Chain-length counter for auto-approved actions; human tap closes the chain (debate pillar 3 part 2).",
       "outcome_goal": "At most one active autonomy_chain_ledger row. classify_control_intent bumps depth_counter on AUTO_EXECUTE. approval_lifecycle.ratify closes the active chain and opens a new one, resetting depth to 0.",
       "prompt": "Migration 189 applied; autonomy_chain_ledger exists with singleton partial-unique index.\n\nFiles to create:\n- runtime/capability/autonomy_chain.py:\n    - get_or_open_active(conn) -> chain_id: SELECT active row or INSERT. Singleton unique index serializes concurrent opens.\n    - bump_depth(conn, run_id=None): SELECT chain_id via get_or_open_active, then UPDATE ... SET depth_counter = depth_counter + 1, last_updated = now(), current_run_id = COALESCE(%s, current_run_id) WHERE chain_id = %s AND terminated_at IS NULL.\n    - close_on_human_tap(conn, reason='human_tap'): UPDATE SET terminated_at = now(), last_human_tap_at = now(), termination_reason = %s WHERE terminated_at IS NULL.\n    - current_depth(conn) -> int: returns 0 if no active row.\n\nSurgical call-site hooks (exactly two):\n1. runtime/control_commands.classify_control_intent — when returning ControlPolicyDecision(mode=AUTO_EXECUTE, ...), call autonomy_chain.bump_depth(conn, run_id) before return.\n2. runtime/capability/approval_lifecycle.ratify_approval_request — at top of atomic block, call autonomy_chain.close_on_human_tap(conn).\n\nTests at tests/integration/test_autonomy_chain_ledger.py using rollback-isolated conn: empty table -> current_depth == 0; bump opens chain at depth 1; consecutive bumps increase monotonically; close terminates; next bump opens fresh chain at depth 1 (not continuing); partial unique index prevents two active rows under concurrency.",
@@ -239,7 +275,9 @@
         "Code&DBs/Workflow/runtime/capability/approval_lifecycle.py",
         "Code&DBs/Workflow/tests/integration/test_autonomy_chain_ledger.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_autonomy_chain_ledger.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase1.authority.spine.20260420.wave2.autonomy.chain.ledger"
+      ]
     }
   ]
 }

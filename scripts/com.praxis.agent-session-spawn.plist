@@ -8,18 +8,18 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/nate/Praxis/scripts/run_agent_session_workflow.sh</string>
+        <string>__PRAXIS_REPO_ROOT__/scripts/run_agent_session_workflow.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/nate/Praxis</string>
+    <string>__PRAXIS_REPO_ROOT__</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>WORKFLOW_DATABASE_URL</key>
-        <string>postgresql://localhost:5432/praxis</string>
+        <string>__WORKFLOW_DATABASE_URL__</string>
         <key>PATH</key>
-        <string>/Users/nate/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>__PRAXIS_PATH__</string>
     </dict>
 
     <key>StartCalendarInterval</key>
@@ -34,9 +34,9 @@
     <false/>
 
     <key>StandardOutPath</key>
-    <string>/Users/nate/Praxis/artifacts/agent_session_spawn.log</string>
+    <string>__PRAXIS_REPO_ROOT__/artifacts/agent_session_spawn.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/nate/Praxis/artifacts/agent_session_spawn.err</string>
+    <string>__PRAXIS_REPO_ROOT__/artifacts/agent_session_spawn.err</string>
 </dict>
 </plist>

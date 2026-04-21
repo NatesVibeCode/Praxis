@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from registry.provider_execution_registry import resolve_api_key_env_vars
 from runtime.docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
-from runtime.sandbox_runtime import _cli_auth_volume_flags
+from runtime.sandbox_runtime import _cli_auth_volume_flags, _cli_home_tmpfs_flags
 from runtime.workflow.execution_policy import validate_auth_mount_policy
 
 if TYPE_CHECKING:
@@ -283,6 +283,8 @@ def run_in_docker(
 
     normalized_auth_policy = validate_auth_mount_policy(auth_mount_policy)
     if normalized_auth_policy != "none":
+        if user:
+            docker_cmd.extend(_cli_home_tmpfs_flags())
         docker_cmd.extend(
             _cli_auth_volume_flags(
                 provider_slug=provider_slug if normalized_auth_policy == "provider_scoped" else None,

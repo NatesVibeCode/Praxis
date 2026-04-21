@@ -158,7 +158,7 @@ _ELIGIBILITY_SQL = """
 # providers whose default adapter transport is denied by policy (e.g.
 # anthropic.llm_task per decision.2026-04-20.anthropic-cli-only-restored)
 # never surface as a route candidate. Without this filter the router
-# happily emits anthropic/claude-opus-4-6 for auto/review, the worker hits
+# happily emits anthropic/claude-opus-4-7 for auto/review, the worker hits
 # the Anthropic HTTP API with an unauthenticated key, and a whole batch
 # collapses on 401 before any work starts.
 _PROVIDER_TRANSPORT_ADMISSION_SQL = """
@@ -1247,7 +1247,7 @@ class TaskTypeRouter:
         has admitted_by_policy=false in provider_transport_admissions.
 
         The classic failure the filter prevents: auto/review resolves to
-        anthropic/claude-opus-4-6; the worker's default adapter for
+        anthropic/claude-opus-4-7; the worker's default adapter for
         anthropic is llm_task (HTTP); provider_transport_admissions has
         that row marked admitted_by_policy=false per the CLI-only policy;
         but without this filter the route is emitted anyway and the worker

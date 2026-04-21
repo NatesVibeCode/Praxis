@@ -85,7 +85,7 @@ INSERT INTO registry_native_runtime_profile_authority (
     'scratch_agent',
     'openai',
     '["openai", "anthropic", "google"]'::jsonb,
-    '["gpt-5.4", "claude-opus-4-6", "claude-sonnet-4-6", "gemini-3.1-pro-preview", "gpt-5.4-mini", "gemini-3-flash-preview", "claude-haiku-4-5-20251001"]'::jsonb,
+    '["gpt-5.4", "claude-opus-4-7", "claude-sonnet-4-6", "gemini-3.1-pro-preview", "gpt-5.4-mini", "gemini-3-flash-preview", "claude-haiku-4-5-20251001"]'::jsonb,
     'artifacts/runtime_receipts/scratch_agent',
     'artifacts/runtime_topology/scratch_agent'
 )

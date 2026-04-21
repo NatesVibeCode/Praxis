@@ -83,10 +83,10 @@ Reject:
 
 Review output is not authority. A verdict that stays in chat is residue. For every genuine improvement, route it to the narrowest durable surface:
 
-- defect discovered by the review -> `praxis workflow bugs file`, attach evidence, resolve only after validation
-- enhancement, hardening, refactor, or new capability -> `praxis workflow roadmap write preview|validate|commit`
+- defect discovered by the review -> `praxis workflow bugs file --title "<title>" --severity <P0|P1|P2|P3> --category <category> --description "<description>" --filed-by "<actor>" --source-kind <source_kind>`, attach evidence, resolve only after validation
+- enhancement, hardening, refactor, or new capability -> `praxis workflow roadmap write <preview|validate|commit> --title <title> --intent-brief <brief>`
 - architecture policy established by the review -> `praxis workflow tools call praxis_operator_architecture_policy --input-json '{...}' --yes`
-- already-tracked item the review confirms complete -> `praxis workflow roadmap closeout preview|commit`
+- already-tracked item the review confirms complete -> `praxis workflow roadmap closeout <preview|commit> [--bug-id <id>]... [--roadmap-item-id <id>]...`
 
 If authority is unclear, ask the router: `praxis workflow query "what record should capture this review outcome?"` — then drop to the specific surface once clear.
 

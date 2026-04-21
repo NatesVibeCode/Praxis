@@ -1,14 +1,15 @@
 #!/bin/bash
 # End-to-end smoke test for the agent_sessions service.
-# Starts the service if needed, fires one turn, asserts reply mentions /Users/nate/Praxis.
+# Starts the service if needed, fires one turn, asserts reply mentions this repo.
 
 set -euo pipefail
 
-REPO=/Users/nate/Praxis
+REPO="${PRAXIS_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 PORT=8421
 BASE="http://127.0.0.1:$PORT"
 LOG="$REPO/artifacts/agent_sessions_smoke_$(date -u +%Y%m%d).log"
 STARTED_PID=""
+PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"
 
 mkdir -p "$(dirname "$LOG")"
 exec > >(tee -a "$LOG") 2>&1
@@ -29,10 +30,15 @@ trap cleanup EXIT
 
 log "starting smoke test"
 
+if [ -z "$PYTHON_BIN" ]; then
+  log "FAIL: python3 not found; set PRAXIS_PYTHON_BIN"
+  exit 1
+fi
+
 if ! curl -sf "$BASE/agents" >/dev/null 2>&1; then
   log "service not running — launching in background"
   cd "$REPO"
-  PYTHONPATH="$REPO/Code&DBs/Workflow" /opt/homebrew/bin/python3 \
+  PYTHONPATH="$REPO/Code&DBs/Workflow" "$PYTHON_BIN" \
     "$REPO/Code&DBs/Workflow/surfaces/api/agent_sessions.py" \
     >> "$REPO/artifacts/agent_sessions.log" \
     2>> "$REPO/artifacts/agent_sessions.err" &
@@ -53,7 +59,7 @@ resp=$(curl -sS -X POST -H 'Content-Type: application/json' \
   -d '{"prompt":"smoke: what directory are you currently running in? answer with the absolute path only."}' \
   "$BASE/agents")
 echo "$resp" > "$REPO/artifacts/agent_sessions_smoke_new.json"
-agent_id=$(echo "$resp" | /opt/homebrew/bin/python3 -c 'import sys,json;print(json.load(sys.stdin).get("agent_id",""))')
+agent_id=$(echo "$resp" | "$PYTHON_BIN" -c 'import sys,json;print(json.load(sys.stdin).get("agent_id",""))')
 if [ -z "$agent_id" ]; then
   log "FAIL: no agent_id in response: $resp"
   exit 1
@@ -64,7 +70,7 @@ log "polling GET /agents/$agent_id/messages for up to 60s"
 reply=""
 for i in $(seq 1 60); do
   events=$(curl -sf "$BASE/agents/$agent_id/messages" || true)
-  reply=$(echo "$events" | /opt/homebrew/bin/python3 - <<'PY'
+  reply=$(echo "$events" | "$PYTHON_BIN" - <<'PY'
 import json, sys
 try:
     payload = json.loads(sys.stdin.read())
@@ -95,8 +101,8 @@ for ev in events:
 print("".join(pieces))
 PY
 )
-  if echo "$reply" | grep -q '/Users/nate/Praxis'; then
-    log "PASS: reply contains /Users/nate/Praxis"
+  if echo "$reply" | grep -q "$REPO"; then
+    log "PASS: reply contains $REPO"
     log "reply excerpt: $(echo "$reply" | head -c 200)"
     curl -sS -X DELETE "$BASE/agents/$agent_id" >/dev/null || true
     exit 0
@@ -104,7 +110,7 @@ PY
   sleep 1
 done
 
-log "FAIL: reply did not contain /Users/nate/Praxis within 60s"
+log "FAIL: reply did not contain $REPO within 60s"
 log "last reply text: $reply"
 curl -sS -X DELETE "$BASE/agents/$agent_id" >/dev/null || true
 exit 1

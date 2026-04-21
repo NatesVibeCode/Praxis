@@ -5,12 +5,12 @@
 
 set -euo pipefail
 
-REPO=/Users/nate/Praxis
+REPO="${PRAXIS_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SPEC="$REPO/config/cascade/specs/W_agent_session_service_20260420.queue.json"
 MARKER="$REPO/artifacts/agent_session_workflow.launched"
 LOG_DIR="$REPO/artifacts"
 LAUNCH_LOG="$LOG_DIR/agent_session_workflow_launch.log"
-PRAXIS=/Users/nate/.local/bin/praxis
+PRAXIS="${PRAXIS_BIN:-$(command -v praxis || true)}"
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 log() { echo "[$(ts)] agent-session-spawn: $*" | tee -a "$LAUNCH_LOG"; }
@@ -24,6 +24,11 @@ fi
 
 if [ ! -f "$SPEC" ]; then
   log "ERROR: spec not found at $SPEC"
+  exit 1
+fi
+
+if [ -z "$PRAXIS" ]; then
+  log "ERROR: praxis CLI not found; set PRAXIS_BIN"
   exit 1
 fi
 

@@ -31,13 +31,17 @@
         "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
         "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py"
       ],
-      "verify_command": "psql postgresql://localhost:5432/praxis -f 'Code&DBs/Databases/migrations/workflow/196_web_push_subscriptions.sql' && psql postgresql://localhost:5432/praxis -c '\\d web_push_subscriptions'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase3.push.and.status.20260421.wave0.vapid.migration"
+      ]
     },
     {
       "label": "wave1_push_fanout_module",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave0_vapid_migration"],
+      "depends_on": [
+        "wave0_vapid_migration"
+      ],
       "description": "Runtime module that signs + POSTs VAPID-signed push payloads on approval events.",
       "outcome_goal": "runtime.notifications.web_push.fanout_approval_pending(conn, request_id) posts to every active web_push_subscriptions row. open_approval_request invokes the fanout. Failed endpoints auto-disable on 404/410.",
       "prompt": "Install pywebpush (add to requirements.txt).\n\nFiles:\n- Code&DBs/Workflow/runtime/notifications/__init__.py\n- Code&DBs/Workflow/runtime/notifications/web_push.py:\n    - _vapid_claims() reads VAPID_SUBJECT from os.environ (default 'mailto:admin@praxis.local').\n    - _vapid_private_key() reads VAPID_PRIVATE_KEY from os.environ; raise RuntimeError on missing (fail fast at first fanout).\n    - fanout(conn, payload: Mapping, *, enrollment_id_filter=None) -> int: SELECT endpoint, p256dh, auth FROM web_push_subscriptions WHERE revoked_at IS NULL AND enabled=TRUE (optionally filtered by enrollment_id); for each, call pywebpush with VAPID; on WebPushException 404/410, mark enabled=FALSE. Returns count of successful pushes.\n    - fanout_approval_pending(conn, request_id) -> int: read the approval_requests row, build payload {event:'pending_opened', request_id, intent_kind, plan_envelope_summary}, call fanout. Never raises — log and swallow.\n\nModify Code&DBs/Workflow/runtime/capability/approval_lifecycle.py: at the end of open_approval_request (after the INSERT), call web_push.fanout_approval_pending(conn, request.request_id) in a try/except that logs + swallows. Push failure must not block the approval being recorded.\n\nTests at Code&DBs/Workflow/tests/integration/test_push_fanout.py using rollback-isolated conn + monkeypatched pywebpush: register fixture subscription; call fanout_approval_pending; assert pywebpush called once with correct VAPID claims and payload; simulate 410 response; assert enabled=FALSE after.",
@@ -53,13 +57,17 @@
         "Code&DBs/Workflow/tests/integration/test_push_fanout.py",
         "requirements.txt"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_push_fanout.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase3.push.and.status.20260421.wave1.push.fanout.module"
+      ]
     },
     {
       "label": "wave1_push_endpoints",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave1_push_fanout_module"],
+      "depends_on": [
+        "wave1_push_fanout_module"
+      ],
       "description": "HTTP endpoints for PWA to subscribe/unsubscribe + service-worker push handler.",
       "outcome_goal": "POST /mobile/notifications/subscribe (body: endpoint, p256dh, auth) upserts a web_push_subscriptions row for the authed enrollment. DELETE /mobile/notifications/subscribe deactivates. Service worker's push handler deep-links to /mobile/approvals.",
       "prompt": "Backend (Python):\n- Code&DBs/Workflow/surfaces/api/handlers/notifications.py with aiohttp handlers:\n    - POST /mobile/notifications/subscribe — requires mobile session; body {endpoint, p256dh, auth}; INSERT ON CONFLICT (endpoint) DO UPDATE SET p256dh, auth, enrollment_id, enabled=TRUE, revoked_at=NULL.\n    - DELETE /mobile/notifications/subscribe — body {endpoint}; UPDATE SET enabled=FALSE, revoked_at=now() WHERE endpoint = %s AND enrollment_id = authed_enrollment.\n    - GET /mobile/notifications/vapid-public-key — returns the VAPID public key (from platform_config or env) as base64url.\n- Register in Code&DBs/Workflow/surfaces/api/rest.py under the mobile route group.\n\nFrontend (TypeScript) — scaffold only, full wiring in Phase 5:\n- Code&DBs/Workflow/surfaces/app/src/mobile/service-worker.ts — add self.addEventListener('push', (event) => { const data = event.data.json(); self.registration.showNotification(data.title, { body: data.body, data: { url: data.url || '/mobile/approvals' }, tag: data.request_id }); }); and notificationclick handler that clients.openWindow(data.url).\n- Code&DBs/Workflow/surfaces/app/src/mobile/api/push.ts — enrollPush() fetches /mobile/notifications/vapid-public-key, calls navigator.serviceWorker.pushManager.subscribe({userVisibleOnly:true, applicationServerKey}), POSTs the result to /mobile/notifications/subscribe.\n\nIntegration tests at Code&DBs/Workflow/tests/integration/test_push_endpoints.py: subscribe + re-subscribe upserts; unsubscribe without cookie -> 401; authed unsubscribe disables.",
@@ -76,13 +84,17 @@
         "Code&DBs/Workflow/surfaces/app/src/mobile/api/push.ts",
         "Code&DBs/Workflow/tests/integration/test_push_endpoints.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_push_endpoints.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase3.push.and.status.20260421.wave1.push.endpoints"
+      ]
     },
     {
       "label": "wave2_public_status_endpoint",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave1_push_endpoints"],
+      "depends_on": [
+        "wave1_push_endpoints"
+      ],
       "description": "Cheap unauthenticated liveness probe for the phone and Phase 4 tunnel health check.",
       "outcome_goal": "GET /mobile/status returns {ok, server_ts, last_approval_age_s, mac_awake} without a session cookie. Hardened: no leaked internals beyond those four fields. Rate-limited by IP to 60 rpm.",
       "prompt": "Add Code&DBs/Workflow/surfaces/api/handlers/mobile_status.py:\n\n- GET /mobile/status (no auth) returns JSON:\n    {\n      'ok': True,\n      'server_ts': iso8601 utc,\n      'last_approval_age_s': int | null (seconds since the most-recent approval_requests.created_at; null if table empty),\n      'mac_awake': bool (read from runtime.caffeinate_policy.is_held() — Phase 4 will wire this; for Phase 3 stub returns True)\n    }\n\n- Rate-limit: per-IP token bucket 60 requests/min. Exceed -> 429. Use an in-process dict keyed by request.remote.\n- Explicit allowlist in the mobile session middleware: this path bypasses session checks.\n- No other fields. No heartbeat data, no worker counts, no version strings.\n\nRegister in rest.py BEFORE the mobile session middleware so it remains public.\n\nIntegration tests at Code&DBs/Workflow/tests/integration/test_mobile_status.py: unauthenticated GET returns 200 with the four keys; 61st call from same IP in one minute returns 429; null last_approval_age when approvals empty.",
@@ -95,13 +107,17 @@
         "Code&DBs/Workflow/surfaces/api/rest.py",
         "Code&DBs/Workflow/tests/integration/test_mobile_status.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_mobile_status.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase3.push.and.status.20260421.wave2.public.status.endpoint"
+      ]
     },
     {
       "label": "wave2_notification_preferences",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave1_push_endpoints"],
+      "depends_on": [
+        "wave1_push_endpoints"
+      ],
       "description": "PWA Settings page toggle for per-device push enable/disable.",
       "outcome_goal": "Opening /mobile/settings shows a push toggle whose state reflects web_push_subscriptions.enabled for the current device. Toggling calls subscribe or unsubscribe; UI updates optimistically, rolls back on API error.",
       "prompt": "Add Code&DBs/Workflow/surfaces/app/src/mobile/pages/Settings.tsx:\n\n- useEffect on mount: navigator.serviceWorker.getRegistration().then(r => r.pushManager.getSubscription()) — reflects browser-side state.\n- Toggle component calling enrollPush() (from api/push.ts) or unsubscribePush() (DELETE /mobile/notifications/subscribe).\n- Optimistic UI: flip toggle immediately; on 4xx response, revert + show inline error.\n- Minimal Moon styling: hollow node, white on black, typographic label 'Push notifications'.\n\nAdd route /mobile/settings to the mobile router (or stub it if router not yet defined — Phase 5 will wire full navigation; for now render at that path if the PWA scaffold exists, else just export the component).\n\nTests at Code&DBs/Workflow/surfaces/app/src/mobile/__tests__/settings.test.tsx using vitest + mocked fetch + mocked serviceWorker: toggle ON calls subscribe; toggle OFF calls unsubscribe; API error reverts optimistic state.",
@@ -113,7 +129,9 @@
         "Code&DBs/Workflow/surfaces/app/src/mobile/pages/Settings.tsx",
         "Code&DBs/Workflow/surfaces/app/src/mobile/__tests__/settings.test.tsx"
       ],
-      "verify_command": "cd 'Code&DBs/Workflow/surfaces/app' && npm test -- src/mobile/__tests__/settings.test.tsx"
+      "verify_refs": [
+        "verify.workflow.mobile.phase3.push.and.status.20260421.wave2.notification.preferences"
+      ]
     }
   ]
 }

@@ -66,7 +66,7 @@ def decide(
     max_attempts : int
         Maximum attempts allowed for this job.
     failover_chain : list[str] | None
-        Ordered list of agent slugs to try (e.g., ["openai/gpt-5.4", "anthropic/claude-opus-4-6"]).
+        Ordered list of agent slugs to try (e.g., ["openai/gpt-5.4", "anthropic/claude-opus-4-7"]).
     resolved_agent : str | None
         The agent that just failed.
     pre_classified : FailureClassification | None

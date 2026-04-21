@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS model_sync_config (
 INSERT INTO model_sync_config (provider_slug, doc_model_ids, migration_rules, sync_note)
 VALUES (
     'anthropic',
-    '["claude-opus-4-6","claude-sonnet-4-6","claude-haiku-4-5-20251001"]'::jsonb,
-    '{"claude-sonnet-4-5":"claude-sonnet-4-6","claude-haiku-4-5":"claude-haiku-4-5-20251001"}'::jsonb,
+    '["claude-opus-4-7","claude-sonnet-4-6","claude-haiku-4-5-20251001"]'::jsonb,
+    '{"claude-opus-4-6":"claude-opus-4-7","claude-sonnet-4-5":"claude-sonnet-4-6","claude-haiku-4-5":"claude-haiku-4-5-20251001"}'::jsonb,
     'Seeded from sync_provider_model_catalog.py — observed IDs April 8 2026'
 )
 ON CONFLICT (provider_slug) DO UPDATE SET

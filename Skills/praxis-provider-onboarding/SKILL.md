@@ -46,7 +46,7 @@ Example probe:
 praxis workflow tools call praxis_provider_onboard --input-json '{"action":"probe","provider_slug":"openrouter","transport":"api"}'
 ```
 
-Only after a clean probe should you run `action: onboard`.
+Only after a clean probe should you run `praxis workflow tools call praxis_provider_onboard --input-json '{"action":"onboard","provider_slug":"<provider_slug>","transport":"api"}' --yes`.
 
 ## Rules
 

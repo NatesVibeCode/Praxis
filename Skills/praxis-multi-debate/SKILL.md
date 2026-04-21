@@ -65,10 +65,10 @@ Every position prompt needs:
 
 Debate output is not authority. `Must Do` / `Should Do` / `Remove / Simplify / Change` items are chat residue until they land in a durable surface. Route each synthesized item:
 
-- defect surfaced by the debate -> `praxis workflow bugs file`
-- enhancement, refactor, or new capability -> `praxis workflow roadmap write preview|validate|commit`
+- defect surfaced by the debate -> `praxis workflow bugs file --title "<title>" --severity <P0|P1|P2|P3> --category <category> --description "<description>" --filed-by "<actor>" --source-kind <source_kind>`
+- enhancement, refactor, or new capability -> `praxis workflow roadmap write <preview|validate|commit> --title <title> --intent-brief <brief>`
 - architecture policy the debate settled -> `praxis workflow tools call praxis_operator_architecture_policy --input-json '{...}' --yes`
-- already-tracked item the debate confirms complete -> `praxis workflow roadmap closeout preview|commit`
+- already-tracked item the debate confirms complete -> `praxis workflow roadmap closeout <preview|commit> [--bug-id <id>]... [--roadmap-item-id <id>]...`
 
 Verify by reading back through the same authority (`praxis workflow roadmap view`, `praxis workflow bugs search`, `praxis workflow query`). Call out any item that lacked a safe durable home.
 
@@ -79,7 +79,7 @@ Return:
 1. `Debate Set` — the topics and why each is its own packet
 2. `Per-Topic Scope` — positions, attack structure, review lenses
 3. `Execution Shape` — single run vs wave sequence, spec path(s)
-4. `Evidence Path` — how to retrieve submissions (`praxis workflow run-status`, `praxis workflow tools call praxis_get_submission ...`)
+4. `Evidence Path` — how to retrieve submissions (`praxis workflow run-status`, `praxis workflow tools call praxis_get_submission --workflow-token <token> --input-json '{"job_label":"<label>"}'`)
 5. `Synthesis Gate` — what the orchestrator must extract before closing: `Must Do`, `Should Do`, `Remove / Simplify / Change`
 6. `Writes Performed` — ids and authority of every roadmap row, bug, or policy persisted from the synthesis
 7. `Verification Readback` — the read-lane call that confirmed each write

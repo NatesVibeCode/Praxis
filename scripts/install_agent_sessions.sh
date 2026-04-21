@@ -4,10 +4,12 @@
 
 set -euo pipefail
 
-REPO=/Users/nate/Praxis
+REPO="${PRAXIS_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SRC="$REPO/scripts/com.praxis.agent-sessions.plist"
 DST="$HOME/Library/LaunchAgents/com.praxis.agent-sessions.plist"
 PORT=8421
+PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"
+LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 log() { echo "[$(ts)] install-agent-sessions: $*"; }
@@ -17,9 +19,26 @@ if [ ! -f "$SRC" ]; then
   exit 1
 fi
 
-mkdir -p "$(dirname "$DST")"
-cp "$SRC" "$DST"
-log "plist copied to $DST"
+if [ -z "$PYTHON_BIN" ]; then
+  log "ERROR: python3 not found; set PRAXIS_PYTHON_BIN"
+  exit 1
+fi
+
+xml_escape() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
+}
+
+sed_escape() {
+  printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
+}
+
+mkdir -p "$(dirname "$DST")" "$REPO/artifacts"
+sed \
+  -e "s|__PRAXIS_REPO_ROOT__|$(sed_escape "$(xml_escape "$REPO")")|g" \
+  -e "s|__PRAXIS_PYTHON_BIN__|$(sed_escape "$(xml_escape "$PYTHON_BIN")")|g" \
+  -e "s|__PRAXIS_PATH__|$(sed_escape "$(xml_escape "$LAUNCHD_PATH")")|g" \
+  "$SRC" > "$DST"
+log "plist rendered to $DST"
 
 launchctl unload "$DST" 2>/dev/null || true
 launchctl load "$DST"

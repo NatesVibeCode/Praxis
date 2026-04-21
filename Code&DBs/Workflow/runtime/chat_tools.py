@@ -118,7 +118,7 @@ CHAT_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "run_id": {"type": "string", "description": "The workflow run ID"},
                 "label": {"type": "string", "description": "The job label to retry"},
-                "model_override": {"type": "string", "description": "Optional: use a different model (e.g., anthropic/claude-opus-4-6)"},
+                "model_override": {"type": "string", "description": "Optional: use a different model (e.g., anthropic/claude-opus-4-7)"},
             },
             "required": ["run_id", "label"],
         },

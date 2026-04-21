@@ -73,12 +73,12 @@ WITH seed (
             'decision.market-model-match-rules.2026-04-08'
         ),
         (
-            'provider_model_market_match_rule.artificial_analysis.anthropic.claude-opus-4-6',
+            'provider_model_market_match_rule.artificial_analysis.anthropic.claude-opus-4-7',
             'artificial_analysis',
             'anthropic',
-            'claude-opus-4-6',
+            'claude-opus-4-7',
             'anthropic',
-            'claude-opus-4-6',
+            'claude-opus-4-7',
             'exact_source_slug',
             1.000,
             jsonb_build_object(

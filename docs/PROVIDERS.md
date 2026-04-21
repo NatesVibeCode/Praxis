@@ -56,7 +56,7 @@ Each provider/model combination has capability scores for task types:
 Bypass routing with explicit provider/model:
 
 ```json
-{"agent": "anthropic/claude-opus-4-6"}
+{"agent": "anthropic/claude-opus-4-7"}
 ```
 
 ### Provider Fallback
@@ -65,7 +65,8 @@ If the primary provider for a job is unavailable (rate limit, outage), the engin
 
 ## runtime_profiles.json
 
-Located at `config/runtime_profiles.json`. Defines the provider pool and allowed models:
+Live authority lives in `registry_native_runtime_profile_authority.allowed_models`.
+`config/runtime_profiles.json` is the fresh-install seed for that DB row:
 
 ```json
 {
@@ -77,7 +78,7 @@ Located at `config/runtime_profiles.json`. Defines the provider pool and allowed
       "provider_names": ["openai", "anthropic", "google"],
       "allowed_models": [
         "gpt-5.4",
-        "claude-opus-4-6",
+        "claude-opus-4-7",
         "claude-sonnet-4-6",
         "gemini-3.1-pro-preview",
         "gpt-5.4-mini",

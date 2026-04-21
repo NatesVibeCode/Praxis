@@ -4782,7 +4782,12 @@
         "object_name": "v_mcp_liveness_snapshots"
       }
     ],
-    "180_remove_direct_anthropic_provider.sql": [],
+    "180_remove_direct_anthropic_provider.sql": [
+      {
+        "object_type": "table",
+        "object_name": "provider_concurrency"
+      }
+    ],
     "181_data_dictionary_wiring_audit_snapshots.sql": [
       {
         "object_type": "table",
@@ -4804,7 +4809,7 @@
       },
       {
         "object_type": "table",
-        "object_name": "mobile_capability_grants"
+        "object_name": "capability_grants"
       },
       {
         "object_type": "table",
@@ -4820,19 +4825,19 @@
       },
       {
         "object_type": "index",
-        "object_name": "mobile_capability_grants_principal_active_idx"
+        "object_name": "capability_grants_principal_active_idx"
       },
       {
         "object_type": "index",
-        "object_name": "mobile_capability_grants_plan_envelope_hash_active_idx"
+        "object_name": "capability_grants_plan_envelope_hash_active_idx"
       },
       {
         "object_type": "index",
-        "object_name": "mobile_capability_grants_device_active_idx"
+        "object_name": "capability_grants_device_active_idx"
       },
       {
         "object_type": "index",
-        "object_name": "mobile_capability_grants_approval_request_id_idx"
+        "object_name": "capability_grants_approval_request_id_idx"
       },
       {
         "object_type": "index",

@@ -8,11 +8,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/nate/Praxis/scripts/public_branch_sync.sh</string>
+        <string>__PRAXIS_REPO_ROOT__/scripts/public_branch_sync.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/nate/Praxis</string>
+    <string>__PRAXIS_REPO_ROOT__</string>
 
     <key>StartCalendarInterval</key>
     <dict>
@@ -26,9 +26,9 @@
     <false/>
 
     <key>StandardOutPath</key>
-    <string>/Users/nate/Praxis/artifacts/public_branch_sync.log</string>
+    <string>__PRAXIS_REPO_ROOT__/artifacts/public_branch_sync.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/nate/Praxis/artifacts/public_branch_sync.err</string>
+    <string>__PRAXIS_REPO_ROOT__/artifacts/public_branch_sync.err</string>
 </dict>
 </plist>

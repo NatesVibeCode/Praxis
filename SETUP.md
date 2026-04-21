@@ -21,7 +21,7 @@ This script is idempotent. It creates `.env` when no repo DB authority exists, c
 
 ## Docker Setup
 
-Requires Docker and Docker Compose. The compose stack does **not** include its own database — it expects a host Postgres reachable via `host.docker.internal:5432` and a database named `praxis`.
+Requires Docker and Docker Compose. The compose stack does **not** include its own database. It uses `WORKFLOW_DATABASE_URL` from `.env` or the shell, so the database can be host-local, remote on the LAN, or any reachable Postgres 16+ instance with `pgvector`.
 
 ```bash
 # Start the app services (semantic-backend + api-server)
@@ -34,7 +34,7 @@ docker compose ps
 ./scripts/bootstrap
 ```
 
-On Linux, `host.docker.internal` is not resolved by default. Either add `extra_hosts: ["host.docker.internal:host-gateway"]` to the compose services, or run the API natively via the path below.
+If nested Docker workers need to call the host-published API from Linux, set `PRAXIS_WORKFLOW_MCP_URL` to a reachable URL for `/mcp`. On Docker Desktop and OrbStack the default `http://host.docker.internal:8420/mcp` usually works.
 
 ## macOS Native Setup
 
@@ -194,8 +194,8 @@ Located at `config/runtime_profiles.json`. Defines provider routing policy:
       "provider_names": ["openai", "anthropic", "google"],
       "allowed_models": [
         "gpt-5.4",
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
+        "claude-opus-4-7",
+        "claude-sonnet-4-7",
         "gemini-3.1-pro-preview"
       ],
       "repo_root": ".",
@@ -215,6 +215,9 @@ Located at `config/runtime_profiles.json`. Defines provider routing policy:
 | `PRAXIS_DOCKER_IMAGE` | `praxis-worker:latest` | Docker image for sandboxed execution. If unset and the default image is missing, Praxis will build it from `Code&DBs/Workflow/docker/praxis-worker.Dockerfile` on first use. |
 | `PRAXIS_DOCKER_MEMORY` | `4g` | Memory limit for Docker workers |
 | `PRAXIS_DOCKER_CPUS` | `2` | CPU limit for Docker workers |
+| `PRAXIS_CLI_AUTH_HOME` | `$HOME` | Host directory containing `.codex`, `.claude`, and `.gemini` auth files for Docker workers |
+| `PRAXIS_WORKER_MAX_PARALLEL` | `4` | Local workflow worker slot cap used by the compose worker command |
+| `PRAXIS_WORKFLOW_MCP_URL` | `http://host.docker.internal:8420/mcp` | MCP bridge URL for worker-launched model containers |
 
 ## MCP Setup
 

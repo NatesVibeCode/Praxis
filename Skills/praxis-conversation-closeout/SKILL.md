@@ -55,7 +55,7 @@ Prefer first-class `praxis workflow` entrypoints when they exist:
 - `praxis workflow query ...`
 - `praxis workflow recall ...`
 
-Drop to `praxis workflow tools describe|call ...` only for decision and policy surfaces that do not yet have a stable dedicated command.
+Drop to `praxis workflow tools describe <tool>` or `praxis workflow tools call <tool> --input-json '{...}' --yes` only for decision and policy surfaces that do not yet have a stable dedicated command.
 
 ## Core Laws
 
@@ -97,10 +97,10 @@ Use the strongest write seam available.
 
 When the conversation includes implementation work or follow-up obligations, use this split:
 
-- defect still broken, deferred, or only partially mitigated -> `praxis workflow bugs file`
-- defect fixed in this thread but never tracked -> `praxis workflow bugs file`, then `attach_evidence`, then `resolve` only after real verification evidence exists
-- enhancement, hardening, refactor, or new capability request -> `praxis workflow roadmap write preview|validate|commit`
-- already tracked bug or roadmap item now complete -> `praxis workflow roadmap closeout preview|commit`
+- defect still broken, deferred, or only partially mitigated -> `praxis workflow bugs file --title "<title>" --severity <P0|P1|P2|P3> --category <category> --description "<description>" --filed-by "<actor>" --source-kind <source_kind>`
+- defect fixed in this thread but never tracked -> `praxis workflow bugs file --title "<title>" --severity <P0|P1|P2|P3> --category <category> --description "<description>" --filed-by "<actor>" --source-kind <source_kind>`, then `attach_evidence`, then `resolve` only after real verification evidence exists
+- enhancement, hardening, refactor, or new capability request -> `praxis workflow roadmap write <preview|validate|commit> --title <title> --intent-brief <brief>`
+- already tracked bug or roadmap item now complete -> `praxis workflow roadmap closeout <preview|commit> [--bug-id <id>]... [--roadmap-item-id <id>]...`
 
 For architectural decisions, prefer the typed surface:
 
@@ -147,7 +147,7 @@ Use bug authority through the stable CLI surface:
 
 ```text
 praxis workflow bugs search "<symptom or title>"
-praxis workflow bugs file ...
+praxis workflow bugs file --title "<title>" --severity <P0|P1|P2|P3> --category <category> --description "<description>" --filed-by "<actor>" --source-kind <source_kind>
 praxis workflow bugs attach_evidence ...
 praxis workflow bugs resolve ...
 ```
@@ -192,8 +192,8 @@ praxis workflow tools call praxis_operator_decisions --input-json '{"action":"li
 
 Use the correct table for the actual object:
 
-- new roadmap item or enhancement -> `praxis workflow roadmap write preview|validate|commit`
-- new bug for a defect still needing work -> `praxis workflow bugs file`, plus immediate evidence attachment when authoritative provenance exists
+- new roadmap item or enhancement -> `praxis workflow roadmap write <preview|validate|commit> --title <title> --intent-brief <brief>`
+- new bug for a defect still needing work -> `praxis workflow bugs file --title "<title>" --severity <P0|P1|P2|P3> --category <category> --description "<description>" --filed-by "<actor>" --source-kind <source_kind>`, plus immediate evidence attachment when authoritative provenance exists
 - defect fixed during the conversation but not previously tracked -> duplicate check first with `praxis workflow bugs search`, then `file`, attach `observed_in`, `attempted_fix`, and `validates_fix` evidence as available, then `resolve` to `FIXED` only after validation evidence is attached
 - completed roadmap item or bug set -> discover the exact existing ids first, run `praxis workflow roadmap closeout preview`, inspect the reconciliation result, then `commit` only those exact `bug_ids` and `roadmap_item_ids`
 - recallable conversation artifact with no better home -> `praxis_ingest` using `kind:"conversation"` or another schema-valid kind

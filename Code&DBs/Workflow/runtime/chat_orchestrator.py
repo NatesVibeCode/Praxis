@@ -43,8 +43,8 @@ _ROUTE_FAILURE_TTL_SECONDS = 300  # skip routes that failed in the last 5 minute
 
 # Rough cost estimates per 1M tokens (input/output)
 _COST_PER_1M = {
-    "claude-sonnet-4-5": (3.0, 15.0),
-    "claude-opus-4-6": (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-opus-4-7": (15.0, 75.0),
     "gpt-5.4": (2.5, 10.0),
     "gpt-5.4-mini": (0.4, 1.6),
 }

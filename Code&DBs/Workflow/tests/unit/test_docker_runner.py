@@ -267,7 +267,7 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
     monkeypatch.setattr(
         "adapters.docker_runner._cli_auth_volume_flags",
         lambda provider_slug=None: (
-            ["-v", "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro"]
+            ["-v", "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro"]
             if provider_slug == "openai"
             else []
         ),
@@ -292,8 +292,52 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
         "--cpus",
         "2",
     ]
+    tmpfs_mounts = [
+        captured["cmd"][idx + 1]
+        for idx, value in enumerate(captured["cmd"])
+        if value == "--tmpfs"
+    ]
+    assert "/home/praxis-agent/.claude:uid=1100,gid=1100,mode=755" in tmpfs_mounts
+    assert "/home/praxis-agent/.codex:uid=1100,gid=1100,mode=755" in tmpfs_mounts
+    assert "/home/praxis-agent/.gemini:uid=1100,gid=1100,mode=755" in tmpfs_mounts
     assert "-v" in captured["cmd"]
-    assert "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro" in captured["cmd"]
+    assert "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro" in captured["cmd"]
+
+
+def test_run_in_docker_skips_cli_home_tmpfs_when_auth_mounts_disabled(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakePopen:
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+            self.returncode = 0
+
+        def communicate(self, input=None, timeout=None):
+            return ("ok", "")
+
+    monkeypatch.setattr(
+        "adapters.docker_runner.resolve_docker_image",
+        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None}),
+    )
+    monkeypatch.setattr("adapters.docker_runner._has_docker_image", lambda image: True)
+    monkeypatch.setattr(
+        "adapters.docker_runner._cli_auth_volume_flags",
+        lambda provider_slug=None: (_ for _ in ()).throw(
+            AssertionError("auth volume lookup should be skipped")
+        ),
+    )
+    monkeypatch.setattr("adapters.docker_runner.subprocess.Popen", _FakePopen)
+
+    result = run_in_docker(
+        command="echo hello",
+        stdin_text="",
+        timeout=1,
+        provider_slug="openai",
+        auth_mount_policy="none",
+    )
+
+    assert result.execution_mode == "docker"
+    assert "--tmpfs" not in captured["cmd"]
 
 
 def test_run_in_docker_rejects_unknown_auth_mount_policy(monkeypatch):

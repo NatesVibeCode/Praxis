@@ -75,6 +75,7 @@ _CLI_AUTH_MOUNTS: tuple[tuple[frozenset[str], str, str], ...] = (
     (frozenset({"google", "gemini"}), ".gemini/google_accounts.json", "/home/praxis-agent/.gemini/google_accounts.json"),
     (frozenset({"google", "gemini"}), ".gemini/settings.json", "/home/praxis-agent/.gemini/settings.json"),
 )
+_CLI_HOME_TMPFS_DIRS: tuple[str, ...] = (".claude", ".codex", ".gemini")
 
 
 def _cli_auth_home() -> str:
@@ -207,6 +208,19 @@ def _cli_auth_volume_flags(*, provider_slug: str | None = None) -> list[str]:
         host_path = os.path.join(home, rel_path)
         if any(os.path.isfile(os.path.join(probe_home, rel_path)) for probe_home in probe_homes):
             flags.extend(["-v", f"{host_path}:{container_path}:ro"])
+    return flags
+
+
+def _cli_home_tmpfs_flags() -> list[str]:
+    """Return writable CLI home dirs for non-root Docker CLI execution."""
+    flags: list[str] = []
+    for home_subdir in _CLI_HOME_TMPFS_DIRS:
+        flags.extend(
+            [
+                "--tmpfs",
+                f"/home/praxis-agent/{home_subdir}:uid=1100,gid=1100,mode=755",
+            ]
+        )
     return flags
 
 
@@ -834,10 +848,7 @@ class DockerLocalSandboxProvider:
             # specific files into these tmpfs dirs. Without this, the container
             # auto-creates parent dirs owned by root:755 when mounting individual
             # files, blocking uid-1100 writes and breaking gemini/codex CLIs.
-            for _home_subdir in (".claude", ".codex", ".gemini"):
-                docker_cmd.extend(
-                    ["--tmpfs", f"/home/praxis-agent/{_home_subdir}:uid=1100,gid=1100,mode=755"],
-                )
+            docker_cmd.extend(_cli_home_tmpfs_flags())
             docker_cmd.extend(
                 _cli_auth_volume_flags(provider_slug=provider_slug)
             )

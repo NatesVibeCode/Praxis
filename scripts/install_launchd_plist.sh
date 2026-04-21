@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
-# Install the authority-to-memory projection refresh LaunchAgent.
-# Idempotent: safe to re-run after plist edits.
+# Render and install a Praxis launchd plist template from scripts/.
+
 set -euo pipefail
 
+if [[ $# -ne 1 ]]; then
+    echo "usage: scripts/install_launchd_plist.sh com.praxis.NAME.plist" >&2
+    exit 2
+fi
+
 REPO_ROOT="${PRAXIS_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-PLIST_NAME="com.praxis.authority-memory-refresh.plist"
+PLIST_NAME="$1"
 SRC="$REPO_ROOT/scripts/$PLIST_NAME"
 DST="$HOME/Library/LaunchAgents/$PLIST_NAME"
 PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"
+LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
 DATABASE_URL="${WORKFLOW_DATABASE_URL:-}"
 
+if [[ "$PLIST_NAME" != com.praxis.*.plist ]]; then
+    echo "error: plist must be a com.praxis.*.plist file" >&2
+    exit 2
+fi
+
 if [[ ! -f "$SRC" ]]; then
-    echo "error: $SRC not found" >&2
+    echo "error: source plist not found: $SRC" >&2
     exit 1
 fi
 
@@ -35,19 +46,16 @@ sed_escape() {
     printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
 
-mkdir -p "$(dirname "$DST")"
+mkdir -p "$(dirname "$DST")" "$REPO_ROOT/artifacts"
 sed \
     -e "s|__PRAXIS_REPO_ROOT__|$(sed_escape "$(xml_escape "$REPO_ROOT")")|g" \
     -e "s|__PRAXIS_PYTHON_BIN__|$(sed_escape "$(xml_escape "$PYTHON_BIN")")|g" \
+    -e "s|__PRAXIS_PATH__|$(sed_escape "$(xml_escape "$LAUNCHD_PATH")")|g" \
     -e "s|__WORKFLOW_DATABASE_URL__|$(sed_escape "$(xml_escape "$DATABASE_URL")")|g" \
     "$SRC" > "$DST"
+
+plutil -lint "$DST" >/dev/null
 launchctl unload "$DST" 2>/dev/null || true
 launchctl load "$DST"
 
 echo "installed: $DST"
-echo "status:"
-launchctl list | grep com.praxis.authority-memory || true
-echo ""
-echo "cadence: every 30 minutes (RunAtLoad=true so it fires on load)"
-echo "logs: $REPO_ROOT/artifacts/authority_memory_refresh.log"
-echo "errs: $REPO_ROOT/artifacts/authority_memory_refresh.err"

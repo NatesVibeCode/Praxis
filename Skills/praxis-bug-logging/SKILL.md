@@ -77,7 +77,7 @@ Use provenance fields only when they can be verified:
 Prefer the stable CLI surface:
 
 ```text
-praxis workflow bugs file
+praxis workflow bugs file --title "<title>" --severity <P0|P1|P2|P3> --category <category> --description "<description>" --filed-by "<actor>" --source-kind <source_kind>
 ```
 
 When CLI needs raw field control, use the tool surface:

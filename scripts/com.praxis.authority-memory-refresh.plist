@@ -7,19 +7,19 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/python3</string>
-        <string>/Users/nate/Praxis/scripts/refresh_authority_memory.py</string>
+        <string>__PRAXIS_PYTHON_BIN__</string>
+        <string>__PRAXIS_REPO_ROOT__/scripts/refresh_authority_memory.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/nate/Praxis</string>
+    <string>__PRAXIS_REPO_ROOT__</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PYTHONPATH</key>
-        <string>/Users/nate/Praxis/Code&amp;DBs/Workflow</string>
+        <string>__PRAXIS_REPO_ROOT__/Code&amp;DBs/Workflow</string>
         <key>WORKFLOW_DATABASE_URL</key>
-        <string>postgresql://localhost:5432/praxis</string>
+        <string>__WORKFLOW_DATABASE_URL__</string>
     </dict>
 
     <key>StartInterval</key>
@@ -29,9 +29,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/nate/Praxis/artifacts/authority_memory_refresh.log</string>
+    <string>__PRAXIS_REPO_ROOT__/artifacts/authority_memory_refresh.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/nate/Praxis/artifacts/authority_memory_refresh.err</string>
+    <string>__PRAXIS_REPO_ROOT__/artifacts/authority_memory_refresh.err</string>
 </dict>
 </plist>

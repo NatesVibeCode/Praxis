@@ -1,0 +1,22 @@
+{
+  "spec_version": "1.0",
+  "name": "a8_sandbox_kernel",
+  "workflow_id": "a8_sandbox_kernel",
+  "queue_id": "audit-batch-2026-04-20-a8",
+  "phase": "maintenance",
+  "target_branch": "praxis/kernel-sandbox",
+  "outcome_goal": "Every RuntimeBoundaryError raise is inside runtime/sandbox_runtime.py; execution_backends.py and execution_policy.py only assemble payloads.",
+  "verify_command": "bash -lc \"bad=$(rg 'raise RuntimeBoundaryError' 'Code&DBs/Workflow' --type py -l | rg -v 'Code&DBs/Workflow/runtime/sandbox_runtime.py' || true); test -z \\\"$bad\\\" && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k sandbox\"",
+  "jobs": [
+    {
+      "id": "a8_sandbox_kernel",
+      "label": "a8_sandbox_kernel",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "refactor",
+      "verify_refs": ["verify.audit_batch_20260420.a8_sandbox_kernel"],
+      "prompt": "On branch praxis/kernel-sandbox, consolidate the sandbox kernel. Touched files: Code&DBs/Workflow/runtime/sandbox_runtime.py; Code&DBs/Workflow/runtime/workflow/execution_backends.py; Code&DBs/Workflow/runtime/workflow/execution_policy.py; Code&DBs/Workflow/adapters/docker_runner.py. Move RuntimeBoundaryError raising authority into sandbox_runtime.py. execution_backends.py and execution_policy.py should assemble payloads only. File operator_decisions key decision.2026-04-20.kernel-sandbox-consolidation and open a PR to public referencing it. Transport constraint: use admitted CLI transport only; do not use llm_task, HTTP API routes, Anthropic routes, or deprecated Claude 4.6 slugs.",
+      "verify_command": "bash -lc \"bad=$(rg 'raise RuntimeBoundaryError' 'Code&DBs/Workflow' --type py -l | rg -v 'Code&DBs/Workflow/runtime/sandbox_runtime.py' || true); test -z \\\"$bad\\\" && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k sandbox\""
+    }
+  ]
+}

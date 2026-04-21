@@ -1,11 +1,11 @@
 #!/bin/bash
-# Sync /Users/nate/Praxis local public branch to origin/public.
+# Sync the local public branch to origin/public.
 # Single-user repo: auto-commit any dirty state to a snapshot commit before
 # fast-forwarding, then push. Never drops work, never blocks on dirty tree.
 
 set -euo pipefail
 
-REPO=/Users/nate/Praxis
+REPO="${PRAXIS_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$REPO"
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }

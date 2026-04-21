@@ -34,13 +34,17 @@
         "Code&DBs/Workflow/surfaces/app/src/mobile/components/BurnRateHeader.tsx",
         "Code&DBs/Workflow/tests/integration/test_device_revoke.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_device_revoke.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase6.hardening.policies.20260423.wave6.stolen.phone.defense"
+      ]
     },
     {
       "label": "wave6_e2e_chain_attack",
       "agent": "auto/test",
       "task_type": "test",
-      "depends_on": ["wave6_stolen_phone_defense"],
+      "depends_on": [
+        "wave6_stolen_phone_defense"
+      ],
       "description": "End-to-end tests for the chain attacks the debate identified: scope-widen, remediation-bypass, in-scope blast-radius, and policy-drift.",
       "outcome_goal": "Four E2E integration tests prove the attack paths are stopped: (a) workflow edits a file outside its grant's write_scope -> gate; (b) workflow attempts FIX_AND_RETRY without a covering grant -> approval_request opened; (c) in-scope plan crossing session_blast_radius_policy threshold -> gate regardless of grant coverage; (d) runtime attempting api.anthropic.com call emits a policy_drift_events row and surfaces on mobile metrics.",
       "prompt": "Write end-to-end integration tests at Code&DBs/Workflow/tests/integration/test_chain_attack_defense.py.\n\nTest 1 — commit-plus-push chain:\n- Enroll fixture device.\n- Issue grant covering {allowed_operations: ['workflow.submit', 'git.add', 'git.commit'], write_scope: ['docs/']}. NOT git.push, NOT Code&DBs/.\n- Simulate intent sequence: edit docs/foo.md (covered), git.commit (covered), edit Code&DBs/runtime/control_commands.py (NOT covered — write_scope mismatch), assert classify_control_intent returns GATE with reason_code='write_scope_outside_grant'.\n- Assert approval_requests row with proposed_plan_envelope including Code&DBs/ in write_scope.\n\nTest 2 — migration-plus-restart chain:\n- Grant covering ['data_dictionary.read_schema', 'data_dictionary.run_local_tests'].\n- Simulate data_dictionary_governance_remediation emitting 'sync.repair' (not covered).\n- Assert grant_ref=None + open_approval_request triggered.\n- Assert self_healing FIX_AND_RETRY similarly gated to 'pending_approval'.\n\nTest 3 — in-scope blast-radius (pillar 4):\n- Grant covering ['workflow.submit', 'fs.write'] with write_scope ['Code&DBs/Workflow/'] and budget_ceiling_cents 10000.\n- UPDATE session_blast_radius_policy SET threshold_files_mutated=5 WHERE policy_id='default' (tighten for test).\n- Open session, bump record_mutation six times.\n- Assert 6th call triggers gate: gate_triggered_at non-null, gate_triggered_dim='files_mutated'.\n- Assert approval_requests row with intent_kind='blast_radius_threshold_crossed' + gate_approval_ref linked.\n- Assert gate fires DESPITE active grant + unexhausted budget — orthogonal to grant coverage.\n\nTest 4 — policy drift surfaced (pillar 3):\n- Monkey-patch task_assembler._call_haiku's provider string back to 'anthropic'.\n- Invoke the call; assert it raises.\n- Assert exactly one new policy_drift_events row with policy_id='providers::anthropic', detector_kind='anthropic_api_call_attempt'.\n- Call policy_drift.recent_drift_count(conn, 24); assert >= 1.\n- Call mobile_metrics.snapshot with fixture conn; assert response['quality']['policy_drift_count_24h'] >= 1.\n\nAll four tests use rollback-isolated conns.",
@@ -53,13 +57,17 @@
       "write_scope": [
         "Code&DBs/Workflow/tests/integration/test_chain_attack_defense.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_chain_attack_defense.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase6.hardening.policies.20260423.wave6.e2e.chain.attack"
+      ]
     },
     {
       "label": "wave6_blast_radius_threshold_halve",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave6_e2e_chain_attack"],
+      "depends_on": [
+        "wave6_e2e_chain_attack"
+      ],
       "description": "Migration 199: halve blast-radius thresholds concurrent with mobile ship. Debate-mandated moral-hazard correction.",
       "outcome_goal": "session_blast_radius_policy row 'default' now has threshold_files_mutated=25, threshold_bytes_written=2621440 (2.5 MiB), threshold_external_calls=10, threshold_spend_cents=500 ($5). A decision row records the halve with the debate decision_ref.",
       "prompt": "Write Code&DBs/Databases/migrations/workflow/199_blast_radius_policy_halve.sql:\n\nBEGIN;\n\nUPDATE session_blast_radius_policy\nSET threshold_files_mutated   = 25,\n    threshold_bytes_written   = 2621440,\n    threshold_external_calls  = 10,\n    threshold_spend_cents     = 500,\n    decision_ref              = 'decision.2026-04-23.blast-radius-mobile-moral-hazard-halve',\n    rationale                 = 'Halved concurrent with mobile oversight ship. Debate debate_mobile_access_architecture_20260420 identified that mobile surface creates moral hazard — Nate approves more easily from the phone, so per-session ceilings must tighten to compensate. Any dimension crossing still triggers mid-plan approval; halving shifts where that line is drawn by 2x. Revisit after 14 days of behavior data.',\n    updated_at                = now()\nWHERE policy_id = 'default';\n\n-- File the decision row explicitly so operator_decisions authority has the trace.\nINSERT INTO operator_decisions (\n    policy_id,\n    scope_ref,\n    title,\n    rationale,\n    status,\n    decided_at\n) VALUES (\n    'decision.2026-04-23.blast-radius-mobile-moral-hazard-halve',\n    'session_blast_radius_policy::default',\n    'Blast-radius thresholds halved concurrent with mobile oversight ship',\n    'Mobile oversight creates a moral-hazard vector: approvals become easier from the phone, so per-session working-set ceilings must tighten to compensate. Halved: files 50->25, bytes 5MiB->2.5MiB, external_calls 20->10, spend $10->$5. Revisit 2026-05-07 with 14 days of data.',\n    'active',\n    now()\n) ON CONFLICT (policy_id) DO NOTHING;\n\nCOMMIT;\n\n-- Verification:\n--   SELECT threshold_files_mutated, threshold_bytes_written, threshold_external_calls, threshold_spend_cents FROM session_blast_radius_policy WHERE policy_id='default';\n--   Expected: 25, 2621440, 10, 500\n\nRegister in Code&DBs/Workflow/system_authority/workflow_migration_authority.json. Regenerate the Python authority artifact.",
@@ -72,25 +80,34 @@
         "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
         "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py"
       ],
-      "verify_command": "psql postgresql://localhost:5432/praxis -f 'Code&DBs/Databases/migrations/workflow/199_blast_radius_policy_halve.sql' && psql postgresql://localhost:5432/praxis -c \"SELECT threshold_files_mutated, threshold_bytes_written, threshold_external_calls, threshold_spend_cents FROM session_blast_radius_policy WHERE policy_id='default'\" | grep -q '25 | 2621440 | 10 | 500'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase6.hardening.policies.20260423.wave6.blast.radius.threshold.halve"
+      ]
     },
     {
       "label": "wave6_roadmap_policies",
       "agent": "auto/build",
       "task_type": "build",
-      "depends_on": ["wave6_e2e_chain_attack"],
+      "depends_on": [
+        "wave6_e2e_chain_attack"
+      ],
       "description": "File the five architecture policies the synthesis produced into Praxis.db operator_decisions.",
       "outcome_goal": "Five rows exist in operator_decisions with the policy-ids arch_mobile_pwa_webauthn, arch_authorization_capability_ledger, arch_minimalist_mobile_metrics, arch_session_blast_radius_gate, arch_policy_drift_inverse_check, each citing this queue_id as decision source.",
       "prompt": "Call praxis_operator_architecture_policy to file five rows.\n\n1. { policy_id: 'arch_mobile_pwa_webauthn', title: 'Mobile Control Surface must be a WebAuthn-backed Thin PWA', rationale: 'Native apps add App-Store deployment latency incompatible with zero-day remediation windows against autonomous threats. Bespoke cryptography (custom ed25519 HTTP signatures) introduces canonicalization ambiguities that an autonomous agent will exploit. Passkey + PWA solves hardware attestation and instant deploy simultaneously. Source: debate workflow_bf339d4a5629 + continuation workflow_e2f4e3d241b1.', status: 'active' }.\n\n2. { policy_id: 'arch_authorization_capability_ledger', title: 'Eradicate Label-Per-Action Authz in favor of Capability Grants', rationale: 'Autonomous agents bypass static verb-level authorization (_SAFE_AUTO_EXECUTE_TYPES) by chaining benign actions into destructive payloads. All auto-execution must be validated against a stateful, budget-aware capability ledger (capability_grants) covering the whole plan envelope. The existing gate_evaluations table is extended with grant_ref + plan_envelope_hash, not replaced.', status: 'active' }.\n\n3. { policy_id: 'arch_minimalist_mobile_metrics', title: 'Mobile metrics restricted to Pending Approvals + Burn Rate header and five compact panels', rationale: 'The mobile surface is a capability control gate, not a dashboard. The always-visible header shows only Pending Approvals, Burn Rate, and active-session blast-radius; the five panels (Flow, Economy, Providers, Quality, System) are compact-idle and expand on tap. No chart, no sparkline, no scrolling inside a panel. Collapse and simplify.', status: 'active' }.\n\n4. { policy_id: 'arch_session_blast_radius_gate', title: 'Session working-set gates fire regardless of grant coverage', rationale: 'Per-action risk tags (_SAFE_AUTO_EXECUTE_TYPES) and per-plan grants both miss the damage shape the plan approves in aggregate but would not have approved at size. A session-scoped blast-radius counter (files_mutated, bytes_written, external_calls, spend_cents) crossed against session_blast_radius_policy fires a mid-plan approval_request independent of grant coverage. Source: debate debate_mobile_access_architecture_20260420 pillar 4.', status: 'active' }.\n\n5. { policy_id: 'arch_policy_drift_inverse_check', title: 'operator_decisions is round-tripped: runtime emits drift on violation', rationale: 'A static authority row only protects behavior if the runtime is instrumented to honor it. The inverse check — whenever runtime hits a code path the authority declared inactive — emits a policy_drift_events row. First detector covers anthropic CLI-only enforcement across five neutralized paths. Future policies register detectors via runtime.capability.policy_drift.emit_drift. policy_drift_count_24h is the headline oversight metric. Source: debate debate_mobile_access_architecture_20260420 pillar 3.', status: 'active' }.\n\nVerify by querying operator_decisions for each policy_id.",
       "read_scope": [],
       "write_scope": [],
-      "verify_command": "psql postgresql://localhost:5432/praxis -c \"SELECT policy_id FROM operator_decisions WHERE policy_id IN ('arch_mobile_pwa_webauthn', 'arch_authorization_capability_ledger', 'arch_minimalist_mobile_metrics', 'arch_session_blast_radius_gate', 'arch_policy_drift_inverse_check')\" | grep -c arch_ | grep -q 5"
+      "verify_refs": [
+        "verify.workflow.mobile.phase6.hardening.policies.20260423.wave6.roadmap.policies"
+      ]
     },
     {
       "label": "wave6_review",
       "agent": "auto/review",
       "task_type": "review",
-      "depends_on": ["wave6_e2e_chain_attack", "wave6_roadmap_policies"],
+      "depends_on": [
+        "wave6_e2e_chain_attack",
+        "wave6_roadmap_policies"
+      ],
       "description": "Hostile code review of the whole integration against the threat model.",
       "outcome_goal": "A written review at docs/architecture/mobile_access_plan_review.md names every place the capability ledger could be bypassed, every remaining autorun_ok or _SAFE_AUTO_EXECUTE_TYPES reference, every test gap, and either closes each finding with a linked fix commit or files a bug.",
       "prompt": "Hostile review. Pretend you are the autonomous builder trying to chain around the new controls.\n\nMust check:\n1. grep -r '_SAFE_AUTO_EXECUTE_TYPES\\|autorun_ok' Code&DBs/Workflow/ returns zero matches in non-test, non-archive paths.\n2. Every site that constructs a ControlIntent passes plan_hash before classify_control_intent.\n3. Every path that writes gate_evaluations includes grant_ref + plan_envelope_hash when a grant is active.\n4. self_healing.py, data_dictionary_governance_remediation.py, canonical_workflows.py, workflow_chain.py, command_handlers.py, chat_tools.py all route recovery/remediation/retry intents through resolve_capability_grant.\n5. POST /approvals/{id}/ratify rejects stale step-up assertions (>30s).\n6. Revoking a device revokes its sessions AND its active grants atomically.\n7. Budget accounting uses atomic UPDATE with CHECK constraint; two concurrent consumes cannot both succeed.\n8. PWA service-worker does not cache any API response (only app shell).\n9. Cookie is httpOnly + SameSite=Strict + Secure in production.\n10. No plaintext bootstrap tokens persist in Praxis.db — only hashed, with expires_at.\n11. WebAuthn RP ID is validated server-side, not trusted from client.\n12. The chain-attack E2E tests at tests/integration/test_chain_attack_defense.py actually fail if the authority path is disabled (negative validation).\n\nProduce docs/architecture/mobile_access_plan_review.md with findings grouped: BLOCKERS, MAJOR, MINOR, NITS. For each finding, a proposed fix and file:line. If clean, say so.",
@@ -101,7 +118,9 @@
       "write_scope": [
         "docs/architecture/mobile_access_plan_review.md"
       ],
-      "verify_command": "test -f docs/architecture/mobile_access_plan_review.md && ! grep -r '_SAFE_AUTO_EXECUTE_TYPES' 'Code&DBs/Workflow/runtime/' && ! grep -r 'autorun_ok' 'Code&DBs/Workflow/runtime/data_dictionary_governance_remediation.py'"
+      "verify_refs": [
+        "verify.workflow.mobile.phase6.hardening.policies.20260423.wave6.review"
+      ]
     }
   ]
 }

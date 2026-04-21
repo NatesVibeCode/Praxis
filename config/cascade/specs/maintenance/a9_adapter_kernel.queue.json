@@ -1,0 +1,22 @@
+{
+  "spec_version": "1.0",
+  "name": "a9_adapter_kernel",
+  "workflow_id": "a9_adapter_kernel",
+  "queue_id": "audit-batch-2026-04-20-a9",
+  "phase": "maintenance",
+  "target_branch": "praxis/kernel-adapter",
+  "outcome_goal": "httpx, requests, and aiohttp callsites exist only inside adapters/http_transport.py, and five adapter types converge on that transport.",
+  "verify_command": "bash -lc \"bad=$(rg 'httpx\\.|requests\\.|aiohttp\\.' 'Code&DBs/Workflow' --type py -l | rg -v 'Code&DBs/Workflow/adapters/http_transport.py' || true); test -z \\\"$bad\\\" && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_adapter_kernel.py'\"",
+  "jobs": [
+    {
+      "id": "a9_adapter_kernel",
+      "label": "a9_adapter_kernel",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "refactor",
+      "verify_refs": ["verify.audit_batch_20260420.a9_adapter_kernel"],
+      "prompt": "After a7_secret_kernel lands, rebase branch praxis/kernel-adapter on praxis/kernel-secret and consolidate adapter HTTP transport. Touched files: Code&DBs/Workflow/adapters/http_transport.py; Code&DBs/Workflow/adapters/provider_transport.py; Code&DBs/Workflow/adapters/llm_client.py; Code&DBs/Workflow/adapters/mcp_task.py; Code&DBs/Workflow/runtime/integrations/connector_executor.py; Code&DBs/Workflow/runtime/integrations/webhook.py. Ensure httpx, requests, and aiohttp callsites exist only in adapters/http_transport.py and five adapter types converge on that transport. File operator_decisions key decision.2026-04-20.kernel-adapter-consolidation and open a PR to public referencing it. Transport constraint: use admitted CLI transport only; do not use llm_task, HTTP API routes, Anthropic routes, or deprecated Claude 4.6 slugs.",
+      "verify_command": "bash -lc \"bad=$(rg 'httpx\\.|requests\\.|aiohttp\\.' 'Code&DBs/Workflow' --type py -l | rg -v 'Code&DBs/Workflow/adapters/http_transport.py' || true); test -z \\\"$bad\\\" && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_adapter_kernel.py'\""
+    }
+  ]
+}

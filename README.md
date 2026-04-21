@@ -67,7 +67,9 @@ Vite serves the UI and proxies API calls to the port in `PRAXIS_API_PORT` (defau
 
 ### Docker path (alternative)
 
-If you prefer containers, `docker compose up -d` brings up `semantic-backend` and `api-server`. The stack uses the **host** launchd Postgres at `postgresql://localhost:5432/praxis` via `host.docker.internal` — it does not start its own database container. On Linux you may need `extra_hosts: host.docker.internal:host-gateway` in compose, or run the API natively.
+If you prefer containers, `docker compose up -d` brings up the runtime services. The stack does **not** start its own database container; it uses `WORKFLOW_DATABASE_URL` from `.env` or the shell. That URL may point at host-local Postgres, another LAN machine, or any reachable Postgres 16+ instance with `pgvector`.
+
+The worker also mounts CLI auth files from `PRAXIS_CLI_AUTH_HOME` when set, otherwise from `$HOME`. Set `PRAXIS_WORKER_MAX_PARALLEL` to cap local worker slots on small machines.
 
 ## Example Workflow Spec
 
@@ -124,7 +126,7 @@ The `agent` field uses `auto/` prefixes to route jobs to the best model for each
 | `auto/debate` | Adversarial analysis | Best reasoner |
 | `auto/research` | Deep research | Research-specialized model |
 
-The router resolves these to concrete provider/model pairs based on the provider registry and runtime profiles. You can also specify a provider directly: `"agent": "anthropic/claude-sonnet-4-6"`.
+The router resolves these to concrete provider/model pairs based on the provider registry and runtime profiles. You can also specify a provider directly: `"agent": "anthropic/claude-sonnet-4-7"`.
 
 ## MCP Integration
 

@@ -1,8 +1,9 @@
 services:
-  # Canonical Postgres is the host's launchd instance at
-  # postgresql://nate@host.docker.internal:5432/praxis (data dir
-  # Code&DBs/Databases/postgres-dev/data). The old bundled postgres service
-  # has been removed because it split-brained with launchd.
+  # Canonical Postgres is external to this compose stack. Set
+  # WORKFLOW_DATABASE_URL in .env or the shell; this may point at host-local
+  # Postgres, another LAN machine, or any reachable Postgres 16+ pgvector DB.
+  # The old bundled postgres service was removed because it split-brained with
+  # the operator-owned database authority.
   semantic-backend:
     build:
       context: ./Code&DBs/Workflow
@@ -47,7 +48,7 @@ services:
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: postgresql://nate@host.docker.internal:5432/praxis
+      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
@@ -57,7 +58,8 @@ services:
       # Integration secrets hydrated from host Keychain at compose-up time
       # (bin/praxis-compose-env exports account="praxis" services into shell).
       # The MCP bridge runs inside this container, so integration HTTP calls
-      # from workers (via host.docker.internal:8420/mcp → praxis_integration)
+      # from workers (by default via host.docker.internal:8420/mcp →
+      # praxis_integration; override PRAXIS_WORKFLOW_MCP_URL when needed)
       # need these present in the container env. Keychain is unreachable from
       # Linux, so this passthrough is the single authorized hydration channel.
       HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
@@ -97,7 +99,7 @@ services:
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: postgresql://nate@host.docker.internal:5432/praxis
+      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
     working_dir: /workspace
     volumes:
@@ -128,13 +130,13 @@ services:
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: postgresql://nate@host.docker.internal:5432/praxis
+      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
-      PRAXIS_CLI_AUTH_HOME: /Users/nate
-      PRAXIS_WORKFLOW_MCP_URL: http://host.docker.internal:8420/mcp
+      PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
+      PRAXIS_WORKFLOW_MCP_URL: ${PRAXIS_WORKFLOW_MCP_URL:-http://host.docker.internal:8420/mcp}
       # Single Anthropic auth authority: ~/.claude/.credentials.json is
       # mounted into the worker and is the only source of truth. We blank
       # every env-based Anthropic auth rail so the CLI cannot pick up a
@@ -146,10 +148,10 @@ services:
     working_dir: /workspace
     volumes:
       - .:/workspace
-      - /Users/nate/.codex:/root/.codex:ro
-      - /Users/nate/.gemini:/root/.gemini:ro
-      - /Users/nate/.claude.json:/root/.claude.json:ro
-      - /Users/nate/.claude/.credentials.json:/root/.claude/.credentials.json
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex:ro
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.gemini:/root/.gemini:ro
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude.json:/root/.claude.json:ro
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
       - /var/run/docker.sock:/var/run/docker.sock
       # Share host /tmp with worker so sandbox temp dirs (created by the
       # worker via tempfile.mkdtemp) are visible both sides: host-side
@@ -157,7 +159,7 @@ services:
       # must read them back for _dehydrate_copy after exec.
       - /tmp:/tmp
     command:
-      - python3
-      - -m
-      - runtime.workflow_worker
+      - sh
+      - -c
+      - exec python3 -m surfaces.cli.main queue worker --max-concurrent "$${PRAXIS_WORKER_MAX_PARALLEL:-2}"
     restart: unless-stopped

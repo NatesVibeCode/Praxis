@@ -53,7 +53,7 @@ praxis workflow retry <run_id> <label>
 - `run` is kickoff, not wait semantics
 - `run_id` is the durable tracking handle
 - use `--kill-if-idle` only after `run-status` shows an unhealthy idle run
-- when no direct alias fits, use `praxis workflow tools call praxis_workflow --input-json '{...}'`
+- when no direct alias fits, use `praxis workflow tools call praxis_workflow --input-json '{...}' --yes` for launch/write actions
 - if you do not know the schema, query the catalog instead of guessing
 
 ## Output Contract

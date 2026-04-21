@@ -69,8 +69,8 @@ def _tier_of_model(provider_slug: str, model_slug: str | None) -> str:
 
 # One tier up for review — real provider/model-version slugs
 _REVIEWER_FOR_TIER: dict[str, tuple[str, str]] = {
-    "economy": ("anthropic", "claude-sonnet-4-6"),     # haiku → sonnet reviews
-    "mid": ("anthropic", "claude-opus-4-6"),           # sonnet → opus reviews
+    "economy": ("anthropic", "claude-sonnet-4-6"),     # haiku -> sonnet reviews
+    "mid": ("anthropic", "claude-opus-4-7"),           # sonnet -> opus reviews
     # frontier: no auto-review
 }
 

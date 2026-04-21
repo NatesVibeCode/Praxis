@@ -57,7 +57,7 @@ VALUES
     ('anthropic', 'claude-opus-4-20250514', '2026-06-15', 'deprecating',
      'anthropic_model_deprecations_page_2026_04_20',
      'https://docs.anthropic.com/en/docs/about-claude/model-deprecations',
-     'Opus 4 retires 2026-06-15. Migrate to Opus 4.6 (claude-opus-4-6) or Opus 4.7 (claude-opus-4-5).')
+     'Opus 4 retires 2026-06-15. Migrate to Opus 4.7 (claude-opus-4-7).')
 ON CONFLICT (provider_slug, model_slug, retirement_effective_date) DO NOTHING;
 
 COMMIT;
