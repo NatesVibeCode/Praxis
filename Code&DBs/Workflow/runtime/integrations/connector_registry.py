@@ -148,7 +148,13 @@ def upsert_connector_schema(
     """Upsert api_schemas + api_endpoints from connector introspection. Returns schema_id."""
     import json as _json
 
-    auth_type = "api_key" if (auth_shape or {}).get("kind") == "env_var" else "none"
+    auth_kind = str((auth_shape or {}).get("kind") or "none").strip().lower()
+    auth_type = {
+        "api_key": "api_key",
+        "env_var": "api_key",
+        "oauth2": "oauth2",
+        "unknown": "unknown",
+    }.get(auth_kind, "none")
     paths = {
         f"/{cap['action']}": {
             "post": {

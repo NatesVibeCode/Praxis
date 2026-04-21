@@ -11,8 +11,8 @@
 -- a worker (provider=anthropic, adapter=cli_llm), it needs a candidate.
 --
 -- This migration adds exactly TWO candidate rows:
---   * anthropic/claude-sonnet-4-6  (default CLI model)
---   * anthropic/claude-opus-4-6    (heavier model, same CLI binary)
+--   * anthropic/claude-sonnet-4-7  (default CLI model)
+--   * anthropic/claude-opus-4-7    (heavier model, same CLI binary)
 --
 -- Both rows are CLI-only:
 --   - cli_config populated with the claude binary invocation template.
@@ -22,11 +22,27 @@
 --   - No model_profile_candidate_bindings row is added (profile resolver
 --     will not pull these in).
 --
--- Effect: a spec that explicitly names anthropic/claude-sonnet-4-6 with
+-- Effect: a spec that explicitly names anthropic/claude-sonnet-4-7 with
 -- adapter_type=cli_llm will resolve and dispatch the claude binary. No
 -- other path can land on anthropic.
 
 BEGIN;
+
+-- Keep explicit Anthropic CLI candidates, but do not let direct Anthropic
+-- appear in auto/* routing or stale profile bindings. Anthropic API routes
+-- remain forbidden; Claude is reachable only through explicit cli_llm specs.
+UPDATE public.provider_model_candidates
+SET status = 'retired',
+    effective_to = COALESCE(effective_to, now())
+WHERE provider_slug = 'anthropic'
+  AND model_slug IN ('claude-sonnet-4-6', 'claude-opus-4-6')
+  AND status = 'active';
+
+DELETE FROM public.task_type_routing
+WHERE provider_slug = 'anthropic';
+
+DELETE FROM public.model_profile_candidate_bindings
+WHERE candidate_ref LIKE 'candidate.anthropic.%';
 
 INSERT INTO public.provider_model_candidates (
     candidate_ref,
@@ -58,25 +74,25 @@ INSERT INTO public.provider_model_candidates (
     cap_build_med
 ) VALUES
 (
-    'candidate.anthropic.cli.claude-sonnet-4-6',
+    'candidate.anthropic.cli.claude-sonnet-4-7',
     'provider.anthropic',
     'Anthropic (CLI)',
     'anthropic',
-    'claude-sonnet-4-6',
+    'claude-sonnet-4-7',
     'active',
     10,   -- intentionally low priority so auto/* never ranks this ahead of openrouter/openai
     1,
     '["cli", "subscription", "local-cli"]'::jsonb,
     '{
       "provider_slug": "anthropic",
-      "model_slug": "claude-sonnet-4-6",
+      "model_slug": "claude-sonnet-4-7",
       "adapter_type": "cli_llm",
       "billing_model": "subscription_included",
       "catalog_source": "migration.184"
     }'::jsonb,
     '{
       "binary_name": "claude",
-      "model_slug": "claude-sonnet-4-6",
+      "model_slug": "claude-sonnet-4-7",
       "provider_slug": "anthropic",
       "prompt_mode": "stdin",
       "cmd_template": ["claude", "-p", "--output-format", "json", "--model", "{model}"],
@@ -112,25 +128,25 @@ INSERT INTO public.provider_model_candidates (
     true
 ),
 (
-    'candidate.anthropic.cli.claude-opus-4-6',
+    'candidate.anthropic.cli.claude-opus-4-7',
     'provider.anthropic',
     'Anthropic (CLI)',
     'anthropic',
-    'claude-opus-4-6',
+    'claude-opus-4-7',
     'active',
     10,
     1,
     '["cli", "subscription", "local-cli", "heavy"]'::jsonb,
     '{
       "provider_slug": "anthropic",
-      "model_slug": "claude-opus-4-6",
+      "model_slug": "claude-opus-4-7",
       "adapter_type": "cli_llm",
       "billing_model": "subscription_included",
       "catalog_source": "migration.184"
     }'::jsonb,
     '{
       "binary_name": "claude",
-      "model_slug": "claude-opus-4-6",
+      "model_slug": "claude-opus-4-7",
       "provider_slug": "anthropic",
       "prompt_mode": "stdin",
       "cmd_template": ["claude", "-p", "--output-format", "json", "--model", "{model}"],

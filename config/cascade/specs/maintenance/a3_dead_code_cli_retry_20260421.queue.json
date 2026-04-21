@@ -1,0 +1,19 @@
+{
+  "spec_version": "1.0",
+  "name": "a3_dead_code_cli_retry_20260421",
+  "workflow_id": "a3_dead_code_cli_retry_20260421",
+  "queue_id": "audit-batch-2026-04-20-a3-cli-retry-20260421",
+  "phase": "maintenance",
+  "outcome_goal": "Net-negative diff on public; every deleted symbol has grep evidence of zero callers recorded in the PR description.",
+  "jobs": [
+    {
+      "id": "a3_dead_code",
+      "label": "a3_dead_code",
+      "agent": "anthropic/claude-opus-4-7",
+      "adapter_type": "cli_llm",
+      "task_type": "review",
+      "prompt": "Delete only symbols with grep/discover evidence of zero live callers. Targets: Code&DBs/Workflow/runtime/__init__.py __getattr__; Code&DBs/Workflow/runtime/execution/__init__.py; Code&DBs/Workflow/runtime/workflow/__init__.py; Code&DBs/Workflow/tests/unit/test_supervisor_compatibility.py; any file matching *_compat*, *_shim*, legacy_*. Standing order: unused shims before live facades. Produce a net-negative branch diff. PR description must show symbol -> evidence command -> zero-caller result. Transport constraint: use CLI only; do not use Anthropic API or any llm_task route.",
+      "verify_command": "bash -lc \"git diff --stat public..HEAD | tail -1 | rg 'deletions' >/dev/null && pytest -q && praxis workflow discover reindex --yes\""
+    }
+  ]
+}

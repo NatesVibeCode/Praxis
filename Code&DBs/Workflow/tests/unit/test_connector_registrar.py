@@ -133,8 +133,12 @@ def test_infer_auth_shape_api_key():
     ):
         shape = _infer_auth_shape("artifacts.connectors.stripe.client", "stripe")
 
-    assert shape["kind"] == "env_var"
-    assert shape["env_var"] == "STRIPE_API_KEY"
+    assert shape == {
+        "kind": "unknown",
+        "required": True,
+        "parameter": "api_key",
+        "reason": "constructor_auth_param_without_declared_secret",
+    }
 
 
 def test_infer_auth_shape_no_auth():
@@ -149,6 +153,23 @@ def test_infer_auth_shape_no_auth():
     assert shape["kind"] == "none"
 
 
+def test_infer_auth_shape_missing_client_class_is_unknown():
+    fake_mod = _make_module("artifacts.connectors.empty.client")
+
+    with patch(
+        "runtime.integrations.connector_registrar.importlib.import_module",
+        return_value=fake_mod,
+    ):
+        shape = _infer_auth_shape("artifacts.connectors.empty.client", "empty")
+
+    assert shape == {
+        "kind": "unknown",
+        "required": None,
+        "reason": "client_class_not_found",
+    }
+    assert "EMPTY_API_KEY" not in str(shape)
+
+
 def test_infer_auth_shape_import_failure():
     with patch(
         "runtime.integrations.connector_registrar.importlib.import_module",
@@ -156,9 +177,10 @@ def test_infer_auth_shape_import_failure():
     ):
         shape = _infer_auth_shape("nonexistent.module", "test")
 
-    # Falls back to env_var convention
-    assert shape["kind"] == "env_var"
-    assert shape["env_var"] == "TEST_API_KEY"
+    assert shape["kind"] == "unknown"
+    assert shape["required"] is None
+    assert shape["reason"] == "connector_import_failed"
+    assert "TEST_API_KEY" not in str(shape)
 
 
 # ── register_built_connector ────────────────────────────────────────

@@ -1,4 +1,4 @@
--- Migration 181: Restore the anthropic CLI surface (subscription-only).
+-- Migration 182: Restore the anthropic CLI surface (subscription-only).
 --
 -- Migration 180 over-reached: it deleted the CLI profile, lane policy, and
 -- concurrency rows alongside the API-path rows that caused BUG-AB6FF6D1.
@@ -64,7 +64,7 @@ INSERT INTO public.provider_cli_profiles (
     300,
     '[]'::jsonb,
     'active',
-    'claude-sonnet-4-6',   -- CLI default; subscription-billed
+    'claude-sonnet-4-7',   -- CLI default; subscription-billed
     NULL,                  -- api_endpoint REMOVED (was api.anthropic.com)
     NULL,                  -- api_protocol_family REMOVED
     '[]'::jsonb,           -- api_key_env_vars REMOVED (was ANTHROPIC_API_KEY)
@@ -80,7 +80,7 @@ INSERT INTO public.provider_cli_profiles (
     'stdin',
     'claude_mcp_config',
     NULL,
-    '{"strip": ["ANTHROPIC_API_KEY"], "set_home": true}'::jsonb,
+    '{"strip": ["ANTHROPIC_API_KEY"]}'::jsonb,
     false
 ) ON CONFLICT (provider_slug) DO UPDATE SET
     binary_name           = EXCLUDED.binary_name,

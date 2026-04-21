@@ -1,0 +1,19 @@
+{
+  "spec_version": "1.0",
+  "name": "a6_contract_drift_cli_retry2_20260421",
+  "workflow_id": "a6_contract_drift_cli_retry2_20260421",
+  "queue_id": "audit-batch-2026-04-20-a6-cli-retry2-20260421",
+  "phase": "maintenance",
+  "outcome_goal": "Every contract under contracts/ and runtime/*_contract.py has a producer-to-consumer round-trip test; drift cases are filed as bugs.",
+  "jobs": [
+    {
+      "id": "a6_contract_drift",
+      "label": "a6_contract_drift",
+      "agent": "anthropic/claude-opus-4-7",
+      "adapter_type": "cli_llm",
+      "task_type": "review",
+      "prompt": "Audit typed-contract drift. Targets: Code&DBs/Workflow/contracts/domain.py; Code&DBs/Workflow/contracts/data_contracts.py; Code&DBs/Workflow/runtime/dependency_contract.py; Code&DBs/Workflow/runtime/build_planning_contract.py; Code&DBs/Workflow/runtime/topology_contract.py; Code&DBs/Workflow/runtime/workflow/submission_contract.py; Code&DBs/Workflow/adapters/provider_types.py. For each contract, name producer, consumer, serialization boundary, current tests, missing coverage, drift risks. Add focused round-trip tests where scope is clear; file bugs contract-drift::<contract> where broader fixes are needed. Transport constraint: use CLI only; do not use Anthropic API or any llm_task route.",
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k contract"
+    }
+  ]
+}

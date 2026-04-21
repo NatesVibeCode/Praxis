@@ -1827,7 +1827,7 @@ def test_execute_job_blocks_before_cli_spawn_when_provider_not_ready(monkeypatch
         lambda self, agent_slug: SimpleNamespace(
             provider=agent_slug.split("/", 1)[0],
             ready=False,
-            reason="Missing env var: ANTHROPIC_API_KEY",
+            reason="Missing credential: EXAMPLE_API_KEY",
             checked_at=datetime.now(timezone.utc),
         ),
     )
@@ -1847,7 +1847,7 @@ def test_execute_job_blocks_before_cli_spawn_when_provider_not_ready(monkeypatch
         {
             "id": 14,
             "label": "job-alpha",
-            "agent_slug": "anthropic/claude-sonnet-4",
+            "agent_slug": "example/example-model",
             "prompt": "use cli",
             "run_id": "run.alpha",
         },
@@ -1856,7 +1856,7 @@ def test_execute_job_blocks_before_cli_spawn_when_provider_not_ready(monkeypatch
 
     assert captured["status"] == "failed"
     assert captured["error_code"] == "credential.env_var_missing"
-    assert "ANTHROPIC_API_KEY" in str(captured["stdout_preview"])
+    assert "EXAMPLE_API_KEY" in str(captured["stdout_preview"])
 
 
 def test_execute_job_blocks_before_prompt_and_cli_when_provider_is_route_disabled(monkeypatch) -> None:

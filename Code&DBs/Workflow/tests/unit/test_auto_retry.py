@@ -137,6 +137,13 @@ class TestClassification:
         assert c.category == OrchestratorFailureCategory.INPUT_ERROR
         assert c.is_retryable is False
 
+    def test_missing_workflow_submission_is_non_retryable_infrastructure(self):
+        c = failure_classifier.classify_failure("workflow_submission.required_missing")
+
+        assert c.category == OrchestratorFailureCategory.INFRASTRUCTURE
+        assert c.is_retryable is False
+        assert "sealed workflow_job_submissions row" in c.recommended_action
+
 
 # ── Retry decision tests ─────────────────────────────────────────────────
 

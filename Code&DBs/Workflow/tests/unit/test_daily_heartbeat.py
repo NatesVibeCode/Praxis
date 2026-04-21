@@ -446,7 +446,7 @@ def _provider_profile() -> dict[str, Any]:
         "default_model": "claude-sonnet-4-5",
         "output_format": "json",
         "output_envelope_key": "result",
-        "api_key_env_vars": ["ANTHROPIC_API_KEY"],
+        "api_key_env_vars": [],
         "adapter_economics": {
             "cli_llm": {
                 "billing_mode": "subscription_included",

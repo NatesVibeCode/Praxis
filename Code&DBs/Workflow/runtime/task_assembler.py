@@ -547,7 +547,7 @@ ONLY JSON."""
             sandbox_policy=SimpleNamespace(
                 network_policy="provider_only",
                 workspace_materialization="copy",
-                secret_allowlist=("OPENROUTER_API_KEY",),
+                secret_allowlist=(),
             ),
         )
         result = execute_api(

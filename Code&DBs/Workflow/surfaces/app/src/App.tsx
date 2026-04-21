@@ -526,6 +526,7 @@ export function AppShell() {
             'push',
             { bypassBuildDraftGuard: true },
           )}
+          onEditWorkflow={(wfId) => openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon' })}
           onViewRun={(runId) => openRunDetail(runId)}
           onDraftStateChange={handleBuildDraftStateChange}
           initialMode={state.buildIntent === '__compose__' ? 'compose' : undefined}

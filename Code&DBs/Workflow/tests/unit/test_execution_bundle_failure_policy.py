@@ -21,6 +21,37 @@ def test_architecture_jobs_do_not_auto_require_submission() -> None:
     assert contract["submit_tool_names"] == []
 
 
+def test_mutating_jobs_require_sealed_code_submission_by_default() -> None:
+    contract = _completion_contract(
+        task_type="build",
+        bucket="build",
+        submission_required=None,
+        downstream_labels=(),
+        verify_refs=("verify.job.local",),
+    )
+
+    assert contract["submission_required"] is True
+    assert contract["verification_required"] is True
+    assert contract["result_kind"] == "code_change"
+    assert contract["submit_tool_names"] == [
+        "praxis_submit_code_change",
+        "praxis_get_submission",
+    ]
+
+
+def test_mutating_jobs_require_verification_even_when_verify_refs_missing() -> None:
+    contract = _completion_contract(
+        task_type="build",
+        bucket="build",
+        submission_required=None,
+        downstream_labels=(),
+        verify_refs=(),
+    )
+
+    assert contract["submission_required"] is True
+    assert contract["verification_required"] is True
+
+
 def test_explicit_submission_requirement_is_still_honored() -> None:
     contract = _completion_contract(
         task_type="architecture",

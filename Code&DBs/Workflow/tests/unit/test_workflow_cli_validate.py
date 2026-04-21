@@ -32,18 +32,27 @@ def _agent_registry(known_agents: set[str]):
     return _AgentRegistry
 
 
-def _write_spec(tmp_path: Path, *, agent_slug: str) -> str:
+def _write_spec(
+    tmp_path: Path,
+    *,
+    agent_slug: str,
+    task_type: str | None = None,
+    verify_refs: list[str] | None = None,
+) -> str:
+    job = {
+        "label": "validate_job",
+        "agent": agent_slug,
+        "prompt": "Run identity check.",
+    }
+    if task_type is not None:
+        job["task_type"] = task_type
+    if verify_refs is not None:
+        job["verify_refs"] = verify_refs
     payload = {
         "name": "cli validate smoke",
         "workflow_id": "cli_validate_smoke",
         "phase": "test",
-        "jobs": [
-            {
-                "label": "validate_job",
-                "agent": agent_slug,
-                "prompt": "Run identity check.",
-            }
-        ],
+        "jobs": [job],
     }
     path = tmp_path / "spec.queue.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -84,6 +93,27 @@ def test_cmd_validate_passes_when_all_agents_are_known(
     result = workflow_cli.cmd_validate(argparse.Namespace(spec=spec_path))
 
     assert result == 0
+
+
+def test_cmd_validate_rejects_mutating_job_without_verify_refs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    spec_path = _write_spec(tmp_path, agent_slug="gpt-5.4-mini", task_type="build")
+
+    monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
+    monkeypatch.setattr(
+        __import__("registry.agent_config", fromlist=["*"]),
+        "AgentRegistry",
+        _agent_registry({"gpt-5.4-mini", "gpt-4o"}),
+    )
+
+    result = workflow_cli.cmd_validate(argparse.Namespace(spec=spec_path))
+
+    rendered = capsys.readouterr().out
+    assert result == 1
+    assert "requires verify_refs" in rendered
 
 
 def test_cmd_validate_accepts_legacy_agent_aliases(

@@ -47,11 +47,32 @@ def _edge_gate_runtime_release(edge_gate: dict[str, Any]) -> tuple[str, dict[str
     return "conditional", json.loads(json.dumps(release_condition))
 
 
-def _edge_gate_validation_command(edge_gate: dict[str, Any]) -> str | None:
+def _edge_gate_validation_config(edge_gate: dict[str, Any]) -> dict[str, Any] | None:
     release = edge_gate.get("release") if isinstance(edge_gate.get("release"), dict) else {}
     if _as_text(release.get("edge_type")) != "validation" and _as_text(release.get("family")) != "validation":
         return None
     config = release.get("config") if isinstance(release.get("config"), dict) else {}
+    return config
+
+
+def _edge_gate_validation_refs(edge_gate: dict[str, Any]) -> list[str]:
+    config = _edge_gate_validation_config(edge_gate)
+    if config is None:
+        return []
+    return list(
+        dict.fromkeys(
+            [
+                *_string_list(config.get("verify_refs")),
+                _as_text(config.get("verify_ref")),
+            ]
+        )
+    )
+
+
+def _edge_gate_legacy_verify_command(edge_gate: dict[str, Any]) -> str:
+    config = _edge_gate_validation_config(edge_gate)
+    if config is None:
+        return ""
     return _as_text(config.get("verify_command"))
 
 
@@ -366,13 +387,22 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
         and _as_text(edge_gate.get("from_node_id"))
         and _as_text(edge_gate.get("to_node_id"))
     }
-    validation_commands_by_step_id: dict[str, list[str]] = {}
+    validation_refs_by_step_id: dict[str, list[str]] = {}
     retry_max_attempts_by_step_id: dict[str, int] = {}
     approval_edge_pairs: list[tuple[str, str]] = []
     for (from_id, to_id), edge_gate in edge_gate_by_pair.items():
-        verify_command = _edge_gate_validation_command(edge_gate)
-        if verify_command:
-            validation_commands_by_step_id.setdefault(from_id, []).append(verify_command)
+        legacy_verify_command = _edge_gate_legacy_verify_command(edge_gate)
+        if legacy_verify_command:
+            edge_id = _as_text(edge_gate.get("edge_id")) or f"{from_id}->{to_id}"
+            raise PlanningBlockedError([
+                (
+                    f"validation edge {edge_id} uses legacy verify_command; "
+                    "register verifier authority and use verify_refs instead"
+                )
+            ])
+        verify_refs = _edge_gate_validation_refs(edge_gate)
+        if verify_refs:
+            validation_refs_by_step_id.setdefault(from_id, []).extend(verify_refs)
         retry_max_attempts = _edge_gate_retry_max_attempts(edge_gate)
         if retry_max_attempts is not None:
             retry_max_attempts_by_step_id[to_id] = max(retry_max_attempts_by_step_id.get(to_id, 0), retry_max_attempts)
@@ -499,11 +529,11 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             job["system_prompt"] = (
                 f"You are {agent_slug}. Execute only the responsibilities assigned in this planned operating-model step."
             )
-        verify_commands = validation_commands_by_step_id.get(step_id)
-        if verify_commands:
-            deduped_verify_commands = [cmd for cmd in dict.fromkeys(cmd.strip() for cmd in verify_commands) if cmd]
-            if deduped_verify_commands:
-                job["verify_command"] = " && ".join(deduped_verify_commands)
+        verify_refs = validation_refs_by_step_id.get(step_id)
+        if verify_refs:
+            deduped_verify_refs = [ref for ref in dict.fromkeys(ref.strip() for ref in verify_refs) if ref]
+            if deduped_verify_refs:
+                job["verify_refs"] = deduped_verify_refs
         approval_questions = approval_questions_by_step_id.get(step_id)
         if approval_questions:
             deduped_questions = [question for question in dict.fromkeys(question.strip() for question in approval_questions) if question]

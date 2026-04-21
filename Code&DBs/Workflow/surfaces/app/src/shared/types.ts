@@ -90,7 +90,7 @@ export interface BuildEdgeRelease {
   branch_reason?: string;
   state?: string;
   config?: {
-    verify_command?: string;
+    verify_refs?: string[];
     condition?: Record<string, unknown> | string;
     max_attempts?: number;
     fallback?: string;

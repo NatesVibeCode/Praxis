@@ -195,7 +195,7 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
         default_model="gpt-4.1",
         api_endpoint="https://api.openai.com/v1/chat/completions",
         api_protocol_family="openai_chat_completions",
-        api_key_env_vars=("OPENAI_API_KEY",),
+        api_key_env_vars=(),
         adapter_economics={
             "cli_llm": {
                 "billing_mode": "subscription_included",
@@ -242,7 +242,7 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
         default_model="auto",
         api_endpoint="https://api.cursor.com/v0/agents",
         api_protocol_family="cursor_background_agent",
-        api_key_env_vars=("CURSOR_API_KEY",),
+        api_key_env_vars=(),
         adapter_economics={
             "llm_task": {
                 "billing_mode": "subscription_included",
@@ -276,7 +276,7 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
         default_model="composer-2",
         api_endpoint="",
         api_protocol_family="",
-        api_key_env_vars=("CURSOR_API_KEY",),
+        api_key_env_vars=(),
         adapter_economics={
             "cli_llm": {
                 "billing_mode": "subscription_included",
@@ -320,7 +320,7 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
         default_model="gemini-2.5-flash",
         api_endpoint="https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         api_protocol_family="google_generate_content",
-        api_key_env_vars=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        api_key_env_vars=(),
         adapter_economics={
             "cli_llm": {
                 "billing_mode": "subscription_included",

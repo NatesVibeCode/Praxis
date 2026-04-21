@@ -1,0 +1,19 @@
+{
+  "spec_version": "1.0",
+  "name": "a1_security_review_cli_retry2_20260421",
+  "workflow_id": "a1_security_review_cli_retry2_20260421",
+  "queue_id": "audit-batch-2026-04-20-a1-cli-retry2-20260421",
+  "phase": "maintenance",
+  "outcome_goal": "Every high-trust seam has been reviewed via the security-review skill and every finding is either a dedupe-keyed bug or a decision.YYYY-MM-DD.security-review-ack-* row.",
+  "jobs": [
+    {
+      "id": "a1_security_review",
+      "label": "a1_security_review",
+      "agent": "anthropic/claude-opus-4-7",
+      "adapter_type": "cli_llm",
+      "task_type": "review",
+      "prompt": "Run the security-review skill against the high-trust seams. Targets: Code&DBs/Workflow/runtime/sandbox_runtime.py; Code&DBs/Workflow/adapters/docker_runner.py; Code&DBs/Workflow/runtime/workflow/execution_backends.py; Code&DBs/Workflow/runtime/integrations/connector_executor.py; Code&DBs/Workflow/runtime/integrations/webhook.py; Code&DBs/Workflow/runtime/integration_manifest.py; Code&DBs/Workflow/surfaces/api/operator_write.py; Code&DBs/Workflow/surfaces/mcp/tools/operator.py; Code&DBs/Workflow/surfaces/api/rest.py. File a canonical bug per finding with signature security-review-$(date -I)-<category>. If a seam is intentionally accepted, file operator_decisions key decision.2026-04-20.security-review-ack-<category>. Done when every category has either a bug or an ack decision. Transport constraint: use CLI only; do not use Anthropic API or any llm_task route.",
+      "verify_command": "bash -lc \"bugs=$(praxis workflow bugs --signature-contains security-review-$(date -I) --state-in-open 2>/dev/null | wc -l | tr -d ' '); acks=$(psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key LIKE 'decision.%.security-review-ack-%' AND effective_to IS NULL\\\"); test ${bugs:-0} -ge 3 -o ${acks:-0} -ge 1\""
+    }
+  ]
+}

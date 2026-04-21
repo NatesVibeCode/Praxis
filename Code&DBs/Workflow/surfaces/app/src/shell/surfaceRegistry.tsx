@@ -46,12 +46,23 @@ const STATIC_SURFACES = {
   },
   build: {
     kindLabel: 'Build',
-    getTabLabel: (state: ShellState) => (state.buildWorkflowId ? 'Workflow workspace' : 'New workflow'),
-    getContext: (_state: ShellState): ShellSurfaceContext => ({
-      label: 'App builder',
-      detail: 'Shape the workflow graph, inspect detail, and release from one workspace.',
-    }),
-    getNavigateDescription: (_state: ShellState) => 'Jump back into Moon Build.',
+    getTabLabel: (state: ShellState) => (
+      state.moonRunId ? 'Run view' : state.buildWorkflowId ? 'Workflow workspace' : 'New workflow'
+    ),
+    getContext: (state: ShellState): ShellSurfaceContext => (
+      state.moonRunId
+        ? {
+            label: 'Run observer',
+            detail: 'Trace the execution graph, inspect receipts, and jump to the source workflow.',
+          }
+        : {
+            label: 'App builder',
+            detail: 'Shape the workflow graph, inspect detail, and release from one workspace.',
+          }
+    ),
+    getNavigateDescription: (state: ShellState) => (
+      state.moonRunId ? 'Return to the active run view.' : 'Jump back into Moon Build.'
+    ),
   },
   costs: {
     kindLabel: 'Finance',
@@ -169,7 +180,7 @@ export function buildShellTabs(state: ShellState): ShellTabDescriptor[] {
     {
       id: 'build',
       label: STATIC_SURFACES.build.getTabLabel(state),
-      kind: STATIC_SURFACES.build.kindLabel,
+      kind: state.moonRunId ? 'Run' : STATIC_SURFACES.build.kindLabel,
       closable: false,
     },
     {
@@ -221,7 +232,10 @@ export function buildShellNavigationItems(args: {
             ? ['manifest', 'manifests', 'catalog', 'search', 'list', 'discover', 'control-plane', 'plan', 'approval']
             : ['accent', 'atlas', 'graph', 'diagram', 'knowledge', 'memory', 'entities', 'map', 'overview'],
     selected: state.activeTabId === surfaceId,
-    onSelect: () => activateTab(surfaceId),
+    onSelect: () => {
+      if (surfaceId === 'build' && state.moonRunId && state.activeTabId === 'build') return;
+      activateTab(surfaceId);
+    },
   }));
 
   const dynamicItems: MenuAction[] = state.dynamicTabs.map((tab) => ({

@@ -54,7 +54,7 @@ def test_load_runtime_sandbox_profile_authority_returns_authoritative_record() -
                 "docker_memory": "4g",
                 "network_policy": "provider_only",
                 "workspace_materialization": "copy",
-                "secret_allowlist": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
+                "secret_allowlist": ["OPENAI_API_KEY", "EXAMPLE_API_KEY"],
                 "auth_mount_policy": "provider_scoped",
                 "timeout_profile": "default",
             }
@@ -71,7 +71,7 @@ def test_load_runtime_sandbox_profile_authority_returns_authoritative_record() -
         docker_memory="4g",
         network_policy="provider_only",
         workspace_materialization="copy",
-        secret_allowlist=("OPENAI_API_KEY", "ANTHROPIC_API_KEY"),
+        secret_allowlist=("OPENAI_API_KEY", "EXAMPLE_API_KEY"),
         auth_mount_policy="provider_scoped",
         timeout_profile="default",
     )

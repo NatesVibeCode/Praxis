@@ -461,16 +461,24 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
         details.append(detail)
 
     # ── verify_refs enforcement for code task types ────────────────────────
-    verification_warnings: list[str] = []
+    spec_verify_refs = getattr(spec, "verify_refs", None) or []
+    verification_errors: list[str] = []
+    verification_preflight_errors: list[dict[str, Any]] = []
     for job in getattr(spec, "jobs", ()):
         task_type = str(job.get("task_type") or "").strip().lower()
         job_verify_refs = job.get("verify_refs") or []
         job_label = str(job.get("label") or "?")
-        if task_type in _VERIFICATION_REQUIRED_TASK_TYPES and not job_verify_refs:
-            verification_warnings.append(
-                f"job '{job_label}': task_type '{task_type}' requires verify_refs "
-                f"but none are specified — job will fail at the verification gate"
+        if task_type in _VERIFICATION_REQUIRED_TASK_TYPES and not (job_verify_refs or spec_verify_refs):
+            message = (
+                f"task_type '{task_type}' requires verify_refs but none are specified"
             )
+            verification_errors.append(f"job '{job_label}': {message}")
+            verification_preflight_errors.append({
+                "kind": "verify_refs_missing",
+                "severity": "error",
+                "label": job_label,
+                "message": message,
+            })
 
     # --- Additional preflight checks -----------------------------------
     # These catch classes of errors that would otherwise only surface at
@@ -478,6 +486,7 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
     # adapter.transport_unsupported mid-run, workflow_id collision →
     # psycopg UniqueViolation on submit).
     preflight_warnings: list[dict[str, Any]] = []
+    preflight_warnings.extend(verification_preflight_errors)
     preflight_warnings.extend(_preflight_deterministic_builders(spec))
     preflight_warnings.extend(_preflight_provider_admissions(spec, pg_conn=pg_conn))
     preflight_warnings.extend(_preflight_workflow_id_collision(spec, pg_conn=pg_conn))
@@ -490,8 +499,8 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
         "agent_resolution": agent_resolution,
         "agent_resolution_details": details,
     }
-    if verification_warnings:
-        result["verification_warnings"] = verification_warnings
+    if verification_errors:
+        result["verification_errors"] = verification_errors
     if preflight_warnings:
         result["preflight_warnings"] = preflight_warnings
     if unresolved:

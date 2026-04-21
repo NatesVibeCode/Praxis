@@ -48,51 +48,51 @@ INSERT INTO task_type_routing (task_type, model_slug, provider_slug, permitted, 
 -- BUILD: GPT-5.4 leads SWE-Bench Pro (57.7%), Terminal-Bench (75.1%), Aider (88%)
 ('build', 'gpt-5.4',                'openai',    true,  1, 57.7, 'SWE-Bench Pro',  8.75, 'Best coder across all benchmarks'),
 ('build', 'gemini-3.1-pro-preview', 'google',    true,  2, 54.2, 'SWE-Bench Pro',  7.00, 'Strong #2, best price/performance'),
-('build', 'claude-sonnet-4-6',      'anthropic',  true,  3, 79.6, 'SWE-Bench Verified', 9.00, 'Solid but not top on coding benchmarks'),
+('build', 'claude-sonnet-4-7',      'anthropic',  true,  3, 79.6, 'SWE-Bench Verified', 9.00, 'Solid but not top on coding benchmarks'),
 ('build', 'gpt-5.4-mini',           'openai',    true,  4, 0,    '',               2.63, 'Good for simpler build tasks'),
-('build', 'claude-opus-4-6',        'anthropic',  false, 99, 80.8, 'SWE-Bench Verified', 15.0, 'BLOCKED: too expensive for build — use for architecture only'),
+('build', 'claude-opus-4-7',        'anthropic',  false, 99, 80.8, 'SWE-Bench Verified', 15.0, 'BLOCKED: too expensive for build — use for architecture only'),
 
 -- ARCHITECTURE: Opus and GPT-5.4 for deep reasoning
-('architecture', 'claude-opus-4-6',        'anthropic',  true,  1, 80.8, 'SWE-Bench Verified', 15.0, 'Best reasoning depth and long-context coherence'),
+('architecture', 'claude-opus-4-7',        'anthropic',  true,  1, 80.8, 'SWE-Bench Verified', 15.0, 'Best reasoning depth and long-context coherence'),
 ('architecture', 'gpt-5.4',                'openai',    true,  2, 57.7, 'SWE-Bench Pro',  8.75, 'Strong reasoning, cheaper than Opus'),
 ('architecture', 'gemini-3.1-pro-preview', 'google',    true,  3, 80.6, 'SWE-Bench Verified', 7.00, 'Good architecture at lowest cost'),
-('architecture', 'claude-sonnet-4-6',      'anthropic',  false, 99, 0,    '',               9.00, 'BLOCKED: use Opus or GPT-5.4 for architecture'),
+('architecture', 'claude-sonnet-4-7',      'anthropic',  false, 99, 0,    '',               9.00, 'BLOCKED: use Opus or GPT-5.4 for architecture'),
 ('architecture', 'gpt-5.4-mini',           'openai',    false, 99, 0,    '',               2.63, 'BLOCKED: too lightweight for architecture'),
 
 -- WIRING: mechanical tasks, GPT-5.4-mini and Gemini Flash
 ('wiring', 'gpt-5.4-mini',           'openai',    true,  1, 0, '', 2.63, 'Cheapest, fast, good for mechanical work'),
 ('wiring', 'gemini-3.1-pro-preview', 'google',    true,  2, 0, '', 7.00, 'Good fallback for wiring'),
 ('wiring', 'gpt-5.4',                'openai',    true,  3, 0, '', 8.75, 'Overkill but works'),
-('wiring', 'claude-sonnet-4-6',      'anthropic',  true,  4, 0, '', 9.00, 'Acceptable for wiring'),
-('wiring', 'claude-opus-4-6',        'anthropic',  false, 99, 0, '', 15.0, 'BLOCKED: never use Opus for wiring'),
+('wiring', 'claude-sonnet-4-7',      'anthropic',  true,  4, 0, '', 9.00, 'Acceptable for wiring'),
+('wiring', 'claude-opus-4-7',        'anthropic',  false, 99, 0, '', 15.0, 'BLOCKED: never use Opus for wiring'),
 
 -- TEST: writing and running tests
 ('test', 'gpt-5.4',                'openai',    true,  1, 75.1, 'Terminal-Bench', 8.75, 'Best at CLI/terminal execution'),
 ('test', 'gemini-3.1-pro-preview', 'google',    true,  2, 68.5, 'Terminal-Bench', 7.00, 'Good test writer'),
-('test', 'claude-sonnet-4-6',      'anthropic',  true,  3, 0, '', 9.00, 'Solid test coverage'),
+('test', 'claude-sonnet-4-7',      'anthropic',  true,  3, 0, '', 9.00, 'Solid test coverage'),
 ('test', 'gpt-5.4-mini',           'openai',    true,  4, 0, '', 2.63, 'Quick unit tests'),
-('test', 'claude-opus-4-6',        'anthropic',  false, 99, 0, '', 15.0, 'BLOCKED: too expensive for testing'),
+('test', 'claude-opus-4-7',        'anthropic',  false, 99, 0, '', 15.0, 'BLOCKED: too expensive for testing'),
 
 -- REFACTOR: restructuring existing code
 ('refactor', 'gpt-5.4',                'openai',    true,  1, 88.0, 'Aider Polyglot', 8.75, 'Best at multi-language code editing'),
 ('refactor', 'gemini-3.1-pro-preview', 'google',    true,  2, 83.1, 'Aider Polyglot', 7.00, 'Strong refactoring'),
-('refactor', 'claude-sonnet-4-6',      'anthropic',  true,  3, 0, '', 9.00, 'Decent refactoring'),
+('refactor', 'claude-sonnet-4-7',      'anthropic',  true,  3, 0, '', 9.00, 'Decent refactoring'),
 ('refactor', 'gpt-5.4-mini',           'openai',    true,  4, 0, '', 2.63, 'Simple renames/moves'),
-('refactor', 'claude-opus-4-6',        'anthropic',  false, 99, 0, '', 15.0, 'BLOCKED: overkill for refactoring'),
+('refactor', 'claude-opus-4-7',        'anthropic',  false, 99, 0, '', 15.0, 'BLOCKED: overkill for refactoring'),
 
 -- DEBATE: adversarial analysis
-('debate', 'claude-opus-4-6',        'anthropic',  true,  1, 0, '', 15.0, 'Best reasoning for adversarial debate'),
+('debate', 'claude-opus-4-7',        'anthropic',  true,  1, 0, '', 15.0, 'Best reasoning for adversarial debate'),
 ('debate', 'gpt-5.4',                'openai',    true,  2, 0, '', 8.75, 'Strong debater'),
 ('debate', 'gemini-3.1-pro-preview', 'google',    true,  3, 0, '', 7.00, 'Good analysis'),
-('debate', 'claude-sonnet-4-6',      'anthropic',  true,  4, 0, '', 9.00, 'Adequate for debate'),
+('debate', 'claude-sonnet-4-7',      'anthropic',  true,  4, 0, '', 9.00, 'Adequate for debate'),
 
 -- REVIEW: code review and quality assessment
 ('review', 'gpt-5.4',                'openai',    true,  1, 0, '', 8.75, 'Best code understanding'),
-('review', 'claude-sonnet-4-6',      'anthropic',  true,  2, 0, '', 9.00, 'Good reviewer'),
+('review', 'claude-sonnet-4-7',      'anthropic',  true,  2, 0, '', 9.00, 'Good reviewer'),
 ('review', 'gemini-3.1-pro-preview', 'google',    true,  3, 0, '', 7.00, 'Adequate for review'),
 ('review', 'gpt-5.4-mini',           'openai',    true,  4, 0, '', 2.63, 'Quick reviews')
 
-ON CONFLICT (task_type, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     benchmark_score = EXCLUDED.benchmark_score,

@@ -215,23 +215,15 @@ def _submission_result_kind(*, task_type: str, bucket: str) -> str:
     return "artifact_bundle"
 
 
-_SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES = frozenset()
-
 _VERIFICATION_REQUIRED_TASK_TYPES = frozenset({
     "build", "implement", "code_generation", "code_edit",
     "refactor", "test", "wiring",
 })
+_SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES = _VERIFICATION_REQUIRED_TASK_TYPES
 
 
 def _default_submission_required(task_type: str) -> bool:
-    """Submission is opt-in.
-
-    Auto-requiring submission for text/architecture packets created a second
-    terminalization path where useful work could exist, a submission could even
-    be sealed, and the job could still fail during post-execution bookkeeping.
-    That contract is too brittle for planning/research lanes; callers that
-    truly require submission must declare it explicitly in spec.
-    """
+    """Mutating jobs must seal a submission; non-mutating packets remain opt-in."""
     return task_type.strip().lower() in _SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES
 
 
@@ -248,13 +240,7 @@ def _completion_contract(
         normalized_submission_required = bool(submission_required)
     else:
         normalized_submission_required = _default_submission_required(normalized_task_type)
-    # verification_required: code task types must pass verify_refs to succeed.
-    # Only enforce when the spec actually declared verify_refs — specs that
-    # use inline verify_command rely on the outcome_gate instead.
-    verification_required = (
-        normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
-        and bool(verify_refs)
-    )
+    verification_required = normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
     result_kind = _submission_result_kind(task_type=normalized_task_type, bucket=bucket)
     submit_tool_names = (
         [_SUBMISSION_RESULT_KIND_TO_TOOL[result_kind], _SUBMISSION_READ_TOOL]

@@ -62,13 +62,13 @@ def test_credential_resolver_maps_openai_auth_ref() -> None:
     assert cred.auth_ref == "secret.default-path.openai"
 
 
-def test_credential_resolver_maps_anthropic_auth_ref() -> None:
-    cred = resolve_credential(
-        "secret.runtime.anthropic",
-        env={"ANTHROPIC_API_KEY": "sk-ant-test"},
-    )
-    assert cred.provider_hint == "anthropic"
-    assert cred.api_key == "sk-ant-test"
+def test_credential_resolver_rejects_cli_only_anthropic_api_key() -> None:
+    with pytest.raises(CredentialResolutionError) as exc_info:
+        resolve_credential(
+            "secret.runtime.anthropic",
+            env={"ANTHROPIC_API_KEY": "sk-ant-test"},
+        )
+    assert exc_info.value.reason_code == "credential.provider_unknown"
 
 
 def test_credential_resolver_fails_on_missing_env_var() -> None:

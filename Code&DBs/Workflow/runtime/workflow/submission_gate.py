@@ -48,41 +48,25 @@ def resolve_submission_for_job(
 ) -> SubmissionGateResult:
     """Resolve the submission state for a completed job.
 
-    Three stages in order:
+    Stages in order:
     1. Check whether the agent already sealed a submission (via tool call).
-    2. If not, and agent succeeded with non-empty output, auto-seal the output.
+    2. Re-check for a submission before final enforcement.
     3. If still missing and required, mark the job failed.
+    4. Enforce verify_refs and acceptance status.
     """
     from runtime.workflow.submission_capture import (
         WorkflowSubmissionServiceError,
         attach_verification_artifact_refs_for_job,
         get_submission_for_job_attempt,
-        submit_artifact_bundle,
-        submit_research_result,
     )
-    from runtime.workflow.receipt_writer import extract_transcript_text, is_transcript_output
     from runtime.workflow._context_building import _submission_required_for_bundle
 
     submission_required = _submission_required_for_bundle(execution_bundle)
     submission_state: dict[str, Any] | None = None
 
-    # ── Stage 0: enforce verification_required ─────────────────────────────
-    # If the completion contract says verification is required, the job must
-    # have run verify_refs and they must have passed. If verification never
-    # ran (no verify_refs, so no artifact refs) the job fails here.
     verification_required = bool(
         ((execution_bundle or {}).get("completion_contract") or {}).get("verification_required")
     )
-    if verification_required and final_status == "succeeded" and not verification_artifact_refs:
-        final_status = "failed"
-        final_error_code = "verification.required_not_run"
-        result = {
-            **result,
-            "stderr": (
-                str(result.get("stderr") or "")
-                + "\nverification_required=true but no verify_refs were executed"
-            ).strip(),
-        }
 
     # ── Stage 1: check for an existing sealed submission ────────────────────
     try:
@@ -108,63 +92,7 @@ def resolve_submission_for_job(
             "submission receipt sync failed for %s/%s: %s", run_id, job_label, exc
         )
 
-    # ── Stage 2: auto-seal when agent produced output but skipped the tool ──
-    if final_status == "succeeded" and submission_required and submission_state is None:
-        raw_output = str(result.get("stdout") or "").strip()
-        output_text = (
-            extract_transcript_text(raw_output)
-            if is_transcript_output(raw_output)
-            else raw_output
-        )
-        if output_text:
-            result_kind = str(
-                ((execution_bundle or {}).get("completion_contract") or {}).get("result_kind")
-                or "research_result"
-            )
-            try:
-                submit_fn = (
-                    submit_artifact_bundle
-                    if result_kind == "artifact_bundle"
-                    else submit_research_result
-                )
-                submission_state = submit_fn(
-                    run_id=run_id,
-                    workflow_id=workflow_id or run_id,
-                    job_label=job_label,
-                    summary=output_text,
-                    primary_paths=[],
-                    result_kind=result_kind,
-                    conn=conn,
-                )
-                logger.info(
-                    "Auto-sealed submission for %s/%s (result_kind=%s)",
-                    run_id, job_label, result_kind,
-                )
-            except WorkflowSubmissionServiceError as exc:
-                final_status = "failed"
-                final_error_code = (
-                    str(getattr(exc, "reason_code", "") or "").strip()
-                    or "workflow_submission.auto_seal_failed"
-                )
-                result = _result_with_stderr(
-                    result,
-                    f"submission auto-seal failed: {exc}",
-                )
-                logger.warning(
-                    "Auto-seal failed for %s/%s: %s", run_id, job_label, exc
-                )
-            except Exception as exc:
-                final_status = "failed"
-                final_error_code = "workflow_submission.auto_seal_failed"
-                result = _result_with_stderr(
-                    result,
-                    f"submission auto-seal failed: {type(exc).__name__}: {exc}",
-                )
-                logger.warning(
-                    "Auto-seal failed for %s/%s: %s", run_id, job_label, exc
-                )
-
-    # ── Stage 2b: re-check for agent-sealed submission before enforcing ────
+    # ── Stage 2: re-check for agent-sealed submission before enforcing ─────
     # The agent may have sealed a submission via MCP during execution that
     # Stage 1 missed due to commit timing.  One more lookup before rejecting.
     if final_status == "succeeded" and submission_required and submission_state is None:
@@ -192,7 +120,7 @@ def resolve_submission_for_job(
                 exc,
             )
 
-    # ── Stage 3: enforce the contract ───────────────────────────────────────
+    # ── Stage 3: enforce the submission contract ───────────────────────────
     if final_status == "succeeded" and submission_required and submission_state is None:
         final_status = "failed"
         final_error_code = "workflow_submission.required_missing"
@@ -204,7 +132,22 @@ def resolve_submission_for_job(
             ).strip(),
         }
 
-    # ── Stage 4: enforce acceptance contract ──────────────────────────────
+    # ── Stage 4: enforce verification contract ─────────────────────────────
+    # If the completion contract says verification is required, the job must
+    # have run verify_refs and they must have passed. If verification never
+    # ran (no verify_refs, so no artifact refs) the job fails here.
+    if verification_required and final_status == "succeeded" and not verification_artifact_refs:
+        final_status = "failed"
+        final_error_code = "verification.required_not_run"
+        result = {
+            **result,
+            "stderr": (
+                str(result.get("stderr") or "")
+                + "\nverification_required=true but no verify_refs were executed"
+            ).strip(),
+        }
+
+    # ── Stage 5: enforce acceptance contract ───────────────────────────────
     # If the submission was sealed and has an acceptance_status of "failed",
     # the job fails regardless of other status.
     if final_status == "succeeded" and isinstance(submission_state, dict):

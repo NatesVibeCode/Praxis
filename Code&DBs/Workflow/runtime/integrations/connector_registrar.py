@@ -178,19 +178,33 @@ def _infer_auth_shape(module_path: str, slug: str) -> dict[str, Any]:
     """Infer auth requirements from the client constructor signature."""
     try:
         mod = importlib.import_module(module_path)
-    except Exception:
-        return {"kind": "env_var", "env_var": f"{slug.upper()}_API_KEY"}
+    except Exception as exc:
+        return {
+            "kind": "unknown",
+            "required": None,
+            "reason": "connector_import_failed",
+            "detail": str(exc),
+        }
 
     client_class = find_client_class(mod)
     if client_class is None:
-        return {"kind": "env_var", "env_var": f"{slug.upper()}_API_KEY"}
+        return {
+            "kind": "unknown",
+            "required": None,
+            "reason": "client_class_not_found",
+        }
 
     sig = inspect.signature(client_class.__init__)
     params = set(sig.parameters.keys()) - {"self"}
 
     for param_name in ("api_key", "token", "auth_token", "access_token"):
         if param_name in params:
-            return {"kind": "env_var", "env_var": f"{slug.upper()}_API_KEY"}
+            return {
+                "kind": "unknown",
+                "required": True,
+                "parameter": param_name,
+                "reason": "constructor_auth_param_without_declared_secret",
+            }
 
     return {"kind": "none"}
 

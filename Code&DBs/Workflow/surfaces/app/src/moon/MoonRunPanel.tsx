@@ -8,7 +8,6 @@ import {
 } from '../dashboard/runApi';
 import { triggerWorkflow } from '../shared/buildController';
 import { MoonStatusRing } from './MoonStatusRing';
-import { statusState, statusLabel, TERMINAL_STATES } from './moonStatus';
 
 interface Props {
   runId: string;
@@ -26,6 +25,10 @@ const TERMINAL_JOB_STATUSES = new Set<RunJob['status']>([
   'cancelled',
   'parent_failed',
 ]);
+
+function formatRawStatus(status: string): string {
+  return status.replace(/[_-]+/g, ' ');
+}
 
 interface RunStreamEvent {
   jobs?: RunJob[];
@@ -168,7 +171,7 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
         {liveRun && (
           <span className="moon-run__status-chip" style={{ marginLeft: 8 }}>
             <MoonStatusRing status={liveRun.status} size={10} />
-            <span>{statusLabel(statusState(liveRun.status))}</span>
+            <span>{formatRawStatus(liveRun.status)}</span>
           </span>
         )}
       </div>

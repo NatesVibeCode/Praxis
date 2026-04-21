@@ -824,7 +824,7 @@ def test_plan_definition_marks_approval_gates_as_approval_required_jobs() -> Non
     assert jobs["step-002"].get("dependency_edges") is None
 
 
-def test_plan_definition_wires_validation_edge_gates_into_verify_command() -> None:
+def test_plan_definition_wires_validation_edge_gates_into_verify_refs() -> None:
     result = plan_definition(
         {
             "source_prose": "Validate the primary step before the downstream continuation runs.",
@@ -861,7 +861,7 @@ def test_plan_definition_wires_validation_edge_gates_into_verify_command() -> No
                             "state": "configured",
                             "release_condition": {"kind": "always"},
                             "config": {
-                                "verify_command": "python -m py_compile app.py",
+                                "verify_refs": ["verify_ref.python.py_compile.app"],
                             },
                         },
                     }
@@ -872,8 +872,57 @@ def test_plan_definition_wires_validation_edge_gates_into_verify_command() -> No
     )
 
     jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
-    assert jobs["step-001"]["verify_command"] == "python -m py_compile app.py"
+    assert jobs["step-001"]["verify_refs"] == ["verify_ref.python.py_compile.app"]
     assert jobs["step-002"].get("dependency_edges") is None
+
+
+def test_plan_definition_rejects_validation_edge_legacy_verify_command() -> None:
+    with pytest.raises(PlanningBlockedError, match="legacy verify_command"):
+        plan_definition(
+            {
+                "source_prose": "Validate the primary step before continuation.",
+                "compiled_prose": "Validate the primary step before continuation.",
+                "definition_revision": "def_legacy_validation_gate",
+                "references": [],
+                "narrative_blocks": [],
+                "draft_flow": [
+                    {
+                        "id": "step-001",
+                        "title": "Primary step",
+                        "summary": "Run the primary step.",
+                        "depends_on": [],
+                        "order": 1,
+                    },
+                    {
+                        "id": "step-002",
+                        "title": "Continuation",
+                        "summary": "Run after validation.",
+                        "depends_on": ["step-001"],
+                        "order": 2,
+                    },
+                ],
+                "execution_setup": {
+                    "edge_gates": [
+                        {
+                            "edge_id": "edge-step-001-step-002",
+                            "from_node_id": "step-001",
+                            "to_node_id": "step-002",
+                            "release": {
+                                "family": "validation",
+                                "edge_type": "validation",
+                                "label": "Validation",
+                                "state": "configured",
+                                "release_condition": {"kind": "always"},
+                                "config": {
+                                    "verify_command": "python -m py_compile app.py",
+                                },
+                            },
+                        }
+                    ]
+                },
+                "trigger_intent": [],
+            }
+        )
 
 
 def test_plan_definition_wires_retry_edge_gates_into_job_max_attempts() -> None:

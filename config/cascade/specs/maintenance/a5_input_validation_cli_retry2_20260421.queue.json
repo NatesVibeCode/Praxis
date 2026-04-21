@@ -1,0 +1,19 @@
+{
+  "spec_version": "1.0",
+  "name": "a5_input_validation_cli_retry2_20260421",
+  "workflow_id": "a5_input_validation_cli_retry2_20260421",
+  "queue_id": "audit-batch-2026-04-20-a5-cli-retry2-20260421",
+  "phase": "maintenance",
+  "outcome_goal": "An endpoint x input type x validator matrix is stored as decision.2026-04-20.input-validation-matrix; every unvalidated endpoint is filed as a bug with signature input-validation::<endpoint>.",
+  "jobs": [
+    {
+      "id": "a5_input_validation",
+      "label": "a5_input_validation",
+      "agent": "anthropic/claude-opus-4-7",
+      "adapter_type": "cli_llm",
+      "task_type": "review",
+      "prompt": "Build the trust-boundary validation matrix. Targets: Code&DBs/Workflow/surfaces/api/rest.py; Code&DBs/Workflow/surfaces/api/agent_sessions.py; Code&DBs/Workflow/surfaces/api/handlers/_dispatch.py; Code&DBs/Workflow/surfaces/mcp/tools/operator.py; Code&DBs/Workflow/surfaces/mcp/tools/workflow.py; Code&DBs/Workflow/contracts/domain.py. For each endpoint record endpoint, input_type, validator, failure behavior, gap. Persist operator_decisions key decision.2026-04-20.input-validation-matrix with rationale containing endpoint_validation_matrix and endpoint_count=<N>. File bugs input-validation::<endpoint> for gaps. Transport constraint: use CLI only; do not use Anthropic API or any llm_task route.",
+      "verify_command": "bash -lc \"psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key='decision.2026-04-20.input-validation-matrix' AND rationale LIKE '%endpoint_validation_matrix%'\\\" | rg '^1$'\""
+    }
+  ]
+}

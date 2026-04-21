@@ -893,10 +893,18 @@ class DockerLocalSandboxProvider:
         try:
             _env_keys = sorted({part.split("=", 1)[0] for flag_idx, part in enumerate(docker_cmd) if flag_idx > 0 and docker_cmd[flag_idx - 1] == "-e"})
             _stdin_size = len(request.stdin_text or "")
-            _redacted_cmd = [
-                ("<redacted>" if p.startswith("CLAUDE_CODE_OAUTH_TOKEN=") or p.startswith("ANTHROPIC_API_KEY=") else p)
-                for p in docker_cmd
-            ]
+            _redacted_cmd = []
+            for p in docker_cmd:
+                key, sep, _value = p.partition("=")
+                if sep and (
+                    key.endswith("_API_KEY")
+                    or key.endswith("_TOKEN")
+                    or key.endswith("_SECRET")
+                    or "SECRET" in key
+                ):
+                    _redacted_cmd.append(f"{key}=<redacted>")
+                else:
+                    _redacted_cmd.append(p)
             import logging as _lg
             _lg.getLogger("runtime.sandbox_runtime").info(
                 "sandbox_docker_spawn container=%s user=%s workdir=%s network=%s stdin_bytes=%d env_keys=%s cmd=%s",

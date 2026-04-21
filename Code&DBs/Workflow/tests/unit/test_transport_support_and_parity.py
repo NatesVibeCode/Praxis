@@ -26,6 +26,20 @@ def _builtin_profiles_map():
     return {profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES}
 
 
+def _test_profiles_with_declared_auth():
+    profiles = _builtin_profiles_map()
+    auth_envs = {
+        "cursor": ("CURSOR_API_KEY",),
+        "cursor_local": ("CURSOR_API_KEY",),
+        "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "openai": ("OPENAI_API_KEY",),
+    }
+    return {
+        slug: replace(profile, api_key_env_vars=auth_envs.get(slug, profile.api_key_env_vars))
+        for slug, profile in profiles.items()
+    }
+
+
 @pytest.fixture(autouse=True)
 def _builtin_provider_registry_fixture(monkeypatch):
     import adapters.cli_llm as cli_llm_mod
@@ -33,7 +47,7 @@ def _builtin_provider_registry_fixture(monkeypatch):
     import adapters.llm_task as llm_task_mod
     import registry.provider_execution_registry as provider_registry_mod
 
-    profiles = _builtin_profiles_map()
+    profiles = _test_profiles_with_declared_auth()
 
     def _get_profile(provider_slug: str):
         return profiles.get(provider_slug)

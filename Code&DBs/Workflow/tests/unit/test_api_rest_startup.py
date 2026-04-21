@@ -498,6 +498,7 @@ class _FakeRunConn:
                     return [
                         {
                             "run_id": "run-2",
+                            "workflow_id": "wf_spec_two",
                             "spec_name": "Spec Two",
                             "status": "running",
                             "total_jobs": 4,
@@ -512,6 +513,7 @@ class _FakeRunConn:
                     return [
                         {
                             "run_id": "run-2",
+                            "workflow_id": "wf_spec_two",
                             "spec_name": "Spec Two",
                             "status": "running",
                             "total_jobs": 4,
@@ -525,6 +527,7 @@ class _FakeRunConn:
                 return [
                     {
                         "run_id": "run-1",
+                        "workflow_id": "wf_spec_one",
                         "spec_name": "Spec One",
                         "status": "queued",
                         "total_jobs": 3,
@@ -1073,6 +1076,7 @@ def test_run_routes_use_shared_pg_authority_and_match_contract(monkeypatch) -> N
     assert recent_response.json() == [
         {
             "run_id": "run-2",
+            "workflow_id": "wf_spec_two",
             "spec_name": "Spec Two",
             "status": "running",
             "total_jobs": 4,
@@ -1085,6 +1089,7 @@ def test_run_routes_use_shared_pg_authority_and_match_contract(monkeypatch) -> N
 
     assert detail_response.status_code == 200
     assert detail_response.json()["run_id"] == "run-2"
+    assert detail_response.json()["workflow_id"] == "wf_spec_two"
     assert detail_response.json()["spec_name"] == "Spec Two"
     assert detail_response.json()["total_jobs"] == 4
     assert detail_response.json()["completed_jobs"] == 2

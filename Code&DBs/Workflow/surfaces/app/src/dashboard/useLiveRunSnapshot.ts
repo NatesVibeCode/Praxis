@@ -21,6 +21,7 @@ export type JobStatus =
 
 export interface RecentRun {
   run_id: string;
+  workflow_id?: string | null;
   spec_name: string;
   status: RunStatus;
   total_jobs: number;

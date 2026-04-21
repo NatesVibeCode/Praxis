@@ -142,13 +142,10 @@ def _build_execution_env(
     execution_bundle: dict[str, Any] | None,
 ) -> dict[str, str]:
     env = _sanitize_base_env()
-    dotenv_exports = _load_dotenv_exports(workdir, env)
+    _load_dotenv_exports(workdir, env)
     provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
     provider_api_key_names = _provider_api_key_names(provider_slug)
-    export_names = {
-        *provider_api_key_names,
-        *dotenv_exports.keys(),
-    }
+    export_names = set(provider_api_key_names)
     policy = getattr(agent_config, "sandbox_policy", None)
     secret_allowlist = tuple(getattr(policy, "secret_allowlist", ()) or ())
     bundle_sandbox_profile = _sandbox_profile_from_bundle(execution_bundle)
@@ -720,8 +717,19 @@ def execute_api(
         _api_protocol = _profile.api_protocol_family
         _api_endpoint = _profile.api_endpoint
         _api_key_env = selected_api_key_env or (
-            _profile.api_key_env_vars[0] if _profile.api_key_env_vars else f"{provider_slug.upper()}_API_KEY"
+            _profile.api_key_env_vars[0] if _profile.api_key_env_vars else None
         )
+        if not _api_key_env:
+            return {
+                "status": "failed",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": (
+                    "provider_cli_profiles has no api_key_env_vars for API "
+                    f"transport '{provider_slug}'"
+                ),
+                "error_code": "transport_auth_config_missing",
+            }
         _reasoning_flag = (
             f"--reasoning-effort {shlex.quote(reasoning_effort)}" if reasoning_effort else ""
         )

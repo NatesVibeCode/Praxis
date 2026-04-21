@@ -71,8 +71,8 @@ def _sandbox_result(**overrides):
 @pytest.fixture(autouse=True)
 def _stub_provider_api_key_names(monkeypatch) -> None:
     mapping = {
-        "anthropic": ("ANTHROPIC_API_KEY",),
         "cursor": ("CURSOR_API_KEY",),
+        "example": ("EXAMPLE_API_KEY",),
         "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "openai": ("OPENAI_API_KEY",),
     }
@@ -593,23 +593,23 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
                 execution_transport="api",
             )
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("EXAMPLE_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
         "registry.provider_execution_registry.get_profile",
         lambda provider_slug: _provider_profile(
-            api_protocol_family="anthropic_messages",
-            api_endpoint="https://api.anthropic.test/v1/messages",
-            api_key_env_vars=("ANTHROPIC_API_KEY",),
+            api_protocol_family="example_messages",
+            api_endpoint="https://api.example.test/v1/messages",
+            api_key_env_vars=("EXAMPLE_API_KEY",),
         )
-        if provider_slug == "anthropic"
+        if provider_slug == "example"
         else None,
     )
 
     result = execution_backends.execute_api(
         _agent(
-            provider="anthropic",
-            model="claude-haiku-4-5-20251001",
+            provider="example",
+            model="example-model",
             wrapper_command=None,
             execution_transport="api",
         ),
@@ -624,18 +624,79 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
 
     command = str(captured["command"])
     assert f"{sys.executable} -m runtime.api_transport_worker" in command
-    assert "--api-protocol anthropic_messages" in command
+    assert "--api-protocol example_messages" in command
     assert f"--workdir {tmp_path}" in command
-    assert "--model claude-haiku-4-5-20251001" in command
+    assert "--model example-model" in command
     assert captured["stdin_text"] == "hello from api"
     assert captured["execution_transport"] == "api"
     assert captured["sandbox_session_id"] == "sandbox_session:run.alpha:job.api"
-    assert captured["metadata"]["provider_slug"] == "anthropic"
+    assert captured["metadata"]["provider_slug"] == "example"
     assert captured["metadata"]["execution_bundle"]["access_policy"]["write_scope"] == ["api_output.json"]
     assert result["status"] == "succeeded"
     assert result["stdout"] == "api output"
     assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
     assert result["workspace_snapshot_cache_hit"] is True
+
+
+def test_execute_api_requires_registry_declared_auth_env(monkeypatch, tmp_path) -> None:
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            raise AssertionError(f"API sandbox should not run without declared auth: {kwargs}")
+
+    monkeypatch.setenv("BLANK_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.get_profile",
+        lambda provider_slug: _provider_profile(
+            api_protocol_family="blank_messages",
+            api_endpoint="https://api.blank.test/v1/messages",
+            api_key_env_vars=(),
+        )
+        if provider_slug == "blank"
+        else None,
+    )
+
+    result = execution_backends.execute_api(
+        _agent(
+            provider="blank",
+            model="blank-model",
+            wrapper_command=None,
+            execution_transport="api",
+        ),
+        "hello from api",
+        workdir=str(tmp_path),
+    )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "transport_auth_config_missing"
+    assert "api_key_env_vars" in result["stderr"]
+
+
+def test_build_execution_env_uses_dotenv_only_for_declared_secrets(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    (tmp_path / ".env").write_text(
+        "EXAMPLE_API_KEY=dotenv-key\nUNDECLARED_SECRET=should-not-export\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("EXAMPLE_API_KEY", raising=False)
+    monkeypatch.delenv("UNDECLARED_SECRET", raising=False)
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.get_profile",
+        lambda provider_slug: _provider_profile()
+        if provider_slug == "example"
+        else None,
+    )
+
+    env = execution_backends._build_execution_env(
+        _agent(provider="example"),
+        workdir=str(tmp_path),
+        execution_bundle=None,
+    )
+
+    assert env["EXAMPLE_API_KEY"] == "dotenv-key"
+    assert "UNDECLARED_SECRET" not in env
 
 
 def test_execute_api_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> None:
@@ -650,24 +711,24 @@ def test_execute_api_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> No
                 execution_transport="api",
             )
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("EXAMPLE_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "get_load_balancer", lambda: load_balancer)
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
         "registry.provider_execution_registry.get_profile",
         lambda provider_slug: _provider_profile(
-            api_protocol_family="anthropic_messages",
-            api_endpoint="https://api.anthropic.test/v1/messages",
-            api_key_env_vars=("ANTHROPIC_API_KEY",),
+            api_protocol_family="example_messages",
+            api_endpoint="https://api.example.test/v1/messages",
+            api_key_env_vars=("EXAMPLE_API_KEY",),
         )
-        if provider_slug == "anthropic"
+        if provider_slug == "example"
         else None,
     )
 
     result = execution_backends.execute_api(
         _agent(
-            provider="anthropic",
-            model="claude-haiku-4-5-20251001",
+            provider="example",
+            model="example-model",
             wrapper_command=None,
             execution_transport="api",
         ),
@@ -675,8 +736,8 @@ def test_execute_api_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> No
         workdir=str(tmp_path),
     )
 
-    assert load_balancer.providers == ["anthropic"]
-    assert load_balancer.released == ["anthropic"]
+    assert load_balancer.providers == ["example"]
+    assert load_balancer.released == ["example"]
     assert captured["execution_transport"] == "api"
     assert result["status"] == "succeeded"
 
@@ -694,22 +755,22 @@ def test_execute_api_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -
                 sandbox_group_id=kwargs["sandbox_group_id"],
             )
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("EXAMPLE_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
         "registry.provider_execution_registry.get_profile",
         lambda provider_slug: _provider_profile(
-            api_protocol_family="anthropic_messages",
-            api_endpoint="https://api.anthropic.test/v1/messages",
-            api_key_env_vars=("ANTHROPIC_API_KEY",),
+            api_protocol_family="example_messages",
+            api_endpoint="https://api.example.test/v1/messages",
+            api_key_env_vars=("EXAMPLE_API_KEY",),
         )
-        if provider_slug == "anthropic"
+        if provider_slug == "example"
         else None,
     )
 
     agent = _agent(
-        provider="anthropic",
-        model="claude-haiku-4-5-20251001",
+        provider="example",
+        model="example-model",
         wrapper_command=None,
         execution_transport="api",
     )
@@ -735,23 +796,23 @@ def test_execute_api_prefers_bundle_sandbox_profile_contract(monkeypatch, tmp_pa
                 network_policy="disabled",
             )
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("EXAMPLE_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
         "registry.provider_execution_registry.get_profile",
         lambda provider_slug: _provider_profile(
-            api_protocol_family="anthropic_messages",
-            api_endpoint="https://api.anthropic.test/v1/messages",
-            api_key_env_vars=("ANTHROPIC_API_KEY",),
+            api_protocol_family="example_messages",
+            api_endpoint="https://api.example.test/v1/messages",
+            api_key_env_vars=("EXAMPLE_API_KEY",),
         )
-        if provider_slug == "anthropic"
+        if provider_slug == "example"
         else None,
     )
 
     result = execution_backends.execute_api(
         _agent(
-            provider="anthropic",
-            model="claude-haiku-4-5-20251001",
+            provider="example",
+            model="example-model",
             wrapper_command=None,
             execution_transport="api",
             docker_image="agent-image:stale",
@@ -768,7 +829,7 @@ def test_execute_api_prefers_bundle_sandbox_profile_contract(monkeypatch, tmp_pa
                 "docker_image": "registry/praxis@sha256:deadbeef",
                 "network_policy": "disabled",
                 "workspace_materialization": "copy",
-                "secret_allowlist": ["ANTHROPIC_API_KEY"],
+                "secret_allowlist": ["EXAMPLE_API_KEY"],
                 "auth_mount_policy": "none",
             },
         },

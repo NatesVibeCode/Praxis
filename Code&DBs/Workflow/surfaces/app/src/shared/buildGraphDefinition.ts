@@ -5,7 +5,7 @@ type DefinitionGate = {
   type: string;
   label?: string;
   required_approvers?: number;
-  verify_command?: string;
+  verify_refs?: string[];
   condition?: Record<string, unknown>;
   max_attempts?: number;
   fallback_job?: string;
@@ -83,7 +83,7 @@ function buildDefinitionGate(edge: BuildEdge): DefinitionGate | null {
       definitionGate = { type: 'human_review' };
       break;
     case 'validation':
-      definitionGate = { type: 'validation', verify_command: release.config?.verify_command };
+      definitionGate = { type: 'validation', verify_refs: stringList(release.config?.verify_refs) };
       break;
     case 'conditional':
       definitionGate = {

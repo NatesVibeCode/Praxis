@@ -362,19 +362,6 @@ def _validate_command(args: list[str], *, stdout: TextIO) -> int:
 
     def _configure(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("spec", help="Path to .queue.json spec file")
-        parser.add_argument(
-            "--check-gates",
-            action="store_true",
-            help="Dry-run each job's verify_command inside praxis-worker:latest to catch "
-            "gates that reference capabilities the worker lacks (missing modules, "
-            "missing binaries, host-only paths). Requires docker.",
-        )
-        parser.add_argument(
-            "--worker-image",
-            default="praxis-worker:latest",
-            help="Worker image to preflight against (default: praxis-worker:latest).",
-        )
-
     return _run_legacy_compat_command(
         args,
         stdout=stdout,

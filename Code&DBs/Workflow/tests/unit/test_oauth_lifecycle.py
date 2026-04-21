@@ -219,11 +219,11 @@ class TestCredentialFallback:
         monkeypatch.setattr(
             credentials_mod,
             "resolve_api_key_env_vars",
-            lambda provider_hint: ("ANTHROPIC_API_KEY",) if provider_hint == "anthropic" else (),
+            lambda provider_hint: ("EXAMPLE_API_KEY",) if provider_hint == "example" else (),
         )
 
         cred = resolve_credential(
-            "secret.test.anthropic",
-            env={"ANTHROPIC_API_KEY": "env_key"},
+            "secret.test.example",
+            env={"EXAMPLE_API_KEY": "env_key"},
         )
         assert cred.api_key == "env_key"

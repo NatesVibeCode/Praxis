@@ -85,4 +85,38 @@ describe('surfaceRegistry', () => {
       },
     });
   });
+
+  test('labels /app/run/:id as a run observer instead of a new workflow', () => {
+    const state = {
+      ...createDefaultShellState(),
+      activeTabId: 'build' as const,
+      moonRunId: 'workflow.chain.demo.001',
+    };
+
+    expect(buildShellTabs(state).find((tab) => tab.id === 'build')).toMatchObject({
+      kind: 'Run',
+      label: 'Run view',
+    });
+
+    expect(resolveActiveShellSurface(state, null)).toMatchObject({
+      category: 'static',
+      id: 'build',
+      context: {
+        label: 'Run observer',
+        detail: 'Trace the execution graph, inspect receipts, and jump to the source workflow.',
+      },
+    });
+
+    const navigateItems = buildShellNavigationItems({
+      state,
+      chatOpen: false,
+      activateTab: vi.fn(),
+      setChatOpen: vi.fn(),
+    });
+    expect(navigateItems.find((item) => item.id === 'navigate:build')).toMatchObject({
+      label: 'Run view',
+      description: 'Return to the active run view.',
+      selected: true,
+    });
+  });
 });

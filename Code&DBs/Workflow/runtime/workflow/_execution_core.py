@@ -5,15 +5,12 @@ called by the worker loop after a job has been claimed.
 """
 from __future__ import annotations
 
-import json
 import logging
-import subprocess
-import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ._shared import _circuit_breakers, _json_safe, _json_loads_maybe, _WORKFLOW_TERMINAL_STATES
+from ._shared import _circuit_breakers, _WORKFLOW_TERMINAL_STATES
 from ._claiming import mark_running, complete_job
 from ._routing import _runtime_profile_ref_for_run
 from ._workflow_state import _workflow_run_envelope
@@ -47,10 +44,7 @@ from runtime.workflow.receipt_writer import (
     extract_transcript_text as _extract_transcript_text,
     is_transcript_output as _is_transcript_output,
 )
-from runtime.workflow.submission_capture import (
-    WorkflowSubmissionServiceError,
-    capture_submission_baseline_for_job as _submission_capture_baseline_for_job,
-)
+from runtime.workflow.submission_capture import WorkflowSubmissionServiceError
 from runtime.workflow.submission_gate import resolve_submission_for_job as _resolve_submission
 from runtime.workflow.verification_runtime import (
     extract_verification_paths as _verification_runtime_extract_verification_paths,
@@ -61,31 +55,6 @@ from registry.native_runtime_profile_sync import resolve_native_runtime_profile_
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
-
-
-def _spec_snapshot_job_for_verify(
-    conn: "SyncPostgresConnection",
-    run_id: str,
-    label: str,
-    *,
-    run_row: dict | None = None,
-) -> dict:
-    """Read a job's spec snapshot entry to get verify_command/outcome_goal."""
-    source_row = run_row
-    if source_row is None:
-        source_row = dict((
-            conn.execute(
-                "SELECT request_envelope FROM workflow_runs WHERE run_id = $1",
-                run_id,
-            )
-            or [{}]
-        )[0])
-    envelope = _workflow_run_envelope(source_row)
-    snapshot = _json_loads_maybe(envelope.get("spec_snapshot"), {}) or {}
-    for job in (snapshot.get("jobs") or []):
-        if isinstance(job, dict) and str(job.get("label") or job.get("slug") or "").strip() == label:
-            return dict(job)
-    return {}
 
 
 def _approval_checkpoint_for_job(
@@ -291,7 +260,7 @@ __all__ = ["execute_job"]
 
 def _cli_readiness_error_code(reason: str | None) -> str:
     normalized = str(reason or "").strip().lower()
-    if normalized.startswith("missing env var:"):
+    if normalized.startswith("missing credential:") or normalized.startswith("missing env var:"):
         return "credential.env_var_missing"
     if normalized.startswith("unknown provider:"):
         return "credential.provider_unknown"
@@ -726,115 +695,6 @@ def execute_job(
     final_status = gate.final_status
     final_error_code = gate.final_error_code
     result = gate.result
-
-    # ── Outcome gate: run verify_command if specified ─────────────────────
-    if final_status == "succeeded":
-        acceptance_contract = (
-            dict(execution_bundle.get("acceptance_contract"))
-            if isinstance(execution_bundle, dict)
-            and isinstance(execution_bundle.get("acceptance_contract"), dict)
-            else {}
-        )
-        acceptance_verify_refs = acceptance_contract.get("verify_refs")
-        verify_cmd = str(job.get("verify_command") or "").strip()
-        spec_job: dict | None = None
-        if not verify_cmd and not acceptance_verify_refs and not verification_artifact_refs:
-            # Check spec snapshot for verify_command
-            spec_job = _spec_snapshot_job_for_verify(conn, run_id, label, run_row=run_row)
-            verify_cmd = str(spec_job.get("verify_command") or "").strip()
-        if verify_cmd and not acceptance_verify_refs and not verification_artifact_refs:
-            outcome_goal = str(
-                job.get("outcome_goal")
-                or (spec_job or _spec_snapshot_job_for_verify(conn, run_id, label, run_row=run_row)).get("outcome_goal")
-                or ""
-            ).strip()
-            try:
-                verify_result = subprocess.run(
-                    verify_cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    cwd=execution_workdir,
-                )
-                if verify_result.returncode != 0:
-                    # Distinguish gate-couldn't-run (infra/spec bug — don't retry,
-                    # don't waste provider budget) from gate-ran-and-failed (agent
-                    # output problem — retry). rc 126/127 = command not found or
-                    # not executable. Shell error text also matches when the
-                    # command itself fails to spawn.
-                    stderr_lc = (verify_result.stderr or "").lower()
-                    gate_broken = (
-                        verify_result.returncode in (126, 127)
-                        or "command not found" in stderr_lc
-                        or "no such file or directory" in stderr_lc
-                    )
-                    final_status = "failed"
-                    final_error_code = (
-                        "outcome_gate_broken" if gate_broken else "outcome_gate_failed"
-                    )
-                    gate_label = (
-                        "Outcome gate broken" if gate_broken else "Outcome gate failed"
-                    )
-                    gate_msg = f"{gate_label}: {outcome_goal or verify_cmd}"
-                    if verify_result.stderr:
-                        gate_msg += f"\n{verify_result.stderr[:500]}"
-                    if verify_result.stdout:
-                        gate_msg += f"\n{verify_result.stdout[:500]}"
-                    result = {
-                        **result,
-                        "stderr": (
-                            str(result.get("stderr") or "") + f"\n{gate_msg}"
-                        ).strip(),
-                    }
-                    # Include stderr tail in the log line so `docker logs` shows
-                    # the real cause (e.g. "command not found") instead of just
-                    # the requirement text, which misleads operators into
-                    # thinking the agent produced bad output.
-                    stderr_tail = (verify_result.stderr or verify_result.stdout or "").strip().splitlines()
-                    last_line = stderr_tail[-1][:200] if stderr_tail else ""
-                    logger.warning(
-                        "%s for %s/%s (rc=%s): %s | stderr_tail=%r",
-                        gate_label,
-                        run_id,
-                        label,
-                        verify_result.returncode,
-                        outcome_goal or verify_cmd,
-                        last_line,
-                    )
-                else:
-                    logger.info(
-                        "Outcome gate passed for %s/%s: %s", run_id, label, outcome_goal or verify_cmd,
-                    )
-            except subprocess.TimeoutExpired:
-                final_status = "failed"
-                final_error_code = "outcome_gate_timeout"
-                result = {
-                    **result,
-                    "stderr": (
-                        str(result.get("stderr") or "")
-                        + f"\nOutcome gate timed out after 60s: {verify_cmd}"
-                    ).strip(),
-                }
-                logger.warning(
-                    "Outcome gate timed out for %s/%s after 60s: %s",
-                    run_id, label, verify_cmd[:200],
-                )
-            except Exception as exc:
-                # Gate subprocess itself couldn't spawn — treat as broken, not failed.
-                final_status = "failed"
-                final_error_code = "outcome_gate_broken"
-                result = {
-                    **result,
-                    "stderr": (
-                        str(result.get("stderr") or "")
-                        + f"\nOutcome gate broken (subprocess spawn failed): {exc}"
-                    ).strip(),
-                }
-                logger.warning(
-                    "Outcome gate broken for %s/%s (spawn failed): %s",
-                    run_id, label, exc,
-                )
 
     # Write receipt to disk (preserves existing artifact flow)
     output_path = _write_output(execution_repo_root, run_id, job_id, label, result)

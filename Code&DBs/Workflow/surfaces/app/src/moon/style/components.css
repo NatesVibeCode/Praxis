@@ -3112,17 +3112,50 @@ button.moon-release__dispatch-btn {
 .moon-run-overlay__summary-pill--idle { border-color: var(--moon-status-idle); color: var(--moon-fg-muted); }
 .moon-run-overlay__summary-pill--pending { border-color: var(--moon-status-pending); color: var(--moon-fg-muted); }
 
+.moon-run-overlay__summary-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.moon-run-overlay__summary-action,
 .moon-run-overlay__summary-cancel {
-  grid-column: 1 / -1;
   min-height: 34px;
-  border: 1px solid var(--moon-danger-a45);
-  border-radius: 8px;
-  background: var(--moon-danger-a08);
-  color: var(--moon-status-failed);
+  width: 100%;
+  padding: 0 12px;
   font: inherit;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+}
+
+.moon-run-overlay__summary-action {
+  border: 1px solid var(--moon-accent-a30);
+  border-radius: 8px;
+  background: var(--moon-accent-a08);
+  color: var(--moon-color-white);
+}
+
+.moon-run-overlay__summary-cancel {
+  border: 1px solid var(--moon-danger-a45);
+  border-radius: 8px;
+  background: var(--moon-danger-a08);
+  color: var(--moon-status-failed);
+}
+
+.moon-run-overlay__summary-action:hover {
+  border-color: var(--moon-accent);
+  background: var(--moon-accent-a12);
+}
+
+.moon-run-overlay__summary-action:focus-visible,
+.moon-run-overlay__summary-cancel:focus-visible,
+.moon-run-overlay__summary-back:focus-visible,
+.moon-run-overlay__job-row:focus-visible,
+.moon-run-overlay__receipt-close:focus-visible,
+.moon-run-overlay__receipt-output-toggle:focus-visible {
+  outline: 2px solid var(--moon-accent);
+  outline-offset: 2px;
 }
 
 .moon-run-overlay__stat-grid {
@@ -3414,6 +3447,13 @@ button.moon-release__dispatch-btn {
   .moon-page--run-view .moon-center {
     padding-top: 24px;
     padding-bottom: 46vh;
+  }
+}
+
+@media (min-width: 961px) {
+  .moon-page--run-view .moon-center {
+    justify-content: flex-start;
+    padding-left: min(430px, 32vw);
   }
 }
 

@@ -241,4 +241,67 @@ describe('buildGraphToDefinition', () => {
       },
     });
   });
+
+  it('projects validation edge gates with verify_refs only', () => {
+    const definition = buildGraphToDefinition({
+      nodes: [
+        {
+          node_id: 'step-001',
+          kind: 'step',
+          title: 'Build step',
+          route: 'auto/build',
+        },
+        {
+          node_id: 'step-002',
+          kind: 'step',
+          title: 'Then path',
+          route: 'auto/review',
+        },
+      ],
+      edges: [
+        {
+          edge_id: 'edge-step-001-step-002',
+          kind: 'sequence',
+          from_node_id: 'step-001',
+          to_node_id: 'step-002',
+          release: {
+            family: 'validation',
+            edge_type: 'validation',
+            label: 'Validation',
+            release_condition: { kind: 'always' },
+            config: { verify_refs: ['verify_ref.python.py_compile.app'] },
+          } as any,
+        },
+      ],
+    });
+
+    expect(definition).toMatchObject({
+      execution_setup: {
+        edge_gates: [
+          {
+            edge_id: 'edge-step-001-step-002',
+            release: {
+              family: 'validation',
+              config: {
+                verify_refs: ['verify_ref.python.py_compile.app'],
+              },
+            },
+          },
+        ],
+      },
+      draft_flow: [
+        expect.any(Object),
+        {
+          id: 'step-002',
+          gates: [
+            {
+              type: 'validation',
+              verify_refs: ['verify_ref.python.py_compile.app'],
+            },
+          ],
+        },
+      ],
+    });
+    expect(JSON.stringify(definition)).not.toContain('verify_command');
+  });
 });

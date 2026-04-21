@@ -404,38 +404,39 @@ def _classify_credential_error(failure_code: str, *, outputs: dict | None = None
 
 def _classify_verification_error(failure_code: str, *, outputs: dict | None = None) -> FailureClassification | None:
     """Check if failure is a verification failure."""
-    # Gate couldn't run at all — spec/infrastructure bug (e.g. verify_command
-    # points at a binary that doesn't exist in the worker container). Retrying
-    # this just wastes provider budget and re-surfaces the same misleading
-    # "outcome_gate_failed" signal. Terminal, non-retryable.
+    # Historical receipt support only. Inline verify_command gates are no
+    # longer an executable workflow path; current jobs must use verify_refs.
     if failure_code == "outcome_gate_broken":
         return FailureClassification(
             category=FailureCategory.VERIFICATION_FAILED,
             is_retryable=False,
             is_transient=False,
             recommended_action=(
-                "Verify the job's verify_command can run in the worker container "
-                "(e.g. avoid host-only paths like /opt/homebrew/bin/python3; "
-                "use PATH-resolved binaries)."
+                "Historical legacy verify_command gate broke. Replace the spec with "
+                "verify_refs and rerun through the sealed submission path."
             ),
             severity="high",
         )
-    # Gate ran and asserted false — agent produced output that doesn't meet the
-    # contract. Retry with backoff (same or failover agent).
     if failure_code == "outcome_gate_failed":
         return FailureClassification(
             category=FailureCategory.VERIFICATION_FAILED,
-            is_retryable=True,
-            is_transient=True,
-            recommended_action="Agent output did not meet outcome_goal. Retry (same model) or failover.",
+            is_retryable=False,
+            is_transient=False,
+            recommended_action=(
+                "Historical legacy verify_command gate failed. Replace the spec with "
+                "verify_refs and rerun through the sealed submission path."
+            ),
             severity="medium",
         )
     if failure_code == "outcome_gate_timeout":
         return FailureClassification(
             category=FailureCategory.TIMEOUT,
-            is_retryable=True,
-            is_transient=True,
-            recommended_action="verify_command exceeded 60s timeout. Retry or simplify the gate.",
+            is_retryable=False,
+            is_transient=False,
+            recommended_action=(
+                "Historical legacy verify_command gate timed out. Replace the spec with "
+                "verify_refs and rerun through the sealed submission path."
+            ),
             severity="medium",
         )
     if "verification" in failure_code or failure_code == "verification.failed":
@@ -444,6 +445,34 @@ def _classify_verification_error(failure_code: str, *, outputs: dict | None = No
             is_retryable=False,
             is_transient=False,
             recommended_action="Verify the spec's registered verification bindings and expected outputs.",
+            severity="medium",
+        )
+    return None
+
+
+def _classify_submission_contract_error(
+    failure_code: str,
+    *,
+    outputs: dict | None = None,
+) -> FailureClassification | None:
+    """Check if failure is due to the sealed submission contract."""
+    if failure_code == "workflow_submission.required_missing":
+        return FailureClassification(
+            category=FailureCategory.INFRASTRUCTURE,
+            is_retryable=False,
+            is_transient=False,
+            recommended_action=(
+                "Mutating job completed without a sealed workflow_job_submissions row. "
+                "Expose the submission tool path to the worker or fix the job contract before retrying."
+            ),
+            severity="high",
+        )
+    if failure_code.startswith("workflow_submission."):
+        return FailureClassification(
+            category=FailureCategory.INFRASTRUCTURE,
+            is_retryable=False,
+            is_transient=False,
+            recommended_action="Inspect the sealed submission contract and workflow_submission evidence.",
             severity="medium",
         )
     return None
@@ -791,6 +820,7 @@ def classify_failure(
         _classify_credential_error,
         _classify_model_error,
         _classify_input_error,
+        _classify_submission_contract_error,
         _classify_verification_error,
         _classify_scope_violation,
         _classify_sandbox_error,

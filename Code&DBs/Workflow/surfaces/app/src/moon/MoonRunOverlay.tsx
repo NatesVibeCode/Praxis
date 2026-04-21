@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { RunDetail, RunJob } from '../dashboard/useLiveRunSnapshot';
 import { MoonStatusRing } from './MoonStatusRing';
-import { statusState, statusLabel, TERMINAL_STATES, type MoonStatusState } from './moonStatus';
+import { statusState, type MoonStatusState } from './moonStatus';
 
 interface Props {
   run: RunDetail | null;
@@ -11,6 +11,7 @@ interface Props {
   onSelectJob: (jobId: string | null) => void;
   onExit: () => void;
   onCancel?: () => void;
+  onEditWorkflow?: (workflowId: string) => void;
 }
 
 const TERMINAL_JOB_STATUSES = new Set<RunJob['status']>([
@@ -30,6 +31,7 @@ const FAILED_JOB_STATUSES = new Set<RunJob['status']>([
 ]);
 const ACTIVE_JOB_STATUSES = new Set<RunJob['status']>(['claimed', 'running']);
 const WAITING_JOB_STATUSES = new Set<RunJob['status']>(['pending', 'ready']);
+const TERMINAL_RUN_STATUSES = new Set<string>(['succeeded', 'failed', 'cancelled']);
 
 function formatDuration(ms: number): string {
   if (!ms || ms < 0) return '—';
@@ -45,6 +47,10 @@ function formatCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
+function formatRawStatus(status: string): string {
+  return status.replace(/[_-]+/g, ' ');
+}
+
 function jobSelectionId(job: RunJob): string {
   return job.label || String(job.id);
 }
@@ -57,6 +63,7 @@ export function MoonRunOverlay({
   onSelectJob,
   onExit,
   onCancel,
+  onEditWorkflow,
 }: Props) {
   const [expandedOutput, setExpandedOutput] = useState(false);
 
@@ -80,7 +87,9 @@ export function MoonRunOverlay({
 
   const runStatusRaw = run?.status ?? (loading ? 'loading' : 'queued');
   const runState: MoonStatusState = statusState(runStatusRaw);
-  const isTerminal = TERMINAL_STATES.has(runState) && runState !== 'idle';
+  const isTerminal = TERMINAL_RUN_STATUSES.has(runStatusRaw);
+  const editableWorkflowId = run?.workflow_id ?? null;
+  const canEditWorkflow = Boolean(editableWorkflowId && onEditWorkflow);
 
   const totalJobs = jobs.length || run?.total_jobs || 0;
   const completedJobs = jobs.length
@@ -114,19 +123,33 @@ export function MoonRunOverlay({
             )}
           </div>
           <span className={`moon-run-overlay__summary-pill moon-run-overlay__summary-pill--${runState}`}>
-            <MoonStatusRing status={runState} size={10} />
-            <span>{statusLabel(runState)}</span>
+            <MoonStatusRing status={runState} size={10} label={formatRawStatus(runStatusRaw)} />
+            <span>{formatRawStatus(runStatusRaw)}</span>
           </span>
-          {!isTerminal && onCancel && (
-            <button
-              type="button"
-              className="moon-run-overlay__summary-cancel"
-              onClick={onCancel}
-            >
-              Cancel
-            </button>
-          )}
         </header>
+
+        {(canEditWorkflow || (!isTerminal && onCancel)) && (
+          <div className="moon-run-overlay__summary-actions">
+            {canEditWorkflow && editableWorkflowId && (
+              <button
+                type="button"
+                className="moon-run-overlay__summary-action"
+                onClick={() => onEditWorkflow?.(editableWorkflowId)}
+              >
+                Edit source workflow
+              </button>
+            )}
+            {!isTerminal && onCancel && (
+              <button
+                type="button"
+                className="moon-run-overlay__summary-cancel"
+                onClick={onCancel}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
 
         <dl className="moon-run-overlay__stat-grid">
           <div>

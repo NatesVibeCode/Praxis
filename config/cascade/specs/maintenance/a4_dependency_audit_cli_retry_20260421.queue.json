@@ -1,0 +1,19 @@
+{
+  "spec_version": "1.0",
+  "name": "a4_dependency_audit_cli_retry_20260421",
+  "workflow_id": "a4_dependency_audit_cli_retry_20260421",
+  "queue_id": "audit-batch-2026-04-20-a4-cli-retry-20260421",
+  "phase": "maintenance",
+  "outcome_goal": "pip-audit and npm audit --audit-level=high both exit 0; patch-version bumps landed; minor/major bumps filed as bugs.",
+  "jobs": [
+    {
+      "id": "a4_dependency_audit",
+      "label": "a4_dependency_audit",
+      "agent": "anthropic/claude-opus-4-7",
+      "adapter_type": "cli_llm",
+      "task_type": "review",
+      "prompt": "Run dependency hygiene. Targets: Code&DBs/Workflow/pyproject.toml; Code&DBs/Workflow/requirements.runtime.txt; Code&DBs/Workflow/surfaces/app/package.json; Code&DBs/Workflow/surfaces/app/package-lock.json; Code&DBs/Workflow/surfaces/cloudflare_sandbox_bridge/package.json. Run pip-audit and npm audit --audit-level=high. Land patch-only bumps when verifier-gated. File bugs dep-audit::<package> for minor/major bumps and unresolved advisories. Done when both audits exit 0 or every remaining non-patch action is a bug. Transport constraint: use CLI only; do not use Anthropic API or any llm_task route.",
+      "verify_command": "bash -lc \"cd 'Code&DBs/Workflow' && pip-audit && cd surfaces/app && npm audit --audit-level=high\""
+    }
+  ]
+}

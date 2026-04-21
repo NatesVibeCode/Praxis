@@ -62,6 +62,7 @@ interface Props {
   runId?: string | null;
   onBack?: () => void;
   onWorkflowCreated?: (id: string) => void;
+  onEditWorkflow?: (id: string) => void;
   onViewRun?: (runId: string) => void;
   onDraftStateChange?: (draft: { dirty: boolean; message?: string | null }) => void;
   /** Initial empty mode: 'choice' (default), 'compose' (prose entry), 'trigger-picker' */
@@ -318,7 +319,7 @@ function shouldKeepEdgeMenusOpen(target: EventTarget | null): boolean {
   );
 }
 
-export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, onViewRun, onDraftStateChange, initialMode }: Props) {
+export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, onEditWorkflow, onViewRun, onDraftStateChange, initialMode }: Props) {
   const { payload, loading, error, mutate, reload, setPayload } = useBuildPayload(workflowId);
   const [state, dispatch] = useReducer(moonBuildReducer, {
     ...initialMoonBuildState,
@@ -1467,6 +1468,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           onSelectJob={(jobId) => dispatch({ type: 'SELECT_RUN_JOB', jobId })}
           onExit={handleRunExit}
           onCancel={handleRunCancel}
+          onEditWorkflow={onEditWorkflow}
         />
       )}
       <div className="moon-body">
@@ -1588,6 +1590,8 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
             ) : (
               <div
                 className="moon-graph"
+                role="group"
+                aria-label={state.viewMode === 'run' ? 'Workflow run graph' : 'Workflow build graph'}
                 style={{
                   position: 'relative',
                   ...getMoonCanvasDimensions(viewModel.layout),
@@ -1746,15 +1750,27 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     // fade to ghost. inLineage defaults true when nothing is
                     // selected, so rest-state opacity is unchanged.
                     const nodeOpacity = node.inLineage ? 1 : 0.28;
+                    const nodeAriaLabel = state.viewMode === 'run'
+                      ? `Inspect run job ${node.title}${node.summary ? `, ${node.summary}` : ''}`
+                      : `Select workflow step ${node.title}${node.summary ? `, ${node.summary}` : ''}`;
                     return (
                       <div
                         key={node.id}
                         className={nodeClass}
                         style={{ ...position, opacity: nodeOpacity, transition: 'opacity 240ms ease' }}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={nodeAriaLabel}
+                        aria-pressed={isSelected}
                         data-drop-node={node.id}
                         data-multiplicity={multiplicityAttr || undefined}
                         data-in-lineage={node.inLineage || undefined}
                         onClick={() => handleNodeClick(node.id, isSelected)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter' && event.key !== ' ') return;
+                          event.preventDefault();
+                          handleNodeClick(node.id, isSelected);
+                        }}
                         onPointerDown={state.viewMode === 'run' ? undefined : e => startNodeDrag(e, node)}
                       >
                         {/*

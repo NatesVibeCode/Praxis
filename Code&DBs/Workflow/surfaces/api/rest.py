@@ -1674,6 +1674,7 @@ def list_recent_runs(
     conn = _shared_pg_conn()
     rows = conn.execute(
         """SELECT r.run_id,
+                  r.workflow_id,
                   COALESCE(r.request_envelope->>'name', r.workflow_id) AS spec_name,
                   r.current_state AS status,
                   COALESCE(NULLIF(r.request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
@@ -1693,6 +1694,7 @@ def list_recent_runs(
     return [
         {
             "run_id": r["run_id"],
+            "workflow_id": r["workflow_id"],
             "spec_name": r["spec_name"],
             "status": r["status"],
             "total_jobs": r["total_jobs"],
@@ -1711,6 +1713,7 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
     conn = _shared_pg_conn()
     run_rows = conn.execute(
         """SELECT r.run_id,
+                  r.workflow_id,
                   COALESCE(r.request_envelope->>'name', r.workflow_id) AS spec_name,
                   r.current_state AS status,
                   COALESCE(NULLIF(r.request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
@@ -1755,6 +1758,7 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
 
     return {
         "run_id": run["run_id"],
+        "workflow_id": run["workflow_id"],
         "spec_name": run["spec_name"],
         "status": run["status"],
         "total_jobs": int(run["total_jobs"] or len(jobs)),

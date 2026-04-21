@@ -190,6 +190,9 @@
     "182_restore_anthropic_cli_only.sql",
     "183_codex_skip_git_repo_check.sql",
     "184_anthropic_cli_candidates.sql",
+    "185_mobile_capability_ledger.sql",
+    "186_gate_evaluations_grant_coverage.sql",
+    "187_webauthn_challenges.sql",
     "189_oversight_instrumentation.sql",
     "190_surface_catalog_gate_icons.sql",
     "191_provider_model_retirement_ledger.sql",
@@ -197,7 +200,8 @@
     "193_native_self_hosted_smoke_workspace_repair.sql",
     "194_projection_freshness_sla_config.sql",
     "195_operator_ideas_authority.sql",
-    "196_workflow_control_commands_view.sql"
+    "196_workflow_control_commands_view.sql",
+    "197_no_synthetic_provider_auth.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -4793,6 +4797,88 @@
     "182_restore_anthropic_cli_only.sql": [],
     "183_codex_skip_git_repo_check.sql": [],
     "184_anthropic_cli_candidates.sql": [],
+    "185_mobile_capability_ledger.sql": [
+      {
+        "object_type": "table",
+        "object_name": "device_enrollments"
+      },
+      {
+        "object_type": "table",
+        "object_name": "mobile_capability_grants"
+      },
+      {
+        "object_type": "table",
+        "object_name": "approval_requests"
+      },
+      {
+        "object_type": "index",
+        "object_name": "device_enrollments_principal_active_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "device_enrollments_credential_id_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "mobile_capability_grants_principal_active_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "mobile_capability_grants_plan_envelope_hash_active_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "mobile_capability_grants_device_active_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "mobile_capability_grants_approval_request_id_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "approval_requests_pending_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "approval_requests_plan_envelope_hash_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "approval_requests_principal_status_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "approval_requests_grant_ref_idx"
+      }
+    ],
+    "186_gate_evaluations_grant_coverage.sql": [
+      {
+        "object_type": "index",
+        "object_name": "gate_evaluations_grant_ref_decided_at_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "gate_evaluations_plan_envelope_hash_decided_at_idx"
+      }
+    ],
+    "187_webauthn_challenges.sql": [
+      {
+        "object_type": "table",
+        "object_name": "webauthn_challenges"
+      },
+      {
+        "object_type": "index",
+        "object_name": "webauthn_challenges_expiry_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "webauthn_challenges_kind_expiry_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "webauthn_challenges_device_active_idx"
+      }
+    ],
     "189_oversight_instrumentation.sql": [
       {
         "object_type": "table",
@@ -4945,7 +5031,8 @@
         "object_type": "view",
         "object_name": "workflow_control_commands"
       }
-    ]
+    ],
+    "197_no_synthetic_provider_auth.sql": []
   },
   "policy_buckets": {
     "canonical": [
@@ -5139,6 +5226,9 @@
       "182_restore_anthropic_cli_only.sql",
       "183_codex_skip_git_repo_check.sql",
       "184_anthropic_cli_candidates.sql",
+      "185_mobile_capability_ledger.sql",
+      "186_gate_evaluations_grant_coverage.sql",
+      "187_webauthn_challenges.sql",
       "189_oversight_instrumentation.sql",
       "190_surface_catalog_gate_icons.sql",
       "191_provider_model_retirement_ledger.sql",
@@ -5146,7 +5236,8 @@
       "193_native_self_hosted_smoke_workspace_repair.sql",
       "194_projection_freshness_sla_config.sql",
       "195_operator_ideas_authority.sql",
-      "196_workflow_control_commands_view.sql"
+      "196_workflow_control_commands_view.sql",
+      "197_no_synthetic_provider_auth.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
