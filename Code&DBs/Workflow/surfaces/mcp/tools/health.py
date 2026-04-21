@@ -75,12 +75,22 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     try:
         provider_registry = provider_registry_health()
     except Exception as exc:
+        provider_registry_error = f"{type(exc).__name__}: {exc}"
         provider_registry = {
             "status": "load_failed",
-            "error": str(exc),
+            "error": provider_registry_error,
             "authority_available": False,
             "fallback_active": False,
         }
+        probes.append(
+            hs_mod.StaticHealthProbe(
+                name="provider_registry",
+                passed=False,
+                message=f"provider registry load failed: {provider_registry_error}",
+                status="failed",
+                details=provider_registry,
+            )
+        )
     for provider_slug, adapter_type in transport_support_summary["probe_targets"]:
         probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 

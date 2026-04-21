@@ -5117,3 +5117,103 @@ def test_handle_decompose_empty_result_is_machine_first() -> None:
     assert result["status"] == "empty"
     assert result["reason_code"] == "decompose.no_sprints"
     assert result["sprints"] == []
+
+
+def test_handle_search_get_includes_platform_registry_results() -> None:
+    class _Pg:
+        def __init__(self) -> None:
+            self.executed: list[str] = []
+
+        def execute(self, query: str, *params: Any) -> list[dict[str, Any]]:
+            normalized = " ".join(query.split())
+            self.executed.append(normalized)
+            if "FROM objects" in normalized:
+                return [
+                    {
+                        "object_id": "task.alpha",
+                        "type_id": "task",
+                        "properties": {"title": "Task Alpha", "status": "active"},
+                    }
+                ]
+            if "FROM app_manifests" in normalized:
+                return [
+                    {
+                        "id": "manifest.support",
+                        "name": "Support Workspace",
+                        "description": "Workspace for support operations",
+                    }
+                ]
+            if "FROM platform_registry" in normalized:
+                return [
+                    {
+                        "id": "dispatch_output.abc123",
+                        "kind": "dispatch_output",
+                        "name": "Morning Dispatch Output",
+                        "category": "dispatch",
+                        "content": "Generated output bundle for the morning run",
+                        "metadata": {"source_path": "/tmp/output.md"},
+                    }
+                ]
+            raise AssertionError(f"unexpected SQL: {normalized}")
+
+    pg = _Pg()
+    subsystems = SimpleNamespace(get_pg_conn=lambda: pg)
+    request = _RequestStub(
+        subsystems=subsystems,
+        path="/api/search?q=alpha",
+    )
+
+    with patch("runtime.receipt_store.search_receipts") as search_receipts:
+        search_receipts.return_value = [
+            SimpleNamespace(
+                id="run-9",
+                label="Morning Run",
+                agent="openai/gpt-5.4",
+                status="succeeded",
+            )
+        ]
+        workflow_query._handle_search_get(request, "/api/search")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["count"] == 4
+    assert any("FROM platform_registry" in query for query in pg.executed)
+
+    results_by_type = {row["type"]: row for row in payload["results"]}
+    assert results_by_type["object"] == {
+        "type": "object",
+        "id": "task.alpha",
+        "title": "Task Alpha",
+        "snippet": "task",
+        "name": "Task Alpha",
+        "description": "task",
+        "kind": "object",
+    }
+    assert results_by_type["manifest"] == {
+        "type": "manifest",
+        "id": "manifest.support",
+        "title": "Support Workspace",
+        "snippet": "Workspace for support operations",
+        "name": "Support Workspace",
+        "description": "Workspace for support operations",
+        "kind": "manifest",
+    }
+    assert results_by_type["workflow"] == {
+        "type": "workflow",
+        "id": "run-9",
+        "title": "Morning Run",
+        "snippet": "openai/gpt-5.4 — succeeded",
+        "name": "Morning Run",
+        "description": "openai/gpt-5.4 — succeeded",
+        "kind": "workflow",
+    }
+    assert results_by_type["registry"] == {
+        "type": "registry",
+        "id": "dispatch_output.abc123",
+        "title": "Morning Dispatch Output",
+        "snippet": "Generated output bundle for the morning run",
+        "name": "Morning Dispatch Output",
+        "description": "Generated output bundle for the morning run",
+        "kind": "dispatch_output",
+    }

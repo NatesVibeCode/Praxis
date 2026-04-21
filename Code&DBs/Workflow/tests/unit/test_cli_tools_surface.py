@@ -95,7 +95,7 @@ def test_tools_root_shows_quickstart() -> None:
     rendered = stdout.getvalue()
     assert "Tool discovery quickstart:" in rendered
     assert "workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]" in rendered
-    assert "workflow tools help <list|search|describe|call>" in rendered
+    assert "workflow tools help <tool|alias>" in rendered
     assert "search results are relevance-ranked" in rendered.lower()
     assert "unique prefix" in rendered.lower()
     assert "workflow mcp" in rendered
@@ -112,6 +112,17 @@ def test_tools_describe_daily_heartbeat_smoke() -> None:
     assert "praxis_daily_heartbeat" in rendered
     assert "entrypoint: workflow heartbeat" in rendered
     assert "alias:heartbeat" in rendered
+
+
+def test_tools_help_can_describe_a_tool_alias() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "help", "query"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "praxis_query" in rendered
+    assert "entrypoint: workflow query" in rendered
+    assert "describe_command: workflow tools describe praxis_query" in rendered
 
 
 def test_commands_index_includes_daily_heartbeat() -> None:

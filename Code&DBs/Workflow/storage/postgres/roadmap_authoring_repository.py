@@ -96,6 +96,10 @@ class PostgresRoadmapAuthoringRepository:
                         item.get("source_bug_id"),
                         field_name=f"roadmap_items[{index}].source_bug_id",
                     ),
+                    "source_idea_id": _optional_text(
+                        item.get("source_idea_id"),
+                        field_name=f"roadmap_items[{index}].source_idea_id",
+                    ),
                     "registry_paths": item.get("registry_paths"),
                     "summary": _require_text(
                         item.get("summary"),
@@ -166,6 +170,7 @@ class PostgresRoadmapAuthoringRepository:
                             priority,
                             parent_roadmap_item_id,
                             source_bug_id,
+                            source_idea_id,
                             registry_paths,
                             summary,
                             acceptance_criteria,
@@ -177,7 +182,7 @@ class PostgresRoadmapAuthoringRepository:
                             updated_at,
                             embedding
                         ) VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12::jsonb, $13, NULL, NULL, NULL, $14, $15, $16::vector
+                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13::jsonb, $14, NULL, NULL, NULL, $15, $16, $17::vector
                         )
                         ON CONFLICT (roadmap_item_id) DO UPDATE SET
                             roadmap_key = EXCLUDED.roadmap_key,
@@ -188,6 +193,7 @@ class PostgresRoadmapAuthoringRepository:
                             priority = EXCLUDED.priority,
                             parent_roadmap_item_id = EXCLUDED.parent_roadmap_item_id,
                             source_bug_id = EXCLUDED.source_bug_id,
+                            source_idea_id = EXCLUDED.source_idea_id,
                             registry_paths = EXCLUDED.registry_paths,
                             summary = EXCLUDED.summary,
                             acceptance_criteria = EXCLUDED.acceptance_criteria,
@@ -204,6 +210,7 @@ class PostgresRoadmapAuthoringRepository:
                         item["priority"],
                         item["parent_roadmap_item_id"],
                         item["source_bug_id"],
+                        item["source_idea_id"],
                         _encode_jsonb(
                             item["registry_paths"],
                             field_name="roadmap_items.registry_paths",

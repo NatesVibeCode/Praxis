@@ -273,6 +273,7 @@ def _tools_quickstart_text() -> str:
         "  workflow tools describe <tool|alias>",
         "  workflow tools call <tool|alias> --input-json '<json>' --yes",
         "  workflow tools help <list|search|describe|call>",
+        "  workflow tools help <tool|alias>",
         "",
     ]
     if direct_entrypoints:
@@ -302,8 +303,14 @@ def _tools_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(_tools_quickstart_text() + "\n")
         return 0
     if args[0] == "help":
-        stdout.write(_tools_help_text(args[1] if len(args) > 1 else None) + "\n")
-        return 0
+        if len(args) == 1:
+            stdout.write(_tools_quickstart_text() + "\n")
+            return 0
+        topic = args[1].strip()
+        if topic in {"list", "search", "describe", "call"}:
+            stdout.write(_tools_help_text(topic) + "\n")
+            return 0
+        return _tools_describe_command(args[1:], stdout=stdout)
 
     subcommand = args[0]
     tail = args[1:]

@@ -21,7 +21,7 @@ interface SearchPanelConfig {
 
 function SearchPanelModule({ config }: QuadrantProps) {
   const cfg = (config ?? {}) as SearchPanelConfig;
-  const endpoint = cfg.endpoint ?? 'registries/search';
+  const endpoint = cfg.endpoint ?? 'search';
   const placeholder = cfg.placeholder ?? 'Search...';
 
   const [query, setQuery] = useState('');

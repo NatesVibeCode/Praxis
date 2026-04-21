@@ -399,7 +399,10 @@ def _runtime_profile_admitted_route_candidates(
     runtime_profile_ref: str,
     candidates: list[str],
 ) -> list[str]:
-    from registry.runtime_profile_admission import load_admitted_runtime_profile_candidates
+    from registry.runtime_profile_admission import (
+        RuntimeProfileAdmissionError,
+        load_admitted_runtime_profile_candidates,
+    )
 
     admitted_candidates = load_admitted_runtime_profile_candidates(
         conn,
@@ -411,12 +414,18 @@ def _runtime_profile_admitted_route_candidates(
     }
     eligible_slugs = [candidate for candidate in candidates if candidate in admitted_slugs]
     if not eligible_slugs:
-        logger.warning(
-            "runtime profile %r resolved to no admitted route candidates; "
-            "falling back to workflow candidate chain",
-            runtime_profile_ref,
+        raise RuntimeProfileAdmissionError(
+            "routing.no_admitted_candidate_overlap",
+            (
+                f"runtime profile {runtime_profile_ref!r} admitted no candidates "
+                "from the workflow failover chain"
+            ),
+            details={
+                "runtime_profile_ref": runtime_profile_ref,
+                "workflow_candidate_slugs": list(candidates),
+                "admitted_candidate_slugs": sorted(admitted_slugs),
+            },
         )
-        return list(candidates)
     return eligible_slugs
 
 
@@ -447,6 +456,20 @@ def _db_admitted_route_candidates(
 
     active_slugs = [candidate for candidate in candidates if candidate in by_slug]
     if not active_slugs:
+        if enforce_runtime_profile:
+            from registry.runtime_profile_admission import RuntimeProfileAdmissionError
+
+            raise RuntimeProfileAdmissionError(
+                "routing.no_active_candidate_overlap",
+                (
+                    "runtime-profile route selection found no active catalog rows "
+                    "for the workflow failover chain"
+                ),
+                details={
+                    "run_id": run_id,
+                    "workflow_candidate_slugs": list(candidates),
+                },
+            )
         return list(candidates), {}
 
     if not enforce_runtime_profile:

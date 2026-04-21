@@ -4254,7 +4254,7 @@ def test_select_claim_route_prefers_healthy_task_type_candidate() -> None:
     assert selected == "anthropic/claude-sonnet-4-6"
 
 
-def test_runtime_profile_admitted_route_candidates_fall_back_to_chain_when_empty(monkeypatch) -> None:
+def test_runtime_profile_admitted_route_candidates_fail_closed_when_empty(monkeypatch) -> None:
     monkeypatch.setattr(
         "registry.runtime_profile_admission.load_admitted_runtime_profile_candidates",
         lambda _conn, runtime_profile_ref: [],
@@ -4265,13 +4265,16 @@ def test_runtime_profile_admitted_route_candidates_fall_back_to_chain_when_empty
         "anthropic/claude-sonnet-4-6",
     ]
 
-    selected = unified_dispatch._runtime_profile_admitted_route_candidates(
-        object(),
-        runtime_profile_ref="praxis",
-        candidates=candidates,
-    )
+    with pytest.raises(RuntimeProfileAdmissionError) as excinfo:
+        unified_dispatch._runtime_profile_admitted_route_candidates(
+            object(),
+            runtime_profile_ref="praxis",
+            candidates=candidates,
+        )
 
-    assert selected == candidates
+    assert excinfo.value.reason_code == "routing.no_admitted_candidate_overlap"
+    assert excinfo.value.details["workflow_candidate_slugs"] == candidates
+    assert excinfo.value.details["admitted_candidate_slugs"] == []
 
 
 def test_claim_one_quarantines_ready_job_with_missing_runtime_profile_authority(monkeypatch) -> None:

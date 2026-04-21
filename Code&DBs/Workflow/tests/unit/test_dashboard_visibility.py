@@ -34,6 +34,22 @@ class _FakeHistory:
         ]
 
 
+class _HealthyHistory:
+    def summary(self) -> dict[str, object]:
+        return {
+            "total_workflows": 10,
+            "succeeded": 10,
+            "failed": 0,
+            "pass_rate": 1.0,
+            "workflow_history_source": "metrics",
+            "workflow_history_status": "complete",
+            "workflow_history_error": None,
+        }
+
+    def recent_workflows(self, limit: int = 20):  # noqa: ARG002
+        return []
+
+
 class _FakeCostTracker:
     def summary(self) -> dict[str, object]:
         return {
@@ -49,6 +65,14 @@ class _FakeCircuits:
         return {"anthropic": {"state": "OPEN", "success_count": 0, "failure_count": 1}}
 
 
+class _ClosedCircuits:
+    def all_states(self) -> dict[str, dict[str, object]]:
+        return {
+            "anthropic": {"state": "CLOSED", "success_count": 10, "failure_count": 0},
+            "openai": {"state": "CLOSED", "success_count": 10, "failure_count": 0},
+        }
+
+
 class _FakeRoutes:
     def __init__(self) -> None:
         self._providers = ("anthropic",)
@@ -58,6 +82,14 @@ class _FakeRoutes:
 
     def provider_slugs(self) -> tuple[str, ...]:
         return self._providers
+
+
+class _MixedRouteHealth:
+    def consecutive_failures(self, provider_slug: str) -> int:
+        return 2 if provider_slug == "anthropic" else 0
+
+    def provider_slugs(self) -> tuple[str, ...]:
+        return ("anthropic", "openai")
 
 
 class _FakeMetricsView:
@@ -155,6 +187,22 @@ def test_build_dashboard_surfaces_route_health_failures_explicitly(monkeypatch):
 
     rendered = dashboard_mod.format_dashboard(data)
     assert "route_health: unavailable error=RuntimeError: route metrics offline" in rendered
+
+
+def test_build_dashboard_degrades_when_route_failure_counts_are_present(monkeypatch):
+    monkeypatch.setattr(dashboard_mod, "get_workflow_history", lambda: _HealthyHistory())
+    monkeypatch.setattr(dashboard_mod, "get_cost_tracker", lambda: _FakeCostTracker())
+    monkeypatch.setattr(dashboard_mod, "get_circuit_breakers", lambda: _ClosedCircuits())
+    monkeypatch.setattr(dashboard_mod, "get_route_outcomes", lambda: _MixedRouteHealth())
+    monkeypatch.setattr(dashboard_mod, "build_leaderboard", lambda: [])
+    monkeypatch.setattr(dashboard_mod, "get_workflow_metrics_view", lambda: _FakeMetricsView())
+
+    data = dashboard_mod.build_dashboard()
+
+    assert data["route_health"] == {"anthropic": 2, "openai": 0}
+    assert data["degraded_route_health"] == {"anthropic": 2}
+    assert data["route_health_error"] is None
+    assert data["system_health"] == "degraded"
 
 
 def test_build_dashboard_surfaces_leaderboard_failures_explicitly(monkeypatch):

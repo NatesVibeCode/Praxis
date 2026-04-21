@@ -6,19 +6,14 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-import asyncpg
 import pytest
 
+from _pg_test_conn import bootstrap_workflow_migration
 from runtime.semantic_assertions import semantic_assertion_id
-from storage.migrations import (
-    workflow_bootstrap_migration_statements,
-    workflow_migration_statements,
-)
 from storage.postgres import PostgresConfigurationError, connect_workflow_database
 from surfaces.api import operator_read, operator_write
 from surfaces.api._operator_repository import _render_roadmap_tree_markdown
 
-_DUPLICATE_SQLSTATES = {"42P07", "42710"}
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741003
 
 
@@ -28,10 +23,6 @@ def _unique_suffix() -> str:
 
 def _fixed_clock() -> datetime:
     return datetime(2026, 4, 8, 20, 0, tzinfo=timezone.utc)
-
-
-def _is_duplicate_object_error(error: BaseException) -> bool:
-    return getattr(error, "sqlstate", None) in _DUPLICATE_SQLSTATES
 
 
 def _is_postgres_unavailable_error(error: BaseException) -> bool:
@@ -46,24 +37,12 @@ def _assert_mapping_contains(actual: dict[str, object], expected: dict[str, obje
 
 
 async def _bootstrap_migration(conn, filename: str) -> None:
-    statements = (
-        workflow_bootstrap_migration_statements(filename)
-        if filename == "082_event_log.sql"
-        else workflow_migration_statements(filename)
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        bootstrap_allowed=filename == "082_event_log.sql",
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
     )
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in statements:
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except asyncpg.PostgresError as exc:
-                if _is_duplicate_object_error(exc):
-                    continue
-                raise
 
 
 async def _seed_roadmap_item(
@@ -291,6 +270,8 @@ async def _seed_tree_rows() -> tuple[dict[str, str], dict[str, str]]:
     blocker_id = f"roadmap_item.test.tree.blocker.{suffix}"
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_migration(conn, "146_semantic_assertion_substrate.sql")
         await _seed_roadmap_item(
             conn,
@@ -409,6 +390,7 @@ def test_roadmap_tree_renderer_orders_phase_tokens_numerically() -> None:
         priority="p1",
         parent_roadmap_item_id=None,
         source_bug_id=None,
+        source_idea_id=None,
         registry_paths=(),
         summary="Root summary",
         acceptance_criteria={"phase_order": "1", "outcome_gate": "Root summary"},
@@ -429,6 +411,7 @@ def test_roadmap_tree_renderer_orders_phase_tokens_numerically() -> None:
         priority="p1",
         parent_roadmap_item_id=root.roadmap_item_id,
         source_bug_id=None,
+        source_idea_id=None,
         registry_paths=(),
         summary="Late child summary",
         acceptance_criteria={"phase_order": "1.10", "outcome_gate": "Late child summary"},
@@ -449,6 +432,7 @@ def test_roadmap_tree_renderer_orders_phase_tokens_numerically() -> None:
         priority="p1",
         parent_roadmap_item_id=root.roadmap_item_id,
         source_bug_id=None,
+        source_idea_id=None,
         registry_paths=(),
         summary="Early child summary",
         acceptance_criteria={"phase_order": "1.2", "outcome_gate": "Early child summary"},
@@ -536,6 +520,8 @@ async def _exercise_roadmap_write_preview_parity() -> None:
     blocker_id = f"roadmap_item.test.tree.write.blocker.{suffix}"
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_migration(conn, "082_event_log.sql")
         await _bootstrap_migration(conn, "146_semantic_assertion_substrate.sql")
         await _seed_roadmap_item(
@@ -647,6 +633,8 @@ async def _exercise_roadmap_write_transaction_rollback() -> None:
     blocker_id = f"roadmap_item.test.tree.rollback.blocker.{suffix}"
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_migration(conn, "082_event_log.sql")
         await _bootstrap_migration(conn, "146_semantic_assertion_substrate.sql")
         await _seed_roadmap_item(

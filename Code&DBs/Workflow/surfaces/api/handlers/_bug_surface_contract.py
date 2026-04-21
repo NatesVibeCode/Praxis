@@ -10,6 +10,7 @@ from runtime.primitive_contracts import (
     bug_query_default_open_only_backlog,
     bug_query_default_open_only_list,
 )
+from runtime.work_item_clustering import cluster_bug_items
 
 
 BugSerializer = Callable[[Any], dict[str, Any]]
@@ -148,6 +149,7 @@ def list_bugs_payload(
     limit = max(1, int(body.get("limit", default_limit) or default_limit))
     title_like = body.get("title_like")
     include_replay_state = bool(body.get("include_replay_state", False))
+    include_clusters = bool(body.get("include_clusters", True))
     replay_ready_only = bool(body.get("replay_ready_only", False))
     open_only = bool(body.get("open_only", bug_query_default_open_only_list()))
     tags = _normalize_tags(body.get("tags"))
@@ -186,11 +188,20 @@ def list_bugs_payload(
         )
     else:
         bug_dicts = [serialize_bug(bug) for bug in bugs[:limit]]
-    return {
+    payload: dict[str, Any] = {
         "bugs": bug_dicts[:limit],
         "count": len(bug_dicts) if replay_ready_only else total_count,
         "returned_count": len(bug_dicts[:limit]),
     }
+    if include_clusters:
+        cluster_payload = cluster_bug_items(bug_dicts[:limit])
+        payload["clusters"] = cluster_payload["clusters"]
+        payload["clustering"] = {
+            key: value
+            for key, value in cluster_payload.items()
+            if key != "clusters"
+        }
+    return payload
 
 
 def file_bug_payload(
@@ -250,6 +261,7 @@ def search_bugs_payload(
         raise ValueError("title is required for search")
     limit = max(1, int(body.get("limit", default_limit) or default_limit))
     include_replay_state = bool(body.get("include_replay_state", False))
+    include_clusters = bool(body.get("include_clusters", True))
     filter_kwargs = _source_issue_filter_kwargs(body)
     bugs = bt.search(
         title,
@@ -272,7 +284,16 @@ def search_bugs_payload(
         )
     else:
         bug_dicts = [serialize_bug(bug) for bug in bugs]
-    return {"bugs": bug_dicts, "count": len(bug_dicts)}
+    payload: dict[str, Any] = {"bugs": bug_dicts, "count": len(bug_dicts)}
+    if include_clusters:
+        cluster_payload = cluster_bug_items(bug_dicts)
+        payload["clusters"] = cluster_payload["clusters"]
+        payload["clustering"] = {
+            key: value
+            for key, value in cluster_payload.items()
+            if key != "clusters"
+        }
+    return payload
 
 
 def stats_payload(*, bt: Any, serialize: Serializer) -> dict[str, Any]:

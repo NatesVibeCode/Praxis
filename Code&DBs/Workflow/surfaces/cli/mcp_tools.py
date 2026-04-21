@@ -285,7 +285,7 @@ def require_confirmation(
     stdout: TextIO,
 ) -> int | None:
     risk = definition.risk_for_params(params)
-    if risk not in {"write", "dispatch"} or confirmed:
+    if risk not in {"write", "dispatch", "launch"} or confirmed:
         return None
     for line in tool_preflight_lines(definition, params):
         stdout.write(line + "\n")

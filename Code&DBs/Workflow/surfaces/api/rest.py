@@ -48,6 +48,7 @@ from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
 from runtime.operation_catalog_bindings import resolve_http_operation_binding
 from runtime.operation_catalog_gateway import aexecute_operation_binding
+from runtime.atlas_graph import build_atlas_payload
 from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
@@ -1620,6 +1621,40 @@ def atlas_html() -> FileResponse | JSONResponse:
     return FileResponse(
         atlas_path,
         media_type="text/html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/api/atlas/graph")
+def atlas_graph() -> JSONResponse:
+    """Return the canonical Atlas graph payload for native app rendering."""
+    try:
+        payload = build_atlas_payload()
+    except Exception as exc:
+        logger.exception("Atlas graph payload failed")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ok": False,
+                "error": "atlas_graph_unavailable",
+                "detail": str(exc),
+                "nodes": [],
+                "edges": [],
+                "areas": [],
+                "metadata": {
+                    "source_authority": "Praxis.db",
+                    "node_count": 0,
+                    "edge_count": 0,
+                    "aggregate_edge_count": 0,
+                },
+                "warnings": [type(exc).__name__],
+            },
+        )
+    return JSONResponse(
+        content=jsonable_encoder(payload),
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
             "Pragma": "no-cache",

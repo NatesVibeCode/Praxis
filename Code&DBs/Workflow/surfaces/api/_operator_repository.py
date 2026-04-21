@@ -18,6 +18,7 @@ from runtime.instance import (
     resolve_native_instance,
 )
 from runtime.work_item_assessment import WorkItemAssessmentRecord, assess_work_items
+from runtime.work_item_clustering import cluster_bug_items, cluster_roadmap_items
 from runtime.work_item_workflow_bindings import WorkItemWorkflowBindingRecord
 from storage.postgres import connect_workflow_database
 from ._payload_contract import optional_text, require_text
@@ -618,6 +619,7 @@ class OperatorRoadmapItemRecord:
     priority: str
     parent_roadmap_item_id: str | None
     source_bug_id: str | None
+    source_idea_id: str | None
     registry_paths: tuple[str, ...]
     summary: str
     acceptance_criteria: Mapping[str, Any]
@@ -639,6 +641,7 @@ class OperatorRoadmapItemRecord:
             "priority": self.priority,
             "parent_roadmap_item_id": self.parent_roadmap_item_id,
             "source_bug_id": self.source_bug_id,
+            "source_idea_id": self.source_idea_id,
             "registry_paths": list(self.registry_paths),
             "summary": self.summary,
             "acceptance_criteria": _json_compatible(self.acceptance_criteria),
@@ -965,6 +968,32 @@ class NativeOperatorQuerySnapshot:
             ]
         if self.workflow_run_observability is not None:
             payload["workflow_run_observability"] = self.workflow_run_observability.to_json()
+        bug_cluster_payload = cluster_bug_items(
+            payload.get("bugs", ()),
+            include_singletons=False,
+        )
+        roadmap_cluster_payload = cluster_roadmap_items(payload["roadmap_items"])
+        if bug_cluster_payload["clusters"] or roadmap_cluster_payload["clusters"]:
+            payload["clusters"] = {
+                "bugs": bug_cluster_payload["clusters"],
+                "roadmap_items": roadmap_cluster_payload["clusters"],
+            }
+            payload["clustering"] = {
+                "bugs": {
+                    key: value
+                    for key, value in bug_cluster_payload.items()
+                    if key != "clusters"
+                },
+                "roadmap_items": {
+                    key: value
+                    for key, value in roadmap_cluster_payload.items()
+                    if key != "clusters"
+                },
+            }
+            payload["counts"]["bug_clusters"] = len(bug_cluster_payload["clusters"])
+            payload["counts"]["roadmap_item_clusters"] = len(
+                roadmap_cluster_payload["clusters"]
+            )
         return payload
 
 
@@ -986,6 +1015,24 @@ class OperatorRoadmapTreeSnapshot:
             (record.item_kind, record.item_id): record.to_json()
             for record in self.work_item_assessments
         }
+        roadmap_item_rows = [
+            {
+                **record.to_json(),
+                **(
+                    {"assessment": assessments_by_key[("roadmap_item", record.roadmap_item_id)]}
+                    if ("roadmap_item", record.roadmap_item_id) in assessments_by_key
+                    else {}
+                ),
+            }
+            for record in self.roadmap_items
+        ]
+        dependency_rows = [
+            record.to_json() for record in self.roadmap_item_dependencies
+        ]
+        cluster_payload = cluster_roadmap_items(
+            roadmap_item_rows,
+            dependencies=dependency_rows,
+        )
         return {
             "kind": "roadmap_tree",
             "instruction_authority": _roadmap_tree_instruction_authority(self),
@@ -993,6 +1040,7 @@ class OperatorRoadmapTreeSnapshot:
             "root_roadmap_item_id": self.root_roadmap_item_id,
             "counts": {
                 "roadmap_items": len(self.roadmap_items),
+                "roadmap_item_clusters": len(cluster_payload["clusters"]),
                 "roadmap_item_dependencies": len(self.roadmap_item_dependencies),
                 "work_item_assessments": len(self.work_item_assessments),
                 "semantic_neighbors": len(self.semantic_neighbors),
@@ -1005,20 +1053,14 @@ class OperatorRoadmapTreeSnapshot:
                     else {}
                 ),
             },
-            "roadmap_items": [
-                {
-                    **record.to_json(),
-                    **(
-                        {"assessment": assessments_by_key[("roadmap_item", record.roadmap_item_id)]}
-                        if ("roadmap_item", record.roadmap_item_id) in assessments_by_key
-                        else {}
-                    ),
-                }
-                for record in self.roadmap_items
-            ],
-            "roadmap_item_dependencies": [
-                record.to_json() for record in self.roadmap_item_dependencies
-            ],
+            "roadmap_item_clusters": cluster_payload["clusters"],
+            "roadmap_item_clustering": {
+                key: value
+                for key, value in cluster_payload.items()
+                if key != "clusters"
+            },
+            "roadmap_items": roadmap_item_rows,
+            "roadmap_item_dependencies": dependency_rows,
             "work_item_assessments": [record.to_json() for record in self.work_item_assessments],
             "semantic_neighbors": [record.to_json() for record in self.semantic_neighbors],
             "semantic_neighbors_reason_code": self.semantic_neighbors_reason_code,
@@ -1110,6 +1152,7 @@ def _roadmap_record_from_row(row: Mapping[str, Any]) -> OperatorRoadmapItemRecor
             field_name="parent_roadmap_item_id",
         ),
         source_bug_id=_optional_text(row.get("source_bug_id"), field_name="source_bug_id"),
+        source_idea_id=_optional_text(row.get("source_idea_id"), field_name="source_idea_id"),
         registry_paths=_normalize_string_sequence(
             row.get("registry_paths"),
             field_name="registry_paths",
@@ -1269,7 +1312,10 @@ def _operator_query_instruction_authority(
         record.work_item_workflow_binding_id for record in snapshot.work_item_workflow_bindings
     )
     has_run_observability = bool(snapshot.workflow_run_packet_inspections)
+    has_cluster_candidates = len(snapshot.roadmap_items) > 1 or len(snapshot.bugs) > 1
     packet_read_order = ["roadmap_truth", "queue_refs"]
+    if has_cluster_candidates:
+        packet_read_order.append("clusters")
     if snapshot.issues:
         packet_read_order.append("issues")
     if has_run_observability:
@@ -1283,7 +1329,7 @@ def _operator_query_instruction_authority(
             "work_item_workflow_bindings",
         ]
     )
-    return {
+    payload = {
         "kind": "operator_query_instruction_authority",
         "authority": "surfaces.api.operator_read.query_operator_surface",
         "packet_read_order": packet_read_order,
@@ -1318,6 +1364,20 @@ def _operator_query_instruction_authority(
             else "Read roadmap-backed rows, queue refs, work-item assessments, and closeout recommendations here before using repo files or prior chat state."
         ),
     }
+    if has_cluster_candidates:
+        payload["clusters"] = {
+            "authority": "runtime.work_item_clustering",
+            "applies_to": [
+                kind
+                for kind, present in (
+                    ("bugs", len(snapshot.bugs) > 1),
+                    ("roadmap_items", len(snapshot.roadmap_items) > 1),
+                )
+                if present
+            ],
+            "directive": "Use clusters to batch related work before reading individual rows.",
+        }
+    return payload
 
 
 def _roadmap_tree_instruction_authority(
@@ -1328,6 +1388,7 @@ def _roadmap_tree_instruction_authority(
         "authority": "surfaces.api.operator_read.query_roadmap_tree",
         "packet_read_order": [
             "root_item",
+            "roadmap_item_clusters",
             "roadmap_items",
             "roadmap_item_dependencies",
             "rendered_markdown",
@@ -1339,7 +1400,7 @@ def _roadmap_tree_instruction_authority(
         "queue_refs": {
             "roadmap_item_ids": [record.roadmap_item_id for record in snapshot.roadmap_items],
         },
-        "directive": "Read the roadmap subtree here before assuming scope from files or chat.",
+        "directive": "Read roadmap_item_clusters before individual roadmap_items so related waves stay batched by default.",
     }
 
 
@@ -1861,6 +1922,7 @@ class NativeOperatorQueryFrontdoor:
                 priority,
                 parent_roadmap_item_id,
                 source_bug_id,
+                source_idea_id,
                 registry_paths,
                 summary,
                 acceptance_criteria,
@@ -1912,6 +1974,7 @@ class NativeOperatorQueryFrontdoor:
                     priority,
                     parent_roadmap_item_id,
                     source_bug_id,
+                    source_idea_id,
                     registry_paths,
                     summary,
                     acceptance_criteria,

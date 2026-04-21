@@ -172,6 +172,7 @@ def test_build_modules_include_orchestrator_when_conn(tmp_path, monkeypatch):
     assert "relationship_integrity_scanner" in module_names
     assert "schema_consistency_scanner" in module_names
     assert "content_quality_scanner" in module_names
+    assert "graph_hygiene" in module_names
 
 
 def test_build_modules_include_rate_limit_prober_when_conn(tmp_path, monkeypatch):

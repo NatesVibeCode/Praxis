@@ -403,7 +403,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         sys.path.insert(0, _WORKFLOW_ROOT)
 
     from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError, load_raw, validate_authoring_spec, _is_new_authoring_format
-    from runtime.workflow_validation import validate_workflow_spec
+    from runtime.workflow_validation import _authority_error_result, validate_workflow_spec
 
     try:
         raw = load_raw(args.spec)
@@ -419,7 +419,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(f"INVALID: {exc}", file=sys.stderr)
         return 1
 
-    result = validate_workflow_spec(spec, pg_conn=_get_pg_conn())
+    try:
+        pg_conn = _get_pg_conn()
+    except Exception as exc:
+        result = _authority_error_result(spec, f"{type(exc).__name__}: {exc}")
+    else:
+        result = validate_workflow_spec(spec, pg_conn=pg_conn)
     summary = result["summary"]
     print(f"=== Spec Validation: {'PASSED' if result.get('valid', False) else 'FAILED'} ===")
     print(f"Name:             {summary['name']}")
@@ -443,6 +448,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
             suffix = "OK"
         elif status == "aliased":
             suffix = f"ALIASED -> {resolved}"
+        elif status == "authority_error":
+            message = detail.get("message")
+            suffix = f"AUTHORITY ERROR ({message})" if message else "AUTHORITY ERROR"
         else:
             message = detail.get("message")
             suffix = f"NOT FOUND ({message})" if message else "NOT FOUND"

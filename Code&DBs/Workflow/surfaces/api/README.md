@@ -17,6 +17,7 @@ The API should expose the system, not re-implement it.
 Discoverability front doors:
 
 - `workflow api routes` prints the live HTTP route catalog from the CLI.
+- `workflow api help` opens the same route-discovery help from the API namespace.
 - `workflow routes` is the flat alias when you want the same discovery path without the `api` namespace.
 - `workflow help routes` opens the same route-discovery help text as `workflow help api`.
 - `workflow api routes --search ... --method ... --tag ... --path-prefix ...`

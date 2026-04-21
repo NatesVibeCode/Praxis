@@ -39,6 +39,7 @@ def build_dashboard() -> dict[str, Any]:
             - cost_summary: total_cost_usd, by_agent
             - circuit_states: per-provider state
             - route_health: consecutive failures per provider
+            - degraded_route_health: providers with nonzero consecutive failures
             - route_health_error: explicit route-health authority failure, if any
             - leaderboard: top 5 agents by pass rate
             - leaderboard_error: explicit leaderboard authority failure, if any
@@ -160,11 +161,16 @@ def build_dashboard() -> dict[str, Any]:
         or leaderboard_error
         or dispatch_data.get("metrics_query_failed")
     )
+    degraded_route_health = {
+        provider_slug: failure_count
+        for provider_slug, failure_count in route_health.items()
+        if failure_count > 0
+    }
 
     if observability_blocked:
         system_health = "degraded"
     elif pass_rate > 0.8 and open_circuits == 0:
-        system_health = "healthy"
+        system_health = "degraded" if degraded_route_health else "healthy"
     elif pass_rate >= 0.5 and (open_circuits == 0 or half_open_circuits > 0):
         system_health = "degraded"
     else:
@@ -189,6 +195,7 @@ def build_dashboard() -> dict[str, Any]:
         },
         "circuit_states": circuit_states,
         "route_health": route_health,
+        "degraded_route_health": degraded_route_health,
         "route_health_error": route_health_error,
         "leaderboard": leaderboard,
         "leaderboard_error": leaderboard_error,

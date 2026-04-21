@@ -331,10 +331,20 @@ export default defineConfig(async ({ command }) => {
     plugins: isServe ? [react(), apiServerPlugin(apiPort)] : [react()],
     build: {
       rollupOptions: {
-          output: {
+        output: {
           manualChunks(id: string) {
             if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/')) {
               return 'vendor-react';
+            }
+            if (id.includes('/node_modules/cytoscape/')) {
+              return 'vendor-cytoscape';
+            }
+            if (
+              id.includes('/node_modules/cytoscape-fcose/')
+              || id.includes('/node_modules/cose-base/')
+              || id.includes('/node_modules/layout-base/')
+            ) {
+              return 'vendor-cytoscape-layout';
             }
             if (id.includes('/src/dashboard/ReferencePopover')) {
               return 'dashboard-reference';

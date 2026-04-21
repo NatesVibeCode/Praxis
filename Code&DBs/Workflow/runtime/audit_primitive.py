@@ -40,6 +40,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
+from runtime.primitive_contracts import bug_open_status_values
+
 
 # ---------------------------------------------------------------------------
 # Core types
@@ -716,7 +718,7 @@ def _escalate_contract_to_bug(
             "WHERE decision_ref = $1 AND status = ANY($2) "
             "ORDER BY opened_at DESC LIMIT 1",
             f"contract.{contract.name}",
-            ["OPEN", "IN_PROGRESS"],
+            list(bug_open_status_values()),
         )
         if open_rows:
             return str(open_rows[0]["bug_id"])

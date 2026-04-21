@@ -822,6 +822,7 @@ class DockerLocalSandboxProvider:
         auth_mount_policy = validate_auth_mount_policy(
             session.metadata.get("auth_mount_policy") or "provider_scoped"
         )
+        provider_slug: str | None = None
         if auth_mount_policy != "none":
             provider_slug = (
                 _provider_slug(session.metadata)

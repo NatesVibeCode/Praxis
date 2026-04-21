@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from runtime import atlas_graph
+
+
+def test_build_atlas_payload_wraps_graph_with_metadata(monkeypatch) -> None:
+    graph = {
+        "nodes": [
+            {
+                "data": {
+                    "id": "area::authority",
+                    "label": "Operator Authority",
+                    "type": "functional_area",
+                    "area": "authority",
+                    "preview": "Decision authority",
+                    "color": "#a9b1d6",
+                    "is_area": True,
+                    "degree": 2,
+                }
+            },
+            {
+                "data": {
+                    "id": "table:operator_decisions",
+                    "label": "operator_decisions",
+                    "type": "table",
+                    "area": "authority",
+                    "preview": "Decision table",
+                    "color": "#a9b1d6",
+                }
+            },
+        ],
+        "edges": [
+            {
+                "data": {
+                    "id": "table:a|depends_on|table:b",
+                    "source": "table:a",
+                    "target": "table:b",
+                    "label": "depends_on",
+                    "weight": 1.0,
+                }
+            },
+            {
+                "data": {
+                    "id": "area::authority|agg_depends_on|area::memory",
+                    "source": "area::authority",
+                    "target": "area::memory",
+                    "label": "depends_on",
+                    "weight": 3.0,
+                    "is_aggregate": True,
+                },
+                "classes": "aggregate",
+            },
+        ],
+    }
+    monkeypatch.setattr(atlas_graph, "build_graph", lambda *, database_url=None: graph)
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_graph_freshness",
+        lambda conn: {
+            "graph_freshness_state": "fresh",
+            "memory_entities_max_updated_at": "2026-04-20T22:48:24+00:00",
+            "memory_edges_max_updated_at": "2026-04-20T22:45:41+00:00",
+            "authority_projection_last_run_at": "2026-04-20T22:45:41+00:00",
+            "authority_projection_source_max_updated_at": "2026-04-20T22:45:40+00:00",
+            "authority_projection_lag_seconds": 0.0,
+            "authority_projection_edge_count": 166,
+            "authority_projection_last_run_source": "memory_edges.last_validated_at",
+        },
+    )
+    monkeypatch.setattr(atlas_graph, "_connect", lambda database_url=None: object())
+
+    payload = atlas_graph.build_atlas_payload()
+
+    assert payload["ok"] is True
+    assert payload["nodes"] == graph["nodes"]
+    assert payload["edges"] == graph["edges"]
+    assert payload["areas"] == [
+        {
+            "slug": "authority",
+            "title": "Operator Authority",
+            "summary": "Decision authority",
+            "color": "#a9b1d6",
+            "member_count": 2,
+        }
+    ]
+    assert payload["metadata"]["source_authority"] == "Praxis.db"
+    assert payload["metadata"]["node_count"] == 2
+    assert payload["metadata"]["edge_count"] == 1
+    assert payload["metadata"]["aggregate_edge_count"] == 1
+    assert payload["metadata"]["graph_freshness_state"] == "fresh"
+    assert payload["metadata"]["authority_projection_edge_count"] == 166
+    assert payload["metadata"]["freshness"]["authority_projection_last_run_at"] == "2026-04-20T22:45:41+00:00"
+    assert payload["warnings"] == []
+
+
+def test_build_atlas_payload_keeps_graph_available_when_freshness_fails(monkeypatch) -> None:
+    monkeypatch.setattr(atlas_graph, "build_graph", lambda *, database_url=None: {"nodes": [], "edges": []})
+    monkeypatch.setattr(atlas_graph, "_connect", lambda database_url=None: object())
+
+    def _raise(_conn):
+        raise RuntimeError("clock table missing")
+
+    monkeypatch.setattr(atlas_graph, "fetch_graph_freshness", _raise)
+
+    payload = atlas_graph.build_atlas_payload()
+
+    assert payload["ok"] is True
+    assert payload["metadata"]["graph_freshness_state"] == "unknown"
+    assert payload["metadata"]["freshness"]["freshness_error"] == "RuntimeError: clock table missing"
+    assert payload["warnings"] == ["atlas_freshness_unavailable:RuntimeError"]
+
+
+def test_classify_graph_freshness_reports_projection_lag() -> None:
+    projected_at = datetime(2026, 4, 20, 22, 45, tzinfo=timezone.utc)
+    source_at = projected_at + timedelta(seconds=atlas_graph.FRESHNESS_LAG_TOLERANCE_SECONDS + 1)
+
+    state, lag_seconds = atlas_graph.classify_graph_freshness(
+        authority_source_updated_at=source_at,
+        authority_projection_last_run_at=projected_at,
+        authority_projection_edge_count=10,
+    )
+
+    assert state == "projection_lagging"
+    assert lag_seconds == atlas_graph.FRESHNESS_LAG_TOLERANCE_SECONDS + 1
+
+
+def test_classify_graph_freshness_reports_unknown_without_projection_edges() -> None:
+    state, lag_seconds = atlas_graph.classify_graph_freshness(
+        authority_source_updated_at=datetime.now(timezone.utc),
+        authority_projection_last_run_at=datetime.now(timezone.utc),
+        authority_projection_edge_count=0,
+    )
+
+    assert state == "unknown"
+    assert lag_seconds is None
+
+
+def test_infer_schema_area_maps_known_table_markers() -> None:
+    assert atlas_graph.infer_schema_area(
+        "table:operator_decisions",
+        "operator_decisions",
+        "table",
+        "",
+        "schema",
+    ) == "authority"

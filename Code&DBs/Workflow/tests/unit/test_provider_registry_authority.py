@@ -159,6 +159,52 @@ def test_provider_transport_probe_fails_when_runtime_registry_lacks_adapter(monk
     assert check.details["runtime_adapter_supported"] is False
 
 
+def test_provider_transport_probe_fails_supported_api_without_ready_transport(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "runtime.workflow._adapter_registry.runtime_supports_workflow_adapter_type",
+        lambda _adapter_type: True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_lane_policy",
+        lambda provider_slug, adapter_type: {"policy_reason": "admitted"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_adapter_contract",
+        lambda provider_slug, adapter_type: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_adapter_economics",
+        lambda provider_slug, adapter_type: {},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.supports_adapter",
+        lambda provider_slug, adapter_type: True,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_api_endpoint",
+        lambda provider_slug: "https://api.provider.test/v1",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_health,
+        "_provider_api_key_present",
+        lambda provider_slug: False,
+    )
+
+    check = runtime_health.ProviderTransportProbe("openai", "llm_task").check()
+
+    assert check.passed is False
+    assert check.status == "failed"
+    assert check.details["supported"] is True
+    assert check.details["transport_ready"] is False
+    assert check.details["credential_present"] is False
+
+
 def test_workflow_runtime_uses_one_adapter_registry_authority(monkeypatch) -> None:
     monkeypatch.setattr("adapters.cli_llm.default_provider_slug", lambda: "openai")
     monkeypatch.setattr("adapters.llm_task.default_provider_slug", lambda: "openai")
@@ -299,6 +345,110 @@ def test_admin_health_uses_transport_support_frontdoor_for_provider_probes(monke
     }
     assert result["provider_registry"]["status"] == "loaded_from_db"
     assert result["content_health"] == {"status": "skipped", "reason": "no memory engine connection"}
+
+
+def test_admin_health_degrades_when_provider_registry_load_fails(monkeypatch) -> None:
+    class _FakePanel:
+        def snapshot(self):
+            return {"posture": "build"}
+
+        def recommend_lane(self):
+            return SimpleNamespace(
+                recommended_posture="build",
+                confidence=1.0,
+                reasons=("healthy",),
+                degraded_cause=None,
+            )
+
+    monkeypatch.setattr(
+        workflow_admin,
+        "query_transport_support",
+        lambda **_kwargs: _transport_support_payload(),
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "provider_registry_health",
+        lambda: (_ for _ in ()).throw(RuntimeError("registry offline")),
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "dependency_truth_report",
+        lambda scope="all": {"ok": True, "scope": scope},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "_workflow_env",
+        lambda _subs: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "workflow_database_status",
+        lambda env=None: SimpleNamespace(
+            schema_bootstrapped=True,
+            missing_schema_objects=(),
+            compile_artifact_authority_ready=True,
+            compile_index_authority_ready=True,
+            execution_packet_authority_ready=True,
+            repo_snapshot_authority_ready=True,
+            verification_registry_ready=True,
+            verifier_authority_ready=True,
+            healer_authority_ready=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "runtime.receipt_store.proof_metrics",
+        lambda since_hours=0: {"ok": True, "since_hours": since_hours},
+        raising=False,
+    )
+
+    subs = SimpleNamespace(
+        get_health_mod=lambda: SimpleNamespace(
+            PostgresProbe=lambda db_url: runtime_health.StaticHealthProbe(
+                name="postgres",
+                passed=True,
+                message="ok",
+                status="ok",
+            ),
+            PostgresConnectivityProbe=lambda db_url: runtime_health.StaticHealthProbe(
+                name="postgres_connectivity",
+                passed=True,
+                message="ok",
+                status="ok",
+            ),
+            DiskSpaceProbe=lambda path: runtime_health.StaticHealthProbe(
+                name="disk",
+                passed=True,
+                message="ok",
+                status="ok",
+            ),
+            ProviderTransportProbe=lambda provider_slug, adapter_type: runtime_health.StaticHealthProbe(
+                name=f"provider_transport:{provider_slug}:{adapter_type}",
+                passed=True,
+                message="ok",
+                status="ok",
+            ),
+            StaticHealthProbe=runtime_health.StaticHealthProbe,
+            PreflightRunner=runtime_health.PreflightRunner,
+        ),
+        get_pg_conn=lambda: "pg-conn",
+        get_operator_panel=lambda: _FakePanel(),
+    )
+
+    result = workflow_admin._handle_health(subs, {})
+
+    assert result["provider_registry"] == {
+        "status": "load_failed",
+        "error": "RuntimeError: registry offline",
+        "authority_available": False,
+        "fallback_active": False,
+    }
+    assert result["preflight"]["overall"] == "degraded"
+    assert any(
+        check["name"] == "provider_registry"
+        and check["passed"] is False
+        and check["status"] == "failed"
+        for check in result["preflight"]["checks"]
+    )
 
 
 def test_admin_health_includes_content_health_report(monkeypatch) -> None:

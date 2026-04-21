@@ -195,7 +195,8 @@
     "191_provider_model_retirement_ledger.sql",
     "192_heartbeat_probe_kind_model_retirement.sql",
     "193_native_self_hosted_smoke_workspace_repair.sql",
-    "194_projection_freshness_sla_config.sql"
+    "194_projection_freshness_sla_config.sql",
+    "195_operator_ideas_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -4867,6 +4868,76 @@
         "object_type": "row",
         "object_name": "platform_config.observability.projection_freshness.critical_lag_events"
       }
+    ],
+    "195_operator_ideas_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "operator_ideas"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_ideas_idea_key_key"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_ideas_status_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_ideas_resolution_window"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_ideas_terminal_resolution_summary"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_ideas_status_opened_at_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_ideas_source_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "operator_idea_promotions"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_idea_promotions_idea_fkey"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_idea_promotions_roadmap_fkey"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_idea_promotions_unique_edge"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_idea_promotions_idea_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_idea_promotions_roadmap_idx"
+      },
+      {
+        "object_type": "column",
+        "object_name": "roadmap_items.source_idea_id"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "roadmap_items_source_idea_fkey"
+      },
+      {
+        "object_type": "index",
+        "object_name": "roadmap_items_source_idea_idx"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.ideas"
+      }
     ]
   },
   "policy_buckets": {
@@ -5066,7 +5137,8 @@
       "191_provider_model_retirement_ledger.sql",
       "192_heartbeat_probe_kind_model_retirement.sql",
       "193_native_self_hosted_smoke_workspace_repair.sql",
-      "194_projection_freshness_sla_config.sql"
+      "194_projection_freshness_sla_config.sql",
+      "195_operator_ideas_authority.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

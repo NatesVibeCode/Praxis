@@ -840,6 +840,19 @@ def test_cli_execution_policy_uses_explicit_sandbox_contract() -> None:
     assert policy.auth_mount_policy == "none"
 
 
+def test_cli_execution_policy_defaults_cli_only_provider_to_networked_lane() -> None:
+    profile = _builtin_profiles_map()["anthropic"]
+
+    policy = resolve_cli_execution_policy({}, profile=profile)
+
+    assert profile.api_endpoint is None
+    assert profile.api_protocol_family is None
+    assert profile.api_key_env_vars == ()
+    assert policy.network_policy == "provider_only"
+    assert policy.network_enabled is True
+    assert policy.auth_mount_policy == "provider_scoped"
+
+
 def test_llm_task_uses_transport_registry_for_non_chat_protocols(monkeypatch) -> None:
     captured: dict[str, object] = {}
     import adapters.llm_task as llm_task_mod

@@ -4,14 +4,12 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
-import asyncpg
 import pytest
 
-from _pg_test_conn import ensure_test_database_ready
+from _pg_test_conn import bootstrap_workflow_migration, ensure_test_database_ready
 from runtime.event_log import CHANNEL_SEMANTIC_ASSERTION
 from runtime.operator_object_relations import operator_object_relation_id
 from runtime.semantic_assertions import semantic_assertion_id
-from storage.migrations import workflow_bootstrap_migration_statements
 from storage.postgres import (
     bootstrap_control_plane_schema,
     connect_workflow_database,
@@ -288,7 +286,11 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
     try:
         await bootstrap_control_plane_schema(conn)
         for filename in (
+            "015_memory_graph.sql",
+            "158_authority_memory_projection_vocabulary.sql",
             "009_bug_and_roadmap_authority.sql",
+            "136_operation_catalog_authority.sql",
+            "195_operator_ideas_authority.sql",
             "042_roadmap_item_registry_paths.sql",
             "010_operator_control_authority.sql",
             "082_event_log.sql",
@@ -539,19 +541,12 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
 
 
 async def _bootstrap_workflow_migration(conn, filename: str) -> None:
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in workflow_bootstrap_migration_statements(filename):
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except asyncpg.PostgresError as exc:
-                if getattr(exc, "sqlstate", None) in {"42P07", "42701", "42710"}:
-                    continue
-                raise
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        bootstrap_allowed=True,
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
+    )
 
 
 async def _seed_functional_area(

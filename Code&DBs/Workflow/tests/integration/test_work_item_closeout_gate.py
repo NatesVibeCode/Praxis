@@ -6,14 +6,12 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-import asyncpg
 import pytest
 
-from storage.migrations import workflow_migration_statements
+from _pg_test_conn import bootstrap_workflow_migration
 from storage.postgres import PostgresConfigurationError, connect_workflow_database
 from surfaces.api import operator_read, operator_write
 
-_DUPLICATE_SQLSTATES = {"42P07", "42710"}
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741003
 
 
@@ -25,31 +23,12 @@ def _fixed_clock() -> datetime:
     return datetime(2026, 4, 9, 16, 0, tzinfo=timezone.utc)
 
 
-def _is_duplicate_object_error(error: BaseException) -> bool:
-    return getattr(error, "sqlstate", None) in _DUPLICATE_SQLSTATES
-
-
-def _is_transaction_wrapper_statement(statement: str) -> bool:
-    normalized = statement.strip().rstrip(";").strip().lower()
-    return normalized in {"begin", "begin transaction", "commit"}
-
-
 async def _bootstrap_migration(conn, filename: str) -> None:
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in workflow_migration_statements(filename):
-            if _is_transaction_wrapper_statement(statement):
-                continue
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except asyncpg.PostgresError as exc:
-                if _is_duplicate_object_error(exc):
-                    continue
-                raise
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
+    )
 
 
 async def _seed_bug(conn, *, bug_id: str, suffix: str, clock: datetime) -> None:
@@ -247,6 +226,8 @@ async def _exercise_work_item_closeout_gate_previews_and_commits_from_explicit_f
     await transaction.start()
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_migration(conn, "050_verification_registry.sql")
         await _bootstrap_migration(conn, "072_verifier_healer_authority.sql")
 
@@ -345,6 +326,8 @@ async def _exercise_work_item_closeout_gate_read_projection_reflects_commit_stat
     roadmap_item_id = f"roadmap_item.{suffix}.closeout"
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_migration(conn, "050_verification_registry.sql")
         await _bootstrap_migration(conn, "072_verifier_healer_authority.sql")
         await _seed_bug(conn=conn, bug_id=bug_id, suffix=suffix, clock=clock)

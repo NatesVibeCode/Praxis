@@ -97,6 +97,7 @@ from .compile_artifact_repository import PostgresCompileArtifactRepository
 from .command_repository import PostgresCommandRepository
 from .friction_repository import PostgresFrictionRepository
 from .uploaded_file_repository import PostgresUploadedFileRepository
+from .operator_idea_repository import PostgresOperatorIdeaRepository
 from .roadmap_authoring_repository import PostgresRoadmapAuthoringRepository
 from .observability_maintenance_repository import (
     PostgresObservabilityMaintenanceRepository,
@@ -145,6 +146,7 @@ __all__ = [
     "PostgresWorkflowSurfaceUsageRepository",
     "PostgresOperatorControlRepository",
     "PostgresOperatorFrameRepository",
+    "PostgresOperatorIdeaRepository",
     "PostgresProviderConcurrencyRepository",
     "PostgresReceiptRepository",
     "PostgresRoadmapAuthoringRepository",

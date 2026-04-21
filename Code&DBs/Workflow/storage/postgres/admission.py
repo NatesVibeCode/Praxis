@@ -429,6 +429,34 @@ async def persist_workflow_admission(
                 run=run,
                 request_envelope=request_envelope,
             )
+            if decision.decision == "admit":
+                await conn.execute(
+                    """INSERT INTO capability_grants (
+                           capability_grant_id,
+                           workflow_id,
+                           run_id,
+                           subject_type,
+                           subject_id,
+                           capability_name,
+                           grant_state,
+                           reason_code,
+                           decision_ref,
+                           scope_json,
+                           granted_at
+                       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+                       ON CONFLICT (capability_grant_id) DO NOTHING""",
+                    f"cg_{run.run_id}",
+                    run.workflow_id,
+                    run.run_id,
+                    "workflow_run",
+                    run.run_id,
+                    "execute_workflow",
+                    "active",
+                    decision.reason_code,
+                    decision.admission_decision_id,
+                    "{}",
+                    run.admitted_at,
+                )
     except asyncpg.PostgresError as exc:
         raise PostgresWriteError(
             "postgres.write_failed",

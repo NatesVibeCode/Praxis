@@ -1,0 +1,86 @@
+{
+  "program": "mobile_oversight",
+  "mode": "durable_wave_chain",
+  "why": "Submit the mobile oversight build as one dependency-ordered workflow chain. Each phase is isolated as its own wave so later phases launch only after the prior phase succeeds.",
+  "validate_order": [
+    "config/cascade/specs/W_mobile_phase1_authority_spine_20260420.json",
+    "config/cascade/specs/W_mobile_phase2_command_bus_rewire_20260420.json",
+    "config/cascade/specs/W_mobile_phase3_push_and_status_20260421.json",
+    "config/cascade/specs/W_mobile_phase4_home_tunnel_20260421.json",
+    "config/cascade/specs/W_mobile_phase5_pwa_surface_20260422.json",
+    "config/cascade/specs/W_mobile_phase6_hardening_policies_20260423.json",
+    "config/cascade/specs/W_mobile_phase7_maintenance_cron_20260423.json",
+    "config/cascade/specs/W_mobile_phase8_telegram_fallback_20260425.json"
+  ],
+  "waves": [
+    {
+      "wave_id": "phase1_authority_spine",
+      "specs": [
+        "config/cascade/specs/W_mobile_phase1_authority_spine_20260420.json"
+      ]
+    },
+    {
+      "wave_id": "phase2_command_bus_rewire",
+      "depends_on": [
+        "phase1_authority_spine"
+      ],
+      "specs": [
+        "config/cascade/specs/W_mobile_phase2_command_bus_rewire_20260420.json"
+      ]
+    },
+    {
+      "wave_id": "phase3_push_and_status",
+      "depends_on": [
+        "phase2_command_bus_rewire"
+      ],
+      "specs": [
+        "config/cascade/specs/W_mobile_phase3_push_and_status_20260421.json"
+      ]
+    },
+    {
+      "wave_id": "phase4_home_tunnel",
+      "depends_on": [
+        "phase3_push_and_status"
+      ],
+      "specs": [
+        "config/cascade/specs/W_mobile_phase4_home_tunnel_20260421.json"
+      ]
+    },
+    {
+      "wave_id": "phase5_pwa_surface",
+      "depends_on": [
+        "phase4_home_tunnel"
+      ],
+      "specs": [
+        "config/cascade/specs/W_mobile_phase5_pwa_surface_20260422.json"
+      ]
+    },
+    {
+      "wave_id": "phase6_hardening_policies",
+      "depends_on": [
+        "phase5_pwa_surface"
+      ],
+      "specs": [
+        "config/cascade/specs/W_mobile_phase6_hardening_policies_20260423.json"
+      ]
+    },
+    {
+      "wave_id": "phase7_maintenance_cron",
+      "depends_on": [
+        "phase6_hardening_policies"
+      ],
+      "specs": [
+        "config/cascade/specs/W_mobile_phase7_maintenance_cron_20260423.json"
+      ]
+    },
+    {
+      "wave_id": "phase8_telegram_fallback",
+      "depends_on": [
+        "phase7_maintenance_cron"
+      ],
+      "specs": [
+        "config/cascade/specs/W_mobile_phase8_telegram_fallback_20260425.json"
+      ]
+    }
+  ]
+}

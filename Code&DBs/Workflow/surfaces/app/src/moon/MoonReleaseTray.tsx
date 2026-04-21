@@ -12,6 +12,11 @@ interface PlannedReleaseState {
       depends_on?: string[];
       prompt?: string;
     }>;
+    triggers?: Array<{
+      event_type?: string;
+      source_ref?: string;
+      title?: string;
+    }>;
   };
   definition?: Record<string, unknown>;
   buildGraph?: BuildPayload['build_graph'] | null;
@@ -33,6 +38,15 @@ interface Props {
 }
 
 type PillState = 'blocked' | 'plan-needed' | 'stale' | 'ready' | 'dispatching' | 'confirming' | 'done' | 'error';
+
+function summarizeTriggers(triggers: Array<{ event_type?: string; source_ref?: string; title?: string }>): string {
+  const labels = triggers
+    .map(trigger => trigger.event_type || trigger.source_ref || trigger.title || 'trigger')
+    .filter((label, index, all) => all.indexOf(label) === index);
+  if (labels.length === 0) return 'no trigger';
+  if (labels.length <= 3) return labels.join(' + ');
+  return `${labels.slice(0, 3).join(' + ')} + ${labels.length - 3} more`;
+}
 
 function disabledReason(release: ReleaseStatus, payload: BuildPayload | null, jobCount: number): string | null {
   if (!payload) return 'No workflow — build first';
@@ -73,7 +87,9 @@ export function MoonReleaseTray({
   }, [plannedRelease, releaseSource]);
   const plannedJobs = activePlannedRelease?.compiled_spec?.jobs || [];
   const jobs = activePlannedRelease ? plannedJobs : projectedJobs;
-  const triggers = payload?.compiled_spec_projection?.compiled_spec?.triggers || [];
+  const projectedTriggers = payload?.compiled_spec_projection?.compiled_spec?.triggers || [];
+  const plannedTriggers = activePlannedRelease?.compiled_spec?.triggers || [];
+  const triggers = plannedTriggers.length > 0 ? plannedTriggers : projectedTriggers;
   const hasFullPlan = activePlannedRelease !== null;
   const agentSummary = (hasFullPlan ? plannedJobs : projectedJobs).reduce<Record<string, number>>((acc, job) => {
     const agent = job.agent || 'auto/build';
@@ -85,9 +101,7 @@ export function MoonReleaseTray({
     .slice(0, 2)
     .map(([agent, count]) => agentSummary[agent] > 1 ? `${agent}×${count}` : agent)
     .join(' · ');
-  const triggerSummary = triggers.length > 0
-    ? (triggers[0].event_type || triggers[0].source_ref || 'trigger')
-    : 'no trigger';
+  const triggerSummary = summarizeTriggers(triggers);
 
   useEffect(() => {
     releaseFingerprintRef.current = releaseFingerprint;

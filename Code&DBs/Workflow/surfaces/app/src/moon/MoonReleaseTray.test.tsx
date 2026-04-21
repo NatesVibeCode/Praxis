@@ -23,7 +23,13 @@ const release: ReleaseStatus = {
   checklist: [],
 };
 
-function buildPayload(prompt: string): BuildPayload {
+interface BuildPayloadOptions {
+  projectedJobLabel?: string;
+  triggers?: Array<{ event_type?: string; source_ref?: string }>;
+}
+
+function buildPayload(prompt: string, options: BuildPayloadOptions = {}): BuildPayload {
+  const triggers = options.triggers || [{ event_type: 'manual' }];
   return {
     workflow: { id: 'wf_alpha', name: 'Alpha' },
     definition: {
@@ -40,8 +46,8 @@ function buildPayload(prompt: string): BuildPayload {
     },
     compiled_spec_projection: {
       compiled_spec: {
-        jobs: [{ label: 'Projected draft', agent: 'auto/draft' }],
-        triggers: [{ event_type: 'manual' }],
+        jobs: [{ label: options.projectedJobLabel || 'Projected draft', agent: 'auto/draft' }],
+        triggers,
       },
     },
   };
@@ -135,6 +141,58 @@ describe('MoonReleaseTray', () => {
     expect(screen.getByRole('button', { name: 'Preview plan' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Dispatch' })).toBeDisabled();
     expect(planDefinition).toHaveBeenCalledTimes(1);
+  });
+
+  test('invalidates a previewed plan when only the compiled projection changes', async () => {
+    const { rerender } = render(
+      <MoonReleaseTray
+        release={release}
+        payload={buildPayload('Draft the initial response.', { projectedJobLabel: 'Projected draft' })}
+        workflowId="wf_alpha"
+        onClose={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview plan' }));
+
+    await screen.findAllByText('Planned draft');
+    expect(screen.getByRole('button', { name: 'Dispatch' })).toBeEnabled();
+
+    rerender(
+      <MoonReleaseTray
+        release={release}
+        payload={buildPayload('Draft the initial response.', { projectedJobLabel: 'Projected reviewed draft' })}
+        workflowId="wf_alpha"
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('The workflow changed after preview. Preview plan again before dispatch.')).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: 'Preview plan' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dispatch' })).toBeDisabled();
+    expect(planDefinition).toHaveBeenCalledTimes(1);
+  });
+
+  test('summarizes every projected trigger intent instead of only the first', () => {
+    render(
+      <MoonReleaseTray
+        release={release}
+        payload={buildPayload('Draft the initial response.', {
+          triggers: [
+            { event_type: 'manual' },
+            { event_type: 'schedule' },
+            { source_ref: 'webhook.customer.created' },
+          ],
+        })}
+        workflowId="wf_alpha"
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText(/triggered by manual \+ schedule \+ webhook\.customer\.created/)).toBeInTheDocument();
   });
 
   test('plans and dispatches graph-backed workflows through the canonical build_graph path', async () => {

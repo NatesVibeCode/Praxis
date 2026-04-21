@@ -12,10 +12,14 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_ROOT = REPO_ROOT / "Code&DBs" / "Workflow"
-DEFAULT_DB_URL = os.environ["WORKFLOW_DATABASE_URL"]
+DEFAULT_DB_URL = os.environ.get("WORKFLOW_DATABASE_URL", "")
 CACHE_DIR = REPO_ROOT / ".cache" / "dag-test"
 FOCUS_FILE = CACHE_DIR / "focused_suite.json"
 DEFAULT_SUITE = "workflow_first_slice"
+USAGE = (
+    "usage: ./scripts/test.sh "
+    "suite list|suite focus|plan|check-affected|validate|selftest|moon-style-lint"
+)
 
 SUITE_DEFINITIONS: dict[str, dict[str, Any]] = {
     "workflow_first_slice": {
@@ -73,20 +77,18 @@ def _workflow_command_text(argv: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in parts)
 
 
+def _pytest_command_text(command: list[str]) -> str:
+    return (
+        ". ./scripts/_workflow_env.sh && workflow_load_repo_env && PYTHONPATH="
+        + shlex.quote(str(WORKFLOW_ROOT))
+        + " "
+        + " ".join(shlex.quote(part) for part in command)
+    )
+
+
 def _suite_command_text(suite_name: str, *, collect_only: bool = False) -> str:
     paths = _suite_paths(suite_name)
-    cmd = [
-        "PYTHONPATH=" + shlex.quote(str(WORKFLOW_ROOT)),
-        shlex.quote(sys.executable),
-        "-m",
-        "pytest",
-        "--noconftest",
-        "-q",
-    ]
-    if collect_only:
-        cmd.append("--collect-only")
-    cmd.extend(shlex.quote(path) for path in paths)
-    return " ".join(cmd)
+    return _pytest_command_text(_pytest_command(paths, collect_only=collect_only))
 
 
 def _pytest_command(paths: list[str], *, collect_only: bool = False) -> list[str]:
@@ -105,7 +107,8 @@ def _subprocess_env() -> dict[str, str]:
         if not existing
         else f"{WORKFLOW_ROOT}{os.pathsep}{existing}"
     )
-    env.setdefault("WORKFLOW_DATABASE_URL", DEFAULT_DB_URL)
+    if DEFAULT_DB_URL:
+        env.setdefault("WORKFLOW_DATABASE_URL", DEFAULT_DB_URL)
     env["PATH"] = env.get("PATH", "")
     return env
 
@@ -267,10 +270,7 @@ def _queue_analysis(queue_file: str) -> dict[str, Any]:
         "selected_suites": selected_suites,
         "selected_test_paths": selected_paths,
         "unclassified_paths": unclassified_paths,
-        "recommended_command": "PYTHONPATH="
-        + shlex.quote(str(WORKFLOW_ROOT))
-        + " "
-        + " ".join(shlex.quote(part) for part in recommended_command),
+        "recommended_command": _pytest_command_text(recommended_command),
     }
 
 
@@ -293,6 +293,26 @@ def _run_command(command: list[str]) -> dict[str, Any]:
 
 def _suite_list_payload() -> dict[str, Any]:
     return {"ok": True, "results": _suite_list_result(), "errors": [], "warnings": []}
+
+
+def _help_payload() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "results": {
+            "usage": USAGE,
+            "commands": [
+                "suite list",
+                "suite focus [name]",
+                "plan <queue-file>",
+                "check-affected <queue-file>",
+                "validate <queue-file>",
+                "selftest",
+                "moon-style-lint",
+            ],
+        },
+        "errors": [],
+        "warnings": [],
+    }
 
 
 def _suite_focus_payload(args: list[str]) -> dict[str, Any]:
@@ -380,6 +400,11 @@ def _validate_payload(args: list[str]) -> dict[str, Any]:
         ok = True
         warnings.append(
             "workflow spec validated, but agent resolution was blocked by the sandbox permission surface"
+        )
+    elif "agent authority unavailable:" in run["stdout"] and "AUTHORITY ERROR" in run["stdout"]:
+        ok = True
+        warnings.append(
+            "workflow spec parsed, but agent resolution was blocked by the sandbox permission surface"
         )
     else:
         errors.append(f"workflow validation failed with exit code {run['returncode']}")
@@ -470,14 +495,15 @@ def _dispatch(argv: list[str]) -> dict[str, Any]:
         return {
             "ok": False,
             "results": {},
-            "errors": [
-                "usage: ./scripts/test.sh suite list|suite focus|plan|check-affected|validate|selftest|moon-style-lint"
-            ],
+            "errors": [USAGE],
             "warnings": [],
         }
 
     command = argv[0]
     tail = argv[1:]
+
+    if command in {"help", "-h", "--help"}:
+        return _help_payload()
 
     if command == "suite":
         if not tail:

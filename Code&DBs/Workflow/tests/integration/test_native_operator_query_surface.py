@@ -6,10 +6,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import asyncpg
 import pytest
 
-from _pg_test_conn import ensure_test_database_ready
+from _pg_test_conn import bootstrap_workflow_migration, ensure_test_database_ready
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.instance import (
     PRAXIS_RECEIPTS_DIR_ENV,
@@ -19,7 +18,6 @@ from runtime.instance import (
     resolve_native_instance,
 )
 from runtime.work_item_workflow_bindings import work_item_workflow_binding_id
-from storage.migrations import workflow_migration_statements
 from storage.postgres import (
     bootstrap_control_plane_schema,
     connect_workflow_database,
@@ -289,6 +287,8 @@ async def _seed_native_operator_query_surface_test_data() -> dict[str, object]:
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
 
@@ -491,19 +491,11 @@ def _assert_native_operator_query_surface_reads_canonical_rows_without_mutation(
 
 
 async def _bootstrap_workflow_migration(conn, filename: str) -> None:
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in workflow_migration_statements(filename):
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except asyncpg.PostgresError as exc:
-                if getattr(exc, "sqlstate", None) in {"42P07", "42710"}:
-                    continue
-                raise
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
+    )
 
 
 async def _seed_bug(conn, *, as_of: datetime, suffix: str) -> str:

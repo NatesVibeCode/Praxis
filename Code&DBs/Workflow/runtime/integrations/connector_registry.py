@@ -136,3 +136,59 @@ def get_connector_with_schema(conn: "SyncPostgresConnection", slug: str) -> Opti
         slug,
     )
     return dict(rows[0]) if rows else None
+
+
+def upsert_connector_schema(
+    conn: "SyncPostgresConnection",
+    slug: str,
+    display_name: str,
+    capabilities: list,
+    auth_shape: dict,
+) -> str:
+    """Upsert api_schemas + api_endpoints from connector introspection. Returns schema_id."""
+    import json as _json
+
+    auth_type = "api_key" if (auth_shape or {}).get("kind") == "env_var" else "none"
+    paths = {
+        f"/{cap['action']}": {
+            "post": {
+                "operationId": cap["action"],
+                "summary": cap.get("description", ""),
+                "responses": {"200": {"description": "ok"}},
+            }
+        }
+        for cap in capabilities
+        if cap.get("action")
+    }
+    raw_spec = _json.dumps({
+        "openapi": "3.0.0",
+        "info": {"title": display_name, "version": "0.1.0"},
+        "paths": paths,
+    })
+
+    rows = conn.execute(
+        """INSERT INTO api_schemas (provider_slug, version, title, auth_type, raw_spec)
+           VALUES ($1, '0.1.0', $2, $3, $4::jsonb)
+           ON CONFLICT (provider_slug, version) DO UPDATE SET
+               title = EXCLUDED.title,
+               auth_type = EXCLUDED.auth_type,
+               raw_spec = EXCLUDED.raw_spec
+           RETURNING schema_id""",
+        slug, display_name, auth_type, raw_spec,
+    )
+    schema_id = rows[0]["schema_id"]
+
+    for cap in capabilities:
+        action = cap.get("action", "")
+        if not action:
+            continue
+        conn.execute(
+            """INSERT INTO api_endpoints (schema_id, path, method, operation_id, summary)
+               VALUES ($1, $2, 'POST', $3, $4)
+               ON CONFLICT (schema_id, path, method) DO UPDATE SET
+                   operation_id = EXCLUDED.operation_id,
+                   summary = EXCLUDED.summary""",
+            schema_id, f"/{action}", action, cap.get("description", ""),
+        )
+
+    return schema_id

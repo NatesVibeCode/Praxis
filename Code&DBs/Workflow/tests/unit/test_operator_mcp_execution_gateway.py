@@ -23,6 +23,7 @@ def test_mcp_operator_write_uses_operation_catalog_gateway(monkeypatch) -> None:
             "action": "commit",
             "title": "Bound operator write",
             "intent_brief": "Use one execution gateway",
+            "source_idea_id": "operator_idea.bound.operator.write",
         }
     )
 
@@ -30,6 +31,7 @@ def test_mcp_operator_write_uses_operation_catalog_gateway(monkeypatch) -> None:
     assert captured["operation_name"] == "operator.roadmap_write"
     assert captured["payload"]["action"] == "commit"
     assert captured["payload"]["title"] == "Bound operator write"
+    assert captured["payload"]["source_idea_id"] == "operator_idea.bound.operator.write"
     assert captured["payload"]["depends_on"] == []
     assert captured["payload"]["registry_paths"] == []
 
@@ -79,6 +81,35 @@ def test_mcp_operator_closeout_normalizes_missing_sequences(monkeypatch) -> None
     assert captured["operation_name"] == "operator.work_item_closeout"
     assert captured["payload"]["bug_ids"] == []
     assert captured["payload"]["roadmap_item_ids"] == []
+
+
+def test_mcp_operator_ideas_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_ideas(
+        {
+            "action": "file",
+            "title": "First-class ideas authority",
+            "summary": "Pre-commitment intake for roadmap candidates.",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.ideas"
+    assert captured["operation_name"] == "operator.ideas"
+    assert captured["payload"]["action"] == "file"
+    assert captured["payload"]["title"] == "First-class ideas authority"
+    assert captured["payload"]["source_kind"] == "operator"
+    assert captured["payload"]["idea_ids"] == []
 
 
 def test_mcp_operator_roadmap_view_uses_operation_catalog_gateway(monkeypatch) -> None:

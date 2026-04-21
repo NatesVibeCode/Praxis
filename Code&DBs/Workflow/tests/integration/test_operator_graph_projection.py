@@ -6,13 +6,12 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-import asyncpg
 import pytest
 
+from _pg_test_conn import bootstrap_workflow_migration
 from observability.operator_topology import load_operator_graph_projection
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.semantic_assertions import semantic_assertion_id
-from storage.migrations import workflow_bootstrap_migration_statements
 from storage.postgres import (
     PostgresConfigurationError,
     bootstrap_control_plane_schema,
@@ -30,24 +29,13 @@ def _fixed_clock() -> datetime:
     return datetime(2026, 4, 2, 21, 0, tzinfo=timezone.utc)
 
 
-def _is_duplicate_object_error(error: BaseException) -> bool:
-    return getattr(error, "sqlstate", None) in {"42P07", "42710"}
-
-
 async def _bootstrap_migration(conn, filename: str) -> None:
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in workflow_bootstrap_migration_statements(filename):
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except asyncpg.PostgresError as exc:
-                if _is_duplicate_object_error(exc):
-                    continue
-                raise
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        bootstrap_allowed=True,
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
+    )
 
 
 async def _seed_workflow_lane_and_class(conn, *, as_of: datetime, suffix: str) -> str:
@@ -754,6 +742,8 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
         for filename in (
             "008_workflow_class_and_schedule_schema.sql",
             "009_bug_and_roadmap_authority.sql",
+            "136_operation_catalog_authority.sql",
+            "195_operator_ideas_authority.sql",
             "010_operator_control_authority.sql",
             "015_memory_graph.sql",
             "132_issue_backlog_authority.sql",

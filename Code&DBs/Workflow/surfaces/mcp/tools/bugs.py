@@ -163,7 +163,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, "
                 "bulk backfill replay provenance, or resolve existing bugs.\n\n"
                 "Search uses Postgres full-text ranking and may blend in vector similarity when the "
-                "embedding lane is available.\n\n"
+                "embedding lane is available. List/search responses include derived clusters by default "
+                "so agents can work related bugs together without operator prompting.\n\n"
                 "USE WHEN: something is broken and needs tracking, or you want to see known issues.\n\n"
                 "EXAMPLES:\n"
                 "  List open bugs:    praxis_bugs(action='list', status='OPEN')\n"
@@ -213,6 +214,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "boolean",
                         "description": "When true, annotate listed or searched bugs with replay readiness and reason codes.",
                         "default": False,
+                    },
+                    "include_clusters": {
+                        "type": "boolean",
+                        "description": "When true, include derived bug clusters in list/search output. Defaults to true so cold agents see related work groups automatically.",
+                        "default": True,
                     },
                     "replay_ready_only": {
                         "type": "boolean",

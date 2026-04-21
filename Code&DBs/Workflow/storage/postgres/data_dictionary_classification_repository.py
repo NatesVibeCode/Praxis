@@ -267,6 +267,27 @@ def count_classifications_by_source(conn: Any) -> dict[str, int]:
     return {str(r["source"]): int(r["n"]) for r in rows or []}
 
 
+def list_classification_tag_catalog(conn: Any) -> list[dict[str, Any]]:
+    """Return distinct tag_key/tag_value/source counts for operator visibility."""
+    rows = conn.execute(
+        """
+        SELECT tag_key, tag_value, source, COUNT(*)::int AS rows
+        FROM data_dictionary_classifications
+        GROUP BY tag_key, tag_value, source
+        ORDER BY tag_key, tag_value, source
+        """
+    )
+    return [
+        {
+            "tag_key": r.get("tag_key"),
+            "tag_value": r.get("tag_value") or "",
+            "source": r.get("source"),
+            "rows": int(r.get("rows") or 0),
+        }
+        for r in rows or []
+    ]
+
+
 __all__ = [
     "upsert_classification",
     "replace_projected_classifications",
@@ -275,4 +296,5 @@ __all__ = [
     "list_by_tag",
     "list_classification_layers",
     "count_classifications_by_source",
+    "list_classification_tag_catalog",
 ]

@@ -427,8 +427,6 @@
 
 @media (max-width: 760px) {
   .moon-dock-overlay {
-    left: 8px !important;
-    right: 8px !important;
     top: 8px;
     bottom: 8px;
     width: auto;
@@ -439,6 +437,8 @@
 
   .moon-dock-overlay--left,
   .moon-dock-overlay--right {
+    left: 8px;
+    right: 8px;
     transform: translateY(16px);
     border-radius: 22px;
   }

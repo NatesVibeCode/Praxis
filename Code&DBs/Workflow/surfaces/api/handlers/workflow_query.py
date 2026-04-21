@@ -2559,12 +2559,16 @@ def _handle_search_get(request: Any, path: str) -> None:
                     (str(value) for value in props.values() if isinstance(value, str)),
                     row["object_id"],
                 )
+                description = str(row["type_id"])
                 results.append(
                     {
                         "type": "object",
                         "id": row["object_id"],
                         "title": title,
-                        "snippet": row["type_id"],
+                        "snippet": description,
+                        "name": title,
+                        "description": description,
+                        "kind": "object",
                     }
                 )
         if scope in ("all", "manifests"):
@@ -2574,12 +2578,16 @@ def _handle_search_get(request: Any, path: str) -> None:
                 query,
             )
             for row in rows:
+                description = (row.get("description") or "")[:100]
                 results.append(
                     {
                         "type": "manifest",
                         "id": row["id"],
                         "title": row["name"],
-                        "snippet": (row.get("description") or "")[:100],
+                        "snippet": description,
+                        "name": row["name"],
+                        "description": description,
+                        "kind": "manifest",
                     }
                 )
         if scope in ("all", "workflows"):
@@ -2587,12 +2595,55 @@ def _handle_search_get(request: Any, path: str) -> None:
 
             rows = search_receipts(query, limit=10)
             for row in rows:
+                description = f"{row.agent} — {row.status}"
                 results.append(
                     {
                         "type": "workflow",
                         "id": row.id,
                         "title": row.label,
-                        "snippet": f"{row.agent} — {row.status}",
+                        "snippet": description,
+                        "name": row.label,
+                        "description": description,
+                        "kind": "workflow",
+                    }
+                )
+        if scope in ("all", "registries"):
+            rows = pg.execute(
+                """
+                SELECT registry_id AS id,
+                       kind,
+                       name,
+                       category,
+                       content,
+                       metadata
+                FROM platform_registry
+                WHERE to_tsvector(
+                          'english',
+                          coalesce(name, '') || ' '
+                          || coalesce(kind, '') || ' '
+                          || coalesce(category, '') || ' '
+                          || coalesce(content, '') || ' '
+                          || coalesce(metadata::text, '')
+                      ) @@ plainto_tsquery('english', $1)
+                ORDER BY updated_at DESC
+                LIMIT 10
+                """,
+                query,
+            )
+            for row in rows:
+                description = (
+                    str(row.get("content") or row.get("category") or row.get("kind") or "")
+                    [:120]
+                )
+                results.append(
+                    {
+                        "type": "registry",
+                        "id": row["id"],
+                        "title": row.get("name") or row["id"],
+                        "snippet": description,
+                        "name": row.get("name") or row["id"],
+                        "description": description,
+                        "kind": row.get("kind") or row.get("category") or "registry",
                     }
                 )
         request._send_json(

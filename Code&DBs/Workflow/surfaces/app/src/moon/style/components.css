@@ -245,8 +245,8 @@
   gap: 4px;
   padding: 0 10px;
   min-width: 90px;
-  border-left: 1px solid var(--moon-white-a06, rgba(255, 255, 255, 0.06));
-  border-right: 1px solid var(--moon-white-a06, rgba(255, 255, 255, 0.06));
+  border-left: 1px solid var(--moon-white-a06);
+  border-right: 1px solid var(--moon-white-a06);
 }
 .moon-detail__ribbon-center-dot {
   width: 14px;
@@ -254,7 +254,7 @@
   border-radius: 999px;
   border: 1.5px solid var(--moon-fg);
   background: var(--moon-fg);
-  box-shadow: 0 0 0 3px var(--moon-white-a06, rgba(255, 255, 255, 0.06));
+  box-shadow: 0 0 0 3px var(--moon-white-a06);
 }
 .moon-detail__ribbon-center-label {
   font-size: 11px;
@@ -280,8 +280,8 @@
   }
   .moon-detail__ribbon-center {
     border: none;
-    border-top: 1px solid var(--moon-white-a06, rgba(255, 255, 255, 0.06));
-    border-bottom: 1px solid var(--moon-white-a06, rgba(255, 255, 255, 0.06));
+    border-top: 1px solid var(--moon-white-a06);
+    border-bottom: 1px solid var(--moon-white-a06);
     padding: 8px 0;
     flex-direction: row;
   }
@@ -784,7 +784,7 @@
 }
 .moon-compose textarea {
   width: 100%;
-  background: rgba(10, 10, 10, 0.92);
+  background: var(--moon-compose-input-bg);
   border: 1px solid var(--moon-white-a16);
   border-radius: 18px;
   color: var(--moon-fg);
@@ -1583,7 +1583,7 @@
   border-color: var(--moon-white-a16);
 }
 .moon-release__pill--stale .moon-release__pill-ring--inner {
-  border-color: var(--moon-warning-a28, rgba(210, 153, 34, 0.32));
+  border-color: var(--moon-warning-a32);
 }
 .moon-release__pill--blocked .moon-release__pill-ring {
   border-style: dashed;
@@ -1594,17 +1594,17 @@
   opacity: 0.3;
 }
 .moon-release__pill--dispatching .moon-release__pill-ring {
-  border-color: var(--moon-accent-a44, rgba(243, 238, 228, 0.44));
+  border-color: var(--moon-accent-a44);
   animation: moon-release-ring-spin 2.4s linear infinite;
 }
 .moon-release__pill--dispatching .moon-release__pill-ring--inner {
-  border-color: var(--moon-accent-a28, rgba(243, 238, 228, 0.28));
+  border-color: var(--moon-accent-a28);
   animation: moon-release-ring-spin 1.8s linear infinite reverse;
   opacity: 1;
 }
 .moon-release__pill--confirming .moon-release__pill-ring {
   border-style: solid;
-  border-color: var(--moon-success-a48, rgba(63, 185, 80, 0.48));
+  border-color: var(--moon-success-a48);
   animation: moon-release-ring-pulse 1.4s ease-in-out infinite;
 }
 .moon-release__pill--confirming .moon-release__pill-ring--inner {
@@ -1613,7 +1613,7 @@
 }
 .moon-release__pill--done .moon-release__pill-ring {
   border-style: solid;
-  border-color: var(--moon-success-a48, rgba(63, 185, 80, 0.48));
+  border-color: var(--moon-success-a48);
 }
 .moon-release__pill--done .moon-release__pill-ring--inner {
   border-style: solid;
@@ -1669,7 +1669,7 @@ button.moon-release__pill-inner {
   box-shadow: 0 0 0 1px var(--moon-success-a24) inset;
 }
 .moon-release__pill-inner--dispatch:not(:disabled):hover {
-  border-color: var(--moon-success-a48, rgba(63, 185, 80, 0.48));
+  border-color: var(--moon-success-a48);
   background: var(--moon-success-a16);
   box-shadow: 0 0 28px -8px var(--moon-success-a34);
 }
@@ -1721,7 +1721,7 @@ button.moon-release__pill-inner {
   color: var(--moon-state-success-soft);
 }
 .moon-release__pill-btn--confirm:not(:disabled):hover {
-  border-color: var(--moon-success-a48, rgba(63, 185, 80, 0.48));
+  border-color: var(--moon-success-a48);
   background: var(--moon-success-a16);
 }
 /* Ghost affordance — previews the "Dispatch" step while the pill still
@@ -1757,9 +1757,9 @@ button.moon-release__pill-inner {
   color: var(--moon-fg-muted);
 }
 .moon-release__hint--stale {
-  border-color: var(--moon-warning-a28, rgba(210, 153, 34, 0.32));
-  background: var(--moon-warning-a08, rgba(210, 153, 34, 0.08));
-  color: var(--moon-warning, #d29922);
+  border-color: var(--moon-warning-a32);
+  background: var(--moon-warning-a08);
+  color: var(--moon-warning);
 }
 .moon-release__hint--blocker,
 .moon-release__hint--error {
@@ -1840,7 +1840,7 @@ button.moon-release__pill-inner {
   flex-direction: column;
   gap: 10px;
   padding: 12px 14px 14px;
-  border-top: 1px solid var(--moon-white-a06, rgba(255, 255, 255, 0.06));
+  border-top: 1px solid var(--moon-white-a06);
 }
 .moon-release__plan-jobs {
   display: flex;
@@ -1867,7 +1867,7 @@ button.moon-release__pill-inner {
 @media (prefers-reduced-motion: reduce) {
   .moon-release__pill-ring,
   .moon-release__pill-ring--inner {
-    animation: none !important;
+    animation: none;
   }
 }
 
@@ -2553,8 +2553,8 @@ button.moon-release__pill-inner {
   color: var(--moon-fg);
 }
 @keyframes moon-grammar-rail-suggested {
-  0%, 100% { box-shadow: 0 0 0 0 var(--moon-accent-a24, rgba(243, 238, 228, 0.24)); }
-  50% { box-shadow: 0 0 0 4px var(--moon-accent-a08, rgba(243, 238, 228, 0.08)); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--moon-accent-a24); }
+  50% { box-shadow: 0 0 0 4px var(--moon-accent-a08); }
 }
 @media (prefers-reduced-motion: reduce) {
   .moon-grammar-rail__chip--suggested {
@@ -2863,7 +2863,7 @@ button.moon-selection-card {
   align-items: flex-start;
   justify-content: center;
   gap: 14px;
-  padding: 28px 32px !important;
+  padding: 28px 32px;
 }
 
 button.moon-compose__btn,
@@ -2880,27 +2880,27 @@ button.moon-compose__chip {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 13px 16px !important;
+  padding: 13px 16px;
 }
 
 button.moon-compose__btn {
-  padding: 0 22px !important;
+  padding: 0 22px;
 }
 
 button.moon-center__dock-btn {
-  padding: 0 16px !important;
+  padding: 0 16px;
 }
 
 button.moon-dock-form__btn {
-  padding: 0 16px !important;
+  padding: 0 16px;
 }
 
 button.moon-dock-form__btn--small {
-  padding: 0 12px !important;
+  padding: 0 12px;
 }
 
 button.moon-release__dispatch-btn {
-  padding: 10px 14px !important;
+  padding: 10px 14px;
 }
 
 /* ==========================================================================
@@ -2925,28 +2925,28 @@ button.moon-release__dispatch-btn {
   top: 0;
   left: 0;
   right: 0;
-  z-index: var(--moon-z-chrome, 10);
+  z-index: var(--moon-z-chrome);
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 10px 20px;
-  background: rgba(13, 17, 23, 0.92);
+  background: var(--moon-run-overlay-bg);
   backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--moon-muted-slate, #30363d);
+  border-bottom: 1px solid var(--moon-muted-slate);
   font-size: 13px;
-  color: var(--moon-color-white, #f0f6fc);
+  color: var(--moon-color-white);
 }
 
 .moon-run-overlay__back {
   background: transparent;
   color: inherit;
-  border: 1px solid var(--moon-muted-slate, #30363d);
+  border: 1px solid var(--moon-muted-slate);
   border-radius: 6px;
   padding: 6px 12px;
   cursor: pointer;
   font: inherit;
 }
-.moon-run-overlay__back:hover { background: rgba(255,255,255,0.05); }
+.moon-run-overlay__back:hover { background: var(--moon-white-a05); }
 
 .moon-run-overlay__title {
   display: flex;
@@ -2961,14 +2961,14 @@ button.moon-release__dispatch-btn {
 
 .moon-run-overlay__run-id {
   font-size: 11px;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   font-family: ui-monospace, "SF Mono", Monaco, monospace;
 }
 
 .moon-run-overlay__chip {
   padding: 3px 10px;
   border-radius: 12px;
-  color: #fff;
+  color: var(--moon-color-white);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2978,7 +2978,7 @@ button.moon-release__dispatch-btn {
 .moon-run-overlay__metrics {
   display: flex;
   gap: 14px;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   margin-left: auto;
 }
 .moon-run-overlay__metrics span {
@@ -3004,12 +3004,12 @@ button.moon-release__dispatch-btn {
   left: 50%;
   transform: translateX(-50%);
   padding: 8px 16px;
-  background: rgba(13, 17, 23, 0.92);
-  border: 1px solid var(--moon-muted-slate, #30363d);
+  background: var(--moon-run-overlay-bg);
+  border: 1px solid var(--moon-muted-slate);
   border-radius: 6px;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   font-size: 12px;
-  z-index: var(--moon-z-chrome, 10);
+  z-index: var(--moon-z-chrome);
 }
 .moon-run-overlay__error { color: var(--moon-status-failed); border-color: var(--moon-status-failed); }
 
@@ -3017,18 +3017,18 @@ button.moon-release__dispatch-btn {
   position: fixed;
   top: 72px;
   left: 20px;
-  z-index: var(--moon-z-chrome, 10);
+  z-index: var(--moon-z-chrome);
   width: min(380px, calc(100vw - 40px));
   max-height: calc(100vh - 88px);
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 16px;
-  color: var(--moon-color-white, #f0f6fc);
-  background: rgba(13, 17, 23, 0.88);
-  border: 1px solid var(--moon-muted-slate, #30363d);
+  color: var(--moon-color-white);
+  background: var(--moon-run-overlay-bg-soft);
+  border: 1px solid var(--moon-muted-slate);
   border-radius: 8px;
-  box-shadow: 0 12px 36px rgba(0,0,0,0.42);
+  box-shadow: 0 12px 36px var(--moon-black-a42);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   overflow: hidden;
@@ -3051,7 +3051,7 @@ button.moon-release__dispatch-btn {
   border: 1px solid var(--moon-white-a12);
   border-radius: 8px;
   background: var(--moon-white-a03);
-  color: var(--moon-color-white, #f0f6fc);
+  color: var(--moon-color-white);
   font: inherit;
   font-size: 16px;
   line-height: 1;
@@ -3068,7 +3068,7 @@ button.moon-release__dispatch-btn {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
 }
 
 .moon-run-overlay__summary-title {
@@ -3076,13 +3076,13 @@ button.moon-release__dispatch-btn {
   font-size: 15px;
   font-weight: 700;
   line-height: 1.25;
-  color: var(--moon-color-white, #f0f6fc);
+  color: var(--moon-color-white);
   overflow-wrap: anywhere;
 }
 
 .moon-run-overlay__summary-run-id {
   margin-top: 6px;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   font-family: ui-monospace, "SF Mono", Monaco, monospace;
   font-size: 10px;
   line-height: 1.3;
@@ -3142,7 +3142,7 @@ button.moon-release__dispatch-btn {
 
 .moon-run-overlay__stat-grid dt {
   margin: 0 0 4px;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.09em;
@@ -3151,7 +3151,7 @@ button.moon-release__dispatch-btn {
 
 .moon-run-overlay__stat-grid dd {
   margin: 0;
-  color: var(--moon-color-white, #f0f6fc);
+  color: var(--moon-color-white);
   font-size: 14px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -3162,7 +3162,7 @@ button.moon-release__dispatch-btn {
   padding: 12px;
   border: 1px solid var(--moon-white-a08);
   border-radius: 8px;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   font-size: 12px;
   background: var(--moon-white-a02);
 }
@@ -3194,7 +3194,7 @@ button.moon-release__dispatch-btn {
   padding: 8px 10px;
   border: 1px solid var(--moon-white-a08);
   border-radius: 8px;
-  background: rgba(255,255,255,0.025);
+  background: var(--moon-white-a025);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -3221,7 +3221,7 @@ button.moon-release__dispatch-btn {
 .moon-run-overlay__job-label {
   grid-area: label;
   min-width: 0;
-  color: var(--moon-color-white, #f0f6fc);
+  color: var(--moon-color-white);
   font-family: ui-monospace, "SF Mono", Monaco, monospace;
   font-size: 12px;
   font-weight: 650;
@@ -3232,7 +3232,7 @@ button.moon-release__dispatch-btn {
 
 .moon-run-overlay__job-status {
   grid-area: status;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -3277,17 +3277,17 @@ button.moon-release__dispatch-btn {
   bottom: 16px;
   width: 420px;
   max-width: 90vw;
-  background: rgba(13, 17, 23, 0.96);
-  border: 1px solid var(--moon-muted-slate, #30363d);
+  background: var(--moon-run-overlay-bg-strong);
+  border: 1px solid var(--moon-muted-slate);
   border-radius: 8px;
   padding: 16px;
-  z-index: var(--moon-z-chrome, 10);
+  z-index: var(--moon-z-chrome);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  color: var(--moon-color-white, #f0f6fc);
+  color: var(--moon-color-white);
   font-size: 13px;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  box-shadow: 0 12px 40px var(--moon-black-a50);
 }
 
 .moon-run-overlay__receipt-head {
@@ -3296,7 +3296,7 @@ button.moon-release__dispatch-btn {
   gap: 8px;
   margin-bottom: 12px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--moon-muted-slate, #30363d);
+  border-bottom: 1px solid var(--moon-muted-slate);
 }
 
 .moon-run-overlay__receipt-dot {
@@ -3339,7 +3339,7 @@ button.moon-release__dispatch-btn {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   margin: 0;
 }
 .moon-run-overlay__receipt-meta dd {
@@ -3361,14 +3361,14 @@ button.moon-release__dispatch-btn {
   align-items: center;
   font-size: 11px;
   text-transform: uppercase;
-  color: var(--moon-text-muted, #8b949e);
+  color: var(--moon-text-muted);
   letter-spacing: 0.05em;
   margin-bottom: 6px;
 }
 
 .moon-run-overlay__receipt-output-toggle {
   background: transparent;
-  color: var(--moon-accent, #f3eee4);
+  color: var(--moon-accent);
   border: none;
   font: inherit;
   cursor: pointer;
@@ -3380,8 +3380,8 @@ button.moon-release__dispatch-btn {
   flex: 1;
   margin: 0;
   overflow: auto;
-  background: rgba(0,0,0,0.35);
-  border: 1px solid var(--moon-muted-slate, #30363d);
+  background: var(--moon-run-overlay-pre-bg);
+  border: 1px solid var(--moon-muted-slate);
   border-radius: 6px;
   padding: 10px;
   font-size: 11px;
@@ -3497,10 +3497,9 @@ button.moon-release__dispatch-btn {
   .moon-status-ring--active::before,
   .moon-status-ring--failed svg path,
   .moon-status-ring--ok svg circle {
-    animation: none !important;
+    animation: none;
   }
   .moon-status-ring--ok svg circle {
     fill: var(--moon-ring-stroke);
   }
 }
-

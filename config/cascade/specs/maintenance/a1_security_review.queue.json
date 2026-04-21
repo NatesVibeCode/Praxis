@@ -1,0 +1,19 @@
+{
+  "spec_version": "1.0",
+  "name": "a1_security_review",
+  "workflow_id": "a1_security_review",
+  "phase": "maintenance",
+  "outcome_goal": "Every high-trust seam has been reviewed via the security-review skill and every finding is either a dedupe-keyed bug or a decision.YYYY-MM-DD.security-review-ack-* row.",
+  "verify_command": "bash -lc \"bugs=$(praxis workflow bugs --signature-contains security-review-$(date -I) --state-in-open 2>/dev/null | wc -l | tr -d ' '); acks=$(psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key LIKE 'decision.%.security-review-ack-%' AND effective_to IS NULL\\\"); test ${bugs:-0} -ge 3 -o ${acks:-0} -ge 1\"",
+  "jobs": [
+    {
+      "id": "a1_security_review",
+      "label": "a1_security_review",
+      "agent": "auto/review",
+      "prompt": "Run the security-review skill against the high-trust seams below. Targets: Code&DBs/Workflow/runtime/sandbox_runtime.py; Code&DBs/Workflow/adapters/docker_runner.py; Code&DBs/Workflow/runtime/workflow/execution_backends.py; Code&DBs/Workflow/runtime/integrations/connector_executor.py; Code&DBs/Workflow/runtime/integrations/webhook.py; Code&DBs/Workflow/runtime/integration_manifest.py; Code&DBs/Workflow/surfaces/api/operator_write.py; Code&DBs/Workflow/surfaces/mcp/tools/operator.py; Code&DBs/Workflow/surfaces/api/rest.py. Review categories: sandbox boundary, integration execution, webhook/operator write ingress, MCP operator write, REST operator write. Binding orders: LLM-first operator surfaces, single human review plane, no shim preservation, DB-backed decisions, rollback isolation for bug-surface write tests, public naming convention. For every real issue, file a canonical bug with a stable signature containing security-review-$(date -I) and a category suffix. If a risky seam is intentionally accepted, file an operator_decisions row with key decision.YYYY-MM-DD.security-review-ack-<category>. Done only when each category has either a dedupe-keyed bug or ack decision row, and the verify_command passes.",
+      "input_refs": [],
+      "verify_refs": [],
+      "verify_command": "bash -lc \"bugs=$(praxis workflow bugs --signature-contains security-review-$(date -I) --state-in-open 2>/dev/null | wc -l | tr -d ' '); acks=$(psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key LIKE 'decision.%.security-review-ack-%' AND effective_to IS NULL\\\"); test ${bugs:-0} -ge 3 -o ${acks:-0} -ge 1\""
+    }
+  ]
+}

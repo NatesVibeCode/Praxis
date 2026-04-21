@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Iterator
 
 from adapters.llm_client import (
+    LLMClientError,
     LLMRequest,
     LLMResponse,
     ToolCall,
@@ -162,30 +163,21 @@ class ChatOrchestrator:
                 "latency_ms": latency_ms,
             }
 
-        # Resolve HTTP model lane
-        provider, model, endpoint, api_key = self._resolve_model()
-
         # Tool loop
         all_tool_results: list[dict] = []
         iteration = 0
+        active_http_route: ResolvedChatRoute | None = None
 
         while iteration < _MAX_TOOL_ITERATIONS:
             iteration += 1
             chat_tools, execute_tool = _load_chat_tools()
 
-            request = LLMRequest(
-                endpoint_uri=endpoint,
-                api_key=api_key,
-                provider_slug=provider,
-                model_slug=model,
+            candidate_routes = [active_http_route] if active_http_route is not None else routes
+            response, active_http_route = self._call_llm_with_http_failover(
+                candidate_routes,
                 messages=tuple(messages),
                 tools=tuple(chat_tools),
-                system_prompt=SYSTEM_PROMPT,
-                max_tokens=4096,
-                temperature=0.2,
             )
-
-            response = call_llm(request)
             model_used = f"{response.provider_slug}/{response.model}"
 
             if response.tool_calls:
@@ -204,7 +196,7 @@ class ChatOrchestrator:
                     # Add to messages for next LLM call
                     from runtime.http_transport import format_tool_messages
                     from registry.provider_execution_registry import get_profile
-                    _prof = get_profile(provider)
+                    _prof = get_profile(active_http_route.provider_slug)
                     _proto = _prof.api_protocol_family if _prof else "openai_chat_completions"
                     messages.extend(format_tool_messages(
                         _proto,
@@ -218,7 +210,7 @@ class ChatOrchestrator:
 
             # No tool calls — final text response
             assistant_content = response.content
-            cost = self._estimate_cost(response.usage, model)
+            cost = self._estimate_cost(response.usage, response.model or active_http_route.model_slug)
             msg_id = self._persist_message(
                 conversation_id, "assistant", assistant_content,
                 model_used=model_used, latency_ms=response.latency_ms,
@@ -244,7 +236,11 @@ class ChatOrchestrator:
             "message_id": str(uuid.uuid4()),
             "content": "I reached the maximum number of tool call iterations. Here's what I found so far.",
             "tool_results": all_tool_results,
-            "model_used": f"{provider}/{model}",
+            "model_used": (
+                f"{active_http_route.provider_slug}/{active_http_route.model_slug}"
+                if active_http_route is not None
+                else None
+            ),
             "latency_ms": 0,
         }
 
@@ -598,15 +594,73 @@ class ChatOrchestrator:
 
     def _resolve_model(self) -> tuple[str, str, str, str]:
         """Resolve the first HTTP-capable chat model route."""
-        for route in self._resolve_route_chain():
-            if route.supports_tool_loop and route.endpoint_uri and route.api_key:
-                return (
+        route = self._resolve_http_routes()[0]
+        return (
+            route.provider_slug,
+            route.model_slug,
+            route.endpoint_uri or "",
+            route.api_key or "",
+        )
+
+    def _resolve_http_routes(
+        self,
+        routes: list[ResolvedChatRoute] | None = None,
+    ) -> list[ResolvedChatRoute]:
+        """Return HTTP-capable routes from the resolved failover chain."""
+        route_chain = routes if routes is not None else self._resolve_route_chain()
+        http_routes = [
+            route
+            for route in route_chain
+            if route.supports_tool_loop and route.endpoint_uri and route.api_key
+        ]
+        if not http_routes:
+            raise RuntimeError("no HTTP-backed chat route available for auto/chat")
+        return http_routes
+
+    def _call_llm_with_http_failover(
+        self,
+        routes: list[ResolvedChatRoute],
+        *,
+        messages: tuple[dict[str, Any], ...],
+        tools: tuple[dict[str, Any], ...],
+    ) -> tuple[LLMResponse, ResolvedChatRoute]:
+        """Call chat over HTTP, trying each routed candidate before failing."""
+        http_routes = self._resolve_http_routes(routes)
+        failures: list[str] = []
+        last_error: BaseException | None = None
+        for route in http_routes:
+            request = LLMRequest(
+                endpoint_uri=route.endpoint_uri or "",
+                api_key=route.api_key or "",
+                provider_slug=route.provider_slug,
+                model_slug=route.model_slug,
+                messages=messages,
+                tools=tools,
+                system_prompt=SYSTEM_PROMPT,
+                max_tokens=4096,
+                temperature=0.2,
+            )
+            try:
+                response = call_llm(request)
+            except (LLMClientError, RuntimeError) as exc:
+                last_error = exc
+                _RECENTLY_FAILED_ROUTES[(route.provider_slug, route.model_slug)] = time.monotonic()
+                reason_code = str(getattr(exc, "reason_code", type(exc).__name__))
+                failures.append(f"{route.provider_slug}/{route.model_slug}:{reason_code}")
+                _log.warning(
+                    "chat http route failed for %s/%s: %s",
                     route.provider_slug,
                     route.model_slug,
-                    route.endpoint_uri,
-                    route.api_key,
+                    exc,
                 )
-        raise RuntimeError("no HTTP-backed chat route available for auto/chat")
+                continue
+            _RECENTLY_FAILED_ROUTES.pop((route.provider_slug, route.model_slug), None)
+            return response, route
+
+        detail = "; ".join(failures) if failures else "no HTTP candidates"
+        raise RuntimeError(
+            f"all HTTP-backed chat routes failed for auto/chat: {detail}"
+        ) from last_error
 
     def _send_via_cli(
         self,

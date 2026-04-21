@@ -6,6 +6,7 @@ import pytest
 from pathlib import Path
 
 from surfaces.cli import workflow_cli
+from storage.postgres.validators import PostgresConfigurationError
 
 
 class _Registry:
@@ -101,3 +102,28 @@ def test_cmd_validate_accepts_legacy_agent_aliases(
     result = workflow_cli.cmd_validate(argparse.Namespace(spec=spec_path))
 
     assert result == 0
+
+
+def test_cmd_validate_reports_authority_error_when_pg_conn_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    spec_path = _write_spec(tmp_path, agent_slug="gpt-5.4-mini")
+
+    def _raise_authority_error():
+        raise PostgresConfigurationError(
+            "postgres.authority_unavailable",
+            "WORKFLOW_DATABASE_URL authority unavailable: PermissionError: [Errno 1] Operation not permitted",
+        )
+
+    monkeypatch.setattr(workflow_cli, "_get_pg_conn", _raise_authority_error)
+
+    result = workflow_cli.cmd_validate(argparse.Namespace(spec=spec_path))
+
+    rendered = capsys.readouterr().out
+    assert result == 1
+    assert "=== Spec Validation: FAILED ===" in rendered
+    assert "AUTHORITY ERROR" in rendered
+    assert "agent authority unavailable" in rendered
+    assert "Traceback" not in rendered

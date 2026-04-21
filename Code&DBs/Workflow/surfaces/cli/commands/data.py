@@ -172,11 +172,12 @@ def _render_confirmation(
     risk = definition.risk_for_params({"action": action})
     if writes_to_disk and risk == "read":
         risk = "write"
-    if risk not in {"write", "dispatch"} or confirmed:
+    if risk not in {"write", "dispatch", "launch"} or confirmed:
         return None
+    rendered_risk = "dispatch" if risk == "launch" else risk
     for line in tool_preflight_lines(definition, {"action": action}):
         if line.startswith("risk: "):
-            stdout.write(f"risk: {risk}\n")
+            stdout.write(f"risk: {rendered_risk}\n")
             continue
         stdout.write(line + "\n")
     if writes_to_disk and risk == "write":

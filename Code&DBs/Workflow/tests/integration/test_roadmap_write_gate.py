@@ -5,18 +5,12 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-import asyncpg
 import pytest
 
-from _pg_test_conn import ensure_test_database_ready
-from storage.migrations import (
-    workflow_bootstrap_migration_statements,
-    workflow_migration_statements,
-)
+from _pg_test_conn import bootstrap_workflow_migration, ensure_test_database_ready
 from storage.postgres import connect_workflow_database
 from surfaces.api import operator_write
 
-_DUPLICATE_SQLSTATES = {"42P07", "42710"}
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741002
 _TEST_DATABASE_URL = ensure_test_database_ready()
 
@@ -29,29 +23,13 @@ def _fixed_clock() -> datetime:
     return datetime(2026, 4, 8, 19, 0, tzinfo=timezone.utc)
 
 
-def _is_duplicate_object_error(error: BaseException) -> bool:
-    return getattr(error, "sqlstate", None) in _DUPLICATE_SQLSTATES
-
-
 async def _bootstrap_migration(conn, filename: str) -> None:
-    statements = (
-        workflow_bootstrap_migration_statements(filename)
-        if filename == "082_event_log.sql"
-        else workflow_migration_statements(filename)
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        bootstrap_allowed=filename == "082_event_log.sql",
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
     )
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in statements:
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except asyncpg.PostgresError as exc:
-                if _is_duplicate_object_error(exc):
-                    continue
-                raise
 
 
 async def _seed_roadmap_item(
@@ -143,6 +121,8 @@ async def _exercise_roadmap_write_gate_previews_and_commits_package() -> None:
     await transaction.start()
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_migration(conn, "082_event_log.sql")
         await _bootstrap_migration(conn, "146_semantic_assertion_substrate.sql")
 

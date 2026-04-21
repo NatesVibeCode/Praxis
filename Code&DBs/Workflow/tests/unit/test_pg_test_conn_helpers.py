@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+
 import _pg_test_conn as pg_test_conn
 import pytest
 
+import storage.migrations as workflow_migrations
 import storage.postgres as storage_postgres
 import storage.postgres.connection as pg_connection
 import runtime._workflow_database as runtime_db
@@ -120,6 +123,13 @@ def test_get_isolated_conn_skips_when_authority_unavailable(monkeypatch) -> None
         pg_test_conn.get_isolated_conn()
 
 
+def test_skip_for_unavailable_authority_treats_permission_error_as_skip() -> None:
+    with pytest.raises(pytest.skip.Exception, match="postgres.permission_denied"):
+        pg_test_conn._skip_for_unavailable_authority(
+            PermissionError(1, "Operation not permitted")
+        )
+
+
 def test_get_test_conn_rebuilds_wrapper_when_cached_pool_is_closed(monkeypatch) -> None:
     class _FakePool:
         def __init__(self, closed: bool) -> None:
@@ -165,3 +175,47 @@ def test_get_pool_reopens_closed_cached_pool(monkeypatch) -> None:
         pg_test_conn._pool = None
 
     assert resolved is fresh_pool
+
+
+def test_bootstrap_workflow_migration_skips_transaction_wrappers(monkeypatch) -> None:
+    monkeypatch.setattr(
+        workflow_migrations,
+        "workflow_migration_statements",
+        lambda filename: (
+            "-- migration header\nBEGIN",
+            "CREATE TABLE demo (id integer)",
+            "/* footer */\nCOMMIT",
+        ),
+    )
+
+    class _FakeTransaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, _exc_type, _exc, _tb):
+            return False
+
+    class _FakeConn:
+        def __init__(self) -> None:
+            self.executed: list[tuple[str, tuple[object, ...]]] = []
+
+        def transaction(self):
+            return _FakeTransaction()
+
+        async def execute(self, query: str, *args: object):
+            self.executed.append((query, args))
+
+    conn = _FakeConn()
+
+    asyncio.run(
+        pg_test_conn.bootstrap_workflow_migration(
+            conn,
+            "demo.sql",
+            schema_bootstrap_lock_id=123,
+        )
+    )
+
+    assert conn.executed == [
+        ("SELECT pg_advisory_xact_lock($1::bigint)", (123,)),
+        ("CREATE TABLE demo (id integer)", ()),
+    ]

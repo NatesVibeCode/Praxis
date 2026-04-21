@@ -333,10 +333,13 @@ def _assess_change(conn: Any, change: FieldChange) -> ChangeImpact:
     stws = _stewards_for(conn, change.object_kind)
 
     # Only operator-layer PII/sensitive tags escalate severity to P0.
-    # Auto-detected heuristic tags would over-flag on a codebase that
-    # doesn't hold real customer PII; they stay informational.
+    # Auto/inferred heuristic tags would over-flag on a codebase that
+    # doesn't hold real customer PII; they stay informational. Older
+    # effective rows may omit provenance, so missing source fails
+    # conservative instead of silently downgrading a PII drop.
     def _is_operator_tag(c: dict[str, Any]) -> bool:
-        return str(c.get("effective_source") or c.get("source") or "") == "operator"
+        source = str(c.get("effective_source") or c.get("source") or "").strip()
+        return source in {"", "operator"}
 
     operator_pii_keys = {
         c.get("tag_key") for c in cls

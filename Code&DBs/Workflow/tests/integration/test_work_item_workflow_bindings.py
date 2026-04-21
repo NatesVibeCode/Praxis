@@ -5,17 +5,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from _pg_test_conn import ensure_test_database_ready
+from _pg_test_conn import bootstrap_workflow_migration, ensure_test_database_ready
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.work_item_workflow_bindings import (
     PostgresWorkItemWorkflowBindingRepository,
     load_work_item_workflow_binding,
     project_work_item_workflow_binding,
     work_item_workflow_binding_id,
-)
-from storage.migrations import (
-    workflow_bootstrap_migration_statements,
-    workflow_migration_statements,
 )
 from storage.postgres import (
     bootstrap_control_plane_schema,
@@ -52,6 +48,8 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_workflow_migration(conn, "082_event_log.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
@@ -267,6 +265,8 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_workflow_migration(conn, "082_event_log.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
@@ -464,25 +464,12 @@ async def _cleanup_promoted_roadmap_rows(
 
 
 async def _bootstrap_workflow_migration(conn, filename: str) -> None:
-    statements = (
-        workflow_bootstrap_migration_statements(filename)
-        if filename == "082_event_log.sql"
-        else workflow_migration_statements(filename)
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        bootstrap_allowed=filename == "082_event_log.sql",
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
     )
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in statements:
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except Exception as exc:  # pragma: no cover - fail closed in integration setup
-                sqlstate = getattr(exc, "sqlstate", None)
-                if sqlstate in {"42P07", "42710"}:
-                    continue
-                raise
 
 
 async def _seed_workflow_lane(conn, *, as_of: datetime) -> None:

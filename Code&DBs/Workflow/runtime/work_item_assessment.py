@@ -643,6 +643,9 @@ def assess_work_items(
             reason_codes.append("architecture_changed")
 
         source_bug_id = _optional_text(roadmap_item.get("source_bug_id"), field_name="source_bug_id")
+        source_idea_id = _optional_text(roadmap_item.get("source_idea_id"), field_name="source_idea_id")
+        if source_idea_id is not None:
+            linked_items.append({"kind": "operator_idea", "id": source_idea_id})
         related_bug = bug_by_id.get(source_bug_id) if source_bug_id is not None else None
         lifecycle = _roadmap_lifecycle(roadmap_item)
         activity = _activity_snapshot(

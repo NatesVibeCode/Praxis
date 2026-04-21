@@ -739,6 +739,17 @@ def persist_workflow_record(
             "persisting workflow returned no row",
             details={"workflow_id": normalized_workflow_id},
         )
+    _def_raw = row.get("definition") or {}
+    _def_json = json.dumps(_def_raw) if isinstance(_def_raw, dict) else (_def_raw or "{}")
+    conn.execute(
+        """INSERT INTO workflow_versions (id, workflow_id, version, definition)
+           VALUES ($1, $2, $3, $4::jsonb)
+           ON CONFLICT (workflow_id, version) DO NOTHING""",
+        f"wfv_{uuid.uuid4().hex[:12]}",
+        normalized_workflow_id,
+        row["version"],
+        _def_json,
+    )
     return dict(row)
 
 
@@ -802,6 +813,18 @@ def update_workflow_record(
         f"UPDATE public.workflows SET {', '.join(assignments)} WHERE id = $1 RETURNING *",
         *params,
     )
+    if row is not None:
+        _def_raw = row.get("definition") or {}
+        _def_json = json.dumps(_def_raw) if isinstance(_def_raw, dict) else (_def_raw or "{}")
+        conn.execute(
+            """INSERT INTO workflow_versions (id, workflow_id, version, definition)
+               VALUES ($1, $2, $3, $4::jsonb)
+               ON CONFLICT (workflow_id, version) DO NOTHING""",
+            f"wfv_{uuid.uuid4().hex[:12]}",
+            normalized_workflow_id,
+            row["version"],
+            _def_json,
+        )
     return None if row is None else dict(row)
 
 

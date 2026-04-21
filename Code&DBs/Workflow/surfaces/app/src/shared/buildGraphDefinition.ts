@@ -205,12 +205,13 @@ export function resolveReleasePlanSource(payload: BuildPayload | null): ReleaseP
   const hasDefinition = payload.definition && Object.keys(payload.definition).length > 0;
   const definition = hasDefinition ? payload.definition : undefined;
   const buildGraph = payload.build_graph ?? null;
+  const compiledSpecProjection = payload.compiled_spec_projection?.compiled_spec ?? null;
   if (!definition && !buildGraph) return null;
   const title = String(payload.workflow?.name || (definition as { title?: unknown })?.title || 'moon-workflow');
   return {
     ...(definition ? { definition } : {}),
     ...(buildGraph ? { buildGraph } : {}),
-    fingerprint: stableSerialize({ title, definition: definition || null, buildGraph }),
+    fingerprint: stableSerialize({ title, definition: definition || null, buildGraph, compiledSpecProjection }),
     title,
   };
 }

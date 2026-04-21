@@ -108,6 +108,7 @@ def test_top_level_help_mentions_routes_alias() -> None:
     assert "workflow help commands" in rendered
     assert "workflow help mcp" in rendered
     assert "workflow routes" in rendered
+    assert "workflow api help" in rendered
     assert "workflow integrations" in rendered
     assert "workflow integration list" in rendered
     assert "workflow integration help" in rendered
@@ -127,6 +128,7 @@ def test_commands_index_mentions_routes_alias() -> None:
     assert "workflow help commands" in rendered
     assert "workflow help mcp" in rendered
     assert "Alias for workflow API route discovery" in rendered
+    assert "workflow api help [routes|integrations|data-dictionary]" in rendered
     assert "workflow integrations" in rendered
     assert "workflow api integrations" in rendered
     assert "workflow api data-dictionary" in rendered
@@ -430,7 +432,7 @@ def test_api_help_mentions_route_discovery() -> None:
 
     assert workflow_cli_main(["api", "--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
-    assert "workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
+    assert "workflow api [help|routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
     assert "routes        show and filter the live HTTP route catalog without starting the server" in rendered
     assert "integrations  show and filter the /api/integrations route scope without starting the server" in rendered
     assert "data-dictionary show and filter the /api/data-dictionary route scope without starting the server" in rendered
@@ -446,7 +448,7 @@ def test_routes_help_alias_mentions_route_discovery() -> None:
 
     assert workflow_cli_main(["help", "routes"], stdout=stdout) == 0
     rendered = stdout.getvalue()
-    assert "workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
+    assert "workflow api [help|routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
     assert "Flat alias: workflow routes" in rendered
     assert "workflow integrations" in rendered
     assert "workflow tools list" in rendered
@@ -1460,6 +1462,10 @@ def test_commands_root_json_exposes_machine_readable_index() -> None:
     assert any(entry["command"] == "workflow commands" for entry in payload["entries"])
     assert any(entry["command"] == "workflow help commands" for entry in payload["entries"])
     assert any(
+        entry["command"] == "workflow api help [routes|integrations|data-dictionary]"
+        for entry in payload["entries"]
+    )
+    assert any(
         entry["command"] == "workflow tools [list|search|describe|call|help]"
         for entry in payload["entries"]
     )
@@ -1469,6 +1475,7 @@ def test_commands_root_json_exposes_machine_readable_index() -> None:
     )
     assert any(entry["command"] == "workflow help mcp" for entry in payload["entries"])
     assert "run `workflow commands --json` for machine-readable discovery" in payload["tips"]
+    assert "run `workflow api help` or `workflow help api` for HTTP route discovery" in payload["tips"]
 
 
 def test_help_can_show_command_specific_usage() -> None:
@@ -1479,6 +1486,18 @@ def test_help_can_show_command_specific_usage() -> None:
     rendered = stdout.getvalue()
     assert "workflow run <spec.json>" in rendered
     assert "workflow run -p <prompt>" in rendered
+
+
+def test_api_help_alias_is_discoverable() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["api", "help"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "usage: workflow api [help|routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
+    assert "workflow api help routes" in rendered
+    assert "workflow api help integrations" in rendered
+    assert "workflow api help data-dictionary" in rendered
 
 
 def test_preview_frontdoor_delegates_to_run_with_preview_execution(
@@ -1662,7 +1681,7 @@ def test_help_can_show_api_usage() -> None:
     assert workflow_cli_main(["help", "api"], stdout=stdout) == 0
 
     rendered = stdout.getvalue()
-    assert "workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
+    assert "workflow api [help|routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
     assert "routes        show and filter the live HTTP route catalog without starting the server" in rendered
 
 

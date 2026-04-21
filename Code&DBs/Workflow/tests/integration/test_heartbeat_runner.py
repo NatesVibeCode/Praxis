@@ -30,6 +30,7 @@ _hb = sys.modules["runtime.heartbeat"]
 DuplicateScanner = _hb.DuplicateScanner
 GapScanner = _hb.GapScanner
 HeartbeatModule = _hb.HeartbeatModule
+GraphHygieneModule = _hbr._GraphHygieneModule
 OrphanEdgeCleanup = _hb.OrphanEdgeCleanup
 StaleEntityDetector = _hb.StaleEntityDetector
 
@@ -107,10 +108,10 @@ class TestBuildModules:
     def test_codebase_index_uses_workspace_root(self):
         assert _hbr._resolve_repo_root_for_codebase_index() == _WORKFLOW_ROOT.parent.parent
 
-    def test_creates_four_base_modules(self, tmp_results):
+    def test_creates_five_base_modules(self, tmp_results):
         runner = HeartbeatRunner(results_dir=tmp_results, include_probers=False)
         modules = runner.build_modules()
-        assert len(modules) == 4
+        assert len(modules) == 5
         assert all(isinstance(m, HeartbeatModule) for m in modules)
 
     def test_module_types(self, tmp_results):
@@ -122,6 +123,7 @@ class TestBuildModules:
             DuplicateScanner,
             OrphanEdgeCleanup,
             GapScanner,
+            GraphHygieneModule,
         }
 
 

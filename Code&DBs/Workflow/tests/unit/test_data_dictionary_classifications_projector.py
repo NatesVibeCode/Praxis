@@ -163,8 +163,8 @@ def test_project_structured_shape_tags_json_cols(monkeypatch) -> None:
 def test_run_reports_errors_when_step_raises(monkeypatch) -> None:
     monkeypatch.setattr(
         DataDictionaryClassificationsProjector,
-        "_project_pii",
-        lambda self, entries: (_ for _ in ()).throw(RuntimeError("boom pii")),
+        "_project_owners",
+        lambda self, entries: (_ for _ in ()).throw(RuntimeError("boom owners")),
     )
     monkeypatch.setattr(
         DataDictionaryClassificationsProjector,
@@ -173,7 +173,7 @@ def test_run_reports_errors_when_step_raises(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         DataDictionaryClassificationsProjector,
-        "_project_owners",
+        "_project_pii",
         lambda self, entries: None,
     )
     monkeypatch.setattr(
@@ -183,4 +183,4 @@ def test_run_reports_errors_when_step_raises(monkeypatch) -> None:
     )
     result = DataDictionaryClassificationsProjector(_FakeConn([])).run()
     assert result.ok is False
-    assert "pii_name_heuristics" in (result.error or "")
+    assert "owner_name_heuristics" in (result.error or "")

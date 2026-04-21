@@ -450,7 +450,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="operator",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Read one roadmap subtree, its dependency edges, and semantic-first external neighbors without mutating roadmap authority.",
+        when_to_use="Read one roadmap subtree, derived clusters, dependency edges, and semantic-first external neighbors without mutating roadmap authority.",
         when_not_to_use="Do not use it to commit roadmap changes.",
         risks={"default": "read"},
         examples=[
@@ -466,6 +466,19 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "semantic_neighbor_limit": 8,
                 },
             ),
+        ],
+    ),
+    "praxis_operator_ideas": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Capture pre-commitment ideas, reject/supersede/archive them, or promote them into committed roadmap items.",
+        when_not_to_use="Do not use it as a substitute for committed roadmap work; use praxis_operator_write once scope is committed.",
+        risks={"default": "read", "actions": {"list": "read", "file": "write", "resolve": "write", "promote": "write"}},
+        examples=[
+            _example("List open ideas", {"action": "list", "limit": 25}),
+            _example("File an idea", {"action": "file", "title": "First-class ideas authority", "summary": "Pre-commitment intake for roadmap candidates."}),
+            _example("Reject an idea", {"action": "resolve", "idea_id": "operator_idea.example", "status": "rejected", "resolution_summary": "No longer fits the operator model."}),
         ],
     ),
     "praxis_operator_write": _tool(

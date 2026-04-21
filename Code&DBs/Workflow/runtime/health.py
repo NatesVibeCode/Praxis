@@ -75,6 +75,42 @@ class HealthProbe(ABC):
         ...
 
 
+class StaticHealthProbe(HealthProbe):
+    """Expose an already-known authority verdict through the preflight contract."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        passed: bool,
+        message: str,
+        status: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self._name = name
+        self._passed = passed
+        self._message = message
+        self._status = status
+        self._details = details or {}
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def check(self) -> PreflightCheck:
+        started_at = _utcnow()
+        started_monotonic = time.monotonic()
+        return _build_check(
+            name=self.name,
+            passed=self._passed,
+            message=self._message,
+            started_at=started_at,
+            started_monotonic=started_monotonic,
+            status=self._status,
+            details=self._details,
+        )
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -343,7 +379,7 @@ class ProviderTransportProbe(HealthProbe):
                 transport_ready = binary_path is not None
                 details["binary_path"] = binary_path
                 message = "binary ready" if transport_ready else "binary missing"
-                status = "ok" if transport_ready else "warning"
+                status = "ok" if transport_ready else "failed"
             elif supported and self._adapter_type == "llm_task":
                 endpoint = resolve_api_endpoint(self._provider_slug)
                 credential_present = _provider_api_key_present(self._provider_slug)
@@ -355,13 +391,18 @@ class ProviderTransportProbe(HealthProbe):
                     if transport_ready
                     else "api transport metadata present but credential or endpoint missing"
                 )
-                status = "ok" if transport_ready else "warning"
+                status = "ok" if transport_ready else "failed"
 
             details["transport_ready"] = transport_ready
+            passed = supported and (
+                transport_ready
+                if self._adapter_type in {"cli_llm", "llm_task"}
+                else True
+            )
 
             return _build_check(
                 name=self.name,
-                passed=supported,
+                passed=passed,
                 message=message,
                 started_at=started_at,
                 started_monotonic=started_monotonic,
@@ -1114,6 +1155,7 @@ __all__ = [
     "PreflightRunner",
     "QueueAdmissionGate",
     "QueueDepthProbe",
+    "StaticHealthProbe",
     "WorkflowWorkerProbe",
     "WaveHealth",
     "WaveHealthMonitor",

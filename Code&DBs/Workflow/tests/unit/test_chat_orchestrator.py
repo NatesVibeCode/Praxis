@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from adapters.llm_client import LLMClientError
 import runtime.chat_orchestrator as chat_orchestrator_mod
 from runtime.chat_orchestrator import (
     ChatOrchestrator,
@@ -179,6 +180,57 @@ def test_send_message_prefers_http_lane_when_cli_route_is_sticky(monkeypatch) ->
 
     assert result["content"] == "HTTP lane response"
     assert result["model_used"] == "openai/gpt-5.4"
+    assert [message["role"] for message in store.messages] == ["user", "assistant"]
+
+
+def test_send_message_fails_over_http_route_on_rate_limit(monkeypatch) -> None:
+    store = _FakeChatStore()
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
+    openai_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="llm_task",
+        endpoint_uri="https://api.openai.com/v1/chat/completions",
+        api_key="openai-key",
+        supports_tool_loop=True,
+    )
+    anthropic_route = ResolvedChatRoute(
+        provider_slug="anthropic",
+        model_slug="claude-sonnet-4-6",
+        adapter_type="llm_task",
+        endpoint_uri="https://api.anthropic.com/v1/messages",
+        api_key="anthropic-key",
+        supports_tool_loop=True,
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda: [openai_route, anthropic_route])
+    monkeypatch.setattr(chat_orchestrator_mod, "_load_chat_tools", lambda: ([], lambda *_args: {}))
+    chat_orchestrator_mod._RECENTLY_FAILED_ROUTES.clear()
+
+    def _fake_call_llm(request):
+        calls.append(f"{request.provider_slug}/{request.model_slug}")
+        if request.provider_slug == "openai":
+            raise LLMClientError("llm_client.rate_limited", "rate limit exhausted")
+        return SimpleNamespace(
+            content="Fallback response",
+            provider_slug="anthropic",
+            model="claude-sonnet-4-6",
+            usage={"input_tokens": 1, "output_tokens": 1},
+            latency_ms=25,
+            tool_calls=(),
+        )
+
+    monkeypatch.setattr(chat_orchestrator_mod, "call_llm", _fake_call_llm)
+
+    try:
+        result = orchestrator.send_message("conv-1", "Please answer")
+    finally:
+        chat_orchestrator_mod._RECENTLY_FAILED_ROUTES.clear()
+
+    assert calls == ["openai/gpt-5.4", "anthropic/claude-sonnet-4-6"]
+    assert result["content"] == "Fallback response"
+    assert result["model_used"] == "anthropic/claude-sonnet-4-6"
     assert [message["role"] for message in store.messages] == ["user", "assistant"]
 
 

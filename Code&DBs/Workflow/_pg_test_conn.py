@@ -32,6 +32,8 @@ _CONFIG_MISSING = "postgres.config_missing"
 _DEFAULT_TEST_DATABASE = "praxis_test"
 _TEST_DATABASE_URL_ENV = "WORKFLOW_TEST_DATABASE_URL"
 _DEFAULT_TEST_DATABASE_URL = f"postgresql://postgres@localhost:5432/{_DEFAULT_TEST_DATABASE}"
+_DUPLICATE_MIGRATION_SQLSTATES = frozenset({"42P07", "42701", "42710"})
+_DEFAULT_SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 
 
 def _database_name_from_url(database_url: str) -> str:
@@ -186,6 +188,9 @@ def _get_pool():
 def _skip_for_unavailable_authority(exc: BaseException) -> None:
     reason_code = getattr(exc, "reason_code", "")
     unavailable = reason_code in {_AUTHORITY_UNAVAILABLE, _CONFIG_MISSING}
+    if isinstance(exc, PermissionError):
+        unavailable = True
+        reason_code = reason_code or "postgres.permission_denied"
     if isinstance(exc, asyncpg.InvalidAuthorizationSpecificationError):
         unavailable = True
         reason_code = reason_code or "postgres.invalid_authorization"
@@ -198,6 +203,85 @@ def _skip_for_unavailable_authority(exc: BaseException) -> None:
         f"{reason_code}",
         allow_module_level=True,
     )
+
+
+def _strip_leading_sql_comments(statement: str) -> str:
+    text = statement.lstrip()
+    while text:
+        if text.startswith("--"):
+            newline_index = text.find("\n")
+            if newline_index == -1:
+                return ""
+            text = text[newline_index + 1 :].lstrip()
+            continue
+        if text.startswith("/*"):
+            comment_end = text.find("*/", 2)
+            if comment_end == -1:
+                return ""
+            text = text[comment_end + 2 :].lstrip()
+            continue
+        break
+    return text
+
+
+def _is_comment_only_sql_statement(statement: str) -> bool:
+    return not _strip_leading_sql_comments(statement).strip()
+
+
+def _is_transaction_wrapper_sql_statement(statement: str) -> bool:
+    normalized = (
+        _strip_leading_sql_comments(statement)
+        .strip()
+        .rstrip(";")
+        .strip()
+        .lower()
+    )
+    return normalized in {"begin", "begin transaction", "commit"}
+
+
+async def bootstrap_workflow_migration(
+    conn,
+    filename: str,
+    *,
+    bootstrap_allowed: bool = False,
+    schema_bootstrap_lock_id: int = _DEFAULT_SCHEMA_BOOTSTRAP_LOCK_ID,
+    duplicate_sqlstates: frozenset[str] = _DUPLICATE_MIGRATION_SQLSTATES,
+) -> None:
+    """Replay one workflow migration in rollbackable tests.
+
+    Some canonical migrations carry explicit BEGIN/COMMIT wrappers for direct
+    database application. Test cases usually execute them inside outer rollback
+    transactions, so wrappers must be treated as migration framing rather than
+    executable statements.
+    """
+
+    from storage.migrations import (
+        workflow_bootstrap_migration_statements,
+        workflow_migration_statements,
+    )
+
+    statements = (
+        workflow_bootstrap_migration_statements(filename)
+        if bootstrap_allowed
+        else workflow_migration_statements(filename)
+    )
+    async with conn.transaction():
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock($1::bigint)",
+            schema_bootstrap_lock_id,
+        )
+        for statement in statements:
+            if _is_comment_only_sql_statement(statement):
+                continue
+            if _is_transaction_wrapper_sql_statement(statement):
+                continue
+            try:
+                async with conn.transaction():
+                    await conn.execute(statement)
+            except asyncpg.PostgresError as exc:
+                if getattr(exc, "sqlstate", None) in duplicate_sqlstates:
+                    continue
+                raise
 
 
 def get_test_conn():

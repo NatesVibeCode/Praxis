@@ -91,6 +91,7 @@
 
     --moon-fg: var(--text);
     --moon-fg-muted: var(--text-muted);
+    --moon-text-muted: var(--moon-palette-foreground-muted);
     --moon-fg-dim: var(--moon-palette-neutral-dark);
     --moon-fg-soft: var(--moon-palette-neutral-soft);
     --moon-muted: var(--moon-fg-dim);
@@ -152,6 +153,11 @@
     --moon-surface-card-soft: rgba(255, 255, 255, 0.03);
     --moon-surface-card-muted: rgba(255, 255, 255, 0.02);
     --moon-surface-card-active: rgba(255, 255, 255, 0.06);
+    --moon-compose-input-bg: rgba(10, 10, 10, 0.92);
+    --moon-run-overlay-bg: rgba(13, 17, 23, 0.92);
+    --moon-run-overlay-bg-soft: rgba(13, 17, 23, 0.88);
+    --moon-run-overlay-bg-strong: rgba(13, 17, 23, 0.96);
+    --moon-run-overlay-pre-bg: rgba(0, 0, 0, 0.35);
 
     --moon-state-focus-outline: color-mix(in srgb, var(--moon-accent) 28%, var(--moon-color-black));
     --moon-state-shadow: 0 0 0 3px var(--moon-accent);
@@ -183,6 +189,7 @@
     --moon-white-a03: rgba(255, 255, 255, 0.03);
     --moon-white-a04: rgba(255, 255, 255, 0.04);
     --moon-white-a05: rgba(255, 255, 255, 0.05);
+    --moon-white-a06: rgba(255, 255, 255, 0.06);
     --moon-white-a08: rgba(255, 255, 255, 0.08);
     --moon-white-a10: rgba(255, 255, 255, 0.1);
     --moon-white-a12: rgba(255, 255, 255, 0.12);
@@ -190,6 +197,7 @@
     --moon-white-a16: rgba(255, 255, 255, 0.16);
     --moon-white-a18: rgba(255, 255, 255, 0.18);
     --moon-white-a20: rgba(255, 255, 255, 0.2);
+    --moon-white-a24: rgba(255, 255, 255, 0.24);
     --moon-white-a25: rgba(255, 255, 255, 0.25);
     --moon-white-a85: rgba(255, 255, 255, 0.85);
     --moon-black-a16: rgba(0, 0, 0, 0.16);
@@ -198,9 +206,12 @@
     --moon-black-a22: rgba(0, 0, 0, 0.22);
     --moon-black-a30: rgba(0, 0, 0, 0.3);
     --moon-black-a34: rgba(0, 0, 0, 0.34);
+    --moon-black-a35: rgba(0, 0, 0, 0.35);
     --moon-black-a36: rgba(0, 0, 0, 0.36);
+    --moon-black-a42: rgba(0, 0, 0, 0.42);
     --moon-black-a34-shadow: 0 20px 46px rgba(0, 0, 0, 0.34);
     --moon-black-a45: rgba(0, 0, 0, 0.45);
+    --moon-black-a50: rgba(0, 0, 0, 0.5);
     --moon-glow-outline-soft: var(--moon-black-a20);
     --moon-glow-outline-mid: var(--moon-black-a30);
     --moon-glow-outline-strong: var(--moon-black-a36);
@@ -227,6 +238,8 @@
     --moon-accent-a45: rgba(210, 153, 34, 0.45);
     --moon-accent-a48: rgba(210, 153, 34, 0.48);
     --moon-accent-a80: rgba(210, 153, 34, 0.8);
+    --moon-warning-a08: rgba(210, 153, 34, 0.08);
+    --moon-warning-a32: rgba(210, 153, 34, 0.32);
 
     --moon-neutral-1: rgba(139, 147, 157, 0.2);
     --moon-neutral-2: rgba(139, 147, 157, 0.25);
@@ -240,6 +253,7 @@
 
     --moon-success-a08: rgba(63, 185, 80, 0.08);
     --moon-success-a10: rgba(63, 185, 80, 0.1);
+    --moon-success-a14: rgba(63, 185, 80, 0.14);
     --moon-success-a16: rgba(63, 185, 80, 0.16);
     --moon-success-a24: rgba(63, 185, 80, 0.24);
     --moon-success-a30: rgba(63, 185, 80, 0.3);
@@ -254,6 +268,7 @@
     --moon-danger-a34: rgba(248, 81, 73, 0.34);
     --moon-danger-a45: rgba(248, 81, 73, 0.45);
     --moon-danger-a16: rgba(248, 81, 73, 0.16);
+    --moon-danger-a12: rgba(248, 81, 73, 0.12);
     --moon-danger-a08: rgba(248, 81, 73, 0.08);
     --moon-danger-a06: rgba(248, 81, 73, 0.06);
 
@@ -306,6 +321,7 @@
     --moon-glow-line-soft: var(--moon-glow-outline-soft);
     --moon-glow-line-mid: var(--moon-glow-outline-mid);
     --moon-glow-line-strong: var(--moon-glow-outline-strong);
+    --moon-glow-line-soft-shadow: var(--moon-shadow-line-soft);
     --moon-shadow-white-soft: var(--moon-glow-white-soft);
     --moon-shadow-white-mid: var(--moon-glow-white-mid);
     --moon-shadow-white-strong: var(--moon-glow-white-strong);

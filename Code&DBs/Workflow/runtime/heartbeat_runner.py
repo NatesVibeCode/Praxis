@@ -371,6 +371,39 @@ class _DatabaseMaintenanceModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
+class _GraphHygieneModule(HeartbeatModule):
+    """Heartbeat adapter for graph hygiene maintenance."""
+
+    def __init__(self, engine) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "graph_hygiene"
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        try:
+            from memory.graph_hygiene import GraphHygienist
+
+            report = GraphHygienist(self._engine).run_hygiene_cycle()
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+
+        if report.errors:
+            error_msg = "; ".join(report.errors[:3])
+            return _fail(self.name, t0, error_msg)
+
+        logger.info(
+            "graph_hygiene: archived=%d ranks=%d verified=%d skipped=%d",
+            report.stale_archived,
+            report.ranks_recomputed,
+            report.verified,
+            report.skipped,
+        )
+        return _ok(self.name, t0)
+
+
 class _AutoReviewFlushModule(HeartbeatModule):
     """Heartbeat adapter for time-gated review queue draining."""
 
@@ -800,6 +833,7 @@ class HeartbeatRunner:
             DuplicateScanner(self._engine),
             OrphanEdgeCleanup(self._engine),
             GapScanner(self._engine),
+            _GraphHygieneModule(self._engine),
         ]
 
         if self._conn is not None:

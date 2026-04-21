@@ -103,6 +103,41 @@ describe('buildGraphToDefinition', () => {
     expect(first?.title).toBe('Alpha');
   });
 
+  it('includes compiled spec projection in the release fingerprint', () => {
+    const first = resolveReleasePlanSource({
+      workflow: { id: 'wf_1', name: 'Alpha' },
+      definition: {
+        trigger_intent: [{ event_type: 'manual' }],
+        execution_setup: {
+          phases: [{ route: 'auto/draft', prompt: 'Draft it' }],
+        },
+      },
+      compiled_spec_projection: {
+        compiled_spec: {
+          jobs: [{ label: 'Projected draft', agent: 'auto/draft' }],
+          triggers: [{ event_type: 'manual' }],
+        },
+      },
+    } as any);
+    const second = resolveReleasePlanSource({
+      workflow: { id: 'wf_1', name: 'Alpha' },
+      definition: {
+        trigger_intent: [{ event_type: 'manual' }],
+        execution_setup: {
+          phases: [{ route: 'auto/draft', prompt: 'Draft it' }],
+        },
+      },
+      compiled_spec_projection: {
+        compiled_spec: {
+          jobs: [{ label: 'Projected reviewed draft', agent: 'auto/draft' }],
+          triggers: [{ event_type: 'manual' }],
+        },
+      },
+    } as any);
+
+    expect(first?.fingerprint).not.toBe(second?.fingerprint);
+  });
+
   it('uses build_graph as a first-class release source without projecting it locally', () => {
     const first = resolveReleasePlanSource({
       workflow: { id: 'wf_graph', name: 'Graph Alpha' },

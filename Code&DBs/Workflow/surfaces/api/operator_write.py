@@ -68,6 +68,7 @@ from runtime.work_item_workflow_bindings import (
     WorkItemWorkflowBindingRuntime,
 )
 from storage.postgres import (
+    PostgresOperatorIdeaRepository,
     PostgresOperatorControlRepository,
     PostgresWorkItemCloseoutRepository,
     PostgresRoadmapAuthoringRepository,
@@ -109,6 +110,11 @@ _TASK_ROUTE_ELIGIBILITY_STATUSES = frozenset({"eligible", "rejected"})
 _ISSUE_STATUSES = frozenset({"open", "resolved"})
 _ROADMAP_WRITE_ACTIONS = frozenset({"preview", "validate", "commit"})
 _WORK_ITEM_CLOSEOUT_ACTIONS = frozenset({"preview", "commit"})
+_OPERATOR_IDEA_ACTIONS = frozenset({"list", "file", "resolve", "promote"})
+_OPERATOR_IDEA_STATUSES = frozenset(
+    {"open", "promoted", "rejected", "superseded", "archived"}
+)
+_OPERATOR_IDEA_RESOLUTION_STATUSES = frozenset({"rejected", "superseded", "archived"})
 _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
 _ROADMAP_STATUSES = frozenset({"active", "completed", "done"})
 _ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed"})
@@ -131,6 +137,14 @@ _ROADMAP_SEMANTIC_PREDICATE_SPECS: dict[str, dict[str, object]] = {
         "cardinality_mode": "single_active_per_subject",
         "description": (
             "Auto-registered bridge predicate mirroring roadmap_items.source_bug_id "
+            "onto scoped semantic edges."
+        ),
+    },
+    "sourced_from_idea": {
+        "object_kind_allowlist": ("operator_idea",),
+        "cardinality_mode": "single_active_per_subject",
+        "description": (
+            "Auto-registered bridge predicate mirroring roadmap_items.source_idea_id "
             "onto scoped semantic edges."
         ),
     },
@@ -383,6 +397,34 @@ def _normalize_work_item_closeout_action(value: object) -> str:
         value,
         field_name="action",
         choices=_WORK_ITEM_CLOSEOUT_ACTIONS,
+    )
+
+
+def _normalize_operator_idea_action(value: object | None) -> str:
+    if value is None:
+        return "list"
+    return coerce_choice(
+        value,
+        field_name="action",
+        choices=_OPERATOR_IDEA_ACTIONS,
+    )
+
+
+def _normalize_operator_idea_status(
+    value: object | None,
+    *,
+    terminal_only: bool = False,
+) -> str | None:
+    if value is None:
+        return None
+    return coerce_choice(
+        value,
+        field_name="status",
+        choices=(
+            _OPERATOR_IDEA_RESOLUTION_STATUSES
+            if terminal_only
+            else _OPERATOR_IDEA_STATUSES
+        ),
     )
 
 
@@ -688,6 +730,7 @@ def _roadmap_item_payload(
     priority: str,
     parent_roadmap_item_id: str | None,
     source_bug_id: str | None,
+    source_idea_id: str | None,
     registry_paths: tuple[str, ...],
     summary: str,
     acceptance_criteria: Mapping[str, Any],
@@ -705,6 +748,7 @@ def _roadmap_item_payload(
         "priority": priority,
         "parent_roadmap_item_id": parent_roadmap_item_id,
         "source_bug_id": source_bug_id,
+        "source_idea_id": source_idea_id,
         "registry_paths": list(registry_paths),
         "summary": summary,
         "acceptance_criteria": _json_compatible(acceptance_criteria),
@@ -1144,6 +1188,25 @@ def _issue_key_from_issue_id(issue_id: str) -> str:
     return issue_id.replace("_", ".")
 
 
+def _idea_id_from_slug(slug: str) -> str:
+    return f"operator_idea.{slug}"
+
+
+def _idea_key_from_idea_id(idea_id: str) -> str:
+    prefix = "operator_idea."
+    if idea_id.startswith(prefix):
+        return f"idea.{idea_id[len(prefix):]}"
+    return idea_id.replace("_", ".")
+
+
+def _idea_promotion_id(*, idea_id: str, roadmap_item_id: str) -> str:
+    return (
+        "operator_idea_promotion."
+        f"{_scope_fragment(idea_id, fallback='idea')}."
+        f"{_scope_fragment(roadmap_item_id, fallback='roadmap')}"
+    )
+
+
 def _task_route_eligibility_record_from_row(row: Mapping[str, Any]) -> TaskRouteEligibilityRecord:
     return TaskRouteEligibilityRecord(
         task_route_eligibility_id=str(row["task_route_eligibility_id"]),
@@ -1176,6 +1239,9 @@ class OperatorControlFrontdoor:
     roadmap_repository_factory: Callable[[
         _Connection,
     ], Any] | None = None
+    operator_idea_repository_factory: Callable[[
+        _Connection,
+    ], PostgresOperatorIdeaRepository] | None = None
     object_relation_repository_factory: Callable[[
         _Connection,
     ], OperatorObjectRelationRepository] | None = None
@@ -1203,6 +1269,10 @@ class OperatorControlFrontdoor:
             )
         if self.roadmap_repository_factory is None:
             self.roadmap_repository_factory = self._default_roadmap_repository_factory
+        if self.operator_idea_repository_factory is None:
+            self.operator_idea_repository_factory = (
+                self._default_operator_idea_repository_factory
+            )
         if self.object_relation_repository_factory is None:
             self.object_relation_repository_factory = (
                 self._default_object_relation_repository_factory
@@ -1239,6 +1309,12 @@ class OperatorControlFrontdoor:
         conn: _Connection,
     ) -> Any:
         return PostgresRoadmapAuthoringRepository(conn)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _default_operator_idea_repository_factory(
+        conn: _Connection,
+    ) -> PostgresOperatorIdeaRepository:
+        return PostgresOperatorIdeaRepository(conn)  # type: ignore[arg-type]
 
     @staticmethod
     def _default_object_relation_repository_factory(
@@ -1873,6 +1949,10 @@ class OperatorControlFrontdoor:
             roadmap_item.get("source_bug_id"),
             field_name="source_bug_id",
         )
+        source_idea_id = _optional_text(
+            roadmap_item.get("source_idea_id"),
+            field_name="source_idea_id",
+        )
         decision_ref = _optional_text(
             roadmap_item.get("decision_ref"),
             field_name="decision_ref",
@@ -1895,6 +1975,32 @@ class OperatorControlFrontdoor:
                         qualifiers_json={
                             "bridge_source": "roadmap_items",
                             "source_field": "source_bug_id",
+                        },
+                        source_kind=_ROADMAP_SEMANTIC_SOURCE_KIND,
+                        source_ref=roadmap_item_id,
+                        evidence_ref=None,
+                        bound_decision_id=None,
+                        valid_from=created_at,
+                        valid_to=None,
+                        created_at=created_at,
+                        updated_at=updated_at,
+                    )
+                )
+            )
+        if source_idea_id is not None:
+            assertions.append(
+                normalize_semantic_assertion_record(
+                    SemanticAssertionRecord(
+                        semantic_assertion_id="",
+                        predicate_slug="sourced_from_idea",
+                        assertion_status="active",
+                        subject_kind="roadmap_item",
+                        subject_ref=roadmap_item_id,
+                        object_kind="operator_idea",
+                        object_ref=source_idea_id,
+                        qualifiers_json={
+                            "bridge_source": "roadmap_items",
+                            "source_field": "source_idea_id",
                         },
                         source_kind=_ROADMAP_SEMANTIC_SOURCE_KIND,
                         source_ref=roadmap_item_id,
@@ -2070,6 +2176,7 @@ class OperatorControlFrontdoor:
             SELECT
                 roadmap_item_id,
                 source_bug_id,
+                source_idea_id,
                 lifecycle,
                 registry_paths,
                 decision_ref,
@@ -2380,6 +2487,7 @@ class OperatorControlFrontdoor:
                 priority,
                 parent_roadmap_item_id,
                 source_bug_id,
+                source_idea_id,
                 registry_paths,
                 summary,
                 acceptance_criteria,
@@ -2442,6 +2550,7 @@ class OperatorControlFrontdoor:
                 priority,
                 parent_roadmap_item_id,
                 source_bug_id,
+                source_idea_id,
                 registry_paths,
                 summary,
                 acceptance_criteria,
@@ -2466,6 +2575,18 @@ class OperatorControlFrontdoor:
         row = await conn.fetchrow(
             "SELECT bug_id FROM bugs WHERE bug_id = $1",
             bug_id,
+        )
+        return row is not None
+
+    async def _idea_exists(
+        self,
+        conn: _Connection,
+        *,
+        idea_id: str,
+    ) -> bool:
+        row = await conn.fetchrow(
+            "SELECT idea_id FROM operator_ideas WHERE idea_id = $1",
+            idea_id,
         )
         return row is not None
 
@@ -2585,6 +2706,7 @@ class OperatorControlFrontdoor:
                 lifecycle,
                 priority,
                 source_bug_id,
+                source_idea_id,
                 created_at,
                 updated_at
             FROM roadmap_items
@@ -2667,12 +2789,12 @@ class OperatorControlFrontdoor:
         slug = (
             _optional_text(issue_id, field_name="issue_id")
             or _optional_text(issue_key, field_name="issue_key")
-            or coerce_slug(normalized_title, field_name="title")
+            or coerce_slug(normalized_title, field_name="title", separator="-")
         )
         normalized_issue_id = (
             slug
             if slug.startswith("issue.")
-            else _issue_id_from_slug(coerce_slug(slug, field_name="issue_slug"))
+            else _issue_id_from_slug(coerce_slug(slug, field_name="issue_slug", separator="-"))
         )
         normalized_issue_key = (
             _optional_text(issue_key, field_name="issue_key")
@@ -2762,6 +2884,207 @@ class OperatorControlFrontdoor:
             }
         finally:
             await conn.close()
+
+    async def _operator_ideas(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        action: str | None,
+        idea_id: str | None,
+        idea_key: str | None,
+        title: str | None,
+        summary: str | None,
+        source_kind: str,
+        source_ref: str | None,
+        owner_ref: str | None,
+        decision_ref: str | None,
+        status: str | None,
+        resolution_summary: str | None,
+        roadmap_item_id: str | None,
+        promoted_by: str | None,
+        opened_at: datetime | None,
+        resolved_at: datetime | None,
+        promoted_at: datetime | None,
+        created_at: datetime | None,
+        updated_at: datetime | None,
+        idea_ids: tuple[str, ...],
+        open_only: bool,
+        limit: int,
+    ) -> dict[str, Any]:
+        normalized_action = _normalize_operator_idea_action(action)
+        now = _now()
+        conn = await self.connect_database(env)
+        try:
+            assert self.operator_idea_repository_factory is not None
+            repository = self.operator_idea_repository_factory(conn)
+            if normalized_action == "list":
+                normalized_status = _normalize_operator_idea_status(status)
+                ideas = await repository.list_ideas(
+                    idea_ids=idea_ids or None,
+                    status=normalized_status,
+                    open_only=bool(open_only) and normalized_status is None,
+                    limit=max(1, int(limit)),
+                )
+                return {
+                    "kind": "operator_ideas",
+                    "action": "list",
+                    "query": {
+                        "idea_ids": list(idea_ids),
+                        "status": normalized_status,
+                        "open_only": bool(open_only) and normalized_status is None,
+                        "limit": max(1, int(limit)),
+                    },
+                    "count": len(ideas),
+                    "ideas": list(ideas),
+                }
+
+            if normalized_action == "file":
+                normalized_title = _require_text(title, field_name="title")
+                normalized_summary = _require_text(summary, field_name="summary")
+                slug_source = (
+                    _optional_text(idea_id, field_name="idea_id")
+                    or _optional_text(idea_key, field_name="idea_key")
+                    or coerce_slug(normalized_title, field_name="title", separator="-")
+                )
+                if slug_source.startswith("idea."):
+                    slug_source = slug_source[len("idea.") :]
+                normalized_idea_id = (
+                    slug_source
+                    if slug_source.startswith("operator_idea.")
+                    else _idea_id_from_slug(
+                        coerce_slug(slug_source, field_name="idea_slug", separator="-")
+                    )
+                )
+                normalized_idea_key = (
+                    _optional_text(idea_key, field_name="idea_key")
+                    or _idea_key_from_idea_id(normalized_idea_id)
+                )
+                normalized_opened_at = (
+                    now
+                    if opened_at is None
+                    else _normalize_as_of(
+                        opened_at,
+                        error_type=ValueError,
+                        reason_code="operator_control.invalid_opened_at",
+                    )
+                )
+                normalized_created_at = (
+                    normalized_opened_at
+                    if created_at is None
+                    else _normalize_as_of(
+                        created_at,
+                        error_type=ValueError,
+                        reason_code="operator_control.invalid_created_at",
+                    )
+                )
+                normalized_updated_at = (
+                    normalized_created_at
+                    if updated_at is None
+                    else _normalize_as_of(
+                        updated_at,
+                        error_type=ValueError,
+                        reason_code="operator_control.invalid_updated_at",
+                    )
+                )
+                normalized_decision_ref = (
+                    _optional_text(decision_ref, field_name="decision_ref")
+                    or _default_decision_ref(
+                        _scope_fragment(normalized_idea_id, fallback="idea"),
+                        normalized_created_at,
+                    )
+                )
+                idea = await repository.record_idea(
+                    idea_id=normalized_idea_id,
+                    idea_key=normalized_idea_key,
+                    title=normalized_title,
+                    summary=normalized_summary,
+                    source_kind=_require_text(source_kind, field_name="source_kind"),
+                    source_ref=_optional_text(source_ref, field_name="source_ref"),
+                    owner_ref=_optional_text(owner_ref, field_name="owner_ref"),
+                    decision_ref=normalized_decision_ref,
+                    opened_at=normalized_opened_at,
+                    created_at=normalized_created_at,
+                    updated_at=normalized_updated_at,
+                )
+                return {"kind": "operator_ideas", "action": "file", "idea": idea}
+
+            normalized_idea_id = _require_text(idea_id, field_name="idea_id")
+            if normalized_action == "resolve":
+                normalized_status = _normalize_operator_idea_status(
+                    status or "rejected",
+                    terminal_only=True,
+                )
+                normalized_resolved_at = (
+                    now
+                    if resolved_at is None
+                    else _normalize_as_of(
+                        resolved_at,
+                        error_type=ValueError,
+                        reason_code="operator_control.invalid_resolved_at",
+                    )
+                )
+                normalized_decision_ref = (
+                    _optional_text(decision_ref, field_name="decision_ref")
+                    or _default_decision_ref(
+                        _scope_fragment(normalized_idea_id, fallback="idea"),
+                        normalized_resolved_at,
+                    )
+                )
+                idea = await repository.resolve_idea(
+                    idea_id=normalized_idea_id,
+                    status=_require_text(normalized_status, field_name="status"),
+                    resolution_summary=_require_text(
+                        resolution_summary,
+                        field_name="resolution_summary",
+                    ),
+                    decision_ref=normalized_decision_ref,
+                    resolved_at=normalized_resolved_at,
+                )
+                return {"kind": "operator_ideas", "action": "resolve", "idea": idea}
+
+            if normalized_action == "promote":
+                normalized_roadmap_item_id = _require_text(
+                    roadmap_item_id,
+                    field_name="roadmap_item_id",
+                )
+                normalized_promoted_at = (
+                    now
+                    if promoted_at is None
+                    else _normalize_as_of(
+                        promoted_at,
+                        error_type=ValueError,
+                        reason_code="operator_control.invalid_promoted_at",
+                    )
+                )
+                normalized_decision_ref = (
+                    _optional_text(decision_ref, field_name="decision_ref")
+                    or _default_decision_ref(
+                        _scope_fragment(
+                            f"{normalized_idea_id}.{normalized_roadmap_item_id}",
+                            fallback="idea-promotion",
+                        ),
+                        normalized_promoted_at,
+                    )
+                )
+                promotion = await repository.promote_idea(
+                    idea_promotion_id=_idea_promotion_id(
+                        idea_id=normalized_idea_id,
+                        roadmap_item_id=normalized_roadmap_item_id,
+                    ),
+                    idea_id=normalized_idea_id,
+                    roadmap_item_id=normalized_roadmap_item_id,
+                    decision_ref=normalized_decision_ref,
+                    promoted_by=(
+                        _optional_text(promoted_by, field_name="promoted_by")
+                        or "operator_ideas"
+                    ),
+                    promoted_at=normalized_promoted_at,
+                )
+                return {"kind": "operator_ideas", "action": "promote", **promotion}
+        finally:
+            await conn.close()
+
+        raise ValueError(f"unsupported operator ideas action: {normalized_action}")
 
     async def _ensure_issue_promoted_to_bug(
         self,
@@ -2973,6 +3296,7 @@ class OperatorControlFrontdoor:
                 ),
                 parent_roadmap_item_id=None,
                 source_bug_id=bug_id,
+                source_idea_id=None,
                 registry_paths=(),
                 summary=f"Auto-promoted from {bug_id}: {summary}",
                 acceptance_criteria=acceptance,
@@ -3071,6 +3395,7 @@ class OperatorControlFrontdoor:
         slug: str | None,
         depends_on: tuple[str, ...],
         source_bug_id: str | None,
+        source_idea_id: str | None,
         registry_paths: tuple[str, ...],
         decision_ref: str | None,
         item_kind: str | None,
@@ -3099,6 +3424,10 @@ class OperatorControlFrontdoor:
         normalized_source_bug_id = _optional_text(
             source_bug_id,
             field_name="source_bug_id",
+        )
+        normalized_source_idea_id = _optional_text(
+            source_idea_id,
+            field_name="source_idea_id",
         )
         normalized_registry_paths = _normalize_registry_paths(registry_paths)
         normalized_status = _normalize_roadmap_status(status)
@@ -3130,6 +3459,13 @@ class OperatorControlFrontdoor:
             blocking_errors.append(
                 f"source bug not found: {normalized_source_bug_id}"
             )
+        if normalized_source_idea_id is not None and not await self._idea_exists(
+            conn,
+            idea_id=normalized_source_idea_id,
+        ):
+            blocking_errors.append(
+                f"source idea not found: {normalized_source_idea_id}"
+            )
 
         for dependency in normalized_depends_on:
             if not await self._roadmap_item_exists(conn, roadmap_item_id=dependency):
@@ -3155,6 +3491,12 @@ class OperatorControlFrontdoor:
         ):
             normalized_status = _ROADMAP_COMPLETED_STATUS
             auto_fixes.append("status aligned to completed lifecycle: completed")
+        if normalized_lifecycle == "idea":
+            blocking_errors.append(
+                "roadmap lifecycle 'idea' is retired for new roadmap writes; "
+                "record pre-commitment work through praxis_operator_ideas and "
+                "promote it into roadmap when committed"
+            )
 
         parent_acceptance = (
             parent_row.get("acceptance_criteria")
@@ -3255,6 +3597,7 @@ class OperatorControlFrontdoor:
             priority=normalized_priority,
             parent_roadmap_item_id=normalized_parent,
             source_bug_id=normalized_source_bug_id,
+            source_idea_id=normalized_source_idea_id,
             registry_paths=normalized_registry_paths,
             summary=normalized_intent_brief,
             acceptance_criteria=root_acceptance,
@@ -3307,6 +3650,7 @@ class OperatorControlFrontdoor:
                     priority=child.priority,
                     parent_roadmap_item_id=root_roadmap_item_id,
                     source_bug_id=normalized_source_bug_id,
+                    source_idea_id=normalized_source_idea_id,
                     registry_paths=normalized_registry_paths,
                     summary=child.summary,
                     acceptance_criteria=child_acceptance,
@@ -3344,6 +3688,7 @@ class OperatorControlFrontdoor:
             "parent_roadmap_item_id": normalized_parent,
             "depends_on": list(normalized_depends_on),
             "source_bug_id": normalized_source_bug_id,
+            "source_idea_id": normalized_source_idea_id,
             "registry_paths": list(normalized_registry_paths),
             "decision_ref": normalized_decision_ref,
             "tier": normalized_tier,
@@ -3380,6 +3725,7 @@ class OperatorControlFrontdoor:
         slug: str | None = None,
         depends_on: tuple[str, ...] = (),
         source_bug_id: str | None = None,
+        source_idea_id: str | None = None,
         registry_paths: tuple[str, ...] = (),
         decision_ref: str | None = None,
         item_kind: str | None = None,
@@ -3405,6 +3751,7 @@ class OperatorControlFrontdoor:
                 slug=slug,
                 depends_on=depends_on,
                 source_bug_id=source_bug_id,
+                source_idea_id=source_idea_id,
                 registry_paths=registry_paths,
                 decision_ref=decision_ref,
                 item_kind=item_kind,
@@ -4464,6 +4811,57 @@ class OperatorControlFrontdoor:
             )
         }
 
+    async def operator_ideas_async(
+        self,
+        *,
+        action: str = "list",
+        idea_id: str | None = None,
+        idea_key: str | None = None,
+        title: str | None = None,
+        summary: str | None = None,
+        source_kind: str = "operator",
+        source_ref: str | None = None,
+        owner_ref: str | None = None,
+        decision_ref: str | None = None,
+        status: str | None = None,
+        resolution_summary: str | None = None,
+        roadmap_item_id: str | None = None,
+        promoted_by: str | None = None,
+        opened_at: datetime | None = None,
+        resolved_at: datetime | None = None,
+        promoted_at: datetime | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        idea_ids: tuple[str, ...] | list[str] | None = None,
+        open_only: bool = True,
+        limit: int = 50,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return await self._operator_ideas(
+            env=env,
+            action=action,
+            idea_id=idea_id,
+            idea_key=idea_key,
+            title=title,
+            summary=summary,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            owner_ref=owner_ref,
+            decision_ref=decision_ref,
+            status=status,
+            resolution_summary=resolution_summary,
+            roadmap_item_id=roadmap_item_id,
+            promoted_by=promoted_by,
+            opened_at=opened_at,
+            resolved_at=resolved_at,
+            promoted_at=promoted_at,
+            created_at=created_at,
+            updated_at=updated_at,
+            idea_ids=_coerce_text_sequence(idea_ids, field_name="idea_ids"),
+            open_only=open_only,
+            limit=limit,
+        )
+
     async def roadmap_write_async(
         self,
         *,
@@ -4476,6 +4874,7 @@ class OperatorControlFrontdoor:
         slug: str | None = None,
         depends_on: tuple[str, ...] | list[str] | None = None,
         source_bug_id: str | None = None,
+        source_idea_id: str | None = None,
         registry_paths: tuple[str, ...] | list[str] | None = None,
         decision_ref: str | None = None,
         item_kind: str | None = None,
@@ -4500,6 +4899,7 @@ class OperatorControlFrontdoor:
             slug=slug,
             depends_on=_coerce_text_sequence(depends_on, field_name="depends_on"),
             source_bug_id=source_bug_id,
+            source_idea_id=source_idea_id,
             registry_paths=_coerce_text_sequence(registry_paths, field_name="registry_paths"),
             decision_ref=decision_ref,
             item_kind=item_kind,
@@ -5118,6 +5518,63 @@ class OperatorControlFrontdoor:
             ),
         )
 
+    def operator_ideas(
+        self,
+        *,
+        action: str = "list",
+        idea_id: str | None = None,
+        idea_key: str | None = None,
+        title: str | None = None,
+        summary: str | None = None,
+        source_kind: str = "operator",
+        source_ref: str | None = None,
+        owner_ref: str | None = None,
+        decision_ref: str | None = None,
+        status: str | None = None,
+        resolution_summary: str | None = None,
+        roadmap_item_id: str | None = None,
+        promoted_by: str | None = None,
+        opened_at: datetime | None = None,
+        resolved_at: datetime | None = None,
+        promoted_at: datetime | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        idea_ids: tuple[str, ...] | list[str] | None = None,
+        open_only: bool = True,
+        limit: int = 50,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return _run_async(
+            self.operator_ideas_async(
+                action=action,
+                idea_id=idea_id,
+                idea_key=idea_key,
+                title=title,
+                summary=summary,
+                source_kind=source_kind,
+                source_ref=source_ref,
+                owner_ref=owner_ref,
+                decision_ref=decision_ref,
+                status=status,
+                resolution_summary=resolution_summary,
+                roadmap_item_id=roadmap_item_id,
+                promoted_by=promoted_by,
+                opened_at=opened_at,
+                resolved_at=resolved_at,
+                promoted_at=promoted_at,
+                created_at=created_at,
+                updated_at=updated_at,
+                idea_ids=idea_ids,
+                open_only=open_only,
+                limit=limit,
+                env=env,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
+
     def roadmap_write(
         self,
         *,
@@ -5130,6 +5587,7 @@ class OperatorControlFrontdoor:
         slug: str | None = None,
         depends_on: tuple[str, ...] | list[str] | None = None,
         source_bug_id: str | None = None,
+        source_idea_id: str | None = None,
         registry_paths: tuple[str, ...] | list[str] | None = None,
         decision_ref: str | None = None,
         item_kind: str | None = None,
@@ -5154,6 +5612,7 @@ class OperatorControlFrontdoor:
                 slug=slug,
                 depends_on=depends_on,
                 source_bug_id=source_bug_id,
+                source_idea_id=source_idea_id,
                 registry_paths=registry_paths,
                 decision_ref=decision_ref,
                 item_kind=item_kind,
@@ -6114,6 +6573,112 @@ async def arecord_issue(
     )
 
 
+def operator_ideas(
+    *,
+    action: str = "list",
+    idea_id: str | None = None,
+    idea_key: str | None = None,
+    title: str | None = None,
+    summary: str | None = None,
+    source_kind: str = "operator",
+    source_ref: str | None = None,
+    owner_ref: str | None = None,
+    decision_ref: str | None = None,
+    status: str | None = None,
+    resolution_summary: str | None = None,
+    roadmap_item_id: str | None = None,
+    promoted_by: str | None = None,
+    opened_at: datetime | None = None,
+    resolved_at: datetime | None = None,
+    promoted_at: datetime | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    idea_ids: tuple[str, ...] | list[str] | None = None,
+    open_only: bool = True,
+    limit: int = 50,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record, resolve, promote, or list pre-commitment operator ideas."""
+
+    return OperatorControlFrontdoor().operator_ideas(
+        action=action,
+        idea_id=idea_id,
+        idea_key=idea_key,
+        title=title,
+        summary=summary,
+        source_kind=source_kind,
+        source_ref=source_ref,
+        owner_ref=owner_ref,
+        decision_ref=decision_ref,
+        status=status,
+        resolution_summary=resolution_summary,
+        roadmap_item_id=roadmap_item_id,
+        promoted_by=promoted_by,
+        opened_at=opened_at,
+        resolved_at=resolved_at,
+        promoted_at=promoted_at,
+        created_at=created_at,
+        updated_at=updated_at,
+        idea_ids=idea_ids,
+        open_only=open_only,
+        limit=limit,
+        env=env,
+    )
+
+
+async def aoperator_ideas(
+    *,
+    action: str = "list",
+    idea_id: str | None = None,
+    idea_key: str | None = None,
+    title: str | None = None,
+    summary: str | None = None,
+    source_kind: str = "operator",
+    source_ref: str | None = None,
+    owner_ref: str | None = None,
+    decision_ref: str | None = None,
+    status: str | None = None,
+    resolution_summary: str | None = None,
+    roadmap_item_id: str | None = None,
+    promoted_by: str | None = None,
+    opened_at: datetime | None = None,
+    resolved_at: datetime | None = None,
+    promoted_at: datetime | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    idea_ids: tuple[str, ...] | list[str] | None = None,
+    open_only: bool = True,
+    limit: int = 50,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record, resolve, promote, or list pre-commitment operator ideas."""
+
+    return await OperatorControlFrontdoor().operator_ideas_async(
+        action=action,
+        idea_id=idea_id,
+        idea_key=idea_key,
+        title=title,
+        summary=summary,
+        source_kind=source_kind,
+        source_ref=source_ref,
+        owner_ref=owner_ref,
+        decision_ref=decision_ref,
+        status=status,
+        resolution_summary=resolution_summary,
+        roadmap_item_id=roadmap_item_id,
+        promoted_by=promoted_by,
+        opened_at=opened_at,
+        resolved_at=resolved_at,
+        promoted_at=promoted_at,
+        created_at=created_at,
+        updated_at=updated_at,
+        idea_ids=idea_ids,
+        open_only=open_only,
+        limit=limit,
+        env=env,
+    )
+
+
 def roadmap_write(
     *,
     action: str = "preview",
@@ -6125,6 +6690,7 @@ def roadmap_write(
     slug: str | None = None,
     depends_on: tuple[str, ...] | list[str] | None = None,
     source_bug_id: str | None = None,
+    source_idea_id: str | None = None,
     registry_paths: tuple[str, ...] | list[str] | None = None,
     decision_ref: str | None = None,
     item_kind: str | None = None,
@@ -6149,6 +6715,7 @@ def roadmap_write(
         slug=slug,
         depends_on=depends_on,
         source_bug_id=source_bug_id,
+        source_idea_id=source_idea_id,
         registry_paths=registry_paths,
         decision_ref=decision_ref,
         item_kind=item_kind,
@@ -6174,6 +6741,7 @@ async def aroadmap_write(
     slug: str | None = None,
     depends_on: tuple[str, ...] | list[str] | None = None,
     source_bug_id: str | None = None,
+    source_idea_id: str | None = None,
     registry_paths: tuple[str, ...] | list[str] | None = None,
     decision_ref: str | None = None,
     item_kind: str | None = None,
@@ -6199,6 +6767,7 @@ async def aroadmap_write(
         slug=slug,
         depends_on=depends_on,
         source_bug_id=source_bug_id,
+        source_idea_id=source_idea_id,
         registry_paths=registry_paths,
         decision_ref=decision_ref,
         item_kind=item_kind,
@@ -7036,6 +7605,7 @@ __all__ = [
     "arecord_dataset_rejection",
     "asupersede_dataset_promotion",
     "arecord_functional_area",
+    "aoperator_ideas",
     "arecord_issue",
     "arecord_operator_decision",
     "arecord_operator_object_relation",
@@ -7051,6 +7621,7 @@ __all__ = [
     "backfill_semantic_bridges",
     "record_architecture_policy_decision",
     "record_functional_area",
+    "operator_ideas",
     "record_issue",
     "record_operator_decision",
     "record_operator_object_relation",

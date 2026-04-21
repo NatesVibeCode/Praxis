@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import asyncpg
 import pytest
 
-from _pg_test_conn import ensure_test_database_ready
+from _pg_test_conn import bootstrap_workflow_migration, ensure_test_database_ready
 from contracts.domain import (
     MINIMAL_WORKFLOW_EDGE_TYPE,
     MINIMAL_WORKFLOW_NODE_TYPE,
@@ -32,7 +32,6 @@ from registry.domain import (
 )
 from runtime import RuntimeOrchestrator, WorkflowIntakePlanner
 from runtime.work_item_workflow_bindings import WorkItemWorkflowBindingRecord
-from storage.migrations import workflow_migration_statements
 from storage.postgres import connect_workflow_database
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
@@ -202,19 +201,11 @@ def _binding_from_row(row: asyncpg.Record) -> WorkItemWorkflowBindingRecord:
 
 
 async def _bootstrap_workflow_migration(conn, filename: str) -> None:
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in workflow_migration_statements(filename):
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except asyncpg.PostgresError as exc:
-                if getattr(exc, "sqlstate", None) in {"42P07", "42701", "42710"}:
-                    continue
-                raise
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
+    )
 
 
 def test_cutover_graph_status_surface_is_deterministic_and_surface_only() -> None:
@@ -236,6 +227,8 @@ async def _exercise_cutover_graph_status_surface_is_deterministic_and_surface_on
             "006_platform_authority_schema.sql",
             "008_workflow_class_and_schedule_schema.sql",
             "009_bug_and_roadmap_authority.sql",
+            "136_operation_catalog_authority.sql",
+            "195_operator_ideas_authority.sql",
             "010_operator_control_authority.sql",
             "132_issue_backlog_authority.sql",
             "124_operator_decision_scope_authority.sql",

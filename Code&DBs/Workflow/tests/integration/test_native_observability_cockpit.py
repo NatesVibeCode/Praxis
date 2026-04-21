@@ -7,9 +7,9 @@ from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 
-import asyncpg
 import pytest
 
+from _pg_test_conn import bootstrap_workflow_migration
 from memory.retrieval_telemetry import RetrievalMetric, TelemetryStore
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.debate_metrics import DebateMetricsCollector
@@ -20,10 +20,6 @@ from runtime.instance import (
     PRAXIS_TOPOLOGY_DIR_ENV,
 )
 from runtime.work_item_workflow_bindings import record_work_item_workflow_binding
-from storage.migrations import (
-    workflow_bootstrap_migration_statements,
-    workflow_migration_statements,
-)
 from storage.postgres import (
     PostgresConfigurationError,
     PostgresEvidenceReader,
@@ -486,6 +482,8 @@ async def _seed_cockpit_bindings(
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_workflow_migration(conn, "082_event_log.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
@@ -554,6 +552,8 @@ async def _seed_activity_truth_loop_baseline(
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "136_operation_catalog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "195_operator_ideas_authority.sql")
         await _bootstrap_workflow_migration(conn, "082_event_log.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
@@ -743,26 +743,12 @@ async def _complete_activity_truth_loop_binding(
 
 
 async def _bootstrap_workflow_migration(conn, filename: str) -> None:
-    statements = (
-        workflow_bootstrap_migration_statements(filename)
-        if filename in {"082_event_log.sql", "040_debate_metrics.sql"}
-        else workflow_migration_statements(filename)
+    await bootstrap_workflow_migration(
+        conn,
+        filename,
+        bootstrap_allowed=filename in {"082_event_log.sql", "040_debate_metrics.sql"},
+        schema_bootstrap_lock_id=_SCHEMA_BOOTSTRAP_LOCK_ID,
     )
-    async with conn.transaction():
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _SCHEMA_BOOTSTRAP_LOCK_ID,
-        )
-        for statement in statements:
-            if statement.strip().upper() in {"BEGIN", "COMMIT"}:
-                continue
-            try:
-                async with conn.transaction():
-                    await conn.execute(statement)
-            except asyncpg.PostgresError as exc:
-                if getattr(exc, "sqlstate", None) in {"42P07", "42710"}:
-                    continue
-                raise
 
 
 async def _seed_operator_decision(conn, *, as_of: datetime, suffix: str) -> str:

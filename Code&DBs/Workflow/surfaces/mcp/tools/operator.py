@@ -194,6 +194,40 @@ def tool_praxis_issue_backlog(params: dict) -> dict:
     )
 
 
+def tool_praxis_operator_ideas(params: dict) -> dict:
+    """Record, resolve, promote, or list pre-commitment operator ideas."""
+
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operator.ideas",
+        payload={
+            "action": params.get("action", "list"),
+            "idea_id": params.get("idea_id"),
+            "idea_key": params.get("idea_key"),
+            "title": params.get("title"),
+            "summary": params.get("summary"),
+            "source_kind": params.get("source_kind", "operator"),
+            "source_ref": params.get("source_ref"),
+            "owner_ref": params.get("owner_ref"),
+            "decision_ref": params.get("decision_ref"),
+            "status": params.get("status"),
+            "resolution_summary": params.get("resolution_summary"),
+            "roadmap_item_id": params.get("roadmap_item_id"),
+            "promoted_by": params.get("promoted_by"),
+            "opened_at": params.get("opened_at"),
+            "resolved_at": params.get("resolved_at"),
+            "promoted_at": params.get("promoted_at"),
+            "created_at": params.get("created_at"),
+            "updated_at": params.get("updated_at"),
+            "idea_ids": _optional_sequence_payload(params, "idea_ids"),
+            "open_only": bool(
+                params.get("open_only", bug_query_default_open_only_backlog())
+            ),
+            "limit": int(params.get("limit", 50) or 50),
+        },
+    )
+
+
 def tool_praxis_replay_ready_bugs(params: dict) -> dict:
     """Read the replay-ready bug backlog."""
 
@@ -221,9 +255,12 @@ def tool_praxis_operator_write(params: dict) -> dict:
             "slug": params.get("slug"),
             "depends_on": _optional_sequence_payload(params, "depends_on"),
             "source_bug_id": params.get("source_bug_id"),
+            "source_idea_id": params.get("source_idea_id"),
             "registry_paths": _optional_sequence_payload(params, "registry_paths"),
             "decision_ref": params.get("decision_ref"),
             "item_kind": params.get("item_kind"),
+            "status": params.get("status"),
+            "lifecycle": params.get("lifecycle"),
             "tier": params.get("tier"),
             "phase_ready": params.get("phase_ready"),
             "approval_tag": params.get("approval_tag"),
@@ -978,6 +1015,108 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "praxis_operator_ideas": (
+        tool_praxis_operator_ideas,
+        {
+            "description": (
+                "Record, resolve, promote, or list pre-commitment operator ideas. "
+                "Ideas are upstream of roadmap commitment: they may be rejected, "
+                "superseded, archived, or promoted into existing roadmap items, "
+                "but roadmap itself does not gain a canceled state."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "file", "resolve", "promote"],
+                        "default": "list",
+                    },
+                    "idea_id": {"type": "string"},
+                    "idea_key": {"type": "string"},
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "source_kind": {
+                        "type": "string",
+                        "description": "Origin of the idea, such as operator, conversation, receipt, or research.",
+                        "default": "operator",
+                    },
+                    "source_ref": {"type": "string"},
+                    "owner_ref": {"type": "string"},
+                    "decision_ref": {"type": "string"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["open", "promoted", "rejected", "superseded", "archived"],
+                        "description": "Filter for list or terminal status for resolve.",
+                    },
+                    "resolution_summary": {"type": "string"},
+                    "roadmap_item_id": {
+                        "type": "string",
+                        "description": "Existing roadmap item to link when action='promote'.",
+                    },
+                    "promoted_by": {"type": "string"},
+                    "opened_at": {"type": "string"},
+                    "resolved_at": {"type": "string"},
+                    "promoted_at": {"type": "string"},
+                    "created_at": {"type": "string"},
+                    "updated_at": {"type": "string"},
+                    "idea_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "description": "When true, list only open ideas unless status is supplied.",
+                        "default": bug_query_default_open_only_backlog(),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum idea rows to return for list.",
+                        "minimum": 1,
+                        "default": 50,
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Capture pre-commitment ideas or promote them into roadmap without polluting roadmap with canceled items.",
+                "when_not_to_use": "Do not use it to create committed roadmap work; use praxis_operator_write after the idea is ready for roadmap.",
+                "risks": {
+                    "default": "read",
+                    "actions": {
+                        "list": "read",
+                        "file": "write",
+                        "resolve": "write",
+                        "promote": "write",
+                    },
+                },
+                "examples": [
+                    {
+                        "title": "List open ideas",
+                        "input": {"action": "list", "limit": 25},
+                    },
+                    {
+                        "title": "File an idea",
+                        "input": {
+                            "action": "file",
+                            "title": "First-class ideas authority",
+                            "summary": "Pre-commitment intake for roadmap candidates.",
+                        },
+                    },
+                    {
+                        "title": "Reject an idea",
+                        "input": {
+                            "action": "resolve",
+                            "idea_id": "operator_idea.example",
+                            "status": "rejected",
+                            "resolution_summary": "No longer fits the operator model.",
+                        },
+                    },
+                ],
+            },
+        },
+    ),
     "praxis_replay_ready_bugs": (
         tool_praxis_replay_ready_bugs,
         {
@@ -1044,6 +1183,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "items": {"type": "string"},
                     },
                     "source_bug_id": {"type": "string"},
+                    "source_idea_id": {"type": "string"},
                     "registry_paths": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -1052,6 +1192,15 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "item_kind": {
                         "type": "string",
                         "enum": ["capability", "initiative"],
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["active", "completed", "done"],
+                    },
+                    "lifecycle": {
+                        "type": "string",
+                        "enum": ["planned", "claimed", "completed"],
+                        "description": "Roadmap commitment lifecycle. Use praxis_operator_ideas for pre-commitment ideas.",
                     },
                     "tier": {"type": "string"},
                     "phase_ready": {"type": "boolean"},
@@ -1440,7 +1589,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Read one roadmap subtree and its dependency edges from DB-backed authority.\n\n"
                 "USE WHEN: you want the full package view for a roadmap item, including generated child waves, "
-                "external dependency edges, canonical semantic neighbors, and a rendered markdown outline.\n\n"
+                "derived roadmap item clusters, external dependency edges, canonical semantic neighbors, "
+                "and a rendered markdown outline.\n\n"
                 "EXAMPLES:\n"
                 "  praxis_operator_roadmap_view()\n"
                 "  praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate')\n"

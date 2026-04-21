@@ -454,6 +454,31 @@ def test_issue_backlog_authority_expected_objects_are_registered() -> None:
     )
 
 
+def test_operator_ideas_authority_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("195_operator_ideas_authority.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "operator_ideas",
+            "operator_ideas_idea_key_key",
+            "operator_ideas_status_check",
+            "operator_ideas_resolution_window",
+            "operator_ideas_terminal_resolution_summary",
+            "operator_ideas_source_idx",
+            "operator_idea_promotions",
+            "operator_idea_promotions_idea_fkey",
+            "operator_idea_promotions_roadmap_fkey",
+            "operator_idea_promotions_unique_edge",
+            "operator_idea_promotions_idea_idx",
+            "operator_idea_promotions_roadmap_idx",
+            "roadmap_items.source_idea_id",
+            "roadmap_items_source_idea_fkey",
+            "roadmap_items_source_idea_idx",
+            "operation_catalog_registry.operator.ideas",
+        }
+    )
+
+
 def test_runtime_breadth_authority_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("011_runtime_breadth_authority.sql")
     names = {item.object_name for item in objects}

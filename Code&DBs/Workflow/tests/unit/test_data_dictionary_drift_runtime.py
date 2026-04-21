@@ -215,6 +215,18 @@ def test_dropped_pii_field_is_p0(monkeypatch) -> None:
     assert impact.pii_dropped is True
 
 
+def test_dropped_auto_detected_pii_field_stays_p2(monkeypatch) -> None:
+    _stub_axes(monkeypatch, classifications=[
+        {"tag_key": "pii", "field_path": "email", "effective_source": "auto"},
+    ])
+    impact = drift._assess_change(
+        object(),
+        FieldChange(change_kind="drop_field", object_kind="table:users", field_path="email"),
+    )
+    assert impact.severity == "P2"
+    assert impact.pii_dropped is False
+
+
 def test_changed_field_with_rules_is_p2(monkeypatch) -> None:
     _stub_axes(monkeypatch, rules=[{"field_path": "x", "rule_kind": "not_null"}])
     impact = drift._assess_change(

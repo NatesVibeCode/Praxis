@@ -16,6 +16,7 @@ class RoadmapWriteCommand(BaseModel):
     slug: str | None = None
     depends_on: tuple[str, ...] = ()
     source_bug_id: str | None = None
+    source_idea_id: str | None = None
     registry_paths: tuple[str, ...] = ()
     decision_ref: str | None = None
     item_kind: str | None = None
@@ -33,6 +34,30 @@ class WorkItemCloseoutCommand(BaseModel):
     action: str = "preview"
     bug_ids: tuple[str, ...] = ()
     roadmap_item_ids: tuple[str, ...] = ()
+
+
+class OperatorIdeasCommand(BaseModel):
+    action: str = "list"
+    idea_id: str | None = None
+    idea_key: str | None = None
+    title: str | None = None
+    summary: str | None = None
+    source_kind: str = "operator"
+    source_ref: str | None = None
+    owner_ref: str | None = None
+    decision_ref: str | None = None
+    status: str | None = None
+    resolution_summary: str | None = None
+    roadmap_item_id: str | None = None
+    promoted_by: str | None = None
+    opened_at: datetime | None = None
+    resolved_at: datetime | None = None
+    promoted_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    idea_ids: tuple[str, ...] = ()
+    open_only: bool = True
+    limit: int = 50
 
 
 class TaskRouteEligibilityCommand(BaseModel):
@@ -146,6 +171,7 @@ def handle_operator_roadmap_write(
         slug=command.slug,
         depends_on=command.depends_on,
         source_bug_id=command.source_bug_id,
+        source_idea_id=command.source_idea_id,
         registry_paths=command.registry_paths,
         decision_ref=command.decision_ref,
         item_kind=command.item_kind,
@@ -157,6 +183,38 @@ def handle_operator_roadmap_write(
         reference_doc=command.reference_doc,
         outcome_gate=command.outcome_gate,
         proof_kind=command.proof_kind,
+        env=_resolved_env(subsystems),
+    )
+
+
+def handle_operator_ideas(
+    command: OperatorIdeasCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from surfaces.api.operator_write import OperatorControlFrontdoor
+
+    return OperatorControlFrontdoor().operator_ideas(
+        action=command.action,
+        idea_id=command.idea_id,
+        idea_key=command.idea_key,
+        title=command.title,
+        summary=command.summary,
+        source_kind=command.source_kind,
+        source_ref=command.source_ref,
+        owner_ref=command.owner_ref,
+        decision_ref=command.decision_ref,
+        status=command.status,
+        resolution_summary=command.resolution_summary,
+        roadmap_item_id=command.roadmap_item_id,
+        promoted_by=command.promoted_by,
+        opened_at=command.opened_at,
+        resolved_at=command.resolved_at,
+        promoted_at=command.promoted_at,
+        created_at=command.created_at,
+        updated_at=command.updated_at,
+        idea_ids=command.idea_ids,
+        open_only=command.open_only,
+        limit=command.limit,
         env=_resolved_env(subsystems),
     )
 
@@ -326,6 +384,7 @@ __all__ = [
     "CircuitOverrideCommand",
     "FunctionalAreaRecordCommand",
     "NativePrimaryCutoverGateCommand",
+    "OperatorIdeasCommand",
     "OperatorDecisionRecordCommand",
     "OperatorObjectRelationRecordCommand",
     "RoadmapWriteCommand",
@@ -335,6 +394,7 @@ __all__ = [
     "handle_circuit_override",
     "handle_functional_area_record",
     "handle_native_primary_cutover_gate",
+    "handle_operator_ideas",
     "handle_operator_decision_record",
     "handle_operator_object_relation_record",
     "handle_operator_roadmap_write",

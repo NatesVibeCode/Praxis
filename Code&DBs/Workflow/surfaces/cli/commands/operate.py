@@ -27,6 +27,10 @@ def _api_discovery_text() -> str:
     return (
         "Discovery shortcuts:\n"
         "  workflow routes                alias for live HTTP route discovery\n"
+        "  workflow api help              show API route-discovery help from the API namespace\n"
+        "  workflow api help routes       show the full live HTTP route catalog help\n"
+        "  workflow api help integrations  show the /api/integrations scoped help\n"
+        "  workflow api help data-dictionary  show the /api/data-dictionary scoped help\n"
         "  workflow integrations          alias for /api/integrations route discovery\n"
         "  workflow api integrations      same scoped route discovery from the api namespace\n"
         "  workflow api data-dictionary   same scoped route discovery for the data dictionary API\n"
@@ -34,6 +38,26 @@ def _api_discovery_text() -> str:
         "  workflow help routes           same discovery help from the root help system\n"
         "  workflow tools list            browse catalog-backed MCP tools\n"
         "  workflow tools search <text>    search tools by topic, alias, or entrypoint\n"
+    )
+
+
+def _api_help_text() -> str:
+    return (
+        "usage: workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]\n"
+        "\n"
+        "Start the Praxis REST API server.\n"
+        "Reads the runtime dependency contract from requirements.runtime.txt\n"
+        "Flat alias: workflow routes\n"
+        "Help alias usage: workflow api [help|routes|integrations|data-dictionary|--host HOST|--port PORT]\n"
+        "\n"
+        "  help          show API route-discovery help without starting the server\n"
+        "  routes        show and filter the live HTTP route catalog without starting the server\n"
+        "  integrations  show and filter the /api/integrations route scope without starting the server\n"
+        "  data-dictionary show and filter the /api/data-dictionary route scope without starting the server\n"
+        "  --host HOST   bind address (default: 127.0.0.1; 0.0.0.0 for LAN/container)\n"
+        "  --port PORT   TCP port     (default: 8420)\n"
+        "\n"
+        f"{_api_discovery_text()}"
     )
 
 
@@ -1633,22 +1657,28 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
     """
 
     if args and args[0] in {"-h", "--help"}:
-        stdout.write(
-            "usage: workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]\n"
-            "\n"
-            "Start the Praxis REST API server.\n"
-            "Reads the runtime dependency contract from requirements.runtime.txt\n"
-            "Flat alias: workflow routes\n"
-            "\n"
-            "  routes        show and filter the live HTTP route catalog without starting the server\n"
-            "  integrations  show and filter the /api/integrations route scope without starting the server\n"
-            "  data-dictionary show and filter the /api/data-dictionary route scope without starting the server\n"
-            "  --host HOST   bind address (default: 127.0.0.1; 0.0.0.0 for LAN/container)\n"
-            "  --port PORT   TCP port     (default: 8420)\n"
-            "\n"
-            f"{_api_discovery_text()}"
-        )
+        stdout.write(_api_help_text())
         return 0
+
+    if args and args[0] == "help":
+        if len(args) == 1:
+            stdout.write(_api_help_text())
+            return 0
+
+        help_topic = args[1]
+        tail = args[2:]
+        if tail:
+            stdout.write(f"error: unknown argument: {' '.join(tail)}\n")
+            return 2
+        if help_topic == "routes":
+            return _api_routes_command(["--help"], stdout=stdout)
+        if help_topic == "integrations":
+            return _api_scoped_routes_command("integrations", "/api/integrations", ["--help"], stdout=stdout)
+        if help_topic == "data-dictionary":
+            return _api_scoped_routes_command("data-dictionary", "/api/data-dictionary", ["--help"], stdout=stdout)
+        stdout.write(f"error: unknown api help topic: {help_topic}\n")
+        stdout.write("try: workflow api help routes | workflow api help integrations | workflow api help data-dictionary\n")
+        return 2
 
     if args and args[0] == "routes":
         return _api_routes_command(args[1:], stdout=stdout)

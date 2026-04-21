@@ -35,6 +35,7 @@ class _FakeStore:
         self.list_by: list[dict[str, Any]] = []
         self.layers: list[dict[str, Any]] = []
         self.counts: dict[str, int] = {}
+        self.tag_catalog: list[dict[str, Any]] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -70,6 +71,10 @@ class _FakeStore:
         monkeypatch.setattr(
             runtime, "count_classifications_by_source",
             lambda conn: self.counts,
+        )
+        monkeypatch.setattr(
+            runtime, "list_classification_tag_catalog",
+            lambda conn: self.tag_catalog,
         )
 
 
@@ -229,6 +234,12 @@ def test_find_by_tag_requires_tag_key(monkeypatch) -> None:
 def test_classification_summary_returns_counts(monkeypatch) -> None:
     store = _FakeStore()
     store.counts = {"auto": 42, "operator": 3}
+    store.tag_catalog = [
+        {"tag_key": "pii", "tag_value": "email", "source": "operator", "rows": 3},
+    ]
     store.install(monkeypatch)
     payload = classification_summary(conn=None)
-    assert payload == {"classifications_by_source": {"auto": 42, "operator": 3}}
+    assert payload == {
+        "classifications_by_source": {"auto": 42, "operator": 3},
+        "tag_catalog": store.tag_catalog,
+    }

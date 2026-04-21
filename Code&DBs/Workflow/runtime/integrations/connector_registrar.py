@@ -59,10 +59,18 @@ def register_built_connector(
 
     auth_shape = _infer_auth_shape(module_path, slug)
 
+    # Upsert schema registry (api_schemas + api_endpoints)
+    schema_id = None
+    try:
+        from runtime.integrations.connector_registry import upsert_connector_schema
+        schema_id = upsert_connector_schema(pg, slug, display_name, capabilities, auth_shape)
+    except Exception as exc:
+        logger.warning("Failed to write schema registry for %s: %s", slug, exc)
+
     # Upsert connector_registry
     try:
         from runtime.integrations.connector_registry import register_connector
-        register_connector(pg, slug, display_name, module_path=module_path)
+        register_connector(pg, slug, display_name, module_path=module_path, schema_id=schema_id)
     except Exception as exc:
         return {"error": f"connector_registry upsert failed: {exc}"}
 

@@ -1,0 +1,19 @@
+{
+  "spec_version": "1.0",
+  "name": "a5_input_validation",
+  "workflow_id": "a5_input_validation",
+  "phase": "maintenance",
+  "outcome_goal": "An endpoint x input type x validator matrix is stored as decision.2026-04-20.input-validation-matrix; every unvalidated endpoint is filed as a bug with signature input-validation::<endpoint>.",
+  "verify_command": "bash -lc \"psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key='decision.2026-04-20.input-validation-matrix' AND rationale LIKE '%endpoint_validation_matrix%'\\\" | rg '^1$'\"",
+  "jobs": [
+    {
+      "id": "a5_input_validation",
+      "label": "a5_input_validation",
+      "agent": "auto/review",
+      "prompt": "Build and persist the trust-boundary validation matrix. Targets: Code&DBs/Workflow/surfaces/api/rest.py; Code&DBs/Workflow/surfaces/api/agent_sessions.py; Code&DBs/Workflow/surfaces/api/handlers/_dispatch.py; Code&DBs/Workflow/surfaces/mcp/tools/operator.py; Code&DBs/Workflow/surfaces/mcp/tools/workflow.py; Code&DBs/Workflow/contracts/domain.py. Enumerate every REST endpoint, agent-session endpoint, dispatch handler input, and MCP tool input. For each row record endpoint, input_type, validator/source contract, failure behavior, and gap status. Persist operator_decisions key decision.2026-04-20.input-validation-matrix with rationale containing endpoint_validation_matrix and endpoint_count=<N>. File bugs for unvalidated entries with signature input-validation::<endpoint>. Do not add validators in this audit unless the fix is trivial and verifier-gated.",
+      "input_refs": [],
+      "verify_refs": [],
+      "verify_command": "bash -lc \"psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key='decision.2026-04-20.input-validation-matrix' AND rationale LIKE '%endpoint_validation_matrix%'\\\" | rg '^1$'\""
+    }
+  ]
+}
