@@ -16,6 +16,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, TextIO
 
+from surfaces.cli.frontdoor_authority import (
+    build_cli_frontdoor_authority_payload,
+    workflow_command_ref,
+)
+
 if TYPE_CHECKING:
     from observability.read_models import (
         GraphLineageReadModel,
@@ -574,10 +579,12 @@ def _commands_index_text() -> str:
 
 
 def _commands_index_payload() -> dict[str, object]:
+    command_refs = [workflow_command_ref(command) for command in _known_root_commands()]
     return {
         "usage": "workflow commands",
         "entries": list(_COMMAND_INDEX_ENTRIES),
         "tips": list(_COMMAND_INDEX_TIPS),
+        "authority": build_cli_frontdoor_authority_payload(command_refs),
     }
 
 
