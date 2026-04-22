@@ -1,7 +1,7 @@
 {
   "spec_version": "1.0",
   "name": "maintenance",
-  "workflow_id": "maintenance_2026_04_20",
+  "workflow_id": "maintenance_2026_04_21_r2",
   "phase": "maintenance",
   "outcome_goal": "Six audits filed findings as bugs or operator_decisions; three kernel consolidations (secret, sandbox, adapter) landed on public via verifier-gated PRs; tiered maintenance cron deployed into HeartbeatOrchestrator.",
   "anti_requirements": [
