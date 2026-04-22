@@ -204,7 +204,7 @@ def test_docker_local_exec_prefers_metadata_resource_limits(monkeypatch, tmp_pat
     monkeypatch.setattr(
         sandbox_runtime,
         "resolve_docker_image",
-        lambda requested_image, image_exists: (
+        lambda requested_image, image_exists, **_kwargs: (
             requested_image or "praxis-worker:test",
             {"source": "requested"},
         ),
@@ -275,7 +275,7 @@ def test_docker_local_exec_skips_auth_mounts_when_policy_is_none(monkeypatch, tm
     monkeypatch.setattr(
         sandbox_runtime,
         "resolve_docker_image",
-        lambda requested_image, image_exists: (
+        lambda requested_image, image_exists, **_kwargs: (
             requested_image or "praxis-worker:test",
             {"source": "requested"},
         ),

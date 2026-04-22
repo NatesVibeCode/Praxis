@@ -304,7 +304,11 @@ class TeardownReceipt:
 
 @dataclass(frozen=True, slots=True)
 class SandboxExecRequest:
-    """One command execution within an existing sandbox session."""
+    """One command execution within an existing sandbox session.
+
+    agent_slug flows to resolve_docker_image so it can dispatch to the
+    per-agent-family thin image when no explicit image override is set.
+    """
 
     command: str
     stdin_text: str
@@ -312,6 +316,7 @@ class SandboxExecRequest:
     timeout_seconds: int
     execution_transport: str
     image: str | None = None
+    agent_slug: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -886,6 +891,7 @@ class DockerLocalSandboxProvider:
         docker_image, image_meta = resolve_docker_image(
             requested_image=request.image,
             image_exists=_docker_image_available,
+            agent_slug=getattr(request, "agent_slug", None),
         )
         if not _docker_image_available(docker_image):
             build_hint = f" Build or configure {DOCKER_IMAGE_ENV} before sandbox execution."
@@ -1381,6 +1387,7 @@ class SandboxRuntime:
                     timeout_seconds=timeout_seconds,
                     execution_transport=execution_transport,
                     image=image,
+                    agent_slug=str(provider_metadata.get("provider_slug") or "").strip() or None,
                 ),
             )
             artifact_receipt = provider.collect_artifacts(session, before_manifest)
