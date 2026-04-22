@@ -23,6 +23,9 @@ This script is idempotent. It resolves repo DB authority, creates `.env` only fr
 
 Requires Docker and Docker Compose. The compose stack does **not** include its own database. It uses `WORKFLOW_DATABASE_URL` from `.env` or the shell, so the database can be host-local, remote on the LAN, or any reachable Postgres 16+ instance with `pgvector`.
 
+For a Windows host serving Postgres from WSL2 over a trusted LAN, use
+[docs/runtime-targets/windows-wsl-postgres.md](docs/runtime-targets/windows-wsl-postgres.md).
+
 ```bash
 # Start the cockpit services (semantic-backend + api-server + scheduler)
 docker compose up -d

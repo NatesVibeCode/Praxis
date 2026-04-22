@@ -48,6 +48,16 @@ def test_canonical_tree_dirname_matches_disk() -> None:
     ), f"neither canonical {canonical!r} nor aliases {tree_aliases()!r} exist on disk"
 
 
+def test_code_tree_root_ignores_literal_alias_files(tmp_path: Path) -> None:
+    canonical = code_tree_dirname()
+    canonical_root = tmp_path / canonical
+    canonical_root.mkdir()
+    for alias in tree_aliases():
+        (tmp_path / alias).write_text(canonical, encoding="utf-8")
+
+    assert code_tree_root(tmp_path) == canonical_root
+
+
 def test_workflow_root_exists() -> None:
     assert workflow_root().is_dir()
 

@@ -63,7 +63,9 @@ def code_tree_root(repo_root: Path | None = None) -> Path:
     canonical = code_tree_dirname()
     for alias in tree_aliases():
         candidate = root / alias
-        if candidate.exists():
+        # Some hosts cannot preserve the alias as a symlink and may check it
+        # out as a regular file. Only a real directory can be path authority.
+        if candidate.is_dir():
             return candidate
     return root / canonical
 
