@@ -325,7 +325,12 @@ def test_docker_local_exec_skips_auth_mounts_when_policy_is_none(monkeypatch, tm
 
 def test_sandbox_runtime_runs_provider_contract_and_persists_artifacts(tmp_path) -> None:
     (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
-    expected_snapshot_ref = sandbox_runtime._workspace_snapshot_ref(str(tmp_path))
+    # Bundle below declares write_scope=["changed.txt"]; the shard materializer
+    # now folds that into the snapshot path_filter, so the expected ref must
+    # hash the same filter.
+    expected_snapshot_ref = sandbox_runtime._workspace_snapshot_ref(
+        str(tmp_path), path_filter=("changed.txt",)
+    )
     runtime = SandboxRuntime()
     fake = _RecordingProvider()
     runtime._providers = {"fake": fake}  # type: ignore[attr-defined]
@@ -1208,3 +1213,114 @@ def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_pat
         assert result.execution_mode == "docker_local"
     finally:
         provider.destroy_session(session, "completed")
+
+
+# -----------------------------------------------------------------------------
+# Shard materialization: _workspace_file_entries honors path_filter so only the
+# declared shard is hydrated. Empty filter preserves legacy full-copy behavior.
+# -----------------------------------------------------------------------------
+
+
+def test_workspace_file_entries_empty_filter_returns_everything(tmp_path) -> None:
+    (tmp_path / "a.py").write_text("a", encoding="utf-8")
+    (tmp_path / "b.py").write_text("b", encoding="utf-8")
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "c.py").write_text("c", encoding="utf-8")
+
+    entries = sandbox_runtime._workspace_file_entries(str(tmp_path))
+    relpaths = {r for r, _ in entries}
+    assert relpaths == {"a.py", "b.py", "nested/c.py"}
+
+
+def test_workspace_file_entries_exact_path_filter(tmp_path) -> None:
+    (tmp_path / "a.py").write_text("a", encoding="utf-8")
+    (tmp_path / "b.py").write_text("b", encoding="utf-8")
+
+    entries = sandbox_runtime._workspace_file_entries(
+        str(tmp_path), path_filter=("a.py",)
+    )
+    relpaths = {r for r, _ in entries}
+    assert relpaths == {"a.py"}
+
+
+def test_workspace_file_entries_fnmatch_glob_filter(tmp_path) -> None:
+    (tmp_path / "keep.py").write_text("k", encoding="utf-8")
+    (tmp_path / "keep.ts").write_text("k", encoding="utf-8")
+    (tmp_path / "drop.md").write_text("d", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "nested.py").write_text("n", encoding="utf-8")
+
+    entries = sandbox_runtime._workspace_file_entries(
+        str(tmp_path), path_filter=("*.py", "sub/*.py")
+    )
+    relpaths = {r for r, _ in entries}
+    assert relpaths == {"keep.py", "sub/nested.py"}
+
+
+def test_workspace_snapshot_ref_differs_across_filters(tmp_path) -> None:
+    (tmp_path / "a.py").write_text("a", encoding="utf-8")
+    (tmp_path / "b.py").write_text("b", encoding="utf-8")
+
+    full_ref = sandbox_runtime._workspace_snapshot_ref(str(tmp_path))
+    filtered_ref = sandbox_runtime._workspace_snapshot_ref(
+        str(tmp_path), path_filter=("a.py",)
+    )
+    assert full_ref != filtered_ref, (
+        "different path_filter values must produce different snapshot refs "
+        "so the host-side archive cache does not collide on shard boundaries"
+    )
+
+
+def test_execution_shard_paths_extracts_union_from_access_policy() -> None:
+    metadata = {
+        "execution_bundle": {
+            "access_policy": {
+                "resolved_read_scope": ["adapters/keychain.py"],
+                "write_scope": ["adapters/credentials.py"],
+                "test_scope": ["tests/unit/test_keychain.py"],
+                "blast_radius": ["registry/provider_execution_registry.py"],
+                "declared_read_scope": [],
+            }
+        }
+    }
+    paths = sandbox_runtime._execution_shard_paths(metadata)
+    assert paths == (
+        "adapters/credentials.py",
+        "adapters/keychain.py",
+        "registry/provider_execution_registry.py",
+        "tests/unit/test_keychain.py",
+    )
+
+
+def test_execution_shard_paths_returns_empty_when_bundle_missing() -> None:
+    assert sandbox_runtime._execution_shard_paths(None) == ()
+    assert sandbox_runtime._execution_shard_paths({}) == ()
+    assert sandbox_runtime._execution_shard_paths({"execution_bundle": {}}) == ()
+    assert sandbox_runtime._execution_shard_paths(
+        {"execution_bundle": {"access_policy": {}}}
+    ) == ()
+
+
+def test_write_workspace_snapshot_archive_writes_only_shard(tmp_path) -> None:
+    import tarfile
+
+    (tmp_path / "keep.py").write_text("keep", encoding="utf-8")
+    (tmp_path / "drop.py").write_text("drop", encoding="utf-8")
+    archive_path = tmp_path / "out.tar.gz"
+
+    hydrated = sandbox_runtime._write_workspace_snapshot_archive(
+        str(tmp_path),
+        str(archive_path),
+        path_filter=("keep.py",),
+    )
+
+    assert hydrated == 1
+    with tarfile.open(archive_path, mode="r:gz") as archive:
+        names = {
+            member.name.split("/", 1)[1]
+            for member in archive.getmembers()
+            if member.isfile()
+        }
+    assert names == {"keep.py"}, (
+        f"archive must contain only the shard files, got {names}"
+    )

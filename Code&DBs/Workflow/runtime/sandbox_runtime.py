@@ -226,12 +226,22 @@ def _cli_home_tmpfs_flags() -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceSnapshot:
-    """Control-plane-owned workspace materialization input."""
+    """Control-plane-owned workspace materialization input.
+
+    path_filter, when non-empty, scopes hydration to files whose workspace-
+    relative path matches at least one entry (exact match or fnmatch-glob).
+    This is the shard-materialization lever: when the bundle's access_policy
+    declares a resolved_read_scope / write_scope / test_scope / blast_radius,
+    execute_command unions them into path_filter so the sandbox only sees that
+    shard — not the whole repo. Empty filter (default) preserves legacy
+    full-workspace copy behavior.
+    """
 
     source_root: str
     materialization: str = "copy"
     workspace_snapshot_ref: str = ""
     overlay_files: tuple[dict[str, str], ...] = ()
+    path_filter: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -500,26 +510,57 @@ def _git_tracked_relpaths(root: str) -> list[str] | None:
     return paths
 
 
-def _workspace_file_entries(root: str) -> list[tuple[str, Path]]:
+def _path_matches_filter(relpath: str, path_filter: Sequence[str]) -> bool:
+    """Return True if relpath matches any entry in path_filter.
+
+    Each filter entry is either an exact relative path or an fnmatch-style
+    glob (e.g. "adapters/*.py", "runtime/**/execution_*.py"). Empty filter
+    means "no filter" — callers should short-circuit before calling.
+    """
+    import fnmatch
+    for pattern in path_filter:
+        pattern = str(pattern).strip()
+        if not pattern:
+            continue
+        if pattern == relpath:
+            return True
+        if fnmatch.fnmatchcase(relpath, pattern):
+            return True
+    return False
+
+
+def _workspace_file_entries(
+    root: str,
+    *,
+    path_filter: Sequence[str] = (),
+) -> list[tuple[str, Path]]:
     """Enumerate (relpath, absolute_path) tuples for all files to hydrate.
 
     Honors `.gitignore` when `root` is a git checkout. Falls back to
-    `os.walk` with `_IGNORED_MANIFEST_DIRS` otherwise.
+    `os.walk` with `_IGNORED_MANIFEST_DIRS` otherwise. When path_filter is
+    non-empty, results are restricted to entries matching at least one
+    filter pattern (exact match or fnmatch-glob).
     """
     root_path = Path(root)
     if not root_path.exists():
         return []
 
+    normalized_filter = tuple(str(p).strip() for p in path_filter if str(p).strip())
+    filter_active = bool(normalized_filter)
+
     tracked = _git_tracked_relpaths(root)
     if tracked is not None:
         entries: list[tuple[str, Path]] = []
         for relpath in tracked:
+            relpath = PurePosixPath(relpath).as_posix()
+            if filter_active and not _path_matches_filter(relpath, normalized_filter):
+                continue
             absolute = root_path / relpath
             # git ls-files may report paths for files that were deleted
             # but not yet staged; skip anything that no longer exists.
             if not absolute.is_file():
                 continue
-            entries.append((PurePosixPath(relpath).as_posix(), absolute))
+            entries.append((relpath, absolute))
         return entries
 
     # Fallback: non-git workspace. Use the minimal hardcoded ignore set.
@@ -530,6 +571,8 @@ def _workspace_file_entries(root: str) -> list[tuple[str, Path]]:
         for filename in filenames:
             absolute = current_dir / filename
             relpath = absolute.relative_to(root_path).as_posix()
+            if filter_active and not _path_matches_filter(relpath, normalized_filter):
+                continue
             entries.append((relpath, absolute))
     return entries
 
@@ -538,12 +581,20 @@ def _workspace_snapshot_ref(
     root: str,
     *,
     overlay_files: Sequence[Mapping[str, str]] | None = None,
+    path_filter: Sequence[str] = (),
 ) -> str:
-    """Return a stable content-addressed ref for one hydrated workspace input."""
+    """Return a stable content-addressed ref for one hydrated workspace input.
+
+    path_filter participates in the hash so different shards of the same
+    source_root produce different cache refs (no collision on archive reuse).
+    """
     normalized_overlays = _normalize_workspace_overlay_files(overlay_files)
     overlay_paths = {overlay["relative_path"] for overlay in normalized_overlays}
+    normalized_filter = tuple(
+        sorted({str(p).strip() for p in path_filter if str(p).strip()})
+    )
     entries: list[tuple[str, str]] = []
-    for relpath, absolute in _workspace_file_entries(root):
+    for relpath, absolute in _workspace_file_entries(root, path_filter=normalized_filter):
         if relpath in overlay_paths:
             continue
         try:
@@ -561,13 +612,45 @@ def _workspace_snapshot_ref(
             )
         )
     entries.sort(key=lambda item: item[0])
-    canonical = json.dumps(entries, separators=(",", ":"), ensure_ascii=True)
+    canonical = json.dumps(
+        {"files": entries, "path_filter": list(normalized_filter)},
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
     return f"workspace_snapshot:{digest}"
 
 
 def _uses_empty_workspace_materialization(value: object) -> bool:
     return str(value or "").strip().lower() == _EMPTY_WORKSPACE_MATERIALIZATION
+
+
+def _execution_shard_paths(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """Extract the sandbox shard path_filter from the execution bundle.
+
+    The shard is the union of resolved_read_scope, write_scope, test_scope,
+    and blast_radius from access_policy. Returns () when the bundle declares
+    nothing — that preserves legacy full-workspace copy behavior for specs
+    that haven't adopted scope declarations yet.
+    """
+    if not isinstance(metadata, Mapping):
+        return ()
+    bundle = metadata.get("execution_bundle")
+    if not isinstance(bundle, Mapping):
+        return ()
+    access_policy = bundle.get("access_policy")
+    if not isinstance(access_policy, Mapping):
+        return ()
+    union: set[str] = set()
+    for key in ("resolved_read_scope", "declared_read_scope", "write_scope", "test_scope", "blast_radius"):
+        value = access_policy.get(key)
+        if not isinstance(value, (list, tuple)):
+            continue
+        for entry in value:
+            text = str(entry or "").strip()
+            if text:
+                union.add(text)
+    return tuple(sorted(union))
 
 
 def _workspace_snapshot_cache_root() -> str:
@@ -595,6 +678,7 @@ def _write_workspace_snapshot_archive(
     archive_path: str,
     *,
     overlay_files: Sequence[Mapping[str, str]] | None = None,
+    path_filter: Sequence[str] = (),
 ) -> int:
     source = Path(source_root)
     if not source.exists():
@@ -608,7 +692,9 @@ def _write_workspace_snapshot_archive(
     file_entries = sorted(
         (
             (relpath, absolute)
-            for relpath, absolute in _workspace_file_entries(source_root)
+            for relpath, absolute in _workspace_file_entries(
+                source_root, path_filter=path_filter
+            )
             if relpath not in overlay_paths
         ),
         key=lambda item: item[0],
@@ -656,11 +742,13 @@ def _write_workspace_snapshot_archive(
 
 
 def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> WorkspaceSnapshotArchive:
+    path_filter = tuple(getattr(snapshot, "path_filter", ()) or ())
     snapshot_ref = str(
         getattr(snapshot, "workspace_snapshot_ref", "")
         or _workspace_snapshot_ref(
             snapshot.source_root,
             overlay_files=getattr(snapshot, "overlay_files", ()),
+            path_filter=path_filter,
         )
     ).strip()
     if not snapshot_ref:
@@ -686,6 +774,7 @@ def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> Workspace
         snapshot.source_root,
         str(temp_archive),
         overlay_files=getattr(snapshot, "overlay_files", ()),
+        path_filter=path_filter,
     )
     temp_metadata.write_text(
         json.dumps(
@@ -1250,9 +1339,11 @@ class SandboxRuntime:
                         ),
                     )
             else:
+                shard_path_filter = _execution_shard_paths(provider_metadata)
                 workspace_snapshot_ref = _workspace_snapshot_ref(
                     workdir,
                     overlay_files=workspace_overlays,
+                    path_filter=shard_path_filter,
                 )
                 hydration_receipt = provider.hydrate_workspace(
                     session,
@@ -1261,6 +1352,7 @@ class SandboxRuntime:
                         materialization=workspace_materialization,
                         workspace_snapshot_ref=workspace_snapshot_ref,
                         overlay_files=workspace_overlays,
+                        path_filter=shard_path_filter,
                     ),
                 )
             # The hydrated workspace is owned by the worker uid (root). The
