@@ -21,6 +21,9 @@ import type {
 } from './moonBuildPresenter';
 import { RANK_SPACING, COLUMN_SPACING, glyphFromLabel, computeLineage } from './moonBuildPresenter';
 
+const COMPONENT_ROW_GAP = 40;
+const COMPONENT_COLUMN_GAP = 120;
+
 // --- Status mapping ---
 
 /**
@@ -59,28 +62,49 @@ function inferGlyph(node: RunGraphNode, job: RunJob | undefined): GlyphType {
 
 // --- Layout (topological, same spacing constants as build presenter) ---
 
-function layoutFromRunGraph(graph: RunGraph): GraphLayout {
+function compareRunNodeIds(
+  a: string,
+  b: string,
+  nodeById: Map<string, RunGraphNode>,
+): number {
+  const aPosition = nodeById.get(a)?.position ?? Number.MAX_SAFE_INTEGER;
+  const bPosition = nodeById.get(b)?.position ?? Number.MAX_SAFE_INTEGER;
+  if (aPosition !== bPosition) return aPosition - bPosition;
+  return a.localeCompare(b);
+}
+
+function layoutLayeredRunNodes(
+  graph: RunGraph,
+  nodeIds: string[] = graph.nodes.map((node) => node.id),
+): GraphLayout {
   const empty: GraphLayout = { nodes: new Map(), layers: [], width: 0, height: 0 };
-  if (!graph.nodes.length) return empty;
+  if (!nodeIds.length) return empty;
+
+  const nodeSet = new Set(nodeIds);
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
 
   const adj = new Map<string, string[]>();
   const radj = new Map<string, string[]>();
   const inDeg = new Map<string, number>();
-  for (const n of graph.nodes) {
-    adj.set(n.id, []);
-    radj.set(n.id, []);
-    inDeg.set(n.id, 0);
+  for (const id of nodeIds) {
+    adj.set(id, []);
+    radj.set(id, []);
+    inDeg.set(id, 0);
   }
   for (const e of graph.edges) {
-    if (!adj.has(e.from) || !adj.has(e.to)) continue;
+    if (!nodeSet.has(e.from) || !nodeSet.has(e.to)) continue;
     adj.get(e.from)!.push(e.to);
     radj.get(e.to)!.push(e.from);
     inDeg.set(e.to, (inDeg.get(e.to) || 0) + 1);
   }
+  for (const next of adj.values()) next.sort((a, b) => compareRunNodeIds(a, b, nodeById));
 
   // Assign rank = longest path from any root.
   const rank = new Map<string, number>();
-  const queue = [...inDeg.entries()].filter(([, d]) => d === 0).map(([id]) => id);
+  const queue = [...inDeg.entries()]
+    .filter(([, d]) => d === 0)
+    .map(([id]) => id)
+    .sort((a, b) => compareRunNodeIds(a, b, nodeById));
   for (const id of queue) rank.set(id, 0);
   const topo: string[] = [];
   const pending = new Map(inDeg);
@@ -94,6 +118,12 @@ function layoutFromRunGraph(graph: RunGraph): GraphLayout {
       pending.set(next, d);
       if (d === 0) work.push(next);
     }
+    work.sort((a, b) => compareRunNodeIds(a, b, nodeById));
+  }
+  for (const id of [...nodeIds].sort((a, b) => compareRunNodeIds(a, b, nodeById))) {
+    if (topo.includes(id)) continue;
+    rank.set(id, rank.get(id) || 0);
+    topo.push(id);
   }
 
   // Group nodes by rank, order each layer by parent centroid.
@@ -123,6 +153,12 @@ function layoutFromRunGraph(graph: RunGraph): GraphLayout {
     }
   }
 
+  const rawYs = [...positions.values()].map(p => p.y);
+  const minY = rawYs.length ? Math.min(...rawYs) : 0;
+  if (minY !== 0) {
+    for (const lnode of positions.values()) lnode.y -= minY;
+  }
+
   const layers = sortedRanks.map(r => ({ rank: r, nodeIds: layerMap.get(r)! }));
   const xs = [...positions.values()].map(p => p.x);
   const ys = [...positions.values()].map(p => p.y);
@@ -130,8 +166,103 @@ function layoutFromRunGraph(graph: RunGraph): GraphLayout {
     nodes: positions,
     layers,
     width: xs.length ? Math.max(...xs) + RANK_SPACING : 0,
-    height: ys.length ? Math.max(...ys) - Math.min(...ys) + COLUMN_SPACING : 0,
+    height: ys.length ? Math.max(...ys) + COLUMN_SPACING : 0,
   };
+}
+
+function weakComponents(graph: RunGraph): string[][] {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const neighbors = new Map<string, string[]>();
+  for (const node of graph.nodes) neighbors.set(node.id, []);
+  for (const edge of graph.edges) {
+    if (!neighbors.has(edge.from) || !neighbors.has(edge.to)) continue;
+    neighbors.get(edge.from)!.push(edge.to);
+    neighbors.get(edge.to)!.push(edge.from);
+  }
+
+  const seen = new Set<string>();
+  const components: string[][] = [];
+  const sortedNodeIds = graph.nodes
+    .map((node) => node.id)
+    .sort((a, b) => compareRunNodeIds(a, b, nodeById));
+
+  for (const id of sortedNodeIds) {
+    if (seen.has(id)) continue;
+    const component: string[] = [];
+    const work = [id];
+    seen.add(id);
+    while (work.length) {
+      const current = work.shift()!;
+      component.push(current);
+      for (const next of [...(neighbors.get(current) || [])].sort((a, b) => compareRunNodeIds(a, b, nodeById))) {
+        if (seen.has(next)) continue;
+        seen.add(next);
+        work.push(next);
+      }
+    }
+    components.push(component.sort((a, b) => compareRunNodeIds(a, b, nodeById)));
+  }
+
+  return components;
+}
+
+function countRoots(graph: RunGraph): number {
+  const inDeg = new Map(graph.nodes.map((node) => [node.id, 0]));
+  for (const edge of graph.edges) {
+    if (!inDeg.has(edge.from) || !inDeg.has(edge.to)) continue;
+    inDeg.set(edge.to, (inDeg.get(edge.to) || 0) + 1);
+  }
+  return [...inDeg.values()].filter((degree) => degree === 0).length;
+}
+
+function layoutRootHeavyRunGraph(graph: RunGraph, components: string[][]): GraphLayout {
+  const componentLayouts = components.map((nodeIds) => layoutLayeredRunNodes(graph, nodeIds));
+  const columnCount = Math.max(1, Math.ceil(Math.sqrt(components.length)));
+  const cellWidth = Math.max(...componentLayouts.map((layout) => layout.width), RANK_SPACING)
+    + COMPONENT_COLUMN_GAP;
+  const cellHeight = Math.max(...componentLayouts.map((layout) => layout.height), COLUMN_SPACING)
+    + COMPONENT_ROW_GAP;
+  const positions = new Map<string, LayoutNode>();
+
+  componentLayouts.forEach((layout, index) => {
+    const column = index % columnCount;
+    const row = Math.floor(index / columnCount);
+    const offsetX = column * cellWidth;
+    const offsetY = row * cellHeight;
+    for (const [nodeId, node] of layout.nodes) {
+      positions.set(nodeId, {
+        ...node,
+        rank: column,
+        column: row,
+        x: node.x + offsetX,
+        y: node.y + offsetY,
+      });
+    }
+  });
+
+  const xs = [...positions.values()].map(p => p.x);
+  const ys = [...positions.values()].map(p => p.y);
+  return {
+    nodes: positions,
+    layers: components.map((nodeIds, index) => ({ rank: index, nodeIds })),
+    width: xs.length ? Math.max(...xs) + RANK_SPACING : 0,
+    height: ys.length ? Math.max(...ys) + COLUMN_SPACING : 0,
+  };
+}
+
+function layoutFromRunGraph(graph: RunGraph): GraphLayout {
+  const empty: GraphLayout = { nodes: new Map(), layers: [], width: 0, height: 0 };
+  if (!graph.nodes.length) return empty;
+
+  const components = weakComponents(graph);
+  const rootCount = countRoots(graph);
+  const shouldCompact =
+    components.length >= 4
+    && rootCount >= 4
+    && rootCount / graph.nodes.length >= 0.5;
+
+  if (shouldCompact) return layoutRootHeavyRunGraph(graph, components);
+  return layoutLayeredRunNodes(graph);
 }
 
 /**

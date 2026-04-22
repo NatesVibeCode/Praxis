@@ -103,7 +103,7 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
         ...state,
         selectedNodeId: action.nodeId,
         selectedEdgeId: null,
-        popoutOpen: action.nodeId !== null && state.openDock === null && !state.releaseOpen,
+        popoutOpen: false,
       };
     case 'SELECT_EDGE':
       return { ...state, selectedEdgeId: action.edgeId, selectedNodeId: null, popoutOpen: false };
@@ -125,7 +125,7 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
     case 'TOGGLE_RELEASE':
       return { ...state, releaseOpen: !state.releaseOpen, openDock: null, popoutOpen: false };
     case 'OPEN_POPOUT':
-      return { ...state, popoutOpen: true };
+      return { ...state, openDock: null, releaseOpen: false, popoutOpen: true };
     case 'CLOSE_POPOUT':
       return { ...state, popoutOpen: false };
     case 'SET_PROSE':

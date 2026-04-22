@@ -184,12 +184,6 @@ export function buildShellTabs(state: ShellState): ShellTabDescriptor[] {
       closable: false,
     },
     {
-      id: 'costs',
-      label: STATIC_SURFACES.costs.getTabLabel(state),
-      kind: STATIC_SURFACES.costs.kindLabel,
-      closable: false,
-    },
-    {
       id: 'atlas',
       label: STATIC_SURFACES.atlas.getTabLabel(state),
       kind: STATIC_SURFACES.atlas.kindLabel,
@@ -218,7 +212,7 @@ export function buildShellNavigationItems(args: {
 }): MenuAction[] {
   const { state, chatOpen, activateTab, setChatOpen } = args;
 
-  const staticItems: MenuAction[] = (['dashboard', 'build', 'atlas', 'manifests', 'costs'] as const).map((surfaceId) => ({
+  const staticItems: MenuAction[] = (['dashboard', 'build', 'atlas', 'manifests'] as const).map((surfaceId) => ({
     id: `navigate:${surfaceId}`,
     label: STATIC_SURFACES[surfaceId].getTabLabel(state),
     description: STATIC_SURFACES[surfaceId].getNavigateDescription(state),
@@ -226,11 +220,9 @@ export function buildShellNavigationItems(args: {
       ? ['overview', 'dashboard', 'home']
       : surfaceId === 'build'
         ? ['build', 'workflow', 'moon']
-        : surfaceId === 'costs'
-          ? ['costs', 'spend', 'finance', 'ledger']
-          : surfaceId === 'manifests'
-            ? ['manifest', 'manifests', 'catalog', 'search', 'list', 'discover', 'control-plane', 'plan', 'approval']
-            : ['accent', 'atlas', 'graph', 'diagram', 'knowledge', 'memory', 'entities', 'map', 'overview'],
+        : surfaceId === 'manifests'
+          ? ['manifest', 'manifests', 'catalog', 'search', 'list', 'discover', 'control-plane', 'plan', 'approval']
+          : ['accent', 'atlas', 'graph', 'diagram', 'knowledge', 'memory', 'entities', 'map', 'overview'],
     selected: state.activeTabId === surfaceId,
     onSelect: () => {
       if (surfaceId === 'build' && state.moonRunId && state.activeTabId === 'build') return;

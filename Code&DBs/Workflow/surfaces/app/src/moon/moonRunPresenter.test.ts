@@ -102,6 +102,32 @@ describe('presentRun', () => {
     expect(xs[2]).toBeGreaterThan(xs[1]);
   });
 
+  test('compacts root-heavy run graphs into component tiles instead of one hidden vertical stack', () => {
+    const graphNodes = Array.from({ length: 10 }, (_, index) => {
+      const id = index === 9 ? 'a9_adapter_kernel' : `a${index + 1}_job`;
+      return { id, label: id, type: '', adapter: '', position: index, status: 'succeeded' };
+    });
+    const run = makeRun({
+      graph: {
+        nodes: graphNodes,
+        edges: [
+          { id: 'e-a7-a9', from: 'a7_job', to: 'a9_adapter_kernel', type: 'sequence' },
+        ],
+      },
+    });
+
+    const vm = presentRun(run, null);
+    const rootXs = vm.nodes
+      .filter((node) => node.id !== 'a9_adapter_kernel')
+      .map((node) => node.x);
+    const distinctRootColumns = new Set(rootXs);
+
+    expect(distinctRootColumns.size).toBeGreaterThan(1);
+    expect(vm.layout.height).toBeLessThan(800);
+    expect(vm.nodes.find((node) => node.id === 'a9_adapter_kernel')?.x)
+      .toBeGreaterThan(vm.nodes.find((node) => node.id === 'a7_job')?.x ?? 0);
+  });
+
   test('identifies critical path through the longest dependency chain', () => {
     const run = makeRun({
       graph: {

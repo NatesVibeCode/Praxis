@@ -25,7 +25,6 @@ describe('surfaceRegistry', () => {
     expect(tabs).toEqual([
       { id: 'dashboard', label: 'Overview', kind: 'Suite', closable: false },
       { id: 'build', label: 'Workflow workspace', kind: 'Build', closable: false },
-      { id: 'costs', label: 'Cost Summary', kind: 'Finance', closable: false },
       { id: 'atlas', label: 'Graph Diagram', kind: 'Accent', closable: false },
       { id: 'manifests', label: 'Manifests', kind: 'Catalog', closable: false },
       { id: 'run-detail:run_123', label: 'Run run_123', kind: 'Run', closable: true },
@@ -45,11 +44,7 @@ describe('surfaceRegistry', () => {
       description: 'Jump back into Moon Build.',
       selected: false,
     });
-    expect(navigateItems.find((item) => item.id === 'navigate:costs')).toMatchObject({
-      label: 'Cost Summary',
-      description: 'Inspect token spend and recent costed runs.',
-      selected: false,
-    });
+    expect(navigateItems.find((item) => item.id === 'navigate:costs')).toBeUndefined();
     expect(navigateItems.find((item) => item.id === 'navigate:manifests')).toMatchObject({
       label: 'Manifests',
       description: 'Open the manifest catalog.',
@@ -82,6 +77,15 @@ describe('surfaceRegistry', () => {
       context: {
         label: 'Manifest catalog',
         detail: 'Discover control-plane manifests before opening them by exact id.',
+      },
+    });
+
+    expect(resolveActiveShellSurface({ ...state, activeTabId: 'costs' }, null)).toMatchObject({
+      category: 'static',
+      id: 'costs',
+      context: {
+        label: 'Cost ledger',
+        detail: 'Review token spend, recent receipts, and per-run cost concentration.',
       },
     });
   });

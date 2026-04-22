@@ -146,10 +146,28 @@ describe('MoonBuildPage dock authority', () => {
     moonBuildPageDockMocks.loadCatalog.mockImplementation(() => new Promise(() => undefined));
   });
 
+  test('single-click opens node detail instead of the popout; double-click opens the popout explicitly', () => {
+    render(<MoonBuildPage workflowId="wf-123" />);
+
+    const webhookNode = screen.getByRole('button', { name: /select workflow step webhook/i });
+
+    fireEvent.click(webhookNode);
+
+    expect(screen.getByTestId('node-detail')).toBeInTheDocument();
+    expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
+
+    fireEvent.doubleClick(webhookNode);
+
+    expect(screen.getByTestId('node-popout')).toBeInTheDocument();
+    expect(screen.queryByTestId('node-detail')).not.toBeInTheDocument();
+  });
+
   test('opening the detail dock closes the node popout and keeps it closed while the dock is open', () => {
     render(<MoonBuildPage workflowId="wf-123" />);
 
-    fireEvent.click(screen.getByText('Webhook'));
+    const webhookNode = screen.getByRole('button', { name: /select workflow step webhook/i });
+
+    fireEvent.doubleClick(webhookNode);
 
     expect(screen.getByTestId('node-popout')).toBeInTheDocument();
 
@@ -158,7 +176,7 @@ describe('MoonBuildPage dock authority', () => {
     expect(screen.getByTestId('node-detail')).toBeInTheDocument();
     expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Webhook'));
+    fireEvent.click(webhookNode);
 
     expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
   });
@@ -166,7 +184,9 @@ describe('MoonBuildPage dock authority', () => {
   test('opening release closes the node popout and keeps it closed while release is open', () => {
     render(<MoonBuildPage workflowId="wf-123" />);
 
-    fireEvent.click(screen.getByText('Webhook'));
+    const webhookNode = screen.getByRole('button', { name: /select workflow step webhook/i });
+
+    fireEvent.doubleClick(webhookNode);
 
     expect(screen.getByTestId('node-popout')).toBeInTheDocument();
 
@@ -175,7 +195,7 @@ describe('MoonBuildPage dock authority', () => {
     expect(screen.getByTestId('release-tray')).toBeInTheDocument();
     expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Webhook'));
+    fireEvent.click(webhookNode);
 
     expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
   });

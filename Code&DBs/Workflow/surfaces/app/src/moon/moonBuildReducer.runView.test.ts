@@ -2,6 +2,17 @@ import { describe, test, expect } from 'vitest';
 import { moonBuildReducer, initialMoonBuildState } from './moonBuildReducer';
 
 describe('moonBuildReducer — run view transitions', () => {
+  test('SELECT_NODE selects without opening the node popout; OPEN_POPOUT is explicit', () => {
+    const selected = moonBuildReducer(initialMoonBuildState, { type: 'SELECT_NODE', nodeId: 'node-1' });
+    expect(selected.selectedNodeId).toBe('node-1');
+    expect(selected.popoutOpen).toBe(false);
+
+    const opened = moonBuildReducer({ ...selected, openDock: 'context' }, { type: 'OPEN_POPOUT' });
+    expect(opened.openDock).toBeNull();
+    expect(opened.releaseOpen).toBe(false);
+    expect(opened.popoutOpen).toBe(true);
+  });
+
   test('ENTER_RUN_VIEW from URL source sets viewMode run + activeRunId + clears build transient state', () => {
     const base = {
       ...initialMoonBuildState,
