@@ -136,6 +136,10 @@ def test_mount_capabilities_uses_operation_catalog_when_available(monkeypatch) -
     ]
     assert len(mounted) == 1
     assert mounted[0].openapi_extra["x-praxis-binding-source"] == "operation_catalog"
+    assert mounted[0].openapi_extra["x-praxis-operation-kind"] == "command"
+    assert mounted[0].openapi_extra["x-praxis-authority-domain"] == "authority.test"
+    assert mounted[0].openapi_extra["x-praxis-receipt-required"] is True
+    assert mounted[0].openapi_extra["x-praxis-event-required"] is True
     assert mounted[0].name == "workflow_build.mutate"
     assert target_app.state.capabilities_mounted is True
 

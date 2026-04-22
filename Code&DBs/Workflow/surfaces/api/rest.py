@@ -59,6 +59,11 @@ from runtime.operation_catalog_gateway import aexecute_operation_binding
 from runtime.atlas_graph import build_atlas_payload
 from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
+from surfaces.api.api_authority import (
+    ApiAuthorityBoundaryError,
+    assert_api_mutation_routes_classified,
+    build_api_authority_payload,
+)
 from surfaces.api.catalog_authority import build_catalog_payload
 from surfaces.api.operation_catalog_authority import build_operation_catalog_payload
 from surfaces.api import agent_sessions as agent_sessions_app
@@ -452,6 +457,14 @@ def _boot_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
     return subsystems
 
 
+def _assert_api_authority_boundary(target_app: FastAPI) -> None:
+    try:
+        assert_api_mutation_routes_classified(target_app)
+    except ApiAuthorityBoundaryError:
+        logger.exception("API mutating route authority boundary failed")
+        raise
+
+
 def _json_response_payload(value: Any) -> Any:
     """Preserve repo-local UTC timestamp shape after generic JSON encoding."""
     if isinstance(value, datetime):
@@ -479,6 +492,7 @@ async def _app_lifespan(target_app: FastAPI):
         mount_capabilities(target_app)
     except Exception:
         logger.exception("capability mount failed during startup; API continues in degraded mode")
+    _assert_api_authority_boundary(target_app)
     yield
 
 
@@ -664,6 +678,21 @@ def mount_capabilities(target_app: FastAPI) -> None:
             openapi_extra={
                 "x-praxis-binding-source": mount_source,
                 "x-praxis-operation-name": route_name,
+                "x-praxis-operation-kind": binding.operation_kind,
+                "x-praxis-authority-domain": getattr(
+                    binding,
+                    "authority_domain_ref",
+                    binding.authority_ref,
+                ),
+                "x-praxis-receipt-required": bool(getattr(binding, "receipt_required", True)),
+                "x-praxis-event-required": bool(getattr(binding, "event_required", True)),
+                "x-praxis-event-policy": getattr(binding, "event_type", None)
+                or (
+                    "required"
+                    if bool(getattr(binding, "event_required", True))
+                    else "not_required"
+                ),
+                "x-praxis-projection-ref": getattr(binding, "projection_ref", None),
             },
         )
         _promote_last_capability_route(target_app)
@@ -4052,6 +4081,12 @@ def get_catalog() -> dict[str, Any]:
 def get_operation_catalog() -> dict[str, Any]:
     """Return DB-backed CQRS operation definitions and source policies."""
     return build_operation_catalog_payload(_shared_pg_conn())
+
+
+@app.get("/api/catalog/api-authority")
+def get_api_authority_catalog() -> dict[str, Any]:
+    """Return authority classifications for mutating API routes."""
+    return build_api_authority_payload(app)
 
 
 @app.get("/api/operate/catalog")
