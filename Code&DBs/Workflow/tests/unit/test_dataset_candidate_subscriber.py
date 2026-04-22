@@ -9,6 +9,9 @@ migrations land; here we only test the deterministic logic that decides
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 from runtime.dataset_candidate_subscriber import (
     _ReceiptEvidenceBundle,
     build_candidate_from_bundle,
@@ -107,11 +110,11 @@ def test_dedupe_signature_is_stable_and_kind_sensitive() -> None:
 def test_dedupe_signature_strips_volatile_tokens() -> None:
     a = {
         "diff": "review at 2026-04-18T13:02:11Z by 01HZABCDEFGHJKMNPQRSTVWXYZ",
-        "path": "/Users/nate/Praxis/file.py",
+        "path": str(Path(tempfile.gettempdir()) / "praxis" / "file.py"),
     }
     b = {
         "diff": "review at 2024-01-01T00:00:00Z by 01HXYZAAAAAAAAAAAAAAAAAAAA",
-        "path": "/Users/someone/Praxis/file.py",
+        "path": "/tmp/someone/file.py",
     }
     sig_a = compute_dedupe_signature(candidate_kind="review", route_slug=None, raw_input=a)
     sig_b = compute_dedupe_signature(candidate_kind="review", route_slug=None, raw_input=b)

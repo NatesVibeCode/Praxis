@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Use the canonical repo tree first, but keep the legacy symlink path in the
-# import search path for compatibility with older tests and subprocess checks.
-WORKFLOW_DIR="$REPO_ROOT/Code&DBs/Workflow"
-WORKFLOW_DIR_LEGACY="$REPO_ROOT/CodeDBs/Workflow"
+# shellcheck source=_workflow_env.sh
+source "$REPO_ROOT/scripts/_workflow_env.sh"
+# Use the canonical workflow tree from the checked-in workspace layout config.
+WORKFLOW_DIR="$(workflow_repo_workflow_root)"
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
 COMMAND_NAME="${PRAXIS_COMMAND_NAME:-praxis}"
 SERVICE_MANAGER_PATH="${PRAXIS_SERVICE_MANAGER_PATH:-scripts/praxis}"
@@ -16,12 +16,35 @@ LAUNCHER_STATE_DIR="${PRAXIS_LAUNCHER_STATE_DIR:-$REPO_ROOT/.cache/praxis-launch
 LAUNCHER_STATE_FILE="$LAUNCHER_STATE_DIR/state.json"
 
 ensure_workflow_database_env() {
-    if [ -n "${WORKFLOW_DATABASE_URL:-}" ]; then
+    if [ -n "${WORKFLOW_DATABASE_URL:-}" ] && [ -n "${PRAXIS_WORKSPACE_BASE_PATH:-}" ]; then
         return 0
     fi
     # shellcheck disable=SC1090
     source "$SCRIPT_DIR/_workflow_env.sh"
     workflow_load_repo_env
+}
+
+workflow_subcommand_needs_database_env() {
+    local subcommand="${1:-help}"
+    shift || true
+    case "$subcommand" in
+        help|--help|-h|commands|routes)
+            return 1
+            ;;
+        dry-run)
+            return 1
+            ;;
+        run)
+            for arg in "$@"; do
+                case "$arg" in
+                    --dry-run|--help|-h)
+                        return 1
+                        ;;
+                esac
+            done
+            ;;
+    esac
+    return 0
 }
 
 docker_only_usage() {
@@ -54,6 +77,7 @@ Docker-only commands:
 
 Other commands:
   workflow ...            Delegate to workflow CLI
+  mcp serve               Run the MCP server through launcher/workspace authority
   agent-run               Run the Praxis supervisor agent entrypoint
 
 Services:
@@ -215,7 +239,7 @@ run_local_alpha() {
                 esac
             done
             ensure_workflow_database_env
-            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR:$WORKFLOW_DIR_LEGACY${PYTHONPATH:+:$PYTHONPATH}" \
+            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
             WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL}" \
             PRAXIS_ALPHA_SERVICES_READY="$services_ready" \
             PRAXIS_ALPHA_STATE_FILE="$state_file" \
@@ -247,7 +271,7 @@ PY
                 esac
             done
             ensure_workflow_database_env
-            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR:$WORKFLOW_DIR_LEGACY${PYTHONPATH:+:$PYTHONPATH}" \
+            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
             WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL}" \
             PRAXIS_ALPHA_RUN_ID="$run_id" \
                 "$PYTHON_BIN" - <<'PY'
@@ -670,13 +694,16 @@ EOF
 }
 
 if [ "${1:-}" = "agent-run" ]; then
-    export PYTHONPATH="$WORKFLOW_DIR:$WORKFLOW_DIR_LEGACY${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
     exec python3 -m runtime.praxis_supervisor --repo-root "$REPO_ROOT" run
 fi
 
 if [ "${1:-}" = "workflow" ]; then
     shift
-    export PYTHONPATH="$WORKFLOW_DIR:$WORKFLOW_DIR_LEGACY${PYTHONPATH:+:$PYTHONPATH}"
+    if workflow_subcommand_needs_database_env "$@"; then
+        ensure_workflow_database_env
+    fi
+    export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
     case "${1:-help}" in
       run-managed)
         shift
@@ -696,8 +723,23 @@ if [ "${1:-}" = "workflow" ]; then
     esac
 fi
 
+if [ "${1:-}" = "mcp" ]; then
+    shift
+    ensure_workflow_database_env
+    export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    case "${1:-serve}" in
+      serve|server|"")
+        exec "$PYTHON_BIN" -m surfaces.mcp.server
+        ;;
+      *)
+        echo "usage: ${COMMAND_NAME} mcp serve" >&2
+        exit 2
+        ;;
+    esac
+fi
+
 case "${1:-}" in
-    db|registry|object-type|objects|object|catalog|data|dataset|page|hierarchy|reload|reconcile)
+    launcher|db|registry|object-type|objects|object|catalog|data|dataset|page|hierarchy|reload|reconcile)
         export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
         PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
         exec "$PYTHON_BIN" -m surfaces.cli.praxis "$@"

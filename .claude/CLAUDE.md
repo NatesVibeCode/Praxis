@@ -11,11 +11,13 @@ Orient with:
 
 ## Database
 
-Single Postgres database: `postgresql://localhost:5432/praxis`
+Single Postgres database: resolve it through workflow authority, never a baked localhost DSN.
 
-- Auto-starts on login via launchd (`com.praxis.postgres`)
-- Data dir: `Code&DBs/Databases/postgres-dev/data`
 - Env var: `WORKFLOW_DATABASE_URL`
+- Active authority is the network/registry-resolved Praxis.db, not the retired
+  localhost development database
+- If `WORKFLOW_DATABASE_URL` is absent, discover the current DSN through the
+  workflow registry/runtime authority or ask for it; do not start local Postgres
 - All subsystems (bugs, receipts, constraints, friction, artifacts, memory graph, authority) use Postgres
 - Migrations live under `Code&DBs/Databases/migrations/workflow/`
 - pgvector extension is enabled for vector similarity search
@@ -100,7 +102,7 @@ Inspect exceptions with `praxis workflow query "public naming exceptions"`.
 
 ## Tests
 
-`PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q <test_file>`
+`PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q <test_file>`
 
 ## Repo Skills
 

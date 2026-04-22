@@ -17,7 +17,7 @@ For fresh clones:
 ./scripts/bootstrap
 ```
 
-This script is idempotent. It creates `.env` when no repo DB authority exists, creates the target Postgres database, enables `pgvector`, creates `.venv`, installs dependencies, symlinks `scripts/praxis` into `~/.local/bin`, runs `db-bootstrap` (full migration set plus fresh-install authority seed), starts the REST API, and validates/submits/streams `examples/bootstrap_smoke.queue.json`. The bootstrap smoke is deterministic and provider-independent; `examples/hello_world.queue.json` remains the provider demo. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
+This script is idempotent. It resolves repo DB authority, creates `.env` only from an explicit runtime/registry database URL, creates the target Postgres database, enables `pgvector`, creates `.venv`, installs dependencies, installs the config-backed Praxis runtime launcher, runs `db-bootstrap` (full migration set plus fresh-install authority seed), starts the REST API, and validates/submits/streams `examples/bootstrap_smoke.queue.json`. The bootstrap smoke is deterministic and provider-independent; `examples/hello_world.queue.json` remains the provider demo. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
 
 ## Docker Setup
 
@@ -249,12 +249,8 @@ Add the Praxis MCP server to your Claude Code configuration:
 {
   "mcpServers": {
     "praxis": {
-      "command": "python",
-      "args": ["-m", "surfaces.mcp.server"],
-      "cwd": "/path/to/praxis/Code&DBs/Workflow",
-      "env": {
-        "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis"
-      }
+      "command": "praxis",
+      "args": ["mcp", "serve"]
     }
   }
 }
@@ -280,6 +276,7 @@ curl -X POST http://localhost:8420/orient
 praxis workflow query "status"
 praxis workflow health
 praxis workflow tools list
+praxis workflow tools search query
 
 # Via MCP (in Claude Code)
 praxis_health()

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple, Dict, List
 
 from .receipt_store import list_receipt_payloads
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
 _log = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ _ENV_RISK_SCORES_PATH = "PRAXIS_RISK_SCORES_PATH"
 
 def _repo_root() -> Path:
     """Return the repository root directory."""
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _utc_now() -> datetime:

@@ -139,4 +139,5 @@ def test_publish_policy_review_projects_gate_and_promotion_rows(monkeypatch) -> 
     assert payload["policy"]["promotion_decision"]["decision"] == "accept"
     executed_queries = [query for query, _ in conn.executed]
     assert any("INSERT INTO gate_evaluations" in query for query in executed_queries)
+    assert any("grant_ref, plan_envelope_hash" in query for query in executed_queries)
     assert any("INSERT INTO promotion_decisions" in query for query in executed_queries)

@@ -157,24 +157,24 @@ describe('MoonBuildPage edge dismiss', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Select gate between Webhook and Next step' }));
 
-    expect(screen.getByRole('button', { name: 'Edit gate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add gate' })).toBeInTheDocument();
 
     fireEvent.mouseDown(document.body);
 
-    expect(screen.queryByRole('button', { name: 'Edit gate' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add gate' })).not.toBeInTheDocument();
   });
 
   test('clicking inside the detail dock keeps the selected gate card open', () => {
     render(<MoonBuildPage workflowId="wf-123" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Select gate between Webhook and Next step' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Edit gate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add gate' }));
 
     expect(screen.getByTestId('node-detail')).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByTestId('node-detail'));
 
-    expect(screen.getByRole('button', { name: 'Edit gate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add gate' })).toBeInTheDocument();
   });
 
   test('clicking the desktop detail toggle keeps the selected gate card open', () => {
@@ -182,10 +182,10 @@ describe('MoonBuildPage edge dismiss', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Select gate between Webhook and Next step' }));
 
-    const detailToggle = screen.getByRole('button', { name: 'Open Detail dock' });
+    const detailToggle = screen.getByRole('button', { name: 'Open Inspector dock' });
     fireEvent.mouseDown(detailToggle);
     fireEvent.click(detailToggle);
 
-    expect(screen.getByRole('button', { name: 'Edit gate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add gate' })).toBeInTheDocument();
   });
 });

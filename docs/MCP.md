@@ -9,6 +9,7 @@ CLI discovery is generated from the same catalog metadata:
 - `workflow tools describe <tool|alias|entrypoint>`
 - `workflow tools call <tool|alias|entrypoint> --input-json '{...}'`
 - single-result searches print the direct describe and entrypoint commands
+- each subcommand also accepts `--help`
 
 ## Catalog Summary
 

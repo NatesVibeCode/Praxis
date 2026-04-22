@@ -15,6 +15,61 @@ from surfaces.api.handlers import workflow_query_routes
 from surfaces.api.handlers import workflow_run
 
 
+class _FakeAuthorityConn:
+    def __init__(self) -> None:
+        self.receipts: dict[str, dict] = {}
+        self.events: dict[str, dict] = {}
+
+    def fetchrow(self, query, *args):
+        if "FROM authority_operation_receipts" in query:
+            idempotency_key = args[1]
+            for receipt in self.receipts.values():
+                if receipt.get("idempotency_key") == idempotency_key:
+                    return receipt
+        return None
+
+    def execute(self, query, *args):
+        if "INSERT INTO authority_operation_receipts" in query:
+            receipt_id = args[0]
+            self.receipts[receipt_id] = {
+                "receipt_id": receipt_id,
+                "operation_name": args[1],
+                "operation_kind": args[2],
+                "authority_ref": args[3],
+                "authority_domain_ref": args[4],
+                "storage_target_ref": args[5],
+                "caller_ref": args[6],
+                "idempotency_key": args[7],
+                "idempotency_policy": args[8],
+                "status": args[9],
+                "input_hash": args[10],
+                "output_hash": args[11],
+                "event_ids": args[12],
+                "error": args[13],
+                "handler_module": args[14],
+                "handler_qualname": args[15],
+                "latency_ms": args[16],
+                "result_payload": args[17],
+                "metadata": args[18],
+            }
+            return "INSERT 0 1"
+        if "INSERT INTO authority_events" in query:
+            event_id = args[0]
+            self.events[event_id] = {"event_id": event_id}
+            return "INSERT 0 1"
+        if "UPDATE authority_operation_receipts" in query:
+            event_ids = args[0]
+            receipt_id = args[1]
+            if receipt_id in self.receipts:
+                self.receipts[receipt_id]["event_ids"] = event_ids
+            return "UPDATE 1"
+        return "OK"
+
+
+def _fake_shared_subsystems():
+    return SimpleNamespace(get_pg_conn=lambda: _FakeAuthorityConn())
+
+
 def _binding(
     *,
     operation_name: str,
@@ -47,7 +102,7 @@ def test_mount_capabilities_uses_operation_catalog_when_available(monkeypatch) -
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -162,7 +217,7 @@ def test_mount_capabilities_raises_when_catalog_load_fails(monkeypatch) -> None:
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -194,7 +249,7 @@ def test_mount_capabilities_sorts_specific_routes_ahead_of_catchalls(monkeypatch
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -263,7 +318,7 @@ def test_mount_capabilities_promotes_routes_ahead_of_legacy_rest_of_path_catchal
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -318,7 +373,7 @@ def test_mount_capabilities_raises_on_duplicate_operation_route_bindings(monkeyp
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -362,7 +417,7 @@ def test_mount_capabilities_raises_when_existing_route_owns_binding(monkeypatch)
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -401,7 +456,7 @@ def test_mount_capabilities_flattens_post_body_for_models_without_body_field(mon
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -493,7 +548,7 @@ def test_mount_capabilities_json_encodes_datetime_results(monkeypatch) -> None:
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -547,7 +602,7 @@ def test_mount_capabilities_awaits_async_handlers(monkeypatch) -> None:
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -594,7 +649,7 @@ def test_mount_capabilities_accepts_raw_provider_onboarding_body(monkeypatch) ->
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -649,7 +704,7 @@ def test_mount_capabilities_supports_circuit_query_params(monkeypatch) -> None:
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,
@@ -693,7 +748,7 @@ def test_mount_capabilities_supports_circuit_override_body(monkeypatch) -> None:
     monkeypatch.setattr(
         rest,
         "_ensure_shared_subsystems",
-        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+        lambda _app: _fake_shared_subsystems(),
     )
     monkeypatch.setattr(
         rest,

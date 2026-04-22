@@ -23,8 +23,7 @@ QUEUE_RELATIVE_PATH = Path("artifacts/workflow/release_hardening/release_proof_a
 QUEUE_PATH = REPO_ROOT / QUEUE_RELATIVE_PATH
 NATIVE_CONTRACT_PATH = REPO_ROOT / "config" / "DAG_NATIVE_INSTANCE_ENV.contract"
 DEFAULT_DB_URL = "postgresql://nate@127.0.0.1:5432/dag_workflow"
-DEFAULT_PATH_PREFIX = "/opt/homebrew/bin:/opt/homebrew/Cellar/node/25.6.1/bin"
-PYTHON_BIN = "/opt/homebrew/bin/python3"
+PYTHON_BIN = os.environ.get("PRAXIS_PYTHON_BIN") or sys.executable or shutil.which("python3") or "python3"
 RELEASE_TEST_FILES = (
     "Code&DBs/Workflow/tests/integration/test_repo_local_primary_operator_entrypoint.py",
     "Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py",
@@ -65,7 +64,6 @@ def _base_env() -> dict[str, str]:
         else f"{WORKFLOW_ROOT}{os.pathsep}{existing_pythonpath}"
     )
     env.setdefault("WORKFLOW_DATABASE_URL", DEFAULT_DB_URL)
-    env["PATH"] = f"{DEFAULT_PATH_PREFIX}:{env.get('PATH', '')}"
     return env
 
 

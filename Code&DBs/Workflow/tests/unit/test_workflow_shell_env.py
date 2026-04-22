@@ -10,12 +10,15 @@ from surfaces._workflow_database import workflow_database_authority_for_repo
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _HELPER = _REPO_ROOT / "scripts" / "_workflow_env.sh"
 _WORKFLOW_ROOT = _REPO_ROOT / "Code&DBs" / "Workflow"
+_WORKSPACE_LAYOUT = _REPO_ROOT / "config" / "workspace_layout.json"
 
 
 def _sandbox_repo(tmp_path: Path) -> Path:
     repo_root = tmp_path / "repo"
     (repo_root / "Code&DBs").mkdir(parents=True)
     (repo_root / "Code&DBs" / "Workflow").symlink_to(_WORKFLOW_ROOT, target_is_directory=True)
+    (repo_root / "config").mkdir(parents=True)
+    (repo_root / "config" / "workspace_layout.json").symlink_to(_WORKSPACE_LAYOUT)
     return repo_root
 
 
@@ -63,7 +66,7 @@ def test_workflow_env_bootstrap_fails_closed_without_authority(tmp_path: Path) -
     )
 
     assert completed.returncode != 0
-    assert "WORKFLOW_DATABASE_URL must be set in process env or declared in" in completed.stderr
+    assert "WORKFLOW_DATABASE_URL must be provided by the registry/runtime environment" in completed.stderr
 
 
 def test_workflow_env_bootstrap_matches_explicit_python_authority(tmp_path: Path) -> None:
@@ -101,47 +104,29 @@ def test_workflow_env_bootstrap_matches_repo_env_python_authority(tmp_path: Path
     assert resolved_source == f"repo_env:{repo_env_path}"
 
 
-def test_workflow_env_bootstrap_matches_docker_python_authority(
-    monkeypatch,
+def test_workflow_env_bootstrap_does_not_discover_docker_authority(
     tmp_path: Path,
 ) -> None:
     repo_root = _sandbox_repo(tmp_path)
     (repo_root / "docker-compose.yml").write_text("services:\n  postgres:\n    image: postgres\n", encoding="utf-8")
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    fake_docker = fake_bin / "docker"
-    fake_docker.write_text(
-        "\n".join(
-            [
-                "#!/usr/bin/env bash",
-                "set -eu",
-                "if [ \"$1\" = compose ] && [ \"$4\" = ps ]; then",
-                "  printf '%s\\n' 'postgres-container'",
-                "elif [ \"$1\" = inspect ]; then",
-                "  printf '%s\\n' 'healthy'",
-                "elif [ \"$1\" = compose ] && [ \"$4\" = port ]; then",
-                "  printf '%s\\n' '0.0.0.0:6543'",
-                "else",
-                "  exit 1",
-                "fi",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    fake_docker.chmod(0o755)
-    env = {"PATH": f"{fake_bin}:{os.environ.get('PATH', '')}"}
-    monkeypatch.setenv("PATH", env["PATH"])
 
-    resolved_url, resolved_source = _helper_authority(repo_root, env=env)
-    authority = workflow_database_authority_for_repo(repo_root, env=env)
-
-    assert (resolved_url, resolved_source) == (
-        str(authority.database_url),
-        authority.source,
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"source {_HELPER!s}; workflow_load_repo_env",
+        ],
+        cwd=repo_root,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "WORKFLOW_ENV_REPO_ROOT": str(repo_root),
+        },
+        capture_output=True,
+        text=True,
     )
-    assert resolved_url == "postgresql://postgres@127.0.0.1:6543/praxis"
-    assert resolved_source == "docker"
+
+    assert completed.returncode != 0
+    assert "WORKFLOW_DATABASE_URL must be provided by the registry/runtime environment" in completed.stderr
 
 
 def test_workflow_env_detects_repo_root_when_sourced_from_zsh() -> None:
@@ -158,3 +143,24 @@ def test_workflow_env_detects_repo_root_when_sourced_from_zsh() -> None:
     )
 
     assert completed.stdout.strip() == str(_REPO_ROOT)
+
+
+def test_workflow_env_prefers_launcher_resolved_repo_root(tmp_path: Path) -> None:
+    repo_root = _sandbox_repo(tmp_path)
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"source {_HELPER!s}; printf '%s' \"$workflow_env_repo_root\"",
+        ],
+        cwd=tmp_path,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "PRAXIS_LAUNCHER_RESOLVED_REPO_ROOT": str(repo_root),
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout.strip() == str(repo_root)

@@ -8,8 +8,26 @@
 
 set -uo pipefail
 
-DB_URL="${WORKFLOW_DATABASE_URL:-postgresql://localhost:5432/praxis}"
-PSQL_BIN="${PSQL_BIN:-/opt/homebrew/bin/psql}"
+REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
+if [[ -z "${WORKFLOW_DATABASE_URL:-}" && -f "$REPO_ROOT/scripts/_workflow_env.sh" ]]; then
+    # shellcheck source=/dev/null
+    . "$REPO_ROOT/scripts/_workflow_env.sh"
+    workflow_load_repo_env >/dev/null 2>&1 || true
+fi
+
+DB_URL="${WORKFLOW_DATABASE_URL:-}"
+if [[ -z "$DB_URL" ]]; then
+    exit 0
+fi
+
+PSQL_BIN="${PSQL_BIN:-}"
+if [[ -z "$PSQL_BIN" ]]; then
+    PSQL_BIN="$(command -v psql || true)"
+fi
+
+if [[ -z "$PSQL_BIN" ]]; then
+    exit 0
+fi
 
 if ! command -v "$PSQL_BIN" >/dev/null 2>&1; then
     # Silently no-op if psql isn't available; orient must never block session start.

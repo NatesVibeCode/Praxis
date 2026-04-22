@@ -1,0 +1,154 @@
+{
+  "name": "Mobile Setup — Authority Spine",
+  "workflow_id": "mobile_setup_authority_spine",
+  "phase": "W",
+  "queue_id": "mobile_setup_authority_spine_20260422",
+  "outcome_goal": "Mobile setup has a verified backend authority spine: current DB state is audited, plan envelopes are stamped deterministically, capability grants resolve fail-closed, approval lifecycle rows are created/ratified/revoked through explicit DB functions, and the command-bus integration points are documented with tests proving uncovered autonomous actions do not auto-execute.",
+  "anti_requirements": [
+    "Do NOT recreate the retired mobile_oversight cascade chain or launch scripts.",
+    "Do NOT build WebAuthn, a PWA, Cloudflare Tunnel, Telegram fallback, launchd jobs, or service workers in this wave.",
+    "Do NOT treat passkeys or sessions as action authority. Authentication is deferred until grant resolution exists.",
+    "Do NOT move authority into ad hoc scripts. Runtime behavior belongs in Python modules backed by Praxis.db rows.",
+    "Do NOT preserve _SAFE_AUTO_EXECUTE_TYPES or autorun_ok as execution authority. They may only survive as UI hints after command-bus wiring.",
+    "Do NOT modify unrelated provider, integration, or dashboard surfaces."
+  ],
+  "jobs": [
+    {
+      "label": "audit_mobile_state",
+      "agent": "auto/research",
+      "task_type": "research",
+      "verify_refs": ["verify.mobile_setup_authority_spine.audit_current_state"],
+      "completion_contract": {
+        "submission_required": true,
+        "result_kind": "artifact_bundle",
+        "submit_tool_names": ["praxis_submit_artifact_bundle"],
+        "verification_required": true
+      },
+      "description": "Audit the cleaned current mobile state and DB authority pieces.",
+      "outcome_goal": "artifacts/mobile_setup_authority_spine/00_current_state.md lists existing migrations, missing runtime modules, missing API handlers, and the exact next build boundary for this wave.",
+      "prompt": "Orient first with `praxis workflow tools call praxis_query --input-json '{\"question\":\"status\"}'` and read `docs/architecture/mobile_access_plan.md`.\n\nThen inspect these files:\n- `Code&DBs/Databases/migrations/workflow/185_mobile_capability_ledger.sql`\n- `Code&DBs/Databases/migrations/workflow/186_gate_evaluations_grant_coverage.sql`\n- `Code&DBs/Databases/migrations/workflow/187_webauthn_challenges.sql`\n- `Code&DBs/Databases/migrations/workflow/189_oversight_instrumentation.sql`\n- `Code&DBs/Workflow/runtime/control_commands.py`\n- `Code&DBs/Workflow/runtime/workflow/submission_policy.py`\n\nWrite `artifacts/mobile_setup_authority_spine/00_current_state.md` with sections:\n1. Existing DB authority\n2. Missing runtime authority\n3. Command-bus choke points\n4. Explicit out-of-scope items for this wave\n5. Done condition for the backend authority spine\n\nDo not change code in this job.",
+      "read": [
+        "docs/architecture/mobile_access_plan.md",
+        "Code&DBs/Databases/migrations/workflow/185_mobile_capability_ledger.sql",
+        "Code&DBs/Databases/migrations/workflow/186_gate_evaluations_grant_coverage.sql",
+        "Code&DBs/Databases/migrations/workflow/187_webauthn_challenges.sql",
+        "Code&DBs/Databases/migrations/workflow/189_oversight_instrumentation.sql",
+        "Code&DBs/Workflow/runtime/control_commands.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_policy.py"
+      ],
+      "write": [
+        "artifacts/mobile_setup_authority_spine/00_current_state.md"
+      ],
+      "verify_command": "test -s artifacts/mobile_setup_authority_spine/00_current_state.md && grep -qi 'Existing DB authority' artifacts/mobile_setup_authority_spine/00_current_state.md"
+    },
+    {
+      "label": "build_plan_envelope",
+      "agent": "auto/build",
+      "task_type": "build",
+      "verify_refs": ["verify.mobile_setup_authority_spine.plan_envelope"],
+      "completion_contract": {
+        "submission_required": true,
+        "result_kind": "code_change",
+        "submit_tool_names": ["praxis_submit_code_change"],
+        "verification_required": true
+      },
+      "depends_on": ["audit_mobile_state"],
+      "description": "Implement deterministic plan-envelope stamping.",
+      "outcome_goal": "runtime/capability/plan_envelope.py stamps control intents into stable plan envelopes with deterministic hashes, and tests prove key order and timestamp bucket behavior are stable.",
+      "prompt": "Implement deterministic plan-envelope stamping for mobile approval authority.\n\nFiles to create or update:\n- `Code&DBs/Workflow/runtime/capability/__init__.py`\n- `Code&DBs/Workflow/runtime/capability/types.py`\n- `Code&DBs/Workflow/runtime/capability/plan_envelope.py`\n- focused tests under `Code&DBs/Workflow/tests/` following existing local test layout\n\nRequirements:\n1. Use dataclasses or typed dictionaries consistent with nearby runtime style.\n2. The envelope must include at minimum: command_type, requested_by_kind, requested_by_ref, target_refs, payload_digest, risk_level, blast_radius, created_at_bucket, and plan_envelope_hash.\n3. The hash must be deterministic across JSON key ordering.\n4. The payload digest must not store raw secrets or full payload blobs.\n5. The module must be importable with `PYTHONPATH='Code&DBs/Workflow'`.\n6. Tests must prove stable hash for equivalent payloads with reordered keys and different hash for materially different payloads.\n\nDo not wire command execution in this job.",
+      "read": [
+        "artifacts/mobile_setup_authority_spine/00_current_state.md",
+        "Code&DBs/Workflow/runtime/control_commands.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/capability/__init__.py",
+        "Code&DBs/Workflow/runtime/capability/types.py",
+        "Code&DBs/Workflow/runtime/capability/plan_envelope.py",
+        "Code&DBs/Workflow/tests/"
+      ],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest -q Code\\&DBs/Workflow/tests -k 'plan_envelope or mobile'"
+    },
+    {
+      "label": "build_grant_resolver",
+      "agent": "auto/build",
+      "task_type": "build",
+      "verify_refs": ["verify.mobile_setup_authority_spine.grant_resolver"],
+      "completion_contract": {
+        "submission_required": true,
+        "result_kind": "code_change",
+        "submit_tool_names": ["praxis_submit_code_change"],
+        "verification_required": true
+      },
+      "depends_on": ["build_plan_envelope"],
+      "description": "Resolve active capability grants against stamped plan envelopes.",
+      "outcome_goal": "runtime/capability/resolver.py resolves grant coverage fail-closed against Praxis.db rows and tests cover miss, expiry, revocation, risk ceiling, command scope, and exact plan-envelope hash matching.",
+      "prompt": "Implement the capability grant resolver.\n\nFiles to create or update:\n- `Code&DBs/Workflow/runtime/capability/resolver.py`\n- `Code&DBs/Workflow/runtime/capability/types.py` if needed\n- focused tests under `Code&DBs/Workflow/tests/`\n\nRequirements:\n1. Resolver input is a stamped plan envelope plus principal/device context.\n2. Resolver queries `capability_grants` and returns a structured covered/miss result.\n3. Fail closed on missing table, malformed rows, expired grant, revoked grant, principal mismatch, device mismatch when required, risk ceiling violation, command not in scope, and plan hash mismatch for plan-bound grants.\n4. Do not auto-create grants here.\n5. Tests must use local DB/test fixtures or isolated fakes consistent with existing test patterns. Do not require a live phone or WebAuthn.\n\nDo not wire command execution in this job.",
+      "read": [
+        "Code&DBs/Databases/migrations/workflow/185_mobile_capability_ledger.sql",
+        "Code&DBs/Workflow/runtime/capability/plan_envelope.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/capability/resolver.py",
+        "Code&DBs/Workflow/runtime/capability/types.py",
+        "Code&DBs/Workflow/tests/"
+      ],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest -q Code\\&DBs/Workflow/tests -k 'capability or grant or mobile'"
+    },
+    {
+      "label": "build_approval_lifecycle",
+      "agent": "auto/build",
+      "task_type": "build",
+      "verify_refs": ["verify.mobile_setup_authority_spine.approval_lifecycle"],
+      "completion_contract": {
+        "submission_required": true,
+        "result_kind": "code_change",
+        "submit_tool_names": ["praxis_submit_code_change"],
+        "verification_required": true
+      },
+      "depends_on": ["build_grant_resolver"],
+      "description": "Create, ratify, and revoke approval request rows.",
+      "outcome_goal": "runtime/capability/approval_lifecycle.py can open approval requests, ratify them into grants, revoke requests/grants, and tests prove stale or missing coverage never authorizes execution.",
+      "prompt": "Implement approval lifecycle primitives.\n\nFiles to create or update:\n- `Code&DBs/Workflow/runtime/capability/approval_lifecycle.py`\n- `Code&DBs/Workflow/runtime/capability/types.py` if needed\n- focused tests under `Code&DBs/Workflow/tests/`\n\nRequirements:\n1. `open_approval_request` inserts or returns a pending request for a stamped envelope.\n2. `ratify_approval` creates a capability grant linked to the request and marks the request ratified.\n3. `revoke_approval_request` and `revoke_grant` mark rows revoked without deleting history.\n4. Use explicit transactions where row consistency matters.\n5. Do not implement WebAuthn yet, but design the ratify function so a later step-up freshness check can be inserted before grant issuance.\n6. Tests must prove revoke history remains inspectable and revoked grants do not resolve as covered.\n\nDo not add API handlers in this job.",
+      "read": [
+        "Code&DBs/Databases/migrations/workflow/185_mobile_capability_ledger.sql",
+        "Code&DBs/Workflow/runtime/capability/resolver.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/capability/approval_lifecycle.py",
+        "Code&DBs/Workflow/runtime/capability/types.py",
+        "Code&DBs/Workflow/tests/"
+      ],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest -q Code\\&DBs/Workflow/tests -k 'approval or grant or mobile'"
+    },
+    {
+      "label": "command_bus_integration_plan",
+      "agent": "auto/review",
+      "task_type": "review",
+      "verify_refs": ["verify.mobile_setup_authority_spine.command_bus_plan"],
+      "completion_contract": {
+        "submission_required": true,
+        "result_kind": "artifact_bundle",
+        "submit_tool_names": ["praxis_submit_artifact_bundle"],
+        "verification_required": true
+      },
+      "depends_on": ["build_approval_lifecycle"],
+      "description": "Produce the exact command-bus wiring plan and block unsafe next work.",
+      "outcome_goal": "artifacts/mobile_setup_authority_spine/01_command_bus_wiring.md identifies exact files/functions to wire next, tests required, and remaining failure gates before WebAuthn/PWA work may start.",
+      "prompt": "Review the implemented authority spine and produce the next wiring plan.\n\nRead:\n- `Code&DBs/Workflow/runtime/capability/plan_envelope.py`\n- `Code&DBs/Workflow/runtime/capability/resolver.py`\n- `Code&DBs/Workflow/runtime/capability/approval_lifecycle.py`\n- `Code&DBs/Workflow/runtime/control_commands.py`\n- `Code&DBs/Workflow/runtime/chat_tools.py`\n- `Code&DBs/Workflow/runtime/workflow/submission_policy.py`\n- `Code&DBs/Workflow/runtime/self_healing.py`\n- `Code&DBs/Workflow/runtime/data_dictionary_governance_remediation.py`\n\nWrite `artifacts/mobile_setup_authority_spine/01_command_bus_wiring.md` with:\n1. Exact command-bus insertion points\n2. How `_SAFE_AUTO_EXECUTE_TYPES` or equivalent UI-risk hints must be demoted\n3. Required gate_evaluations evidence changes\n4. Tests that must fail if grant resolution is bypassed\n5. Explicit go/no-go for WebAuthn and PWA follow-up\n\nIf the authority spine is incomplete or tests are weak, say NO-GO and file the failure as the first section.",
+      "read": [
+        "Code&DBs/Workflow/runtime/capability/plan_envelope.py",
+        "Code&DBs/Workflow/runtime/capability/resolver.py",
+        "Code&DBs/Workflow/runtime/capability/approval_lifecycle.py",
+        "Code&DBs/Workflow/runtime/control_commands.py",
+        "Code&DBs/Workflow/runtime/chat_tools.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_policy.py",
+        "Code&DBs/Workflow/runtime/self_healing.py",
+        "Code&DBs/Workflow/runtime/data_dictionary_governance_remediation.py"
+      ],
+      "write": [
+        "artifacts/mobile_setup_authority_spine/01_command_bus_wiring.md"
+      ],
+      "verify_command": "test -s artifacts/mobile_setup_authority_spine/01_command_bus_wiring.md && grep -qi 'go\\|no-go' artifacts/mobile_setup_authority_spine/01_command_bus_wiring.md"
+    }
+  ]
+}

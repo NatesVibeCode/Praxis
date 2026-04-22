@@ -64,6 +64,7 @@ from runtime.compiler_references import (
     workflow_id_for_title as _workflow_id_for_title_impl,
 )
 from runtime.integrations.display_names import display_name_for_integration
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from storage.postgres.validators import PostgresConfigurationError
 
 logger = logging.getLogger(__name__)
@@ -730,7 +731,7 @@ def _hydrate_env_from_dotenv() -> None:
 
 
 def _compiler_repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _read_compiler_env_file(path: Path) -> dict[str, str]:

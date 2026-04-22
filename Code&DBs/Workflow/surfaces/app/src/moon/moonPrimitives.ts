@@ -220,7 +220,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     route: 'auto/research',
     surface: {
       tier: 'primary',
-      badge: 'Core now',
+      badge: 'Core',
       detail: 'Primary Moon step primitive with a real planned runtime route.',
     },
     scaffold: (node) => ({
@@ -232,7 +232,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     route: 'auto/classify',
     surface: {
       tier: 'primary',
-      badge: 'Core now',
+      badge: 'Core',
       detail: 'Primary Moon step primitive with a real planned runtime route.',
     },
     scaffold: (node) => ({
@@ -244,7 +244,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     route: 'auto/draft',
     surface: {
       tier: 'primary',
-      badge: 'Core now',
+      badge: 'Core',
       detail: 'Primary Moon step primitive with a real planned runtime route.',
     },
     scaffold: (node) => ({
@@ -256,7 +256,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     route: '@notifications/send',
     surface: {
       tier: 'primary',
-      badge: 'Core now',
+      badge: 'Core',
       detail: 'Real action primitive with a stable property surface in the node inspector.',
     },
     scaffold: (node, options) => {
@@ -277,7 +277,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     route: '@webhook/post',
     surface: {
       tier: 'primary',
-      badge: 'Core now',
+      badge: 'Core',
       detail: 'Visible now that Moon offers opinionated request presets instead of a blank transport form.',
     },
     scaffold: (node) => {
@@ -305,7 +305,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     route: '@workflow/invoke',
     surface: {
       tier: 'primary',
-      badge: 'Core now',
+      badge: 'Core',
       detail: 'Visible now that Moon can pick saved child workflows by name from the inspector.',
     },
     scaffold: (node) => {

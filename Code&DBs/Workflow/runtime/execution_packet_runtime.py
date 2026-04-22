@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
 
 class ExecutionPacketRuntimeError(RuntimeError):
@@ -378,7 +379,7 @@ def _validate_compile_index_authority(
             surface_revision=compile_surface_revision,
             surface_name="compiler",
             require_fresh=True,
-            repo_root=Path(__file__).resolve().parents[3],
+            repo_root=workspace_repo_root(),
         )
     except CompileIndexAuthorityError as exc:
         raise ExecutionPacketRuntimeError(

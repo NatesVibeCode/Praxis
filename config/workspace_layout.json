@@ -9,9 +9,20 @@
     "workflow_migrations": "Databases/migrations/workflow"
   },
   "log_paths": {
-    "postgres": "Databases/postgres-dev/log/postgres.log"
+    "postgres": "Databases/postgres-dev/log/postgres.log",
+    "supervisor_stdout": "Workflow/artifacts/logs/praxis-engine.log",
+    "supervisor_stderr": "Workflow/artifacts/logs/praxis-engine.err",
+    "api_server_stderr": "Workflow/artifacts/logs/praxis-api-server.err",
+    "workflow_worker_stderr": "Workflow/artifacts/logs/praxis-workflow-worker.err",
+    "scheduler_stderr": "Workflow/artifacts/logs/praxis-scheduler.err"
+  },
+  "scratch_paths": {
+    "atlas_heuristic_map": "Workflow/artifacts/workflow/atlas_heuristic_map.json",
+    "workflow_sandbox_root": "Workflow/artifacts/workflow-sandbox"
   },
   "execution_mounts": {
-    "container_workspace_root": "/workspace"
+    "container_workspace_root": "/workspace",
+    "container_home": "/home/praxis-agent",
+    "container_auth_seed_dir": "/run/praxis-auth"
   }
 }

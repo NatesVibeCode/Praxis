@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 
 import pytest
 
@@ -9,7 +10,7 @@ from storage.postgres import PostgresConfigurationError
 from surfaces import _workflow_database
 
 
-def test_workflow_database_env_falls_back_to_docker_authority(
+def test_workflow_database_env_uses_runtime_authority(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -22,8 +23,8 @@ def test_workflow_database_env_falls_back_to_docker_authority(
         captured["repo_root"] = repo_root
         captured["required"] = required
         return WorkflowDatabaseAuthority(
-            database_url="postgresql://127.0.0.1:5432/praxis",
-            source="docker",
+            database_url="postgresql://registry.example/praxis",
+            source="process_env",
         )
 
     monkeypatch.setattr(
@@ -35,8 +36,8 @@ def test_workflow_database_env_falls_back_to_docker_authority(
     resolved = _workflow_database.workflow_database_env_for_repo(repo_root, env={})
 
     assert resolved == {
-        "WORKFLOW_DATABASE_URL": "postgresql://127.0.0.1:5432/praxis",
-        "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "docker",
+        "WORKFLOW_DATABASE_URL": "postgresql://registry.example/praxis",
+        "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "process_env",
         "PATH": "",
     }
     assert captured == {
@@ -94,7 +95,7 @@ def test_workflow_database_url_for_repo_uses_runtime_authority(
         captured["env"] = env
         captured["repo_root"] = repo_root
         captured["required"] = required
-        return "postgresql://127.0.0.1:5432/praxis"
+        return "postgresql://registry.example/praxis"
 
     monkeypatch.setattr(
         _workflow_database,
@@ -104,7 +105,7 @@ def test_workflow_database_url_for_repo_uses_runtime_authority(
 
     resolved = _workflow_database.workflow_database_url_for_repo(repo_root, env={})
 
-    assert resolved == "postgresql://127.0.0.1:5432/praxis"
+    assert resolved == "postgresql://registry.example/praxis"
     assert captured == {
         "env": {},
         "repo_root": repo_root,
@@ -133,3 +134,10 @@ def test_workflow_database_env_fails_closed_without_any_authority(
 
     with pytest.raises(PostgresConfigurationError, match="WORKFLOW_DATABASE_URL"):
         _workflow_database.workflow_database_env_for_repo(repo_root, env={})
+
+
+def test_launch_agents_root_honors_explicit_env(monkeypatch) -> None:
+    launchd_dir = Path(tempfile.gettempdir()) / "praxis-launchd"
+    monkeypatch.setenv("PRAXIS_LAUNCHD_DIR", str(launchd_dir))
+
+    assert _workflow_database.launch_agents_root() == launchd_dir

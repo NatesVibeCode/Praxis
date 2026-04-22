@@ -9,8 +9,9 @@
 #   docker compose up -d --force-recreate api-server scheduler
 #
 # Or piped into docker compose --env-file:
-#   bin/praxis-compose-env --dotenv > /tmp/praxis-compose.env
-#   docker compose --env-file /tmp/praxis-compose.env up -d
+#   compose_env="$(mktemp -t praxis-compose.XXXXXX)"
+#   bin/praxis-compose-env --dotenv > "$compose_env"
+#   docker compose --env-file "$compose_env" up -d
 #
 # Why this exists: integration manifests declare env_var-backed auth. The
 # resolve_secret() chain in adapters/keychain.py checks .env → Keychain →

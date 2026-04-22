@@ -5,22 +5,83 @@ import sys
 from difflib import SequenceMatcher
 from typing import TextIO
 
-from surfaces.cli.commands.authority import _reconcile_command, _reload_command
-from surfaces.cli.commands.dataset import _dataset_command
-from surfaces.cli.commands.praxis_authoring import (
-    _catalog_command_passthrough,
-    _data_command,
-    _db_command,
-    _hierarchy_command,
-    _object_command_passthrough,
-    _object_type_command_passthrough,
-    _page_command,
-    _registry_command_passthrough,
-)
+
 def _workflow_main() -> callable:
     from surfaces.cli.main import main as workflow_main
 
     return workflow_main
+
+
+def _db_command(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.praxis_authoring import _db_command as command
+
+    return command(argv, stdout=stdout)
+
+
+def _registry_command_passthrough(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.praxis_authoring import _registry_command_passthrough as command
+
+    return command(argv, stdout=stdout)
+
+
+def _object_type_command_passthrough(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.praxis_authoring import _object_type_command_passthrough as command
+
+    return command(argv, stdout=stdout)
+
+
+def _object_command_passthrough(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.praxis_authoring import _object_command_passthrough as command
+
+    return command(argv, stdout=stdout)
+
+
+def _catalog_command_passthrough(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.praxis_authoring import _catalog_command_passthrough as command
+
+    return command(argv, stdout=stdout)
+
+
+def _data_command(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.praxis_authoring import _data_command as command
+
+    return command(argv, stdout=stdout)
+
+
+def _dataset_command(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.dataset import _dataset_command as command
+
+    return command(argv, stdout=stdout)
+
+
+def _page_command(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.praxis_authoring import _page_command as command
+
+    return command(argv, stdout=stdout)
+
+
+def _hierarchy_command(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.praxis_authoring import _hierarchy_command as command
+
+    return command(argv, stdout=stdout)
+
+
+def _reload_command(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.authority import _reload_command as command
+
+    return command(argv, stdout=stdout)
+
+
+def _reconcile_command(argv: list[str], *, stdout: TextIO) -> int:
+    from surfaces.cli.commands.authority import _reconcile_command as command
+
+    return command(argv, stdout=stdout)
+
+
+def _launcher_command(argv: list[str], *, stdout: TextIO) -> int:
+    from runtime.launcher_authority import launcher_cli
+
+    return launcher_cli(argv, stdout=stdout)
 
 
 def _usage() -> str:
@@ -36,6 +97,7 @@ def _help_text() -> str:
             "  praxis workflow <command>                     Execution, query, tool, and operator authority",
             "",
             "Direct authorities:",
+            "  praxis launcher <configure|resolve|doctor>    Host-local launcher resolution",
             "  praxis db <status|plan|apply|describe>        Canonical schema authority",
             "  praxis registry <action>                      Manifest registry authority",
             "  praxis object-type <action>                   Object-type authority",
@@ -105,6 +167,8 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
 
     if namespace == "workflow":
         return _workflow_main()(["workflow", *tail], stdout=stdout)
+    if namespace == "launcher":
+        return _launcher_command(tail, stdout=stdout)
     if namespace == "db":
         return _db_command(tail, stdout=stdout)
     if namespace == "registry":
@@ -133,6 +197,7 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
         namespace,
         [
             "workflow",
+            "launcher",
             "db",
             "registry",
             "object-type",

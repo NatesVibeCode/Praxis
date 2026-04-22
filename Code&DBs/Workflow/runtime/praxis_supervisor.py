@@ -25,18 +25,19 @@ from typing import Any, Mapping
 
 from runtime._workflow_database import (
     WorkflowDatabaseAuthority,
+    launch_agents_root,
     resolve_runtime_database_authority,
 )
-from runtime.workspace_paths import code_tree_root, log_path as _layout_log_path, to_repo_ref
+from runtime.workspace_paths import code_tree_root, log_path as _layout_log_path, repo_root as workspace_repo_root, to_repo_ref
 from storage.postgres.validators import PostgresConfigurationError
 
 LOG = logging.getLogger(__name__)
 
-SERVICE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+SERVICE_PATH = os.environ.get("PRAXIS_SERVICE_PATH") or os.environ.get("PATH") or os.defpath
 SUPERVISOR_LABEL = "com.praxis.engine"
 SUPERVISOR_PROGRAM_NAME = "praxis"
-SUPERVISOR_STDOUT = Path("/tmp/praxis-engine.log")
-SUPERVISOR_STDERR = Path("/tmp/praxis-engine.err")
+SUPERVISOR_STDOUT = _layout_log_path("supervisor_stdout")
+SUPERVISOR_STDERR = _layout_log_path("supervisor_stderr")
 
 LEGACY_LAUNCHD_LABELS = (
     "com.praxis.postgres",
@@ -75,7 +76,7 @@ COMPONENT_SPECS = (
         key="api-server",
         display_name="api-server",
         compatibility_label="com.praxis.api-server",
-        log_path="/tmp/praxis-api-server.err",
+        log_path=str(_layout_log_path("api_server_stderr")),
         port=8420,
         waits_for_postgres=True,
     ),
@@ -83,14 +84,14 @@ COMPONENT_SPECS = (
         key="workflow-worker",
         display_name="workflow-worker",
         compatibility_label="com.praxis.workflow-worker",
-        log_path="/tmp/praxis-workflow-worker.err",
+        log_path=str(_layout_log_path("workflow_worker_stderr")),
         waits_for_postgres=True,
     ),
     ComponentSpec(
         key="scheduler",
         display_name="scheduler",
         compatibility_label="com.praxis.scheduler",
-        log_path="/tmp/praxis-scheduler.err",
+        log_path=str(_layout_log_path("scheduler_stderr")),
         waits_for_postgres=True,
     ),
 )
@@ -182,7 +183,7 @@ def discover_database_authority(repo_root: Path) -> WorkflowDatabaseAuthority:
         repo_env_path = repo_root / ".env"
         raise RuntimeError(
             "praxis_supervisor requires explicit WORKFLOW_DATABASE_URL authority "
-            f"from process env, launchd, or {repo_env_path}"
+            f"from registry/runtime env or {repo_env_path}"
         ) from exc
 
 
@@ -195,7 +196,7 @@ def build_paths(repo_root: Path, database_url: str | None = None) -> SupervisorP
     repo_root = repo_root.resolve()
     code_root = code_tree_root(repo_root)
     workflow_dir = code_root / "Workflow"
-    launch_agents_dir = Path.home() / "Library" / "LaunchAgents"
+    launch_agents_dir = launch_agents_root()
     authority = (
         resolve_runtime_database_authority(database_url=database_url, required=True)
         if database_url is not None
@@ -803,7 +804,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--repo-root",
         type=Path,
-        default=Path(__file__).resolve().parents[3],
+        default=workspace_repo_root(),
         help="Absolute Praxis repo root",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

@@ -14,6 +14,8 @@ workflow_detect_script_path() {
 
 if [ -n "${WORKFLOW_ENV_REPO_ROOT:-}" ]; then
   workflow_env_repo_root="$(cd "${WORKFLOW_ENV_REPO_ROOT}" && pwd)"
+elif [ -n "${PRAXIS_LAUNCHER_RESOLVED_REPO_ROOT:-}" ]; then
+  workflow_env_repo_root="$(cd "${PRAXIS_LAUNCHER_RESOLVED_REPO_ROOT}" && pwd)"
 elif [ -f "${PWD}/docker-compose.yml" ] && [ -f "${PWD}/scripts/_workflow_env.sh" ]; then
   workflow_env_repo_root="$(cd "${PWD}" && pwd)"
 else
@@ -32,6 +34,26 @@ workflow_python_bin() {
   return 1
 }
 
+workflow_repo_workflow_root() {
+  local python_bin
+  python_bin="$(workflow_python_bin)" || {
+    echo "python3 is required to resolve workflow root authority." >&2
+    return 1
+  }
+
+  WORKFLOW_ENV_REPO_ROOT="${workflow_env_repo_root}" "${python_bin}" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+repo_root = Path(os.environ["WORKFLOW_ENV_REPO_ROOT"])
+layout = json.loads((repo_root / "config" / "workspace_layout.json").read_text(encoding="utf-8"))
+code_tree = str(layout["code_tree"]["canonical"])
+workflow_subdir = str(layout["subdirs"]["workflow"])
+print(repo_root / code_tree / workflow_subdir)
+PY
+}
+
 workflow_resolve_database_env_json() {
   local python_bin
   python_bin="$(workflow_python_bin)" || {
@@ -39,7 +61,8 @@ workflow_resolve_database_env_json() {
     return 1
   }
 
-  local workflow_root="${workflow_env_repo_root}/Code&DBs/Workflow"
+  local workflow_root
+  workflow_root="$(workflow_repo_workflow_root)" || return 1
   local pythonpath="${workflow_root}"
   if [ -n "${PYTHONPATH:-}" ]; then
     pythonpath="${pythonpath}:${PYTHONPATH}"
@@ -103,4 +126,14 @@ PY
 
   export WORKFLOW_DATABASE_URL
   export WORKFLOW_DATABASE_AUTHORITY_SOURCE
+
+  if [ -z "${PRAXIS_WORKSPACE_BASE_PATH:-}" ] && [ -f "${workflow_env_repo_root}/.env" ]; then
+    PRAXIS_WORKSPACE_BASE_PATH="$(
+      awk -F= '/^PRAXIS_WORKSPACE_BASE_PATH=/ {sub(/^[^=]*=/, ""); print; exit}' \
+        "${workflow_env_repo_root}/.env"
+    )"
+    if [ -n "${PRAXIS_WORKSPACE_BASE_PATH}" ]; then
+      export PRAXIS_WORKSPACE_BASE_PATH
+    fi
+  fi
 }

@@ -5,7 +5,7 @@ un-embedded. Runs the canonical EmbeddingService (same model everything else
 uses) and writes via pgvector literals.
 
 Run with:
-    PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 \\
+    PYTHONPATH='Code&DBs/Workflow' python3 \\
         'Code&DBs/Workflow/scripts/backfill_semantic_embeddings.py'
 """
 from __future__ import annotations

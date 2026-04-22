@@ -31,7 +31,9 @@ from storage.postgres.validators import PostgresWriteError
 
 _ALLOWED_CATEGORIES = frozenset({
     "table", "object_type", "integration", "dataset", "ingest",
-    "decision", "receipt", "tool", "object",
+    "decision", "receipt", "tool", "object", "command", "event",
+    "projection", "service_bus_channel", "feedback_stream", "definition",
+    "runtime_target",
 })
 _ALLOWED_FIELD_KINDS = frozenset({
     "text", "number", "boolean", "enum", "json", "date", "datetime",

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TYPE_CHECKING, Optional, Dict, Tuple
 
+from runtime.workspace_paths import repo_root as workspace_repo_root
+
 if TYPE_CHECKING:
     from .workflow import WorkflowResult
 
@@ -23,7 +25,7 @@ def _utc_now() -> datetime:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _artifacts_dir() -> Path:

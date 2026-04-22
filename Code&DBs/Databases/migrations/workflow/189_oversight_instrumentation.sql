@@ -24,12 +24,11 @@
 --   plan-envelope approves in aggregate but wouldn't have approved at size.
 --
 -- This migration adds four tables. Runtime instrumentation and mobile
--- surface reads are implemented by spec
--- config/cascade/specs/W_mobile_access_plan_20260420.queue.json waves.
+-- surface reads are future work; the retired mobile cascade specs are not
+-- an implementation authority.
 --
--- No FKs to the mobile-access tables (approval_requests / capability_grants
--- from migrations 185-188) — those migrations are sequenced by the spec's
--- build waves; this migration is authority-only and must apply standalone.
+-- No FKs to the mobile-access tables (approval_requests / capability_grants).
+-- This migration is authority-only and must apply standalone.
 
 BEGIN;
 

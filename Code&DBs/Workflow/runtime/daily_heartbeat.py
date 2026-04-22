@@ -35,6 +35,7 @@ from typing import Any, Literal, Mapping, Sequence
 import asyncpg
 
 from storage.postgres import connect_workflow_database
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ _DEFAULT_TIMEOUTS_S: dict[str, int] = {
 
 _CREDENTIAL_EXPIRY_WARNING_DAYS = 7
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]  # /Users/nate/Praxis
+_REPO_ROOT = workspace_repo_root()
 
 
 # ---------------------------------------------------------------------------

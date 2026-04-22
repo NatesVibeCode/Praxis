@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from storage.postgres import SyncPostgresConnection, ensure_postgres_available
 
 _SYNC_STATUSES = ("pending", "succeeded", "degraded", "skipped")
@@ -67,7 +68,7 @@ def _connection(conn: SyncPostgresConnection | None = None) -> SyncPostgresConne
 def _repo_root(repo_root: str | Path | None = None) -> Path:
     if repo_root is not None:
         return Path(repo_root).resolve()
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _json_mapping(value: object) -> dict[str, object]:

@@ -55,6 +55,7 @@ from runtime.control_plane_manifests import (
     load_control_plane_manifest,
     transition_data_plan_status,
 )
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
 
 class DataRuntimeBoundaryError(RuntimeError):
@@ -81,7 +82,7 @@ def _raise_control_manifest_boundary(exc: ControlPlaneManifestBoundaryError) -> 
 
 
 def _default_workspace_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _json_clone(value: Any) -> Any:

@@ -7,8 +7,10 @@ import hashlib
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -17,6 +19,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from posixpath import normpath
 from pathlib import Path
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
@@ -24,6 +27,11 @@ from uuid import uuid4
 from pathlib import PurePosixPath
 
 from .docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
+from runtime.workspace_paths import (
+    container_auth_seed_dir,
+    container_home,
+    container_workspace_root,
+)
 from runtime.workflow.execution_policy import validate_auth_mount_policy
 
 _DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
@@ -50,6 +58,8 @@ def _parse_docker_mem_str(mem_str: str) -> int:
         return 0
 _CLOUDFLARE_SANDBOX_URL_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_URL"
 _CLOUDFLARE_SANDBOX_TOKEN_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_TOKEN"
+_SANDBOX_HOME = Path(os.environ.get("PRAXIS_SANDBOX_HOME") or container_home()).expanduser()
+_CONTAINER_WORKSPACE_ROOT = str(container_workspace_root())
 # Fallback-only ignore set, used when the source root isn't a git checkout.
 # For git checkouts, `_workspace_file_entries` uses `git ls-files` to honor
 # `.gitignore`, `.git/info/exclude`, and `core.excludesFile` — so anything a
@@ -58,22 +68,31 @@ _CLOUDFLARE_SANDBOX_TOKEN_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_TOKEN"
 # only covers the narrow case of non-git source roots; keep it minimal.
 _IGNORED_MANIFEST_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache"})
 _EMPTY_WORKSPACE_MATERIALIZATION = "none"
+_CLI_AGENT_USER = "praxis-agent"
+_CLI_AGENT_UID = 1100
+_CLI_AGENT_GID = 1100
+_OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
 
 # CLI auth files to mount read-only into Docker containers.
 # Each entry: (provider slugs, host_path_relative_to_home, container_path).
-# Container paths target /home/praxis-agent because the ephemeral CLI container
+# Container paths target the configured container home because the ephemeral CLI container
 # runs as uid 1100 (praxis-agent), which is required for claude's
 # --permission-mode bypassPermissions (blocked under root).
 _CLI_AUTH_MOUNTS: tuple[tuple[frozenset[str], str, str], ...] = (
-    (frozenset({"openai"}), ".codex/auth.json", "/home/praxis-agent/.codex/auth.json"),
+    # Host OpenAI auth files are normally mode 0600 and owned by the macOS
+    # operator uid, so a uid-1100 container cannot read them directly. Mount
+    # the file at a root-only seed path; the Docker command bootstraps it into
+    # the writable praxis-agent home and then drops privileges before running
+    # the CLI.
+    (frozenset({"openai"}), ".codex/auth.json", _OPENAI_AUTH_SEED_PATH),
     # Claude Code reads OAuth tokens from ~/.claude/.credentials.json on Linux
     # (the Keychain equivalent on macOS). The .claude.json file alongside it is
     # session/projects state — useful but not sufficient for auth. Mount both.
-    (frozenset({"anthropic"}), ".claude/.credentials.json", "/home/praxis-agent/.claude/.credentials.json"),
-    (frozenset({"anthropic"}), ".claude.json", "/home/praxis-agent/.claude.json"),
-    (frozenset({"google", "gemini"}), ".gemini/oauth_creds.json", "/home/praxis-agent/.gemini/oauth_creds.json"),
-    (frozenset({"google", "gemini"}), ".gemini/google_accounts.json", "/home/praxis-agent/.gemini/google_accounts.json"),
-    (frozenset({"google", "gemini"}), ".gemini/settings.json", "/home/praxis-agent/.gemini/settings.json"),
+    (frozenset({"anthropic"}), ".claude/.credentials.json", f"{_SANDBOX_HOME}/.claude/.credentials.json"),
+    (frozenset({"anthropic"}), ".claude.json", f"{_SANDBOX_HOME}/.claude.json"),
+    (frozenset({"google", "gemini"}), ".gemini/oauth_creds.json", f"{_SANDBOX_HOME}/.gemini/oauth_creds.json"),
+    (frozenset({"google", "gemini"}), ".gemini/google_accounts.json", f"{_SANDBOX_HOME}/.gemini/google_accounts.json"),
+    (frozenset({"google", "gemini"}), ".gemini/settings.json", f"{_SANDBOX_HOME}/.gemini/settings.json"),
 )
 _CLI_HOME_TMPFS_DIRS: tuple[str, ...] = (".claude", ".codex", ".gemini")
 
@@ -167,26 +186,82 @@ def _execution_write_scope(metadata: Mapping[str, Any] | None) -> tuple[str, ...
     )
 
 
+def _submission_required(metadata: Mapping[str, Any] | None) -> bool:
+    # Determines whether this job runs under the sealed-submission contract
+    # (workflow_execution::mutating-jobs-use-sealed-submission-and-verify-refs-
+    # only). Under that contract, the sandbox filesystem is ephemeral scratch:
+    # the authoritative deliverable is the workflow_job_submissions row the
+    # agent writes via praxis_submit_code_change / praxis_submit_artifact_bundle,
+    # not on-disk artifacts. Filesystem write_scope enforcement and host
+    # dehydration are legacy-mode only.
+    if not isinstance(metadata, Mapping):
+        return False
+    execution_bundle = metadata.get("execution_bundle")
+    if not isinstance(execution_bundle, Mapping):
+        return False
+    contract = execution_bundle.get("completion_contract")
+    if not isinstance(contract, Mapping):
+        return False
+    return bool(contract.get("submission_required"))
+
+
 def _validated_artifact_refs(
     artifact_refs: Sequence[str],
     *,
     write_scope: tuple[str, ...] | None,
-) -> tuple[str, ...]:
-    normalized_refs = _normalize_relative_paths(artifact_refs, field_name="artifact_ref")
-    if write_scope is None:
-        return normalized_refs
+    submission_required: bool,
+) -> tuple[tuple[str, ...], tuple[Mapping[str, Any], ...]]:
+    """Normalize artifact refs and produce a structured drift record.
 
-    blocked_refs = [
-        ref
-        for ref in normalized_refs
-        if not _scope_allows_path(ref, write_scope)
-    ]
-    if blocked_refs:
-        raise RuntimeError(
-            "sandbox produced artifacts outside declared write_scope: "
-            + ", ".join(blocked_refs)
-        )
-    return normalized_refs
+    Returns (normalized_refs, drift_records). For submission-contract jobs,
+    drift is captured but not enforced — the sealed submission is the
+    authoritative deliverable. For legacy jobs, drift raises as before.
+
+    Drift records have a fixed shape so downstream ingesters (verifier
+    worker, drift tracker, shard-suggestion feedback) can consume them
+    without reparsing stderr:
+
+        {
+            "artifact_ref": "<relative path>",
+            "reason": "outside_write_scope",
+            "declared_write_scope": ("<path>", ...),
+            "submission_required": True,
+        }
+    """
+    normalized_refs = _normalize_relative_paths(artifact_refs, field_name="artifact_ref")
+
+    # Short-circuit when no enforcement surface exists.
+    if write_scope is None or len(write_scope) == 0:
+        return normalized_refs, ()
+
+    out_of_scope_refs = tuple(
+        ref for ref in normalized_refs if not _scope_allows_path(ref, write_scope)
+    )
+
+    if not out_of_scope_refs:
+        return normalized_refs, ()
+
+    # Structured drift record — same shape regardless of enforcement mode.
+    drift_records = tuple(
+        {
+            "artifact_ref": ref,
+            "reason": "outside_write_scope",
+            "declared_write_scope": tuple(write_scope),
+            "submission_required": submission_required,
+        }
+        for ref in out_of_scope_refs
+    )
+
+    # Submission contract: drift is captured, job continues. Authority is
+    # the workflow_job_submissions row.
+    if submission_required:
+        return normalized_refs, drift_records
+
+    # Legacy contract: filesystem write_scope is authority; reject hard.
+    raise RuntimeError(
+        "sandbox produced artifacts outside declared write_scope: "
+        + ", ".join(out_of_scope_refs)
+    )
 
 
 def _provider_slug(metadata: Mapping[str, Any] | None) -> str | None:
@@ -211,17 +286,56 @@ def _cli_auth_volume_flags(*, provider_slug: str | None = None) -> list[str]:
     return flags
 
 
-def _cli_home_tmpfs_flags() -> list[str]:
+def _cli_home_tmpfs_flags(*, uid: int = _CLI_AGENT_UID, gid: int = _CLI_AGENT_GID) -> list[str]:
     """Return writable CLI home dirs for non-root Docker CLI execution."""
     flags: list[str] = []
     for home_subdir in _CLI_HOME_TMPFS_DIRS:
         flags.extend(
             [
                 "--tmpfs",
-                f"/home/praxis-agent/{home_subdir}:uid=1100,gid=1100,mode=755",
+                f"{_SANDBOX_HOME}/{home_subdir}:uid={uid},gid={gid},mode=755",
             ]
         )
     return flags
+
+
+def _cli_requires_root_auth_bootstrap(
+    *, provider_slug: str | None, auth_mount_policy: str, requested_user: str | None
+) -> bool:
+    """OpenAI CLI needs root only long enough to copy the host auth file."""
+    normalized_provider = str(provider_slug or "").strip().lower()
+    normalized_policy = str(auth_mount_policy or "").strip().lower()
+    return (
+        normalized_provider == "openai"
+        and normalized_policy != "none"
+        and bool(requested_user)
+    )
+
+
+def _cli_auth_bootstrap_command(command: str, *, provider_slug: str | None) -> str:
+    """Copy root-readable OpenAI auth into the agent home, then drop privileges."""
+    if str(provider_slug or "").strip().lower() != "openai":
+        return command
+
+    quoted_command = shlex.quote(command)
+    fallback_command = shlex.quote(f"HOME={shlex.quote(str(_SANDBOX_HOME))} bash -lc {quoted_command}")
+    return (
+        "set -e; "
+        f"if [ -f {shlex.quote(_OPENAI_AUTH_SEED_PATH)} ]; then "
+        f"mkdir -p {shlex.quote(str(_SANDBOX_HOME / '.codex'))}; "
+        f"cp {shlex.quote(_OPENAI_AUTH_SEED_PATH)} "
+        f"{shlex.quote(str(_SANDBOX_HOME / '.codex' / 'auth.json'))}; "
+        f"chown {_CLI_AGENT_UID}:{_CLI_AGENT_GID} "
+        f"{shlex.quote(str(_SANDBOX_HOME / '.codex'))} "
+        f"{shlex.quote(str(_SANDBOX_HOME / '.codex' / 'auth.json'))}; "
+        f"chmod 600 {shlex.quote(str(_SANDBOX_HOME / '.codex' / 'auth.json'))}; "
+        "fi; "
+        "if command -v setpriv >/dev/null 2>&1; then "
+        f"exec setpriv --reuid={_CLI_AGENT_UID} --regid={_CLI_AGENT_GID} "
+        f"--init-groups env HOME={shlex.quote(str(_SANDBOX_HOME))} bash -lc {quoted_command}; "
+        "fi; "
+        f"exec su -s /bin/bash {_CLI_AGENT_USER} -c {fallback_command}"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,6 +456,13 @@ class SandboxExecutionResult:
     workspace_snapshot_cache_hit: bool = False
     container_cpu_percent: float | None = None
     container_mem_bytes: int | None = None
+    # Scratch-drift record for submission-contract jobs. When an agent writes
+    # files outside the declared write_scope while a sealed submission is the
+    # authoritative deliverable, we still collect the observation as structured
+    # evidence for downstream ingestion (verifier worker, drift tracker, or
+    # shard-suggestion feedback) rather than failing the job. Empty tuple when
+    # no drift detected or the job is legacy-mode.
+    artifact_scope_drift: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -670,6 +791,60 @@ def _workspace_snapshot_cache_dir(workspace_snapshot_ref: str) -> str:
     return os.path.join(_workspace_snapshot_cache_root(), digest)
 
 
+def _ensure_private_directory(path: Path) -> Path:
+    existed = path.exists()
+    path.mkdir(parents=True, exist_ok=True)
+    is_snapshot_root = path.name == "praxis-workspace-snapshots"
+    is_snapshot_digest = len(path.name) == 16 and all(
+        ch in "0123456789abcdef" for ch in path.name
+    )
+    if not existed or is_snapshot_root or is_snapshot_digest:
+        os.chmod(path, 0o700)
+    return path
+
+
+def _real_path_is_within(path: Path, root: Path) -> bool:
+    try:
+        return os.path.commonpath(
+            (os.path.realpath(path), os.path.realpath(root))
+        ) == os.path.realpath(root)
+    except ValueError:
+        return False
+
+
+def _validate_workspace_snapshot_archive_path(archive_path: Path) -> None:
+    cache_root = _ensure_private_directory(Path(_workspace_snapshot_cache_root()))
+    if not _real_path_is_within(archive_path, cache_root):
+        raise RuntimeError(f"workspace snapshot archive escaped cache root: {archive_path}")
+
+
+def _safe_workspace_archive_members(
+    archive: tarfile.TarFile,
+    destination_parent: Path,
+) -> list[tarfile.TarInfo]:
+    destination_root = destination_parent.resolve(strict=False)
+    safe_members: list[tarfile.TarInfo] = []
+    for member in archive.getmembers():
+        normalized_name = normpath(member.name)
+        if (
+            normalized_name in {"", "."}
+            or normalized_name.startswith("../")
+            or normalized_name.startswith("/")
+            or normalized_name != member.name
+        ):
+            raise RuntimeError(f"unsafe workspace archive member: {member.name}")
+        parts = PurePosixPath(normalized_name).parts
+        if not parts or parts[0] != "workspace":
+            raise RuntimeError(f"workspace archive member outside workspace root: {member.name}")
+        if not member.isdir() and not member.isfile():
+            raise RuntimeError(f"unsupported workspace archive member type: {member.name}")
+        target_path = destination_parent / normalized_name
+        if not _real_path_is_within(target_path, destination_root):
+            raise RuntimeError(f"workspace archive member escaped destination: {member.name}")
+        safe_members.append(member)
+    return safe_members
+
+
 def _read_snapshot_archive_metadata(metadata_path: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
@@ -759,10 +934,15 @@ def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> Workspace
     if not snapshot_ref:
         raise RuntimeError("workspace_snapshot_ref must be resolved before hydration")
 
+    cache_root = _ensure_private_directory(Path(_workspace_snapshot_cache_root()))
     cache_dir = Path(_workspace_snapshot_cache_dir(snapshot_ref))
+    if not _real_path_is_within(cache_dir, cache_root):
+        raise RuntimeError(f"workspace snapshot cache dir escaped cache root: {cache_dir}")
     archive_path = cache_dir / "workspace.tar.gz"
     metadata_path = cache_dir / "metadata.json"
 
+    _ensure_private_directory(cache_dir)
+    _validate_workspace_snapshot_archive_path(archive_path)
     metadata = _read_snapshot_archive_metadata(str(metadata_path))
     if archive_path.is_file() and metadata is not None:
         return WorkspaceSnapshotArchive(
@@ -772,7 +952,6 @@ def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> Workspace
             cache_hit=True,
         )
 
-    cache_dir.mkdir(parents=True, exist_ok=True)
     temp_archive = cache_dir / f".{uuid4().hex}.tar.gz"
     temp_metadata = cache_dir / f".{uuid4().hex}.json"
     hydrated_files = _write_workspace_snapshot_archive(
@@ -876,8 +1055,12 @@ class DockerLocalSandboxProvider:
         workspace_root = Path(session.workspace_root)
         shutil.rmtree(workspace_root, ignore_errors=True)
         workspace_root.parent.mkdir(parents=True, exist_ok=True)
+        _validate_workspace_snapshot_archive_path(Path(cached_snapshot.archive_path))
         with tarfile.open(cached_snapshot.archive_path, mode="r:gz") as archive:
-            archive.extractall(workspace_root.parent)
+            archive.extractall(
+                workspace_root.parent,
+                members=_safe_workspace_archive_members(archive, workspace_root.parent),
+            )
         return HydrationReceipt(
             sandbox_session_id=session.sandbox_session_id,
             workspace_root=session.workspace_root,
@@ -908,36 +1091,43 @@ class DockerLocalSandboxProvider:
                 + (f" {detail}" if detail else "")
             )
         container_name = f"praxis-{uuid4().hex[:12]}"
-        # Match the uid used by the cli_llm/docker_runner path: claude CLI
-        # rejects --permission-mode bypassPermissions when run as root, and
-        # the auth-file mounts target /home/praxis-agent (uid 1100). HOME is
-        # set below via env so CLIs resolve config from the mounted files.
+        auth_mount_policy = validate_auth_mount_policy(
+            session.metadata.get("auth_mount_policy") or "provider_scoped"
+        )
+        session_provider_slug = _provider_slug(session.metadata)
+        mounted_provider_slug: str | None = None
+        if auth_mount_policy != "none":
+            mounted_provider_slug = (
+                session_provider_slug
+                if auth_mount_policy == "provider_scoped"
+                else None
+            )
+        root_auth_bootstrap = _cli_requires_root_auth_bootstrap(
+            provider_slug=session_provider_slug,
+            auth_mount_policy=auth_mount_policy,
+            requested_user=f"{_CLI_AGENT_UID}:{_CLI_AGENT_GID}",
+        )
+
+        # Match the uid used by the cli_llm/docker_runner path. OpenAI starts
+        # as root only to copy the root-readable host auth seed, then the
+        # command wrapper drops to praxis-agent before invoking the CLI.
         docker_cmd = [
             "docker",
             "run",
             "--rm",
             "-i",
             "--name", container_name,
-            "--user", "1100:1100",
+            "--user", "0:0" if root_auth_bootstrap else f"{_CLI_AGENT_UID}:{_CLI_AGENT_GID}",
             "--memory",
             _docker_memory(session.metadata),
             "--cpus",
             _docker_cpus(session.metadata),
             "--workdir",
-            "/workspace",
+            _CONTAINER_WORKSPACE_ROOT,
             "-v",
-            f"{session.workspace_root}:/workspace",
+            f"{session.workspace_root}:{_CONTAINER_WORKSPACE_ROOT}",
         ]
-        auth_mount_policy = validate_auth_mount_policy(
-            session.metadata.get("auth_mount_policy") or "provider_scoped"
-        )
-        provider_slug: str | None = None
         if auth_mount_policy != "none":
-            provider_slug = (
-                _provider_slug(session.metadata)
-                if auth_mount_policy == "provider_scoped"
-                else None
-            )
             # Writable scratch dirs for each CLI's own bookkeeping (projects.json,
             # PATH updates, session state). The :ro file mounts below layer their
             # specific files into these tmpfs dirs. Without this, the container
@@ -945,26 +1135,69 @@ class DockerLocalSandboxProvider:
             # files, blocking uid-1100 writes and breaking gemini/codex CLIs.
             docker_cmd.extend(_cli_home_tmpfs_flags())
             docker_cmd.extend(
-                _cli_auth_volume_flags(provider_slug=provider_slug)
+                _cli_auth_volume_flags(provider_slug=mounted_provider_slug)
             )
         # HOME must match the uid-1100 user so CLIs resolve their config files
-        # from the mounted auth targets at /home/praxis-agent/... . Force after
+        # from the mounted auth targets under the configured container home. Force after
         # request.env so upstream defaults (e.g. HOME=/root inherited from the
         # worker container) do not override it.
-        env_items = {**dict(request.env), "HOME": "/home/praxis-agent"}
+        env_items = {**dict(request.env), "HOME": str(_SANDBOX_HOME)}
         for key, value in sorted(env_items.items()):
             docker_cmd.extend(["-e", f"{key}={value}"])
         # Forward host-shell auth env vars (CLAUDE_CODE_OAUTH_TOKEN etc.) that
         # the worker inherited — the ephemeral CLI container needs them for
         # non-file auth paths (Keychain-backed OAuth).
         from adapters.docker_runner import _cli_auth_env_forward
-        for key, value in sorted(_cli_auth_env_forward(provider_slug).items()):
+        for key, value in sorted(_cli_auth_env_forward(session_provider_slug).items()):
             if key in env_items:
                 continue
             docker_cmd.extend(["-e", f"{key}={value}"])
         if session.network_policy == "disabled":
             docker_cmd.append("--network=none")
-        docker_cmd.extend([docker_image, "bash", "-lc", request.command])
+
+        # Live-edit overlay for the `praxis` workflow MCP front door. When
+        # PRAXIS_HOST_WORKSPACE_ROOT is set, we bind-mount the source file
+        # over the baked-in /usr/local/bin/praxis so edits to
+        # bin/praxis_sandbox_client.py are picked up by the next sandbox
+        # without rebuilding the image. The baked-in binary remains as
+        # fallback when the env var is absent (e.g. production hosts that
+        # prefer image-pinned tool versions).
+        host_workspace_root = str(os.environ.get("PRAXIS_HOST_WORKSPACE_ROOT", "")).strip()
+        if host_workspace_root:
+            host_binary_path = os.path.join(
+                host_workspace_root,
+                "Code&DBs",
+                "Workflow",
+                "bin",
+                "praxis_sandbox_client.py",
+            )
+            docker_cmd.extend([
+                "-v",
+                f"{host_binary_path}:/usr/local/bin/praxis:ro",
+            ])
+
+        docker_command = (
+            _cli_auth_bootstrap_command(request.command, provider_slug=session_provider_slug)
+            if root_auth_bootstrap
+            else request.command
+        )
+        docker_cmd.extend([docker_image, "bash", "-lc", docker_command])
+
+        # Diagnostic hook: write the exact docker run invocation to stderr when
+        # PRAXIS_SANDBOX_DEBUG=1. Captures the per-job command so we can diff
+        # against a known-working manual invocation when sandbox_error is
+        # reported. Disabled by default to keep worker logs quiet.
+        if os.environ.get("PRAXIS_SANDBOX_DEBUG", "").strip() == "1":
+            try:
+                import shlex as _dbg_shlex
+                sys.stderr.write(
+                    "PRAXIS_SANDBOX_CMD "
+                    + _dbg_shlex.join(str(part) for part in docker_cmd)
+                    + "\n"
+                )
+                sys.stderr.flush()
+            except Exception:
+                pass
 
         # Background thread: poll docker stats every 2s to capture peak CPU/memory.
         peak_cpu: list[float] = [0.0]
@@ -1016,7 +1249,7 @@ class DockerLocalSandboxProvider:
                 "sandbox_docker_spawn container=%s user=%s workdir=%s network=%s stdin_bytes=%d env_keys=%s cmd=%s",
                 container_name,
                 "1100:1100",
-                "/workspace",
+                _CONTAINER_WORKSPACE_ROOT,
                 "disabled" if session.network_policy == "disabled" else "default",
                 _stdin_size,
                 _env_keys,
@@ -1312,6 +1545,7 @@ class SandboxRuntime:
         provider = self._provider(provider_name)
         provider_metadata = dict(metadata or {})
         write_scope = _execution_write_scope(provider_metadata)
+        submission_required = _submission_required(provider_metadata)
         session = provider.create_session(
             SandboxSessionSpec(
                 sandbox_session_id=sandbox_session_id,
@@ -1391,19 +1625,39 @@ class SandboxRuntime:
                 ),
             )
             artifact_receipt = provider.collect_artifacts(session, before_manifest)
-            artifact_refs = _validated_artifact_refs(
+            artifact_refs, artifact_scope_drift = _validated_artifact_refs(
                 artifact_receipt.artifact_refs,
                 write_scope=write_scope,
+                submission_required=submission_required,
             )
             # Dehydrate: copy changed files from sandbox back to host workdir.
-            # Without this, agent-produced files exist only in the ephemeral
-            # container workspace and never reach the host repo.
+            # Legacy contract only. Under the sealed-submission contract the
+            # authoritative deliverable is the workflow_job_submissions row,
+            # not on-disk artifacts — dehydrating would pollute the host repo
+            # with ephemeral scratch from the sandbox.
             if (
                 artifact_refs
+                and not submission_required
                 and getattr(provider, "execution_lane", "") == "local"
                 and not _uses_empty_workspace_materialization(workspace_materialization)
             ):
                 _dehydrate_copy(session.workspace_root, workdir, artifact_refs)
+            # Structured drift emission for ingestion. Downstream consumers
+            # (verifier worker, shard-drift tracker) can read stderr for these
+            # lines when they need the raw signal; the returned
+            # SandboxExecutionResult.artifact_scope_drift is the canonical
+            # in-process surface.
+            if artifact_scope_drift:
+                drift_envelope = {
+                    "event": "sandbox.artifact_scope_drift",
+                    "sandbox_session_id": sandbox_session_id,
+                    "sandbox_group_id": sandbox_group_id,
+                    "submission_required": submission_required,
+                    "drift_count": len(artifact_scope_drift),
+                    "drift": list(artifact_scope_drift),
+                }
+                sys.stderr.write("PRAXIS_SANDBOX_DRIFT " + json.dumps(drift_envelope, sort_keys=True) + "\n")
+                sys.stderr.flush()
             if artifact_store is not None:
                 persisted_refs: list[str] = []
                 missing_artifacts: list[str] = []
@@ -1445,6 +1699,7 @@ class SandboxRuntime:
                     hydration_receipt.workspace_snapshot_cache_hit
                     or result.workspace_snapshot_cache_hit
                 ),
+                artifact_scope_drift=artifact_scope_drift,
             )
         except Exception:
             disposition = "failed"

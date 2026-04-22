@@ -21,6 +21,7 @@ from registry.native_runtime_profile_sync import (
     resolve_native_runtime_profile_config,
 )
 from runtime._helpers import _fail as _shared_fail
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from storage.postgres import PostgresConfigurationError, ensure_postgres_available
 
 PRAXIS_INSTANCE_NAME_ENV: Final[str] = "PRAXIS_INSTANCE_NAME"
@@ -72,7 +73,7 @@ class NativeWorkflowInstance:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _default_config_path() -> Path:

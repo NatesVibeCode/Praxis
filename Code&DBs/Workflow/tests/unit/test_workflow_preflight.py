@@ -8,6 +8,8 @@ mid-run, workflow_id collisions surfaced as raw psycopg UniqueViolations.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from runtime.workflow_validation import (
@@ -303,7 +305,7 @@ def test_workdir_drift_quiet_when_relative_path() -> None:
 
 def test_workdir_drift_covers_per_job_workdirs(monkeypatch, tmp_path) -> None:
     spec_workdir = str(tmp_path)  # exists
-    missing_job_workdir = "/Users/nate/Praxis/elsewhere/nope"
+    missing_job_workdir = str(Path(tempfile.gettempdir()) / "praxis-workspace" / "elsewhere" / "nope")
     monkeypatch.setattr(
         "runtime.workflow_validation.authority_workspace_roots",
         lambda: (),
@@ -331,7 +333,8 @@ def test_workdir_drift_warns_when_workspace_authority_unavailable(monkeypatch) -
         "runtime.workflow_validation.authority_workspace_roots",
         _boom,
     )
-    spec = _FakeSpec(raw={"workdir": "/Users/nate/Praxis/elsewhere/nope"})
+    missing_workdir = str(Path(tempfile.gettempdir()) / "praxis-workspace" / "elsewhere" / "nope")
+    spec = _FakeSpec(raw={"workdir": missing_workdir})
 
     warnings = _preflight_workdir_drift(spec)
 

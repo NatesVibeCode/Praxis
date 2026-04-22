@@ -29,6 +29,7 @@ from runtime.idempotency import canonical_hash, check_idempotency, record_idempo
 from runtime.intake import WorkflowIntakePlanner
 from runtime._workflow_database import resolve_runtime_database_url
 from runtime.native_authority import default_native_authority_refs
+from runtime.workspace_paths import container_workspace_root
 from runtime.persistent_evidence import PostgresEvidenceWriter
 from runtime.workflow._workflow_execution import (
     WorkflowExecutionContext,
@@ -1265,7 +1266,7 @@ def preview_workflow_execution(
                     "note": (
                         "materialized_repo_root and materialized_workdir are resolved from the "
                         "active fork/worktree binding in runtime/workflow/_execution_core.py. "
-                        "For sharded workflows the worker sees paths like /workspace/... — NOT "
+                        f"For sharded workflows the worker sees paths like {container_workspace_root()}/... — NOT "
                         "the host_repo_root above. Use host_* fields only to understand where "
                         "output/receipts will land on the host."
                     ),
@@ -1298,7 +1299,7 @@ def preview_workflow_execution(
                 "note": (
                     "materialized_repo_root resolves from the active fork/worktree binding "
                     "at execution time (runtime/workflow/_execution_core.py). Sharded workflows "
-                    "see a different path (e.g. /workspace) inside the worker sandbox."
+                    f"see a different path (for example {container_workspace_root()}) inside the worker sandbox."
                 ),
             },
             "workspace_ref": workspace_ref,

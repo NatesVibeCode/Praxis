@@ -25,7 +25,19 @@ class OperationCatalogRecord:
     input_model_ref: str
     handler_ref: str
     authority_ref: str
+    authority_domain_ref: str
     projection_ref: str | None
+    storage_target_ref: str
+    input_schema_ref: str
+    output_schema_ref: str
+    idempotency_key_fields: list[Any]
+    required_capabilities: dict[str, Any]
+    allowed_callers: list[Any]
+    timeout_ms: int
+    receipt_required: bool
+    event_required: bool
+    event_type: str | None
+    projection_freshness_policy_ref: str | None
     posture: str | None
     idempotency_policy: str | None
     enabled: bool
@@ -55,7 +67,19 @@ class ResolvedOperationDefinition:
     input_model_ref: str
     handler_ref: str
     authority_ref: str
+    authority_domain_ref: str
     projection_ref: str | None
+    storage_target_ref: str
+    input_schema_ref: str
+    output_schema_ref: str
+    idempotency_key_fields: list[Any]
+    required_capabilities: dict[str, Any]
+    allowed_callers: list[Any]
+    timeout_ms: int
+    receipt_required: bool
+    event_required: bool
+    event_type: str | None
+    projection_freshness_policy_ref: str | None
     posture: str
     idempotency_policy: str
     enabled: bool
@@ -114,7 +138,19 @@ def _resolve_operation_definition(
         input_model_ref=record.input_model_ref,
         handler_ref=record.handler_ref,
         authority_ref=record.authority_ref,
+        authority_domain_ref=record.authority_domain_ref,
         projection_ref=record.projection_ref,
+        storage_target_ref=record.storage_target_ref,
+        input_schema_ref=record.input_schema_ref,
+        output_schema_ref=record.output_schema_ref,
+        idempotency_key_fields=record.idempotency_key_fields,
+        required_capabilities=record.required_capabilities,
+        allowed_callers=record.allowed_callers,
+        timeout_ms=record.timeout_ms,
+        receipt_required=record.receipt_required,
+        event_required=record.event_required,
+        event_type=record.event_type,
+        projection_freshness_policy_ref=record.projection_freshness_policy_ref,
         posture=posture,
         idempotency_policy=idempotency_policy,
         enabled=enabled,

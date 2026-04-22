@@ -10,6 +10,7 @@ import uuid
 from typing import Any
 
 from runtime.system_events import emit_system_event
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
 
 _SCHEMA_FILENAMES = (
@@ -96,11 +97,7 @@ def _normalize_dependency_ids(
 
 
 def _default_repo_root() -> Path:
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        if (parent / "Code&DBs" / "Workflow").exists():
-            return parent
-    return current.parents[3]
+    return workspace_repo_root()
 
 
 def _topologically_order_waves(waves: list[WorkflowChainWave]) -> tuple[WorkflowChainWave, ...]:

@@ -300,6 +300,7 @@ def _index_error_record(
 _SKIP_DIRS = {
     '__pycache__', '.git', '.pytest_cache', 'node_modules',
     '.mypy_cache', '.ruff_cache', 'venv', '.venv', 'eggs',
+    'artifacts', 'dist', 'build',
 }
 
 # Files to skip

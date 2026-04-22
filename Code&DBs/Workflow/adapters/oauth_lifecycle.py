@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from .keychain import resolve_secret
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +103,7 @@ def resolve_or_refresh(
             f"token_url must use HTTPS for {integration_id}: {token_url!r}",
         )
 
-    env_prefix = integration_id.upper().replace("-", "_")
-    client_id = os.environ.get(f"{env_prefix}_CLIENT_ID", "")
-    client_secret = os.environ.get(f"{env_prefix}_CLIENT_SECRET", "")
+    client_id, client_secret = _resolve_client_credentials(integration_id, auth_shape)
 
     new_tokens = _refresh_token(token_url, client_id, client_secret, token.refresh_token)
 
@@ -177,6 +176,52 @@ def store_token(
         list(scopes),
         token_type,
     )
+
+
+def _auth_shape_secret_name(
+    auth_shape: dict[str, Any],
+    field_names: tuple[str, ...],
+    *,
+    default: str,
+) -> str:
+    for field_name in field_names:
+        value = str(auth_shape.get(field_name, "")).strip()
+        if value:
+            return value
+    return default
+
+
+def _resolve_client_credentials(
+    integration_id: str,
+    auth_shape: dict[str, Any],
+) -> tuple[str, str]:
+    env_prefix = integration_id.upper().replace("-", "_")
+    client_id_name = _auth_shape_secret_name(
+        auth_shape,
+        ("client_id_env_var", "oauth_client_id_env_var"),
+        default=f"{env_prefix}_CLIENT_ID",
+    )
+    client_secret_name = _auth_shape_secret_name(
+        auth_shape,
+        ("client_secret_env_var", "oauth_client_secret_env_var"),
+        default=f"{env_prefix}_CLIENT_SECRET",
+    )
+    client_id = str(resolve_secret(client_id_name) or "").strip()
+    client_secret = str(resolve_secret(client_secret_name) or "").strip()
+    missing = [
+        name
+        for name, value in (
+            (client_id_name, client_id),
+            (client_secret_name, client_secret),
+        )
+        if not value
+    ]
+    if missing:
+        raise OAuthTokenError(
+            "oauth.client_credential_missing",
+            f"OAuth client credential(s) missing for {integration_id}: {', '.join(missing)}",
+        )
+    return client_id, client_secret
 
 
 def _refresh_token(

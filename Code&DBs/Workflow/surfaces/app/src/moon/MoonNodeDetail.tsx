@@ -283,8 +283,10 @@ function parseTriggerFilterRows(rows: TriggerFilterFieldRow[]): Record<string, u
 }
 
 function triggerFilterChipText(row: TriggerFilterFieldRow): string {
-  const rawKey = row.key.trim() || 'New filter';
-  const key = rawKey
+  const rawKey = row.key.trim();
+  if (!rawKey && !row.valueText.trim() && row.valueType === 'string') return 'Add a filter...';
+  
+  const key = (rawKey || 'New filter')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
@@ -1429,8 +1431,8 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
           <div className="moon-dock-section-card moon-dock-section-card--dense">
             <div className="moon-gate-panel">
               <div className="moon-gate-panel__meta">
-                <span className="moon-surface-badge">
-                  {selectedGateCatalogModel?.policy.badge || (selectedEdge.gateState === 'empty' ? 'Core now' : 'Gate')}
+                <span className="moon-surface-badge" title={selectedEdge.gateState === 'empty' ? "No approval required" : undefined}>
+                  {selectedGateCatalogModel?.policy.badge || (selectedEdge.gateState === 'empty' ? 'Ungated' : 'Gate')}
                 </span>
                 {selectedGateCatalogModel && (
                   <span className={`moon-truth-badge moon-truth-badge--${selectedGateCatalogModel.truth.category}`}>
@@ -1828,6 +1830,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     suggestionsKey="authorities"
                     ariaLabel="Handoff target"
                   />
+                  <div style={{ fontSize: 12, color: 'var(--fg3)', marginTop: 8 }}>
+                    The authority or workflow that receives this step's output.
+                  </div>
                 </div>
               )}
 

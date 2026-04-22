@@ -36,6 +36,7 @@ from storage.postgres.workflow_runtime_repository import (
     record_app_manifest_history,
     upsert_app_manifest,
 )
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -553,7 +554,7 @@ ONLY JSON."""
         result = execute_api(
             transient_config,
             prompt,
-            workdir=str(Path(__file__).resolve().parents[3]),
+            workdir=str(workspace_repo_root()),
         )
         if result.get("status") != "succeeded":
             logger.warning("Fast fan-out sandbox execution failed: %s", result.get("stderr", ""))
@@ -647,8 +648,7 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
 
     def _find_repo_root(self):
         """Find the repo root from the current module location."""
-        from pathlib import Path
-        return Path(__file__).resolve().parents[3]
+        return workspace_repo_root()
 
     @staticmethod
     def _parse_model_json(raw: str) -> dict | None:

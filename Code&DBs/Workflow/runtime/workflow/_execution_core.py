@@ -662,24 +662,9 @@ def execute_job(
         return
 
     duration_ms = int((time.monotonic() - start) * 1000)
-
-    verification_outcome = _run_post_execution_verification(
-        conn,
-        run_id=run_id,
-        job_id=job_id,
-        label=label,
-        repo_root=execution_workdir,
-        result=result,
-    )
-    result = verification_outcome["result"]
-    final_status = verification_outcome["final_status"]
-    final_error_code = verification_outcome["final_error_code"]
-    verification_summary = verification_outcome["verification_summary"]
-    verify_bindings = verification_outcome["verification_bindings"]
-    verification_error = verification_outcome["verification_error"]
-    verification_artifact_refs = _verification_artifact_refs(verify_bindings)
     attempt_no = max(1, int(job.get("attempt") or 1))
-    gate = _resolve_submission(
+
+    pre_verification_gate = _resolve_submission(
         conn,
         run_id=run_id,
         workflow_id=workflow_id_for_run,
@@ -687,14 +672,55 @@ def execute_job(
         attempt_no=attempt_no,
         execution_bundle=execution_bundle,
         result=result,
-        final_status=final_status,
-        final_error_code=final_error_code,
-        verification_artifact_refs=verification_artifact_refs,
+        final_status=result.get("status", "failed"),
+        final_error_code=result.get("error_code", ""),
+        verification_artifact_refs=[],
+        enforce_verification_contract=False,
+        enforce_acceptance_contract=False,
     )
-    submission_state = gate.submission_state
-    final_status = gate.final_status
-    final_error_code = gate.final_error_code
-    result = gate.result
+    if pre_verification_gate.final_error_code in {
+        "workflow_submission.required_missing",
+        "workflow_submission.lookup_failed",
+    }:
+        submission_state = pre_verification_gate.submission_state
+        final_status = pre_verification_gate.final_status
+        final_error_code = pre_verification_gate.final_error_code
+        result = pre_verification_gate.result
+        verification_summary = None
+        verify_bindings = None
+        verification_error = None
+    else:
+        verification_outcome = _run_post_execution_verification(
+            conn,
+            run_id=run_id,
+            job_id=job_id,
+            label=label,
+            repo_root=execution_workdir,
+            result=result,
+        )
+        result = verification_outcome["result"]
+        final_status = verification_outcome["final_status"]
+        final_error_code = verification_outcome["final_error_code"]
+        verification_summary = verification_outcome["verification_summary"]
+        verify_bindings = verification_outcome["verification_bindings"]
+        verification_error = verification_outcome["verification_error"]
+        verification_artifact_refs = _verification_artifact_refs(verify_bindings)
+        gate = _resolve_submission(
+            conn,
+            run_id=run_id,
+            workflow_id=workflow_id_for_run,
+            job_label=label,
+            attempt_no=attempt_no,
+            execution_bundle=execution_bundle,
+            result=result,
+            final_status=final_status,
+            final_error_code=final_error_code,
+            verification_artifact_refs=verification_artifact_refs,
+        )
+        submission_state = gate.submission_state
+        final_status = gate.final_status
+        final_error_code = gate.final_error_code
+        result = gate.result
 
     # Write receipt to disk (preserves existing artifact flow)
     output_path = _write_output(execution_repo_root, run_id, job_id, label, result)

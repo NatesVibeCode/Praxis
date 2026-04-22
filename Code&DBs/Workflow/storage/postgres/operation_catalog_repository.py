@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from contracts.operation_catalog import (
+    DEFAULT_AUTHORITY_STORAGE_TARGET,
+    DEFAULT_OPERATION_ALLOWED_CALLERS,
+    DEFAULT_OPERATION_TIMEOUT_MS,
     normalize_operation_idempotency_policy,
     normalize_operation_kind,
     normalize_operation_posture,
@@ -12,6 +15,56 @@ from contracts.operation_catalog import (
 )
 
 from .validators import PostgresWriteError, _optional_text, _require_text
+
+
+def _json_array(value: object, *, field_name: str) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        import json
+
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise PostgresWriteError(
+                "operation_catalog.invalid_submission",
+                f"{field_name} must be a JSON array",
+                details={"field": field_name},
+            ) from exc
+    if not isinstance(value, list):
+        raise PostgresWriteError(
+            "operation_catalog.invalid_submission",
+            f"{field_name} must be a JSON array",
+            details={"field": field_name, "value_type": type(value).__name__},
+        )
+    return list(value)
+
+
+def _json_object(value: object, *, field_name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        import json
+
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise PostgresWriteError(
+                "operation_catalog.invalid_submission",
+                f"{field_name} must be a JSON object",
+                details={"field": field_name},
+            ) from exc
+    if not isinstance(value, dict):
+        raise PostgresWriteError(
+            "operation_catalog.invalid_submission",
+            f"{field_name} must be a JSON object",
+            details={"field": field_name, "value_type": type(value).__name__},
+        )
+    return dict(value)
+
+
+def _default_event_required(row: dict[str, Any]) -> bool:
+    return str(row.get("operation_kind") or "").strip() == "command"
 
 
 def _require_bool(value: object, *, field_name: str) -> bool:
@@ -49,7 +102,55 @@ def _normalize_operation_row(row: dict[str, Any]) -> dict[str, Any]:
             ),
             "handler_ref": _require_text(row.get("handler_ref"), field_name="handler_ref"),
             "authority_ref": _require_text(row.get("authority_ref"), field_name="authority_ref"),
+            "authority_domain_ref": _require_text(
+                row.get("authority_domain_ref") or row.get("authority_ref"),
+                field_name="authority_domain_ref",
+            ),
             "projection_ref": _optional_text(row.get("projection_ref"), field_name="projection_ref"),
+            "storage_target_ref": _require_text(
+                row.get("storage_target_ref") or DEFAULT_AUTHORITY_STORAGE_TARGET,
+                field_name="storage_target_ref",
+            ),
+            "input_schema_ref": _require_text(
+                row.get("input_schema_ref") or row.get("input_model_ref"),
+                field_name="input_schema_ref",
+            ),
+            "output_schema_ref": _require_text(
+                row.get("output_schema_ref") or "operation.output.default",
+                field_name="output_schema_ref",
+            ),
+            "idempotency_key_fields": _json_array(
+                row.get("idempotency_key_fields"),
+                field_name="idempotency_key_fields",
+            ),
+            "required_capabilities": _json_object(
+                row.get("required_capabilities"),
+                field_name="required_capabilities",
+            ),
+            "allowed_callers": _json_array(
+                row.get("allowed_callers") or list(DEFAULT_OPERATION_ALLOWED_CALLERS),
+                field_name="allowed_callers",
+            ),
+            "timeout_ms": _require_int(
+                row.get("timeout_ms") or DEFAULT_OPERATION_TIMEOUT_MS,
+                field_name="timeout_ms",
+            ),
+            "receipt_required": _require_bool(
+                row.get("receipt_required", True),
+                field_name="receipt_required",
+            ),
+            "event_required": _require_bool(
+                row.get("event_required", _default_event_required(row)),
+                field_name="event_required",
+            ),
+            "event_type": _optional_text(
+                row.get("event_type") or str(row.get("operation_name") or "").replace(".", "_"),
+                field_name="event_type",
+            ),
+            "projection_freshness_policy_ref": _optional_text(
+                row.get("projection_freshness_policy_ref"),
+                field_name="projection_freshness_policy_ref",
+            ),
             "posture": normalize_operation_posture(row.get("posture"), allow_none=True),
             "idempotency_policy": normalize_operation_idempotency_policy(
                 row.get("idempotency_policy"),

@@ -14,13 +14,13 @@ services:
     env_file:
       - .env
     environment:
-      PYTHONPATH: "/workspace/Code&DBs/Workflow"
+      PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
       PRAXIS_SEMANTIC_HOST: 0.0.0.0
       PRAXIS_SEMANTIC_PORT: 8421
       WORKFLOW_EMBEDDING_BACKEND: local
-    working_dir: /workspace
+    working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
-      - .:/workspace
+      - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     command:
       - python3
       - -m
@@ -51,7 +51,7 @@ services:
       WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
-      PYTHONPATH: "/workspace/Code&DBs/Workflow"
+      PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
       PRAXIS_API_RELOAD: "0"
@@ -75,9 +75,9 @@ services:
       # architecture-policy::providers::provider-auth-mode-single-authority.
       ANTHROPIC_API_KEY: ""
       ANTHROPIC_AUTH_TOKEN: ""
-    working_dir: /workspace
+    working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
-      - .:/workspace
+      - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     command:
       - sh
       - -c
@@ -101,16 +101,16 @@ services:
       - .env
     environment:
       WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
-      PYTHONPATH: "/workspace/Code&DBs/Workflow"
-    working_dir: /workspace
+      PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
+    working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
-      - .:/workspace
+      - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     command:
       - python3
       - -m
       - runtime.praxis_supervisor
       - --repo-root
-      - /workspace
+      - ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
       - component
       - scheduler
     restart: unless-stopped
@@ -137,7 +137,24 @@ services:
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
-      PYTHONPATH: "/workspace/Code&DBs/Workflow"
+      PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
+      # Sandbox capacity: empirical peak RSS of a real CLI+MCP sandbox is
+      # ~230 MB (measured 2026-04-21 on Dell with two active agent jobs).
+      # 500 MB gives ~2x headroom over observed peak. The old 4 GB default
+      # came from the fat-image era when sandboxes loaded the full Praxis
+      # Python runtime; under the sealed-submission contract the sandbox is
+      # just a CLI + MCP client shuttling bytes to remote inference.
+      PRAXIS_DOCKER_MEMORY: ${PRAXIS_DOCKER_MEMORY:-500m}
+      # Operator diagnostic hook. Set to "1" only when inspecting a failing
+      # sandbox spawn; normal workers should not dump docker-run invocations.
+      PRAXIS_SANDBOX_DEBUG: ${PRAXIS_SANDBOX_DEBUG:-0}
+      # Optional live-edit overlay for bin/praxis_sandbox_client.py. Leave
+      # empty for image-pinned worker operation; set explicitly when doing
+      # operator instrumentation on a trusted host checkout.
+      PRAXIS_HOST_WORKSPACE_ROOT: ${PRAXIS_HOST_WORKSPACE_ROOT:-}
+      # Optional explicit operator override. Leave empty by default so the
+      # worker runtime derives local slots from visible CPU and memory.
+      PRAXIS_WORKER_MAX_PARALLEL: ${PRAXIS_WORKER_MAX_PARALLEL:-}
       PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
       PRAXIS_WORKFLOW_MCP_URL: ${PRAXIS_WORKFLOW_MCP_URL:-http://host.docker.internal:8420/mcp}
       PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
@@ -149,14 +166,14 @@ services:
       ANTHROPIC_API_KEY: ""
       ANTHROPIC_AUTH_TOKEN: ""
       CLAUDE_CODE_OAUTH_TOKEN: ""
-    working_dir: /workspace
+    working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
-      - .:/workspace
+      - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex:ro
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.gemini:/root/.gemini:ro
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude.json:/root/.claude.json:ro
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PRAXIS_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:${PRAXIS_DOCKER_SOCKET_PATH:-/var/run/docker.sock}
       # Share host /tmp with worker so sandbox temp dirs (created by the
       # worker via tempfile.mkdtemp) are visible both sides: host-side
       # ephemeral CLI containers bind-mount from these paths, and worker

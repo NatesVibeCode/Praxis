@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from storage.postgres.connection import resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
@@ -88,7 +89,7 @@ def _read_repo_env_file(path: Path) -> dict[str, str]:
 
 
 def _task_profile_repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _resolve_task_profile_database_url(*, required: bool) -> str | None:

@@ -12,6 +12,9 @@ OPERATION_KINDS = frozenset({"command", "query"})
 OPERATION_SOURCE_KINDS = frozenset({"operation_command", "operation_query"})
 OPERATION_POSTURES = frozenset({"observe", "operate", "build"})
 OPERATION_IDEMPOTENCY_POLICIES = frozenset({"non_idempotent", "idempotent", "read_only"})
+DEFAULT_AUTHORITY_STORAGE_TARGET = "praxis.primary_postgres"
+DEFAULT_OPERATION_TIMEOUT_MS = 15000
+DEFAULT_OPERATION_ALLOWED_CALLERS = ("cli", "mcp", "http", "workflow", "heartbeat")
 
 
 def _normalize_enum(
@@ -94,7 +97,19 @@ def operation_catalog_contract_descriptor() -> dict[str, Any]:
             "input_model_ref",
             "handler_ref",
             "authority_ref",
+            "authority_domain_ref",
             "projection_ref",
+            "storage_target_ref",
+            "input_schema_ref",
+            "output_schema_ref",
+            "idempotency_key_fields",
+            "required_capabilities",
+            "allowed_callers",
+            "timeout_ms",
+            "receipt_required",
+            "event_required",
+            "event_type",
+            "projection_freshness_policy_ref",
             "posture",
             "idempotency_policy",
             "enabled",
@@ -142,6 +157,9 @@ __all__ = [
     "OPERATION_KINDS",
     "OPERATION_POSTURES",
     "OPERATION_SOURCE_KINDS",
+    "DEFAULT_AUTHORITY_STORAGE_TARGET",
+    "DEFAULT_OPERATION_ALLOWED_CALLERS",
+    "DEFAULT_OPERATION_TIMEOUT_MS",
     "build_operation_catalog_response",
     "normalize_operation_idempotency_policy",
     "normalize_operation_kind",

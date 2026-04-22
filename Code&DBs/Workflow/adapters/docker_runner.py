@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Any
 
 from registry.provider_execution_registry import resolve_api_key_env_vars
 from runtime.docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
-from runtime.sandbox_runtime import _cli_auth_volume_flags, _cli_home_tmpfs_flags
+from runtime.sandbox_runtime import (
+    _cli_auth_bootstrap_command,
+    _cli_auth_volume_flags,
+    _cli_home_tmpfs_flags,
+    _cli_requires_root_auth_bootstrap,
+)
+from runtime.workspace_paths import container_home
 from runtime.workflow.execution_policy import validate_auth_mount_policy
 
 if TYPE_CHECKING:
@@ -266,13 +272,21 @@ def run_in_docker(
         "--cpus", docker_cpus,
     ]
 
-    # Run as non-root so CLIs can use --permission-mode bypassPermissions.
-    # HOME is set via env below to match the user's home directory.
-    if user:
-        docker_cmd.extend(["--user", user])
+    normalized_auth_policy = validate_auth_mount_policy(auth_mount_policy)
+    root_auth_bootstrap = _cli_requires_root_auth_bootstrap(
+        provider_slug=provider_slug,
+        auth_mount_policy=normalized_auth_policy,
+        requested_user=user,
+    )
+    effective_user = "0:0" if root_auth_bootstrap else user
+
+    # Run as non-root for normal CLI execution. OpenAI starts as root only to
+    # read the host-owned auth seed, then the shell wrapper drops to uid 1100.
+    if effective_user:
+        docker_cmd.extend(["--user", effective_user])
 
     # Narrow per-run workdir bind: exposes ONLY the job's artifact directory
-    # (not /workspace, not the repo source). Agent file writes persist to the
+    # (not the container workspace root, not the repo source). Agent file writes persist to the
     # host via this mount; nothing else is reachable.
     if workdir:
         resolved_workdir = os.path.abspath(workdir)
@@ -281,7 +295,6 @@ def run_in_docker(
             "--workdir", "/workdir",
         ])
 
-    normalized_auth_policy = validate_auth_mount_policy(auth_mount_policy)
     if normalized_auth_policy != "none":
         if user:
             docker_cmd.extend(_cli_home_tmpfs_flags())
@@ -292,9 +305,9 @@ def run_in_docker(
         )
 
     forwarded_auth_env = _cli_auth_env_forward(provider_slug)
-    # HOME forced to /home/praxis-agent so CLIs resolve config/creds from the
-    # mounted auth files (which target /home/praxis-agent/... by policy).
-    default_home_env = {"HOME": "/home/praxis-agent"} if user else {}
+    # HOME follows the registered container home so auth mounts and CLI
+    # resolution stay under one path authority.
+    default_home_env = {"HOME": str(container_home())} if user else {}
     merged_env: dict[str, str] = {
         **default_home_env,
         **forwarded_auth_env,
@@ -308,7 +321,12 @@ def run_in_docker(
     elif not network:
         docker_cmd.append("--network=none")
 
-    docker_cmd.extend([docker_image, "bash", "-c", command])
+    docker_command = (
+        _cli_auth_bootstrap_command(command, provider_slug=provider_slug)
+        if root_auth_bootstrap
+        else command
+    )
+    docker_cmd.extend([docker_image, "bash", "-c", docker_command])
 
     start_ns = time.monotonic_ns()
     timed_out = False

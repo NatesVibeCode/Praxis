@@ -5,8 +5,10 @@ Sends HTTP requests to arbitrary URLs — the universal integration escape hatch
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
+import socket
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -15,6 +17,29 @@ from typing import Any
 from adapters.credentials import CredentialResolutionError, resolve_credential
 
 logger = logging.getLogger(__name__)
+
+_BLOCKED_WEBHOOK_HOSTS = frozenset(
+    {
+        "localhost",
+        "metadata.google.internal",
+    }
+)
+_BLOCKED_WEBHOOK_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "0.0.0.0/8",
+        "10.0.0.0/8",
+        "100.64.0.0/10",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "::/128",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
 
 
 def _resolve_auth_strategy(
@@ -37,7 +62,12 @@ def _resolve_auth_strategy(
 
     integration_id = str(auth_strategy.get("integration_id") or args.get("_integration_id") or "").strip() or None
     try:
-        credential = resolve_credential(credential_ref, conn=pg, integration_id=integration_id)
+        credential = resolve_credential(
+            credential_ref,
+            conn=pg,
+            integration_id=integration_id,
+            auth_shape=auth_strategy,
+        )
     except CredentialResolutionError as exc:
         logger.warning("webhook credential resolution failed for %s: %s", credential_ref, exc)
         return None, None
@@ -127,6 +157,55 @@ def _method_supports_body(method: str) -> bool:
     return normalized not in {"GET", "DELETE"}
 
 
+def _webhook_ip_is_blocked(address: str) -> bool:
+    try:
+        ip_address = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if any(ip_address in network for network in _BLOCKED_WEBHOOK_NETWORKS):
+        return True
+    return (
+        ip_address.is_loopback
+        or ip_address.is_link_local
+        or ip_address.is_private
+        or ip_address.is_multicast
+        or ip_address.is_unspecified
+        or ip_address.is_reserved
+    )
+
+
+def _validate_webhook_url(url: str) -> tuple[bool, str]:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return False, f"Invalid URL: {url}"
+    try:
+        port = parsed.port
+    except ValueError:
+        return False, f"Invalid URL: {url}"
+
+    host = (parsed.hostname or "").strip().rstrip(".").lower()
+    if not host:
+        return False, f"Invalid URL: {url}"
+    if (
+        host in _BLOCKED_WEBHOOK_HOSTS
+        or host.endswith(".localhost")
+        or host.endswith(".metadata.google.internal")
+    ):
+        return False, f"Blocked internal webhook target: {host}"
+    if _webhook_ip_is_blocked(host):
+        return False, f"Blocked internal webhook target: {host}"
+
+    try:
+        resolved = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        return True, ""
+    for item in resolved:
+        sockaddr = item[4]
+        if sockaddr and _webhook_ip_is_blocked(str(sockaddr[0])):
+            return False, f"Blocked internal webhook target: {host}"
+    return True, ""
+
+
 def execute_webhook(args: dict, pg: Any) -> dict:
     """Execute a webhook call.
 
@@ -150,12 +229,17 @@ def execute_webhook(args: dict, pg: Any) -> dict:
             "error": "missing_url",
         }
 
-    if not url.startswith("http"):
+    valid_url, invalid_summary = _validate_webhook_url(url)
+    if not valid_url:
         return {
             "status": "failed",
             "data": None,
-            "summary": f"Invalid URL: {url}",
-            "error": "invalid_url",
+            "summary": invalid_summary,
+            "error": (
+                "invalid_url"
+                if invalid_summary.startswith("Invalid URL:")
+                else "ssrf_blocked"
+            ),
         }
 
     if not isinstance(headers, dict):
@@ -186,6 +270,19 @@ def execute_webhook(args: dict, pg: Any) -> dict:
         }
     headers = resolved_headers
     url = resolved_url
+
+    valid_url, invalid_summary = _validate_webhook_url(url)
+    if not valid_url:
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": invalid_summary,
+            "error": (
+                "invalid_url"
+                if invalid_summary.startswith("Invalid URL:")
+                else "ssrf_blocked"
+            ),
+        }
 
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
 

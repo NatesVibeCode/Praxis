@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import { spawn, ChildProcess } from 'child_process';
 import { readFileSync, watch, FSWatcher } from 'fs';
 import net from 'net';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
 
 // Single source of truth for the dev bind address. Every port interaction
 // — the free-port probe, the Python child spawn, and the Vite proxy origin —
@@ -11,6 +13,9 @@ import net from 'net';
 // another process already holds *:<port>), and the dev proxy silently
 // targets a dead address.
 const API_HOST = '127.0.0.1';
+const UI_HOST = process.env.PRAXIS_UI_HOST || '127.0.0.1';
+const PYTHON_COMMAND = process.env.PRAXIS_PYTHON_COMMAND || (process.platform === 'win32' ? 'python' : 'python3');
+const API_WATCH_ENABLED = process.env.PRAXIS_API_WATCH !== '0';
 
 async function canBindPort(port: number, host = API_HOST): Promise<boolean> {
   return await new Promise<boolean>((resolve, reject) => {
@@ -46,10 +51,10 @@ async function findOpenPort(preferredPort: number, host = API_HOST, maxAttempts 
 }
 
 // Load .env from repo root for API keys
-function loadDotEnv(repoRoot: string): Record<string, string> {
+function loadDotEnv(envPath: string): Record<string, string> {
   const envVars: Record<string, string> = {};
   try {
-    const content = readFileSync(`${repoRoot}.env`, 'utf-8');
+    const content = readFileSync(envPath, 'utf-8');
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
@@ -94,9 +99,10 @@ function apiServerPlugin(apiPort: number) {
   const recentCrashes: number[] = [];
   let circuitOpen = false;
 
-  const repoRoot = decodeURIComponent(new URL('../../../../', import.meta.url).pathname);
-  const workflowRoot = `${repoRoot}Code&DBs/Workflow`;
-  const repoEnvPath = `${repoRoot}.env`;
+  const appRoot = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = resolve(appRoot, '../../../..');
+  const workflowRoot = join(repoRoot, 'Code&DBs', 'Workflow');
+  const repoEnvPath = join(repoRoot, '.env');
   // Host + args stay in lock-step with the probe in `canBindPort` (both use
   // `API_HOST`). The Vite proxy origin below uses the same constant — if any
   // of the three diverges, the child can bind a different address than the
@@ -114,7 +120,7 @@ function apiServerPlugin(apiPort: number) {
   const normalizedRepoEnvPath = repoEnvPath.replace(/\\/g, '/');
 
   function loadApiEnv() {
-    const dotEnv = loadDotEnv(repoRoot);
+    const dotEnv = loadDotEnv(repoEnvPath);
     const configuredWorkflowDatabaseUrl = dotEnv.WORKFLOW_DATABASE_URL || process.env.WORKFLOW_DATABASE_URL;
     if (!configuredWorkflowDatabaseUrl) {
       throw new Error(`WORKFLOW_DATABASE_URL must be set in process env or declared in ${normalizedRepoEnvPath}`);
@@ -128,7 +134,7 @@ function apiServerPlugin(apiPort: number) {
       PYTHONPATH: workflowRoot,
       WORKFLOW_DATABASE_URL: workflowDatabaseUrl,
       PRAXIS_API_PORT: String(apiPort),
-      PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+      PATH: process.env.PATH || '',
     };
   }
 
@@ -165,7 +171,7 @@ function apiServerPlugin(apiPort: number) {
         `[api]      A wildcard bind (e.g. OrbStack, docker-proxy) at *:${apiPort} does NOT`,
         `[api]      block our loopback bind — so this check is for ${API_HOST}:${apiPort} specifically.`,
         `[api]   2. Run the child directly to see its stderr:`,
-        `[api]        WORKFLOW_DATABASE_URL=... PYTHONPATH=${workflowRoot} python3 -m surfaces.api.server --host ${API_HOST} --port ${apiPort}`,
+        `[api]        WORKFLOW_DATABASE_URL=... PYTHONPATH=${workflowRoot} ${PYTHON_COMMAND} -m surfaces.api.server --host ${API_HOST} --port ${apiPort}`,
         `[api]   3. Fix, then restart Vite to reset the circuit breaker.`,
       ].join('\n'),
     );
@@ -173,7 +179,7 @@ function apiServerPlugin(apiPort: number) {
 
   function startApiServer(reason: string) {
     if (shuttingDown || circuitOpen) return;
-    const child = spawn('python3', apiArgs, {
+    const child = spawn(PYTHON_COMMAND, apiArgs, {
       env: loadApiEnv(),
       cwd: workflowRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -244,6 +250,7 @@ function apiServerPlugin(apiPort: number) {
     if (
       normalized.includes('/node_modules/')
       || normalized.includes('/dist/')
+      || normalized.includes('/.venv/')
       || normalized.includes('/__pycache__/')
       || normalized.includes('/.pytest_cache/')
       || normalized.includes('/.mypy_cache/')
@@ -294,7 +301,9 @@ function apiServerPlugin(apiPort: number) {
       };
 
       startApiServer('starting');
-      startBackendWatchers();
+      if (API_WATCH_ENABLED) {
+        startBackendWatchers();
+      }
       process.once('SIGINT', handleProcessShutdown);
       process.once('SIGTERM', handleProcessShutdown);
 
@@ -386,7 +395,7 @@ export default defineConfig(async ({ command }) => {
       },
     },
     server: {
-      host: API_HOST,
+      host: UI_HOST,
       port: uiPort,
       strictPort: true,
       proxy: {

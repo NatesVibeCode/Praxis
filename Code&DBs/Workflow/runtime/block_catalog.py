@@ -7,15 +7,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from runtime.workspace_paths import workflow_root
-
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+from runtime.workspace_paths import repo_root as workspace_repo_root, workflow_root
 
 
 def block_catalog_path() -> Path:
-    return workflow_root(_repo_root()) / "surfaces" / "app" / "src" / "blocks" / "catalog.v1.json"
+    return workflow_root(workspace_repo_root()) / "surfaces" / "app" / "src" / "blocks" / "catalog.v1.json"
 
 
 @lru_cache(maxsize=1)

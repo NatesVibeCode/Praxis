@@ -2,12 +2,40 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
 import runtime.docker_image_authority as authority
+
+
+def test_build_default_docker_image_passes_layout_build_args(monkeypatch, tmp_path) -> None:
+    dockerfile = tmp_path / "docker" / "praxis-worker.Dockerfile"
+    dockerfile.parent.mkdir()
+    dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(authority, "workflow_root", lambda: tmp_path)
+    monkeypatch.setattr(authority, "container_workspace_root", lambda: Path("/registry-workspace"))
+    monkeypatch.setattr(authority, "container_home", lambda: Path("/registry-home"))
+
+    def _run(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(authority.subprocess, "run", _run)
+
+    ok, error = authority.build_default_docker_image()
+
+    assert ok is True
+    assert error is None
+    args = captured["args"]
+    assert "--build-arg" in args
+    assert "PRAXIS_CONTAINER_WORKSPACE_ROOT=/registry-workspace" in args
+    assert "PRAXIS_CONTAINER_HOME=/registry-home" in args
 
 
 def test_resolve_docker_image_prefers_explicit_sources(monkeypatch) -> None:

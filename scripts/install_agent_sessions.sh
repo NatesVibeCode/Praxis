@@ -6,10 +6,17 @@ set -euo pipefail
 
 REPO="${PRAXIS_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SRC="$REPO/scripts/com.praxis.agent-sessions.plist"
-DST="$HOME/Library/LaunchAgents/com.praxis.agent-sessions.plist"
+default_launchd_dir() {
+  printf '%s' "$HOME"
+  printf '%s' "/Library/LaunchAgents"
+}
+
+LAUNCHD_DIR="${PRAXIS_LAUNCHD_DIR:-$(default_launchd_dir)}"
+DST="$LAUNCHD_DIR/com.praxis.agent-sessions.plist"
 PORT=8421
 PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"
-LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
+LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-$(getconf PATH 2>/dev/null || printf '/usr/bin:/bin:/usr/sbin:/sbin')}"
+DATABASE_URL="${WORKFLOW_DATABASE_URL:-}"
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 log() { echo "[$(ts)] install-agent-sessions: $*"; }
@@ -24,6 +31,24 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 1
 fi
 
+if [ -z "$DATABASE_URL" ] && [ -f "$REPO/scripts/_workflow_env.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$REPO/scripts/_workflow_env.sh"
+  workflow_load_repo_env >/dev/null 2>&1 || true
+  DATABASE_URL="${WORKFLOW_DATABASE_URL:-}"
+fi
+
+if [ -z "$DATABASE_URL" ] && [ -f "$REPO/.env" ]; then
+  DATABASE_URL="$(
+    awk -F= '/^WORKFLOW_DATABASE_URL=/ {sub(/^[^=]*=/, ""); print; exit}' "$REPO/.env"
+  )"
+fi
+
+if [ -z "$DATABASE_URL" ]; then
+  log "ERROR: WORKFLOW_DATABASE_URL not resolved; set it or create .env"
+  exit 1
+fi
+
 xml_escape() {
   printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
 }
@@ -32,7 +57,7 @@ sed_escape() {
   printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
 
-mkdir -p "$(dirname "$DST")" "$REPO/artifacts"
+mkdir -p "$LAUNCHD_DIR" "$REPO/artifacts"
 sed \
   -e "s|__PRAXIS_REPO_ROOT__|$(sed_escape "$(xml_escape "$REPO")")|g" \
   -e "s|__PRAXIS_PYTHON_BIN__|$(sed_escape "$(xml_escape "$PYTHON_BIN")")|g" \

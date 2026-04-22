@@ -27,7 +27,19 @@ class ResolvedHttpOperationBinding:
     command_class: type[BaseModel]
     handler: Callable[..., Any]
     authority_ref: str
+    authority_domain_ref: str
     projection_ref: str | None
+    storage_target_ref: str
+    input_schema_ref: str
+    output_schema_ref: str
+    idempotency_key_fields: list[Any]
+    required_capabilities: dict[str, Any]
+    allowed_callers: list[Any]
+    timeout_ms: int
+    receipt_required: bool
+    event_required: bool
+    event_type: str | None
+    projection_freshness_policy_ref: str | None
     posture: str
     idempotency_policy: str
     binding_revision: str
@@ -111,7 +123,19 @@ def resolve_http_operation_binding(
         command_class=_resolve_command_class(definition.input_model_ref),
         handler=_resolve_handler(definition.handler_ref),
         authority_ref=definition.authority_ref,
+        authority_domain_ref=definition.authority_domain_ref,
         projection_ref=definition.projection_ref,
+        storage_target_ref=definition.storage_target_ref,
+        input_schema_ref=definition.input_schema_ref,
+        output_schema_ref=definition.output_schema_ref,
+        idempotency_key_fields=list(definition.idempotency_key_fields),
+        required_capabilities=dict(definition.required_capabilities),
+        allowed_callers=list(definition.allowed_callers),
+        timeout_ms=definition.timeout_ms,
+        receipt_required=definition.receipt_required,
+        event_required=definition.event_required,
+        event_type=definition.event_type,
+        projection_freshness_policy_ref=definition.projection_freshness_policy_ref,
         posture=definition.posture,
         idempotency_policy=definition.idempotency_policy,
         binding_revision=definition.binding_revision,

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import tempfile
+from pathlib import Path
 
 import surfaces.api._smoke_service as smoke_service
 from surfaces.api import frontdoor, native_ops, operator_read
+
+WORKSPACE_ROOT = str(Path(tempfile.gettempdir()) / "praxis-workspace")
 
 
 @dataclass
@@ -71,7 +75,7 @@ def test_run_local_operator_flow_uses_frontdoor_health_database_payloads(
     env = {
         "WORKFLOW_DATABASE_URL": "postgresql://nate@localhost:5432/praxis",
         "PRAXIS_RUNTIME_PROFILE": "praxis",
-        "PRAXIS_RUNTIME_PROFILES_CONFIG": "/Users/nate/Praxis/config/runtime_profiles.json",
+        "PRAXIS_RUNTIME_PROFILES_CONFIG": f"{WORKSPACE_ROOT}/config/runtime_profiles.json",
     }
     request_payload = {
         "workflow_id": "workflow.native-self-hosted-smoke",
@@ -81,12 +85,12 @@ def test_run_local_operator_flow_uses_frontdoor_health_database_payloads(
     }
     instance_contract = {
         "praxis_instance_name": "praxis",
-        "praxis_receipts_dir": "/Users/nate/Praxis/artifacts/runtime_receipts",
+        "praxis_receipts_dir": f"{WORKSPACE_ROOT}/artifacts/runtime_receipts",
         "praxis_runtime_profile": "praxis",
-        "praxis_topology_dir": "/Users/nate/Praxis/artifacts/runtime_topology",
-        "repo_root": "/Users/nate/Praxis",
-        "runtime_profiles_config": "/Users/nate/Praxis/config/runtime_profiles.json",
-        "workdir": "/Users/nate/Praxis",
+        "praxis_topology_dir": f"{WORKSPACE_ROOT}/artifacts/runtime_topology",
+        "repo_root": WORKSPACE_ROOT,
+        "runtime_profiles_config": f"{WORKSPACE_ROOT}/config/runtime_profiles.json",
+        "workdir": WORKSPACE_ROOT,
     }
     frontdoor_service = _FakeFrontdoorService(
         request_calls=[],
@@ -283,7 +287,7 @@ def test_load_smoke_registry_uses_logical_workspace_identity(monkeypatch) -> Non
                 return [
                     {
                         "workspace_ref": "praxis",
-                        "repo_root": "/Users/nate/Praxis",
+                        "repo_root": WORKSPACE_ROOT,
                         "workdir": "/workspace",
                     }
                 ]

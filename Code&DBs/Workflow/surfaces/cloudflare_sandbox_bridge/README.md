@@ -2,7 +2,7 @@
 
 This surface is the HTTP bridge that makes Praxis `cloudflare_remote` sandbox execution real.
 
-It matches the runtime contract in `/Users/nate/Praxis/Code&DBs/Workflow/runtime/sandbox_runtime.py`:
+It matches the runtime contract in `Code&DBs/Workflow/runtime/sandbox_runtime.py`:
 
 - `POST /sessions/create`
 - `POST /sessions/{id}/hydrate`
@@ -15,7 +15,7 @@ The bridge is designed for a `workers.dev` URL first. You do not need a hosted s
 ## What It Does
 
 - Provisions one Cloudflare Sandbox per Praxis session.
-- Hydrates the workspace archive into `/workspace`.
+- Hydrates the workspace archive into the configured container workspace root.
 - Executes commands with stdin, env vars, cwd, and timeout.
 - Captures changed artifacts and returns them as base64 content.
 - Optionally protects the bridge with a bearer token.
@@ -29,11 +29,16 @@ The bridge is designed for a `workers.dev` URL first. You do not need a hosted s
 
 ## Deploy
 
-1. `cd /Users/nate/Praxis/Code&DBs/Workflow/surfaces/cloudflare_sandbox_bridge`
+1. `cd Code&DBs/Workflow/surfaces/cloudflare_sandbox_bridge`
 2. `npm install`
 3. `npx wrangler login`
-4. Optional but recommended: `npx wrangler secret put BRIDGE_TOKEN`
-5. `npx wrangler deploy`
+4. Configure `PRAXIS_CONTAINER_WORKSPACE_ROOT` and `PRAXIS_BRIDGE_TMP_ROOT` from `config/workspace_layout.json` in the deployment environment.
+5. Optional but recommended: `npx wrangler secret put BRIDGE_TOKEN`
+6. `npx wrangler deploy`
+
+The checked-in `wrangler.jsonc` intentionally does not duplicate container path
+values. The bridge fails closed when the deployment environment omits those
+registry-owned values.
 
 Wrangler will print a URL shaped like:
 

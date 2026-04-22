@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from adapters.keychain import resolve_secret
 from registry.provider_execution_registry import get_profile, resolve_default_adapter_type, supports_adapter
 from runtime._workflow_database import resolve_runtime_database_url
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from storage.postgres import PostgresConfigurationError, ensure_postgres_available
 
 from .domain import (
@@ -193,7 +195,7 @@ def _native_transport_ready_refs(
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _require_text(value: object, *, field_name: str) -> str:
@@ -255,6 +257,70 @@ def _resolve_repo_relative_path(
     return str(candidate)
 
 
+_ENV_TOKEN_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def _row_get(row: object, key: str, default: object = None) -> object:
+    try:
+        return row[key]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError):
+        getter = getattr(row, "get", None)
+        if callable(getter):
+            return getter(key, default)
+        return default
+
+
+def _resolve_workspace_base_path(raw_value: object, *, field_name: str) -> Path:
+    raw_text = _require_text(raw_value, field_name=field_name)
+    match = _ENV_TOKEN_RE.match(raw_text)
+    if match:
+        env_name = match.group(1)
+        env_value = os.environ.get(env_name)
+        if not env_value or not env_value.strip():
+            raise NativeRuntimeProfileSyncError(
+                f"{field_name} references ${env_name}, but {env_name} is not set"
+            )
+        raw_text = env_value.strip()
+    candidate = Path(raw_text).expanduser()
+    if not candidate.is_absolute():
+        candidate = (_repo_root() / candidate).resolve()
+    return candidate.resolve()
+
+
+def _resolve_workspace_paths(row: object, *, runtime_profile_ref: str) -> tuple[str, str]:
+    base_path_ref = str(_row_get(row, "base_path_ref", "") or "").strip()
+    base_path = str(_row_get(row, "base_path", "") or "").strip()
+    if base_path_ref and base_path:
+        base = _resolve_workspace_base_path(
+            base_path,
+            field_name=f"{runtime_profile_ref}.workspace_base_path",
+        )
+        repo_root = _resolve_repo_relative_path(
+            _row_get(row, "repo_root_path", None) or ".",
+            field_name=f"{runtime_profile_ref}.repo_root_path",
+            base=base,
+        )
+        workdir = _resolve_repo_relative_path(
+            _row_get(row, "workdir_path", None) or ".",
+            field_name=f"{runtime_profile_ref}.workdir_path",
+            base=Path(repo_root),
+        )
+        return repo_root, workdir
+
+    local_repo_root = _repo_root()
+    repo_root = _resolve_repo_relative_path(
+        _row_get(row, "repo_root", None),
+        field_name=f"{runtime_profile_ref}.repo_root",
+        base=local_repo_root,
+    )
+    workdir = _resolve_repo_relative_path(
+        _row_get(row, "workdir", None),
+        field_name=f"{runtime_profile_ref}.workdir",
+        base=Path(repo_root),
+    )
+    return repo_root, workdir
+
+
 def _json_text_array(value: object, *, field_name: str) -> tuple[str, ...]:
     parsed = value
     if isinstance(value, str):
@@ -276,7 +342,7 @@ def _json_text_array(value: object, *, field_name: str) -> tuple[str, ...]:
 
 def _default_sync_conn():
     try:
-        database_url = resolve_runtime_database_url(repo_root=Path(__file__).resolve().parents[3], required=True)
+        database_url = resolve_runtime_database_url(repo_root=workspace_repo_root(), required=True)
         return ensure_postgres_available(env={"WORKFLOW_DATABASE_URL": database_url})
     except PostgresConfigurationError as exc:
         raise NativeRuntimeProfileSyncError(
@@ -404,12 +470,19 @@ def _fetch_native_runtime_profile_rows_sync(
                native.topology_dir,
                workspace.repo_root,
                workspace.workdir,
+               workspace.base_path_ref,
+               workspace.repo_root_path,
+               workspace.workdir_path,
+               base_path.base_path,
                runtime.model_profile_id,
                runtime.provider_policy_id,
                runtime.sandbox_profile_ref
         FROM registry_native_runtime_profile_authority native
         JOIN registry_workspace_authority workspace
           ON workspace.workspace_ref = native.workspace_ref
+        LEFT JOIN registry_workspace_base_path_authority base_path
+          ON base_path.base_path_ref = workspace.base_path_ref
+         AND base_path.is_active = true
         JOIN registry_runtime_profile_authority runtime
           ON runtime.runtime_profile_ref = native.runtime_profile_ref
         ORDER BY native.runtime_profile_ref
@@ -432,12 +505,19 @@ async def _fetch_native_runtime_profile_rows_async(
                native.topology_dir,
                workspace.repo_root,
                workspace.workdir,
+               workspace.base_path_ref,
+               workspace.repo_root_path,
+               workspace.workdir_path,
+               base_path.base_path,
                runtime.model_profile_id,
                runtime.provider_policy_id,
                runtime.sandbox_profile_ref
         FROM registry_native_runtime_profile_authority native
         JOIN registry_workspace_authority workspace
           ON workspace.workspace_ref = native.workspace_ref
+        LEFT JOIN registry_workspace_base_path_authority base_path
+          ON base_path.base_path_ref = workspace.base_path_ref
+         AND base_path.is_active = true
         JOIN registry_runtime_profile_authority runtime
           ON runtime.runtime_profile_ref = native.runtime_profile_ref
         ORDER BY native.runtime_profile_ref
@@ -450,7 +530,6 @@ def _native_runtime_configs_from_rows(rows: list[object]) -> tuple[NativeRuntime
         raise NativeRuntimeProfileSyncError(
             "registry_native_runtime_profile_authority must define at least one native runtime profile",
         )
-    local_repo_root = _repo_root()
     configs: list[NativeRuntimeProfileConfig] = []
     for row in rows:
         runtime_profile_ref = _require_text(
@@ -467,15 +546,9 @@ def _native_runtime_configs_from_rows(rows: list[object]) -> tuple[NativeRuntime
         )
         if primary_provider_name not in provider_names:
             provider_names = (primary_provider_name, *provider_names)
-        repo_root = _resolve_repo_relative_path(
-            row["repo_root"],
-            field_name=f"{runtime_profile_ref}.repo_root",
-            base=local_repo_root,
-        )
-        workdir = _resolve_repo_relative_path(
-            row["workdir"],
-            field_name=f"{runtime_profile_ref}.workdir",
-            base=Path(repo_root),
+        repo_root, workdir = _resolve_workspace_paths(
+            row,
+            runtime_profile_ref=runtime_profile_ref,
         )
         configs.append(
             NativeRuntimeProfileConfig(
@@ -892,19 +965,51 @@ def _upsert_workspace_authority_sync(
     record = config.workspace_record()
     conn.execute(
         """
+        INSERT INTO registry_workspace_base_path_authority (
+            base_path_ref,
+            workspace_ref,
+            base_path,
+            host_ref,
+            is_active,
+            priority
+        ) VALUES ($1, $2, $3, $4, true, 100)
+        ON CONFLICT (base_path_ref) DO UPDATE
+        SET workspace_ref = EXCLUDED.workspace_ref,
+            base_path = EXCLUDED.base_path,
+            host_ref = EXCLUDED.host_ref,
+            is_active = true,
+            priority = 100,
+            recorded_at = now()
+        """,
+        "workspace_base.praxis.default",
+        record.workspace_ref,
+        "${PRAXIS_WORKSPACE_BASE_PATH}",
+        "default",
+    )
+    conn.execute(
+        """
         INSERT INTO registry_workspace_authority (
             workspace_ref,
             repo_root,
-            workdir
-        ) VALUES ($1, $2, $3)
+            workdir,
+            base_path_ref,
+            repo_root_path,
+            workdir_path
+        ) VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (workspace_ref) DO UPDATE
         SET repo_root = EXCLUDED.repo_root,
             workdir = EXCLUDED.workdir,
+            base_path_ref = EXCLUDED.base_path_ref,
+            repo_root_path = EXCLUDED.repo_root_path,
+            workdir_path = EXCLUDED.workdir_path,
             recorded_at = now()
         """,
         record.workspace_ref,
-        record.repo_root,
-        record.workdir,
+        ".",
+        ".",
+        "workspace_base.praxis.default",
+        ".",
+        ".",
     )
 
 
@@ -915,19 +1020,51 @@ async def _upsert_workspace_authority_async(
     record = config.workspace_record()
     await conn.execute(
         """
+        INSERT INTO registry_workspace_base_path_authority (
+            base_path_ref,
+            workspace_ref,
+            base_path,
+            host_ref,
+            is_active,
+            priority
+        ) VALUES ($1, $2, $3, $4, true, 100)
+        ON CONFLICT (base_path_ref) DO UPDATE
+        SET workspace_ref = EXCLUDED.workspace_ref,
+            base_path = EXCLUDED.base_path,
+            host_ref = EXCLUDED.host_ref,
+            is_active = true,
+            priority = 100,
+            recorded_at = now()
+        """,
+        "workspace_base.praxis.default",
+        record.workspace_ref,
+        "${PRAXIS_WORKSPACE_BASE_PATH}",
+        "default",
+    )
+    await conn.execute(
+        """
         INSERT INTO registry_workspace_authority (
             workspace_ref,
             repo_root,
-            workdir
-        ) VALUES ($1, $2, $3)
+            workdir,
+            base_path_ref,
+            repo_root_path,
+            workdir_path
+        ) VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (workspace_ref) DO UPDATE
         SET repo_root = EXCLUDED.repo_root,
             workdir = EXCLUDED.workdir,
+            base_path_ref = EXCLUDED.base_path_ref,
+            repo_root_path = EXCLUDED.repo_root_path,
+            workdir_path = EXCLUDED.workdir_path,
             recorded_at = now()
         """,
         record.workspace_ref,
-        record.repo_root,
-        record.workdir,
+        ".",
+        ".",
+        "workspace_base.praxis.default",
+        ".",
+        ".",
     )
 
 

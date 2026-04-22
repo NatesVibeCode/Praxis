@@ -1498,8 +1498,8 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
               <>
                 <div className="moon-center__dock-actions" aria-label="Workspace panels">
                   <div className="moon-center__dock-group">
-                    <DockToggleButton active={actionOpen} label="Action" onClick={() => openDock('action')} />
-                    <DockToggleButton active={contextOpen} label="Detail" onClick={() => openDock('context')} />
+                    <DockToggleButton active={actionOpen} label="Authority" onClick={() => openDock('action')} />
+                    <DockToggleButton active={contextOpen} label="Inspector" onClick={() => openDock('context')} />
                   </div>
                 </div>
                 {!releaseOpen && !state.runViewOpen && <HalfMoon position="bottom" label="Release" onClick={() => dispatch({ type: 'TOGGLE_RELEASE' })} />}
@@ -1517,27 +1517,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                   <div className={`moon-nucleus__ring${state.selectedTrigger ? ' moon-nucleus__ring--decided' : ''}`}>
                   </div>
                 </div>
-
-                {state.emptyMode === 'selection' && (
-                  <div className="moon-selection-window">
-                    <button
-                      type="button"
-                      className="moon-selection-card"
-                      onClick={() => dispatch({ type: 'EMPTY_PICK_TRIGGER' })}
-                    >
-                      <span className="moon-selection-card__title">Pick a trigger</span>
-                      <span className="moon-selection-card__desc">Choose a route first if you already know how this workflow starts.</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="moon-selection-card"
-                      onClick={() => dispatch({ type: 'EMPTY_PICK_COMPOSE' })}
-                    >
-                      <span className="moon-selection-card__title">Describe it</span>
-                      <span className="moon-selection-card__desc">Type plain English. The builder will best-guess the steps, inputs, and outputs.</span>
-                    </button>
-                  </div>
-                )}
 
                 {showComposePanel && (
                   <div className="moon-compose moon-compose--intro" style={{ marginTop: 32 }}>
@@ -1563,7 +1542,15 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     />
                     <div className="moon-compose__actions">
                       <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !state.compileProse.trim()}>
-                        {compiling ? 'Building...' : 'Build from prompt'}
+                        {compiling ? 'Building...' : 'Build workflow'}
+                      </button>
+                      <button
+                        type="button"
+                        className="moon-compose__secondary-link"
+                        onClick={() => dispatch({ type: 'EMPTY_PICK_TRIGGER' })}
+                        style={{ marginLeft: 16, background: 'none', border: 'none', color: 'var(--fg3)', cursor: 'pointer', fontSize: 13, textDecoration: 'underline' }}
+                      >
+                        or choose a trigger manually
                       </button>
                     </div>
                     {state.compileError && (
@@ -1666,7 +1653,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                           <div className="moon-graph-gate__card">
                             <div className="moon-graph-gate__meta">
                               <span className="moon-surface-badge">
-                                {isEmpty ? 'Core now' : control.gatePolicy?.badge || 'Gate'}
+                                {isEmpty ? 'Ungated' : control.gatePolicy?.badge || 'Gate'}
                               </span>
                               {control.gateTruth && (
                                 <span className={`moon-truth-badge moon-truth-badge--${control.gateTruth.category}`}>
@@ -1725,7 +1712,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                               className="moon-graph-gate__detail-button"
                               onClick={() => handleSelectEdge(control.edge.id, { openDetail: true })}
                             >
-                              Edit gate
+                              {isEmpty ? 'Add gate' : 'Update gate'}
                             </button>
                           </div>
                         )}

@@ -28,6 +28,7 @@ from runtime.execution_packet_authority import (
     inspect_execution_packets,
     packet_inspection_from_row,
 )
+from runtime.workspace_paths import container_workspace_root
 from runtime.failure_projection import project_failure_classification
 from runtime.workflow.execution_bundle import (
     build_execution_bundle,
@@ -222,7 +223,7 @@ def build_platform_context(repo_root: str) -> str:
     return (
         "--- PLATFORM CONTEXT ---\n"
         f"Host repo root (persistence/output authority): {repo_root}\n"
-        "Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as /workspace.\n"
+        f"Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as {container_workspace_root()}.\n"
         "Use the live command workspace for shell commands and relative paths; do not assume the host repo path exists inside the sandbox.\n"
         f"Database: {database_ref}\n"
         "--- END PLATFORM CONTEXT ---"
@@ -659,7 +660,36 @@ def _build_job_execution_bundles(
             else [],
             submission_required=job.get("submission_required")
             if isinstance(job.get("submission_required"), bool)
-            else None,
+            else (
+                # Specs express submission requirements nested under
+                # completion_contract; flatten them through so the bundle
+                # builder sees spec authority, not just task_type defaults.
+                bool(job["completion_contract"].get("submission_required"))
+                if isinstance(job.get("completion_contract"), dict)
+                and isinstance(job["completion_contract"].get("submission_required"), bool)
+                else None
+            ),
+            result_kind=(
+                str(job["completion_contract"].get("result_kind") or "").strip() or None
+                if isinstance(job.get("completion_contract"), dict)
+                else None
+            ),
+            submit_tool_names=(
+                [
+                    str(name).strip()
+                    for name in job["completion_contract"].get("submit_tool_names") or []
+                    if str(name).strip()
+                ]
+                if isinstance(job.get("completion_contract"), dict)
+                and isinstance(job["completion_contract"].get("submit_tool_names"), list)
+                else None
+            ),
+            verification_required=(
+                bool(job["completion_contract"].get("verification_required"))
+                if isinstance(job.get("completion_contract"), dict)
+                and isinstance(job["completion_contract"].get("verification_required"), bool)
+                else None
+            ),
             downstream_labels=downstream_by_label.get(label) or [],
             output_schema=job.get("output_schema")
             if isinstance(job.get("output_schema"), dict)
@@ -935,7 +965,33 @@ def _runtime_execution_bundle(
         context_sections=context_sections,
         submission_required=source_job.get("submission_required")
         if isinstance(source_job.get("submission_required"), bool)
-        else None,
+        else (
+            bool(source_job["completion_contract"].get("submission_required"))
+            if isinstance(source_job.get("completion_contract"), dict)
+            and isinstance(source_job["completion_contract"].get("submission_required"), bool)
+            else None
+        ),
+        result_kind=(
+            str(source_job["completion_contract"].get("result_kind") or "").strip() or None
+            if isinstance(source_job.get("completion_contract"), dict)
+            else None
+        ),
+        submit_tool_names=(
+            [
+                str(name).strip()
+                for name in source_job["completion_contract"].get("submit_tool_names") or []
+                if str(name).strip()
+            ]
+            if isinstance(source_job.get("completion_contract"), dict)
+            and isinstance(source_job["completion_contract"].get("submit_tool_names"), list)
+            else None
+        ),
+        verification_required=(
+            bool(source_job["completion_contract"].get("verification_required"))
+            if isinstance(source_job.get("completion_contract"), dict)
+            and isinstance(source_job["completion_contract"].get("verification_required"), bool)
+            else None
+        ),
         downstream_labels=downstream_labels,
         output_schema=source_job.get("output_schema")
         if isinstance(source_job.get("output_schema"), dict)

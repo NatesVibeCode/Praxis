@@ -32,9 +32,12 @@ def _insert_gate_evaluation(conn, *, gate_evaluation) -> None:
             proposal_manifest_hash,
             validated_head_ref,
             target_kind,
-            target_ref
+            target_ref,
+            grant_ref,
+            plan_envelope_hash
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+            $15, $16
         )
         ON CONFLICT (gate_evaluation_id) DO NOTHING
         """,
@@ -52,6 +55,8 @@ def _insert_gate_evaluation(conn, *, gate_evaluation) -> None:
         gate_evaluation.validated_head_ref,
         gate_evaluation.target_kind,
         gate_evaluation.target_ref,
+        getattr(gate_evaluation, "grant_ref", None),
+        getattr(gate_evaluation, "plan_envelope_hash", None),
     )
 
 

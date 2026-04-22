@@ -18,10 +18,8 @@ from registry.provider_execution_registry import build_command, resolve_api_key_
 from runtime.load_balancer import get_load_balancer
 from runtime.execution_transport import resolve_execution_transport
 from runtime.sandbox_runtime import SandboxRuntime, derive_sandbox_identity
-from runtime.workflow.mcp_bridge import (
-    augment_cli_command_for_workflow_mcp,
-    workflow_mcp_workspace_overlays,
-)
+from runtime.workflow.agent_packet import AgentPacket
+from runtime.workflow.mcp_session import mint_workflow_mcp_session_token
 from runtime.workflow.decision_context import decision_workspace_overlays
 from runtime.workspace_paths import workflow_root
 
@@ -36,7 +34,11 @@ _EXECUTION_BUNDLE_ENV = "PRAXIS_EXECUTION_BUNDLE"
 _ALLOWED_MCP_TOOLS_ENV = "PRAXIS_ALLOWED_MCP_TOOLS"
 _LEGACY_ALLOWED_MCP_TOOLS_ENV = "PRAXIS_ALLOWED_MCP_TOOLS"
 _ALLOWED_SKILLS_ENV = "PRAXIS_ALLOWED_SKILLS"
-_SANDBOX_PATH_PREFIX = "/opt/homebrew/bin:/usr/local/bin:"
+# Uniform shell-tool surface: sandbox-side `praxis` CLI reads these to POST
+# into the workflow MCP bridge. Replaces per-provider MCP-config plumbing.
+_MCP_URL_ENV = "PRAXIS_WORKFLOW_MCP_URL"
+_MCP_TOKEN_ENV = "PRAXIS_WORKFLOW_MCP_TOKEN"
+_SANDBOX_PATH_PREFIX_ENV = "PRAXIS_SANDBOX_PATH_PREFIX"
 _PROVIDER_SLOT_BYPASS: ContextVar[bool] = ContextVar(
     "workflow_provider_slot_bypass",
     default=False,
@@ -51,12 +53,10 @@ def _env_flag_enabled(name: str, *, default: bool) -> bool:
 
 
 def _load_env_secret_from_keychain(env: dict[str, str], key_name: str) -> None:
-    if key_name in env and str(env.get(key_name, "")).strip():
-        return
     try:
         from adapters.keychain import resolve_secret
 
-        value = resolve_secret(key_name, env=env)
+        value = resolve_secret(key_name)
     except Exception:
         return
     if value:
@@ -71,8 +71,17 @@ def _resolve_api_key_env_name(provider_slug: str, env: dict[str, str]) -> str | 
     return env_names[0] if env_names else None
 
 
+def _sandbox_path_prefix() -> str:
+    prefix = str(os.environ.get(_SANDBOX_PATH_PREFIX_ENV, "")).strip()
+    if not prefix:
+        return ""
+    return prefix if prefix.endswith(":") else f"{prefix}:"
+
+
 def _sanitize_base_env() -> dict[str, str]:
-    env = dict(os.environ)
+    env: dict[str, str] = {}
+    if os.environ.get(_MCP_URL_ENV):
+        env[_MCP_URL_ENV] = str(os.environ[_MCP_URL_ENV]).strip()
     for key in (
         "CLAUDECODE",
         "CLAUDE_CODE_ENTRYPOINT",
@@ -84,7 +93,7 @@ def _sanitize_base_env() -> dict[str, str]:
         "CLAUDE_CODE_DISABLE_CRON",
     ):
         env.pop(key, None)
-    env["PATH"] = _SANDBOX_PATH_PREFIX + env.get("PATH", "")
+    env["PATH"] = _sandbox_path_prefix() + os.environ.get("PATH", "")
     return env
 
 
@@ -100,25 +109,6 @@ def _ripgrep_config_for_workdir(workdir: str) -> str | None:
         if (directory / ".git").exists():
             break
     return None
-
-
-def _load_dotenv_exports(workdir: str, env: dict[str, str]) -> dict[str, str]:
-    exports: dict[str, str] = {}
-    dotenv_path = os.path.join(workdir, ".env")
-    if not os.path.isfile(dotenv_path):
-        return exports
-    with open(dotenv_path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip("'\"")
-                if key and key not in env:
-                    env[key] = value
-                if key and str(env.get(key, "")).strip():
-                    exports[key] = str(env[key]).strip()
-    return exports
 
 
 def _provider_api_key_names(provider_slug: str) -> tuple[str, ...]:
@@ -142,7 +132,6 @@ def _build_execution_env(
     execution_bundle: dict[str, Any] | None,
 ) -> dict[str, str]:
     env = _sanitize_base_env()
-    _load_dotenv_exports(workdir, env)
     provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
     provider_api_key_names = _provider_api_key_names(provider_slug)
     export_names = set(provider_api_key_names)
@@ -182,6 +171,29 @@ def _build_execution_env(
             allowed_tools = ",".join(str(name) for name in mcp_tool_names)
             sandbox_env[_ALLOWED_MCP_TOOLS_ENV] = allowed_tools
             sandbox_env[_LEGACY_ALLOWED_MCP_TOOLS_ENV] = allowed_tools
+            # Uniform shell-tool surface: every sandbox (codex/claude/gemini)
+            # gets a `praxis` workflow MCP front door baked into its image.
+            # It POSTs to the workflow MCP bridge using these two env vars. This
+            # replaces per-provider MCP-config wiring (which rotted on every
+            # CLI upgrade — see architecture-policy::sandbox::
+            # uniform-shell-tool-surface). The CLI itself does not need any
+            # MCP configuration; the agent invokes tools via the shell.
+            mcp_url = str(env.get(_MCP_URL_ENV, "")).strip()
+            if mcp_url:
+                sandbox_env[_MCP_URL_ENV] = mcp_url
+                try:
+                    sandbox_env[_MCP_TOKEN_ENV] = mint_workflow_mcp_session_token(
+                        run_id=str(execution_bundle.get("run_id") or "").strip() or None,
+                        workflow_id=str(execution_bundle.get("workflow_id") or "").strip() or None,
+                        job_label=str(execution_bundle.get("job_label") or "").strip(),
+                        allowed_tools=[str(name) for name in mcp_tool_names],
+                        agent_slug=provider_slug,
+                    )
+                except Exception:
+                    # Token minting is non-fatal: fallback is the legacy
+                    # per-provider MCP path (if the provider has one). Worker
+                    # logs the exception via the standard execution receipt.
+                    pass
         skill_refs = execution_bundle.get("skill_refs")
         if isinstance(skill_refs, list) and skill_refs:
             sandbox_env[_ALLOWED_SKILLS_ENV] = ",".join(str(name) for name in skill_refs)
@@ -202,6 +214,52 @@ def _build_execution_env(
     if ripgrep_config:
         sandbox_env["RIPGREP_CONFIG_PATH"] = ripgrep_config
     return sandbox_env
+
+
+def _mcp_tool_names_from_bundle(execution_bundle: dict[str, Any] | None) -> tuple[str, ...]:
+    if not isinstance(execution_bundle, dict):
+        return ()
+    raw = execution_bundle.get("mcp_tool_names")
+    if not isinstance(raw, list):
+        return ()
+    return tuple(str(name).strip() for name in raw if str(name).strip())
+
+
+def _build_cli_agent_packet(
+    agent_config,
+    *,
+    rendered_prompt: str,
+    workdir: str,
+    execution_bundle: dict[str, Any] | None,
+) -> AgentPacket:
+    """Packet boundary for the already-rendered runtime prompt.
+
+    ``_execution_core`` owns prompt assembly. Re-running that assembly here
+    would double-inject context and bundle text, so this helper records the
+    prompt as the agent-facing packet exactly as received by ``execute_cli``.
+    """
+    bundle = execution_bundle if isinstance(execution_bundle, dict) else {}
+    provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
+    model_slug = getattr(agent_config, "model", None)
+    env = _build_execution_env(
+        agent_config,
+        workdir=workdir,
+        execution_bundle=execution_bundle,
+    )
+    return AgentPacket(
+        user_prompt=rendered_prompt,
+        system_prompt=str(getattr(agent_config, "system_prompt", "") or "") or "",
+        env=env,
+        mcp_tool_names=_mcp_tool_names_from_bundle(execution_bundle),
+        metadata={
+            "agent_slug": f"{provider_slug}/{model_slug or ''}".strip("/"),
+            "provider_slug": provider_slug or None,
+            "model_slug": model_slug,
+            "job_label": str(bundle.get("job_label") or "").strip(),
+            "run_id": str(bundle.get("run_id") or "").strip(),
+            "workflow_id": str(bundle.get("workflow_id") or "").strip(),
+        },
+    )
 
 
 def _sandbox_profile_from_bundle(
@@ -445,6 +503,7 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
         "sandbox_session_id": result.sandbox_session_id,
         "sandbox_group_id": result.sandbox_group_id,
         "artifact_refs": list(result.artifact_refs),
+        "artifact_scope_drift": [dict(entry) for entry in getattr(result, "artifact_scope_drift", ())],
         "started_at": result.started_at,
         "finished_at": result.finished_at,
         "workspace_snapshot_ref": getattr(result, "workspace_snapshot_ref", ""),
@@ -531,13 +590,14 @@ def execute_cli(
         if not acquired:
             return _provider_capacity_failure(provider_slug)
 
-        env = _build_execution_env(
+        agent_packet = _build_cli_agent_packet(
             agent_config,
+            rendered_prompt=prompt,
             workdir=workdir,
             execution_bundle=execution_bundle,
         )
 
-        stdin_text = prompt
+        stdin_text = agent_packet.user_prompt
         if getattr(agent_config, "wrapper_command", None):
             cmd = shlex.split(agent_config.wrapper_command)
             if "{prompt_file}" in cmd:
@@ -549,7 +609,7 @@ def execute_cli(
                     "error_code": "sandbox_error",
                 }
             if "{prompt}" in cmd:
-                cmd = [prompt if part == "{prompt}" else part for part in cmd]
+                cmd = [agent_packet.user_prompt if part == "{prompt}" else part for part in cmd]
                 stdin_text = ""
         else:
             try:
@@ -568,21 +628,7 @@ def execute_cli(
 
         cmd = normalize_command_parts_for_docker(cmd)
 
-        decision_overlays = decision_workspace_overlays(execution_bundle)
-        workspace_overlays = [
-            *decision_overlays,
-            *workflow_mcp_workspace_overlays(
-                provider_slug=provider_slug,
-                execution_bundle=execution_bundle,
-                prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
-            ),
-        ]
-        cmd = augment_cli_command_for_workflow_mcp(
-            provider_slug=provider_slug,
-            command_parts=cmd,
-            execution_bundle=execution_bundle,
-            prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
-        )
+        workspace_overlays = decision_workspace_overlays(execution_bundle)
         timeout = int(getattr(agent_config, "timeout_seconds", 900) or 900)
         network_policy = _sandbox_policy_value(
             agent_config,
@@ -630,7 +676,7 @@ def execute_cli(
                 workdir=workdir,
                 command=shlex.join(cmd),
                 stdin_text=stdin_text,
-                env=env,
+                env=dict(agent_packet.env),
                 timeout_seconds=timeout,
                 network_policy=network_policy,
                 workspace_materialization=workspace_materialization,
@@ -638,6 +684,10 @@ def execute_cli(
                 image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
                 metadata={
                     "provider_slug": provider_slug,
+                    "agent_packet": {
+                        "mcp_tool_names": list(agent_packet.mcp_tool_names),
+                        "metadata": dict(agent_packet.metadata),
+                    },
                     "execution_bundle": execution_bundle or {},
                     **({"workspace_overlays": workspace_overlays} if workspace_overlays else {}),
                     **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),

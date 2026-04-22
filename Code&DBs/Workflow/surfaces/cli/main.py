@@ -14,77 +14,15 @@ from difflib import SequenceMatcher
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, TextIO
+from typing import TYPE_CHECKING, Protocol, TextIO
 
-from observability.read_models import (
-    GraphLineageReadModel,
-    GraphTopologyReadModel,
-    InspectionReadModel,
-    ReplayReadModel,
-)
-
-from .commands.admin import _compile_command, _github_command, _parse_pr_spec
-from .commands.authority import (
-    _authority_memory_command,
-    _catalog_command,
-    _data_dictionary_command,
-    _object_command,
-    _object_field_command,
-    _object_type_command,
-    _reconcile_command,
-    _registry_command,
-    _reload_command,
-    _schema_command,
-)
-from .commands.files import _files_command
-from .commands.handoff import _handoff_command
-from .commands.data import _data_command
-from .commands.heartbeat import _heartbeat_command
-from .commands.maintenance import _maintenance_command
-from .commands.operate import (
-    _api_command,
-    _cache_command,
-    _capabilities_command,
-    _circuits_command,
-    _config_command,
-    _dashboard_command,
-    _events_command,
-    _integrations_command,
-    _health_command,
-    _health_map_command,
-    _metrics_command,
-    _notifications_command,
-    _params_command,
-    _slots_command,
-    _supervisor_command,
-)
-from .commands.query import (
-    _architecture_command,
-    _artifacts_command,
-    _decompose_command,
-    _bugs_command,
-    _costs_command,
-    _discover_command,
-    _fitness_command,
-    _leaderboard_command,
-    _query_command,
-    _research_command,
-    _recall_command,
-    _receipts_command,
-    _reviews_command,
-    _risk_command,
-    _scope_command,
-    _trends_command,
-    _trust_command,
-)
-from .commands.roadmap import _roadmap_command
-from .commands.tools import _tools_command, _tools_quickstart_text
-from .render import (
-    render_graph_lineage,
-    render_graph_topology,
-    render_inspection,
-    render_replay,
-)
+if TYPE_CHECKING:
+    from observability.read_models import (
+        GraphLineageReadModel,
+        GraphTopologyReadModel,
+        InspectionReadModel,
+        ReplayReadModel,
+    )
 
 __all__ = [
     "GraphLineageCommand",
@@ -301,6 +239,37 @@ def _build_default_observability_service(
 os.environ.setdefault("PRAXIS_DISABLE_STARTUP_WIRING", "1")
 
 
+def _command_attr(module_name: str, command_name: str):
+    module = importlib.import_module(module_name, __package__)
+    return getattr(module, command_name)
+
+
+def _lazy_args_module_command(module_name: str, command_name: str) -> ArgsCommandHandler:
+    def _handler(args: list[str], *, stdout: TextIO) -> int:
+        return _command_attr(module_name, command_name)(args, stdout=stdout)
+
+    return _handler
+
+
+def _lazy_stdout_module_command(module_name: str, command_name: str) -> StdoutCommandHandler:
+    def _handler(*, stdout: TextIO) -> int:
+        return _command_attr(module_name, command_name)(stdout=stdout)
+
+    return _handler
+
+
+def _compile_command(args: list[str], *, stdout: TextIO) -> int:
+    return _command_attr(".commands.admin", "_compile_command")(args, stdout=stdout)
+
+
+def _github_command(args: list[str], *, stdout: TextIO) -> int:
+    return _command_attr(".commands.admin", "_github_command")(args, stdout=stdout)
+
+
+def _parse_pr_spec(spec_str: str) -> tuple[str, str, int]:
+    return _command_attr(".commands.admin", "_parse_pr_spec")(spec_str)
+
+
 def _workflow_command_handler(command_name: str):
     workflow_commands = importlib.import_module(".commands.workflow", __package__)
     return getattr(workflow_commands, command_name)
@@ -425,36 +394,36 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "spawn": _lazy_workflow_args_command("_spawn_command"),
         "dry-run": _lazy_workflow_args_command("_dry_run_command"),
         "chain": _lazy_workflow_args_command("_chain_command"),
-        "query": _query_command,
-        "research": _research_command,
-        "decompose": _decompose_command,
-        "data": _data_command,
-        "files": _files_command,
-        "handoff": _handoff_command,
-        "schema": _schema_command,
-        "registry": _registry_command,
-        "object-type": _object_type_command,
-        "object-field": _object_field_command,
-        "object": _object_command,
-        "catalog": _catalog_command,
-        "reload": _reload_command,
-        "reconcile": _reconcile_command,
-        "architecture": _architecture_command,
-        "bugs": _bugs_command,
-        "recall": _recall_command,
-        "discover": _discover_command,
-        "artifacts": _artifacts_command,
-        "health": _health_command,
-        "heartbeat": _heartbeat_command,
-        "receipts": _receipts_command,
+        "query": _lazy_args_module_command(".commands.query", "_query_command"),
+        "research": _lazy_args_module_command(".commands.query", "_research_command"),
+        "decompose": _lazy_args_module_command(".commands.query", "_decompose_command"),
+        "data": _lazy_args_module_command(".commands.data", "_data_command"),
+        "files": _lazy_args_module_command(".commands.files", "_files_command"),
+        "handoff": _lazy_args_module_command(".commands.handoff", "_handoff_command"),
+        "schema": _lazy_args_module_command(".commands.authority", "_schema_command"),
+        "registry": _lazy_args_module_command(".commands.authority", "_registry_command"),
+        "object-type": _lazy_args_module_command(".commands.authority", "_object_type_command"),
+        "object-field": _lazy_args_module_command(".commands.authority", "_object_field_command"),
+        "object": _lazy_args_module_command(".commands.authority", "_object_command"),
+        "catalog": _lazy_args_module_command(".commands.authority", "_catalog_command"),
+        "reload": _lazy_args_module_command(".commands.authority", "_reload_command"),
+        "reconcile": _lazy_args_module_command(".commands.authority", "_reconcile_command"),
+        "architecture": _lazy_args_module_command(".commands.query", "_architecture_command"),
+        "bugs": _lazy_args_module_command(".commands.query", "_bugs_command"),
+        "recall": _lazy_args_module_command(".commands.query", "_recall_command"),
+        "discover": _lazy_args_module_command(".commands.query", "_discover_command"),
+        "artifacts": _lazy_args_module_command(".commands.query", "_artifacts_command"),
+        "health": _lazy_args_module_command(".commands.operate", "_health_command"),
+        "heartbeat": _lazy_args_module_command(".commands.heartbeat", "_heartbeat_command"),
+        "receipts": _lazy_args_module_command(".commands.query", "_receipts_command"),
         "diagnose": _lazy_workflow_args_command("_diagnose_command"),
         "inspect-job": _lazy_workflow_args_command("_inspect_job_command"),
         "authority-index": _lazy_workflow_args_command("_authority_index_command"),
-        "leaderboard": _leaderboard_command,
+        "leaderboard": _lazy_args_module_command(".commands.query", "_leaderboard_command"),
         "manifest": _lazy_workflow_args_command("_manifest_command"),
-        "trust": _trust_command,
-        "fitness": _fitness_command,
-        "trends": _trends_command,
+        "trust": _lazy_args_module_command(".commands.query", "_trust_command"),
+        "fitness": _lazy_args_module_command(".commands.query", "_fitness_command"),
+        "trends": _lazy_args_module_command(".commands.query", "_trends_command"),
         "verify": _lazy_workflow_args_command("_verify_command"),
         "verify-platform": _lazy_workflow_args_command("_verify_platform_command"),
         "pipeline": _lazy_workflow_args_command("_pipeline_command"),
@@ -467,31 +436,37 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "runs": _lazy_workflow_args_command("_runs_command"),
         "retry": _lazy_workflow_args_command("_retry_command"),
         "cancel": _lazy_workflow_args_command("_cancel_command"),
-        "circuits": _circuits_command,
-        "params": _params_command,
-        "notifications": _notifications_command,
-        "config": _config_command,
-        "dashboard": _dashboard_command,
+        "circuits": _lazy_args_module_command(".commands.operate", "_circuits_command"),
+        "params": _lazy_args_module_command(".commands.operate", "_params_command"),
+        "notifications": _lazy_args_module_command(".commands.operate", "_notifications_command"),
+        "config": _lazy_args_module_command(".commands.operate", "_config_command"),
+        "dashboard": _lazy_args_module_command(".commands.operate", "_dashboard_command"),
         "queue": _lazy_workflow_args_command("_queue_command"),
-        "capabilities": _capabilities_command,
-        "scope": _scope_command,
-        "risk": _risk_command,
-        "events": _events_command,
-        "cache": _cache_command,
-        "health-map": _health_map_command,
-        "reviews": _reviews_command,
+        "capabilities": _lazy_args_module_command(".commands.operate", "_capabilities_command"),
+        "scope": _lazy_args_module_command(".commands.query", "_scope_command"),
+        "risk": _lazy_args_module_command(".commands.query", "_risk_command"),
+        "events": _lazy_args_module_command(".commands.operate", "_events_command"),
+        "cache": _lazy_args_module_command(".commands.operate", "_cache_command"),
+        "health-map": _lazy_args_module_command(".commands.operate", "_health_map_command"),
+        "reviews": _lazy_args_module_command(".commands.query", "_reviews_command"),
         "compile": _compile_command,
-        "metrics": _metrics_command,
+        "metrics": _lazy_args_module_command(".commands.operate", "_metrics_command"),
         "github": _github_command,
-        "api": _api_command,
-        "routes": lambda args, *, stdout: _api_command(["routes", *args], stdout=stdout),
-        "integrations": lambda args, *, stdout: _api_command(["integrations", *args], stdout=stdout),
-        "integration": _integrations_command,
-        "maintenance": _maintenance_command,
-        "supervisor": _supervisor_command,
-        "tools": _tools_command,
-        "dictionary": _data_dictionary_command,
-        "authority-memory": _authority_memory_command,
+        "api": _lazy_args_module_command(".commands.operate", "_api_command"),
+        "routes": lambda args, *, stdout: _command_attr(".commands.operate", "_api_command")(
+            ["routes", *args],
+            stdout=stdout,
+        ),
+        "integrations": lambda args, *, stdout: _command_attr(".commands.operate", "_api_command")(
+            ["integrations", *args],
+            stdout=stdout,
+        ),
+        "integration": _lazy_args_module_command(".commands.operate", "_integrations_command"),
+        "maintenance": _lazy_args_module_command(".commands.maintenance", "_maintenance_command"),
+        "supervisor": _lazy_args_module_command(".commands.operate", "_supervisor_command"),
+        "tools": _lazy_args_module_command(".commands.tools", "_tools_command"),
+        "dictionary": _lazy_args_module_command(".commands.authority", "_data_dictionary_command"),
+        "authority-memory": _lazy_args_module_command(".commands.authority", "_authority_memory_command"),
         "generate": _generate_command,
         "validate": _validate_command,
         "stream": _stream_command,
@@ -500,15 +475,15 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "records": _lazy_workflow_args_command("_records_command"),
         "repair": _lazy_workflow_args_command("_repair_command"),
         "work": _lazy_workflow_args_command("_work_command"),
-        "roadmap": _roadmap_command,
+        "roadmap": _lazy_args_module_command(".commands.roadmap", "_roadmap_command"),
         "commands": lambda args, *, stdout: _commands_index_command(args, stdout=stdout),
     }
     return _ARG_COMMANDS
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
     "status": _lazy_workflow_stdout_command("_status_command"),
-    "costs": _costs_command,
-    "slots": _slots_command,
+    "costs": _lazy_stdout_module_command(".commands.query", "_costs_command"),
+    "slots": _lazy_stdout_module_command(".commands.operate", "_slots_command"),
     "active": _lazy_workflow_stdout_command("_active_command"),
 }
 
@@ -574,13 +549,14 @@ def _api_help_text() -> str:
 
 
 def _mcp_help_text() -> str:
+    tools_quickstart_text = _command_attr(".commands.tools", "_tools_quickstart_text")
     return "\n".join(
         [
             "usage: workflow mcp [list|search|describe|call|help]",
             "",
             "Alias for workflow tools discovery.",
             "",
-            _tools_quickstart_text(),
+            tools_quickstart_text(),
         ]
     )
 
@@ -840,17 +816,25 @@ def _dispatch(
     if isinstance(command, InspectCommand):
         if not _has_callable(service, "inspect_run"):
             raise RuntimeError("cli frontdoor requires an inspect service")
+        from .render import render_inspection
+
         return render_inspection(service.inspect_run(run_id=command.run_id))
     if isinstance(command, ReplayCommand):
         if not _has_callable(service, "replay_run"):
             raise RuntimeError("cli frontdoor requires a replay service")
+        from .render import render_replay
+
         return render_replay(service.replay_run(run_id=command.run_id))
     if isinstance(command, GraphTopologyCommand):
         if not _has_callable(service, "graph_topology_run"):
             raise RuntimeError("cli frontdoor requires a graph topology service")
+        from .render import render_graph_topology
+
         return render_graph_topology(service.graph_topology_run(run_id=command.run_id))
     if not _has_callable(service, "graph_lineage_run"):
         raise RuntimeError("cli frontdoor requires a graph lineage service")
+    from .render import render_graph_lineage
+
     return render_graph_lineage(service.graph_lineage_run(run_id=command.run_id))
 
 

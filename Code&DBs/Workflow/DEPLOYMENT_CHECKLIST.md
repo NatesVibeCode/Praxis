@@ -15,7 +15,7 @@
 ### 1. Launcher Works
 
 ```bash
-cd "/Users/nate/Praxis/Code&DBs/Workflow"
+cd "/path/to/praxis/Code&DBs/Workflow"
 ./scripts/mcp-server.sh <<'EOF'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 EOF
@@ -24,7 +24,7 @@ EOF
 ### 2. Tool Catalog Loads
 
 ```bash
-cd "/Users/nate/Praxis/Code&DBs/Workflow"
+cd "/path/to/praxis/Code&DBs/Workflow"
 ./scripts/mcp-server.sh <<'EOF'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
@@ -34,9 +34,9 @@ EOF
 ### 3. Workflow Spec Validation Works
 
 ```bash
-cd "/Users/nate/Praxis/Code&DBs/Workflow"
+cd "/path/to/praxis/Code&DBs/Workflow"
 ./scripts/mcp-server.sh <<'EOF'
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"praxis_workflow_validate","input":{"spec_path":"/Users/nate/Praxis/config/specs/local_alpha/W0_workflow_preflight.json"}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"praxis_workflow_validate","input":{"spec_path":"/path/to/praxis/config/specs/local_alpha/W0_workflow_preflight.json"}}}
 EOF
 ```
 
@@ -46,7 +46,7 @@ EOF
 {
   "mcpServers": {
     "praxis-workflow": {
-      "command": "/Users/nate/Praxis/Code&DBs/Workflow/scripts/mcp-server.sh",
+      "command": "/path/to/praxis/Code&DBs/Workflow/scripts/mcp-server.sh",
       "disabled": false
     }
   }

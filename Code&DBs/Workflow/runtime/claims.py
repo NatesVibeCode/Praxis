@@ -30,6 +30,7 @@ from storage.postgres.claim_lifecycle_repository import (
 )
 
 from .domain import RouteIdentity, RunState, RuntimeBoundaryError, RuntimeLifecycleError
+from .workspace_paths import scratch_path
 from registry.persona_authority import (
     ForkOwnershipSelector,
     ForkWorktreeBindingAuthorityRecord,
@@ -79,7 +80,7 @@ class SandboxSessionRequest:
     reuse_reason_code: str | None = None
     base_ref: str = "refs/heads/main"
     base_digest: str = "sha256:unknown"
-    sandbox_root: str = "/tmp/workflow-sandbox"
+    sandbox_root: str = str(scratch_path("workflow_sandbox_root"))
     expires_at: datetime | None = None
     fork_ref: str | None = None
     worktree_ref: str | None = None

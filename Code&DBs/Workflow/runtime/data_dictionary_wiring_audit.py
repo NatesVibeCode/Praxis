@@ -60,11 +60,9 @@ class WiringFinding:
 def _resolve_default_root() -> Path:
     """Find the Code&DBs/Workflow root in either local or container contexts.
 
-    The audit runs both on the developer laptop (where the tree is at
-    `/Users/nate/Praxis/Code&DBs/Workflow`) and inside the API Docker
-    container (where the same tree is mounted at `/workspace/Code&DBs/
-    Workflow`). Walking up from `__file__` finds the right root
-    portably in both cases.
+    The audit runs both on developer hosts and inside API containers.
+    Walking up from `__file__` finds the right root portably without
+    preserving host- or container-specific path literals as authority.
     """
     here = Path(__file__).resolve()
     # __file__ is at {root}/runtime/data_dictionary_wiring_audit.py — walk

@@ -134,3 +134,44 @@ def test_submission_gate_reports_final_lookup_outage_instead_of_required_missing
     assert result.final_error_code == "workflow_submission.lookup_failed"
     assert "submission lookup failed before final enforcement" in result.result["stderr"]
     assert "submission repository offline" in result.result["stderr"]
+
+
+def test_submission_gate_can_precheck_submission_before_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sealed_submission = {
+        "submission_id": "submission.alpha",
+        "acceptance_status": "passed",
+        "acceptance_report": {},
+    }
+    monkeypatch.setattr(
+        submission_capture,
+        "attach_verification_artifact_refs_for_job",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        submission_capture,
+        "get_submission_for_job_attempt",
+        lambda *_args, **_kwargs: sealed_submission,
+    )
+
+    bundle = _bundle(result_kind="code_change")
+    bundle["completion_contract"]["verification_required"] = True
+    result = resolve_submission_for_job(
+        _Conn(),
+        run_id="run.alpha",
+        workflow_id="workflow.alpha",
+        job_label="job.alpha",
+        attempt_no=1,
+        execution_bundle=bundle,
+        result={"stdout": "finished work", "stderr": ""},
+        final_status="succeeded",
+        final_error_code="",
+        verification_artifact_refs=[],
+        enforce_verification_contract=False,
+        enforce_acceptance_contract=False,
+    )
+
+    assert result.submission_state == sealed_submission
+    assert result.final_status == "succeeded"
+    assert result.final_error_code == ""

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from runtime._workflow_database import (
     WorkflowDatabaseAuthority,
+    launch_agents_root,
     resolve_runtime_database_authority,
     resolve_runtime_database_url,
 )
@@ -63,4 +64,5 @@ __all__ = [
     "workflow_database_authority_for_repo",
     "workflow_database_env_for_repo",
     "workflow_database_url_for_repo",
+    "launch_agents_root",
 ]

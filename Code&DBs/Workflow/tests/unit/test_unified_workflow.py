@@ -946,6 +946,13 @@ def test_execute_job_always_uses_job_prompt(monkeypatch) -> None:
     monkeypatch.setattr(_exec_mod, "_write_job_receipt", lambda *_args, **_kwargs: "receipt.alpha")
     monkeypatch.setattr(_exec_mod, "_get_verify_bindings", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
+        _exec_mod,
+        "_run_post_execution_verification",
+        lambda *_args, **_kwargs: pytest.fail(
+            "submission-required jobs must fail missing submission before verification"
+        ),
+    )
+    monkeypatch.setattr(
         _ctx_mod,
         "_submission_capture_baseline_for_job",
         lambda *_args, **_kwargs: {"status": "captured"},
@@ -2544,7 +2551,9 @@ def test_persist_graph_submission_evidence_advances_route_identity_from_intake(m
     assert captured["admission_proof"].transition_seq == 2
 
 
-def test_graph_registry_from_authority_uses_logical_workspace_identity_for_bundle_hash() -> None:
+def test_graph_registry_from_authority_uses_logical_workspace_identity_for_bundle_hash(tmp_path) -> None:
+    repo_root = str(tmp_path / "workspace-root")
+
     class _RegistryConn:
         def execute(self, query: str, *args):
             if "FROM registry_workspace_authority" in query:
@@ -2552,7 +2561,7 @@ def test_graph_registry_from_authority_uses_logical_workspace_identity_for_bundl
                 return [
                     {
                         "workspace_ref": "praxis",
-                        "repo_root": "/Users/nate/Praxis",
+                        "repo_root": repo_root,
                         "workdir": "/workspace",
                     }
                 ]

@@ -145,14 +145,17 @@ def test_bootstrap_workflow_schema_skips_advisory_lock_when_schema_is_ready(
     assert conn.transaction_exits == 0
 
 
-def test_bootstrap_workflow_schema_applies_missing_zero_object_migrations(
+def test_bootstrap_workflow_schema_backfills_ledger_when_schema_is_ready(
     monkeypatch,
 ) -> None:
     conn = _FakeAsyncConn()
-    applied: list[str] = []
+    recorded: list[tuple[str, str]] = []
 
     async def _bootstrap_migration(_conn, filename: str) -> None:
-        applied.append(filename)
+        raise AssertionError(f"unexpected migration replay for {filename}")
+
+    async def _record_migration_apply(_conn, filename: str, *, applied_by: str) -> None:
+        recorded.append((filename, applied_by))
 
     monkeypatch.setattr(
         postgres_schema,
@@ -170,6 +173,7 @@ def test_bootstrap_workflow_schema_applies_missing_zero_object_migrations(
         ),
     )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
+    monkeypatch.setattr(postgres_schema, "_record_migration_apply", _record_migration_apply)
     monkeypatch.setattr(
         postgres_schema,
         "_acquire_schema_bootstrap_lock",
@@ -180,7 +184,12 @@ def test_bootstrap_workflow_schema_applies_missing_zero_object_migrations(
 
     assert conn.transaction_entries == 1
     assert conn.transaction_exits == 1
-    assert applied == ["198_remove_unbacked_anthropic_haiku_runtime_model.sql"]
+    assert recorded == [
+        (
+            "198_remove_unbacked_anthropic_haiku_runtime_model.sql",
+            "schema_ledger_backfill",
+        )
+    ]
 
 
 def test_bootstrap_workflow_schema_locks_and_applies_only_missing_migrations(

@@ -292,6 +292,8 @@ def _tools_quickstart_text() -> str:
         "  workflow tools help <list|search|describe|call>",
         "  workflow tools help <tool|alias>",
         "",
+        "Tip: each subcommand also accepts --help for command-specific usage.",
+        "",
     ]
     if direct_entrypoints:
         lines.append("Common direct entrypoints:")
@@ -420,6 +422,9 @@ def _attach_tool_list_interpretive_context(
 
 
 def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
+    if any(arg in {"-h", "--help"} for arg in args):
+        stdout.write(_tools_help_text("list") + "\n")
+        return 0
     surface = None
     tier = "all"
     risk = "all"
@@ -467,6 +472,9 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
+    if any(arg in {"-h", "--help"} for arg in args):
+        stdout.write(_tools_help_text("search") + "\n")
+        return 0
     as_json = False
     exact = False
     surface = None
@@ -574,6 +582,9 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
+    if any(arg in {"-h", "--help"} for arg in args):
+        stdout.write(_tools_help_text("describe") + "\n")
+        return 0
     if not args:
         stdout.write("usage: workflow tools describe <tool|alias|entrypoint> [--json]\n")
         return 2
@@ -648,6 +659,9 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _tools_call_command(args: list[str], *, stdout: TextIO) -> int:
+    if any(arg in {"-h", "--help"} for arg in args):
+        stdout.write(_tools_help_text("call") + "\n")
+        return 0
     if not args:
         stdout.write(
             "usage: workflow tools call <tool|alias|entrypoint> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]\n"

@@ -199,7 +199,7 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
   if (item.actionValue === 'auto/classify') {
     return {
       tier: 'primary',
-      badge: 'Core now',
+      badge: 'Core',
       detail: 'Backed by a real analysis lane instead of borrowing the support route.',
     };
   }
@@ -221,21 +221,21 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
     if (item.gateFamily === 'conditional' || item.gateFamily === 'after_failure') {
       return {
         tier: 'primary',
-        badge: 'Core now',
+        badge: 'Core',
         detail: 'This is one of the few gate types that changes execution today.',
       };
     }
     if (item.gateFamily === 'approval') {
       return {
         tier: 'primary',
-        badge: 'Core now',
+        badge: 'Core',
         detail: 'Pauses the downstream step behind a human approval checkpoint before execution continues.',
       };
     }
     if (item.gateFamily === 'validation') {
       return {
         tier: 'primary',
-        badge: 'Core now',
+        badge: 'Core',
         detail: 'Executes the configured verification command before the downstream step proceeds.',
       };
     }
@@ -268,10 +268,15 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
   }
 
   if (item.family === 'trigger') {
+    let detail = 'Primary trigger primitive with real compile and release authority.';
+    if (item.actionValue === 'trigger') detail = 'Starts when an operator clicks Run.';
+    else if (item.actionValue === 'trigger/webhook') detail = 'Starts when a POST arrives on a registered endpoint.';
+    else if (item.actionValue === 'trigger/schedule') detail = 'Starts on a cron or interval.';
+
     return {
       tier: 'primary',
-      badge: 'Core now',
-      detail: 'Primary trigger primitive with real compile and release authority.',
+      badge: 'Core',
+      detail,
     };
   }
 
@@ -390,7 +395,7 @@ export function formatSurfaceSummaryLine(
   const counts = kind === 'node' ? summary.nodeCounts : summary.edgeCounts;
   const parts: string[] = [];
 
-  if (counts.primary) parts.push(`${counts.primary} core now`);
+  if (counts.primary) parts.push(`${counts.primary} core`);
   if (counts.advanced) parts.push(`${counts.advanced} advanced/later`);
   if (counts.hidden) parts.push(`${counts.hidden} removed from main UI`);
 

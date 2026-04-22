@@ -66,16 +66,25 @@ describe('shell state helpers', () => {
     expect(buildShellUrl(state, false)).toBe('/app/run/workflow_xyz');
   });
 
-  test('builds /app/build when Moon has no moonRunId', () => {
+  test('builds /app/workflow when Moon has no moonRunId', () => {
     const state = {
       ...createDefaultShellState(),
       activeTabId: 'build' as const,
     };
 
-    expect(buildShellUrl(state, false)).toBe('/app/build');
+    expect(buildShellUrl(state, false)).toBe('/app/workflow');
   });
 
-  test('parses build query params into the build tab', () => {
+  test('parses workflow query params into the build tab', () => {
+    const payload = parseShellLocationState('?workflow=wf_123&intent=research', '/app/workflow');
+
+    expect(payload.shellState.activeTabId).toBe('build');
+    expect(payload.shellState.buildWorkflowId).toBe('wf_123');
+    expect(payload.shellState.buildIntent).toBe('research');
+    expect(payload.shellState.buildView).toBe('moon');
+  });
+
+  test('parses legacy build query params into the build tab', () => {
     const payload = parseShellLocationState('?page=build&workflow=wf_123&intent=research');
 
     expect(payload.shellState.activeTabId).toBe('build');
@@ -106,7 +115,7 @@ describe('shell state helpers', () => {
     expect(payload.shellState.buildView).toBe('moon');
   });
 
-  test('builds build urls with workflow and intent', () => {
+  test('builds workflow urls with workflow and intent', () => {
     const state = {
       ...createDefaultShellState(),
       activeTabId: 'build' as const,
@@ -115,7 +124,7 @@ describe('shell state helpers', () => {
       buildView: 'moon' as const,
     };
 
-    expect(buildShellUrl(state, false)).toBe('/app/build?workflow=wf_moon&intent=research');
+    expect(buildShellUrl(state, false)).toBe('/app/workflow?workflow=wf_moon&intent=research');
   });
 
   test('builds costs urls from the active static tab', () => {

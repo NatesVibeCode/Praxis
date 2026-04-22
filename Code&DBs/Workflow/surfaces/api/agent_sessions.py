@@ -11,13 +11,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 __all__ = ["app"]
@@ -26,6 +28,8 @@ __all__ = ["app"]
 PRAXIS_ROOT = Path(__file__).resolve().parents[4]
 ARTIFACTS_DIR = PRAXIS_ROOT / "artifacts"
 AGENTS_DIR = ARTIFACTS_DIR / "agents"
+_PUBLIC_AUTH_TOKEN_ENV = "PRAXIS_API_TOKEN"
+_HTTP_BEARER = HTTPBearer(auto_error=False)
 
 
 def _claude_cwd(env: dict[str, str] | None = None) -> Path:
@@ -34,6 +38,46 @@ def _claude_cwd(env: dict[str, str] | None = None) -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     return PRAXIS_ROOT
+
+
+def _public_api_token(env: dict[str, str] | None = None) -> str | None:
+    source = env if env is not None else os.environ
+    value = (source.get(_PUBLIC_AUTH_TOKEN_ENV) or "").strip()
+    return value or None
+
+
+async def _require_agent_session_access(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Security(_HTTP_BEARER),
+) -> str:
+    expected_token = _public_api_token()
+    if expected_token is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "PRAXIS_API_TOKEN is required before agent sessions can run",
+                "error_code": "agent_sessions_auth_not_configured",
+            },
+        )
+    if credentials is None or str(credentials.scheme).lower() != "bearer":
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "message": "Bearer token required for agent sessions",
+                "error_code": "agent_sessions_auth_required",
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not secrets.compare_digest(str(credentials.credentials), expected_token):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Bearer token rejected for agent sessions",
+                "error_code": "agent_sessions_auth_rejected",
+            },
+        )
+    request.state.authenticated_principal = "public_api_token"
+    return "public_api_token"
 
 _STREAM_IDLE_TIMEOUT = 5.0
 _TURN_TERMINATION_TIMEOUT = 2.0
@@ -74,8 +118,44 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_agent_id(agent_id: str) -> str:
+    try:
+        parsed = UUID(str(agent_id), version=4)
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "agent_id must be a canonical UUIDv4",
+                "error_code": "invalid_agent_id",
+            },
+        ) from None
+    normalized = str(parsed)
+    if str(agent_id) != normalized:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "agent_id must be a canonical UUIDv4",
+                "error_code": "invalid_agent_id",
+            },
+        )
+    return normalized
+
+
 def _agent_dir(agent_id: str) -> Path:
-    return AGENTS_DIR / agent_id
+    normalized = _normalize_agent_id(agent_id)
+    base = AGENTS_DIR.resolve()
+    path = (base / normalized).resolve(strict=False)
+    try:
+        path.relative_to(base)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "agent_id must resolve inside the agent session store",
+                "error_code": "invalid_agent_id",
+            },
+        ) from None
+    return path
 
 
 def _meta_path(agent_id: str) -> Path:
@@ -291,7 +371,10 @@ async def _terminate_process(agent_id: str) -> bool:
 
 
 @app.post("/agents")
-async def create_agent(body: CreateAgentRequest) -> dict[str, Any]:
+async def create_agent(
+    body: CreateAgentRequest,
+    _auth: str = Security(_require_agent_session_access),
+) -> dict[str, Any]:
     agent_id = str(uuid4())
     session_id = str(uuid4())
     title = body.title or f"agent-{agent_id[:8]}"
@@ -327,7 +410,12 @@ async def create_agent(body: CreateAgentRequest) -> dict[str, Any]:
 
 
 @app.post("/agents/{agent_id}/messages")
-async def send_message(agent_id: str, body: SendMessageRequest) -> dict[str, Any]:
+async def send_message(
+    agent_id: str,
+    body: SendMessageRequest,
+    _auth: str = Security(_require_agent_session_access),
+) -> dict[str, Any]:
+    agent_id = _normalize_agent_id(agent_id)
     meta = _read_meta(agent_id)
     if meta is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
@@ -345,7 +433,11 @@ async def send_message(agent_id: str, body: SendMessageRequest) -> dict[str, Any
 
 
 @app.get("/agents/{agent_id}/messages")
-async def get_messages(agent_id: str) -> dict[str, Any]:
+async def get_messages(
+    agent_id: str,
+    _auth: str = Security(_require_agent_session_access),
+) -> dict[str, Any]:
+    agent_id = _normalize_agent_id(agent_id)
     meta = _read_meta(agent_id)
     if meta is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
@@ -370,7 +462,12 @@ async def get_messages(agent_id: str) -> dict[str, Any]:
 
 
 @app.get("/agents/{agent_id}/stream")
-async def stream_events(agent_id: str, request: Request) -> StreamingResponse:
+async def stream_events(
+    agent_id: str,
+    request: Request,
+    _auth: str = Security(_require_agent_session_access),
+) -> StreamingResponse:
+    agent_id = _normalize_agent_id(agent_id)
     meta = _read_meta(agent_id)
     if meta is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
@@ -403,7 +500,11 @@ async def stream_events(agent_id: str, request: Request) -> StreamingResponse:
 
 
 @app.delete("/agents/{agent_id}")
-async def delete_agent(agent_id: str) -> dict[str, Any]:
+async def delete_agent(
+    agent_id: str,
+    _auth: str = Security(_require_agent_session_access),
+) -> dict[str, Any]:
+    agent_id = _normalize_agent_id(agent_id)
     meta = _read_meta(agent_id)
     if meta is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
@@ -419,7 +520,9 @@ async def delete_agent(agent_id: str) -> dict[str, Any]:
 
 
 @app.get("/agents")
-async def list_agents() -> list[dict[str, Any]]:
+async def list_agents(
+    _auth: str = Security(_require_agent_session_access),
+) -> list[dict[str, Any]]:
     if not AGENTS_DIR.exists():
         return []
 
@@ -427,15 +530,19 @@ async def list_agents() -> list[dict[str, Any]]:
     for entry in sorted(AGENTS_DIR.iterdir(), key=lambda path: path.name):
         if not entry.is_dir():
             continue
-        meta = _read_meta(entry.name)
+        try:
+            agent_id = _normalize_agent_id(entry.name)
+            meta = _read_meta(agent_id)
+        except HTTPException:
+            continue
         if meta is None:
             continue
         agents.append(
             {
-                "agent_id": meta.get("agent_id", entry.name),
+                "agent_id": meta.get("agent_id", agent_id),
                 "title": meta.get("title", ""),
                 "last_activity": meta.get("last_activity"),
-                "running": entry.name in _active_turns,
+                "running": agent_id in _active_turns,
             }
         )
     return agents

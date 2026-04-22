@@ -123,6 +123,26 @@ def test_build_paths_records_database_authority_source(monkeypatch, tmp_path: Pa
     assert paths.environment["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] == "repo_env:/tmp/repo/.env"
 
 
+def test_build_paths_honors_explicit_launchd_dir(monkeypatch, tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    launchd_dir = tmp_path / "LaunchAgents"
+    monkeypatch.setenv("PRAXIS_LAUNCHD_DIR", str(launchd_dir))
+    monkeypatch.setattr(
+        praxis_supervisor,
+        "discover_database_authority",
+        lambda _repo_root: praxis_supervisor.WorkflowDatabaseAuthority(
+            database_url="postgresql://repo.test/praxis",
+            source="repo_env:/tmp/repo/.env",
+        ),
+    )
+
+    paths = praxis_supervisor.build_paths(repo_root)
+
+    assert paths.launch_agents_dir == launchd_dir
+    assert paths.launch_agent_plist == launchd_dir / f"{praxis_supervisor.SUPERVISOR_LABEL}.plist"
+
+
 def test_apply_control_action_updates_desired_state_and_restart_tokens(monkeypatch, tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     monkeypatch.setattr(praxis_supervisor, "current_supervisor_pid", lambda _: None)

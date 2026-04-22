@@ -126,6 +126,7 @@ def test_tools_root_shows_quickstart() -> None:
     assert "search results are relevance-ranked" in rendered.lower()
     assert "unique prefix" in rendered.lower()
     assert "workflow mcp" in rendered
+    assert "each subcommand also accepts --help" in rendered
     assert "Common direct entrypoints:" in rendered
     assert "workflow diagnose" in rendered
 
@@ -150,6 +151,25 @@ def test_tools_help_can_describe_a_tool_alias() -> None:
     assert "praxis_query" in rendered
     assert "entrypoint: workflow query" in rendered
     assert "describe_command: workflow tools describe praxis_query" in rendered
+
+
+@pytest.mark.parametrize(
+    ("argv", "usage_fragment"),
+    [
+        (["tools", "list", "--help"], "usage: workflow tools list [--surface <surface>] [--tier <tier>] [--risk <risk>] [--json]"),
+        (["tools", "search", "--help"], "usage: workflow tools search <text> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>] [--json]"),
+        (["tools", "describe", "--help"], "usage: workflow tools describe <tool|alias|entrypoint> [--json]"),
+        (["tools", "call", "--help"], "usage: workflow tools call <tool|alias|entrypoint> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]"),
+    ],
+)
+def test_tools_subcommands_accept_help_flags(argv: list[str], usage_fragment: str) -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(argv, stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert usage_fragment in rendered
+    assert "Tip:" in rendered
 
 
 def test_commands_index_includes_daily_heartbeat() -> None:

@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "praxis-api",
-      "runtimeExecutable": "/opt/homebrew/bin/python3",
+      "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "uvicorn", "surfaces.api.rest:app", "--host", "127.0.0.1", "--port", "8420"],
       "port": 8420
     }

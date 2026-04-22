@@ -10,7 +10,7 @@ native_operator_repo_root="$(cd "$native_operator_common_dir/.." && pwd)"
 # shellcheck source=_workflow_env.sh
 source "$native_operator_repo_root/scripts/_workflow_env.sh"
 
-native_operator_workflow_root="$native_operator_repo_root/Code&DBs/Workflow"
+native_operator_workflow_root="$(workflow_repo_workflow_root)"
 native_operator_runtime_profiles_config="$native_operator_repo_root/config/runtime_profiles.json"
 native_operator_runtime_profile_ref="praxis"
 native_operator_instance_name="praxis"

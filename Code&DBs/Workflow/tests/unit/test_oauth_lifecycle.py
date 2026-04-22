@@ -148,6 +148,48 @@ class TestCredentialFallback:
         assert cred.api_key == "oauth_tok"
         assert cred.provider_hint == "bearer"
 
+    def test_resolve_credential_threads_auth_shape_to_oauth_refresh(self, monkeypatch):
+        from adapters.credentials import resolve_credential
+
+        captured: dict[str, object] = {}
+        auth_shape = {"token_url": "https://auth.example.com/token"}
+
+        def _resolve_or_refresh(conn, integration_id, *, auth_shape=None, buffer_seconds=300):
+            captured.update(
+                conn=conn,
+                integration_id=integration_id,
+                auth_shape=auth_shape,
+                buffer_seconds=buffer_seconds,
+            )
+            return OAuthToken(
+                integration_id=integration_id,
+                access_token="oauth-token",
+                refresh_token=None,
+                expires_at=None,
+                scopes=(),
+                token_type="Bearer",
+            )
+
+        import adapters.oauth_lifecycle as oauth_lifecycle_mod
+
+        conn = object()
+        monkeypatch.setattr(oauth_lifecycle_mod, "resolve_or_refresh", _resolve_or_refresh)
+
+        cred = resolve_credential(
+            "secret.test.dummy",
+            conn=conn,
+            integration_id="test-int",
+            auth_shape=auth_shape,
+        )
+
+        assert cred.api_key == "oauth-token"
+        assert captured == {
+            "conn": conn,
+            "integration_id": "test-int",
+            "auth_shape": auth_shape,
+            "buffer_seconds": 300,
+        }
+
     def test_expired_token_without_refresh_raises(self):
         """Expired token with no refresh_token raises."""
         past = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -165,7 +207,7 @@ class TestCredentialFallback:
         with pytest.raises(OAuthTokenError, match="no refresh_token"):
             resolve_or_refresh(conn, "test-int")
 
-    def test_refresh_missing_access_token_raises(self):
+    def test_refresh_missing_access_token_raises(self, monkeypatch):
         """Refresh response without access_token raises."""
         past = datetime.now(timezone.utc) - timedelta(hours=1)
         conn = _FakeConn({
@@ -179,8 +221,12 @@ class TestCredentialFallback:
                 }
             ]
         })
-        from unittest.mock import patch, MagicMock
-        import io
+        from unittest.mock import patch
+
+        monkeypatch.setattr(
+            "adapters.oauth_lifecycle.resolve_secret",
+            lambda name: "client-secret" if name.endswith(("_CLIENT_ID", "_CLIENT_SECRET")) else None,
+        )
 
         # Mock _refresh_token to return response without access_token
         with patch("adapters.oauth_lifecycle._refresh_token") as mock_refresh:
@@ -210,6 +256,78 @@ class TestCredentialFallback:
                 conn, "test-int",
                 auth_shape={"token_url": "http://insecure.com/token"},
             )
+
+    def test_refresh_resolves_client_credentials_through_keychain(self, monkeypatch):
+        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        conn = _FakeConn({
+            "token_kind = 'access'": [
+                {
+                    "access_token": "expired",
+                    "refresh_token": "ref_tok",
+                    "expires_at": past,
+                    "scopes": [],
+                    "token_type": "Bearer",
+                }
+            ]
+        })
+        captured: dict[str, str] = {}
+
+        def _resolve_secret(name):
+            values = {
+                "TEST_INT_CLIENT_ID": "keychain-client-id",
+                "TEST_INT_CLIENT_SECRET": "keychain-client-secret",
+            }
+            return values.get(name)
+
+        def _refresh_token(token_url, client_id, client_secret, refresh_token):
+            captured.update(
+                token_url=token_url,
+                client_id=client_id,
+                client_secret=client_secret,
+                refresh_token=refresh_token,
+            )
+            return {"access_token": "new_access", "token_type": "Bearer"}
+
+        monkeypatch.setattr("adapters.oauth_lifecycle.resolve_secret", _resolve_secret)
+        monkeypatch.setattr("adapters.oauth_lifecycle._refresh_token", _refresh_token)
+
+        token = resolve_or_refresh(
+            conn,
+            "test-int",
+            auth_shape={"token_url": "https://auth.example.com/token"},
+        )
+
+        assert token.access_token == "new_access"
+        assert captured == {
+            "token_url": "https://auth.example.com/token",
+            "client_id": "keychain-client-id",
+            "client_secret": "keychain-client-secret",
+            "refresh_token": "ref_tok",
+        }
+
+    def test_refresh_fails_closed_when_client_credentials_missing(self, monkeypatch):
+        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        conn = _FakeConn({
+            "token_kind = 'access'": [
+                {
+                    "access_token": "expired",
+                    "refresh_token": "ref_tok",
+                    "expires_at": past,
+                    "scopes": [],
+                    "token_type": "Bearer",
+                }
+            ]
+        })
+        monkeypatch.setattr("adapters.oauth_lifecycle.resolve_secret", lambda name: None)
+
+        with pytest.raises(OAuthTokenError) as exc_info:
+            resolve_or_refresh(
+                conn,
+                "test-int",
+                auth_shape={"token_url": "https://auth.example.com/token"},
+            )
+
+        assert exc_info.value.reason_code == "oauth.client_credential_missing"
 
     def test_resolve_credential_without_conn_uses_env(self, monkeypatch):
         """Without conn, falls back to env var lookup."""

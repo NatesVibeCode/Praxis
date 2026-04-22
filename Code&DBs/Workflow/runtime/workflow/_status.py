@@ -40,6 +40,7 @@ __all__ = [
     "summarize_run_health",
     "summarize_run_recovery",
     "inspect_job",
+    "cancel_job",
     "cancel_run",
     "retry_job",
     "wait_for_run",
@@ -1104,6 +1105,35 @@ def cancel_run(
         "run_id": run_id,
         "cancelled_jobs": len(cancelled),
         "labels": [r["label"] for r in cancelled],
+        "run_status": run_status,
+    }
+
+
+def cancel_job(conn: SyncPostgresConnection, job_id: str | int) -> dict:
+    """Cancel a single non-terminal job and update its parent run status."""
+    rows = conn.execute(
+        """UPDATE workflow_jobs
+           SET status = 'cancelled', finished_at = now()
+           WHERE id = $1::bigint
+             AND status IN ('pending', 'ready', 'claimed', 'running')
+           RETURNING id, run_id, label""",
+        job_id,
+    )
+    cancelled = [dict(r) for r in (rows or [])]
+    if not cancelled:
+        return {
+            "job_id": str(job_id),
+            "status": "not_cancelled",
+            "message": "Job not found or already in a terminal state",
+        }
+
+    run_id = str(cancelled[0]["run_id"])
+    run_status = _recompute_workflow_run_state(conn, run_id)
+    return {
+        "job_id": str(cancelled[0]["id"]),
+        "run_id": run_id,
+        "label": cancelled[0].get("label"),
+        "status": "cancelled",
         "run_status": run_status,
     }
 

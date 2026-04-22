@@ -17,9 +17,12 @@ from runtime.workspace_paths import (
     authority_workspace_roots,
     code_tree_dirname,
     code_tree_root,
+    container_auth_seed_dir,
+    container_home,
     container_workspace_root,
     databases_root,
     log_path,
+    scratch_path,
     strip_workflow_prefix,
     to_repo_ref,
     tree_aliases,
@@ -33,6 +36,7 @@ def test_layout_file_exists_and_parses() -> None:
     assert "code_tree" in layout
     assert "subdirs" in layout
     assert "log_paths" in layout
+    assert "scratch_paths" in layout
     assert "execution_mounts" in layout
 
 
@@ -60,6 +64,18 @@ def test_log_path_resolves() -> None:
     pg = log_path("postgres")
     assert pg.name == "postgres.log"
     assert "postgres-dev" in str(pg)
+    supervisor = log_path("supervisor_stdout")
+    assert supervisor.name == "praxis-engine.log"
+    assert "Workflow/artifacts/logs" in str(supervisor)
+
+
+def test_scratch_path_resolves() -> None:
+    atlas = scratch_path("atlas_heuristic_map")
+    assert atlas.name == "atlas_heuristic_map.json"
+    assert "Workflow/artifacts/workflow" in str(atlas)
+    sandbox = scratch_path("workflow_sandbox_root")
+    assert sandbox.name == "workflow-sandbox"
+    assert "Workflow/artifacts" in str(sandbox)
 
 
 def test_container_workspace_root_comes_from_layout_authority() -> None:
@@ -70,9 +86,25 @@ def test_container_workspace_root_allows_explicit_authority_override() -> None:
     assert container_workspace_root(env={"PRAXIS_CONTAINER_WORKSPACE_ROOT": "/sandbox"}) == Path("/sandbox")
 
 
+def test_container_home_comes_from_layout_authority() -> None:
+    assert container_home() == Path(_layout()["execution_mounts"]["container_home"])
+
+
+def test_container_auth_seed_dir_comes_from_layout_authority() -> None:
+    assert container_auth_seed_dir() == Path(_layout()["execution_mounts"]["container_auth_seed_dir"])
+
+
 def test_authority_workspace_roots_includes_explicit_host_override() -> None:
     roots = authority_workspace_roots(env={"PRAXIS_HOST_WORKSPACE_ROOT": "/host/workspace"})
     assert roots[0] == Path("/host/workspace")
+
+
+def test_authority_workspace_roots_includes_launcher_resolved_repo_root() -> None:
+    roots = authority_workspace_roots(
+        env={"PRAXIS_LAUNCHER_RESOLVED_REPO_ROOT": "/authority/resolved/praxis"}
+    )
+
+    assert roots[0] == Path("/authority/resolved/praxis")
 
 
 def test_authority_workspace_roots_propagates_instance_authority_errors(monkeypatch) -> None:

@@ -147,7 +147,7 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
     case 'CLEAR_CATALOG':
       return { ...state, pendingCatalogId: null };
     case 'EMPTY_OPEN_SELECTION':
-      return { ...state, emptyMode: 'selection' as const };
+      return { ...state, emptyMode: 'compose' as const };
     case 'EMPTY_PICK_TRIGGER':
       return { ...state, emptyMode: 'trigger-picker' as const, selectedTrigger: null };
     case 'EMPTY_PICK_COMPOSE':

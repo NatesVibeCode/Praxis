@@ -13,7 +13,7 @@ Owns:
   and `--exact` when you already know the alias, name, or entrypoint; single-hit
   searches and top exact/prefix matches also print the direct describe and
   entrypoint commands, while empty searches now print broadening hints instead
-  of ending on a bare zero; `workflow tools help <list|search|describe|call>`
+  of ending on a bare zero; the subcommands also accept `--help`; `workflow tools help <list|search|describe|call>`
   prints targeted subcommand usage, and `workflow tools help <tool|alias>`
   prints the matching tool description
 - HTTP route discovery via `praxis workflow api routes` and flat alias `praxis workflow routes`, including `--search`,

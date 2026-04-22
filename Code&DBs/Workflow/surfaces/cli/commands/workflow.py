@@ -685,7 +685,7 @@ def _chain_command(args: list[str], *, stdout: TextIO) -> int:
             "       workflow chain <spec1.json> <spec2.json> ...\n"
             "\n"
             "Coordination-program mode: single JSON with a top-level 'waves' key\n"
-            "(e.g. config/cascade/chain/mobile_oversight_program.json) is submitted\n"
+            "(e.g. config/cascade/chain/example_program.json) is submitted\n"
             "via the durable multi-wave chain command bus.\n"
             "\n"
             "Legacy sequential mode: two or more spec paths submit a job chain where\n"
@@ -2494,37 +2494,19 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
         job_id = sub_args[0]
 
         try:
-            from runtime.workflow.unified import _recompute_workflow_run_state
+            from runtime.workflow.unified import cancel_job
 
             conn = _workflow_runtime_conn()
-            rows = conn.execute(
-                """UPDATE workflow_jobs
-                   SET status = 'cancelled', finished_at = NOW()
-                   WHERE id = $1::bigint
-                     AND status IN ('pending', 'ready', 'claimed', 'running')
-                   RETURNING run_id""",
-                job_id,
-            )
+            result = cancel_job(conn, job_id)
         except Exception as exc:
             stdout.write(f"error: failed to cancel job: {exc}\n")
             return 1
 
-        if rows:
-            _recompute_workflow_run_state(conn, str(rows[0]["run_id"]))
-            stdout.write(_json.dumps({"job_id": job_id, "status": "cancelled"}, indent=2) + "\n")
+        if result.get("status") == "cancelled":
+            stdout.write(_json.dumps(result, indent=2) + "\n")
             return 0
 
-        stdout.write(
-            _json.dumps(
-                {
-                    "job_id": job_id,
-                    "status": "not_cancelled",
-                    "message": "Job not found or already in a terminal state",
-                },
-                indent=2,
-            )
-            + "\n"
-        )
+        stdout.write(_json.dumps(result, indent=2) + "\n")
         return 1
 
     stdout.write(f"unknown queue subcommand: {subcommand}\n")

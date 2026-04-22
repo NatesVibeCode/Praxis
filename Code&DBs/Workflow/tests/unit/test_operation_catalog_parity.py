@@ -736,6 +736,108 @@ _SEEDED_OPERATION_ROWS = [
         "binding_revision": "binding.operation_catalog_registry.semantic_assertions.20260416",
         "decision_ref": "decision.operation_catalog_registry.semantic_assertions.20260416",
     },
+    {
+        "operation_ref": "service-lifecycle-register-target",
+        "operation_name": "service.lifecycle.register_target",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/service-lifecycle/targets",
+        "input_model_ref": "runtime.service_lifecycle.RegisterRuntimeTargetCommand",
+        "handler_ref": "runtime.service_lifecycle.handle_register_runtime_target",
+        "authority_ref": "authority.service_lifecycle",
+        "projection_ref": "projection.service_lifecycle.instances",
+        "posture": "operate",
+        "idempotency_policy": "idempotent",
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.service_lifecycle.20260422",
+        "decision_ref": "decision.service_lifecycle.runtime_target_neutrality.20260422",
+    },
+    {
+        "operation_ref": "service-lifecycle-register-service",
+        "operation_name": "service.lifecycle.register_service",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/service-lifecycle/services",
+        "input_model_ref": "runtime.service_lifecycle.RegisterServiceDefinitionCommand",
+        "handler_ref": "runtime.service_lifecycle.handle_register_service_definition",
+        "authority_ref": "authority.service_lifecycle",
+        "projection_ref": "projection.service_lifecycle.instances",
+        "posture": "operate",
+        "idempotency_policy": "idempotent",
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.service_lifecycle.20260422",
+        "decision_ref": "decision.service_lifecycle.runtime_target_neutrality.20260422",
+    },
+    {
+        "operation_ref": "service-lifecycle-declare-desired-state",
+        "operation_name": "service.lifecycle.declare_desired_state",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/service-lifecycle/desired-state",
+        "input_model_ref": "runtime.service_lifecycle.DeclareServiceDesiredStateCommand",
+        "handler_ref": "runtime.service_lifecycle.handle_declare_service_desired_state",
+        "authority_ref": "authority.service_lifecycle",
+        "projection_ref": "projection.service_lifecycle.instances",
+        "posture": "operate",
+        "idempotency_policy": "idempotent",
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.service_lifecycle.20260422",
+        "decision_ref": "decision.service_lifecycle.runtime_target_neutrality.20260422",
+    },
+    {
+        "operation_ref": "service-lifecycle-record-event",
+        "operation_name": "service.lifecycle.record_event",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/service-lifecycle/events",
+        "input_model_ref": "runtime.service_lifecycle.RecordServiceLifecycleEventCommand",
+        "handler_ref": "runtime.service_lifecycle.handle_record_service_lifecycle_event",
+        "authority_ref": "authority.service_lifecycle",
+        "projection_ref": "projection.service_lifecycle.instances",
+        "posture": "operate",
+        "idempotency_policy": "non_idempotent",
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.service_lifecycle.20260422",
+        "decision_ref": "decision.service_lifecycle.runtime_target_neutrality.20260422",
+    },
+    {
+        "operation_ref": "service-lifecycle-get-projection",
+        "operation_name": "service.lifecycle.get_projection",
+        "source_kind": "operation_query",
+        "operation_kind": "query",
+        "http_method": "GET",
+        "http_path": "/api/service-lifecycle/projection/{service_ref}/{runtime_target_ref}",
+        "input_model_ref": "runtime.service_lifecycle.QueryServiceProjectionCommand",
+        "handler_ref": "runtime.service_lifecycle.handle_query_service_projection",
+        "authority_ref": "authority.service_lifecycle",
+        "projection_ref": "projection.service_lifecycle.instances",
+        "posture": "observe",
+        "idempotency_policy": "read_only",
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.service_lifecycle.20260422",
+        "decision_ref": "decision.service_lifecycle.runtime_target_neutrality.20260422",
+    },
+    {
+        "operation_ref": "service-lifecycle-list-targets",
+        "operation_name": "service.lifecycle.list_targets",
+        "source_kind": "operation_query",
+        "operation_kind": "query",
+        "http_method": "GET",
+        "http_path": "/api/service-lifecycle/targets",
+        "input_model_ref": "runtime.service_lifecycle.ListRuntimeTargetsCommand",
+        "handler_ref": "runtime.service_lifecycle.handle_list_runtime_targets",
+        "authority_ref": "authority.service_lifecycle",
+        "projection_ref": "projection.service_lifecycle.instances",
+        "posture": "observe",
+        "idempotency_policy": "read_only",
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.service_lifecycle.20260422",
+        "decision_ref": "decision.service_lifecycle.runtime_target_neutrality.20260422",
+    },
 ]
 
 _SEEDED_SOURCE_POLICIES = [
@@ -760,13 +862,36 @@ _SEEDED_SOURCE_POLICIES = [
 ]
 
 
+def _cqrs_operation_row(row: dict[str, object]) -> dict[str, object]:
+    operation_kind = str(row["operation_kind"])
+    operation_name = str(row["operation_name"])
+    projection_ref = row.get("projection_ref")
+    return {
+        **row,
+        "authority_domain_ref": row.get("authority_domain_ref") or row["authority_ref"],
+        "storage_target_ref": row.get("storage_target_ref") or "praxis.primary_postgres",
+        "input_schema_ref": row.get("input_schema_ref") or row["input_model_ref"],
+        "output_schema_ref": row.get("output_schema_ref") or "operation.output.default",
+        "idempotency_key_fields": row.get("idempotency_key_fields") or [],
+        "required_capabilities": row.get("required_capabilities") or {},
+        "allowed_callers": row.get("allowed_callers")
+        or ["cli", "mcp", "http", "workflow", "heartbeat"],
+        "timeout_ms": row.get("timeout_ms") or 15000,
+        "receipt_required": row.get("receipt_required", True),
+        "event_required": row.get("event_required", operation_kind == "command"),
+        "event_type": row.get("event_type") or operation_name.replace(".", "_"),
+        "projection_freshness_policy_ref": row.get("projection_freshness_policy_ref")
+        or ("projection_freshness.default" if projection_ref else None),
+    }
+
+
 def test_seeded_operation_catalog_rows_resolve_to_live_bindings(monkeypatch) -> None:
     monkeypatch.setattr(
         operation_catalog,
         "_list_operation_catalog_records",
-        lambda conn, source_kind=None, include_disabled=False, limit=100: list(
-            _SEEDED_OPERATION_ROWS
-        ),
+        lambda conn, source_kind=None, include_disabled=False, limit=100: [
+            _cqrs_operation_row(row) for row in _SEEDED_OPERATION_ROWS
+        ],
     )
     monkeypatch.setattr(
         operation_catalog,
@@ -826,6 +951,12 @@ def test_seeded_operation_catalog_rows_resolve_to_live_bindings(monkeypatch) -> 
         "semantic_assertions.record",
         "semantic_assertions.retract",
         "semantic_assertions.list",
+        "service.lifecycle.register_target",
+        "service.lifecycle.register_service",
+        "service.lifecycle.declare_desired_state",
+        "service.lifecycle.record_event",
+        "service.lifecycle.get_projection",
+        "service.lifecycle.list_targets",
     }
 
     signatures: set[tuple[str, str]] = set()

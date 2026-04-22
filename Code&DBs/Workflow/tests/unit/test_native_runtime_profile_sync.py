@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 
 from registry.native_runtime_profile_sync import (
@@ -9,10 +11,13 @@ from registry.native_runtime_profile_sync import (
     _latest_budget_window_sync,
     _live_candidates_sync,
     _native_transport_ready_refs,
+    _native_runtime_configs_from_rows,
     _upsert_profile_authority_rows_sync,
 )
 from registry.runtime_profile_admission import _effective_provider_policy_name
 from registry.runtime_profile_admission import _candidate_is_admitted_for_runtime_profile
+
+WORKSPACE_ROOT = str((Path(tempfile.gettempdir()) / "praxis-workspace").resolve())
 
 
 class _FakeConn:
@@ -178,6 +183,40 @@ def test_default_sync_conn_uses_runtime_database_authority(monkeypatch) -> None:
         "WORKFLOW_DATABASE_URL": "postgresql://127.0.0.1:5432/praxis",
     }
     assert conn == captured["env"]
+
+
+def test_native_runtime_config_resolves_workspace_base_env_token(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "PRAXIS_WORKSPACE_BASE_PATH",
+        WORKSPACE_ROOT,
+    )
+
+    config = _native_runtime_configs_from_rows(
+        [
+            {
+                "runtime_profile_ref": "praxis",
+                "workspace_ref": "praxis",
+                "instance_name": "praxis",
+                "provider_name": "openai",
+                "provider_names": '["openai"]',
+                "allowed_models": '["gpt-5.4"]',
+                "receipts_dir": "artifacts/runtime_receipts",
+                "topology_dir": "artifacts/runtime_topology",
+                "repo_root": ".",
+                "workdir": ".",
+                "base_path_ref": "workspace_base.praxis.default",
+                "repo_root_path": ".",
+                "workdir_path": ".",
+                "base_path": "${PRAXIS_WORKSPACE_BASE_PATH}",
+                "model_profile_id": "model_profile.praxis.default",
+                "provider_policy_id": "provider_policy.praxis.default",
+                "sandbox_profile_ref": "sandbox_profile.praxis.default",
+            }
+        ]
+    )[0]
+
+    assert config.repo_root == WORKSPACE_ROOT
+    assert config.workdir == WORKSPACE_ROOT
 
 
 def test_native_transport_ready_refs_uses_canonical_secret_resolver(monkeypatch) -> None:

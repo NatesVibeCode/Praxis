@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import tempfile
+from pathlib import Path
 
 from surfaces.mcp.tools import workflow as workflow_tools
 from surfaces.workflow_bridge import WorkflowAcknowledgement, WorkflowClaimableWork
@@ -178,10 +180,11 @@ def test_run_status_payload_prefers_policy_reason_code_for_route_disabled_failur
 
 
 def test_build_platform_context_warns_that_sandbox_commands_use_live_workspace() -> None:
-    context = _exec_mod._build_platform_context("/Users/praxis/Praxis")
+    workspace_root = str(Path(tempfile.gettempdir()) / "praxis-workspace")
+    context = _exec_mod._build_platform_context(workspace_root)
 
-    assert "Host repo root (persistence/output authority): /Users/praxis/Praxis" in context
-    assert "Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as /workspace." in context
+    assert f"Host repo root (persistence/output authority): {workspace_root}" in context
+    assert "Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as" in context
     assert "do not assume the host repo path exists inside the sandbox" in context
 
 

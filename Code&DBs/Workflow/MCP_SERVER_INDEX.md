@@ -36,6 +36,7 @@ The same catalog-backed inventory is visible from the terminal:
 - `workflow tools search <text> [--exact]`
 - `workflow tools describe <tool>`
 - `workflow tools call <tool> --input-json '{...}'`
+- each subcommand also accepts `--help`
 
 Curated read-mostly aliases remain flat:
 

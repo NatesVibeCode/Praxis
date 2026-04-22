@@ -5,7 +5,30 @@ import json
 from types import SimpleNamespace
 import urllib.error
 
+import pytest
+
 from runtime.integrations.webhook import execute_webhook
+
+
+@pytest.fixture(autouse=True)
+def _stable_webhook_dns(monkeypatch) -> None:
+    import runtime.integrations.webhook as webhook_mod
+
+    def _fake_getaddrinfo(host, port, type=0):
+        del type
+        if host in {"api.example.com", "override.example.net"}:
+            return [
+                (
+                    webhook_mod.socket.AF_INET,
+                    webhook_mod.socket.SOCK_STREAM,
+                    0,
+                    "",
+                    ("93.184.216.34", port or 443),
+                )
+            ]
+        return []
+
+    monkeypatch.setattr(webhook_mod.socket, "getaddrinfo", _fake_getaddrinfo)
 
 
 class _FakeResponse:
@@ -330,6 +353,64 @@ def test_execute_webhook_rejects_relative_endpoint_without_base_url() -> None:
     assert result["status"] == "failed"
     assert result["error"] == "invalid_url"
     assert result["summary"] == "Invalid URL: /v1/items"
+
+
+def test_execute_webhook_rejects_private_ip_targets() -> None:
+    result = execute_webhook(
+        {
+            "endpoint": "http://169.254.169.254/latest/meta-data/",
+            "method": "GET",
+        },
+        pg=None,
+    )
+
+    assert result["status"] == "failed"
+    assert result["error"] == "ssrf_blocked"
+    assert result["summary"] == "Blocked internal webhook target: 169.254.169.254"
+
+
+def test_execute_webhook_rejects_metadata_host_targets() -> None:
+    result = execute_webhook(
+        {
+            "endpoint": "http://metadata.google.internal/computeMetadata/v1/",
+            "method": "GET",
+        },
+        pg=None,
+    )
+
+    assert result["status"] == "failed"
+    assert result["error"] == "ssrf_blocked"
+    assert result["summary"] == "Blocked internal webhook target: metadata.google.internal"
+
+
+def test_execute_webhook_rejects_dns_targets_that_resolve_private(monkeypatch) -> None:
+    import runtime.integrations.webhook as webhook_mod
+
+    monkeypatch.setattr(
+        webhook_mod.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                webhook_mod.socket.AF_INET,
+                webhook_mod.socket.SOCK_STREAM,
+                0,
+                "",
+                ("10.0.0.7", 443),
+            )
+        ],
+    )
+
+    result = execute_webhook(
+        {
+            "endpoint": "https://internal.example.com/hook",
+            "method": "POST",
+        },
+        pg=None,
+    )
+
+    assert result["status"] == "failed"
+    assert result["error"] == "ssrf_blocked"
+    assert result["summary"] == "Blocked internal webhook target: internal.example.com"
 
 
 def test_execute_webhook_surfaces_http_error_with_reproducible_details(monkeypatch) -> None:

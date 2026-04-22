@@ -16,6 +16,9 @@ from typing import Mapping
 _LAYOUT_FILENAME = "workspace_layout.json"
 _HOST_WORKSPACE_ROOT_ENV = "PRAXIS_HOST_WORKSPACE_ROOT"
 _CONTAINER_WORKSPACE_ROOT_ENV = "PRAXIS_CONTAINER_WORKSPACE_ROOT"
+_CONTAINER_HOME_ENV = "PRAXIS_CONTAINER_HOME"
+_CONTAINER_AUTH_SEED_DIR_ENV = "PRAXIS_CONTAINER_AUTH_SEED_DIR"
+_LAUNCHER_RESOLVED_REPO_ROOT_ENV = "PRAXIS_LAUNCHER_RESOLVED_REPO_ROOT"
 
 
 def _repo_root() -> Path:
@@ -86,6 +89,13 @@ def log_path(name: str, *, repo_root: Path | None = None) -> Path:
     return code_tree_root(repo_root) / relative
 
 
+def scratch_path(name: str, *, repo_root: Path | None = None) -> Path:
+    scratch_paths = _layout()["scratch_paths"]
+    assert isinstance(scratch_paths, Mapping)
+    relative = str(scratch_paths[name])
+    return code_tree_root(repo_root) / relative
+
+
 def container_workspace_root(*, env: Mapping[str, str] | None = None) -> Path:
     """Canonical workspace root inside sandbox/container execution."""
     source = env if env is not None else os.environ
@@ -95,6 +105,28 @@ def container_workspace_root(*, env: Mapping[str, str] | None = None) -> Path:
     execution_mounts = _layout()["execution_mounts"]
     assert isinstance(execution_mounts, Mapping)
     return Path(str(execution_mounts["container_workspace_root"])).expanduser()
+
+
+def container_home(*, env: Mapping[str, str] | None = None) -> Path:
+    """Canonical home directory inside sandbox/container execution."""
+    source = env if env is not None else os.environ
+    configured = str(source.get(_CONTAINER_HOME_ENV) or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    execution_mounts = _layout()["execution_mounts"]
+    assert isinstance(execution_mounts, Mapping)
+    return Path(str(execution_mounts["container_home"])).expanduser()
+
+
+def container_auth_seed_dir(*, env: Mapping[str, str] | None = None) -> Path:
+    """Root for root-readable auth seed files inside sandbox containers."""
+    source = env if env is not None else os.environ
+    configured = str(source.get(_CONTAINER_AUTH_SEED_DIR_ENV) or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    execution_mounts = _layout()["execution_mounts"]
+    assert isinstance(execution_mounts, Mapping)
+    return Path(str(execution_mounts["container_auth_seed_dir"])).expanduser()
 
 
 def authority_workspace_roots(*, env: Mapping[str, str] | None = None) -> tuple[Path, ...]:
@@ -117,6 +149,7 @@ def authority_workspace_roots(*, env: Mapping[str, str] | None = None) -> tuple[
             roots.append(candidate)
 
     _append(source.get(_HOST_WORKSPACE_ROOT_ENV))
+    _append(source.get(_LAUNCHER_RESOLVED_REPO_ROOT_ENV))
     try:
         from runtime.instance import native_instance_contract
     except ImportError:

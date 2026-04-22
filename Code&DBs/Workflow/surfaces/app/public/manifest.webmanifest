@@ -1,0 +1,9 @@
+{
+  "name": "Praxis",
+  "short_name": "Praxis",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#090909",
+  "theme_color": "#090909",
+  "icons": []
+}

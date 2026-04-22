@@ -50,6 +50,8 @@ from runtime.command_handlers import (
     request_workflow_submit_command,
     workflow_cancel_proof,
 )
+from runtime.capability.plan_envelope import build_plan_envelope
+from runtime.capability.resolver import GrantResolution, resolve_capability_grant
 from storage.postgres import PostgresCommandRepository
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
 
@@ -452,7 +454,7 @@ class ControlExecutionMode(str, Enum):
 _COMMAND_TYPES = frozenset(item.value for item in ControlCommandType)
 _COMMAND_STATUSES = frozenset(item.value for item in ControlCommandStatus)
 _RISK_LEVELS = frozenset(item.value for item in ControlRiskLevel)
-_SAFE_AUTO_EXECUTE_TYPES = frozenset(
+_LOW_RISK_LOCAL_COMMAND_TYPES = frozenset(
     {
         ControlCommandType.WORKFLOW_SUBMIT.value,
         ControlCommandType.WORKFLOW_SPAWN.value,
@@ -460,6 +462,7 @@ _SAFE_AUTO_EXECUTE_TYPES = frozenset(
         ControlCommandType.SYNC_REPAIR.value,
     }
 )
+_LOCAL_AUTO_EXECUTE_REQUESTER_KINDS = frozenset({"operator", "system", "cli", "workflow", "chat"})
 _UNSET = object()
 _DEFAULT_RISK_LEVELS = {
     ControlCommandType.WORKFLOW_SUBMIT.value: ControlRiskLevel.LOW.value,
@@ -707,6 +710,7 @@ class ControlIntent:
     idempotency_key: str
     payload: Mapping[str, Any] = field(default_factory=dict)
     risk_level: str | ControlRiskLevel | None = None
+    plan_envelope_hash: str | None = None
 
     def __post_init__(self) -> None:
         command_type = _normalize_enum_value(
@@ -724,6 +728,12 @@ class ControlIntent:
             allowed_values=_RISK_LEVELS,
             default_value=_DEFAULT_RISK_LEVELS[command_type],
         )
+        plan_envelope_hash = None
+        raw_plan_hash = self.plan_envelope_hash or payload.get("plan_envelope_hash")
+        if raw_plan_hash is not None:
+            plan_envelope_hash = _normalize_text(raw_plan_hash, field_name="plan_envelope_hash")
+            payload = dict(payload)
+            payload["plan_envelope_hash"] = plan_envelope_hash
 
         object.__setattr__(self, "command_type", command_type)
         object.__setattr__(self, "requested_by_kind", requested_by_kind)
@@ -731,6 +741,7 @@ class ControlIntent:
         object.__setattr__(self, "idempotency_key", idempotency_key)
         object.__setattr__(self, "payload", payload)
         object.__setattr__(self, "risk_level", risk_level)
+        object.__setattr__(self, "plan_envelope_hash", plan_envelope_hash)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -739,6 +750,7 @@ class ControlIntent:
             "requested_by_ref": self.requested_by_ref,
             "idempotency_key": self.idempotency_key,
             "risk_level": self.risk_level,
+            "plan_envelope_hash": self.plan_envelope_hash,
             "payload": _json_compatible(dict(self.payload)),
         }
 
@@ -816,22 +828,128 @@ class ControlCommandRecord:
             idempotency_key=self.idempotency_key,
             risk_level=self.risk_level,
             payload=dict(self.payload),
+            plan_envelope_hash=(
+                str(self.payload.get("plan_envelope_hash"))
+                if isinstance(self.payload.get("plan_envelope_hash"), str)
+                else None
+            ),
         )
+
+
+def _build_control_plan_envelope(intent: ControlIntent):
+    return build_plan_envelope(
+        command_type=intent.command_type,
+        requested_by_kind=intent.requested_by_kind,
+        requested_by_ref=intent.requested_by_ref,
+        risk_level=intent.risk_level,
+        payload=intent.payload,
+    )
+
+
+def stamp_control_intent(intent: ControlIntent) -> ControlIntent:
+    """Attach the canonical plan-envelope hash to the control intent."""
+
+    envelope = _build_control_plan_envelope(intent)
+    existing_hash = intent.plan_envelope_hash
+    if existing_hash is not None and existing_hash != envelope.plan_hash:
+        raise ControlCommandPolicyError(
+            "control.command.plan_hash_mismatch",
+            "control intent plan envelope hash does not match its payload",
+            details={
+                "expected_plan_envelope_hash": envelope.plan_hash,
+                "actual_plan_envelope_hash": existing_hash,
+            },
+        )
+    payload = dict(intent.payload)
+    payload["plan_envelope_hash"] = envelope.plan_hash
+    return ControlIntent(
+        command_type=intent.command_type,
+        requested_by_kind=intent.requested_by_kind,
+        requested_by_ref=intent.requested_by_ref,
+        idempotency_key=intent.idempotency_key,
+        risk_level=intent.risk_level,
+        payload=payload,
+        plan_envelope_hash=envelope.plan_hash,
+    )
+
+
+def _local_policy_covers(intent: ControlIntent) -> bool:
+    return (
+        intent.command_type in _LOW_RISK_LOCAL_COMMAND_TYPES
+        and intent.risk_level == ControlRiskLevel.LOW.value
+        and intent.requested_by_kind in _LOCAL_AUTO_EXECUTE_REQUESTER_KINDS
+    )
 
 
 def classify_control_intent(intent: ControlIntent) -> ControlPolicyDecision:
     """Return the policy disposition for one intent."""
 
-    if intent.command_type in _SAFE_AUTO_EXECUTE_TYPES and intent.risk_level == ControlRiskLevel.LOW.value:
+    payload = dict(intent.payload)
+    if (
+        isinstance(payload.get("grant_ref"), str)
+        and isinstance(payload.get("plan_envelope_hash"), str)
+        and payload.get("grant_coverage_status") == "covered"
+    ):
         return ControlPolicyDecision(
             mode=ControlExecutionMode.AUTO_EXECUTE.value,
             risk_level=intent.risk_level,
-            reason_code="control.policy.safe_to_execute",
+            reason_code="control.policy.capability_grant_covered",
+        )
+    if _local_policy_covers(intent):
+        return ControlPolicyDecision(
+            mode=ControlExecutionMode.AUTO_EXECUTE.value,
+            risk_level=intent.risk_level,
+            reason_code="control.policy.local_operator_authority",
         )
     return ControlPolicyDecision(
         mode=ControlExecutionMode.CONFIRM_REQUIRED.value,
         risk_level=intent.risk_level,
-        reason_code="control.policy.confirm_required",
+        reason_code="control.policy.capability_grant_required",
+    )
+
+
+def evaluate_control_intent_policy(
+    conn: "SyncPostgresConnection",
+    intent: ControlIntent,
+) -> ControlPolicyDecision:
+    """Evaluate DB-backed policy for one intent."""
+
+    stamped = stamp_control_intent(intent)
+    envelope = _build_control_plan_envelope(stamped)
+    payload = dict(stamped.payload)
+    grant_ref = payload.get("grant_ref")
+    principal_ref = payload.get("principal_ref")
+    device_id = payload.get("device_id")
+    resolution: GrantResolution | None = None
+    if isinstance(grant_ref, str) and grant_ref.strip():
+        resolution = resolve_capability_grant(
+            conn,
+            envelope=envelope,
+            principal_ref=principal_ref if isinstance(principal_ref, str) else None,
+            device_id=device_id if isinstance(device_id, str) else None,
+            grant_ref=grant_ref,
+        )
+    if resolution is not None and resolution.covered:
+        return ControlPolicyDecision(
+            mode=ControlExecutionMode.AUTO_EXECUTE.value,
+            risk_level=stamped.risk_level,
+            reason_code=resolution.reason_code,
+            approved_by=resolution.grant_ref or _AUTO_APPROVAL_REF,
+        )
+    if _local_policy_covers(stamped):
+        return ControlPolicyDecision(
+            mode=ControlExecutionMode.AUTO_EXECUTE.value,
+            risk_level=stamped.risk_level,
+            reason_code="control.policy.local_operator_authority",
+        )
+    return ControlPolicyDecision(
+        mode=ControlExecutionMode.CONFIRM_REQUIRED.value,
+        risk_level=stamped.risk_level,
+        reason_code=(
+            "control.policy.capability_grant_required"
+            if resolution is None
+            else resolution.reason_code
+        ),
     )
 
 
@@ -980,6 +1098,8 @@ def create_control_command(
     """Create a durable command row, optionally auto-executing safe intents."""
 
     requested_at = requested_at or _utc_now()
+    intent = stamp_control_intent(intent)
+    policy = evaluate_control_intent_policy(conn, intent)
     command_id = command_id or f"control.command.{uuid.uuid4().hex[:12]}"
     signature = intent.signature()
 
@@ -1014,10 +1134,10 @@ def create_control_command(
         "control.command.requested",
         created,
         previous_status=None,
-        extra={"policy": classify_control_intent(intent).mode},
+        extra={"policy": policy.mode, "policy_reason_code": policy.reason_code},
     )
 
-    if auto_execute and is_safe_to_auto_execute(intent):
+    if auto_execute and policy.auto_execute:
         return execute_control_command(conn, created.command_id)
 
     return created
@@ -1212,7 +1332,8 @@ def execute_control_command(
         )
 
     if command.command_status == ControlCommandStatus.REQUESTED.value:
-        if not is_safe_to_auto_execute(command.to_intent()):
+        policy = evaluate_control_intent_policy(conn, command.to_intent())
+        if not policy.auto_execute:
             raise ControlCommandPolicyError(
                 "control.command.confirmation_required",
                 f"command requires confirmation before execution: {command.command_type}",
@@ -1220,12 +1341,13 @@ def execute_control_command(
                     "command_id": command.command_id,
                     "command_type": command.command_type,
                     "risk_level": command.risk_level,
+                    "policy_reason_code": policy.reason_code,
                 },
             )
         command = accept_control_command(
             conn,
             command.command_id,
-            approved_by=_AUTO_APPROVAL_REF,
+            approved_by=policy.approved_by,
         )
     elif command.command_status != ControlCommandStatus.ACCEPTED.value:
         raise ControlCommandTransitionError(
@@ -1329,6 +1451,7 @@ __all__ = [
     "classify_control_intent",
     "complete_control_command",
     "create_control_command",
+    "evaluate_control_intent_policy",
     "execute_control_intent",
     "execute_control_command",
     "fail_control_command",
@@ -1349,6 +1472,7 @@ __all__ = [
     "request_workflow_submit_command",
     "submit_workflow_command",
     "requires_confirmation",
+    "stamp_control_intent",
     "start_control_command",
     "workflow_cancel_proof",
     "update_control_command",

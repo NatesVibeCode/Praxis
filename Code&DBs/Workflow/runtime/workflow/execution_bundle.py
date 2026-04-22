@@ -234,19 +234,44 @@ def _completion_contract(
     submission_required: bool | None,
     downstream_labels: Sequence[str] | None,
     verify_refs: Sequence[str] = (),
+    # Spec-level overrides from the job's `completion_contract` block.
+    # When present, these win over the task_type/bucket-derived defaults —
+    # spec authority comes first. Empty / None keeps the default.
+    result_kind_override: str | None = None,
+    submit_tool_names_override: Sequence[str] | None = None,
+    verification_required_override: bool | None = None,
 ) -> dict[str, Any]:
     normalized_task_type = task_type.strip().lower()
     if submission_required is not None:
         normalized_submission_required = bool(submission_required)
     else:
         normalized_submission_required = _default_submission_required(normalized_task_type)
-    verification_required = normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
-    result_kind = _submission_result_kind(task_type=normalized_task_type, bucket=bucket)
-    submit_tool_names = (
-        [_SUBMISSION_RESULT_KIND_TO_TOOL[result_kind], _SUBMISSION_READ_TOOL]
-        if normalized_submission_required
-        else []
+    if verification_required_override is not None:
+        verification_required = bool(verification_required_override)
+    else:
+        verification_required = normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
+    # Spec-level result_kind wins; fall back to task_type/bucket derivation.
+    normalized_override = str(result_kind_override or "").strip().lower()
+    if normalized_override and normalized_override in _SUBMISSION_RESULT_KIND_TO_TOOL:
+        result_kind = normalized_override
+    else:
+        result_kind = _submission_result_kind(task_type=normalized_task_type, bucket=bucket)
+    # Spec-level submit_tool_names wins; else derive from the (possibly-
+    # overridden) result_kind. The read tool is always appended so agents
+    # can inspect their own submissions during multi-attempt work.
+    explicit_submit_tools = _dedupe_strings(
+        [str(name).strip() for name in (submit_tool_names_override or []) if str(name).strip()]
     )
+    if normalized_submission_required:
+        if explicit_submit_tools:
+            derived_submit_tools = list(explicit_submit_tools)
+            if _SUBMISSION_READ_TOOL not in derived_submit_tools:
+                derived_submit_tools.append(_SUBMISSION_READ_TOOL)
+            submit_tool_names = derived_submit_tools
+        else:
+            submit_tool_names = [_SUBMISSION_RESULT_KIND_TO_TOOL[result_kind], _SUBMISSION_READ_TOOL]
+    else:
+        submit_tool_names = []
     review_tool_names = (
         [_SUBMISSION_READ_TOOL, _SUBMISSION_REVIEW_TOOL]
         if normalized_task_type in _SUBMISSION_REVIEW_TASK_TYPES
@@ -284,8 +309,9 @@ def _orient_hint(
         "entrypoint_tool": normalized_entrypoint,
         "suggested_question": question,
         "notes": [
-            f"Start with {normalized_entrypoint} before broader tool use.",
-            "Use only the admitted MCP tools and adapter tools listed in this bundle.",
+            f"Call tools through `praxis workflow tools call <tool_name> --input-json '{{...}}'`. Use `praxis workflow tools describe {normalized_entrypoint}` when you need the input schema.",
+            "Use `praxis workflow tools search <text>` to discover allowed MCP tools from inside the sandbox.",
+            "At the end of mutating jobs, submit results through the cataloged `praxis_submit_*` tool with `praxis workflow tools call`; the sealed submission is the authoritative deliverable.",
             "Stay inside the declared read/write boundary and verification refs.",
         ],
     }
@@ -314,6 +340,15 @@ def build_execution_bundle(
     sandbox_profile_ref: str | None = None,
     sandbox_profile: Mapping[str, Any] | None = None,
     submission_required: bool | None = None,
+    # Optional spec-level overrides for the completion contract. These
+    # propagate the job's `completion_contract.result_kind` and
+    # `completion_contract.submit_tool_names` through the bundle so a
+    # build-bucket job can intentionally seal as artifact_bundle
+    # (bypassing the baseline requirement) without changing its
+    # task_type. When None, task_type/bucket defaults apply.
+    result_kind: str | None = None,
+    submit_tool_names: Sequence[str] | None = None,
+    verification_required: bool | None = None,
     downstream_labels: Sequence[str] | None = None,
     output_schema: Mapping[str, Any] | None = None,
     authoring_contract: Mapping[str, Any] | None = None,
@@ -351,6 +386,17 @@ def build_execution_bundle(
         capabilities=normalized_capabilities,
         verify_refs=normalized_verify_refs,
     )
+    normalized_write_scope = _dedupe_strings(_string_list(write_scope))
+    mutation_requires_submission = bool(normalized_write_scope)
+    effective_submission_required = True if mutation_requires_submission else submission_required
+    effective_verification_required = (
+        True if mutation_requires_submission else verification_required
+    )
+    effective_result_kind = (
+        "code_change"
+        if mutation_requires_submission and not str(result_kind or "").strip()
+        else result_kind
+    )
     profile = try_resolve_profile(_profile_task_type(normalized_task_type))
     normalized_allowed_tools = (
         manifest_allowed_tools
@@ -368,9 +414,12 @@ def build_execution_bundle(
     completion_contract = _completion_contract(
         task_type=normalized_task_type,
         bucket=bucket,
-        submission_required=submission_required,
+        submission_required=effective_submission_required,
         downstream_labels=downstream_labels,
         verify_refs=normalized_verify_refs,
+        result_kind_override=effective_result_kind,
+        submit_tool_names_override=submit_tool_names,
+        verification_required_override=effective_verification_required,
     )
     normalized_authoring_contract = normalize_authoring_contract(
         output_schema=output_schema,
@@ -419,7 +468,6 @@ def build_execution_bundle(
     normalized_skill_refs = _dedupe_strings(
         [*_BUCKET_SKILLS.get(bucket, _BUCKET_SKILLS["general"]), *_string_list(explicit_skill_refs)],
     )
-    normalized_write_scope = _dedupe_strings(_string_list(write_scope))
     normalized_declared_read_scope = _dedupe_strings(_string_list(declared_read_scope))
     normalized_resolved_read_scope = _dedupe_strings(_string_list(resolved_read_scope))
     normalized_blast_radius = _dedupe_strings(_string_list(blast_radius))
@@ -535,10 +583,25 @@ def render_execution_bundle(bundle: Mapping[str, Any] | None) -> str:
         submit_tools = _string_list(completion_contract.get("submit_tool_names"))
         if completion_contract.get("submission_required") and submit_tools:
             tool_name = submit_tools[0]
+            result_kind = str(completion_contract.get("result_kind") or "").strip()
+            payload = {
+                "summary": "<one-sentence description>",
+                "primary_paths": ["<path1>", "<path2>"],
+            }
+            if result_kind:
+                payload["result_kind"] = result_kind
+            payload["notes"] = "<evidence/rationale>"
             parts.append(
                 f"\n** SUBMISSION REQUIRED **\n"
-                f"When you have completed your task, you MUST call the {tool_name} tool "
-                f"with a summary of your work. Your output will not be recorded unless you submit it.\n"
+                f"When you have completed your task, you MUST seal your work with the "
+                f"{tool_name} tool. Your output is NOT recorded unless you submit it — "
+                f"describing the work in stdout does not count.\n\n"
+                f"Invoke from your shell/Bash tool:\n"
+                f"  praxis workflow tools call {tool_name} --input-json "
+                f"'{json.dumps(payload, sort_keys=True)}'\n\n"
+                f"The `praxis` binary is preinstalled at /usr/local/bin/praxis and reads "
+                f"its credentials from PRAXIS_WORKFLOW_MCP_URL + PRAXIS_WORKFLOW_MCP_TOKEN "
+                f"which are already set in your environment.\n"
             )
         else:
             parts.append(

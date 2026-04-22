@@ -216,6 +216,7 @@ def tool_praxis_audit_primitive(params: dict[str, Any]) -> dict[str, Any]:
                     only_patterns=only,
                     max_per_pattern=max_per,
                     max_tier=max_tier or "none",
+                    authority_grant_ref=params.get("authority_grant_ref"),
                 ),
             }
 

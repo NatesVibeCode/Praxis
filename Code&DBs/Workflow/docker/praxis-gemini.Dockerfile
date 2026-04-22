@@ -13,25 +13,38 @@
 
 FROM node:22-bookworm-slim
 
+ARG PRAXIS_CONTAINER_WORKSPACE_ROOT
+ARG PRAXIS_CONTAINER_HOME
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV PRAXIS_CONTAINER_WORKSPACE_ROOT=${PRAXIS_CONTAINER_WORKSPACE_ROOT} \
+    PRAXIS_CONTAINER_HOME=${PRAXIS_CONTAINER_HOME}
+
+RUN test -n "$PRAXIS_CONTAINER_WORKSPACE_ROOT" && test -n "$PRAXIS_CONTAINER_HOME"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
         curl \
+        python3-minimal \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @google/gemini-cli@latest \
     && npm cache clean --force
 
-WORKDIR /workspace
+# ── uniform sandbox tool surface ────────────────────────────────────
+# See architecture-policy::sandbox::uniform-shell-tool-surface.
+COPY bin/praxis_sandbox_client.py /usr/local/bin/praxis
+RUN chmod 0755 /usr/local/bin/praxis
+
+WORKDIR ${PRAXIS_CONTAINER_WORKSPACE_ROOT}
 
 # Non-root agent user matches the uid=1100 the worker uses for auth-file
-# mounts targeting /home/praxis-agent (see praxis-worker.Dockerfile for
+# mounts targeting the configured container home (see praxis-worker.Dockerfile for
 # rationale).
-RUN useradd -m -u 1100 -s /bin/bash praxis-agent \
-    && mkdir -p /home/praxis-agent/.gemini \
-    && chown -R 1100:1100 /home/praxis-agent
+RUN useradd -m -d "${PRAXIS_CONTAINER_HOME}" -u 1100 -s /bin/bash praxis-agent \
+    && mkdir -p "${PRAXIS_CONTAINER_HOME}/.gemini" \
+    && chown -R 1100:1100 "${PRAXIS_CONTAINER_HOME}"
 
-RUN bash -lc "node --version && which gemini && id praxis-agent"
+RUN bash -lc "node --version && which gemini && which praxis && id praxis-agent"

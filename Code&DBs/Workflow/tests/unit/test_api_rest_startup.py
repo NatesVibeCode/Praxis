@@ -112,12 +112,144 @@ def test_launcher_status_endpoint_delegates_to_handler(monkeypatch) -> None:
     assert response.json() == expected
 
 
+def test_launcher_resolve_endpoint_returns_workspace_authority(monkeypatch) -> None:
+    class _FakeConn:
+        def execute(self, query: str, *args: object):
+            assert "registry_workspace_base_path_authority" in query
+            assert "workspace.workspace_ref = $1" in query
+            assert args == ("praxis", "default")
+            return [
+                {
+                    "workspace_ref": "praxis",
+                    "host_ref": "default",
+                    "base_path_ref": "workspace_base.praxis.default",
+                    "base_path": "${PRAXIS_WORKSPACE_BASE_PATH}",
+                    "repo_root_path": ".",
+                    "workdir_path": ".",
+                }
+            ]
+
+    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _FakeConn())
+
+    with TestClient(rest.app) as client:
+        response = client.get(
+            "/api/launcher/resolve",
+            params={"workspace_ref": "praxis", "host_ref": "default"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["resolution"]["base_path_ref"] == "workspace_base.praxis.default"
+    assert payload["resolution"]["base_path"] == "${PRAXIS_WORKSPACE_BASE_PATH}"
+    assert response.headers["Cache-Control"].startswith("no-store")
+
+
+def test_launcher_resolve_endpoint_returns_structured_unresolved_error(monkeypatch) -> None:
+    class _FakeConn:
+        def execute(self, _query: str, *args: object):
+            assert args == ("missing", "default")
+            return []
+
+    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _FakeConn())
+
+    with TestClient(rest.app) as client:
+        response = client.get(
+            "/api/launcher/resolve",
+            params={"workspace_ref": "missing", "host_ref": "default"},
+        )
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["warnings"] == []
+    assert payload["errors"][0]["reason_code"] == "launcher_workspace_unresolved"
+    assert payload["errors"][0]["details"] == {
+        "workspace_ref": "missing",
+        "host_ref": "default",
+    }
+    assert response.headers["Cache-Control"].startswith("no-store")
+
+
+def test_launcher_resolve_endpoint_returns_structured_ambiguous_error(monkeypatch) -> None:
+    row = {
+        "workspace_ref": "praxis",
+        "host_ref": "default",
+        "base_path_ref": "workspace_base.praxis.default",
+        "base_path": "${PRAXIS_WORKSPACE_BASE_PATH}",
+        "repo_root_path": ".",
+        "workdir_path": ".",
+    }
+
+    class _FakeConn:
+        def execute(self, _query: str, *args: object):
+            assert args == ("praxis", "default")
+            return [row, dict(row)]
+
+    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _FakeConn())
+
+    with TestClient(rest.app) as client:
+        response = client.get(
+            "/api/launcher/resolve",
+            params={"workspace_ref": "praxis", "host_ref": "default"},
+        )
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["errors"][0]["reason_code"] == "launcher_workspace_ambiguous"
+
+
+def test_launcher_resolve_endpoint_returns_structured_invalid_request(monkeypatch) -> None:
+    class _ForbiddenConn:
+        def execute(self, *_args: object):
+            raise AssertionError("invalid launcher requests should not query postgres")
+
+    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _ForbiddenConn())
+
+    with TestClient(rest.app) as client:
+        response = client.get(
+            "/api/launcher/resolve",
+            params={"workspace_ref": "   ", "host_ref": "default"},
+        )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["errors"][0]["reason_code"] == "launcher_config_invalid"
+    assert payload["errors"][0]["details"] == {"field": "workspace_ref"}
+
+
+def test_launcher_resolve_endpoint_returns_structured_database_unavailable(monkeypatch) -> None:
+    class _BrokenConn:
+        def execute(self, *_args: object):
+            raise RuntimeError("database offline")
+
+    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _BrokenConn())
+
+    with TestClient(rest.app) as client:
+        response = client.get(
+            "/api/launcher/resolve",
+            params={"workspace_ref": "praxis", "host_ref": "default"},
+        )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["errors"][0]["reason_code"] == "launcher_database_unavailable"
+    assert payload["errors"][0]["details"] == {"error_type": "RuntimeError"}
+
+
 def test_agent_sessions_surface_is_mounted(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(rest.agent_sessions_app, "AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setenv("PRAXIS_API_TOKEN", "session-token")
 
     with TestClient(rest.app) as client:
         index_response = client.get("/api/agent-sessions")
-        agents_response = client.get("/api/agent-sessions/agents")
+        agents_response = client.get(
+            "/api/agent-sessions/agents",
+            headers={"Authorization": "Bearer session-token"},
+        )
 
     assert index_response.status_code == 200
     assert index_response.json()["service"] == "agent_sessions"

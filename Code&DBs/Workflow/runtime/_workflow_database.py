@@ -4,28 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import os
-import plistlib
-import subprocess
-import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-import asyncpg
-
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from storage.postgres import PostgresConfigurationError, resolve_workflow_database_url
 
 _WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
-_WORKFLOW_DATABASE_PROBE_TIMEOUT_S = 3.0
-_WORKFLOW_DATABASE_LAUNCHD_LABELS = (
-    "com.praxis.engine",
-    "com.praxis.postgres",
-    "com.praxis.api-server",
-    "com.praxis.workflow-api",
-    "com.praxis.workflow-worker",
-    "com.praxis.scheduler",
-    "com.praxis.queue-worker",
-)
+_WORKFLOW_LAUNCHD_DIR_ENV = "PRAXIS_LAUNCHD_DIR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,11 +24,15 @@ class WorkflowDatabaseAuthority:
 
 
 def _runtime_repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
-def _launch_agents_root() -> Path:
-    return Path.home() / "Library" / "LaunchAgents"
+def launch_agents_root(*, env: Mapping[str, str] | None = None) -> Path:
+    source = env if env is not None else os.environ
+    configured = str(source.get(_WORKFLOW_LAUNCHD_DIR_ENV) or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home().joinpath("Library", "LaunchAgents")
 
 
 def _read_repo_env_file(path: Path) -> dict[str, str]:
@@ -63,127 +54,6 @@ def _read_repo_env_file(path: Path) -> dict[str, str]:
     return resolved
 
 
-def _probe_workflow_database_url(database_url: str) -> bool:
-    normalized_database_url = resolve_workflow_database_url(
-        env={_WORKFLOW_DATABASE_URL_ENV: database_url}
-    )
-
-    async def _probe() -> bool:
-        conn = await asyncpg.connect(
-            normalized_database_url,
-            timeout=_WORKFLOW_DATABASE_PROBE_TIMEOUT_S,
-        )
-        try:
-            return True
-        finally:
-            await conn.close()
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        try:
-            return asyncio.run(_probe())
-        except Exception:
-            return False
-
-    result: dict[str, bool] = {}
-
-    def _run_probe() -> None:
-        try:
-            result["reachable"] = asyncio.run(_probe())
-        except Exception:
-            result["reachable"] = False
-
-    probe_thread = threading.Thread(target=_run_probe, daemon=True, name="workflow-db-probe")
-    probe_thread.start()
-    probe_thread.join(timeout=_WORKFLOW_DATABASE_PROBE_TIMEOUT_S + 1.0)
-    return bool(result.get("reachable"))
-
-
-def _try_resolve_launchd_database_url(repo_root: Path) -> tuple[str, str] | None:
-    launch_agents = _launch_agents_root()
-    if not launch_agents.is_dir():
-        return None
-
-    for label in _WORKFLOW_DATABASE_LAUNCHD_LABELS:
-        plist_path = launch_agents / f"{label}.plist"
-        if not plist_path.exists():
-            continue
-        try:
-            payload = plistlib.loads(plist_path.read_bytes())
-        except Exception:
-            continue
-        env_vars = payload.get("EnvironmentVariables")
-        if not isinstance(env_vars, dict):
-            continue
-        candidate = env_vars.get(_WORKFLOW_DATABASE_URL_ENV)
-        if not isinstance(candidate, str) or not candidate.strip():
-            continue
-        candidate = candidate.strip()
-        if _probe_workflow_database_url(candidate):
-            return candidate, label
-    return None
-
-
-def _try_resolve_docker_database_url(repo_root: Path) -> str | None:
-    compose_file = repo_root / "docker-compose.yml"
-    if not compose_file.is_file():
-        return None
-
-    try:
-        postgres_container = subprocess.run(
-            ["docker", "compose", "-f", str(compose_file), "ps", "-q", "postgres"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if not postgres_container:
-        return None
-
-    try:
-        container_state = subprocess.run(
-            [
-                "docker",
-                "inspect",
-                "--format",
-                "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
-                postgres_container,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if container_state not in {"healthy", "running"}:
-        return None
-
-    try:
-        published = subprocess.run(
-            ["docker", "compose", "-f", str(compose_file), "port", "postgres", "5432"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if not published or ":" not in published:
-        return None
-
-    docker_host, docker_port = published.rsplit(":", 1)
-    docker_host = docker_host.strip().lstrip("[").rstrip("]")
-    if docker_host in {"", "0.0.0.0", "::"}:
-        docker_host = "127.0.0.1"
-    if not docker_port.strip():
-        return None
-    return f"postgresql://postgres@{docker_host}:{docker_port.strip()}/praxis"
-
-
 def resolve_runtime_database_authority(
     database_url: str | None = None,
     *,
@@ -191,7 +61,13 @@ def resolve_runtime_database_authority(
     repo_root: Path | None = None,
     required: bool = True,
 ) -> WorkflowDatabaseAuthority:
-    """Resolve runtime database authority plus the source that provided it."""
+    """Resolve runtime database authority plus the source that provided it.
+
+    The resolver is intentionally explicit: DB authority must arrive through an
+    argument, process/registry environment, or a repo env file. It must not
+    discover launchd, Docker, or localhost Postgres instances because those can
+    silently point future agents at stale operator state.
+    """
 
     if database_url is not None:
         raw_database_url = str(database_url).strip()
@@ -221,14 +97,6 @@ def resolve_runtime_database_authority(
         )
 
     resolved_repo_root = repo_root if repo_root is not None else _runtime_repo_root()
-    launchd_authority = _try_resolve_launchd_database_url(resolved_repo_root)
-    if launchd_authority is not None:
-        launchd_database_url, launchd_label = launchd_authority
-        return WorkflowDatabaseAuthority(
-            database_url=launchd_database_url,
-            source=f"launchd:{launchd_label}",
-        )
-
     repo_env_path = resolved_repo_root / ".env"
     repo_env = _read_repo_env_file(repo_env_path)
     if _WORKFLOW_DATABASE_URL_ENV in repo_env:
@@ -237,19 +105,12 @@ def resolve_runtime_database_authority(
             source=f"repo_env:{repo_env_path}",
         )
 
-    docker_database_url = _try_resolve_docker_database_url(resolved_repo_root)
-    if docker_database_url is not None:
-        return WorkflowDatabaseAuthority(
-            database_url=docker_database_url,
-            source="docker",
-        )
-
     if required:
         raise PostgresConfigurationError(
             "postgres.config_missing",
             (
-                f"{_WORKFLOW_DATABASE_URL_ENV} must be set in process env "
-                f"or declared in {repo_env_path}"
+                f"{_WORKFLOW_DATABASE_URL_ENV} must be provided by the registry/runtime "
+                f"environment or declared explicitly in {repo_env_path}"
             ),
             details={
                 "environment_variable": _WORKFLOW_DATABASE_URL_ENV,

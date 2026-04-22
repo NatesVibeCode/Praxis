@@ -41,6 +41,7 @@ def resolve_credential(
     env: dict[str, str] | None = None,
     conn: Any = None,
     integration_id: str | None = None,
+    auth_shape: dict[str, Any] | None = None,
 ) -> ResolvedCredential:
     """Resolve an auth_ref to an API key.
 
@@ -51,7 +52,7 @@ def resolve_credential(
         try:
             from .oauth_lifecycle import resolve_or_refresh
 
-            token = resolve_or_refresh(conn, integration_id)
+            token = resolve_or_refresh(conn, integration_id, auth_shape=auth_shape)
             return ResolvedCredential(
                 auth_ref=auth_ref,
                 api_key=token.access_token,

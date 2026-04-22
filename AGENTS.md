@@ -12,10 +12,12 @@ praxis workflow tools call praxis_operator_decisions \ # MCP / CLI path
     --input-json '{"action":"list","decision_kind":"architecture_policy","active_only":true}'
 ```
 
-If neither is reachable, fall back to direct Postgres:
+If neither is reachable, fall back to the registry/runtime-provided network
+Postgres DSN. Do not start, query, or infer authority from a localhost
+Postgres instance; localhost Postgres is retired for operator state.
 
 ```
-psql postgresql://localhost:5432/praxis -c "
+psql "$WORKFLOW_DATABASE_URL" -c "
 SELECT decision_scope_ref, decision_key, title, rationale
 FROM operator_decisions
 WHERE decision_kind='architecture_policy'
@@ -43,6 +45,11 @@ exceptions as unavailable unless they are present in Praxis.db.
 ## Why this matters
 
 Praxis.db is the cross-harness source of truth. Codex, Claude, Gemini, and Cursor all read the same `operator_decisions` table. Anything that lives only in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.cursorrules` is proprietary sidecar drift. Operator authority lives in Postgres.
+
+The active Praxis.db is the network/registry-resolved Postgres authority, not
+the old localhost development database. If `WORKFLOW_DATABASE_URL` is absent,
+discover it through the workflow registry/runtime authority or ask for the
+current network DSN; do not resurrect local Postgres to make a command pass.
 
 ## Binding behavior
 

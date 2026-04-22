@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from runtime.primitive_contracts import bug_query_default_open_only_backlog
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import (
     get_definition,
@@ -29,7 +30,7 @@ from surfaces.cli.mcp_tools import (
 # ---------------------------------------------------------------------------
 
 _cli_pg_conn = None
-WORKFLOW_ROOT = Path(__file__).resolve().parents[3]
+WORKFLOW_ROOT = workspace_repo_root()
 _SQL_KEYWORD_RE = re.compile(
     r"\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b",
     re.IGNORECASE,

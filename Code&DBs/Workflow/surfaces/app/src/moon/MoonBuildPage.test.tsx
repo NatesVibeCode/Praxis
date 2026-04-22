@@ -258,7 +258,7 @@ describe('MoonBuildPage', () => {
 
     render(<MoonBuildPage workflowId="wf-123" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Detail dock' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Inspector dock' }));
 
     expect(screen.getByTestId('moon-middle')).toHaveClass('moon-middle--context-open');
   });
@@ -287,7 +287,7 @@ describe('MoonBuildPage', () => {
     fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'Build a workflow from this prompt' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /build from prompt/i }));
+    fireEvent.click(screen.getByRole('button', { name: /build workflow/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Request timed out after 45s');
   });

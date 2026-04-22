@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
+
+REPO_ROOT = workspace_repo_root()
 WORKFLOW_ROOT = REPO_ROOT / "Code&DBs" / "Workflow"
 RECEIPTS_DIR = str(REPO_ROOT / "artifacts" / "workflow_receipts")
 

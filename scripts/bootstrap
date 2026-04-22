@@ -5,7 +5,7 @@
 #   1. Resolve a repo-local database authority, creating .env when absent.
 #   2. Create the target Postgres database and enable pgvector.
 #   3. Create .venv and install requirements.runtime.txt.
-#   4. Symlink scripts/praxis into ~/.local/bin.
+#   4. Install a config-backed Praxis runtime launcher onto PATH.
 #   5. Run DB bootstrap and fresh-install seed via the native operator surface.
 #   6. Start the REST API on PRAXIS_API_PORT.
 #   7. Validate, submit, and stream examples/bootstrap_smoke.queue.json.
@@ -17,7 +17,9 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-workflow_root="$repo_root/Code&DBs/Workflow"
+# shellcheck source=./_workflow_env.sh
+source "$repo_root/scripts/_workflow_env.sh"
+workflow_root="$(workflow_repo_workflow_root)"
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 ok()   { printf '  \033[1;32m[ok]\033[0m %s\n' "$*"; }
@@ -40,19 +42,22 @@ without_contract_env() {
 
 ensure_repo_env_file() {
   local repo_env="$repo_root/.env"
+  local resolved_database_url="${1:-}"
   if [ -f "$repo_env" ]; then
     ok ".env already declares repo-local runtime authority"
     return 0
   fi
 
-  local bootstrap_database_url="${WORKFLOW_DATABASE_URL:-postgresql://localhost:5432/praxis}"
+  if [ -z "$resolved_database_url" ]; then
+    die "could not determine WORKFLOW_DATABASE_URL for .env creation"
+  fi
   umask 077
   {
     printf '# Created by ./scripts/bootstrap for repo-local Praxis runtime authority.\n'
-    printf 'WORKFLOW_DATABASE_URL=%s\n' "$bootstrap_database_url"
+    printf 'WORKFLOW_DATABASE_URL=%s\n' "$resolved_database_url"
     printf 'PRAXIS_API_PORT=%s\n' "${PRAXIS_API_PORT:-8420}"
   } > "$repo_env"
-  ok "created .env with WORKFLOW_DATABASE_URL=$(redact_url_for_log "$bootstrap_database_url")"
+  ok "created .env with WORKFLOW_DATABASE_URL=$(redact_url_for_log "$resolved_database_url")"
 }
 
 resolve_database_authority() {
@@ -109,6 +114,90 @@ except Exception:
 PY
 }
 
+launcher_config_path() {
+  if [ -n "${PRAXIS_LAUNCHER_CONFIG:-}" ]; then
+    printf '%s\n' "$PRAXIS_LAUNCHER_CONFIG"
+    return 0
+  fi
+  printf '%s\n' "$HOME/.config/praxis/launcher.json"
+}
+
+write_launcher_seed_config() {
+  local config_path="$1"
+  local launcher_api_url="${PRAXIS_API_URL:-}"
+  PYTHONPATH="$workflow_root${PYTHONPATH:+:$PYTHONPATH}" \
+    "$venv_dir/bin/python" - "$config_path" "$database_url" "$repo_root" "$launcher_api_url" <<'PY'
+import sys
+from runtime.launcher_authority import write_launcher_seed_config
+
+config_path, database_url, repo_root, api_url = sys.argv[1:5]
+write_launcher_seed_config(
+    config_path,
+    workspace_ref="praxis",
+    host_ref="default",
+    api_url=api_url or None,
+    database_url=database_url,
+    environment={"PRAXIS_WORKSPACE_BASE_PATH": repo_root},
+)
+PY
+}
+
+target_is_managed_launcher() {
+  local target="$1"
+  [ -f "$target" ] && grep -q "Praxis runtime launcher. Managed by ./scripts/bootstrap." "$target"
+}
+
+target_is_legacy_sql_locator() {
+  local target="$1"
+  [ -f "$target" ] || return 1
+  PYTHONPATH="$workflow_root${PYTHONPATH:+:$PYTHONPATH}" \
+    "$venv_dir/bin/python" - "$target" <<'PY'
+import sys
+from pathlib import Path
+from runtime.launcher_authority import looks_like_legacy_sql_locator
+
+path = Path(sys.argv[1])
+raise SystemExit(0 if looks_like_legacy_sql_locator(path.read_text(encoding="utf-8")) else 1)
+PY
+}
+
+install_runtime_launcher() {
+  local target="$1"
+  local backup=""
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    if target_is_managed_launcher "$target"; then
+      ok "updating managed praxis runtime launcher at $target"
+    else
+      backup="${target}.backup.$(date +%Y%m%d%H%M%S)"
+      if target_is_legacy_sql_locator "$target"; then
+        warn "old SQL locator shim detected at $target; backing it up to $backup"
+      else
+        warn "$target exists; backing it up to $backup before installing runtime launcher"
+      fi
+      mv "$target" "$backup"
+    fi
+  fi
+
+  PRAXIS_LAUNCHER_TARGET="$target" \
+  PRAXIS_LAUNCHER_SOURCE="$workflow_root/runtime/launcher_authority.py" \
+    "$venv_dir/bin/python" - <<'PY'
+import os
+from pathlib import Path
+
+target = Path(os.environ["PRAXIS_LAUNCHER_TARGET"])
+source = Path(os.environ["PRAXIS_LAUNCHER_SOURCE"])
+body = source.read_text(encoding="utf-8")
+script = (
+    "#!/usr/bin/env python3\n"
+    "# Praxis runtime launcher. Managed by ./scripts/bootstrap.\n"
+    "# Self-contained: resolves the checkout through launcher authority before importing repo code.\n"
+    + body
+)
+target.write_text(script, encoding="utf-8")
+target.chmod(0o755)
+PY
+}
+
 # --- Step 1: prereqs ---------------------------------------------------------
 step "Checking prerequisites"
 
@@ -123,13 +212,14 @@ if ! command -v psql >/dev/null 2>&1; then
 fi
 ok "psql at $(command -v psql)"
 
-ensure_repo_env_file
 database_authority="$(
   resolve_database_authority
 )" || die "could not resolve WORKFLOW_DATABASE_URL from repo authority"
 database_url="$(printf '%s\n' "$database_authority" | sed -n '1p')"
 database_authority_source="$(printf '%s\n' "$database_authority" | sed -n '2p')"
 ok "database authority: $database_authority_source"
+
+ensure_repo_env_file "$database_url"
 
 database_meta="$(parse_database_authority)"
 database_name="$(printf '%s\n' "$database_meta" | sed -n '1p')"
@@ -178,29 +268,30 @@ pip install --quiet -r "$requirements"
 ok "dependencies installed from requirements.runtime.txt"
 
 # --- Step 3: praxis CLI on PATH ---------------------------------------------
-step "Installing praxis CLI shim"
+step "Installing praxis runtime launcher"
 
-local_bin="${HOME}/.local/bin"
+local_bin="${PRAXIS_LOCAL_BIN_DIR:-${XDG_BIN_HOME:-}}"
+if [ -z "$local_bin" ]; then
+  die "set PRAXIS_LOCAL_BIN_DIR or XDG_BIN_HOME before running ./scripts/bootstrap"
+fi
 mkdir -p "$local_bin"
-shim_target="$local_bin/praxis"
-shim_source="$repo_root/scripts/praxis"
+launcher_target="$local_bin/praxis"
+launcher_config="$(launcher_config_path)"
+checkout_command="$repo_root/scripts/praxis"
 
-if [ ! -x "$shim_source" ]; then
+if [ ! -x "$checkout_command" ]; then
   die "scripts/praxis is not executable - run chmod +x scripts/praxis"
 fi
 
-if [ -L "$shim_target" ] && [ "$(readlink "$shim_target")" = "$shim_source" ]; then
-  ok "praxis shim already points at $shim_source"
-elif [ -e "$shim_target" ]; then
-  warn "$shim_target exists but does not point at this repo; leaving it alone"
-else
-  ln -s "$shim_source" "$shim_target"
-  ok "linked $shim_target -> $shim_source"
-fi
+write_launcher_seed_config "$launcher_config"
+ok "launcher seed config written at $launcher_config"
+
+install_runtime_launcher "$launcher_target"
+ok "installed praxis runtime launcher at $launcher_target"
 
 case ":$PATH:" in
   *":$local_bin:"*) ok "$local_bin is on PATH" ;;
-  *) warn "$local_bin is NOT on PATH. Add to your shell rc: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
+  *) warn "$local_bin is NOT on PATH. Add it to your shell rc before invoking praxis" ;;
 esac
 
 # --- Step 4: db-bootstrap ---------------------------------------------------

@@ -12,9 +12,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from runtime.workspace_paths import repo_root as workspace_repo_root
+
 logger = logging.getLogger(__name__)
 
-_CONNECTORS_DIR = Path(__file__).resolve().parents[3] / "artifacts" / "connectors"
+_CONNECTORS_DIR = workspace_repo_root() / "artifacts" / "connectors"
 
 
 # ── Client introspection (shared with connector_executor) ────────────

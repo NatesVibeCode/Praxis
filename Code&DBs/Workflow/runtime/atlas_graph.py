@@ -14,10 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from runtime._workflow_database import resolve_runtime_database_url
+from runtime.workspace_paths import repo_root as workspace_repo_root, scratch_path
 from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-HEURISTIC_MAP_PATH = Path("/tmp/atlas_heuristic_map.json")
+REPO_ROOT = workspace_repo_root()
+HEURISTIC_MAP_PATH = scratch_path("atlas_heuristic_map")
 FRESHNESS_LAG_TOLERANCE_SECONDS = 2.0
 
 # One color per area. Keep this here so the API, app, and static export share

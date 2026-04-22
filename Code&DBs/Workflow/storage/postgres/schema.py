@@ -684,6 +684,20 @@ async def _bootstrap_migration(conn: asyncpg.Connection, filename: str) -> None:
     await _record_migration_apply(conn, filename)
 
 
+async def _record_bootstrapped_schema_migration_rows(
+    conn: asyncpg.Connection,
+    filenames: tuple[str, ...],
+) -> None:
+    """Backfill apply-tracking rows when expected schema authority is already present."""
+
+    for filename in filenames:
+        await _record_migration_apply(
+            conn,
+            filename,
+            applied_by="schema_ledger_backfill",
+        )
+
+
 async def bootstrap_control_plane_schema(conn: asyncpg.Connection) -> None:
     """Apply the v1 control-plane schema in an idempotent, fail-closed way."""
 
@@ -716,8 +730,10 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
         if readiness.is_bootstrapped:
             migration_audit = await workflow_migration_audit(conn)
             if migration_audit.missing:
-                for filename in migration_audit.missing:
-                    await _bootstrap_migration(conn, filename)
+                await _record_bootstrapped_schema_migration_rows(
+                    conn,
+                    migration_audit.missing,
+                )
             return
         control_readiness = await inspect_control_plane_schema(conn)
         if not control_readiness.is_bootstrapped:

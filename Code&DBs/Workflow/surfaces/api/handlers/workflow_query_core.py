@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from storage.postgres.validators import PostgresConfigurationError
 
@@ -427,7 +428,7 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-_QUERY_ROOT = Path(__file__).resolve().parents[3]
+_QUERY_ROOT = workspace_repo_root()
 _DIAGNOSE_RUN_ID_RE = re.compile(
     r"(?:diagnose(?:\s+run)?(?:\s+id)?|run(?:\s+id)?)[:=#\s]+([A-Za-z0-9:_-]+)",
     re.IGNORECASE,

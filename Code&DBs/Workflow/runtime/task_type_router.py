@@ -1762,6 +1762,37 @@ class TaskTypeRouter:
         severity_counts: dict[str, int] | None = None,
     ) -> None:
         """Apply downstream review feedback to the route's durable health state."""
+        try:
+            from .feedback_authority import (
+                RecordAuthorityFeedbackCommand,
+                record_feedback_event,
+            )
+
+            record_feedback_event(
+                self._conn,
+                RecordAuthorityFeedbackCommand(
+                    feedback_stream_ref="feedback.route_review",
+                    target_ref=f"{task_type}:{provider_slug}/{model_slug}",
+                    source_ref="runtime.review_tracker",
+                    signal_kind="route_review_feedback",
+                    signal_payload={
+                        "task_type": task_type,
+                        "provider_slug": provider_slug,
+                        "model_slug": model_slug,
+                        "bug_count": int(bug_count),
+                        "severity_counts": dict(severity_counts or {}),
+                    },
+                    proposed_action={
+                        "kind": "route_health_adjustment_candidate",
+                        "target_authority_domain_ref": "authority.task_route_eligibility",
+                    },
+                    recorded_by="runtime.task_type_router",
+                    idempotency_key=None,
+                ),
+            )
+        except Exception:
+            logger.warning("route review feedback authority intake failed", exc_info=True)
+
         self._ensure_route_state_row(task_type, provider_slug, model_slug)
         severity_counts = severity_counts or {}
         severity_penalties = self._policy.review_severity_penalties or {}

@@ -45,6 +45,8 @@ def resolve_submission_for_job(
     final_status: str,
     final_error_code: str,
     verification_artifact_refs: list[str],
+    enforce_verification_contract: bool = True,
+    enforce_acceptance_contract: bool = True,
 ) -> SubmissionGateResult:
     """Resolve the submission state for a completed job.
 
@@ -136,7 +138,12 @@ def resolve_submission_for_job(
     # If the completion contract says verification is required, the job must
     # have run verify_refs and they must have passed. If verification never
     # ran (no verify_refs, so no artifact refs) the job fails here.
-    if verification_required and final_status == "succeeded" and not verification_artifact_refs:
+    if (
+        enforce_verification_contract
+        and verification_required
+        and final_status == "succeeded"
+        and not verification_artifact_refs
+    ):
         final_status = "failed"
         final_error_code = "verification.required_not_run"
         result = {
@@ -150,7 +157,7 @@ def resolve_submission_for_job(
     # ── Stage 5: enforce acceptance contract ───────────────────────────────
     # If the submission was sealed and has an acceptance_status of "failed",
     # the job fails regardless of other status.
-    if final_status == "succeeded" and isinstance(submission_state, dict):
+    if enforce_acceptance_contract and final_status == "succeeded" and isinstance(submission_state, dict):
         acceptance_status = str(submission_state.get("acceptance_status") or "").strip().lower()
         if acceptance_status == "failed":
             final_status = "failed"

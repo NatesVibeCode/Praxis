@@ -30,6 +30,22 @@ _VALID_OPERATION_ROW = {
     "decision_ref": "decision.operation_catalog_registry.bootstrap.20260416",
 }
 
+_EXPECTED_OPERATION_ROW = {
+    **_VALID_OPERATION_ROW,
+    "authority_domain_ref": "authority.capability_catalog",
+    "storage_target_ref": "praxis.primary_postgres",
+    "input_schema_ref": "runtime.operations.commands.suggest_next.SuggestNextNodesCommand",
+    "output_schema_ref": "operation.output.default",
+    "idempotency_key_fields": [],
+    "required_capabilities": {},
+    "allowed_callers": ["cli", "mcp", "http", "workflow", "heartbeat"],
+    "timeout_ms": 15000,
+    "receipt_required": True,
+    "event_required": False,
+    "event_type": "workflow_build_suggest_next",
+    "projection_freshness_policy_ref": None,
+}
+
 _VALID_SOURCE_POLICY_ROW = {
     "policy_ref": "operation-query",
     "source_kind": "operation_query",
@@ -95,7 +111,7 @@ def test_list_operation_catalog_records_filters_and_normalizes() -> None:
 
     rows = list_operation_catalog_records(conn, source_kind="operation_query", limit=10)
 
-    assert rows == [dict(_VALID_OPERATION_ROW)]
+    assert rows == [dict(_EXPECTED_OPERATION_ROW)]
 
 
 def test_load_operation_catalog_record_by_name_returns_none_when_missing() -> None:

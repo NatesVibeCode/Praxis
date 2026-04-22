@@ -224,7 +224,12 @@ def resolve_token(
         try:
             from adapters.credentials import resolve_credential
 
-            cred = resolve_credential(credential_ref, conn=pg, integration_id=integration_id)
+            cred = resolve_credential(
+                credential_ref,
+                conn=pg,
+                integration_id=integration_id,
+                auth_shape=auth_shape,
+            )
             return cred.api_key
         except Exception as exc:
             logger.warning("credential resolution failed for %s: %s", integration_id, exc)

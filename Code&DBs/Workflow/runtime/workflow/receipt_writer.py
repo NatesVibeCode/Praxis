@@ -331,6 +331,17 @@ def write_job_receipt(
         receipt_outputs["workspace_snapshot_cache_hit"] = bool(
             result.get("workspace_snapshot_cache_hit")
         )
+    # Sandbox resource observability: peak CPU% and memory bytes captured by
+    # sandbox_runtime's background docker-stats poller. Forwarded here so
+    # `SELECT outputs->>'container_mem_bytes' FROM receipts` yields a usable
+    # distribution for capacity tuning (cap sizing, worker concurrency,
+    # per-agent footprint comparison). Absent keys indicate the poller did
+    # not capture at least one tick before the container exited — typical
+    # for jobs under the 2-second poll interval.
+    if result.get("container_mem_bytes") is not None:
+        receipt_outputs["container_mem_bytes"] = int(result["container_mem_bytes"])
+    if result.get("container_cpu_percent") is not None:
+        receipt_outputs["container_cpu_percent"] = float(result["container_cpu_percent"])
     if isinstance(submission, Mapping):
         submission_id = str(submission.get("submission_id") or "").strip()
         if submission_id:

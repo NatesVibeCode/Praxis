@@ -103,12 +103,11 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
         {open && (
           <>
         <div className="chat-panel__header">
-          <div className="chat-panel__title">Ask Anything</div>
+          <div className="chat-panel__title">Assistant · build</div>
           <button className="chat-panel__close" type="button" onClick={onClose} aria-label="Close chat">
             &times;
           </button>
         </div>
-
         <div className="chat-panel__messages" role="log" aria-live="polite" aria-relevant="additions">
           {messages.length === 0 && !streamingText && (
             <div className="chat-panel__empty">

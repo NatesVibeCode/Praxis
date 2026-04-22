@@ -45,6 +45,15 @@ from registry.provider_execution_registry import (
 )
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
+from runtime.launcher_authority import (
+    LauncherAuthorityError,
+    launcher_error_payload,
+    launcher_error_status_code,
+    launcher_resolution_row_payload,
+    launcher_resolution_sql,
+    normalize_launcher_resolution_request,
+)
+from runtime.mobile_security import apply_no_store_headers, no_store_headers, set_mobile_session_cookie
 from runtime.operation_catalog_bindings import resolve_http_operation_binding
 from runtime.operation_catalog_gateway import aexecute_operation_binding
 from runtime.atlas_graph import build_atlas_payload
@@ -108,6 +117,16 @@ _HTTP_BEARER = HTTPBearer(auto_error=False)
 
 def _is_public_request_path(path: str) -> bool:
     return path == "/v1" or path.startswith(_PUBLIC_ROUTE_PREFIX)
+
+
+def _is_mobile_sensitive_path(path: str) -> bool:
+    return (
+        path == "/session"
+        or path.startswith("/approvals/")
+        or path.startswith("/api/approvals/")
+        or path.startswith("/devices/")
+        or path.startswith("/api/devices/")
+    )
 
 
 def _route_visibility(route: APIRoute) -> str:
@@ -671,6 +690,8 @@ async def _praxis_transport_middleware(request: Request, call_next):
     response.headers.setdefault(_REQUEST_ID_HEADER, request.state.request_id)
     if _is_public_request_path(request.url.path):
         response.headers.setdefault("X-Praxis-Api-Version", _PUBLIC_API_VERSION)
+    if _is_mobile_sensitive_path(request.url.path):
+        apply_no_store_headers(response)
     return response
 
 
@@ -1591,6 +1612,45 @@ def launcher_recover(req: LauncherRecoverRequest) -> JSONResponse:
     except launcher_handlers.LauncherAuthorityError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.get("/api/launcher/resolve")
+def launcher_resolve(
+    workspace_ref: str = Query(default="praxis"),
+    host_ref: str = Query(default="default"),
+) -> JSONResponse:
+    """Return launcher workspace/base-path authority for the global command."""
+
+    headers = no_store_headers()
+    try:
+        workspace, host = normalize_launcher_resolution_request(
+            workspace_ref=str(workspace_ref or ""),
+            host_ref=str(host_ref or ""),
+        )
+        try:
+            rows = _shared_pg_conn().execute(
+                launcher_resolution_sql(placeholder_style="dollar"),
+                workspace,
+                host,
+            )
+        except Exception as exc:
+            raise LauncherAuthorityError(
+                "launcher_database_unavailable",
+                "launcher registry database authority is unavailable",
+                details={"error_type": type(exc).__name__},
+            ) from exc
+        payload = launcher_resolution_row_payload(
+            rows,
+            workspace_ref=workspace,
+            host_ref=host,
+        )
+    except LauncherAuthorityError as exc:
+        return JSONResponse(
+            status_code=launcher_error_status_code(exc),
+            content=jsonable_encoder(launcher_error_payload(exc)),
+            headers=headers,
+        )
+    return JSONResponse(content=jsonable_encoder(payload), headers=headers)
 
 
 @app.get("/api/atlas.html", response_model=None)
@@ -3216,6 +3276,123 @@ async def heartbeat_post(request: Request) -> Response:
 async def session_post(request: Request) -> Response:
     return await _dispatch_standard_route(request)
 
+
+class MobileApprovalRatifyRequest(BaseModel):
+    ratified_by: str = Field(min_length=1)
+    assertion_verified_at: datetime
+    assertion_expires_at: datetime
+
+
+class MobileBootstrapExchangeRequest(BaseModel):
+    bootstrap_token: str = Field(min_length=1)
+    device_id: str = Field(min_length=1)
+    ttl_s: int = Field(default=3600, ge=1, le=86400)
+    budget_limit: int = Field(default=25, ge=0, le=1000)
+
+
+class MobileDeviceRevokeRequest(BaseModel):
+    revoked_by: str = Field(min_length=1)
+    revoke_reason: str = Field(min_length=1)
+
+
+@app.post("/auth/bootstrap/exchange", tags=["mobile"])
+@app.post("/api/auth/bootstrap/exchange", tags=["mobile"])
+def exchange_mobile_bootstrap_token(body: MobileBootstrapExchangeRequest) -> JSONResponse:
+    from runtime.capability.sessions import MobileSessionError, exchange_bootstrap_token
+
+    try:
+        exchange = exchange_bootstrap_token(
+            _shared_pg_conn(),
+            bootstrap_token_secret=body.bootstrap_token,
+            device_id=body.device_id,
+            ttl_s=body.ttl_s,
+            budget_limit=body.budget_limit,
+        )
+    except MobileSessionError as exc:
+        return JSONResponse(
+            status_code=401,
+            content={"error_code": exc.reason_code, "message": str(exc)},
+            headers=no_store_headers(),
+        )
+
+    session = exchange["session"]
+    response = JSONResponse(
+        status_code=200,
+        content={
+            "session": jsonable_encoder({
+                "session_id": session.get("session_id"),
+                "principal_ref": session.get("principal_ref"),
+                "device_id": session.get("device_id"),
+                "created_at": session.get("created_at"),
+                "expires_at": session.get("expires_at"),
+                "budget_limit": session.get("budget_limit"),
+                "budget_used": session.get("budget_used"),
+            })
+        },
+        headers=no_store_headers(),
+    )
+    set_mobile_session_cookie(
+        response,
+        session_token=str(exchange["session_token_secret"]),
+        expires_at=session.get("expires_at") if isinstance(session.get("expires_at"), datetime) else None,
+    )
+    return response
+
+
+@app.post("/approvals/{request_id}/ratify", tags=["mobile"])
+@app.post("/api/approvals/{request_id}/ratify", tags=["mobile"])
+def ratify_mobile_approval(
+    request_id: str,
+    body: MobileApprovalRatifyRequest,
+) -> JSONResponse:
+    from runtime.capability.approval_lifecycle import (
+        ApprovalLifecycleError,
+        ratify_approval_request,
+    )
+
+    try:
+        grant = ratify_approval_request(
+            _shared_pg_conn(),
+            request_id=request_id,
+            ratified_by=body.ratified_by,
+            assertion_verified_at=body.assertion_verified_at,
+            assertion_expires_at=body.assertion_expires_at,
+        )
+    except ApprovalLifecycleError as exc:
+        status_code = 409
+        if exc.reason_code in {"approval.assertion_stale", "approval.assertion_timestamp_required"}:
+            status_code = 401
+        if exc.reason_code == "approval.request_not_found":
+            status_code = 404
+        return JSONResponse(
+            status_code=status_code,
+            content={"error_code": exc.reason_code, "message": str(exc), "details": exc.details},
+            headers=no_store_headers(),
+        )
+    return JSONResponse(
+        status_code=200,
+        content={"request_id": request_id, "grant": jsonable_encoder(grant)},
+        headers=no_store_headers(),
+    )
+
+
+@app.post("/devices/{device_id}/revoke", tags=["mobile"])
+@app.post("/api/devices/{device_id}/revoke", tags=["mobile"])
+def revoke_mobile_device(
+    device_id: str,
+    body: MobileDeviceRevokeRequest,
+) -> JSONResponse:
+    from runtime.capability.approval_lifecycle import revoke_device_authority
+
+    result = revoke_device_authority(
+        _shared_pg_conn(),
+        device_id=device_id,
+        revoked_by=body.revoked_by,
+        revoke_reason=body.revoke_reason,
+    )
+    return JSONResponse(status_code=200, content=result, headers=no_store_headers())
+
+
 @app.get("/api/trust")
 def get_trust() -> list[dict[str, Any]]:
     """Return ELO-based trust scores for all (provider, model) pairs."""
@@ -3804,7 +3981,7 @@ def health_check_endpoint() -> Any:
 
     import shutil
 
-    usage = shutil.disk_usage(str(Path(__file__).resolve().parents[3]))
+    usage = shutil.disk_usage(str(REPO_ROOT))
     free_gb = round(usage.free / (1024**3), 1)
     checks.append({"name": "disk", "ok": free_gb > 5, "free_gb": free_gb})
     if free_gb <= 5:

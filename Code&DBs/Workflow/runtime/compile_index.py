@@ -31,6 +31,7 @@ from runtime.integrations.display_names import (
     display_name_for_integration,
 )
 from runtime.object_schema import list_compiled_object_types
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from registry.integration_registry_sync import sync_integration_registry
 from registry.reference_catalog_sync import sync_reference_catalog
 
@@ -156,10 +157,6 @@ def _stable_hash(value: object) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
 
-def _repo_root_from_module() -> Path:
-    return Path(__file__).resolve().parents[3]
-
-
 def _compile_index_surface_paths() -> tuple[Path, ...]:
     runtime_dir = Path(__file__).resolve().parent
     resolved_paths: list[Path] = []
@@ -218,7 +215,7 @@ def current_repo_fingerprint(repo_root: str | Path | None = None) -> dict[str, A
     snapshot taken from one code revision does not silently hydrate another.
     """
 
-    resolved_root = Path(repo_root) if repo_root is not None else _repo_root_from_module()
+    resolved_root = Path(repo_root) if repo_root is not None else workspace_repo_root()
     resolved_root = resolved_root.resolve()
     try:
         git_head = _git_output(resolved_root, "rev-parse", "HEAD")

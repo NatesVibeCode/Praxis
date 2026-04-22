@@ -341,7 +341,8 @@ class CapabilityTracker:
             recorded_at=recorded_at,
         )
 
-        _get_repository().record_capability_outcome(
+        conn = _get_conn()
+        _get_repository(conn).record_capability_outcome(
             run_id=outcome.run_id,
             provider_slug=outcome.provider_slug,
             model_slug=outcome.model_slug,
@@ -350,6 +351,34 @@ class CapabilityTracker:
             output_quality_signals=outcome.output_quality_signals,
             recorded_at=recorded_at,
         )
+        try:
+            from .feedback_authority import (
+                RecordAuthorityFeedbackCommand,
+                record_feedback_event,
+            )
+
+            record_feedback_event(
+                conn,
+                RecordAuthorityFeedbackCommand(
+                    feedback_stream_ref="feedback.capability_outcome",
+                    target_ref=f"{outcome.provider_slug}/{outcome.model_slug}",
+                    source_ref=outcome.run_id,
+                    signal_kind="capability_quality_observed",
+                    signal_payload=outcome.to_dict(),
+                    proposed_action={
+                        "kind": "capability_reclassification_candidate",
+                        "inferred_capabilities": outcome.inferred_capabilities,
+                    },
+                    recorded_by="runtime.capability_feedback",
+                    idempotency_key=f"capability_outcome:{outcome.run_id}",
+                ),
+            )
+        except Exception as exc:  # pragma: no cover - feedback intake must not hide outcome write
+            _log.warning(
+                "capability feedback authority intake failed: %s",
+                exc,
+                exc_info=True,
+            )
 
         return outcome
 

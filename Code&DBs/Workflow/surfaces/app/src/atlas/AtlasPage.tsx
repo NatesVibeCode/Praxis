@@ -74,6 +74,8 @@ interface AtlasPayload {
 type LabelMode = 'auto' | 'always' | 'off';
 
 const ATLAS_EASING = 'ease-in-out-cubic';
+const ATLAS_GRAPH_TIMEOUT_MS = 15_000;
+const ATLAS_RENDER_READY_TIMEOUT_MS = 4_000;
 
 const RELATION_STYLES: Record<string, { color: string; style: 'solid' | 'dashed' | 'dotted' }> = {
   depends_on: { color: '#7aa2f7', style: 'solid' },
@@ -226,8 +228,13 @@ function useAtlasGraph() {
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), ATLAS_GRAPH_TIMEOUT_MS);
     try {
-      const response = await fetch('/api/atlas/graph', { cache: 'no-store' });
+      const response = await fetch('/api/atlas/graph', {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
       const body = await response.json().catch(() => null) as AtlasPayload | null;
       if (!response.ok || !body?.ok) {
         throw new Error(body?.detail || body?.error || `Atlas graph request failed with HTTP ${response.status}`);
@@ -235,8 +242,13 @@ function useAtlasGraph() {
       setPayload(body);
     } catch (err) {
       setPayload(null);
-      setError(err instanceof Error ? err.message : 'Atlas graph is unavailable.');
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError(`Atlas graph request timed out after ${Math.ceil(ATLAS_GRAPH_TIMEOUT_MS / 1000)}s.`);
+      } else {
+        setError(err instanceof Error ? err.message : 'Atlas graph is unavailable.');
+      }
     } finally {
+      window.clearTimeout(timeout);
       setLoading(false);
     }
   }, []);
@@ -736,10 +748,27 @@ export function AtlasPage() {
       }
     });
 
+    const readyTimeout = window.setTimeout(() => {
+      if (cyRef.current !== cy || ready) return;
+      applyFilters();
+      cy.resize();
+      fitVisibleGraph(80);
+      applyLabelMode();
+      setReady(true);
+      setGlobalAtlasDebug(cy, true);
+    }, ATLAS_RENDER_READY_TIMEOUT_MS);
+    cy.one('layoutstop', () => window.clearTimeout(readyTimeout));
+
     try {
       layoutOverview(false);
     } catch (err) {
-      setReady(false);
+      window.clearTimeout(readyTimeout);
+      applyFilters();
+      cy.resize();
+      fitVisibleGraph(80);
+      applyLabelMode();
+      setReady(true);
+      setGlobalAtlasDebug(cy, true);
       setRenderIssue(err instanceof Error ? err.message : 'Atlas layout failed.');
     }
 
@@ -750,6 +779,7 @@ export function AtlasPage() {
     window.addEventListener('resize', onResize);
 
     return () => {
+      window.clearTimeout(readyTimeout);
       window.removeEventListener('resize', onResize);
       cy.destroy();
       if (cyRef.current === cy) cyRef.current = null;

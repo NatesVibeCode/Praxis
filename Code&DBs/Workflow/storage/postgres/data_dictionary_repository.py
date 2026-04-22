@@ -19,7 +19,9 @@ _VALID_FIELD_KINDS = frozenset({
 })
 _VALID_CATEGORIES = frozenset({
     "table", "object_type", "integration", "dataset", "ingest",
-    "decision", "receipt", "tool", "object",
+    "decision", "receipt", "tool", "object", "command", "event",
+    "projection", "service_bus_channel", "feedback_stream", "definition",
+    "runtime_target",
 })
 
 

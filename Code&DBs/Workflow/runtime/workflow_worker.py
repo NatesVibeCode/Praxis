@@ -19,6 +19,10 @@ _log = logging.getLogger(__name__)
 def _repo_root_from_runtime_file(file_path: str) -> str:
     """Resolve the Praxis workspace root from this runtime entrypoint."""
 
+    configured = os.environ.get("PRAXIS_WORKSPACE_BASE_PATH")
+    if configured and configured.strip():
+        return os.path.abspath(os.path.expanduser(configured.strip()))
+
     here = os.path.abspath(file_path)
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here))))
 

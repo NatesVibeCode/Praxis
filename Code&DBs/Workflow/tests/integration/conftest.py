@@ -18,12 +18,12 @@ import _pg_test_conn
 if "WORKFLOW_DATABASE_URL" not in os.environ:
     os.environ["WORKFLOW_DATABASE_URL"] = _pg_test_conn.ensure_test_database_ready()
 
-# Ensure Postgres tools (pg_ctl, psql) are on PATH for dev_postgres tests
-# Add platform-specific Postgres bin to PATH if present
-for _pg_candidate in ["/opt/homebrew/opt/postgresql@14/bin", "/usr/lib/postgresql/14/bin"]:
-    if os.path.isdir(_pg_candidate) and _pg_candidate not in os.environ.get("PATH", ""):
-        os.environ["PATH"] = _pg_candidate + ":" + os.environ.get("PATH", "")
-        break
+# Ensure Postgres tools (pg_ctl, psql) are discoverable without baking in a
+# package-manager path. CI/dev harnesses can set PRAXIS_POSTGRES_BIN_DIR when
+# PATH does not already expose the tools.
+_pg_bin_dir = os.environ.get("PRAXIS_POSTGRES_BIN_DIR", "").strip()
+if _pg_bin_dir and os.path.isdir(_pg_bin_dir) and _pg_bin_dir not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _pg_bin_dir + os.pathsep + os.environ.get("PATH", "")
 
 from adapters.evidence import build_claim_received_proof
 from runtime import RouteIdentity

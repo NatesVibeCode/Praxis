@@ -38,6 +38,7 @@ Persistence, if needed, is the caller's responsibility.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Iterable
 
 from runtime.primitive_contracts import bug_open_status_values
@@ -389,25 +390,56 @@ def execute_action(
         }
 
 
+def _audit_apply_grant_covers(conn: Any, grant_ref: str | None) -> bool:
+    if not isinstance(grant_ref, str) or not grant_ref.strip():
+        return False
+    try:
+        rows = conn.execute(
+            """
+            SELECT grant_id, capability_scope, expires_at, revoked_at
+            FROM capability_grants
+            WHERE grant_id = $1
+              AND revoked_at IS NULL
+              AND (expires_at IS NULL OR expires_at > $2)
+            LIMIT 1
+            """,
+            grant_ref.strip(),
+            datetime.now(timezone.utc),
+        )
+    except Exception:
+        return False
+    if not rows:
+        return False
+    scope = dict(rows[0]).get("capability_scope")
+    if not isinstance(scope, dict):
+        return False
+    values = scope.get("command_types") or scope.get("capabilities") or ()
+    if isinstance(values, str):
+        values = [values]
+    return "*" in values or "audit.apply" in values
+
+
 def apply_autorunnable(
     conn: Any,
     *,
     only_patterns: set[str] | None = None,
     max_per_pattern: int = 200,
     max_tier: str = "deterministic",
+    authority_grant_ref: str | None = None,
 ) -> dict[str, Any]:
-    """Apply every action whose pattern is deterministic + autorun_ok.
+    """Apply actions covered by deterministic pattern plus explicit grant.
 
     This is the 'on-rails' path: findings whose resolution requires zero
     human judgment get resolved automatically. Every applied action is
     logged in the returned payload so the caller (heartbeat / HTTP /
     MCP) can record a receipt.
 
-    Patterns are gated on three criteria to count as autorunnable:
+    Patterns are gated on four criteria to count as autorunnable:
 
       1. pattern.deterministic is True
       2. action.autorun_ok is True (planner-authored per finding)
       3. pattern.name is in `only_patterns` when that filter is set
+      4. an active DB capability grant covers audit.apply
 
     Anything else falls through to the needs-review pile and is
     returned unchanged.
@@ -417,6 +449,7 @@ def apply_autorunnable(
     skipped: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     counts_per_pattern: dict[str, int] = {}
+    grant_covered = _audit_apply_grant_covers(conn, authority_grant_ref)
 
     for entry in plan["plans"]:
         action_payload = entry["action"]
@@ -440,6 +473,9 @@ def apply_autorunnable(
             continue
         if not pat.deterministic:
             skipped.append({**entry, "reason": "non-deterministic pattern"})
+            continue
+        if not grant_covered:
+            skipped.append({**entry, "reason": "capability grant required"})
             continue
         if not action_payload.get("autorun_ok"):
             skipped.append({**entry, "reason": "action not marked autorun_ok"})
@@ -473,6 +509,8 @@ def apply_autorunnable(
         "applied_count": len(applied),
         "skipped_count": len(skipped),
         "error_count":   len(errors),
+        "authority_grant_ref": authority_grant_ref,
+        "authority_grant_covered": grant_covered,
         "by_pattern":    counts_per_pattern,
         "applied":       applied[:20],          # truncate for payload size
         "applied_total": len(applied),
@@ -534,10 +572,11 @@ def derive_playbook() -> dict[str, Any]:
                     "max_tier": "|".join(_COST_TIER_ORDER) + " (default: none)",
                     "only_patterns": "optional allowlist",
                     "max_per_pattern": "int cap per batch",
+                    "authority_grant_ref": "required active grant covering audit.apply",
                 },
                 "returns": (
                     "applied / skipped / errors. Only patterns where "
-                    "pattern.deterministic AND action.autorun_ok AND "
+                    "pattern.deterministic AND action.autorun_ok AND grant covers audit.apply AND "
                     "pattern.cost_tier <= max_tier execute."
                 ),
             },
@@ -548,7 +587,7 @@ def derive_playbook() -> dict[str, Any]:
         "execution_guarantees": [
             "patterns with cost_tier='deterministic' need zero model calls",
             "patterns with deterministic=False are never autorun",
-            "apply with max_tier='deterministic' is safe to schedule unattended",
+            "apply requires an active DB capability grant covering audit.apply",
             "apply with max_tier='human' still only runs patterns whose "
             "action.autorun_ok is True — human judgment about whether to "
             "run the pattern at all is separate from tier selection",

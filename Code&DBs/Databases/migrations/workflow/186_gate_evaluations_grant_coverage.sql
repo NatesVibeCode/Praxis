@@ -4,7 +4,7 @@ ALTER TABLE gate_evaluations
     DROP CONSTRAINT IF EXISTS gate_evaluations_grant_ref_fkey;
 
 ALTER TABLE gate_evaluations
-    ADD COLUMN IF NOT EXISTS grant_ref TEXT NULL REFERENCES capability_grants (grant_id) ON DELETE RESTRICT;
+    ADD COLUMN IF NOT EXISTS grant_ref TEXT NULL;
 
 ALTER TABLE gate_evaluations
     ADD COLUMN IF NOT EXISTS plan_envelope_hash TEXT NULL;

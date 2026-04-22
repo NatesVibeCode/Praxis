@@ -11,9 +11,15 @@ fi
 REPO_ROOT="${PRAXIS_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 PLIST_NAME="$1"
 SRC="$REPO_ROOT/scripts/$PLIST_NAME"
-DST="$HOME/Library/LaunchAgents/$PLIST_NAME"
+default_launchd_dir() {
+    printf '%s' "$HOME"
+    printf '%s' "/Library/LaunchAgents"
+}
+
+LAUNCHD_DIR="${PRAXIS_LAUNCHD_DIR:-$(default_launchd_dir)}"
+DST="$LAUNCHD_DIR/$PLIST_NAME"
 PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"
-LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"
+LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-$(getconf PATH 2>/dev/null || printf '/usr/bin:/bin:/usr/sbin:/sbin')}"
 DATABASE_URL="${WORKFLOW_DATABASE_URL:-}"
 
 if [[ "$PLIST_NAME" != com.praxis.*.plist ]]; then
@@ -31,12 +37,23 @@ if [[ -z "$PYTHON_BIN" ]]; then
     exit 1
 fi
 
+if [[ -z "$DATABASE_URL" && -f "$REPO_ROOT/scripts/_workflow_env.sh" ]]; then
+    # shellcheck source=/dev/null
+    . "$REPO_ROOT/scripts/_workflow_env.sh"
+    workflow_load_repo_env >/dev/null 2>&1 || true
+    DATABASE_URL="${WORKFLOW_DATABASE_URL:-}"
+fi
+
 if [[ -z "$DATABASE_URL" && -f "$REPO_ROOT/.env" ]]; then
     DATABASE_URL="$(
         awk -F= '/^WORKFLOW_DATABASE_URL=/ {sub(/^[^=]*=/, ""); print; exit}' "$REPO_ROOT/.env"
     )"
 fi
-DATABASE_URL="${DATABASE_URL:-postgresql://localhost:5432/praxis}"
+
+if [[ -z "$DATABASE_URL" ]]; then
+    echo "error: WORKFLOW_DATABASE_URL not resolved; set it or create .env" >&2
+    exit 1
+fi
 
 xml_escape() {
     printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
@@ -46,7 +63,7 @@ sed_escape() {
     printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
 
-mkdir -p "$(dirname "$DST")" "$REPO_ROOT/artifacts"
+mkdir -p "$LAUNCHD_DIR" "$REPO_ROOT/artifacts"
 sed \
     -e "s|__PRAXIS_REPO_ROOT__|$(sed_escape "$(xml_escape "$REPO_ROOT")")|g" \
     -e "s|__PRAXIS_PYTHON_BIN__|$(sed_escape "$(xml_escape "$PYTHON_BIN")")|g" \

@@ -6,17 +6,14 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8765"],
       "port": 8765,
-      "cwd": "/Users/nate/Praxis/artifacts"
+      "cwd": "artifacts"
     },
     {
       "name": "praxis-app",
       "runtimeExecutable": "npx",
       "runtimeArgs": ["vite", "--port", "5173"],
       "port": 5173,
-      "cwd": "/Users/nate/Praxis/Code&DBs/Workflow/surfaces/app",
-      "env": {
-        "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis"
-      }
+      "cwd": "Code&DBs/Workflow/surfaces/app"
     }
   ]
 }

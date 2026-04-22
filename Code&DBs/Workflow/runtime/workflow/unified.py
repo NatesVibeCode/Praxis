@@ -117,6 +117,7 @@ from ._claiming import (  # noqa: F401
 
 # ── Status and observability ─────────────────────────────────────────────
 from ._status import (  # noqa: F401
+    cancel_job,
     cancel_run,
     get_run_status,
     inspect_job,

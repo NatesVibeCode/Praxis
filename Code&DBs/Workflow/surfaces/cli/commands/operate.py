@@ -7,6 +7,7 @@ import os
 
 from typing import Any, TextIO
 
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import (
     get_definition,
@@ -1376,7 +1377,7 @@ def _health_map_command(args: list[str], *, stdout: TextIO) -> int:
 
     from runtime.health_map import HealthMapper, format_health_map, format_health_map_json
 
-    workflow_root = str(Path(__file__).resolve().parents[3])
+    workflow_root = str(workspace_repo_root())
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
@@ -1748,7 +1749,7 @@ def _supervisor_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"error: unknown supervisor subcommand: {subcommand}\n")
         return 2
 
-    workflow_root = Path(__file__).resolve().parents[3]
+    workflow_root = workspace_repo_root()
     repo_root = workflow_root.parents[1]
     launcher_script = repo_root / "scripts" / "praxis"
 

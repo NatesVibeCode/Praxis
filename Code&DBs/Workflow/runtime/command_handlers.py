@@ -81,6 +81,46 @@ def _emit_system_event(
     )
 
 
+def _record_workflow_command_bus_envelope(
+    conn: "SyncPostgresConnection",
+    command: Any,
+    *,
+    message_type_ref: str,
+) -> None:
+    command_json = command.to_json() if hasattr(command, "to_json") else dict(command)
+    command_id = str(command_json.get("command_id") or "").strip()
+    if not command_id:
+        return
+    try:
+        from runtime.service_bus_authority import (
+            RecordServiceBusMessageCommand,
+            record_service_bus_message,
+        )
+
+        record_service_bus_message(
+            conn,
+            RecordServiceBusMessageCommand(
+                channel_ref="service_bus.channel.workflow_command",
+                message_type_ref=message_type_ref,
+                correlation_ref=command_id,
+                command_ref=command_id,
+                authority_domain_ref="authority.workflow_runs",
+                message_status="published",
+                payload={
+                    "command_id": command_id,
+                    "command_type": command_json.get("command_type"),
+                    "command_status": command_json.get("command_status"),
+                    "requested_by_kind": command_json.get("requested_by_kind"),
+                    "requested_by_ref": command_json.get("requested_by_ref"),
+                    "payload": command_json.get("payload") or {},
+                },
+                recorded_by="runtime.command_handlers",
+            ),
+        )
+    except Exception:
+        logger.warning("workflow command service-bus envelope record failed", exc_info=True)
+
+
 def _event_type_for_status(status: str) -> str:
     from runtime.control_commands import ControlCommandError, ControlCommandStatus
 
@@ -818,7 +858,13 @@ def request_workflow_submit_command(
         idempotency_key=n_ikey or f"workflow.submit.{n_kind}.{_uuid.uuid4().hex}",
         payload=_payload,
     )
-    return request_control_command(conn, intent, command_id=command_id, requested_at=requested_at)
+    command = request_control_command(conn, intent, command_id=command_id, requested_at=requested_at)
+    _record_workflow_command_bus_envelope(
+        conn,
+        command,
+        message_type_ref="service_bus.message.workflow_submit",
+    )
+    return command
 
 
 def request_workflow_spawn_command(
@@ -900,7 +946,13 @@ def request_workflow_spawn_command(
         idempotency_key=n_ikey or f"workflow.spawn.{n_kind}.{_uuid.uuid4().hex}",
         payload=payload,
     )
-    return request_control_command(conn, intent, command_id=command_id, requested_at=requested_at)
+    command = request_control_command(conn, intent, command_id=command_id, requested_at=requested_at)
+    _record_workflow_command_bus_envelope(
+        conn,
+        command,
+        message_type_ref="service_bus.message.workflow_spawn",
+    )
+    return command
 
 
 def render_workflow_spawn_response(
@@ -986,7 +1038,13 @@ def request_workflow_chain_submit_command(
             "adopt_active": n_adopt,
         },
     )
-    return request_control_command(conn, intent, command_id=command_id, requested_at=requested_at)
+    command = request_control_command(conn, intent, command_id=command_id, requested_at=requested_at)
+    _record_workflow_command_bus_envelope(
+        conn,
+        command,
+        message_type_ref="service_bus.message.workflow_chain_submit",
+    )
+    return command
 
 
 def render_workflow_submit_response(

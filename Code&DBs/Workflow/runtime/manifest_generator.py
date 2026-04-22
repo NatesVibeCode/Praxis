@@ -7,6 +7,7 @@ that the React shell can render. Uses claude CLI for LLM calls.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import uuid
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
 
 from runtime.block_catalog import block_ids, format_block_catalog_for_prompt
 from runtime.helm_manifest import normalize_helm_bundle, validate_helm_bundle
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +437,31 @@ class ManifestGenerator:
 
     def refine(self, manifest_id: str, instruction: str) -> GeneratedManifest:
         """Refine an existing manifest based on user feedback."""
+        try:
+            from .feedback_authority import (
+                RecordAuthorityFeedbackCommand,
+                record_feedback_event,
+            )
+
+            record_feedback_event(
+                self._conn,
+                RecordAuthorityFeedbackCommand(
+                    feedback_stream_ref="feedback.manifest_refinement",
+                    target_ref=manifest_id,
+                    source_ref="runtime.manifest_generator.refine",
+                    signal_kind="manifest_refinement_requested",
+                    signal_payload={"instruction": instruction},
+                    proposed_action={
+                        "kind": "manifest_refinement_candidate",
+                        "target_authority_domain_ref": "authority.object_schema",
+                    },
+                    recorded_by="runtime.manifest_generator",
+                    idempotency_key=None,
+                ),
+            )
+        except Exception:
+            logger.warning("manifest refinement feedback authority intake failed", exc_info=True)
+
         # Load current manifest JSON
         row = self._conn.fetchrow(
             "SELECT id, manifest, version FROM app_manifests WHERE id = $1",

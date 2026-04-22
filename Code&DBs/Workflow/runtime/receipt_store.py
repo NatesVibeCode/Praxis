@@ -23,6 +23,7 @@ from runtime.failure_classifier import classify_failure
 from runtime.friction_ledger import FrictionLedger, FrictionType
 from runtime.bug_tracker import BugTracker, BugCategory, BugSeverity, build_failure_signature
 from runtime._workflow_database import resolve_runtime_database_url
+from runtime.system_events import emit_system_event
 from storage.postgres.receipt_repository import PostgresReceiptRepository
 from storage.postgres import ensure_postgres_available
 from runtime.workflow.evidence_sequence_allocator import (
@@ -264,6 +265,49 @@ def _source_slug(payload: dict[str, Any]) -> str:
     return str(payload.get("agent") or "unknown")
 
 
+def _report_post_receipt_hook_failure(
+    conn,
+    *,
+    hook: str,
+    payload: dict[str, Any],
+    error: Exception,
+) -> None:
+    failure_code = str(payload.get("failure_code") or "").strip()
+    receipt_id = str(payload.get("receipt_id") or "").strip()
+    run_id = str(payload.get("run_id") or "").strip()
+    _log.warning(
+        "post-receipt hook %s failed for receipt_id=%s run_id=%s failure_code=%s: %s",
+        hook,
+        receipt_id or "unknown",
+        run_id or "unknown",
+        failure_code or "unknown",
+        error,
+        exc_info=True,
+    )
+    try:
+        emit_system_event(
+            conn,
+            event_type="post_receipt_hook.failed",
+            source_id=receipt_id or run_id or "unknown",
+            source_type="receipt" if receipt_id else "workflow_run",
+            payload={
+                "hook": hook,
+                "receipt_id": receipt_id or None,
+                "run_id": run_id or None,
+                "failure_code": failure_code or None,
+                "error_type": type(error).__name__,
+                "error": str(error),
+            },
+        )
+    except Exception as emit_error:
+        _log.warning(
+            "could not emit post-receipt hook failure event for hook %s: %s",
+            hook,
+            emit_error,
+            exc_info=True,
+        )
+
+
 def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
     status = str(payload.get("status") or "").strip().lower()
     failure_code = str(payload.get("failure_code") or "").strip()
@@ -290,8 +334,13 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
             job_label=label or "receipt",
             message=f"{failure_category or classification.category.value}: {failure_code}",
         )
-    except Exception:
-        pass
+    except Exception as error:
+        _report_post_receipt_hook_failure(
+            conn,
+            hook="friction_ledger.record",
+            payload=payload,
+            error=error,
+        )
 
     # 2) Run canonical bug-threshold aggregation from receipts table.
     try:
@@ -315,7 +364,12 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
             f"model:{_normalize_tag_value(str(payload.get('model_slug') or 'unknown'))}",
             f"signature:{_normalize_tag_value(str(signature.get('fingerprint') or 'unknown'))}",
         )
-        existing = tracker.list_bugs(open_only=True, tags=signature_tags, limit=1)
+        dedupe_tags = (
+            "auto-filed",
+            f"failure_code:{_normalize_tag_value(failure_code)}",
+            f"job_label:{_normalize_tag_value(label or 'unknown')}",
+        )
+        existing = tracker.list_bugs(open_only=True, tags=dedupe_tags, limit=1)
         failure_count = int(
             conn.fetchval(
                 """
@@ -358,8 +412,13 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
                         created_by="receipt_store",
                         notes=f"Observed failure {failure_code}.",
                     )
-                except Exception:
-                    pass
+                except Exception as error:
+                    _report_post_receipt_hook_failure(
+                        conn,
+                        hook="bug_evidence.receipt",
+                        payload=payload,
+                        error=error,
+                    )
             if run_id:
                 try:
                     tracker.link_evidence(
@@ -370,10 +429,20 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
                         created_by="receipt_store",
                         notes=f"Observed failing run {run_id}.",
                     )
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as error:
+                    _report_post_receipt_hook_failure(
+                        conn,
+                        hook="bug_evidence.run",
+                        payload=payload,
+                        error=error,
+                    )
+    except Exception as error:
+        _report_post_receipt_hook_failure(
+            conn,
+            hook="auto_bug_threshold",
+            payload=payload,
+            error=error,
+        )
 
 
 

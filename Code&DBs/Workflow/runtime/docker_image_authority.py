@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
+from runtime.workspace_paths import container_home, container_workspace_root
+
 DOCKER_IMAGE_ENV = "PRAXIS_DOCKER_IMAGE"
 DEFAULT_DOCKER_IMAGE = "praxis-worker:latest"
 DEFAULT_DOCKERFILE_RELATIVE = Path("docker") / "praxis-worker.Dockerfile"
@@ -64,6 +66,15 @@ def default_dockerfile_path() -> Path:
     return workflow_root() / DEFAULT_DOCKERFILE_RELATIVE
 
 
+def _docker_build_args() -> list[str]:
+    return [
+        "--build-arg",
+        f"PRAXIS_CONTAINER_WORKSPACE_ROOT={container_workspace_root()}",
+        "--build-arg",
+        f"PRAXIS_CONTAINER_HOME={container_home()}",
+    ]
+
+
 def build_default_docker_image(
     *,
     image_name: str = DEFAULT_DOCKER_IMAGE,
@@ -88,6 +99,7 @@ def build_default_docker_image(
                 str(dockerfile),
                 "-t",
                 image_name,
+                *_docker_build_args(),
                 str(workflow_root()),
             ],
             capture_output=True,

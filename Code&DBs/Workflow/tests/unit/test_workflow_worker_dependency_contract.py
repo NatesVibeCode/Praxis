@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
+import tempfile
 
 from runtime.workflow import _worker_loop as worker_loop
 from surfaces.cli.commands import workflow as workflow_commands
 from runtime import workflow_worker
+
+WORKSPACE_ROOT = Path(tempfile.gettempdir()) / "praxis-workspace"
+REQUIREMENTS_MANIFEST = WORKSPACE_ROOT / "requirements.runtime.txt"
 
 
 def test_worker_concurrency_env_override_wins(monkeypatch) -> None:
@@ -37,8 +42,17 @@ def test_worker_concurrency_auto_balances_cpu_and_memory(monkeypatch) -> None:
     assert decision["memory_slot_bytes"] == 2 * 1024**3
 
 
+def test_compose_worker_does_not_pin_parallelism_by_default() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "PRAXIS_WORKER_MAX_PARALLEL:-8" not in compose_text
+    assert "PRAXIS_WORKER_MAX_PARALLEL: ${PRAXIS_WORKER_MAX_PARALLEL:-}" in compose_text
+
+
 def test_start_worker_checks_dependency_contract_before_launch(monkeypatch) -> None:
     observed: dict[str, object] = {}
+    monkeypatch.delenv("PRAXIS_WORKSPACE_BASE_PATH", raising=False)
 
     def _fake_require_runtime_dependencies(*, scope: str = "workflow_worker", manifest_path=None):
         observed["scope"] = scope
@@ -46,7 +60,7 @@ def test_start_worker_checks_dependency_contract_before_launch(monkeypatch) -> N
         return {
             "ok": True,
             "scope": scope,
-            "manifest_path": "/tmp/requirements.runtime.txt",
+            "manifest_path": str(REQUIREMENTS_MANIFEST),
             "required_count": 9,
             "available_count": 9,
             "missing_count": 0,
@@ -70,14 +84,45 @@ def test_start_worker_checks_dependency_contract_before_launch(monkeypatch) -> N
 
     workflow_worker.start_worker(
         poll_interval=0.5,
-        file_path="/tmp/Praxis/Code&DBs/Workflow/runtime/workflow_worker.py",
+        file_path=str(WORKSPACE_ROOT / "Code&DBs/Workflow/runtime/workflow_worker.py"),
     )
 
     assert observed["scope"] == "workflow_worker"
     assert observed["manifest_path"] is None
     assert observed["conn"] == "fake-conn"
-    assert observed["repo_root"] == "/tmp/Praxis"
+    assert observed["repo_root"] == str(WORKSPACE_ROOT)
     assert observed["poll_interval"] == 0.5
+
+
+def test_start_worker_prefers_workspace_base_env(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    monkeypatch.setenv(
+        "PRAXIS_WORKSPACE_BASE_PATH",
+        str(WORKSPACE_ROOT),
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "require_runtime_dependencies",
+        lambda scope="workflow_worker", manifest_path=None: {
+            "ok": True,
+            "manifest_path": str(REQUIREMENTS_MANIFEST),
+        },
+    )
+    monkeypatch.setattr(workflow_worker, "_build_worker_connection", lambda: "fake-conn")
+    monkeypatch.setattr(
+        workflow_worker,
+        "_run_worker_loop",
+        lambda conn, repo_root, *, poll_interval=2.0: observed.update(
+            {"repo_root": repo_root}
+        ),
+    )
+
+    workflow_worker.start_worker(
+        file_path=str(WORKSPACE_ROOT / "Code&DBs/Workflow/runtime/workflow_worker.py"),
+    )
+
+    assert observed["repo_root"] == str(WORKSPACE_ROOT)
 
 
 def test_workflow_worker_uses_extracted_worker_loop(monkeypatch) -> None:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 import uuid
 
@@ -10,6 +12,8 @@ from runtime.compile_artifacts import CompileArtifactStore
 import runtime.workflow_graph_compiler as workflow_graph_compiler
 from runtime.workflow import _admission
 from runtime.workflow import unified
+
+WORKDIR = str(Path(tempfile.gettempdir()) / "praxis-workspace")
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +42,7 @@ def _stub_graph_submission_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
         "resolve_native_runtime_profile_config",
         lambda *_args, **_kwargs: SimpleNamespace(
             workspace_ref="praxis",
-            workdir="/Users/nate/Praxis",
+            workdir=WORKDIR,
             model_profile_id="model.default",
             provider_policy_id="provider.default",
             sandbox_profile_ref="sandbox.default",

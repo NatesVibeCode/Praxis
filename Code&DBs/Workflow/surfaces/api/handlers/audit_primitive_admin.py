@@ -107,6 +107,7 @@ def _handle_apply(request: Any, path: str) -> None:
             apply_autorunnable(
                 pg, only_patterns=only, max_per_pattern=max_per,
                 max_tier=max_tier,
+                authority_grant_ref=body.get("authority_grant_ref"),
             ),
         )
     except Exception as exc:

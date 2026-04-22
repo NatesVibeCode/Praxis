@@ -14,5 +14,3 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN ln -sf /usr/bin/python3 /usr/local/bin/python
 RUN npm install -g @openai/codex@0.116.0
-
-WORKDIR /workspace

@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 
 from adapters.deterministic import DeterministicTaskRequest
 from runtime._helpers import _fail
-from runtime.workflow.execution_bundle import _completion_contract
+from runtime.workflow.execution_bundle import (
+    _completion_contract,
+    build_execution_bundle,
+    render_execution_bundle,
+)
 
 
 def test_architecture_jobs_do_not_auto_require_submission() -> None:
@@ -30,6 +34,41 @@ def test_mutating_jobs_require_sealed_code_submission_by_default() -> None:
         verify_refs=("verify.job.local",),
     )
 
+    assert contract["submission_required"] is True
+    assert contract["verification_required"] is True
+    assert contract["result_kind"] == "code_change"
+    assert contract["submit_tool_names"] == [
+        "praxis_submit_code_change",
+        "praxis_get_submission",
+    ]
+
+
+def test_rendered_submission_instruction_uses_canonical_workflow_tools_call() -> None:
+    bundle = build_execution_bundle(
+        job_label="job.alpha",
+        prompt="Patch the declared file.",
+        task_type="build",
+        write_scope=("runtime/example.py",),
+    )
+
+    rendered = render_execution_bundle(bundle)
+
+    assert "praxis workflow tools call praxis_submit_code_change" in rendered
+    assert "praxis submit_code_change" not in rendered
+
+
+def test_write_scope_requires_sealed_code_submission_even_without_mutating_task_type() -> None:
+    bundle = build_execution_bundle(
+        job_label="job.alpha",
+        prompt="Audit and patch the declared file.",
+        task_type="architecture",
+        write_scope=("runtime/example.py",),
+        verify_refs=("verify.job.alpha",),
+        submission_required=False,
+        verification_required=False,
+    )
+
+    contract = bundle["completion_contract"]
     assert contract["submission_required"] is True
     assert contract["verification_required"] is True
     assert contract["result_kind"] == "code_change"

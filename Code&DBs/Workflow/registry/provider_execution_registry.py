@@ -24,6 +24,7 @@ from typing import Any
 from adapters import provider_transport
 from adapters.provider_types import ProviderAdapterContract, ProviderCLIProfile
 from runtime._workflow_database import resolve_runtime_database_url
+from runtime.workspace_paths import repo_root as workspace_repo_root
 from storage.postgres.connection import resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
@@ -163,7 +164,7 @@ def _clear_registry_state() -> None:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _read_repo_env_file(path: Path) -> dict[str, str]:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 from io import StringIO
 from types import SimpleNamespace
 
@@ -14,6 +16,8 @@ import registry.provider_onboarding._report as provider_onboarding_report
 import surfaces.mcp.tools.provider_onboard as provider_onboard_tool
 from surfaces.cli import native_operator
 from surfaces.mcp.tools.provider_onboard import tool_praxis_provider_onboard
+
+LOCALCLI_BINARY_PATH = str(Path(tempfile.gettempdir()) / "praxis-cli" / "localcli-agent")
 
 
 class _FakeTx:
@@ -764,7 +768,7 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
                 summary="cli ready",
                 details={
                     "selected_transport": spec.selected_transport,
-                    "binary_path": "/Users/praxis/.local/bin/localcli-agent",
+                    "binary_path": LOCALCLI_BINARY_PATH,
                     "credential_source": "ambient_cli_session",
                 },
             ),

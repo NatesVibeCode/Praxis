@@ -112,7 +112,8 @@ export function parseShellLocationState(search: string, pathname: string = windo
   const params = new URLSearchParams(search);
   const shellState = createDefaultShellState();
 
-  // Path-based routes: /app/run/{runId}, /app/build, /app/costs
+  // Path-based routes: /app/run/{runId}, /app/workflow, /app/costs.
+  // /app/build remains accepted as a legacy alias for older bookmarks.
   const appRelative = pathname.replace(/^\/app\/?/, '');
   const runMatch = appRelative.match(/^run\/(.+)/);
   if (runMatch) {
@@ -129,7 +130,12 @@ export function parseShellLocationState(search: string, pathname: string = windo
       chatOpen: false,
     };
   }
-  if (appRelative === 'build' || appRelative.startsWith('build/')) {
+  if (
+    appRelative === 'workflow'
+    || appRelative.startsWith('workflow/')
+    || appRelative === 'build'
+    || appRelative.startsWith('build/')
+  ) {
     return {
       shellState: {
         ...shellState,
@@ -304,7 +310,7 @@ export function buildShellUrl(state: ShellState, chatOpen: boolean): string {
     if (state.buildWorkflowId) params.set('workflow', state.buildWorkflowId);
     if (state.buildIntent) params.set('intent', state.buildIntent);
     const query = params.toString();
-    return `/app/build${query ? `?${query}` : ''}`;
+    return `/app/workflow${query ? `?${query}` : ''}`;
   }
 
   if (state.activeTabId === 'costs') {

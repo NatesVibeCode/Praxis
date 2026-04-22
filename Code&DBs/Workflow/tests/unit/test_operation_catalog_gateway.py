@@ -12,6 +12,26 @@ class _ExampleCommand(BaseModel):
     value: str
 
 
+class _FakeAuthorityConn:
+    def __init__(self, *, cached_result: dict[str, object] | None = None) -> None:
+        self.cached_result = cached_result
+        self.fetchrow_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.execute_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        self.fetchrow_calls.append((query, args))
+        if "FROM authority_operation_receipts" in query:
+            return self.cached_result
+        raise AssertionError(f"unexpected fetchrow: {query}")
+
+    def execute(self, query: str, *args: object) -> list[dict[str, object]]:
+        self.execute_calls.append((query, args))
+        return []
+
+    def executed_sql(self) -> str:
+        return "\n".join(query for query, _args in self.execute_calls)
+
+
 def test_execute_operation_from_subsystems_resolves_and_invokes_binding(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -35,9 +55,11 @@ def test_execute_operation_from_subsystems_resolves_and_invokes_binding(monkeypa
         decision_ref="decision.operation.example.20260416",
     )
 
+    conn = _FakeAuthorityConn()
+
     class _Subsystems:
         def get_pg_conn(self) -> object:
-            return object()
+            return conn
 
     subsystems = _Subsystems()
     monkeypatch.setattr(
@@ -53,20 +75,14 @@ def test_execute_operation_from_subsystems_resolves_and_invokes_binding(monkeypa
     )
 
     assert result["value"] == "authoritative"
-    assert result["operation_receipt"] == {
-        "operation_ref": "operator.example",
-        "operation_name": "operator.example",
-        "operation_kind": "command",
-        "source_kind": "operation_command",
-        "authority_ref": "authority.example",
-        "projection_ref": None,
-        "posture": "operate",
-        "idempotency_policy": "non_idempotent",
-        "binding_revision": "binding.operation.example.20260416",
-        "decision_ref": "decision.operation.example.20260416",
-        "execution_status": "completed",
-        "result_status": None,
-    }
+    receipt = result["operation_receipt"]
+    assert receipt["operation_name"] == "operator.example"
+    assert receipt["authority_domain_ref"] == "authority.example"
+    assert receipt["storage_target_ref"] == "praxis.primary_postgres"
+    assert receipt["execution_status"] == "completed"
+    assert receipt["event_ids"]
+    assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
+    assert "INSERT INTO authority_events" in conn.executed_sql()
     assert captured["command"].value == "authoritative"
     assert captured["subsystems"] is subsystems
 
@@ -116,9 +132,11 @@ def test_execute_query_operation_also_attaches_operation_receipt(monkeypatch) ->
         decision_ref="decision.operation.query_example.20260416",
     )
 
+    conn = _FakeAuthorityConn()
+
     class _Subsystems:
         def get_pg_conn(self) -> object:
-            return object()
+            return conn
 
     monkeypatch.setattr(
         gateway,
@@ -135,6 +153,9 @@ def test_execute_query_operation_also_attaches_operation_receipt(monkeypatch) ->
     assert result["value"] == "query"
     assert result["operation_receipt"]["operation_name"] == "operator.query_example"
     assert result["operation_receipt"]["result_status"] is None
+    assert result["operation_receipt"]["event_ids"] == []
+    assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
+    assert "INSERT INTO authority_events" not in conn.executed_sql()
 
 
 def test_aexecute_operation_from_subsystems_awaits_async_handlers(monkeypatch) -> None:
@@ -156,9 +177,11 @@ def test_aexecute_operation_from_subsystems_awaits_async_handlers(monkeypatch) -
         decision_ref="decision.operation.semantic_assertions.20260416",
     )
 
+    conn = _FakeAuthorityConn()
+
     class _Subsystems:
         def get_pg_conn(self) -> object:
-            return object()
+            return conn
 
     monkeypatch.setattr(
         gateway,
@@ -176,6 +199,7 @@ def test_aexecute_operation_from_subsystems_awaits_async_handlers(monkeypatch) -
 
     assert result["value"] == "async"
     assert result["operation_receipt"]["operation_name"] == "semantic_assertions.list"
+    assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
 
 
 def test_execute_operation_from_subsystems_runs_async_handlers_for_sync_surfaces(monkeypatch) -> None:
@@ -197,9 +221,11 @@ def test_execute_operation_from_subsystems_runs_async_handlers_for_sync_surfaces
         decision_ref="decision.operation.semantic_assertions.20260416",
     )
 
+    conn = _FakeAuthorityConn()
+
     class _Subsystems:
         def get_pg_conn(self) -> object:
-            return object()
+            return conn
 
     monkeypatch.setattr(
         gateway,
@@ -215,3 +241,45 @@ def test_execute_operation_from_subsystems_runs_async_handlers_for_sync_surfaces
 
     assert result["value"] == "sync-surface"
     assert result["operation_receipt"]["operation_name"] == "semantic_assertions.list"
+
+
+def test_idempotent_operation_returns_prior_receipt_payload(monkeypatch) -> None:
+    cached = {
+        "receipt_id": "00000000-0000-0000-0000-000000000001",
+        "result_payload": {"value": "cached", "operation_receipt": {"execution_status": "replayed"}},
+    }
+    conn = _FakeAuthorityConn(cached_result=cached)
+    binding = SimpleNamespace(
+        operation_ref="operator.idempotent_example",
+        operation_name="operator.idempotent_example",
+        source_kind="operation_command",
+        operation_kind="command",
+        command_class=_ExampleCommand,
+        handler=lambda _command, _subsystems: {"value": "should-not-run"},
+        authority_ref="authority.example",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="idempotent",
+        idempotency_key_fields=["value"],
+        binding_revision="binding.operation.idempotent_example.20260416",
+        decision_ref="decision.operation.idempotent_example.20260416",
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.idempotent_example",
+        payload={"value": "same"},
+    )
+
+    assert result["value"] == "cached"
+    assert conn.execute_calls == []

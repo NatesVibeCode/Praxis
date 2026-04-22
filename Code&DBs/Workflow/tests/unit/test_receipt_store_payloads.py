@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from runtime import receipt_store
 
@@ -55,6 +56,112 @@ def test_load_receipt_payload_reads_from_postgres_and_normalizes(monkeypatch):
     assert payload["finished_at"] == "2026-04-06T12:30:00+00:00"
     assert payload["latency_ms"] == 1500
     assert payload["total_cost_usd"] == 0.25
+
+
+def test_post_receipt_hooks_dedupe_auto_bug_by_aggregation_tags(monkeypatch):
+    observed: dict[str, object] = {}
+
+    class _NoopFrictionLedger:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def record(self, **_kwargs):
+            return None
+
+    class _FakeTracker:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def list_bugs(self, *, open_only, tags, limit):
+            observed["dedupe_tags"] = tags
+            assert open_only is True
+            assert limit == 1
+            return [SimpleNamespace(bug_id="BUG-existing")]
+
+        def file_bug(self, **_kwargs):
+            raise AssertionError("existing aggregation bug should be reused")
+
+        def link_evidence(self, bug_id, **kwargs):
+            observed.setdefault("links", []).append((bug_id, kwargs))
+
+    class _Conn:
+        def fetchval(self, *_args):
+            return 4
+
+    monkeypatch.setattr(receipt_store, "FrictionLedger", _NoopFrictionLedger)
+    monkeypatch.setattr(receipt_store, "BugTracker", _FakeTracker)
+    monkeypatch.setattr(receipt_store, "emit_system_event", lambda *_args, **_kwargs: None)
+
+    receipt_store._run_post_receipt_hooks(
+        {
+            "status": "failed",
+            "failure_code": "sandbox_error",
+            "failure_category": "sandbox_error",
+            "job_label": "wave0_integrated_design",
+            "node_id": "wave0_integrated_design",
+            "receipt_id": "receipt:workflow_1:1:1",
+            "run_id": "workflow_1",
+        },
+        conn=_Conn(),
+    )
+
+    assert observed["dedupe_tags"] == (
+        "auto-filed",
+        "failure_code:sandbox_error",
+        "job_label:wave0_integrated_design",
+    )
+    assert ("BUG-existing",) == tuple({bug_id for bug_id, _ in observed["links"]})
+
+
+def test_post_receipt_hooks_emit_events_for_evidence_link_failures(monkeypatch):
+    events: list[dict[str, object]] = []
+
+    class _NoopFrictionLedger:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def record(self, **_kwargs):
+            return None
+
+    class _FakeTracker:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def list_bugs(self, **_kwargs):
+            return []
+
+        def file_bug(self, **_kwargs):
+            return SimpleNamespace(bug_id="BUG-new"), []
+
+        def link_evidence(self, *_args, **_kwargs):
+            raise RuntimeError("evidence authority unavailable")
+
+    class _Conn:
+        def fetchval(self, *_args):
+            return 3
+
+    def _emit_system_event(_conn, **kwargs):
+        events.append(kwargs)
+
+    monkeypatch.setattr(receipt_store, "FrictionLedger", _NoopFrictionLedger)
+    monkeypatch.setattr(receipt_store, "BugTracker", _FakeTracker)
+    monkeypatch.setattr(receipt_store, "emit_system_event", _emit_system_event)
+
+    receipt_store._run_post_receipt_hooks(
+        {
+            "status": "failed",
+            "failure_code": "workflow.timeout",
+            "job_label": "wave6",
+            "node_id": "wave6",
+            "receipt_id": "receipt:workflow_2:1:1",
+            "run_id": "workflow_2",
+        },
+        conn=_Conn(),
+    )
+
+    hooks = {event["payload"]["hook"] for event in events}
+    assert {"bug_evidence.receipt", "bug_evidence.run"} <= hooks
+    assert {event["event_type"] for event in events} == {"post_receipt_hook.failed"}
 
 
 def test_apply_receipt_provenance_rewrites_legacy_git_payload_when_repo_snapshot_is_available(

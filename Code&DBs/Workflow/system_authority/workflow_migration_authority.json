@@ -193,6 +193,7 @@
     "185_mobile_capability_ledger.sql",
     "186_gate_evaluations_grant_coverage.sql",
     "187_webauthn_challenges.sql",
+    "188_mobile_sessions.sql",
     "189_oversight_instrumentation.sql",
     "190_surface_catalog_gate_icons.sql",
     "191_provider_model_retirement_ledger.sql",
@@ -202,7 +203,17 @@
     "195_operator_ideas_authority.sql",
     "196_workflow_control_commands_view.sql",
     "197_no_synthetic_provider_auth.sql",
-    "198_remove_unbacked_anthropic_haiku_runtime_model.sql"
+    "198_remove_unbacked_anthropic_haiku_runtime_model.sql",
+    "199_workspace_base_path_authority.sql",
+    "200_cqrs_authority_kernel.sql",
+    "201_service_lifecycle_authority.sql",
+    "202_cqrs_authority_object_registry.sql",
+    "203_cqrs_operation_contract_enforcement.sql",
+    "204_cqrs_event_projection_contracts.sql",
+    "205_feedback_authority.sql",
+    "206_legacy_schema_authority_backfill.sql",
+    "207_legacy_domain_authority_assignment.sql",
+    "208_structured_document_semantic_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -4653,8 +4664,30 @@
         "object_name": "idx_schema_migrations_bootstrap_role"
       }
     ],
-    "174_surface_catalog_trigger_icons.sql": [],
-    "175_openrouter_primary_chat_engine.sql": [],
+    "174_surface_catalog_trigger_icons.sql": [
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.trigger-webhook"
+      },
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.trigger-schedule"
+      }
+    ],
+    "175_openrouter_primary_chat_engine.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_transport_admissions.openrouter.llm_task"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_model_candidates.candidate.openrouter.anthropic.claude-sonnet-4-6"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.decision.2026-04-19.openrouter-primary-chat-engine"
+      }
+    ],
     "176_data_dictionary_schema_snapshots.sql": [
       {
         "object_type": "table",
@@ -4799,10 +4832,50 @@
         "object_name": "idx_data_dictionary_wiring_audit_snapshots_taken"
       }
     ],
-    "182_audit_exclusions.sql": [],
-    "182_restore_anthropic_cli_only.sql": [],
-    "183_codex_skip_git_repo_check.sql": [],
-    "184_anthropic_cli_candidates.sql": [],
+    "182_audit_exclusions.sql": [
+      {
+        "object_type": "table",
+        "object_name": "audit_exclusions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_audit_exclusions_audit_finding"
+      }
+    ],
+    "182_restore_anthropic_cli_only.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_cli_profiles.anthropic"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_lane_policy.anthropic"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_concurrency.anthropic"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.decision.2026-04-20.anthropic-cli-only-restored"
+      }
+    ],
+    "183_codex_skip_git_repo_check.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_cli_profiles.openai"
+      }
+    ],
+    "184_anthropic_cli_candidates.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_model_candidates.candidate.anthropic.cli.claude-sonnet-4-6"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_model_candidates.candidate.anthropic.cli.claude-opus-4-7"
+      }
+    ],
     "185_mobile_capability_ledger.sql": [
       {
         "object_type": "table",
@@ -4885,6 +4958,36 @@
         "object_name": "webauthn_challenges_device_active_idx"
       }
     ],
+    "188_mobile_sessions.sql": [
+      {
+        "object_type": "table",
+        "object_name": "mobile_bootstrap_tokens"
+      },
+      {
+        "object_type": "index",
+        "object_name": "mobile_bootstrap_tokens_principal_active_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "mobile_sessions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "mobile_sessions_principal_active_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "mobile_sessions_device_active_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "mobile_session_budget_events"
+      },
+      {
+        "object_type": "index",
+        "object_name": "mobile_session_budget_events_session_idx"
+      }
+    ],
     "189_oversight_instrumentation.sql": [
       {
         "object_type": "table",
@@ -4927,7 +5030,28 @@
         "object_name": "idx_session_blast_radius_run"
       }
     ],
-    "190_surface_catalog_gate_icons.sql": [],
+    "190_surface_catalog_gate_icons.sql": [
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.ctrl-branch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.ctrl-approval"
+      },
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.ctrl-validation"
+      },
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.ctrl-retry"
+      },
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.ctrl-on-failure"
+      }
+    ],
     "191_provider_model_retirement_ledger.sql": [
       {
         "object_type": "table",
@@ -4942,8 +5066,26 @@
         "object_name": "provider_model_retirement_ledger_effective_date_idx"
       }
     ],
-    "192_heartbeat_probe_kind_model_retirement.sql": [],
-    "193_native_self_hosted_smoke_workspace_repair.sql": [],
+    "192_heartbeat_probe_kind_model_retirement.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "heartbeat_probe_snapshots.heartbeat_probe_snapshots_probe_kind_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "heartbeat_runs.heartbeat_runs_scope_check"
+      }
+    ],
+    "193_native_self_hosted_smoke_workspace_repair.sql": [
+      {
+        "object_type": "row",
+        "object_name": "workflow_definitions.workflow_definition.native_self_hosted_smoke.v1"
+      },
+      {
+        "object_type": "row",
+        "object_name": "workflow_definition_nodes.workflow_definition.native_self_hosted_smoke.v1"
+      }
+    ],
     "194_projection_freshness_sla_config.sql": [
       {
         "object_type": "row",
@@ -5038,8 +5180,302 @@
         "object_name": "workflow_control_commands"
       }
     ],
-    "197_no_synthetic_provider_auth.sql": [],
-    "198_remove_unbacked_anthropic_haiku_runtime_model.sql": []
+    "197_no_synthetic_provider_auth.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_transport_admissions.anthropic"
+      },
+      {
+        "object_type": "row",
+        "object_name": "registry_sandbox_profile_authority.no_anthropic_api_key"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_cli_profiles.anthropic.sandbox_env_overrides"
+      }
+    ],
+    "198_remove_unbacked_anthropic_haiku_runtime_model.sql": [
+      {
+        "object_type": "row",
+        "object_name": "registry_native_runtime_profile_authority.no_unbacked_anthropic_haiku"
+      },
+      {
+        "object_type": "row",
+        "object_name": "model_sync_config.anthropic.no_unbacked_haiku"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_model_candidates.anthropic.haiku.inactive"
+      }
+    ],
+    "199_workspace_base_path_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "registry_workspace_base_path_authority"
+      },
+      {
+        "object_type": "column",
+        "object_name": "registry_workspace_authority.base_path_ref"
+      },
+      {
+        "object_type": "column",
+        "object_name": "registry_workspace_authority.repo_root_path"
+      },
+      {
+        "object_type": "column",
+        "object_name": "registry_workspace_authority.workdir_path"
+      }
+    ],
+    "200_cqrs_authority_kernel.sql": [
+      {
+        "object_type": "table",
+        "object_name": "authority_storage_targets"
+      },
+      {
+        "object_type": "table",
+        "object_name": "authority_domains"
+      },
+      {
+        "object_type": "table",
+        "object_name": "authority_projection_registry"
+      },
+      {
+        "object_type": "table",
+        "object_name": "authority_projection_state"
+      },
+      {
+        "object_type": "table",
+        "object_name": "authority_operation_receipts"
+      },
+      {
+        "object_type": "table",
+        "object_name": "authority_events"
+      },
+      {
+        "object_type": "column",
+        "object_name": "operation_catalog_registry.authority_domain_ref"
+      },
+      {
+        "object_type": "column",
+        "object_name": "operation_catalog_registry.storage_target_ref"
+      }
+    ],
+    "201_service_lifecycle_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "service_reconciler_registry"
+      },
+      {
+        "object_type": "table",
+        "object_name": "runtime_targets"
+      },
+      {
+        "object_type": "table",
+        "object_name": "service_definitions"
+      },
+      {
+        "object_type": "table",
+        "object_name": "service_desired_states"
+      },
+      {
+        "object_type": "table",
+        "object_name": "service_instance_events"
+      },
+      {
+        "object_type": "table",
+        "object_name": "service_instance_projection"
+      },
+      {
+        "object_type": "index",
+        "object_name": "runtime_targets_scope_enabled_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "service_desired_states_active_unique_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "service_instance_events_service_target_seq_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "service_instance_projection_status_idx"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.service.lifecycle.register_target"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.service.lifecycle.register_service"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.service.lifecycle.declare_desired_state"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.service.lifecycle.record_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.service.lifecycle.get_projection"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.service.lifecycle.list_targets"
+      }
+    ],
+    "202_cqrs_authority_object_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "authority_object_registry"
+      },
+      {
+        "object_type": "table",
+        "object_name": "service_bus_channel_registry"
+      },
+      {
+        "object_type": "table",
+        "object_name": "service_bus_message_contracts"
+      },
+      {
+        "object_type": "table",
+        "object_name": "service_bus_message_ledger"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_object_ownership"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_object_drift_report"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_authority_object_registry_updated_at"
+      }
+    ],
+    "203_cqrs_operation_contract_enforcement.sql": [
+      {
+        "object_type": "function",
+        "object_name": "enforce_authority_object_dictionary_binding"
+      },
+      {
+        "object_type": "function",
+        "object_name": "enforce_operation_catalog_cqrs_contract"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_authority_object_dictionary_binding"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_operation_catalog_cqrs_contract"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_contract_validation_report"
+      }
+    ],
+    "204_cqrs_event_projection_contracts.sql": [
+      {
+        "object_type": "table",
+        "object_name": "authority_event_contracts"
+      },
+      {
+        "object_type": "table",
+        "object_name": "authority_projection_contracts"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_event_projection_contract_report"
+      }
+    ],
+    "205_feedback_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "authority_feedback_streams"
+      },
+      {
+        "object_type": "table",
+        "object_name": "authority_feedback_events"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_feedback_event_projection"
+      }
+    ],
+    "206_legacy_schema_authority_backfill.sql": [
+      {
+        "object_type": "view",
+        "object_name": "authority_schema_adoption_report"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_legacy_backfill_summary"
+      }
+    ],
+    "207_legacy_domain_authority_assignment.sql": [
+      {
+        "object_type": "table",
+        "object_name": "authority_legacy_domain_assignment_rules"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_legacy_domain_assignment_summary"
+      }
+    ],
+    "208_structured_document_semantic_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "structured_document_revisions"
+      },
+      {
+        "object_type": "table",
+        "object_name": "structured_document_sections"
+      },
+      {
+        "object_type": "table",
+        "object_name": "structured_document_section_embeddings"
+      },
+      {
+        "object_type": "table",
+        "object_name": "structured_document_context_selection_receipts"
+      },
+      {
+        "object_type": "view",
+        "object_name": "structured_document_section_semantics"
+      },
+      {
+        "object_type": "view",
+        "object_name": "structured_document_context_receipt_summary"
+      },
+      {
+        "object_type": "index",
+        "object_name": "structured_document_context_selection_idempotency_idx"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_structured_document_section_search_vector"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_structured_document_sections_search_vector"
+      },
+      {
+        "object_type": "row",
+        "object_name": "semantic_predicates.defines"
+      },
+      {
+        "object_type": "row",
+        "object_name": "semantic_predicates.constrains"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.structured_documents.record_context_selection"
+      }
+    ]
   },
   "policy_buckets": {
     "canonical": [
@@ -5236,6 +5672,7 @@
       "185_mobile_capability_ledger.sql",
       "186_gate_evaluations_grant_coverage.sql",
       "187_webauthn_challenges.sql",
+      "188_mobile_sessions.sql",
       "189_oversight_instrumentation.sql",
       "190_surface_catalog_gate_icons.sql",
       "191_provider_model_retirement_ledger.sql",
@@ -5245,7 +5682,17 @@
       "195_operator_ideas_authority.sql",
       "196_workflow_control_commands_view.sql",
       "197_no_synthetic_provider_auth.sql",
-      "198_remove_unbacked_anthropic_haiku_runtime_model.sql"
+      "198_remove_unbacked_anthropic_haiku_runtime_model.sql",
+      "199_workspace_base_path_authority.sql",
+      "200_cqrs_authority_kernel.sql",
+      "201_service_lifecycle_authority.sql",
+      "202_cqrs_authority_object_registry.sql",
+      "203_cqrs_operation_contract_enforcement.sql",
+      "204_cqrs_event_projection_contracts.sql",
+      "205_feedback_authority.sql",
+      "206_legacy_schema_authority_backfill.sql",
+      "207_legacy_domain_authority_assignment.sql",
+      "208_structured_document_semantic_authority.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

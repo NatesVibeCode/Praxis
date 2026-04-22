@@ -2,14 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  ARCHIVE_BASE64_PATH,
   BRIDGE_TOKEN_ENV,
-  WORKSPACE_ROOT,
+  archiveBase64Path,
+  resolveWorkspaceRoot,
   authorizeRequest,
   handleBridgeRequest,
   handleExecSession,
   sanitizeEnv,
 } from "../src/bridge.js";
+
+const BRIDGE_ENV = {
+  PRAXIS_CONTAINER_WORKSPACE_ROOT: "bridge-workspace",
+  PRAXIS_BRIDGE_TMP_ROOT: "bridge-tmp",
+};
 
 function request(path, payload, options = {}) {
   return new Request(`https://bridge.example${path}`, {
@@ -45,7 +50,7 @@ test("health endpoint stays unauthenticated and self-describing", async () => {
   const response = await handleBridgeRequest(
     new Request("https://bridge.example/healthz"),
     { [BRIDGE_TOKEN_ENV]: "secret" },
-    {},
+    BRIDGE_ENV,
   );
   assert.equal(response.status, 200);
   const payload = await response.json();
@@ -77,7 +82,7 @@ test("create session allocates a sandbox id and initializes workspace roots", as
       network_policy: "provider_only",
       workspace_materialization: "copy",
     }),
-    {},
+    BRIDGE_ENV,
     {
       generateSessionId: () => "cf-session-123",
       getSandboxForSession(_env, sessionId) {
@@ -90,7 +95,7 @@ test("create session allocates a sandbox id and initializes workspace roots", as
   const payload = await response.json();
   assert.equal(payload.provider_session_id, "cf-session-123");
   assert.equal(sandbox.execCalls.length, 1);
-  assert.match(sandbox.execCalls[0].command, new RegExp(WORKSPACE_ROOT));
+  assert.match(sandbox.execCalls[0].command, new RegExp(resolveWorkspaceRoot(BRIDGE_ENV)));
 });
 
 test("create session fails closed for unsupported network policy", async () => {
@@ -100,7 +105,7 @@ test("create session fails closed for unsupported network policy", async () => {
       network_policy: "disabled",
       workspace_materialization: "copy",
     }),
-    {},
+    BRIDGE_ENV,
     {
       getSandboxForSession() {
         throw new Error("should not resolve sandbox");
@@ -132,7 +137,7 @@ test("hydrate session writes archive and returns the baseline file count", async
       archive_base64: "ZXhhbXBsZQ==",
       workspace_materialization: "copy",
     }),
-    {},
+    BRIDGE_ENV,
     {
       getSandboxForSession() {
         return sandbox;
@@ -143,7 +148,7 @@ test("hydrate session writes archive and returns the baseline file count", async
   const payload = await response.json();
   assert.equal(payload.hydrated_files, 2);
   assert.deepEqual(sandbox.writeCalls, [
-    { path: ARCHIVE_BASE64_PATH, content: "ZXhhbXBsZQ==" },
+    { path: archiveBase64Path(BRIDGE_ENV), content: "ZXhhbXBsZQ==" },
   ]);
   assert.equal(sandbox.execCalls.length, 2);
 });
@@ -165,7 +170,7 @@ test("exec session forwards cwd env stdin and timeout", async () => {
       timeout_seconds: 12,
       execution_transport: "cli",
     }),
-    {},
+    BRIDGE_ENV,
     {
       getSandboxForSession() {
         return sandbox;
@@ -190,7 +195,7 @@ test("exec session forwards cwd env stdin and timeout", async () => {
   assert.equal(payload.timed_out, false);
   assert.equal(payload.provider_latency_ms, 250);
   assert.deepEqual(sandbox.execCalls[0].options, {
-    cwd: "/workspace",
+    cwd: BRIDGE_ENV.PRAXIS_CONTAINER_WORKSPACE_ROOT,
     env: { OPENAI_API_KEY: "sk-test", COUNT: "3" },
     stdin: "payload",
     timeout: 12_000,
@@ -208,6 +213,7 @@ test("exec session translates timeout exceptions into sandbox result payloads", 
       command: "sleep 10",
       timeout_seconds: 5,
     },
+    BRIDGE_ENV,
     {
       nowIso: (() => {
         const values = [
@@ -246,7 +252,7 @@ test("artifacts endpoint returns changed files and base64 content", async () => 
     request("/sessions/cf-session/artifacts", {
       include_content: true,
     }),
-    {},
+    BRIDGE_ENV,
     {
       getSandboxForSession() {
         return sandbox;

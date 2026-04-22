@@ -31,6 +31,7 @@ from runtime.heartbeat import (
 )
 
 from runtime.cron_scheduler import CronScheduler as _CronScheduler
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ CREATE TABLE IF NOT EXISTS heartbeat_status_current (
 
 def _resolve_repo_root_for_codebase_index() -> Path:
     """Return the Praxis workspace root for codebase indexing."""
-    return Path(__file__).resolve().parents[3]
+    return workspace_repo_root()
 
 
 def _json_mapping(value: object) -> dict[str, object]:

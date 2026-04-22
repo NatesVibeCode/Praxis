@@ -43,6 +43,7 @@ def test_praxis_help_uses_canonical_command_name() -> None:
 
     assert "Usage: praxis <command> [service]" in completed.stdout
     assert "workflow ...            Canonical execution, query, and operator authority" in completed.stdout
+    assert "mcp serve               Run the MCP server through launcher/workspace authority" in completed.stdout
     assert "db ...                  Schema authority plus SQL scaffolds" in completed.stdout
     assert "launch                  Start cockpit Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
     assert "doctor --json           Emit semantic launcher readiness as JSON" in completed.stdout

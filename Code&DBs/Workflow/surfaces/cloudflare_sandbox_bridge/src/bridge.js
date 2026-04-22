@@ -3,11 +3,44 @@ const JSON_HEADERS = {
 };
 
 export const BRIDGE_TOKEN_ENV = "BRIDGE_TOKEN";
-export const WORKSPACE_ROOT = "/workspace";
-export const BRIDGE_TMP_ROOT = "/tmp/praxis-bridge";
-export const ARCHIVE_BASE64_PATH = `${BRIDGE_TMP_ROOT}/workspace.tar.gz.b64`;
-export const ARCHIVE_BINARY_PATH = `${BRIDGE_TMP_ROOT}/workspace.tar.gz`;
-export const BASELINE_MANIFEST_PATH = `${BRIDGE_TMP_ROOT}/baseline-manifest.json`;
+export const WORKSPACE_ROOT_ENV = "PRAXIS_CONTAINER_WORKSPACE_ROOT";
+export const BRIDGE_TMP_ROOT_ENV = "PRAXIS_BRIDGE_TMP_ROOT";
+
+function resolveWorkspaceRoot(env = {}) {
+  const value = typeof env?.[WORKSPACE_ROOT_ENV] === "string" ? env[WORKSPACE_ROOT_ENV].trim() : "";
+  if (!value) {
+    throw new Error(`${WORKSPACE_ROOT_ENV} must be configured for the bridge runtime.`);
+  }
+  return value;
+}
+
+function resolveBridgeTmpRoot(env = {}) {
+  const value = typeof env?.[BRIDGE_TMP_ROOT_ENV] === "string" ? env[BRIDGE_TMP_ROOT_ENV].trim() : "";
+  if (!value) {
+    throw new Error(`${BRIDGE_TMP_ROOT_ENV} must be configured for the bridge runtime.`);
+  }
+  return value;
+}
+
+function archiveBase64Path(env = {}) {
+  return `${resolveBridgeTmpRoot(env)}/workspace.tar.gz.b64`;
+}
+
+function archiveBinaryPath(env = {}) {
+  return `${resolveBridgeTmpRoot(env)}/workspace.tar.gz`;
+}
+
+function baselineManifestPath(env = {}) {
+  return `${resolveBridgeTmpRoot(env)}/baseline-manifest.json`;
+}
+
+export {
+  archiveBase64Path,
+  archiveBinaryPath,
+  baselineManifestPath,
+  resolveBridgeTmpRoot,
+  resolveWorkspaceRoot,
+};
 
 const CREATE_SESSION_PATH = /^\/sessions\/create\/?$/;
 const SESSION_ACTION_PATH =
@@ -19,7 +52,7 @@ import json
 import os
 from pathlib import Path
 
-root = Path("/workspace")
+root = Path(os.environ["PRAXIS_CONTAINER_WORKSPACE_ROOT"])
 manifest = {}
 if root.exists():
     for dirpath, dirnames, filenames in os.walk(root):
@@ -34,7 +67,7 @@ if root.exists():
                 continue
             manifest[relpath] = [int(stat.st_size), int(stat.st_mtime_ns)]
 
-baseline = Path("/tmp/praxis-bridge/baseline-manifest.json")
+baseline = Path(os.environ["PRAXIS_BRIDGE_TMP_ROOT"]) / "baseline-manifest.json"
 baseline.parent.mkdir(parents=True, exist_ok=True)
 baseline.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
 print(json.dumps({"hydrated_files": len(manifest)}))
@@ -43,17 +76,19 @@ PY`.trim();
 const HYDRATE_ARCHIVE_COMMAND = `
 python - <<'PY'
 import base64
+import os
 from pathlib import Path
 
-encoded_path = Path("/tmp/praxis-bridge/workspace.tar.gz.b64")
-binary_path = Path("/tmp/praxis-bridge/workspace.tar.gz")
+bridge_tmp_root = Path(os.environ["PRAXIS_BRIDGE_TMP_ROOT"])
+encoded_path = bridge_tmp_root / "workspace.tar.gz.b64"
+binary_path = bridge_tmp_root / "workspace.tar.gz"
 binary_path.parent.mkdir(parents=True, exist_ok=True)
 binary_path.write_bytes(base64.b64decode(encoded_path.read_text(encoding="utf-8")))
 PY
-rm -rf /workspace
-mkdir -p /workspace
-tar -xzf /tmp/praxis-bridge/workspace.tar.gz -C /
-rm -f /tmp/praxis-bridge/workspace.tar.gz /tmp/praxis-bridge/workspace.tar.gz.b64`.trim();
+rm -rf "$PRAXIS_CONTAINER_WORKSPACE_ROOT"
+mkdir -p "$PRAXIS_CONTAINER_WORKSPACE_ROOT"
+tar -xzf "$PRAXIS_BRIDGE_TMP_ROOT/workspace.tar.gz" -C /
+rm -f "$PRAXIS_BRIDGE_TMP_ROOT/workspace.tar.gz" "$PRAXIS_BRIDGE_TMP_ROOT/workspace.tar.gz.b64"`.trim();
 
 const ARTIFACT_CAPTURE_COMMAND = `
 python - <<'PY'
@@ -62,8 +97,8 @@ import json
 import os
 from pathlib import Path
 
-root = Path("/workspace")
-baseline_path = Path("/tmp/praxis-bridge/baseline-manifest.json")
+root = Path(os.environ["PRAXIS_CONTAINER_WORKSPACE_ROOT"])
+baseline_path = Path(os.environ["PRAXIS_BRIDGE_TMP_ROOT"]) / "baseline-manifest.json"
 baseline = {}
 if baseline_path.exists():
     try:
@@ -153,11 +188,11 @@ export async function handleBridgeRequest(request, env, deps = {}) {
 
   switch (action) {
     case "hydrate":
-      return handleHydrateSession(sandbox, body.payload);
+      return handleHydrateSession(sandbox, body.payload, env);
     case "exec":
-      return handleExecSession(sandbox, body.payload, deps);
+      return handleExecSession(sandbox, body.payload, env, deps);
     case "artifacts":
-      return handleArtifactsSession(sandbox);
+      return handleArtifactsSession(sandbox, env);
     case "destroy":
       return handleDestroySession(sandbox);
     default:
@@ -194,7 +229,14 @@ export async function handleCreateSession(payload, env, deps) {
 
   const providerSessionId = deps.generateSessionId?.() || crypto.randomUUID();
   const sandbox = resolveSandbox(env, providerSessionId, deps);
-  const init = await sandbox.exec(`mkdir -p ${WORKSPACE_ROOT} ${BRIDGE_TMP_ROOT}`);
+  const workspaceRoot = resolveWorkspaceRoot(env);
+  const bridgeTmpRoot = resolveBridgeTmpRoot(env);
+  const init = await sandbox.exec(`mkdir -p "${workspaceRoot}" "${bridgeTmpRoot}"`, {
+    env: {
+      PRAXIS_CONTAINER_WORKSPACE_ROOT: workspaceRoot,
+      PRAXIS_BRIDGE_TMP_ROOT: bridgeTmpRoot,
+    },
+  });
   if (!init?.success) {
     return errorResponse(
       500,
@@ -205,7 +247,7 @@ export async function handleCreateSession(payload, env, deps) {
   return jsonResponse({ provider_session_id: providerSessionId });
 }
 
-export async function handleHydrateSession(sandbox, payload) {
+export async function handleHydrateSession(sandbox, payload, env = {}) {
   if ((payload?.workspace_materialization || "copy") !== "copy") {
     return errorResponse(
       400,
@@ -218,9 +260,15 @@ export async function handleHydrateSession(sandbox, payload) {
     return errorResponse(400, "missing_archive", "hydrate requires archive_base64.");
   }
 
-  await sandbox.writeFile(ARCHIVE_BASE64_PATH, archiveBase64);
+  const workspaceRoot = resolveWorkspaceRoot(env);
+  const bridgeTmpRoot = resolveBridgeTmpRoot(env);
+  await sandbox.writeFile(archiveBase64Path(env), archiveBase64);
   const hydrate = await sandbox.exec(HYDRATE_ARCHIVE_COMMAND, {
-    cwd: "/",
+    cwd: workspaceRoot,
+    env: {
+      PRAXIS_CONTAINER_WORKSPACE_ROOT: workspaceRoot,
+      PRAXIS_BRIDGE_TMP_ROOT: bridgeTmpRoot,
+    },
     timeout: 120_000,
   });
   if (!hydrate?.success) {
@@ -232,7 +280,11 @@ export async function handleHydrateSession(sandbox, payload) {
   }
 
   const manifest = await sandbox.exec(MANIFEST_CAPTURE_COMMAND, {
-    cwd: "/",
+    cwd: workspaceRoot,
+    env: {
+      PRAXIS_CONTAINER_WORKSPACE_ROOT: workspaceRoot,
+      PRAXIS_BRIDGE_TMP_ROOT: bridgeTmpRoot,
+    },
     timeout: 60_000,
   });
   if (!manifest?.success) {
@@ -252,7 +304,7 @@ export async function handleHydrateSession(sandbox, payload) {
   });
 }
 
-export async function handleExecSession(sandbox, payload, deps = {}) {
+export async function handleExecSession(sandbox, payload, env = {}, deps = {}) {
   const command = typeof payload?.command === "string" ? payload.command : "";
   if (!command.trim()) {
     return errorResponse(400, "missing_command", "exec requires a non-empty command.");
@@ -261,8 +313,9 @@ export async function handleExecSession(sandbox, payload, deps = {}) {
   const startedAt = deps.nowIso?.() || new Date().toISOString();
   const startedMs = deps.nowMs?.() || Date.now();
   try {
+    const workspaceRoot = resolveWorkspaceRoot(env);
     const result = await sandbox.exec(command, {
-      cwd: WORKSPACE_ROOT,
+      cwd: workspaceRoot,
       env: sanitizeEnv(payload?.env),
       stdin: typeof payload?.stdin_text === "string" ? payload.stdin_text : "",
       timeout: normalizeTimeoutMs(payload?.timeout_seconds),
@@ -297,9 +350,15 @@ export async function handleExecSession(sandbox, payload, deps = {}) {
   }
 }
 
-export async function handleArtifactsSession(sandbox) {
+export async function handleArtifactsSession(sandbox, env = {}) {
+  const workspaceRoot = resolveWorkspaceRoot(env);
+  const bridgeTmpRoot = resolveBridgeTmpRoot(env);
   const capture = await sandbox.exec(ARTIFACT_CAPTURE_COMMAND, {
-    cwd: "/",
+    cwd: workspaceRoot,
+    env: {
+      PRAXIS_CONTAINER_WORKSPACE_ROOT: workspaceRoot,
+      PRAXIS_BRIDGE_TMP_ROOT: bridgeTmpRoot,
+    },
     timeout: 60_000,
   });
   if (!capture?.success) {

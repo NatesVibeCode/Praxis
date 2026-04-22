@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import subprocess
+import tarfile
+import tempfile
 from pathlib import Path
 
 import pytest
 
 import runtime.sandbox_runtime as sandbox_runtime
+from runtime.workspace_paths import container_auth_seed_dir, container_home
 from runtime.sandbox_runtime import (
     ArtifactReceipt,
     CloudflareRemoteSandboxProvider,
@@ -21,6 +25,10 @@ from runtime.sandbox_runtime import (
     WorkspaceSnapshot,
     derive_sandbox_identity,
 )
+
+AUTH_HOME = str(Path(tempfile.gettempdir()) / "praxis-auth-home")
+CONTAINER_HOME = str(container_home())
+OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
 
 
 class _RecordingProvider:
@@ -107,59 +115,59 @@ class _ArtifactStore:
 
 
 def test_cli_auth_volume_flags_use_explicit_host_home(monkeypatch) -> None:
-    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/praxis")
+    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", AUTH_HOME)
     monkeypatch.setattr(
         sandbox_runtime.os.path,
         "isfile",
         lambda path: path in {
-            "/Users/praxis/.codex/auth.json",
-            "/Users/praxis/.claude.json",
-            "/Users/praxis/.gemini/oauth_creds.json",
+            f"{AUTH_HOME}/.codex/auth.json",
+            f"{AUTH_HOME}/.claude.json",
+            f"{AUTH_HOME}/.gemini/oauth_creds.json",
         },
     )
 
     flags = sandbox_runtime._cli_auth_volume_flags()
 
-    assert "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro" in flags
-    assert "/Users/praxis/.claude.json:/home/praxis-agent/.claude.json:ro" in flags
+    assert f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro" in flags
+    assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" in flags
     assert (
-        "/Users/praxis/.gemini/oauth_creds.json:"
-        "/home/praxis-agent/.gemini/oauth_creds.json:ro"
+        f"{AUTH_HOME}/.gemini/oauth_creds.json:"
+        f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
     ) in flags
 
 
 def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypatch) -> None:
-    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/praxis")
+    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", AUTH_HOME)
     monkeypatch.setattr(sandbox_runtime.os.path, "expanduser", lambda value: "/root" if value == "~" else value)
     monkeypatch.setattr(
         sandbox_runtime.os.path,
         "isfile",
         lambda path: path in {
-            "/root/.codex/auth.json",
-            "/root/.claude.json",
-            "/root/.gemini/oauth_creds.json",
+            f"{AUTH_HOME}/.codex/auth.json",
+            f"{AUTH_HOME}/.claude.json",
+            f"{AUTH_HOME}/.gemini/oauth_creds.json",
         },
     )
 
     flags = sandbox_runtime._cli_auth_volume_flags()
 
-    assert "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro" in flags
-    assert "/Users/praxis/.claude.json:/home/praxis-agent/.claude.json:ro" in flags
+    assert f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro" in flags
+    assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" in flags
     assert (
-        "/Users/praxis/.gemini/oauth_creds.json:"
-        "/home/praxis-agent/.gemini/oauth_creds.json:ro"
+        f"{AUTH_HOME}/.gemini/oauth_creds.json:"
+        f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
     ) in flags
 
 
 def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) -> None:
-    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/praxis")
+    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", AUTH_HOME)
     monkeypatch.setattr(
         sandbox_runtime.os.path,
         "isfile",
         lambda path: path in {
-            "/Users/praxis/.codex/auth.json",
-            "/Users/praxis/.claude.json",
-            "/Users/praxis/.gemini/oauth_creds.json",
+            f"{AUTH_HOME}/.codex/auth.json",
+            f"{AUTH_HOME}/.claude.json",
+            f"{AUTH_HOME}/.gemini/oauth_creds.json",
         },
     )
 
@@ -168,11 +176,11 @@ def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) ->
 
     assert openai_flags == [
         "-v",
-        "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro",
+        f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro",
     ]
     assert anthropic_flags == [
         "-v",
-        "/Users/praxis/.claude.json:/home/praxis-agent/.claude.json:ro",
+        f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro",
     ]
 
 
@@ -364,7 +372,9 @@ def test_sandbox_runtime_runs_provider_contract_and_persists_artifacts(tmp_path)
     ]
 
 
-def test_sandbox_runtime_rejects_out_of_scope_artifacts_before_host_copyback(tmp_path) -> None:
+def test_sandbox_runtime_rejects_out_of_scope_artifacts_under_legacy_contract(tmp_path) -> None:
+    # Legacy contract (no completion_contract.submission_required): filesystem
+    # write_scope is the authority and out-of-scope artifacts fail the job hard.
     (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
     runtime = SandboxRuntime()
     fake = _RecordingProvider()
@@ -392,6 +402,81 @@ def test_sandbox_runtime_rejects_out_of_scope_artifacts_before_host_copyback(tmp
 
     assert not (tmp_path / "changed.txt").exists()
     assert fake.calls[-1] == ("destroy", "failed")
+
+
+def test_sandbox_runtime_captures_drift_under_submission_contract(tmp_path) -> None:
+    # Under the sealed-submission contract (workflow_execution::mutating-jobs-
+    # use-sealed-submission-and-verify-refs-only), the sandbox filesystem is
+    # ephemeral scratch. The authoritative deliverable is the
+    # workflow_job_submissions row; scratch drift is captured as structured
+    # evidence and the job continues.
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
+    runtime = SandboxRuntime()
+    fake = _RecordingProvider()
+    runtime._providers = {"fake": fake}  # type: ignore[attr-defined]
+
+    result = runtime.execute_command(
+        provider_name="fake",
+        sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+        sandbox_group_id="group:run.alpha",
+        workdir=str(tmp_path),
+        command="echo hi",
+        stdin_text="payload",
+        env={"OPENAI_API_KEY": "test-key"},
+        timeout_seconds=15,
+        network_policy="provider_only",
+        workspace_materialization="copy",
+        execution_transport="cli",
+        metadata={
+            "execution_bundle": {
+                "access_policy": {"write_scope": ["allowed.txt"]},
+                "completion_contract": {"submission_required": True},
+            }
+        },
+    )
+
+    assert result.artifact_refs == ("changed.txt",)
+    assert fake.calls[-1] == ("destroy", "completed")
+    assert len(result.artifact_scope_drift) == 1
+    drift = result.artifact_scope_drift[0]
+    assert drift["artifact_ref"] == "changed.txt"
+    assert drift["reason"] == "outside_write_scope"
+    assert drift["submission_required"] is True
+    assert drift["declared_write_scope"] == ("allowed.txt",)
+
+
+def test_sandbox_runtime_skips_dehydrate_under_submission_contract(tmp_path) -> None:
+    # When the sandbox runs in submission-contract mode, the agent's scratch
+    # files must not be dehydrated back to the host repo — the sealed
+    # submission carries the authoritative patch payload instead.
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
+    runtime = SandboxRuntime()
+    fake = _RecordingProvider()
+    runtime._providers = {"fake": fake}  # type: ignore[attr-defined]
+
+    runtime.execute_command(
+        provider_name="fake",
+        sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+        sandbox_group_id="group:run.alpha",
+        workdir=str(tmp_path),
+        command="echo hi",
+        stdin_text="payload",
+        env={"OPENAI_API_KEY": "test-key"},
+        timeout_seconds=15,
+        network_policy="provider_only",
+        workspace_materialization="copy",
+        execution_transport="cli",
+        metadata={
+            "execution_bundle": {
+                "access_policy": {"write_scope": ["allowed.txt"]},
+                "completion_contract": {"submission_required": True},
+            }
+        },
+    )
+
+    # No file should have been dehydrated to the host workdir — the only thing
+    # present is the seed we placed before exec.
+    assert not (tmp_path / "changed.txt").exists()
 
 
 def test_sandbox_runtime_none_materialization_uses_empty_workspace_without_copyback(tmp_path) -> None:
@@ -757,6 +842,55 @@ def test_docker_local_hydrate_workspace_applies_overlay_files(monkeypatch, tmp_p
     provider.destroy_session(session, "completed")
 
 
+def test_docker_local_hydrate_workspace_rejects_unsafe_cached_snapshot_archive(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("PRAXIS_SANDBOX_SNAPSHOT_CACHE_DIR", str(tmp_path / "snapshot-cache"))
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    snapshot_ref = "workspace_snapshot:unsafe"
+    cache_dir = Path(sandbox_runtime._workspace_snapshot_cache_dir(snapshot_ref))
+    cache_dir.mkdir(parents=True)
+    archive_path = cache_dir / "workspace.tar.gz"
+    metadata_path = cache_dir / "metadata.json"
+    metadata_path.write_text(
+        json.dumps({"workspace_snapshot_ref": snapshot_ref, "hydrated_files": 1}),
+        encoding="utf-8",
+    )
+    payload = b"owned"
+    unsafe_member = tarfile.TarInfo("../pwned.txt")
+    unsafe_member.size = len(payload)
+    with tarfile.open(archive_path, mode="w:gz") as archive:
+        archive.addfile(unsafe_member, io.BytesIO(payload))
+
+    provider = DockerLocalSandboxProvider()
+    spec = type(
+        "Spec",
+        (),
+        {
+            "sandbox_session_id": "sandbox_session:run.alpha:job.alpha",
+            "sandbox_group_id": "group:run.alpha",
+            "network_policy": "provider_only",
+            "workspace_materialization": "copy",
+            "timeout_seconds": 30,
+            "metadata": {},
+        },
+    )()
+    session = provider.create_session(spec)
+
+    with pytest.raises(RuntimeError, match="unsafe workspace archive member"):
+        provider.hydrate_workspace(
+            session,
+            WorkspaceSnapshot(
+                source_root=str(source_root),
+                materialization="copy",
+                workspace_snapshot_ref=snapshot_ref,
+            ),
+        )
+    assert not (Path(session.workspace_root).parent / "pwned.txt").exists()
+    provider.destroy_session(session, "completed")
+
+
 def test_cloudflare_remote_syncs_artifacts_for_capture(monkeypatch, tmp_path) -> None:
     requests: list[tuple[str, dict]] = []
 
@@ -1085,12 +1219,12 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
     monkeypatch.setattr(
         "runtime.sandbox_runtime.os.path.isfile",
         lambda path: path in {
-            "/Users/praxis/.codex/auth.json",
-            "/Users/praxis/.claude.json",
-            "/Users/praxis/.gemini/oauth_creds.json",
+            f"{AUTH_HOME}/.codex/auth.json",
+            f"{AUTH_HOME}/.claude.json",
+            f"{AUTH_HOME}/.gemini/oauth_creds.json",
         },
     )
-    monkeypatch.setattr("runtime.sandbox_runtime.os.path.expanduser", lambda value: "/Users/praxis" if value == "~" else value)
+    monkeypatch.setattr("runtime.sandbox_runtime.os.path.expanduser", lambda value: AUTH_HOME if value == "~" else value)
     monkeypatch.setattr(
         "runtime.sandbox_runtime.subprocess.Popen",
         lambda args, **kwargs: (
@@ -1141,11 +1275,11 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
 
         run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
         joined_cmd = " ".join(run_cmd)
-        assert "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro" in joined_cmd
-        assert "/Users/praxis/.claude.json:/home/praxis-agent/.claude.json:ro" not in joined_cmd
+        assert f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro" in joined_cmd
+        assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" not in joined_cmd
         assert (
-            "/Users/praxis/.gemini/oauth_creds.json:"
-            "/home/praxis-agent/.gemini/oauth_creds.json:ro"
+            f"{AUTH_HOME}/.gemini/oauth_creds.json:"
+            f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
         ) not in joined_cmd
     finally:
         provider.destroy_session(session, "completed")

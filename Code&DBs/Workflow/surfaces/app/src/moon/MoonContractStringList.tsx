@@ -35,7 +35,7 @@ export function stringArrayFromContractRows(rows: ContractStringRow[]): string[]
 
 function chipLabel(row: ContractStringRow): string {
   const t = row.value.trim();
-  if (!t) return 'Empty field';
+  if (!t) return '(unnamed)';
   if (t.length > 36) return `${t.slice(0, 33)}…`;
   return t;
 }
