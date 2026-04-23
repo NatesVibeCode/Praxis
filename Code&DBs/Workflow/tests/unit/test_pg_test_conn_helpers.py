@@ -153,6 +153,15 @@ def test_skip_for_unavailable_authority_treats_dns_failure_as_skip() -> None:
         )
 
 
+def test_skip_for_unavailable_authority_treats_create_database_privilege_as_skip() -> None:
+    with pytest.raises(pytest.skip.Exception, match="postgres.insufficient_privilege"):
+        pg_test_conn._skip_for_unavailable_authority(
+            pg_test_conn.asyncpg.InsufficientPrivilegeError(
+                "permission denied to create database"
+            )
+        )
+
+
 def test_get_test_conn_rebuilds_wrapper_when_cached_pool_is_closed(monkeypatch) -> None:
     class _FakePool:
         def __init__(self, closed: bool) -> None:

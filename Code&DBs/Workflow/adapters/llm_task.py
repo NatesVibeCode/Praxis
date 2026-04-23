@@ -29,7 +29,7 @@ from registry.provider_execution_registry import (
     resolve_api_protocol_family,
     supports_adapter,
 )
-from .task_profiles import try_resolve_profile
+from .task_profiles import TaskProfileAuthorityError, resolve_profile
 from runtime.http_transport import call_transport
 
 _DEFAULT_MAX_TOKENS = 4096
@@ -566,8 +566,25 @@ class LLMTaskAdapter(BaseNodeAdapter):
         system_prompt_parts: list[str] = []
         task_type = payload.get("task_type")
         if task_type:
-            tp = try_resolve_profile(str(task_type))
-            if tp is not None and tp.system_prompt_hint:
+            try:
+                tp = resolve_profile(str(task_type))
+            except TaskProfileAuthorityError as exc:
+                return _fail(
+                    request=request,
+                    reason_code="adapter.task_profile_authority_unavailable",
+                    failure_code="adapter.task_profile_authority_unavailable",
+                    started_at=started_at,
+                    executor_type=LLMTaskAdapter.executor_type,
+                    inputs=inputs,
+                    outputs=_annotate_outputs(_failure_outputs(
+                        transport_kind=transport_kind,
+                        failure_namespace=failure_namespace,
+                        provider_slug=provider_slug,
+                        model_slug=None,
+                        stderr=str(exc),
+                    )),
+                )
+            if tp.system_prompt_hint:
                 system_prompt_parts.append(tp.system_prompt_hint)
         if payload.get("system_prompt"):
             system_prompt_parts.append(str(payload["system_prompt"]))

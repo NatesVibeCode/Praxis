@@ -93,6 +93,47 @@ def create_mobile_session(
     return dict(rows[0])
 
 
+def ensure_bootstrap_device_enrollment(
+    conn: Any,
+    *,
+    principal_ref: str,
+    device_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Ensure a bootstrap-paired phone has a device enrollment row."""
+
+    effective_now = now or _utc_now()
+    rows = conn.execute(
+        """
+        INSERT INTO device_enrollments (
+            device_id, principal_ref, credential_id, credential_public_key,
+            credential_sign_count, device_label, transports, enrolled_at,
+            last_asserted_at
+        ) VALUES (
+            $1::uuid, $2, $3, $4, 0, $5, '["bootstrap"]'::jsonb, $6, $6
+        )
+        ON CONFLICT (device_id) DO UPDATE
+        SET principal_ref = EXCLUDED.principal_ref,
+            last_asserted_at = EXCLUDED.last_asserted_at
+        WHERE device_enrollments.revoked_at IS NULL
+        RETURNING device_id, principal_ref, device_label, enrolled_at,
+                  last_asserted_at
+        """,
+        device_id,
+        principal_ref,
+        f"bootstrap:{device_id}",
+        b"bootstrap",
+        "Praxis Mobile",
+        effective_now,
+    )
+    if not rows:
+        raise MobileSessionError(
+            "mobile.device_enrollment_denied",
+            "mobile device enrollment could not be created or refreshed",
+        )
+    return dict(rows[0])
+
+
 def exchange_bootstrap_token(
     conn: Any,
     *,
@@ -128,6 +169,12 @@ def exchange_bootstrap_token(
         if isinstance(expires_at, datetime) and expires_at <= effective_now:
             raise MobileSessionError("mobile.bootstrap_token_expired", "bootstrap token has expired")
 
+        ensure_bootstrap_device_enrollment(
+            tx,
+            principal_ref=str(token["principal_ref"]),
+            device_id=device_id,
+            now=effective_now,
+        )
         session_id = str(uuid4())
         session = create_mobile_session(
             tx,
@@ -157,6 +204,35 @@ def exchange_bootstrap_token(
         "session_token_secret": resolved_session_secret,
         "token_id": token["token_id"],
     }
+
+
+def resolve_mobile_session(
+    conn: Any,
+    *,
+    session_token_secret: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Resolve and validate a mobile session cookie secret."""
+
+    effective_now = now or _utc_now()
+    rows = conn.execute(
+        """
+        SELECT session_id, principal_ref, device_id, created_at, expires_at,
+               last_step_up_at, budget_limit, budget_used
+        FROM mobile_sessions
+        WHERE session_token_hash = $1
+          AND revoked_at IS NULL
+          AND expires_at > $2
+        """,
+        hash_secret(session_token_secret),
+        effective_now,
+    )
+    if not rows:
+        raise MobileSessionError(
+            "mobile.session_invalid",
+            "mobile session was not found, has expired, or was revoked",
+        )
+    return dict(rows[0])
 
 
 def spend_session_budget(
@@ -208,8 +284,10 @@ def spend_session_budget(
 __all__ = [
     "MobileSessionError",
     "create_mobile_session",
+    "ensure_bootstrap_device_enrollment",
     "exchange_bootstrap_token",
     "hash_secret",
     "issue_bootstrap_token",
+    "resolve_mobile_session",
     "spend_session_budget",
 ]

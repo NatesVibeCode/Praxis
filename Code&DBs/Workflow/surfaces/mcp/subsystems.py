@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 
 from .._subsystems_base import _BaseSubsystems
-from .._workflow_database import workflow_database_env_for_repo
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +21,8 @@ _RECEIPTS_DIR = str(_REPO_ROOT / "artifacts" / "workflow_receipts")
 
 
 def workflow_database_env() -> dict[str, str]:
+    from .._workflow_database import workflow_database_env_for_repo
+
     return workflow_database_env_for_repo(_REPO_ROOT)
 
 

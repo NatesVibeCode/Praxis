@@ -222,6 +222,9 @@ def _skip_for_unavailable_authority(exc: BaseException) -> None:
         if isinstance(item, asyncpg.InvalidAuthorizationSpecificationError):
             unavailable = True
             reason_code = reason_code or "postgres.invalid_authorization"
+        if isinstance(item, asyncpg.InsufficientPrivilegeError):
+            unavailable = True
+            reason_code = reason_code or "postgres.insufficient_privilege"
         if isinstance(item, (ConnectionError, TimeoutError, socket.gaierror)):
             unavailable = True
             reason_code = reason_code or _AUTHORITY_UNAVAILABLE

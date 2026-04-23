@@ -26,15 +26,59 @@ _ENV_CACHE_DIR = "PRAXIS_WORKFLOW_CACHE_DIR"
 class CacheKey:
     """Compute content-addressed cache keys from workflow specs."""
 
+    _VERSION = "workflow-result-cache-key:v2"
+
     @staticmethod
     def compute(spec: WorkflowSpec) -> str:
-        components = [
-            spec.prompt or "",
-            spec.provider_slug or "",
-            spec.model_slug or "",
-            spec.system_prompt or "",
-        ]
-        return hashlib.sha256("\n".join(components).encode("utf-8")).hexdigest()
+        payload = {
+            "version": CacheKey._VERSION,
+            "workflow_spec": {
+                "acceptance_contract": spec.acceptance_contract,
+                "adapter_type": spec.adapter_type,
+                "allowed_tools": spec.allowed_tools,
+                "authoring_contract": spec.authoring_contract,
+                "capabilities": spec.capabilities,
+                "context_sections": spec.context_sections,
+                "definition_revision": spec.definition_revision,
+                "label": spec.label,
+                "max_context_tokens": spec.max_context_tokens,
+                "max_retries": spec.max_retries,
+                "max_tokens": spec.max_tokens,
+                "model_slug": spec.model_slug,
+                "output_schema": spec.output_schema,
+                "packet_provenance": spec.packet_provenance,
+                "parent_run_id": spec.parent_run_id,
+                "persist": spec.persist,
+                "plan_revision": spec.plan_revision,
+                "prefer_cost": spec.prefer_cost,
+                "prompt": spec.prompt,
+                "provider_slug": spec.provider_slug,
+                "review_target_modules": spec.review_target_modules,
+                "reviews_workflow_id": spec.reviews_workflow_id,
+                "runtime_profile_ref": spec.runtime_profile_ref,
+                "scope_read": spec.scope_read,
+                "scope_write": spec.scope_write,
+                "skip_auto_review": spec.skip_auto_review,
+                "submission_required": spec.submission_required,
+                "system_prompt": spec.system_prompt,
+                "task_type": spec.task_type,
+                "temperature": spec.temperature,
+                "tier": spec.tier,
+                "timeout": spec.timeout,
+                "use_cache": spec.use_cache,
+                "verify_refs": spec.verify_refs,
+                "workdir": spec.workdir,
+                "workspace_ref": spec.workspace_ref,
+            },
+        }
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+            allow_nan=False,
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
     @staticmethod
     def validate(key: str) -> bool:

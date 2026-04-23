@@ -45,7 +45,7 @@ def _profile_for(task_type: str) -> TaskProfile | None:
 
 @pytest.fixture(autouse=True)
 def _task_profile_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("adapters.task_profiles.try_resolve_profile", _profile_for)
+    monkeypatch.setattr("adapters.task_profiles.resolve_profile", _profile_for)
 
 
 def _write_spec(spec: dict) -> str:

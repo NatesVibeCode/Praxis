@@ -70,7 +70,6 @@ from ._context_building import (  # noqa: F401
     _build_job_execution_context_shards,
     _capture_submission_baseline_if_required,
     _execution_model_messages,
-    _execution_packet_lineage_payload,
     _extract_verification_paths,
     _job_verify_refs,
     _persist_runtime_context_for_job,

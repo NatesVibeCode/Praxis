@@ -1,8 +1,30 @@
 from __future__ import annotations
 
+import pytest
+
+from adapters.task_profiles import TaskProfile
 from runtime.workflow.artifact_contracts import evaluate_submission_acceptance
 from runtime.workflow.execution_bundle import build_execution_bundle, render_execution_bundle
 from runtime.workflow_spec import validate_workflow_spec
+
+
+def _profile_for(task_type: str) -> TaskProfile:
+    return TaskProfile(
+        task_type=task_type,
+        allowed_tools=("Read", "Write"),
+        default_tier="mid",
+        file_attach=False,
+        system_prompt_hint=f"{task_type} profile",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _task_profile_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("runtime.workflow.execution_bundle.resolve_profile", _profile_for)
+    monkeypatch.setattr(
+        "runtime.workflow.execution_bundle.infer_task_type",
+        lambda prompt, *, label=None, require_authority=False: "research",
+    )
 
 
 def test_validate_workflow_spec_accepts_authoring_and_acceptance_contracts() -> None:

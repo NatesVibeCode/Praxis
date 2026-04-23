@@ -83,7 +83,7 @@ _DEFAULT_COST_TRACKER_BUFFER = int(os.environ.get("PRAXIS_COST_TRACKER_BUFFER", 
 class CostTracker:
     """Postgres-backed ledger of recent cost records."""
 
-    __slots__ = ("_conn", "_conn_factory", "_max_size")
+    __slots__ = ("_conn", "_conn_factory", "_last_authority_error", "_max_size")
 
     def __init__(
         self,
@@ -95,14 +95,18 @@ class CostTracker:
         self._max_size = max_size
         self._conn = conn
         self._conn_factory = conn_factory
+        self._last_authority_error: str | None = None
 
     def _get_conn(self) -> SyncPostgresConnection | None:
         if self._conn is not None:
+            self._last_authority_error = None
             return self._conn
         try:
             self._conn = self._conn_factory()
-        except Exception:
+        except Exception as exc:
+            self._last_authority_error = f"{type(exc).__name__}: {exc}"
             return None
+        self._last_authority_error = None
         return self._conn
 
     def _row_to_record(self, row: Any) -> CostRecord:
@@ -158,20 +162,26 @@ class CostTracker:
         if conn is None:
             return ()
         bounded_limit = max(0, min(limit, self._max_size))
-        rows = conn.execute(
-            """
-            SELECT run_id, provider_slug, model_slug, cost_usd,
-                   input_tokens, output_tokens, recorded_at
-              FROM workflow_cost_ledger
-             ORDER BY recorded_at DESC
-             LIMIT $1
-            """,
-            bounded_limit,
-        )
+        try:
+            rows = conn.execute(
+                """
+                SELECT run_id, provider_slug, model_slug, cost_usd,
+                       input_tokens, output_tokens, recorded_at
+                  FROM workflow_cost_ledger
+                 ORDER BY recorded_at DESC
+                 LIMIT $1
+                """,
+                bounded_limit,
+            )
+        except Exception as exc:
+            self._last_authority_error = f"{type(exc).__name__}: {exc}"
+            return ()
+        self._last_authority_error = None
         return tuple(self._row_to_record(row) for row in rows)
 
     def summary(self) -> dict[str, Any]:
         records = self.recent_records(limit=self._max_size)
+        authority_ready = self._last_authority_error is None
         total_cost = 0.0
         total_input = 0
         total_output = 0
@@ -185,6 +195,10 @@ class CostTracker:
             cost_by_agent[slug] = cost_by_agent.get(slug, 0.0) + record.cost_usd
 
         return {
+            "authority_ready": authority_ready,
+            "observability_state": "ready" if authority_ready else "degraded",
+            "reason_code": None if authority_ready else "cost_tracker.authority_unavailable",
+            "error": self._last_authority_error,
             "total_cost_usd": round(total_cost, 6),
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,

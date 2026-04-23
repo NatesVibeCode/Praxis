@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from surfaces.mcp.tools import health as health_tool
+import runtime.health as runtime_health
 import runtime.missing_detector as missing_detector
 
 
@@ -385,6 +386,112 @@ def test_tool_dag_health_reports_projection_freshness_sla(monkeypatch) -> None:
             "read_side_circuit_breaker": "open",
         }
     ]
+
+
+def test_tool_dag_health_degrades_when_surface_usage_recorder_is_degraded(monkeypatch) -> None:
+    degraded_recorder = {
+        "authority_ready": False,
+        "observability_state": "degraded",
+        "dropped_event_count": 1,
+        "durable_event_count": 0,
+        "durable_error_count": 1,
+        "backup_authority_ready": False,
+        "last_error": "RuntimeError: surface usage table unavailable",
+    }
+    monkeypatch.setattr(health_tool, "surface_usage_recorder_health", lambda: degraded_recorder)
+    monkeypatch.setattr(
+        health_tool,
+        "dependency_truth_report",
+        lambda scope="all": {"ok": True, "scope": scope},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "workflow_database_url_for_repo",
+        lambda repo_root, env=None: "postgresql://repo.test/workflow",
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "get_context_cache",
+        lambda: SimpleNamespace(stats=lambda: {"hit_rate": 0.0}),
+    )
+    monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
+    monkeypatch.setattr(
+        health_tool,
+        "query_transport_support",
+        lambda **_kwargs: {
+            "default_provider_slug": "openai",
+            "default_adapter_type": "cli_llm",
+            "support_basis": "provider_execution_registry",
+            "providers": [],
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "get_route_outcomes",
+        lambda: SimpleNamespace(summary=lambda **_kwargs: {"provider_count": 0}),
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "_subs",
+        SimpleNamespace(
+            get_health_mod=lambda: SimpleNamespace(
+                PostgresProbe=lambda db_url: runtime_health.StaticHealthProbe(
+                    name="postgres",
+                    passed=True,
+                    message="ok",
+                    status="ok",
+                ),
+                PostgresConnectivityProbe=lambda db_url: runtime_health.StaticHealthProbe(
+                    name="postgres_connectivity",
+                    passed=True,
+                    message="ok",
+                    status="ok",
+                ),
+                DiskSpaceProbe=lambda path: runtime_health.StaticHealthProbe(
+                    name="disk",
+                    passed=True,
+                    message="ok",
+                    status="ok",
+                ),
+                ProviderTransportProbe=lambda provider_slug, adapter_type: runtime_health.StaticHealthProbe(
+                    name=f"provider_transport:{provider_slug}:{adapter_type}",
+                    passed=True,
+                    message="ok",
+                    status="ok",
+                ),
+                StaticHealthProbe=runtime_health.StaticHealthProbe,
+                PreflightRunner=runtime_health.PreflightRunner,
+            ),
+            get_pg_conn=lambda: "pg-conn",
+            get_operator_panel=lambda: _FakePanel(),
+            get_memory_engine=lambda: None,
+        ),
+    )
+
+    result = health_tool.tool_dag_health({})
+
+    assert result["preflight"]["overall"] == "degraded"
+    assert result["surface_usage_recorder"] == degraded_recorder
+    assert any(
+        check["name"] == "surface_usage_recorder"
+        and check["passed"] is False
+        and check["details"] == degraded_recorder
+        for check in result["preflight"]["checks"]
+    )
 
 
 def test_tool_dag_health_enriches_edge_endpoints_with_entity_context(monkeypatch) -> None:

@@ -215,7 +215,8 @@
     "207_legacy_domain_authority_assignment.sql",
     "208_structured_document_semantic_authority.sql",
     "209_empty_thin_sandbox_runtime_targets.sql",
-    "210_javascript_vitest_verifier.sql"
+    "210_javascript_vitest_verifier.sql",
+    "211_interactive_agent_session_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5488,6 +5489,48 @@
         "object_type": "row",
         "object_name": "verifier_registry.job.javascript.vitest_file"
       }
+    ],
+    "211_interactive_agent_session_authority.sql": [
+      {
+        "object_type": "column",
+        "object_name": "agent_sessions.session_kind"
+      },
+      {
+        "object_type": "column",
+        "object_name": "agent_sessions.external_session_id"
+      },
+      {
+        "object_type": "column",
+        "object_name": "agent_sessions.display_title"
+      },
+      {
+        "object_type": "column",
+        "object_name": "agent_sessions.principal_ref"
+      },
+      {
+        "object_type": "column",
+        "object_name": "agent_sessions.workspace_ref"
+      },
+      {
+        "object_type": "column",
+        "object_name": "agent_sessions.last_activity_at"
+      },
+      {
+        "object_type": "table",
+        "object_name": "agent_session_events"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_agent_sessions_kind_activity"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_agent_sessions_principal_activity"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_agent_session_events_session_created"
+      }
     ]
   },
   "policy_buckets": {
@@ -5707,7 +5750,8 @@
       "207_legacy_domain_authority_assignment.sql",
       "208_structured_document_semantic_authority.sql",
       "209_empty_thin_sandbox_runtime_targets.sql",
-      "210_javascript_vitest_verifier.sql"
+      "210_javascript_vitest_verifier.sql",
+      "211_interactive_agent_session_authority.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

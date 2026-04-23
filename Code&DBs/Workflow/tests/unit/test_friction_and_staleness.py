@@ -173,6 +173,33 @@ class TestFrictionLedger:
         rate = ledger.bounce_rate(since_hours=1)
         assert abs(rate - 0.5) < 0.01
 
+    def test_patterns_group_structured_fingerprint(self, ledger):
+        message = (
+            '{"event":"cli_command_failure","fingerprint":"abc123",'
+            '"reason_code":"cli.unsupported_arguments",'
+            '"command":"status --since-hours 24000",'
+            '"output":"workflow status does not support arguments"}'
+        )
+        ledger.record(FrictionType.HARD_FAILURE, "cli.workflow", "workflow status", message)
+        ledger.record(FrictionType.HARD_FAILURE, "cli.workflow", "workflow status", message)
+
+        patterns = ledger.patterns(
+            source="cli.workflow",
+            promotion_threshold=2,
+        )
+
+        assert len(patterns) == 1
+        pattern = patterns[0]
+        assert pattern.fingerprint == "abc123"
+        assert pattern.count == 2
+        assert pattern.sources == ("cli.workflow",)
+        assert pattern.job_labels == ("workflow status",)
+        assert pattern.reason_code == "cli.unsupported_arguments"
+        assert pattern.command == "status --since-hours 24000"
+        assert pattern.sample == "workflow status does not support arguments"
+        assert pattern.promotion_candidate is True
+        assert pattern.to_json()["promotion_candidate"] is True
+
     def test_is_guardrail(self, ledger):
         ev_bounce = ledger.record(FrictionType.GUARDRAIL_BOUNCE, "governance", "j1", "m1")
         ev_warn = ledger.record(FrictionType.WARN_ONLY, "posture", "j2", "m2")

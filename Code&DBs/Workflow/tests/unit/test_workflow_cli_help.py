@@ -118,6 +118,7 @@ def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
     assert "duplicate_check <query>" in rendered
     assert "attach_evidence    Attach canonical evidence to a bug" in rendered
     assert "resolve            Mark an existing bug fixed, deferred, or won't-fix; FIXED may run verifier proof" in rendered
+    assert "--category S       Filing category: SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER" in rendered
 
 
 def test_bugs_subcommand_help_after_action_is_success() -> None:

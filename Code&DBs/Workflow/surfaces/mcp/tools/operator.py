@@ -4,9 +4,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from runtime.operation_catalog_gateway import execute_operation_from_subsystems
-from runtime.primitive_contracts import bug_query_default_open_only_backlog
-
 from ..subsystems import _subs
 
 
@@ -52,6 +49,20 @@ def _optional_sequence_payload(params: dict[str, Any], field_name: str) -> Any:
     return [] if value is None else value
 
 
+def execute_operation_from_subsystems(*args: Any, **kwargs: Any) -> Any:
+    from runtime.operation_catalog_gateway import (
+        execute_operation_from_subsystems as _execute_operation_from_subsystems,
+    )
+
+    return _execute_operation_from_subsystems(*args, **kwargs)
+
+
+def _bug_query_default_open_only_backlog() -> bool:
+    from runtime.primitive_contracts import bug_query_default_open_only_backlog
+
+    return bug_query_default_open_only_backlog()
+
+
 def tool_praxis_status_snapshot(params: dict) -> dict:
     """Read the canonical workflow status snapshot."""
 
@@ -95,7 +106,7 @@ def tool_praxis_bug_replay_provenance_backfill(params: dict) -> dict:
         payload={
             "limit": params.get("limit"),
             "open_only": bool(
-                params.get("open_only", bug_query_default_open_only_backlog())
+                params.get("open_only", _bug_query_default_open_only_backlog())
             ),
             "receipt_limit": params.get("receipt_limit", 1),
         },
@@ -202,7 +213,7 @@ def tool_praxis_issue_backlog(params: dict) -> dict:
         payload={
             "limit": int(params.get("limit", 50) or 50),
             "open_only": bool(
-                params.get("open_only", bug_query_default_open_only_backlog())
+                params.get("open_only", _bug_query_default_open_only_backlog())
             ),
             "status": params.get("status"),
         },
@@ -236,7 +247,7 @@ def tool_praxis_operator_ideas(params: dict) -> dict:
             "updated_at": params.get("updated_at"),
             "idea_ids": _optional_sequence_payload(params, "idea_ids"),
             "open_only": bool(
-                params.get("open_only", bug_query_default_open_only_backlog())
+                params.get("open_only", _bug_query_default_open_only_backlog())
             ),
             "limit": int(params.get("limit", 50) or 50),
         },
@@ -780,7 +791,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "runtime.primitive_contracts.bug_query_default_open_only_backlog() so "
                             "operator-facing bug surfaces share one authority (closes BUG-BAEC85C1)."
                         ),
-                        "default": bug_query_default_open_only_backlog(),
+                        "default": _bug_query_default_open_only_backlog(),
                     },
                     "receipt_limit": {
                         "type": "integer",
@@ -1010,7 +1021,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "runtime.primitive_contracts.bug_query_default_open_only_backlog() so "
                             "operator-facing bug surfaces share one authority (closes BUG-BAEC85C1)."
                         ),
-                        "default": bug_query_default_open_only_backlog(),
+                        "default": _bug_query_default_open_only_backlog(),
                     },
                     "status": {
                         "type": "string",
@@ -1082,7 +1093,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "open_only": {
                         "type": "boolean",
                         "description": "When true, list only open ideas unless status is supplied.",
-                        "default": bug_query_default_open_only_backlog(),
+                        "default": _bug_query_default_open_only_backlog(),
                     },
                     "limit": {
                         "type": "integer",

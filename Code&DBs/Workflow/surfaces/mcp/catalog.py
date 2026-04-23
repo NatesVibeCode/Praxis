@@ -39,6 +39,7 @@ _MCP_SERVER_ID = "praxis-workflow-mcp"
 _SCHEMA_PRIMITIVE_RESOLVERS: dict[str, Callable[[], Any]] = {
     "bug_query_default_open_only_list": bug_query_default_open_only_list,
     "bug_query_default_open_only_backlog": bug_query_default_open_only_backlog,
+    "_bug_query_default_open_only_backlog": bug_query_default_open_only_backlog,
 }
 
 

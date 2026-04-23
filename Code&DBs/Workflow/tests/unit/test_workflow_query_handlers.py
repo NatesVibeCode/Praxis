@@ -5210,6 +5210,53 @@ def test_handle_friction_empty_stats_is_machine_first() -> None:
     assert result["by_source"] == {}
 
 
+def test_handle_friction_patterns_returns_deterministic_groups() -> None:
+    captured: dict[str, object] = {}
+
+    class _Pattern:
+        def to_json(self):
+            return {
+                "fingerprint": "abc123",
+                "count": 3,
+                "reason_code": "cli.unsupported_arguments",
+                "promotion_candidate": True,
+            }
+
+    class _Ledger:
+        def patterns(self, **kwargs):
+            captured.update(kwargs)
+            return [_Pattern()]
+
+    subs = SimpleNamespace(get_friction_ledger=lambda: _Ledger())
+
+    result = workflow_query_core.handle_friction(
+        subs,
+        {
+            "action": "patterns",
+            "source": "cli.workflow",
+            "limit": 5,
+            "scan_limit": 50,
+            "promotion_threshold": 3,
+        },
+    )
+
+    assert result == {
+        "count": 1,
+        "patterns": [
+            {
+                "fingerprint": "abc123",
+                "count": 3,
+                "reason_code": "cli.unsupported_arguments",
+                "promotion_candidate": True,
+            }
+        ],
+    }
+    assert captured["source"] == "cli.workflow"
+    assert captured["limit"] == 5
+    assert captured["scan_limit"] == 50
+    assert captured["promotion_threshold"] == 3
+
+
 def test_handle_artifacts_empty_stats_is_machine_first() -> None:
     subs = SimpleNamespace(get_artifact_store=lambda: SimpleNamespace(stats=lambda: {"total_artifacts": 0, "by_type": {}}))
 
@@ -5218,6 +5265,23 @@ def test_handle_artifacts_empty_stats_is_machine_first() -> None:
     assert result["status"] == "empty"
     assert result["reason_code"] == "artifacts.none_recorded"
     assert result["total_artifacts"] == 0
+
+
+def test_handle_artifacts_list_requires_explicit_sandbox_id() -> None:
+    subs = SimpleNamespace(get_artifact_store=lambda: SimpleNamespace(stats=lambda: {}, list_by_sandbox=lambda _sid: []))
+
+    with pytest.raises(workflow_query_core._ClientError, match="sandbox_id is required"):
+        workflow_query_core.handle_artifacts(subs, {"action": "list"})
+
+
+def test_handle_artifacts_list_rejects_demo_placeholder() -> None:
+    subs = SimpleNamespace(get_artifact_store=lambda: SimpleNamespace(stats=lambda: {}, list_by_sandbox=lambda _sid: []))
+
+    with pytest.raises(workflow_query_core._ClientError, match="example placeholder"):
+        workflow_query_core.handle_artifacts(
+            subs,
+            {"action": "list", "sandbox_id": "sandbox_abc123"},
+        )
 
 
 def test_handle_research_no_hits_is_machine_first() -> None:

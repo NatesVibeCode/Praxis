@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -256,13 +257,14 @@ def _insert_authority_event(
     conn: Any,
     binding: ResolvedHttpOperationBinding,
     *,
+    event_id: str | None = None,
     receipt_id: str,
     input_hash: str,
     output_hash: str,
     idempotency_key: str | None,
     result_status: str | None,
 ) -> str:
-    event_id = str(uuid4())
+    event_id = event_id or str(uuid4())
     authority_domain_ref = _binding_value(binding, "authority_domain_ref", binding.authority_ref)
     event_type = _binding_value(binding, "event_type", None) or binding.operation_name.replace(".", "_")
     payload = {
@@ -299,6 +301,15 @@ def _insert_authority_event(
     return event_id
 
 
+@contextmanager
+def _operation_proof_transaction(conn: Any):
+    transaction = getattr(conn, "transaction", None)
+    if not callable(transaction):
+        raise RuntimeError("operation receipt persistence requires conn.transaction()")
+    with transaction() as tx_conn:
+        yield tx_conn
+
+
 def _attach_receipt_to_authority_events(
     conn: Any,
     *,
@@ -317,6 +328,52 @@ def _attach_receipt_to_authority_events(
         receipt_id,
         event_ids,
     )
+
+
+def _write_operation_proof(
+    conn: Any,
+    binding: ResolvedHttpOperationBinding,
+    *,
+    receipt: Mapping[str, Any],
+    result_payload: Any,
+    input_hash: str,
+    output_hash: str | None,
+    idempotency_key: str | None,
+    result_status: str | None,
+) -> dict[str, Any]:
+    durable_receipt = dict(receipt)
+    event_ids = list(durable_receipt.get("event_ids") or [])
+    should_create_event = (
+        durable_receipt.get("execution_status") == "completed"
+        and binding.operation_kind == "command"
+        and _binding_value(binding, "event_required", True)
+        and not event_ids
+    )
+    if should_create_event:
+        event_ids.append(str(uuid4()))
+        durable_receipt["event_ids"] = event_ids
+
+    if _binding_value(binding, "receipt_required", True):
+        _insert_operation_receipt(conn, binding, receipt=durable_receipt, result_payload=result_payload)
+    if durable_receipt.get("execution_status") == "completed" and event_ids:
+        if should_create_event:
+            _insert_authority_event(
+                conn,
+                binding,
+                event_id=event_ids[0],
+                receipt_id=str(durable_receipt["receipt_id"]),
+                input_hash=input_hash,
+                output_hash=output_hash or "",
+                idempotency_key=idempotency_key,
+                result_status=result_status,
+            )
+        else:
+            _attach_receipt_to_authority_events(
+                conn,
+                receipt_id=str(durable_receipt["receipt_id"]),
+                event_ids=event_ids,
+            )
+    return durable_receipt
 
 
 def _persist_operation_outcome(
@@ -353,37 +410,16 @@ def _persist_operation_outcome(
         projection_freshness=projection_freshness,
         duration_ms=duration_ms,
     )
-    if _binding_value(binding, "receipt_required", True):
-        _insert_operation_receipt(conn, binding, receipt=receipt, result_payload=result)
-    if execution_status == "completed" and event_ids:
-        _attach_receipt_to_authority_events(conn, receipt_id=receipt_id, event_ids=event_ids)
-    if (
-        execution_status == "completed"
-        and binding.operation_kind == "command"
-        and _binding_value(binding, "event_required", True)
-        and not event_ids
-    ):
-        event_ids.append(
-            _insert_authority_event(
-                conn,
-                binding,
-                receipt_id=receipt_id,
-                input_hash=input_hash,
-                output_hash=output_hash or "",
-                idempotency_key=idempotency_key,
-                result_status=normalized_result_status,
-            )
-        )
-        receipt = dict(receipt)
-        receipt["event_ids"] = event_ids
-        conn.execute(
-            """
-            UPDATE authority_operation_receipts
-               SET event_ids = $2::jsonb
-             WHERE receipt_id = $1::uuid
-            """,
-            receipt_id,
-            json.dumps(event_ids, sort_keys=True, default=str),
+    with _operation_proof_transaction(conn) as proof_conn:
+        receipt = _write_operation_proof(
+            proof_conn,
+            binding,
+            receipt=receipt,
+            result_payload=result,
+            input_hash=input_hash,
+            output_hash=output_hash,
+            idempotency_key=idempotency_key,
+            result_status=normalized_result_status,
         )
     return dict(receipt)
 

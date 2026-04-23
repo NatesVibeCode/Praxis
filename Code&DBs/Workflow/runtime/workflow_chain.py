@@ -295,7 +295,12 @@ def bootstrap_workflow_chain_schema(conn: Any) -> None:
         conn.execute(statement)
 
 
-def validate_workflow_chain(program: WorkflowChainProgram, *, repo_root: str, pg_conn: Any) -> list[dict[str, Any]]:
+def _validated_specs_for_program(
+    program: WorkflowChainProgram,
+    *,
+    repo_root: str,
+    pg_conn: Any,
+) -> list[dict[str, Any]]:
     """Validate every referenced workflow spec through the live authority."""
 
     from runtime.workflow_spec import WorkflowSpec
@@ -307,8 +312,21 @@ def validate_workflow_chain(program: WorkflowChainProgram, *, repo_root: str, pg
         spec = WorkflowSpec.load(str(repo_root_path / spec_path))
         result = validate_workflow_spec(spec, pg_conn=pg_conn)
         result["spec_path"] = spec_path
+        result["_workflow_spec"] = spec
         results.append(result)
     return results
+
+
+def validate_workflow_chain(program: WorkflowChainProgram, *, repo_root: str, pg_conn: Any) -> list[dict[str, Any]]:
+    """Validate every referenced workflow spec through the live authority."""
+
+    validation = _validated_specs_for_program(program, repo_root=repo_root, pg_conn=pg_conn)
+    public_results: list[dict[str, Any]] = []
+    for item in validation:
+        public_item = dict(item)
+        public_item.pop("_workflow_spec", None)
+        public_results.append(public_item)
+    return public_results
 
 
 def _workflow_chain_result_ref(chain_id: str) -> str:
@@ -370,14 +388,26 @@ def _emit_chain_event(conn: Any, *, event_type: str, chain_id: str, payload: dic
     conn.execute("SELECT pg_notify('system_event', $1)", chain_id)
 
 
-def _spec_rows_for_program(program: WorkflowChainProgram, *, repo_root: Path) -> list[dict[str, Any]]:
+def _spec_rows_for_program(
+    program: WorkflowChainProgram,
+    *,
+    repo_root: Path,
+    validated_specs: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     from runtime.workflow._shared import _workflow_id_for_spec
     from runtime.workflow_spec import WorkflowSpec
 
+    specs_by_path = {
+        str(item.get("spec_path")): item.get("_workflow_spec")
+        for item in (validated_specs or [])
+        if item.get("_workflow_spec") is not None
+    }
     rows: list[dict[str, Any]] = []
     for wave in program.waves:
         for ordinal, spec_path in enumerate(wave.spec_paths, start=1):
-            spec = WorkflowSpec.load(str(repo_root / spec_path))
+            spec = specs_by_path.get(spec_path)
+            if spec is None:
+                spec = WorkflowSpec.load(str(repo_root / spec_path))
             rows.append(
                 {
                     "wave_id": wave.wave_id,
@@ -463,7 +493,7 @@ def submit_workflow_chain(
 
     repo_root_path = Path(repo_root).resolve()
     program = load_workflow_chain(coordination_path, repo_root=str(repo_root_path))
-    validation = validate_workflow_chain(program, repo_root=str(repo_root_path), pg_conn=conn)
+    validation = _validated_specs_for_program(program, repo_root=str(repo_root_path), pg_conn=conn)
     invalid = [item for item in validation if not item.get("valid", False)]
     if invalid:
         first_invalid = invalid[0]
@@ -472,7 +502,11 @@ def submit_workflow_chain(
             f"{first_invalid.get('error') or 'invalid spec'}",
         )
 
-    spec_rows = _spec_rows_for_program(program, repo_root=repo_root_path)
+    spec_rows = _spec_rows_for_program(
+        program,
+        repo_root=repo_root_path,
+        validated_specs=validation,
+    )
     if adopt_active:
         _assert_unique_adoption_targets(spec_rows)
 

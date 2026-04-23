@@ -7,9 +7,16 @@ from runtime.operations.queries import operator_observability
 
 
 class _FakeConn:
-    def __init__(self, *, zone_rows=None, fail_zone_lookup: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        zone_rows=None,
+        fail_zone_lookup: bool = False,
+        fail_in_flight: bool = False,
+    ) -> None:
         self._zone_rows = zone_rows or []
         self._fail_zone_lookup = fail_zone_lookup
+        self._fail_in_flight = fail_in_flight
 
     def execute(self, sql: str, *args):
         if "FROM failure_category_zones" in sql:
@@ -17,6 +24,8 @@ class _FakeConn:
                 raise RuntimeError("zone authority unavailable")
             return self._zone_rows
         if "FROM workflow_runs" in sql:
+            if self._fail_in_flight:
+                raise RuntimeError("workflow run authority unavailable")
             return []
         raise AssertionError(f"Unexpected SQL: {sql}")
 
@@ -126,6 +135,34 @@ def test_operator_status_snapshot_scans_the_full_receipt_window(monkeypatch) -> 
 
     assert captured == {"limit": 6001, "since_hours": 24}
     assert result["total_workflows"] == 0
+
+
+def test_operator_status_snapshot_degrades_when_in_flight_readback_fails(monkeypatch) -> None:
+    subsystems = SimpleNamespace(
+        get_pg_conn=lambda: _FakeConn(fail_in_flight=True)
+    )
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.list_receipts",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.receipt_stats",
+        lambda **_kwargs: {"totals": {"receipts": 0}},
+    )
+
+    result = operator_observability.handle_query_operator_status_snapshot(
+        operator_observability.QueryOperatorStatusSnapshot(since_hours=24),
+        subsystems,
+    )
+
+    assert result["observability_state"] == "degraded"
+    assert result["in_flight_authority_ready"] is False
+    assert result["in_flight_error"] == "workflow run authority unavailable"
+    assert any(
+        error["code"] == "in_flight_workflows_lookup_failed"
+        for error in result["errors"]
+    )
+    assert "in_flight_workflows" not in result
 
 
 def test_run_status_view_uses_async_evidence_reader(monkeypatch) -> None:

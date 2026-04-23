@@ -89,6 +89,7 @@ def test_workflow_worker_delegates_terminal_state_to_receipt_backed_repository(m
                 "output_payload": {"artifact": "ok"},
                 "failure_code": "",
                 "receipt_id": "receipt:run-1:card.plan:1:terminal",
+                "expected_current_state": "running",
             },
         ),
     ]
@@ -156,6 +157,7 @@ def test_workflow_worker_delegates_failure_persistence_to_repository(monkeypatch
                 "run_node_id": "node-2",
                 "failure_code": "worker_exception",
                 "receipt_id": "receipt:run-2:card.build:1:terminal",
+                "expected_current_state": "running",
             },
         ),
     ]

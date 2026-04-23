@@ -397,12 +397,18 @@ def _validate_payload(args: list[str]) -> dict[str, Any]:
     if ok:
         pass
     elif "Spec Validation: PASSED" in run["stdout"] and "Agent resolution check failed" in run["stdout"]:
-        ok = True
+        ok = False
+        errors.append(
+            "workflow validation failed: agent resolution was blocked by the sandbox permission surface"
+        )
         warnings.append(
             "workflow spec validated, but agent resolution was blocked by the sandbox permission surface"
         )
     elif "agent authority unavailable:" in run["stdout"] and "AUTHORITY ERROR" in run["stdout"]:
-        ok = True
+        ok = False
+        errors.append(
+            "workflow validation failed: agent resolution was blocked by the sandbox permission surface"
+        )
         warnings.append(
             "workflow spec parsed, but agent resolution was blocked by the sandbox permission surface"
         )

@@ -24,6 +24,90 @@ ensure_workflow_database_env() {
     workflow_load_repo_env
 }
 
+record_praxis_shell_failure() {
+    if [ "$#" -lt 2 ]; then
+        echo "usage: record_praxis_shell_failure <exit_code> <command_label_prefix> [command...]" >&2
+        return 2
+    fi
+
+    local exit_code="$1"
+    local command_label_prefix="$2"
+    shift 2
+
+    PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+        "$PYTHON_BIN" - "$exit_code" "$command_label_prefix" "$@" <<'PY'
+import os
+import sys
+
+from surfaces.cli.friction import record_shell_command_failure
+
+exit_code = int(sys.argv[1])
+command_label_prefix = sys.argv[2]
+args = sys.argv[3:]
+output_text = sys.stdin.read()
+record_shell_command_failure(
+    args=args,
+    exit_code=exit_code,
+    output_text=output_text,
+    env=os.environ,
+    command_label_prefix=command_label_prefix,
+)
+PY
+}
+
+ensure_workflow_database_env_with_recording() {
+    if [ "$#" -lt 1 ]; then
+        echo "usage: ensure_workflow_database_env_with_recording <command_label_prefix> [command...]" >&2
+        return 2
+    fi
+
+    local command_label_prefix="$1"
+    shift
+
+    local output_file
+    output_file="$(mktemp "${TMPDIR:-/tmp}/praxis-env-failure.XXXXXX")" || return 1
+
+    if ensure_workflow_database_env >"$output_file" 2>&1; then
+        rm -f "$output_file"
+        return 0
+    fi
+
+    local exit_code=$?
+    local output_text
+    output_text="$(cat "$output_file")"
+    rm -f "$output_file"
+    printf '%s\n' "$output_text" >&2
+    printf '%s' "$output_text" | record_praxis_shell_failure "$exit_code" "$command_label_prefix" "$@"
+    return "$exit_code"
+}
+
+run_shell_command_with_recording() {
+    if [ "$#" -lt 3 ]; then
+        echo "usage: run_shell_command_with_recording <command_label_prefix> <command_name> <command> [args...]" >&2
+        return 2
+    fi
+
+    local command_label_prefix="$1"
+    local command_name="$2"
+    shift 2
+
+    local output_file
+    output_file="$(mktemp "${TMPDIR:-/tmp}/praxis-shell-failure.XXXXXX")" || return 1
+
+    local exit_code=0
+    if "$@" > >(tee "$output_file") 2> >(tee -a "$output_file" >&2); then
+        :
+    else
+        exit_code=$?
+        local output_text
+        output_text="$(cat "$output_file")"
+        printf '%s' "$output_text" | record_praxis_shell_failure "$exit_code" "$command_label_prefix" "$command_name" "${@:2}"
+    fi
+
+    rm -f "$output_file"
+    return "$exit_code"
+}
+
 workflow_subcommand_needs_database_env() {
     local subcommand="${1:-help}"
     shift || true
@@ -702,12 +786,17 @@ docker_only_repair_sync() {
 
 unsupported_native_command() {
     local command_name="${1:-}"
-    cat >&2 <<EOF
+    local message
+    message=$(
+        cat <<EOF
 ${COMMAND_NAME} ${command_name} is no longer supported.
 Native install/setup launchd control has been removed.
 Use ${COMMAND_NAME} start|stop|restart|status|logs for Docker runtime control,
 ${COMMAND_NAME} launch|doctor for launcher readiness, and ${COMMAND_NAME} workflow ... for operator authority.
 EOF
+    )
+    printf '%s\n' "$message" >&2
+    printf '%s' "$message" | record_praxis_shell_failure 1 praxis "$command_name"
     return 1
 }
 
@@ -719,7 +808,7 @@ fi
 if [ "${1:-}" = "workflow" ]; then
     shift
     if workflow_subcommand_needs_database_env "$@"; then
-        ensure_workflow_database_env
+        ensure_workflow_database_env_with_recording workflow "$@" || exit "$?"
     fi
     export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
     case "${1:-help}" in
@@ -743,7 +832,7 @@ fi
 
 if [ "${1:-}" = "mcp" ]; then
     shift
-    ensure_workflow_database_env
+    ensure_workflow_database_env_with_recording mcp "${1:-serve}" "${@:2}" || exit "$?"
     export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
     case "${1:-serve}" in
       serve|server|"")
@@ -771,43 +860,43 @@ case "${1:-}" in
         ;;
     launch)
         shift
-        docker_only_launch "$@"
+        run_shell_command_with_recording praxis launch docker_only_launch "$@"
         exit $?
         ;;
     doctor)
         shift
-        docker_only_doctor "$@"
+        run_shell_command_with_recording praxis doctor docker_only_doctor "$@"
         exit $?
         ;;
     repair-sync)
         shift
-        docker_only_repair_sync "$@"
+        run_shell_command_with_recording praxis repair-sync docker_only_repair_sync "$@"
         exit $?
         ;;
     status)
         shift
-        docker_only_status "$@"
+        run_shell_command_with_recording praxis status docker_only_status "$@"
         exit $?
         ;;
     start)
         shift
-        docker_only_start "$@"
-        exit 0
+        run_shell_command_with_recording praxis start docker_only_start "$@"
+        exit $?
         ;;
     stop)
         shift
-        docker_only_stop "$@"
-        exit 0
+        run_shell_command_with_recording praxis stop docker_only_stop "$@"
+        exit $?
         ;;
     restart)
         shift
-        docker_only_restart "$@"
-        exit 0
+        run_shell_command_with_recording praxis restart docker_only_restart "$@"
+        exit $?
         ;;
     logs)
         shift
-        docker_only_logs "$@"
-        exit 0
+        run_shell_command_with_recording praxis logs docker_only_logs "$@"
+        exit $?
         ;;
     setup)
         shift
@@ -819,10 +908,14 @@ case "${1:-}" in
         exit 1
         ;;
     "")
-        docker_only_usage
+        usage_output="$(docker_only_usage)"
+        printf '%s\n' "$usage_output"
+        printf '%s' "$usage_output" | record_praxis_shell_failure 1 praxis
         exit 1
         ;;
 esac
 
-echo "Unknown command: ${1:-} (try: ${COMMAND_NAME} help)" >&2
+unknown_command_output="Unknown command: ${1:-} (try: ${COMMAND_NAME} help)"
+printf '%s\n' "$unknown_command_output" >&2
+printf '%s\n' "$unknown_command_output" | record_praxis_shell_failure 1 praxis "${1:-}"
 exit 1

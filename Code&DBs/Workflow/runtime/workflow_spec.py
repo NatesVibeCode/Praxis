@@ -153,7 +153,7 @@ class WorkflowSpec:
 
     @classmethod
     def _load_new_format(cls, raw: dict[str, Any]) -> "WorkflowSpec":
-        from adapters.task_profiles import try_resolve_profile
+        from adapters.task_profiles import TaskProfileAuthorityError, resolve_profile
         from runtime.prompt_generation import generate_job_prompt
 
         normalized = dict(raw)
@@ -168,7 +168,13 @@ class WorkflowSpec:
         anti_requirements = _as_string_list(normalized.get("anti_requirements"))
         verify_refs = _as_string_list(normalized.get("verify_refs"))
 
-        profile = try_resolve_profile(task_type)
+        try:
+            profile = resolve_profile(task_type)
+        except TaskProfileAuthorityError as exc:
+            raise WorkflowSpecError(
+                "new-format workflow specs require DB-backed task profile authority; "
+                f"{exc}"
+            ) from exc
 
         # --- build job list ---
         if "jobs" in normalized:
@@ -193,7 +199,16 @@ class WorkflowSpec:
         for index, job in enumerate(jobs):
             # Inherit task_type from spec unless overridden
             job_task_type = str(job.get("task_type") or task_type).strip()
-            job_profile = try_resolve_profile(job_task_type) if job_task_type != task_type else profile
+            if job_task_type != task_type:
+                try:
+                    job_profile = resolve_profile(job_task_type)
+                except TaskProfileAuthorityError as exc:
+                    raise WorkflowSpecError(
+                        "new-format workflow job requires DB-backed task profile authority; "
+                        f"{exc}"
+                    ) from exc
+            else:
+                job_profile = profile
 
             # Contract inheritance: full replace, not merge.
             # If task_type overridden without contract override, try profile defaults first.

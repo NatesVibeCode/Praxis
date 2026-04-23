@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import enum
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -39,6 +41,38 @@ class FrictionStats:
     by_type: dict
     by_source: dict
     bounce_rate: float
+
+
+@dataclass(frozen=True)
+class FrictionPattern:
+    """Deterministic grouping of repeated friction events."""
+
+    fingerprint: str
+    count: int
+    sources: tuple[str, ...]
+    job_labels: tuple[str, ...]
+    reason_code: str
+    command: str
+    sample: str
+    first_seen: datetime
+    last_seen: datetime
+    event_ids: tuple[str, ...]
+    promotion_candidate: bool
+
+    def to_json(self) -> dict:
+        return {
+            "fingerprint": self.fingerprint,
+            "count": self.count,
+            "sources": list(self.sources),
+            "job_labels": list(self.job_labels),
+            "reason_code": self.reason_code,
+            "command": self.command,
+            "sample": self.sample,
+            "first_seen": self.first_seen.isoformat(),
+            "last_seen": self.last_seen.isoformat(),
+            "event_ids": list(self.event_ids),
+            "promotion_candidate": self.promotion_candidate,
+        }
 
 
 class FrictionLedger:
@@ -212,6 +246,91 @@ class FrictionLedger:
         br = bounces / total if total else 0.0
         return FrictionStats(total=total, by_type=by_type, by_source=by_source, bounce_rate=br)
 
+    def patterns(
+        self,
+        friction_type: Optional[FrictionType] = None,
+        source: Optional[str] = None,
+        since: Optional[datetime] = None,
+        limit: int = 20,
+        scan_limit: int = 500,
+        include_test: bool = False,
+        promotion_threshold: int = 3,
+    ) -> list[FrictionPattern]:
+        """Return deterministic repeated-friction groups.
+
+        Structured event messages may supply a fingerprint, command, and
+        reason_code. Older plain-text rows still group by a stable fallback
+        hash over source, job label, type, and normalized message.
+        """
+
+        rows = self.list_events(
+            friction_type=friction_type,
+            source=source,
+            since=since,
+            limit=max(limit, scan_limit),
+            include_test=include_test,
+        )
+        groups: dict[str, dict] = {}
+        for event in rows:
+            payload = _structured_message(event.message)
+            fingerprint = _pattern_fingerprint(event, payload)
+            command = _payload_text(payload, "command") or event.job_label
+            reason_code = (
+                _payload_text(payload, "reason_code")
+                or _payload_text(payload, "code")
+                or event.friction_type.value
+            )
+            sample = (
+                _payload_text(payload, "output")
+                or _payload_text(payload, "message")
+                or event.message
+            )
+            group = groups.setdefault(
+                fingerprint,
+                {
+                    "fingerprint": fingerprint,
+                    "count": 0,
+                    "sources": set(),
+                    "job_labels": set(),
+                    "reason_code": reason_code,
+                    "command": command,
+                    "sample": sample,
+                    "first_seen": event.timestamp,
+                    "last_seen": event.timestamp,
+                    "event_ids": [],
+                },
+            )
+            group["count"] += 1
+            group["sources"].add(event.source)
+            group["job_labels"].add(event.job_label)
+            group["event_ids"].append(event.event_id)
+            if event.timestamp < group["first_seen"]:
+                group["first_seen"] = event.timestamp
+            if event.timestamp > group["last_seen"]:
+                group["last_seen"] = event.timestamp
+                group["reason_code"] = reason_code
+                group["command"] = command
+                group["sample"] = sample
+
+        patterns = [
+            FrictionPattern(
+                fingerprint=str(group["fingerprint"]),
+                count=int(group["count"]),
+                sources=tuple(sorted(group["sources"])),
+                job_labels=tuple(sorted(group["job_labels"])),
+                reason_code=str(group["reason_code"]),
+                command=str(group["command"]),
+                sample=str(group["sample"])[:700],
+                first_seen=group["first_seen"],
+                last_seen=group["last_seen"],
+                event_ids=tuple(str(event_id) for event_id in group["event_ids"][:10]),
+                promotion_candidate=int(group["count"]) >= promotion_threshold,
+            )
+            for group in groups.values()
+        ]
+        patterns.sort(key=lambda pattern: (pattern.count, pattern.last_seen), reverse=True)
+        return patterns[:limit]
+
     def bounce_rate(self, since_hours: int = 24, include_test: bool = False) -> float:
         since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
         rows = self._repository.list_type_rows_since(
@@ -238,3 +357,40 @@ class FrictionLedger:
             timestamp=row["timestamp"] if isinstance(row["timestamp"], datetime) else datetime.fromisoformat(row["timestamp"]),
             is_test=row.get("is_test", False) if isinstance(row, dict) else getattr(row, "is_test", False),
         )
+
+
+def _structured_message(message: str) -> dict[str, object] | None:
+    text = str(message or "").strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _payload_text(payload: dict[str, object] | None, key: str) -> str:
+    if payload is None:
+        return ""
+    value = payload.get(key)
+    if value is None:
+        return ""
+    return " ".join(str(value).split())
+
+
+def _pattern_fingerprint(event: FrictionEvent, payload: dict[str, object] | None) -> str:
+    explicit = _payload_text(payload, "fingerprint")
+    if explicit:
+        return explicit
+    basis = json.dumps(
+        {
+            "friction_type": event.friction_type.value,
+            "source": event.source,
+            "job_label": event.job_label,
+            "message": " ".join(event.message.split())[:700],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.blake2s(basis.encode("utf-8"), digest_size=8).hexdigest()

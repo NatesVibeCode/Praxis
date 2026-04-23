@@ -8,9 +8,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from runtime.workspace_paths import repo_root as workspace_repo_root
-from storage.postgres import PostgresConfigurationError, resolve_workflow_database_url
-
 _WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 _WORKFLOW_LAUNCHD_DIR_ENV = "PRAXIS_LAUNCHD_DIR"
 
@@ -24,7 +21,21 @@ class WorkflowDatabaseAuthority:
 
 
 def _runtime_repo_root() -> Path:
+    from runtime.workspace_paths import repo_root as workspace_repo_root
+
     return workspace_repo_root()
+
+
+def _postgres_configuration_error(*args, **kwargs):
+    from storage.postgres import PostgresConfigurationError
+
+    return PostgresConfigurationError(*args, **kwargs)
+
+
+def _resolve_workflow_database_url(*, env: Mapping[str, str]) -> str:
+    from storage.postgres import resolve_workflow_database_url
+
+    return resolve_workflow_database_url(env=env)
 
 
 def launch_agents_root(*, env: Mapping[str, str] | None = None) -> Path:
@@ -73,14 +84,14 @@ def resolve_runtime_database_authority(
         raw_database_url = str(database_url).strip()
         if not raw_database_url:
             if required:
-                raise PostgresConfigurationError(
+                raise _postgres_configuration_error(
                     "postgres.config_missing",
                     f"{_WORKFLOW_DATABASE_URL_ENV} must be set to a Postgres DSN",
                     details={"environment_variable": _WORKFLOW_DATABASE_URL_ENV},
                 )
             return WorkflowDatabaseAuthority(database_url=None, source="unconfigured")
         return WorkflowDatabaseAuthority(
-            database_url=resolve_workflow_database_url(
+            database_url=_resolve_workflow_database_url(
                 env={_WORKFLOW_DATABASE_URL_ENV: raw_database_url}
             ),
             source="argument",
@@ -92,7 +103,7 @@ def resolve_runtime_database_authority(
         if (not isinstance(raw_database_url, str) or not raw_database_url.strip()) and not required:
             return WorkflowDatabaseAuthority(database_url=None, source="unconfigured")
         return WorkflowDatabaseAuthority(
-            database_url=resolve_workflow_database_url(env=source),
+            database_url=_resolve_workflow_database_url(env=source),
             source="process_env",
         )
 
@@ -101,12 +112,12 @@ def resolve_runtime_database_authority(
     repo_env = _read_repo_env_file(repo_env_path)
     if _WORKFLOW_DATABASE_URL_ENV in repo_env:
         return WorkflowDatabaseAuthority(
-            database_url=resolve_workflow_database_url(env=repo_env),
+            database_url=_resolve_workflow_database_url(env=repo_env),
             source=f"repo_env:{repo_env_path}",
         )
 
     if required:
-        raise PostgresConfigurationError(
+        raise _postgres_configuration_error(
             "postgres.config_missing",
             (
                 f"{_WORKFLOW_DATABASE_URL_ENV} must be provided by the registry/runtime "

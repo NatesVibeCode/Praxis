@@ -104,6 +104,36 @@ def test_workflow_env_bootstrap_matches_repo_env_python_authority(tmp_path: Path
     assert resolved_source == f"repo_env:{repo_env_path}"
 
 
+def test_workflow_env_exports_repo_root_as_workspace_base_when_unset(tmp_path: Path) -> None:
+    repo_root = _sandbox_repo(tmp_path)
+    (repo_root / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://repo-env.example/praxis\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                f"source {_HELPER!s}; "
+                "workflow_load_repo_env; "
+                "printf '%s' \"$PRAXIS_WORKSPACE_BASE_PATH\""
+            ),
+        ],
+        cwd=repo_root,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "WORKFLOW_ENV_REPO_ROOT": str(repo_root),
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout == str(repo_root)
+
+
 def test_workflow_env_bootstrap_does_not_discover_docker_authority(
     tmp_path: Path,
 ) -> None:

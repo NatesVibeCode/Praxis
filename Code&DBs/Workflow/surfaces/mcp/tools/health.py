@@ -14,6 +14,7 @@ from surfaces.api.operator_read import (
     build_transport_support_summary,
     query_transport_support,
 )
+from surfaces.api.handlers._surface_usage import surface_usage_recorder_health
 
 from surfaces._workflow_database import workflow_database_url_for_repo
 from ..subsystems import _subs, REPO_ROOT, workflow_database_env
@@ -67,6 +68,17 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     probes.append(hs_mod.PostgresConnectivityProbe(db_url))
 
     probes.append(hs_mod.DiskSpaceProbe(str(REPO_ROOT)))
+    surface_usage_recorder = surface_usage_recorder_health()
+    if surface_usage_recorder.get("authority_ready") is False:
+        probes.append(
+            hs_mod.StaticHealthProbe(
+                name="surface_usage_recorder",
+                passed=False,
+                message=f"surface usage recorder degraded: {surface_usage_recorder.get('last_error') or 'unknown error'}",
+                status="failed",
+                details=surface_usage_recorder,
+            )
+        )
     transport_support = query_transport_support(
         health_mod=hs_mod,
         pg=_subs.get_pg_conn(),
@@ -153,7 +165,14 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         "preflight": {
             "overall": preflight.overall.value,
             "checks": [
-                {"name": c.name, "passed": c.passed, "message": c.message, "duration_ms": round(c.duration_ms, 2)}
+                {
+                    "name": c.name,
+                    "passed": c.passed,
+                    "message": c.message,
+                    "duration_ms": round(c.duration_ms, 2),
+                    "status": getattr(c, "status", None) or ("ok" if c.passed else "failed"),
+                    "details": getattr(c, "details", {}),
+                }
                 for c in preflight.checks
             ],
             "timestamp": preflight.timestamp.isoformat(),
@@ -176,6 +195,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
             "provider_registry_fallback_active": provider_registry.get("fallback_active"),
         },
         "provider_registry": provider_registry,
+        "surface_usage_recorder": surface_usage_recorder,
         "dependency_truth": dependency_truth,
         "context_cache": cache_stats,
         "content_health": content_health,

@@ -12,11 +12,30 @@ class _ExampleCommand(BaseModel):
     value: str
 
 
+class _FakeTransaction:
+    def __init__(self, conn: "_FakeAuthorityConn") -> None:
+        self.conn = conn
+
+    def __enter__(self) -> "_FakeAuthorityConn":
+        self.conn.transaction_enters += 1
+        return self.conn
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if exc_type is None:
+            self.conn.transaction_commits += 1
+        else:
+            self.conn.transaction_rollbacks += 1
+
+
 class _FakeAuthorityConn:
     def __init__(self, *, cached_result: dict[str, object] | None = None) -> None:
         self.cached_result = cached_result
         self.fetchrow_calls: list[tuple[str, tuple[object, ...]]] = []
         self.execute_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.transaction_enters = 0
+        self.transaction_commits = 0
+        self.transaction_rollbacks = 0
+        self.raise_on_sql: str | None = None
 
     def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
         self.fetchrow_calls.append((query, args))
@@ -26,10 +45,15 @@ class _FakeAuthorityConn:
 
     def execute(self, query: str, *args: object) -> list[dict[str, object]]:
         self.execute_calls.append((query, args))
+        if self.raise_on_sql and self.raise_on_sql in query:
+            raise RuntimeError("injected proof write failure")
         return []
 
     def executed_sql(self) -> str:
         return "\n".join(query for query, _args in self.execute_calls)
+
+    def transaction(self) -> _FakeTransaction:
+        return _FakeTransaction(self)
 
 
 def test_execute_operation_from_subsystems_resolves_and_invokes_binding(monkeypatch) -> None:
@@ -83,6 +107,10 @@ def test_execute_operation_from_subsystems_resolves_and_invokes_binding(monkeypa
     assert receipt["event_ids"]
     assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
     assert "INSERT INTO authority_events" in conn.executed_sql()
+    assert "UPDATE authority_operation_receipts" not in conn.executed_sql()
+    assert conn.transaction_enters == 1
+    assert conn.transaction_commits == 1
+    assert conn.transaction_rollbacks == 0
     assert captured["command"].value == "authoritative"
     assert captured["subsystems"] is subsystems
 
@@ -156,6 +184,7 @@ def test_execute_query_operation_also_attaches_operation_receipt(monkeypatch) ->
     assert result["operation_receipt"]["event_ids"] == []
     assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
     assert "INSERT INTO authority_events" not in conn.executed_sql()
+    assert conn.transaction_commits == 1
 
 
 def test_aexecute_operation_from_subsystems_awaits_async_handlers(monkeypatch) -> None:
@@ -200,6 +229,54 @@ def test_aexecute_operation_from_subsystems_awaits_async_handlers(monkeypatch) -
     assert result["value"] == "async"
     assert result["operation_receipt"]["operation_name"] == "semantic_assertions.list"
     assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
+    assert conn.transaction_commits == 1
+
+
+def test_command_receipt_event_persistence_rolls_back_as_one_proof_write(monkeypatch) -> None:
+    binding = SimpleNamespace(
+        operation_ref="operator.example",
+        operation_name="operator.example",
+        source_kind="operation_command",
+        operation_kind="command",
+        command_class=_ExampleCommand,
+        handler=lambda command, _subsystems: {"value": command.value},
+        authority_ref="authority.example",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="non_idempotent",
+        binding_revision="binding.operation.example.20260416",
+        decision_ref="decision.operation.example.20260416",
+    )
+
+    conn = _FakeAuthorityConn()
+    conn.raise_on_sql = "INSERT INTO authority_events"
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    try:
+        gateway.execute_operation_from_subsystems(
+            _Subsystems(),
+            operation_name="operator.example",
+            payload={"value": "authoritative"},
+        )
+    except RuntimeError as exc:
+        assert "injected proof write failure" in str(exc)
+    else:
+        raise AssertionError("operation proof write failure should propagate")
+
+    assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
+    assert "INSERT INTO authority_events" in conn.executed_sql()
+    assert conn.transaction_enters == 1
+    assert conn.transaction_commits == 0
+    assert conn.transaction_rollbacks == 1
 
 
 def test_execute_operation_from_subsystems_runs_async_handlers_for_sync_surfaces(monkeypatch) -> None:

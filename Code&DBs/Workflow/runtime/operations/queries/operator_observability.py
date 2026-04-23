@@ -232,6 +232,8 @@ def handle_query_operator_status_snapshot(
         )
 
     in_flight = []
+    in_flight_authority_ready = True
+    in_flight_error: str | None = None
     try:
         running_rows = conn.execute(
             """SELECT run_id, current_state, requested_at, request_envelope
@@ -269,8 +271,9 @@ def handle_query_operator_status_snapshot(
                     "elapsed_seconds": elapsed,
                 }
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        in_flight_authority_ready = False
+        in_flight_error = str(exc)
 
     result: dict[str, Any] = {
         "total_workflows": total,
@@ -287,16 +290,28 @@ def handle_query_operator_status_snapshot(
         "top_failure_codes": top_failures,
         "since_hours": query.since_hours,
         "zone_authority_ready": zone_authority_ready,
-        "observability_state": "ready" if zone_authority_ready else "degraded",
+        "in_flight_authority_ready": in_flight_authority_ready,
+        "in_flight_error": in_flight_error,
+        "observability_state": (
+            "ready"
+            if zone_authority_ready and in_flight_authority_ready
+            else "degraded"
+        ),
         **_queue_depth_snapshot(conn),
     }
+    errors: list[dict[str, str]] = []
     if zone_authority_error:
-        result["errors"] = [
-            {
-                "code": "failure_category_zones_lookup_failed",
-                "message": zone_authority_error,
-            }
-        ]
+        errors.append({
+            "code": "failure_category_zones_lookup_failed",
+            "message": zone_authority_error,
+        })
+    if in_flight_error:
+        errors.append({
+            "code": "in_flight_workflows_lookup_failed",
+            "message": in_flight_error,
+        })
+    if errors:
+        result["errors"] = errors
     if in_flight:
         result["in_flight_workflows"] = in_flight
     return result

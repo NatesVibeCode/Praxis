@@ -71,16 +71,63 @@ def _agent_sessions_port(env: dict[str, str] | None = None) -> int:
 async def _require_agent_session_access(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(_HTTP_BEARER),
-) -> str:
+) -> dict[str, str]:
     expected_token = _public_api_token()
+
+    if credentials is not None and str(credentials.scheme).lower() == "bearer":
+        if expected_token is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "message": "PRAXIS_API_TOKEN is required before bearer agent sessions can run",
+                    "error_code": "agent_sessions_auth_not_configured",
+                },
+            )
+        if not secrets.compare_digest(str(credentials.credentials), expected_token):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "message": "Bearer token rejected for agent sessions",
+                    "error_code": "agent_sessions_auth_rejected",
+                },
+            )
+        request.state.authenticated_principal = "public_api_token"
+        return _auth_payload(principal_ref="public_api_token", auth_kind="bearer")
+
+    from runtime.mobile_security import AUTH_COOKIE_NAME
+
+    mobile_session_cookie = str(request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
+    if mobile_session_cookie:
+        from runtime.capability.sessions import MobileSessionError, resolve_mobile_session
+
+        try:
+            session = resolve_mobile_session(
+                _agent_sessions_pg_conn(),
+                session_token_secret=mobile_session_cookie,
+            )
+        except MobileSessionError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail={"message": str(exc), "error_code": exc.reason_code},
+            ) from exc
+
+        principal_ref = str(session.get("principal_ref") or "mobile_session").strip()
+        request.state.authenticated_principal = principal_ref
+        return _auth_payload(
+            principal_ref=principal_ref,
+            auth_kind="mobile_session",
+            mobile_session_id=str(session.get("session_id") or ""),
+        )
+
     if expected_token is None:
         raise HTTPException(
             status_code=503,
             detail={
-                "message": "PRAXIS_API_TOKEN is required before agent sessions can run",
+                "message": "PRAXIS_API_TOKEN or a valid mobile session cookie is required before agent sessions can run",
                 "error_code": "agent_sessions_auth_not_configured",
             },
         )
+
     if credentials is None or str(credentials.scheme).lower() != "bearer":
         raise HTTPException(
             status_code=401,
@@ -90,16 +137,6 @@ async def _require_agent_session_access(
             },
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if not secrets.compare_digest(str(credentials.credentials), expected_token):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "message": "Bearer token rejected for agent sessions",
-                "error_code": "agent_sessions_auth_rejected",
-            },
-        )
-    request.state.authenticated_principal = "public_api_token"
-    return "public_api_token"
 
 _STREAM_IDLE_TIMEOUT = 5.0
 _TURN_TERMINATION_TIMEOUT = 2.0
@@ -111,6 +148,7 @@ _agent_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _agent_processes: dict[str, asyncio.subprocess.Process] = {}
 _active_turns: set[str] = set()
 _claimed_turns: set[str] = set()
+_subsystems: Any | None = None
 
 
 class CreateAgentRequest(BaseModel):
@@ -120,6 +158,269 @@ class CreateAgentRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     prompt: str
+
+
+def _agent_sessions_pg_conn() -> Any:
+    factory = getattr(app.state, "pg_conn_factory", None)
+    if callable(factory):
+        return factory()
+
+    global _subsystems
+    if _subsystems is None:
+        from surfaces.api.handlers._subsystems import _Subsystems
+
+        _subsystems = _Subsystems()
+    return _subsystems.get_pg_conn()
+
+
+def _auth_payload(
+    *,
+    principal_ref: str,
+    auth_kind: str,
+    mobile_session_id: str | None = None,
+) -> dict[str, str]:
+    payload = {"principal_ref": principal_ref, "auth_kind": auth_kind}
+    if mobile_session_id:
+        payload["mobile_session_id"] = mobile_session_id
+    return payload
+
+
+INTERACTIVE_SESSION_KIND = "interactive_cli"
+INTERACTIVE_WORKFLOW_ID = "interactive_cli"
+INTERACTIVE_JOB_LABEL = "interactive"
+
+
+def _json_dump(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _decode_json(value: Any) -> Any:
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value
+
+
+def _session_from_row(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    return {
+        "agent_id": data["session_id"],
+        "session_id": data["external_session_id"],
+        "title": data.get("display_title") or data["session_id"],
+        "principal_ref": data.get("principal_ref") or "",
+        "workspace_ref": data.get("workspace_ref") or "",
+        "status": data.get("status") or "",
+        "running": False,
+        "created_at": data.get("created_at"),
+        "last_activity": data.get("last_activity_at") or data.get("heartbeat_at"),
+    }
+
+
+def create_interactive_agent_session(
+    conn: Any,
+    *,
+    agent_id: str,
+    cli_session_id: str,
+    title: str,
+    principal_ref: str,
+    workspace_ref: str,
+) -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        INSERT INTO agent_sessions (
+            session_id, run_id, workflow_id, job_label, agent_slug, status,
+            session_kind, external_session_id, display_title, principal_ref,
+            workspace_ref, context_json, last_activity_at, heartbeat_at
+        ) VALUES (
+            $1, $2, $3, $4, 'claude', 'active',
+            $5, $6, $7, $8, $9, '{}'::jsonb, now(), now()
+        )
+        ON CONFLICT (session_id) DO UPDATE SET
+            status = 'active',
+            session_kind = EXCLUDED.session_kind,
+            external_session_id = EXCLUDED.external_session_id,
+            display_title = EXCLUDED.display_title,
+            principal_ref = EXCLUDED.principal_ref,
+            workspace_ref = EXCLUDED.workspace_ref,
+            last_activity_at = now(),
+            heartbeat_at = now(),
+            revoked_at = NULL,
+            revoked_by = NULL,
+            revoke_reason = NULL
+        RETURNING session_id, external_session_id, display_title, principal_ref,
+                  workspace_ref, status, created_at, last_activity_at, heartbeat_at
+        """,
+        agent_id,
+        f"interactive:{agent_id}",
+        INTERACTIVE_WORKFLOW_ID,
+        INTERACTIVE_JOB_LABEL,
+        INTERACTIVE_SESSION_KIND,
+        cli_session_id,
+        title,
+        principal_ref,
+        workspace_ref,
+    )
+    session = _session_from_row(rows[0])
+    append_interactive_agent_event(
+        conn,
+        agent_id=agent_id,
+        event_kind="session.created",
+        payload={"title": title, "cli_session_id": cli_session_id, "workspace_ref": workspace_ref},
+    )
+    return session
+
+
+def get_interactive_agent_session(conn: Any, *, agent_id: str) -> dict[str, Any] | None:
+    rows = conn.execute(
+        """
+        SELECT session_id, external_session_id, display_title, principal_ref,
+               workspace_ref, status, created_at, last_activity_at, heartbeat_at
+        FROM agent_sessions
+        WHERE session_id = $1
+          AND session_kind = $2
+          AND revoked_at IS NULL
+        """,
+        agent_id,
+        INTERACTIVE_SESSION_KIND,
+    )
+    if not rows:
+        return None
+    return _session_from_row(rows[0])
+
+
+def list_interactive_agent_sessions(conn: Any) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT session_id, external_session_id, display_title, principal_ref,
+               workspace_ref, status, created_at, last_activity_at, heartbeat_at
+        FROM agent_sessions
+        WHERE session_kind = $1
+          AND revoked_at IS NULL
+        ORDER BY last_activity_at DESC, created_at DESC
+        """,
+        INTERACTIVE_SESSION_KIND,
+    )
+    return [_session_from_row(row) for row in rows]
+
+
+def append_interactive_agent_event(
+    conn: Any,
+    *,
+    agent_id: str,
+    event_kind: str,
+    payload: dict[str, Any] | None = None,
+    text_content: str | None = None,
+) -> int | None:
+    rows = conn.execute(
+        """
+        WITH updated AS (
+            UPDATE agent_sessions
+            SET last_activity_at = now(),
+                heartbeat_at = now()
+            WHERE session_id = $1
+              AND session_kind = $2
+              AND revoked_at IS NULL
+            RETURNING session_id
+        )
+        INSERT INTO agent_session_events (
+            session_id, event_kind, payload_json, text_content
+        )
+        SELECT session_id, $3, $4::jsonb, $5
+        FROM updated
+        RETURNING event_id
+        """,
+        agent_id,
+        INTERACTIVE_SESSION_KIND,
+        event_kind,
+        _json_dump(payload or {}),
+        text_content,
+    )
+    if not rows:
+        return None
+    return int(rows[0]["event_id"])
+
+
+def list_interactive_agent_events(conn: Any, *, agent_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT event_id, event_kind, payload_json, text_content, created_at
+        FROM agent_session_events
+        WHERE session_id = $1
+        ORDER BY event_id ASC
+        """,
+        agent_id,
+    )
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        data = dict(row)
+        events.append(
+            {
+                "event_id": data["event_id"],
+                "type": data["event_kind"],
+                "event_kind": data["event_kind"],
+                "payload": _decode_json(data.get("payload_json")),
+                "text": data.get("text_content"),
+                "text_content": data.get("text_content"),
+                "created_at": data.get("created_at"),
+            }
+        )
+    return events
+
+
+def terminate_interactive_agent_session(
+    conn: Any,
+    *,
+    agent_id: str,
+    terminated_by: str,
+    reason: str,
+) -> None:
+    append_interactive_agent_event(
+        conn,
+        agent_id=agent_id,
+        event_kind="session.terminated",
+        payload={"terminated_by": terminated_by, "reason": reason},
+    )
+    conn.execute(
+        """
+        UPDATE agent_sessions
+        SET status = 'terminated',
+            last_activity_at = now(),
+            heartbeat_at = now(),
+            revoked_at = COALESCE(revoked_at, now()),
+            revoked_by = COALESCE(revoked_by, $2),
+            revoke_reason = COALESCE(revoke_reason, $3)
+        WHERE session_id = $1
+          AND session_kind = $4
+        """,
+        agent_id,
+        terminated_by,
+        reason,
+        INTERACTIVE_SESSION_KIND,
+    )
+
+
+def _spend_mobile_budget_if_present(auth: dict[str, str], *, reason_code: str) -> None:
+    session_id = auth.get("mobile_session_id")
+    if not session_id:
+        return
+    from runtime.capability.sessions import MobileSessionError, spend_session_budget
+
+    try:
+        spend_session_budget(
+            _agent_sessions_pg_conn(),
+            session_id=session_id,
+            units=1,
+            reason_code=reason_code,
+        )
+    except MobileSessionError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail={"message": str(exc), "error_code": exc.reason_code},
+        ) from exc
 
 
 @app.get("/")
@@ -190,9 +491,9 @@ def _messages_path(agent_id: str) -> Path:
 
 def _read_meta(agent_id: str) -> dict[str, Any] | None:
     path = _meta_path(agent_id)
-    if not path.exists():
-        return None
     try:
+        if not path.exists():
+            return None
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
@@ -203,17 +504,23 @@ def _read_meta(agent_id: str) -> dict[str, Any] | None:
 
 def _write_meta_atomic(agent_id: str, meta: dict[str, Any]) -> None:
     path = _meta_path(agent_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f"{path.name}.tmp")
-    tmp_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp_path, path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f"{path.name}.tmp")
+        tmp_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp_path, path)
+    except OSError as exc:
+        print(f"[agent_sessions] compatibility meta export skipped: {exc}", flush=True)
 
 
 def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, ensure_ascii=False))
-        fh.write("\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False))
+            fh.write("\n")
+    except OSError as exc:
+        print(f"[agent_sessions] compatibility event export skipped: {exc}", flush=True)
 
 
 def _get_lock(agent_id: str) -> asyncio.Lock:
@@ -301,7 +608,13 @@ def _final_reply_from_events(events: list[dict[str, Any]]) -> str:
     return ""
 
 
-async def _run_turn(agent_id: str, session_id: str, prompt: str) -> tuple[str, list[dict[str, Any]], int]:
+async def _run_turn(
+    agent_id: str,
+    session_id: str,
+    prompt: str,
+    *,
+    pg_conn: Any | None = None,
+) -> tuple[str, list[dict[str, Any]], int]:
     queue = _get_queue(agent_id)
     messages_path = _messages_path(agent_id)
     cmd = [
@@ -343,6 +656,14 @@ async def _run_turn(agent_id: str, session_id: str, prompt: str) -> tuple[str, l
 
             turn_events.append(event)
             _append_jsonl(messages_path, event)
+            if pg_conn is not None:
+                append_interactive_agent_event(
+                    pg_conn,
+                    agent_id=agent_id,
+                    event_kind="cli.event",
+                    payload=event,
+                    text_content=_event_text(event) or None,
+                )
             await queue.put(event)
 
         exit_code = await proc.wait()
@@ -395,15 +716,24 @@ async def _terminate_process(agent_id: str) -> bool:
 @app.post("/agents")
 async def create_agent(
     body: CreateAgentRequest,
-    _auth: str = Security(_require_agent_session_access),
+    _auth: dict[str, str] = Security(_require_agent_session_access),
 ) -> dict[str, Any]:
+    pg_conn = _agent_sessions_pg_conn()
+    _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.create")
+
     agent_id = str(uuid4())
     session_id = str(uuid4())
     title = body.title or f"agent-{agent_id[:8]}"
     now = _now_iso()
+    session = create_interactive_agent_session(
+        pg_conn,
+        agent_id=agent_id,
+        cli_session_id=session_id,
+        title=title,
+        principal_ref=_auth["principal_ref"],
+        workspace_ref="praxis.default",
+    )
 
-    agent_dir = _agent_dir(agent_id)
-    agent_dir.mkdir(parents=True, exist_ok=True)
     _write_meta_atomic(
         agent_id,
         {
@@ -414,42 +744,85 @@ async def create_agent(
             "last_activity": now,
         },
     )
-    _messages_path(agent_id).touch(exist_ok=True)
+    try:
+        _messages_path(agent_id).touch(exist_ok=True)
+    except OSError as exc:
+        print(f"[agent_sessions] compatibility message log skipped: {exc}", flush=True)
 
     print(f"[agent_sessions] created agent={agent_id} session={session_id}", flush=True)
 
     if body.prompt:
+        append_interactive_agent_event(
+            pg_conn,
+            agent_id=agent_id,
+            event_kind="user.prompt",
+            payload={"principal_ref": _auth["principal_ref"]},
+            text_content=body.prompt,
+        )
         _claim_turn(agent_id)
         lock = _get_lock(agent_id)
         await lock.acquire()
         try:
-            await _run_turn(agent_id, session_id, body.prompt)
+            reply, _turn_events, exit_code = await _run_turn(
+                agent_id,
+                session_id,
+                body.prompt,
+                pg_conn=pg_conn,
+            )
         finally:
             lock.release()
             _release_turn(agent_id)
+        append_interactive_agent_event(
+            pg_conn,
+            agent_id=agent_id,
+            event_kind="assistant.reply",
+            payload={"exit_code": exit_code},
+            text_content=reply,
+        )
 
-    return {"agent_id": agent_id, "session_id": session_id, "title": title}
+    return {"agent_id": agent_id, "session_id": session_id, "title": title, "authority": session}
 
 
 @app.post("/agents/{agent_id}/messages")
 async def send_message(
     agent_id: str,
     body: SendMessageRequest,
-    _auth: str = Security(_require_agent_session_access),
+    _auth: dict[str, str] = Security(_require_agent_session_access),
 ) -> dict[str, Any]:
     agent_id = _normalize_agent_id(agent_id)
-    meta = _read_meta(agent_id)
-    if meta is None:
+    pg_conn = _agent_sessions_pg_conn()
+    session = get_interactive_agent_session(pg_conn, agent_id=agent_id)
+    if session is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
+    _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.message")
+    append_interactive_agent_event(
+        pg_conn,
+        agent_id=agent_id,
+        event_kind="user.prompt",
+        payload={"principal_ref": _auth["principal_ref"]},
+        text_content=body.prompt,
+    )
 
     _claim_turn(agent_id)
     lock = _get_lock(agent_id)
     await lock.acquire()
     try:
-        reply, turn_events, exit_code = await _run_turn(agent_id, str(meta["session_id"]), body.prompt)
+        reply, turn_events, exit_code = await _run_turn(
+            agent_id,
+            str(session["session_id"]),
+            body.prompt,
+            pg_conn=pg_conn,
+        )
     finally:
         lock.release()
         _release_turn(agent_id)
+    append_interactive_agent_event(
+        pg_conn,
+        agent_id=agent_id,
+        event_kind="assistant.reply",
+        payload={"exit_code": exit_code},
+        text_content=reply,
+    )
 
     return {"reply": reply, "turn_events": turn_events, "exit_code": exit_code}
 
@@ -457,41 +830,24 @@ async def send_message(
 @app.get("/agents/{agent_id}/messages")
 async def get_messages(
     agent_id: str,
-    _auth: str = Security(_require_agent_session_access),
+    _auth: dict[str, str] = Security(_require_agent_session_access),
 ) -> dict[str, Any]:
     agent_id = _normalize_agent_id(agent_id)
-    meta = _read_meta(agent_id)
-    if meta is None:
+    pg_conn = _agent_sessions_pg_conn()
+    if get_interactive_agent_session(pg_conn, agent_id=agent_id) is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
 
-    events: list[dict[str, Any]] = []
-    path = _messages_path(agent_id)
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                event = json.loads(stripped)
-                if isinstance(event, dict):
-                    events.append(event)
-                else:
-                    events.append({"type": "raw", "data": event})
-            except json.JSONDecodeError:
-                events.append({"type": "raw", "data": stripped})
-
-    return {"events": events}
+    return {"events": list_interactive_agent_events(pg_conn, agent_id=agent_id)}
 
 
 @app.get("/agents/{agent_id}/stream")
 async def stream_events(
     agent_id: str,
     request: Request,
-    _auth: str = Security(_require_agent_session_access),
+    _auth: dict[str, str] = Security(_require_agent_session_access),
 ) -> StreamingResponse:
     agent_id = _normalize_agent_id(agent_id)
-    meta = _read_meta(agent_id)
-    if meta is None:
+    if get_interactive_agent_session(_agent_sessions_pg_conn(), agent_id=agent_id) is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
 
     queue = _get_queue(agent_id)
@@ -524,17 +880,24 @@ async def stream_events(
 @app.delete("/agents/{agent_id}")
 async def delete_agent(
     agent_id: str,
-    _auth: str = Security(_require_agent_session_access),
+    _auth: dict[str, str] = Security(_require_agent_session_access),
 ) -> dict[str, Any]:
     agent_id = _normalize_agent_id(agent_id)
-    meta = _read_meta(agent_id)
-    if meta is None:
+    pg_conn = _agent_sessions_pg_conn()
+    if get_interactive_agent_session(pg_conn, agent_id=agent_id) is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
 
+    _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.terminate")
     terminated = await _terminate_process(agent_id)
     now = _now_iso()
     termination_event = {"event": "terminated", "at": now}
     _append_jsonl(_messages_path(agent_id), termination_event)
+    terminate_interactive_agent_session(
+        pg_conn,
+        agent_id=agent_id,
+        terminated_by=_auth["principal_ref"],
+        reason="agent_sessions.delete",
+    )
     await _get_queue(agent_id).put(termination_event)
     _release_turn(agent_id)
 
@@ -543,30 +906,11 @@ async def delete_agent(
 
 @app.get("/agents")
 async def list_agents(
-    _auth: str = Security(_require_agent_session_access),
+    _auth: dict[str, str] = Security(_require_agent_session_access),
 ) -> list[dict[str, Any]]:
-    if not AGENTS_DIR.exists():
-        return []
-
-    agents: list[dict[str, Any]] = []
-    for entry in sorted(AGENTS_DIR.iterdir(), key=lambda path: path.name):
-        if not entry.is_dir():
-            continue
-        try:
-            agent_id = _normalize_agent_id(entry.name)
-            meta = _read_meta(agent_id)
-        except HTTPException:
-            continue
-        if meta is None:
-            continue
-        agents.append(
-            {
-                "agent_id": meta.get("agent_id", agent_id),
-                "title": meta.get("title", ""),
-                "last_activity": meta.get("last_activity"),
-                "running": agent_id in _active_turns,
-            }
-        )
+    agents = list_interactive_agent_sessions(_agent_sessions_pg_conn())
+    for agent in agents:
+        agent["running"] = str(agent.get("agent_id") or "") in _active_turns
     return agents
 
 

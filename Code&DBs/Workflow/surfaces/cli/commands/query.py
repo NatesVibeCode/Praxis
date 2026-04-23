@@ -10,7 +10,6 @@ from typing import Any, TextIO
 
 from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from runtime.workspace_paths import repo_root as workspace_repo_root
-from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import (
     get_definition,
     print_json,
@@ -44,6 +43,8 @@ _SQL_CONTEXT_RE = re.compile(
 def _get_conn():
     global _cli_pg_conn
     if _cli_pg_conn is None:
+        from surfaces.cli._db import cli_sync_conn
+
         _cli_pg_conn = cli_sync_conn()
     return _cli_pg_conn
 
@@ -382,16 +383,17 @@ def _trust_command(args: list[str], *, stdout: TextIO) -> int:
                 i += 2
             else:
                 i += 1
-            try:
-                scorer.compute_from_receipts()
-            except Exception as exc:
-                stdout.write(f"error: failed to compute from receipts: {exc}\n")
-                return 1
         elif args[i] in {"--json"}:
             i += 1
         else:
             stdout.write(f"unknown argument: {args[i]}\n")
             return 2
+
+    try:
+        scorer.compute_from_receipts()
+    except Exception as exc:
+        stdout.write(f"error: failed to compute from receipts: {exc}\n")
+        return 1
 
     scores = scorer.all_scores()
     if "--json" in args:
@@ -852,6 +854,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "\n"
             "  --status S         Filter: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
             "  --severity S       Filter: P0, P1, P2, P3\n"
+            "  --category S       Filing category: SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER\n"
             "  --limit N          Max results (default 25)\n"
             "  --all              Include resolved bugs (default: open only)\n"
             "  --body TEXT        Alias for --description on filing and duplicate checks\n"

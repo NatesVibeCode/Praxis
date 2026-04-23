@@ -43,9 +43,8 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_not_to_use="Do not use it for workflow receipt history or knowledge-graph recall.",
         risks={"default": "read", "actions": {"stats": "read", "list": "read", "search": "read", "diff": "read"}},
         examples=[
-            _example("List the latest sandbox", {"action": "list"}),
+            _example("List one sandbox", {"action": "list", "sandbox_id": "sandbox_20260423_001"}),
             _example("Search generated outputs", {"action": "search", "query": "migration schema"}),
-            _example("List one sandbox", {"action": "list", "sandbox_id": "sandbox_abc123"}),
         ],
     ),
     "praxis_bugs": _tool(
@@ -259,10 +258,11 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         recommended_alias=None,
         when_to_use="Inspect friction and guardrail events that are slowing workflows down.",
         when_not_to_use="Do not use it for health probes or general bug search.",
-        risks={"default": "read", "actions": {"stats": "read", "list": "read"}},
+        risks={"default": "read", "actions": {"stats": "read", "list": "read", "patterns": "read"}},
         examples=[
             _example("Show friction stats", {"action": "stats"}),
             _example("List recent friction events", {"action": "list", "limit": 20}),
+            _example("Show repeated CLI failures", {"action": "patterns", "source": "cli.workflow"}),
         ],
     ),
     "praxis_get_submission": _tool(
@@ -292,15 +292,14 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="knowledge",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Inspect blast radius and graph neighbors for a known or latest knowledge-graph entity.",
+        when_to_use="Inspect blast radius and graph neighbors for a known knowledge-graph entity.",
         when_not_to_use="Do not use it for broad knowledge search; use recall first when you need ranked candidates.",
         risks={"default": "read"},
         examples=[
-            _example("Inspect the latest entity", {"depth": 1}),
-            _example("Inspect blast radius for one entity", {"entity_id": "entity_abc123", "depth": 1}),
+            _example("Inspect blast radius for one entity", {"entity_id": "module:task_assembler", "depth": 1}),
             _example(
                 "Inspect blast radius including enrichment edges",
-                {"entity_id": "entity_abc123", "depth": 1, "include_enrichment": True},
+                {"entity_id": "module:task_assembler", "depth": 1, "include_enrichment": True},
             ),
         ],
     ),
@@ -312,10 +311,9 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_not_to_use="Do not use it for ranked search or blast-radius inspection; use recall or graph first.",
         risks={"default": "read"},
         examples=[
-            _example("Compose a story for the latest entity", {}),
             _example(
                 "Compose a story for one entity",
-                {"entity_id": "entity_abc123", "max_lines": 4},
+                {"entity_id": "module:task_assembler", "max_lines": 4},
             ),
         ],
     ),
@@ -817,9 +815,9 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             },
         },
         examples=[
-            _example("List runnable jobs on the current wave", {"action": "next"}),
+            _example("List runnable jobs on one wave", {"action": "next", "wave_id": "wave_1"}),
             _example("Observe current wave state", {"action": "observe"}),
-            _example("Record results on the current wave", {"action": "record", "jobs": "build:pass,test:fail"}),
+            _example("Record results on one wave", {"action": "record", "wave_id": "wave_1", "jobs": "build:pass,test:fail"}),
         ],
     ),
     "praxis_workflow": _tool(

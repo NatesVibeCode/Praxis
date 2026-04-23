@@ -163,7 +163,8 @@ Example input:
 
 ```json
 {
-  "action": "list"
+  "action": "list",
+  "sandbox_id": "sandbox_20260423_001"
 }
 ```
 
@@ -222,7 +223,7 @@ Example input:
 - CLI schema help: `workflow tools describe praxis_friction`
 - When to use: Inspect friction and guardrail events that are slowing workflows down.
 - When not to use: Do not use it for health probes or general bug search.
-- Selector: `action`; default `stats`; values `stats`, `list`
+- Selector: `action`; default `stats`; values `stats`, `list`, `patterns`
 - Required args: (none)
 
 Example input:
@@ -573,7 +574,7 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow tools call praxis_graph`
 - CLI schema help: `workflow tools describe praxis_graph`
-- When to use: Inspect blast radius and graph neighbors for a known or latest knowledge-graph entity.
+- When to use: Inspect blast radius and graph neighbors for a known knowledge-graph entity.
 - When not to use: Do not use it for broad knowledge search; use recall first when you need ranked candidates.
 - Selector: none
 - Required args: (none)
@@ -582,6 +583,7 @@ Example input:
 
 ```json
 {
+  "entity_id": "module:task_assembler",
   "depth": 1
 }
 ```
@@ -670,7 +672,10 @@ Example input:
 Example input:
 
 ```json
-{}
+{
+  "entity_id": "module:task_assembler",
+  "max_lines": 4
+}
 ```
 
 ### Operations
@@ -1731,7 +1736,8 @@ Example input:
 
 ```json
 {
-  "action": "next"
+  "action": "next",
+  "wave_id": "wave_1"
 }
 ```
 

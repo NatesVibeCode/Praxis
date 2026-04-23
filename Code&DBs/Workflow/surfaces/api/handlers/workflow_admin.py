@@ -4,27 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from runtime.dependency_contract import dependency_truth_report
-from runtime.engineering_observability import (
-    build_bug_scoreboard,
-    build_code_hotspots,
-    build_platform_observability,
-)
-from runtime.missing_detector import build_content_health_report
-from runtime.instance import native_instance_contract
-from runtime.primitive_contracts import (
-    bug_status_sql_in_literal,
-    build_orient_primitive_contracts,
-)
-from registry.provider_execution_registry import registry_health as provider_registry_health
-from surfaces._boot import resolve_surface_env, workflow_database_status
-from surfaces.api.operator_read import (
-    build_transport_support_summary,
-    query_transport_support,
-)
-from surfaces.api.handlers import workflow_launcher
-from surfaces.mcp.catalog import get_tool_catalog
-
 from ._shared import (
     REPO_ROOT,
     RouteEntry,
@@ -34,10 +13,89 @@ from ._shared import (
     _read_json_body,
     _serialize,
 )
-from .workflow_run import _handle_status
+
+
+def dependency_truth_report(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime.dependency_contract import dependency_truth_report as _dependency_truth_report
+
+    return _dependency_truth_report(*args, **kwargs)
+
+
+def build_code_hotspots(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime.engineering_observability import build_code_hotspots as _build_code_hotspots
+
+    return _build_code_hotspots(*args, **kwargs)
+
+
+def build_bug_scoreboard(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime.engineering_observability import build_bug_scoreboard as _build_bug_scoreboard
+
+    return _build_bug_scoreboard(*args, **kwargs)
+
+
+def build_platform_observability(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime.engineering_observability import (
+        build_platform_observability as _build_platform_observability,
+    )
+
+    return _build_platform_observability(*args, **kwargs)
+
+
+def build_content_health_report(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime.missing_detector import build_content_health_report as _build_content_health_report
+
+    return _build_content_health_report(*args, **kwargs)
+
+
+def provider_registry_health(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from registry.provider_execution_registry import registry_health as _provider_registry_health
+
+    return _provider_registry_health(*args, **kwargs)
+
+
+def query_transport_support(*args: Any, **kwargs: Any) -> Any:
+    from surfaces.api.operator_read import query_transport_support as _query_transport_support
+
+    return _query_transport_support(*args, **kwargs)
+
+
+def build_transport_support_summary(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from surfaces.api.operator_read import (
+        build_transport_support_summary as _build_transport_support_summary,
+    )
+
+    return _build_transport_support_summary(*args, **kwargs)
+
+
+def surface_usage_recorder_health() -> dict[str, Any]:
+    from ._surface_usage import surface_usage_recorder_health as _surface_usage_recorder_health
+
+    return _surface_usage_recorder_health()
+
+
+def workflow_database_status(*args: Any, **kwargs: Any) -> Any:
+    from surfaces._boot import workflow_database_status as _workflow_database_status
+
+    return _workflow_database_status(*args, **kwargs)
+
+
+def native_instance_contract(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime.instance import native_instance_contract as _native_instance_contract
+
+    return _native_instance_contract(*args, **kwargs)
+
+
+def build_orient_primitive_contracts(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime.primitive_contracts import (
+        build_orient_primitive_contracts as _build_orient_primitive_contracts,
+    )
+
+    return _build_orient_primitive_contracts(*args, **kwargs)
 
 
 def _tool_definition(tool_name: str):
+    from surfaces.mcp.catalog import get_tool_catalog
+
     definition = get_tool_catalog().get(tool_name)
     if definition is None:
         raise KeyError(f"unknown MCP tool: {tool_name}")
@@ -45,6 +103,8 @@ def _tool_definition(tool_name: str):
 
 
 def _workflow_env(subs: Any) -> dict[str, str]:
+    from surfaces._boot import resolve_surface_env
+
     postgres_env = getattr(subs, "_postgres_env", None)
     env = dict(postgres_env() or {}) if callable(postgres_env) else None
     try:
@@ -231,21 +291,25 @@ def _build_orient_authority_envelope(
     health_payload: dict[str, Any],
     dependency_truth: dict[str, Any],
     tool_guidance: dict[str, Any],
+    fast: bool = False,
 ) -> dict[str, Any]:
     """Return the explicit authority envelope projected by /orient."""
 
     workflow_env: dict[str, str] = {}
     workflow_env_error: str | None = None
-    try:
-        workflow_env = _workflow_env(subs)
-        native_instance: dict[str, Any] = native_instance_contract(
-            env=workflow_env,
-        )
-    except Exception as exc:  # noqa: BLE001 — orient must report drift instead of hiding it
-        workflow_env_error = f"{type(exc).__name__}: {exc}"
-        native_instance = {
-            "error": f"native_instance unavailable: {workflow_env_error}",
-        }
+    if fast:
+        native_instance = {"status": "skipped", "reason": "orient_fast_path"}
+    else:
+        try:
+            workflow_env = _workflow_env(subs)
+            native_instance = native_instance_contract(
+                env=workflow_env,
+            )
+        except Exception as exc:  # noqa: BLE001 — orient must report drift instead of hiding it
+            workflow_env_error = f"{type(exc).__name__}: {exc}"
+            native_instance = {
+                "error": f"native_instance unavailable: {workflow_env_error}",
+            }
     primitive_contracts = build_orient_primitive_contracts(
         workflow_env=workflow_env,
         native_instance=native_instance,
@@ -313,6 +377,8 @@ def _build_orient_authority_envelope(
 def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     """Return everything an agent needs to start operating."""
 
+    fast_orient = bool(body.get("fast") or body.get("skip_engineering_observability"))
+    compact_orient = bool(body.get("compact"))
     endpoints = {
         "/orient": "Full orientation context for cold-start agents",
         "/mcp": "Bounded MCP JSON-RPC bridge for Praxis Engine workflow jobs and other HTTP clients",
@@ -364,72 +430,135 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/api/circuits/history": "Read durable provider circuit override history through the operation catalog",
     }
 
-    health_payload = _handle_health(subs, {})
-    dependency_truth = dependency_truth_report(scope="all")
+    if fast_orient:
+        health_payload = {
+            "preflight": {"overall": "skipped"},
+            "operator_snapshot": {},
+            "proof_metrics": {"status": "skipped", "reason": "orient_fast_path"},
+            "schema_authority": {"status": "skipped", "reason": "orient_fast_path"},
+            "lane_recommendation": {},
+        }
+    else:
+        health_payload = _handle_health(subs, {})
+    if fast_orient:
+        dependency_truth = {"ok": True, "status": "skipped", "reason": "orient_fast_path"}
+    else:
+        dependency_truth = dependency_truth_report(scope="all")
 
     recent_activity: dict[str, Any]
-    try:
-        ingester = subs.get_receipt_ingester()
-        receipts = ingester.load_recent(since_hours=24)
-        pass_rate = ingester.compute_pass_rate(receipts)
-        top_failures = ingester.top_failure_codes(receipts)
-        recent_activity = {
-            "total_workflows_24h": len(receipts),
-            "pass_rate": round(pass_rate, 4),
-            "top_failure_codes": top_failures,
-        }
-    except Exception as exc:
-        recent_activity = {"error": f"Could not load receipts: {exc}"}
+    if fast_orient:
+        recent_activity = {"status": "skipped", "reason": "orient_fast_path"}
+    else:
+        try:
+            ingester = subs.get_receipt_ingester()
+            receipts = ingester.load_recent(since_hours=24)
+            pass_rate = ingester.compute_pass_rate(receipts)
+            top_failures = ingester.top_failure_codes(receipts)
+            recent_activity = {
+                "total_workflows_24h": len(receipts),
+                "pass_rate": round(pass_rate, 4),
+                "top_failure_codes": top_failures,
+            }
+        except Exception as exc:
+            recent_activity = {"error": f"Could not load receipts: {exc}"}
 
     try:
         bug_tracker = subs.get_bug_tracker()
     except Exception:
         bug_tracker = None
 
-    engineering_observability = {
-        "code_hotspots": build_code_hotspots(
-            repo_root=REPO_ROOT,
-            bug_tracker=bug_tracker,
-            roots=("runtime", "surfaces/api", "surfaces/cli"),
-            limit=10,
-        ),
-        "bug_scoreboard": build_bug_scoreboard(
-            bug_tracker=bug_tracker,
-            repo_root=REPO_ROOT,
-            limit=10,
-        ),
-        "platform_observability": build_platform_observability(
-            platform_payload=health_payload,
-        ),
-    }
+    if fast_orient:
+        engineering_observability = {
+            "code_hotspots": {"status": "skipped", "reason": "orient_fast_path"},
+            "bug_scoreboard": {"status": "skipped", "reason": "orient_fast_path"},
+            "platform_observability": {"status": "skipped", "reason": "orient_fast_path"},
+        }
+    else:
+        engineering_observability = {
+            "code_hotspots": build_code_hotspots(
+                repo_root=REPO_ROOT,
+                bug_tracker=bug_tracker,
+                roots=("runtime", "surfaces/api", "surfaces/cli"),
+                limit=10,
+            ),
+            "bug_scoreboard": build_bug_scoreboard(
+                bug_tracker=bug_tracker,
+                repo_root=REPO_ROOT,
+                limit=10,
+            ),
+            "platform_observability": build_platform_observability(
+                platform_payload=health_payload,
+            ),
+        }
 
-    discover_tool = _tool_definition("praxis_discover")
-    recall_tool = _tool_definition("praxis_recall")
-    query_tool = _tool_definition("praxis_query")
-    workflow_tool = _tool_definition("praxis_workflow")
-    health_tool = _tool_definition("praxis_health")
-    bugs_tool = _tool_definition("praxis_bugs")
-    tool_count = len(get_tool_catalog())
-    tool_guidance = _build_orient_tool_guidance(
-        discover_tool=discover_tool,
-        recall_tool=recall_tool,
-        query_tool=query_tool,
-        workflow_tool=workflow_tool,
-        health_tool=health_tool,
-        bugs_tool=bugs_tool,
-        tool_count=tool_count,
-    )
+    if fast_orient:
+        from types import SimpleNamespace
+
+        tool_count = 0
+        query_tool = SimpleNamespace(name="praxis_query", cli_entrypoint="workflow query")
+        health_tool = SimpleNamespace(name="praxis_health", cli_entrypoint="workflow health")
+        discover_tool = SimpleNamespace(name="praxis_discover", cli_entrypoint="workflow discover")
+        recall_tool = SimpleNamespace(name="praxis_recall", cli_entrypoint="workflow recall")
+        bugs_tool = SimpleNamespace(name="praxis_bugs", cli_entrypoint="workflow bugs")
+        workflow_tool = SimpleNamespace(name="praxis_workflow", cli_entrypoint="workflow run")
+        tool_guidance = {
+            "kind": "catalog_backed_cli",
+            "preferred": True,
+            "status": "skipped",
+            "reason": "orient_fast_path",
+            "recommended_reads": [
+                {"tool": "praxis_query", "command": "workflow query"},
+                {"tool": "praxis_health", "command": "workflow health"},
+                {"tool": "praxis_discover", "command": "workflow discover"},
+                {"tool": "praxis_recall", "command": "workflow recall"},
+                {"tool": "praxis_bugs", "command": "workflow bugs"},
+            ],
+        }
+    else:
+        from surfaces.mcp.catalog import get_tool_catalog
+
+        discover_tool = _tool_definition("praxis_discover")
+        recall_tool = _tool_definition("praxis_recall")
+        query_tool = _tool_definition("praxis_query")
+        workflow_tool = _tool_definition("praxis_workflow")
+        health_tool = _tool_definition("praxis_health")
+        bugs_tool = _tool_definition("praxis_bugs")
+        tool_count = len(get_tool_catalog())
+        tool_guidance = _build_orient_tool_guidance(
+            discover_tool=discover_tool,
+            recall_tool=recall_tool,
+            query_tool=query_tool,
+            workflow_tool=workflow_tool,
+            health_tool=health_tool,
+            bugs_tool=bugs_tool,
+            tool_count=tool_count,
+        )
 
     try:
         standing_orders = _build_standing_orders(subs)
     except Exception as exc:  # noqa: BLE001 — orient must not crash on auxiliary reads
         standing_orders = [{"error": f"standing_orders unavailable: {exc}"}]
+    if compact_orient:
+        standing_orders = [
+            {
+                **order,
+                "rationale": (
+                    str(order.get("rationale") or "")[:360] + "...[truncated]"
+                    if len(str(order.get("rationale") or "")) > 360
+                    else order.get("rationale")
+                ),
+            }
+            if isinstance(order, dict)
+            else order
+            for order in standing_orders
+        ]
     authority_envelope = _build_orient_authority_envelope(
         subs,
         standing_orders=standing_orders,
         health_payload=health_payload,
         dependency_truth=dependency_truth,
         tool_guidance=tool_guidance,
+        fast=fast_orient,
     )
     try:
         from runtime.setup_wizard import setup_payload
@@ -724,6 +853,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
+    skip_transport_support = bool(body.get("skip_transport_support"))
     hs_mod = subs.get_health_mod()
     dependency_truth = dependency_truth_report(scope="all")
 
@@ -733,31 +863,54 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         hs_mod.PostgresConnectivityProbe(db_url),
         hs_mod.DiskSpaceProbe(str(REPO_ROOT)),
     ]
-    transport_support = query_transport_support(
-        health_mod=hs_mod,
-        pg=subs.get_pg_conn(),
-    )
-    transport_support_summary = build_transport_support_summary(transport_support)
-    try:
-        provider_registry = provider_registry_health()
-    except Exception as exc:
-        provider_registry_error = f"{type(exc).__name__}: {exc}"
-        provider_registry = {
-            "status": "load_failed",
-            "error": provider_registry_error,
-            "authority_available": False,
-            "fallback_active": False,
-        }
+    surface_usage_recorder = surface_usage_recorder_health()
+    if surface_usage_recorder.get("authority_ready") is False:
         probes.append(
             hs_mod.StaticHealthProbe(
-                name="provider_registry",
+                name="surface_usage_recorder",
                 passed=False,
-                message=f"provider registry load failed: {provider_registry_error}",
+                message=f"surface usage recorder degraded: {surface_usage_recorder.get('last_error') or 'unknown error'}",
                 status="failed",
-                details=provider_registry,
+                details=surface_usage_recorder,
             )
         )
-    for provider_slug, adapter_type in transport_support_summary["probe_targets"]:
+    if skip_transport_support:
+        transport_support = []
+        transport_support_summary = {
+            "default_provider_slug": "",
+            "default_adapter_type": "",
+            "registered_providers": [],
+            "providers": [],
+            "support_basis": "skipped:orient_fast_path",
+            "probe_targets": [],
+        }
+        provider_registry = {"status": "skipped", "reason": "orient_fast_path"}
+    else:
+        transport_support = query_transport_support(
+            health_mod=hs_mod,
+            pg=subs.get_pg_conn(),
+        )
+        transport_support_summary = build_transport_support_summary(transport_support)
+        try:
+            provider_registry = provider_registry_health()
+        except Exception as exc:
+            provider_registry_error = f"{type(exc).__name__}: {exc}"
+            provider_registry = {
+                "status": "load_failed",
+                "error": provider_registry_error,
+                "authority_available": False,
+                "fallback_active": False,
+            }
+            probes.append(
+                hs_mod.StaticHealthProbe(
+                    name="provider_registry",
+                    passed=False,
+                    message=f"provider registry load failed: {provider_registry_error}",
+                    status="failed",
+                    details=provider_registry,
+                )
+            )
+    for provider_slug, adapter_type in transport_support_summary.get("probe_targets", []):
         probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 
     runner = hs_mod.PreflightRunner(probes)
@@ -767,39 +920,46 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     snap = panel.snapshot()
     lane = panel.recommend_lane()
     proof_payload: dict[str, Any]
-    try:
-        from runtime.receipt_store import proof_metrics
+    if skip_transport_support:
+        proof_payload = {"status": "skipped", "reason": "orient_fast_path"}
+        content_health = {"status": "skipped", "reason": "orient_fast_path"}
+    else:
+        try:
+            from runtime.receipt_store import proof_metrics
 
-        proof_payload = proof_metrics(
-            since_hours=int(body.get("since_hours") or 0),
-        )
-    except Exception as exc:
-        proof_payload = {"error": f"Could not compute proof metrics: {exc}"}
+            proof_payload = proof_metrics(
+                since_hours=int(body.get("since_hours") or 0),
+            )
+        except Exception as exc:
+            proof_payload = {"error": f"Could not compute proof metrics: {exc}"}
 
-    try:
-        memory_engine = getattr(subs, "get_memory_engine", lambda: None)()
-        content_health = build_content_health_report(memory_engine)
-    except Exception as exc:
-        content_health = {"status": "error", "reason": str(exc)}
+        try:
+            memory_engine = getattr(subs, "get_memory_engine", lambda: None)()
+            content_health = build_content_health_report(memory_engine)
+        except Exception as exc:
+            content_health = {"status": "error", "reason": str(exc)}
 
     schema_authority: dict[str, Any]
-    try:
-        status = workflow_database_status(env=_workflow_env(subs))
-        schema_authority = {
-            "schema_bootstrapped": status.schema_bootstrapped,
-            "missing_schema_objects": list(status.missing_schema_objects),
-            "compile_artifact_authority_ready": status.compile_artifact_authority_ready,
-            "compile_index_authority_ready": status.compile_index_authority_ready,
-            "execution_packet_authority_ready": status.execution_packet_authority_ready,
-            "repo_snapshot_authority_ready": status.repo_snapshot_authority_ready,
-            "verification_registry_ready": status.verification_registry_ready,
-            "verifier_authority_ready": status.verifier_authority_ready,
-            "healer_authority_ready": status.healer_authority_ready,
-        }
-    except Exception as exc:
-        schema_authority = {
-            "error": f"Could not resolve schema authority readiness: {exc}",
-        }
+    if skip_transport_support:
+        schema_authority = {"status": "skipped", "reason": "orient_fast_path"}
+    else:
+        try:
+            status = workflow_database_status(env=_workflow_env(subs))
+            schema_authority = {
+                "schema_bootstrapped": status.schema_bootstrapped,
+                "missing_schema_objects": list(status.missing_schema_objects),
+                "compile_artifact_authority_ready": status.compile_artifact_authority_ready,
+                "compile_index_authority_ready": status.compile_index_authority_ready,
+                "execution_packet_authority_ready": status.execution_packet_authority_ready,
+                "repo_snapshot_authority_ready": status.repo_snapshot_authority_ready,
+                "verification_registry_ready": status.verification_registry_ready,
+                "verifier_authority_ready": status.verifier_authority_ready,
+                "healer_authority_ready": status.healer_authority_ready,
+            }
+        except Exception as exc:
+            schema_authority = {
+                "error": f"Could not resolve schema authority readiness: {exc}",
+            }
 
     return {
         "preflight": {
@@ -821,6 +981,7 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "proof_metrics": proof_payload,
         "content_health": content_health,
         "schema_authority": schema_authority,
+        "surface_usage_recorder": surface_usage_recorder,
         "dependency_truth": dependency_truth,
         "transport_support_summary": {
             "default_provider_slug": transport_support_summary["default_provider_slug"],
@@ -896,9 +1057,28 @@ def _handle_platform_overview_get(request: Any, path: str) -> None:
     try:
         pg = request.subsystems.get_pg_conn()
         from runtime.receipt_store import list_receipts as _list_receipts
+        from .workflow_run import _handle_status
 
         status_data = _handle_status(request.subsystems, {"since_hours": 24})
         recent_records = _list_receipts(limit=20)
+        from runtime.primitive_contracts import bug_status_sql_in_literal
+
+        degraded_sources: dict[str, str] = {}
+
+        def _fetch_count(query: str, source: str) -> int:
+            try:
+                return int(pg.fetchval(query) or 0)
+            except Exception as exc:  # noqa: BLE001 - overview must degrade per source.
+                degraded_sources[source] = f"{type(exc).__name__}: {exc}"
+                return 0
+
+        def _execute_rows(query: str, source: str) -> list[Any]:
+            try:
+                return list(pg.execute(query))
+            except Exception as exc:  # noqa: BLE001 - overview must keep other ticket metrics usable.
+                degraded_sources[source] = f"{type(exc).__name__}: {exc}"
+                return []
+
         recent = [
             {
                 "label": record.label,
@@ -908,7 +1088,7 @@ def _handle_platform_overview_get(request: Any, path: str) -> None:
             }
             for record in recent_records
         ]
-        models = pg.execute(
+        models = _execute_rows(
             """
             SELECT DISTINCT ON (provider_slug, model_slug)
                    provider_slug || '/' || model_slug AS name,
@@ -918,28 +1098,36 @@ def _handle_platform_overview_get(request: Any, path: str) -> None:
             FROM provider_model_candidates
             WHERE status = 'active'
             ORDER BY provider_slug, model_slug, priority ASC, created_at DESC
-            """
+            """,
+            "provider_model_candidates",
         )
-        bug_sev = pg.execute(
-            "SELECT severity as code, COUNT(*) as count FROM bugs GROUP BY severity ORDER BY count DESC LIMIT 8"
+        bug_sev = _execute_rows(
+            "SELECT severity as code, COUNT(*) as count FROM bugs GROUP BY severity ORDER BY count DESC LIMIT 8",
+            "bugs_by_severity",
         )
         request._send_json(
             200,
             {
                 "pass_rate": status_data.get("pass_rate", 0),
                 "total_workflows": status_data.get("total_workflows", 0),
-                "total_tables": int(
-                    pg.fetchval("SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public'")
+                "total_tables": _fetch_count(
+                    "SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public'",
+                    "pg_tables",
                 ),
-                "total_bugs": int(pg.fetchval("SELECT COUNT(*) FROM bugs")),
-                "open_bugs": int(
-                    pg.fetchval(
-                        "SELECT COUNT(*) FROM bugs WHERE "
-                        + bug_status_sql_in_literal("open")
-                    )
+                "total_bugs": _fetch_count("SELECT COUNT(*) FROM bugs", "bugs_total"),
+                "open_bugs": _fetch_count(
+                    "SELECT COUNT(*) FROM bugs WHERE "
+                    + bug_status_sql_in_literal("open"),
+                    "bugs_open",
                 ),
-                "total_workflow_runs": int(pg.fetchval("SELECT COUNT(*) FROM public.workflow_runs")),
-                "total_registry_items": int(pg.fetchval("SELECT COUNT(*) FROM platform_registry")),
+                "total_workflow_runs": _fetch_count(
+                    "SELECT COUNT(*) FROM public.workflow_runs",
+                    "workflow_runs",
+                ),
+                "total_registry_items": _fetch_count(
+                    "SELECT COUNT(*) FROM platform_registry",
+                    "platform_registry",
+                ),
                 "recent_workflows": [
                     {
                         "label": row["label"],
@@ -959,6 +1147,8 @@ def _handle_platform_overview_get(request: Any, path: str) -> None:
                     for row in models
                 ],
                 "bug_severity": [dict(row) for row in bug_sev],
+                "observability_state": "degraded" if degraded_sources else "ready",
+                "degraded_sources": degraded_sources,
             },
         )
     except Exception as exc:
@@ -1019,6 +1209,8 @@ def _handle_workflow_templates_get(request: Any, path: str) -> None:
 def _handle_launcher_status_get(request: Any, path: str) -> None:
     del path
     try:
+        from surfaces.api.handlers import workflow_launcher
+
         request._send_json(200, workflow_launcher.launcher_status_payload())
     except workflow_launcher.LauncherAuthorityError as exc:
         request._send_json(503, {"error": str(exc)})
@@ -1074,6 +1266,8 @@ def _handle_launcher_recover_post(request: Any, path: str) -> None:
     if run_id is not None and (not isinstance(run_id, str) or not run_id.strip()):
         request._send_json(400, {"error": "run_id must be a non-empty string when provided"})
         return
+
+    from surfaces.api.handlers import workflow_launcher
 
     try:
         status_code, payload = workflow_launcher.launcher_recover_payload(

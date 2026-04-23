@@ -5,9 +5,16 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from runtime.canonical_workflows import materialize_definition_from_build_graph
-from runtime.compile_reuse import stable_hash
-from storage.postgres import PostgresWorkflowSurfaceUsageRepository
+_RECORDER_FAILURES: dict[str, Any] = {
+    "dropped_event_count": 0,
+    "durable_event_count": 0,
+    "durable_error_count": 0,
+    "last_error": None,
+    "last_entrypoint": None,
+    "last_surface_kind": None,
+    "last_friction_event_id": None,
+    "last_durable_error": None,
+}
 
 _TRACKED_API_ROUTES = frozenset(
     {
@@ -61,6 +68,8 @@ def _header_value(headers: Any, *names: str) -> str:
 
 
 def _base_definition_metrics(definition: dict[str, Any]) -> dict[str, Any]:
+    from runtime.compile_reuse import stable_hash
+
     execution_setup = definition.get("execution_setup") if isinstance(definition.get("execution_setup"), dict) else {}
     references = definition.get("references") if isinstance(definition.get("references"), list) else []
     capabilities = definition.get("capabilities") if isinstance(definition.get("capabilities"), list) else []
@@ -85,6 +94,8 @@ def _definition_from_request_body(request_body: dict[str, Any]) -> dict[str, Any
     definition = request_body.get("definition")
     build_graph = request_body.get("build_graph")
     if isinstance(build_graph, dict):
+        from runtime.canonical_workflows import materialize_definition_from_build_graph
+
         base_definition = definition if isinstance(definition, dict) else {}
         try:
             materialized = materialize_definition_from_build_graph(
@@ -208,6 +219,89 @@ def _metadata_value_is_present(value: Any) -> bool:
     return True
 
 
+def record_surface_usage_failure(
+    *,
+    surface_kind: str,
+    entrypoint_name: str,
+    error: Exception,
+    conn: Any | None = None,
+) -> None:
+    _RECORDER_FAILURES["dropped_event_count"] = int(
+        _RECORDER_FAILURES.get("dropped_event_count") or 0
+    ) + 1
+    _RECORDER_FAILURES["last_error"] = f"{type(error).__name__}: {error}"
+    _RECORDER_FAILURES["last_entrypoint"] = entrypoint_name
+    _RECORDER_FAILURES["last_surface_kind"] = surface_kind
+    _RECORDER_FAILURES["last_friction_event_id"] = None
+    _RECORDER_FAILURES["last_durable_error"] = None
+    if conn is None:
+        _RECORDER_FAILURES["durable_error_count"] = int(
+            _RECORDER_FAILURES.get("durable_error_count") or 0
+        ) + 1
+        _RECORDER_FAILURES["last_durable_error"] = "surface usage failure had no Postgres connection for friction ledger"
+        return
+    try:
+        from runtime.friction_ledger import FrictionLedger, FrictionType
+
+        message = json.dumps(
+            {
+                "reason_code": "surface_usage.record_failed",
+                "surface_kind": surface_kind,
+                "entrypoint_name": entrypoint_name,
+                "error_type": type(error).__name__,
+                "error": str(error),
+            },
+            sort_keys=True,
+        )
+        event = FrictionLedger(conn).record(
+            FrictionType.HARD_FAILURE,
+            source="surface_usage_recorder",
+            job_label=f"{surface_kind}:{entrypoint_name}",
+            message=message,
+        )
+        _RECORDER_FAILURES["durable_event_count"] = int(
+            _RECORDER_FAILURES.get("durable_event_count") or 0
+        ) + 1
+        _RECORDER_FAILURES["last_friction_event_id"] = event.event_id
+    except Exception as durable_exc:
+        _RECORDER_FAILURES["durable_error_count"] = int(
+            _RECORDER_FAILURES.get("durable_error_count") or 0
+        ) + 1
+        _RECORDER_FAILURES["last_durable_error"] = f"{type(durable_exc).__name__}: {durable_exc}"
+
+
+def surface_usage_recorder_health() -> dict[str, Any]:
+    dropped = int(_RECORDER_FAILURES.get("dropped_event_count") or 0)
+    durable_events = int(_RECORDER_FAILURES.get("durable_event_count") or 0)
+    durable_errors = int(_RECORDER_FAILURES.get("durable_error_count") or 0)
+    return {
+        "authority_ready": dropped == 0,
+        "observability_state": "ready" if dropped == 0 else "degraded",
+        "dropped_event_count": dropped,
+        "durable_event_count": durable_events,
+        "durable_error_count": durable_errors,
+        "backup_authority_ready": dropped == 0 or durable_events >= dropped,
+        "last_error": _RECORDER_FAILURES.get("last_error"),
+        "last_entrypoint": _RECORDER_FAILURES.get("last_entrypoint"),
+        "last_surface_kind": _RECORDER_FAILURES.get("last_surface_kind"),
+        "last_friction_event_id": _RECORDER_FAILURES.get("last_friction_event_id"),
+        "last_durable_error": _RECORDER_FAILURES.get("last_durable_error"),
+    }
+
+
+def _reset_surface_usage_recorder_health_for_tests() -> None:
+    _RECORDER_FAILURES.update({
+        "dropped_event_count": 0,
+        "durable_event_count": 0,
+        "durable_error_count": 0,
+        "last_error": None,
+        "last_entrypoint": None,
+        "last_surface_kind": None,
+        "last_friction_event_id": None,
+        "last_durable_error": None,
+    })
+
+
 def record_api_route_usage(
     subsystems: Any,
     *,
@@ -225,8 +319,21 @@ def record_api_route_usage(
     route_conn = conn
     if route_conn is None:
         if subsystems is None or not hasattr(subsystems, "get_pg_conn"):
+            record_surface_usage_failure(
+                surface_kind="api",
+                entrypoint_name=normalized_path,
+                error=RuntimeError("surface usage postgres connection unavailable"),
+            )
             return
-        route_conn = subsystems.get_pg_conn()
+        try:
+            route_conn = subsystems.get_pg_conn()
+        except Exception as exc:
+            record_surface_usage_failure(
+                surface_kind="api",
+                entrypoint_name=normalized_path,
+                error=exc,
+            )
+            return
     body_payload = _mapping_payload(request_body)
     response = _mapping_payload(response_payload)
     event_payload: dict[str, Any] = {
@@ -268,9 +375,21 @@ def record_api_route_usage(
         if _metadata_value_is_present(value)
     }
     try:
+        from storage.postgres import PostgresWorkflowSurfaceUsageRepository
+
         PostgresWorkflowSurfaceUsageRepository(route_conn).record_event(**event_payload)
-    except Exception:
+    except Exception as exc:
+        record_surface_usage_failure(
+            surface_kind="api",
+            entrypoint_name=normalized_path,
+            error=exc,
+            conn=route_conn,
+        )
         return
 
 
-__all__ = ["record_api_route_usage"]
+__all__ = [
+    "record_api_route_usage",
+    "record_surface_usage_failure",
+    "surface_usage_recorder_health",
+]

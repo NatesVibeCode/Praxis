@@ -11,11 +11,6 @@ from urllib.parse import urlsplit
 
 from typing import Any, TextIO
 
-from runtime.workspace_paths import repo_root as workspace_repo_root
-from runtime.instance import native_instance_contract
-from runtime.primitive_contracts import build_runtime_binding_contract, redact_url
-from surfaces.cli._db import cli_sync_conn
-from surfaces._workflow_database import workflow_database_authority_for_repo
 from surfaces.cli.mcp_tools import (
     get_definition,
     print_json,
@@ -23,7 +18,12 @@ from surfaces.cli.mcp_tools import (
     require_confirmation,
     run_cli_tool,
 )
-from surfaces.mcp.subsystems import workflow_database_env as mcp_workflow_database_env
+
+
+def _workspace_repo_root():
+    from runtime.workspace_paths import repo_root as workspace_repo_root
+
+    return workspace_repo_root()
 
 
 def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
@@ -100,7 +100,7 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     from runtime.setup_wizard import setup_payload_for_cli
     from surfaces.api.rest import list_api_routes
 
-    setup_payload = setup_payload_for_cli("doctor", repo_root=workspace_repo_root())
+    setup_payload = setup_payload_for_cli("doctor", repo_root=_workspace_repo_root())
     runtime_target = _as_dict(setup_payload.get("runtime_target"))
     orient_exit_code, orient_payload = run_cli_tool("praxis_orient", {})
     orient_data = _as_dict(orient_payload if orient_exit_code == 0 else {})
@@ -286,7 +286,10 @@ def _orient_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"error: unknown orient argument: {unknown[0]}\n")
         stdout.write("usage: workflow orient [--json]\n")
         return 2
-    exit_code, payload = run_cli_tool("praxis_orient", {})
+    exit_code, payload = run_cli_tool(
+        "praxis_orient",
+        {"fast": True, "skip_engineering_observability": True, "compact": True},
+    )
     print_json(stdout, payload)
     return exit_code
 
@@ -1071,6 +1074,8 @@ def _notifications_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write((notifications or "No pending workflow notifications.") + "\n")
         return 0
 
+    from surfaces.cli._db import cli_sync_conn
+
     conn = cli_sync_conn()
     from runtime.workflow_notifications import WorkflowNotificationConsumer
 
@@ -1583,7 +1588,7 @@ def _health_map_command(args: list[str], *, stdout: TextIO) -> int:
 
     from runtime.health_map import HealthMapper, format_health_map, format_health_map_json
 
-    workflow_root = str(workspace_repo_root())
+    workflow_root = str(_workspace_repo_root())
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
@@ -1931,7 +1936,7 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _read_repo_env(repo_root: object) -> dict[str, str]:
-    root = repo_root if isinstance(repo_root, os.PathLike) else workspace_repo_root()
+    root = repo_root if isinstance(repo_root, os.PathLike) else _workspace_repo_root()
     path = Path(root) / ".env"
     env: dict[str, str] = {}
     try:
@@ -1950,7 +1955,7 @@ def _read_repo_env(repo_root: object) -> dict[str, str]:
 
 
 def _resolve_authority_env() -> tuple[dict[str, str], bool]:
-    repo_root = workspace_repo_root()
+    repo_root = _workspace_repo_root()
     authority_env = _read_repo_env(repo_root)
     authority_env.update({k: v for k, v in os.environ.items() if k and isinstance(v, str)})
     configured = bool(authority_env.get("WORKFLOW_DATABASE_URL"))
@@ -1958,6 +1963,8 @@ def _resolve_authority_env() -> tuple[dict[str, str], bool]:
 
 
 def _build_runtime_binding(env: dict[str, str], *, native_instance) -> dict[str, Any]:
+    from runtime.primitive_contracts import build_runtime_binding_contract
+
     try:
         return build_runtime_binding_contract(
             workflow_env=env,
@@ -1999,6 +2006,11 @@ def _compare_authority_field(label: str, left: str, right: str) -> str:
 
 
 def _authority_command(args: list[str], *, stdout: TextIO) -> int:
+    from runtime.instance import native_instance_contract
+    from runtime.primitive_contracts import redact_url
+    from surfaces._workflow_database import workflow_database_authority_for_repo
+    from surfaces.mcp.subsystems import workflow_database_env as mcp_workflow_database_env
+
     if args and args[0] in {"-h", "--help", "help"}:
         stdout.write(
             "usage: workflow authority [--json] [--check] [--instance]\n"
@@ -2025,7 +2037,7 @@ def _authority_command(args: list[str], *, stdout: TextIO) -> int:
     as_json = "--json" in args
     check_api = "--check" in args
     show_instance = "--instance" in args
-    repo_root = workspace_repo_root()
+    repo_root = _workspace_repo_root()
     authority_env, configured = _resolve_authority_env()
 
     cli_authority: dict[str, object]
@@ -2228,7 +2240,7 @@ def _supervisor_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"error: unknown supervisor subcommand: {subcommand}\n")
         return 2
 
-    workflow_root = workspace_repo_root()
+    workflow_root = _workspace_repo_root()
     repo_root = workflow_root.parents[1]
     launcher_script = repo_root / "scripts" / "praxis"
 

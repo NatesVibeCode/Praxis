@@ -10,8 +10,6 @@ from typing import Any
 from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
 from runtime.compile_reuse import module_surface_revision, stable_hash
 from runtime.execution_packet_authority import (
-    build_execution_packet_lineage_payload,
-    finalize_execution_packet,
     inspect_execution_packets,
 )
 from runtime.prompt_renderer import RenderedPrompt, render_prompt_as_messages
@@ -519,6 +517,18 @@ def build_shadow_execution_packet(
         task_type=task_type,
     )
     capability_binding = capability_bindings[0] if capability_bindings else {}
+    packet_revision_authority = _mapping(provenance.get("packet_revision_authority"))
+    if not packet_revision_authority:
+        packet_revision_authority = {
+            "kind": "execution_packet_revision_authority",
+            "provenance_kind": "compiled",
+            "definition_revision": definition_revision,
+            "plan_revision": plan_revision,
+            "synthetic_fields": [],
+            "reason_code": "packet.revision.compiled",
+            "workflow_id": workflow_id,
+            "run_id": run_id,
+        }
     execution_bundle = build_execution_bundle(
         job_label=job_label,
         prompt=str(rendered.user_message or ""),
@@ -575,6 +585,7 @@ def build_shadow_execution_packet(
     packet_payload: dict[str, Any] = {
         "definition_revision": definition_revision,
         "plan_revision": plan_revision,
+        "packet_revision_authority": packet_revision_authority,
         "packet_version": 1,
         "workflow_id": workflow_id,
         "run_id": run_id,
@@ -626,66 +637,16 @@ def persist_shadow_execution_packet(
     try:
         packet_dict = dict(packet)
         artifact_store = CompileArtifactStore(conn)
-        lineage_payload = build_execution_packet_lineage_payload(
-            packet_dict,
+        finalized_packet = artifact_store.persist_execution_packet_with_reuse(
+            packet=packet_dict,
+            authority_refs=[packet_dict["definition_revision"], packet_dict["plan_revision"]],
             parent_artifact_ref=packet_dict["plan_revision"],
         )
-        compile_provenance = packet_dict.get("compile_provenance")
-        input_fingerprint = (
-            str(compile_provenance.get("input_fingerprint"))
-            if isinstance(compile_provenance, Mapping)
-            else ""
-        ).strip()
-        try:
-            reusable_lineage = artifact_store.load_reusable_artifact(
-                artifact_kind="packet_lineage",
-                input_fingerprint=input_fingerprint,
-            )
-        except CompileArtifactError as exc:
-            raise ShadowExecutionPacketError(
-                "shadow_packet.reuse_failed_closed",
-                f"shadow packet lineage reuse failed closed: {exc}",
-                details={"input_fingerprint": input_fingerprint},
-            ) from exc
-
-        if reusable_lineage is not None:
-            lineage_payload = dict(_json_clone(reusable_lineage.payload))
-            reuse_metadata = {
-                "decision": "reused",
-                "reason_code": "packet.compile.exact_input_match",
-                "artifact_ref": reusable_lineage.artifact_ref,
-                "revision_ref": reusable_lineage.revision_ref,
-                "content_hash": reusable_lineage.content_hash,
-                "decision_ref": reusable_lineage.decision_ref,
-            }
-        else:
-            artifact_store.record_packet_lineage(
-                packet=lineage_payload,
-                authority_refs=[packet_dict["definition_revision"], packet_dict["plan_revision"]],
-                decision_ref=str(lineage_payload["decision_ref"]),
-                parent_artifact_ref=str(lineage_payload["parent_artifact_ref"]),
-                input_fingerprint=input_fingerprint,
-            )
-            reuse_metadata = {
-                "decision": "compiled",
-                "reason_code": "packet.compile.miss",
-                "artifact_ref": str(lineage_payload["packet_revision"]),
-                "revision_ref": str(lineage_payload["packet_revision"]),
-                "content_hash": str(lineage_payload["packet_hash"]),
-                "decision_ref": str(lineage_payload["decision_ref"]),
-            }
-
-        finalized_packet = finalize_execution_packet(
-            packet_dict,
-            lineage_payload=lineage_payload,
-            reuse_metadata=reuse_metadata,
-        )
-        artifact_store.record_execution_packet(
-            packet=finalized_packet,
-            authority_refs=[finalized_packet["definition_revision"], finalized_packet["plan_revision"]],
-            decision_ref=str(finalized_packet["decision_ref"]),
-            parent_artifact_ref=str(finalized_packet["parent_artifact_ref"]),
-        )
+    except CompileArtifactError as exc:
+        raise ShadowExecutionPacketError(
+            "shadow_packet.reuse_failed_closed",
+            f"shadow packet lineage reuse failed closed: {exc}",
+        ) from exc
     except ShadowExecutionPacketError:
         raise
     except Exception as exc:

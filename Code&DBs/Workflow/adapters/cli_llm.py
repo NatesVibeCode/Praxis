@@ -40,7 +40,7 @@ from registry.provider_execution_registry import (
     registered_providers,
 )
 from .structured_output import StructuredOutput, parse_model_output
-from .task_profiles import try_resolve_profile
+from .task_profiles import TaskProfileAuthorityError, resolve_profile
 from runtime.workflow.execution_policy import resolve_cli_execution_policy
 
 _DEFAULT_TIMEOUT = int(os.environ.get("PRAXIS_CLI_TIMEOUT", "300"))
@@ -558,8 +558,23 @@ class CLILLMAdapter(BaseNodeAdapter):
         task_type = payload.get("task_type")
         system_prompt_parts: list[str] = []
         if task_type:
-            tp = try_resolve_profile(task_type)
-            if tp is not None and tp.system_prompt_hint:
+            try:
+                tp = resolve_profile(str(task_type))
+            except TaskProfileAuthorityError as exc:
+                return _fail(
+                    request=request,
+                    reason_code="adapter.task_profile_authority_unavailable",
+                    failure_code="adapter.task_profile_authority_unavailable",
+                    started_at=started_at,
+                    executor_type=CLILLMAdapter.executor_type,
+                    inputs=inputs,
+                    outputs={
+                        "transport_kind": "cli",
+                        "failure_namespace": "cli_adapter",
+                        "stderr": str(exc),
+                    },
+                )
+            if tp.system_prompt_hint:
                 system_prompt_parts.append(tp.system_prompt_hint)
         if packet_system_prompt:
             system_prompt_parts.append(packet_system_prompt)

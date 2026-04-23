@@ -163,3 +163,90 @@ def test_build_authority_preserves_explicitly_accepted_binding_across_snapshot_r
     assert binding["accepted_target"]["target_ref"] == "#escalation-policy"
     assert bundle["projection_status"]["state"] == "ready"
     assert bundle["build_issues"] == []
+
+
+def test_build_authority_does_not_require_execution_route_before_hardening() -> None:
+    definition = {
+        "type": "operating_model",
+        "draft_flow": [
+            {
+                "id": "step-001",
+                "title": "Review support inbox",
+                "summary": "Review the support inbox.",
+                "depends_on": [],
+                "order": 1,
+            }
+        ],
+        "binding_ledger": [
+            {
+                "binding_id": "binding:ref-001",
+                "source_kind": "reference",
+                "source_label": "triage-agent",
+                "source_span": None,
+                "source_node_ids": ["step-001"],
+                "state": "accepted",
+                "candidate_targets": [
+                    {
+                        "target_ref": "task_type_routing:auto/review",
+                        "label": "Auto Review",
+                        "kind": "agent",
+                    }
+                ],
+                "accepted_target": {
+                    "target_ref": "task_type_routing:auto/review",
+                    "label": "Auto Review",
+                    "kind": "agent",
+                },
+                "rationale": "Accepted in build workspace.",
+                "created_at": "2026-04-15T10:00:00+00:00",
+                "updated_at": "2026-04-15T10:01:00+00:00",
+                "freshness": None,
+            }
+        ],
+        "definition_revision": "def_explicit_approval_no_execution_setup",
+    }
+
+    bundle = build_authority_bundle(definition)
+
+    assert bundle["projection_status"]["state"] == "ready"
+    assert bundle["build_issues"] == []
+
+
+def test_build_authority_blocks_incomplete_hardened_execution_routes() -> None:
+    definition = {
+        "type": "operating_model",
+        "draft_flow": [
+            {
+                "id": "step-001",
+                "title": "Review support inbox",
+                "summary": "Review the support inbox.",
+                "depends_on": [],
+                "order": 1,
+            }
+        ],
+        "execution_setup": {
+            "phases": [
+                {
+                    "step_id": "step-001",
+                    "title": "Review support inbox",
+                }
+            ]
+        },
+        "definition_revision": "def_incomplete_hardened_route",
+    }
+
+    bundle = build_authority_bundle(definition)
+
+    assert bundle["projection_status"]["state"] == "blocked"
+    assert bundle["build_issues"] == [
+        {
+            "issue_id": "issue:missing-route:step-001",
+            "kind": "missing_route",
+            "node_id": "step-001",
+            "binding_id": None,
+            "label": "Choose how this step runs",
+            "summary": "This step has no executable route yet, so the workflow cannot be hardened or run.",
+            "severity": "blocking",
+            "gate_rule": {"required_field": "execution_setup.phases.agent_route"},
+        }
+    ]

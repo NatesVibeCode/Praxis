@@ -23,6 +23,21 @@ from runtime.service_bus_authority import (
 )
 
 
+class _FakeTransaction:
+    def __init__(self, conn: "_FakeConn") -> None:
+        self.conn = conn
+
+    def __enter__(self) -> "_FakeConn":
+        self.conn.transaction_enters += 1
+        return self.conn
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if exc_type is None:
+            self.conn.transaction_commits += 1
+        else:
+            self.conn.transaction_rollbacks += 1
+
+
 class _FakeConn:
     def __init__(self) -> None:
         self.fetchrow_calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -31,6 +46,9 @@ class _FakeConn:
         self.feedback_event_id = str(uuid4())
         self.authority_event_id = str(uuid4())
         self.service_bus_message_id = str(uuid4())
+        self.transaction_enters = 0
+        self.transaction_commits = 0
+        self.transaction_rollbacks = 0
 
     def fetchrow(self, query: str, *args: Any) -> dict[str, Any] | None:
         self.fetchrow_calls.append((query, args))
@@ -112,6 +130,9 @@ class _FakeConn:
 
     def executed_sql(self) -> str:
         return "\n".join([q for q, _ in self.execute_calls] + [q for q, _ in self.fetchrow_calls])
+
+    def transaction(self) -> _FakeTransaction:
+        return _FakeTransaction(self)
 
 
 class _Subsystems:

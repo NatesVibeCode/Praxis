@@ -6,7 +6,7 @@ import asyncio
 import os
 import re
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,14 @@ from storage.postgres.validators import PostgresConfigurationError
 from surfaces._workflow_database import workflow_database_url_for_repo
 from .._payload_contract import coerce_optional_text
 from . import _bug_surface_contract as _bug_contract
-from ._shared import _ClientError, _bug_to_dict, _matches, _serialize
+from ._shared import (
+    _ClientError,
+    _bug_to_dict,
+    _matches,
+    _serialize,
+    is_demo_placeholder,
+    placeholder_error_message,
+)
 from .workflow_admin import _handle_health
 
 
@@ -1430,6 +1437,30 @@ def handle_friction(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             ],
         }
 
+    if action == "patterns":
+        since_hours = body.get("since_hours")
+        since = None
+        if since_hours is not None:
+            since = datetime.now(timezone.utc) - timedelta(hours=float(since_hours))
+        patterns = ledger.patterns(
+            source=body.get("source") or None,
+            since=since,
+            limit=body.get("limit", 20),
+            scan_limit=body.get("scan_limit", 500),
+            include_test=include_test,
+            promotion_threshold=body.get("promotion_threshold", 3),
+        )
+        if not patterns:
+            return _empty_result(
+                status="empty",
+                reason_code="friction.no_patterns",
+                payload={"count": 0, "patterns": []},
+            )
+        return {
+            "count": len(patterns),
+            "patterns": [pattern.to_json() for pattern in patterns],
+        }
+
     raise _ClientError(f"Unknown friction action: {action}")
 
 
@@ -1470,12 +1501,10 @@ def handle_artifacts(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
     if action == "list":
         sandbox_id = str(body.get("sandbox_id", "") or "").strip()
-        if sandbox_id == "sandbox_abc123":
-            sandbox_id = ""
+        if is_demo_placeholder("sandbox_id", sandbox_id):
+            raise _ClientError(placeholder_error_message("sandbox_id", sandbox_id))
         if not sandbox_id:
-            sandbox_id = store.latest_sandbox_id() or ""
-        if not sandbox_id:
-            raise _ClientError("sandbox_id is required for list and no sandbox artifacts were found")
+            raise _ClientError("sandbox_id is required for list")
         items = store.list_by_sandbox(sandbox_id)
         if not items:
             return _empty_result(

@@ -11,7 +11,7 @@ def test_every_tool_has_complete_cli_metadata() -> None:
 
     for definition in catalog.values():
         assert definition.cli_surface
-        assert definition.cli_tier in {"stable", "advanced", "curated", "session"}
+        assert definition.cli_tier in {"stable", "advanced", "curated", "session", "core"}
         assert definition.cli_entrypoint
         assert definition.cli_describe_command
         assert definition.cli_when_to_use
@@ -48,16 +48,16 @@ def test_catalog_examples_match_current_tool_contracts() -> None:
     wave = catalog["praxis_wave"].example_input()
 
     assert artifacts["action"] == "list"
-    assert "sandbox_id" not in artifacts
+    assert artifacts["sandbox_id"] == "sandbox_20260423_001"
     assert governance["text"] == "Ship the API key in the test fixture"
     assert "prompt" not in governance
     assert graph["depth"] == 1
-    assert "entity_id" not in graph
+    assert graph["entity_id"] == "module:task_assembler"
     assert heal["job_label"] == "build"
     assert roadmap == {}
     assert (repo_root / validate["spec_path"]).is_file()
     assert wave["action"] == "next"
-    assert "wave_id" not in wave
+    assert wave["wave_id"] == "wave_1"
 
 
 def test_tool_display_name_omits_redundant_praxis_prefix() -> None:

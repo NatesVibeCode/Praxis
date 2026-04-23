@@ -3,19 +3,16 @@
 Cards are nodes. Edges define execution order. The dispatch worker polls for
 ready cards and executes them through the existing agent CLI infrastructure.
 
-Three entry points:
-  start_model_run()   — OperatingModel → workflow_run + run_nodes + run_edges
-  execute_card()      — picks up a ready run_node, dispatches based on card kind
-  release_downstream() — after a card completes, releases downstream cards
+Compatibility entry points:
+  start_model_run()   — fail-closed guard for the retired model-card creation lane
+  execute_card()      — picks up an existing ready run_node, dispatches based on card kind
+  release_downstream() — releases downstream cards for existing compatibility runs
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
-import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from runtime.execution.records import (
@@ -30,6 +27,10 @@ from storage.postgres.workflow_orchestration_repository import (
 
 logger = logging.getLogger(__name__)
 
+
+class LegacyModelRuntimeRetiredError(RuntimeError):
+    """Raised when a caller tries to create new runs through the retired model-card lane."""
+
 # Edge kinds that require upstream success to fire
 SUCCESS_EDGES = {
     'proceeds_to', 'mission_to_decision', 'decision_to_action',
@@ -41,184 +42,12 @@ FAILURE_EDGES = {'alternate_route', 'recovers_via'}
 ANY_TERMINAL_EDGES = {'escalates_to', 'state_informs'}
 
 
-def _uid(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
-
-
-# ---------------------------------------------------------------------------
-# start_model_run: OperatingModel → workflow_run + run_nodes + run_edges
-# ---------------------------------------------------------------------------
-
 def start_model_run(conn, model: dict) -> dict:
-    """Create a workflow_run with run_nodes for each card and run_edges for each edge."""
-    model_id = model.get('id', uuid.uuid4().hex[:12])
-    model_name = model.get('name', 'Unnamed model')
-    cards = model.get('cards', [])
-    edges = model.get('edges', [])
-
-    run_id = f"model_{uuid.uuid4().hex[:12]}"
-    workflow_id = f"model:{model_id}"
-    request_id = _uid('req')
-    now = datetime.now(timezone.utc)
-
-    # --- Authority chain (reuses dispatch pattern) ---
-    def_id = f"model_def:{hashlib.sha256(workflow_id.encode()).hexdigest()[:10]}:v1"
-    adm_id = f"model_adm:{run_id}"
-    ctx_id = f"ctx_{uuid.uuid4().hex[:8]}"
-
-    # 1. workflow_definitions
-    conn.execute(
-        """INSERT INTO workflow_definitions (
-            workflow_definition_id, workflow_id, schema_version,
-            definition_version, definition_hash, status,
-            request_envelope, normalized_definition, created_at
-        ) VALUES ($1, $2, 1, 1, $3, 'active', $4::jsonb, $5::jsonb, $6)
-        ON CONFLICT (workflow_definition_id) DO NOTHING""",
-        def_id, workflow_id, uuid.uuid4().hex[:16],
-        json.dumps({"type": "model_run", "model_name": model_name}),
-        json.dumps({"model": True}),
-        now,
+    """Block new model-card runs from the retired side path."""
+    del conn, model
+    raise LegacyModelRuntimeRetiredError(
+        "model-card run creation is retired; submit through the unified workflow front door"
     )
-
-    # 2. workflow_definition_nodes (one per card)
-    for i, card in enumerate(cards):
-        wdn_id = f"{def_id}:node:{card['id']}"
-        conn.execute(
-            """INSERT INTO workflow_definition_nodes (
-                workflow_definition_node_id, workflow_definition_id,
-                node_id, node_type, schema_version, adapter_type,
-                display_name, inputs, expected_outputs, success_condition,
-                failure_behavior, authority_requirements, execution_boundary,
-                position_index
-            ) VALUES ($1, $2, $3, $4, 1, $5, $6, $7::jsonb, $8::jsonb,
-                      $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13)
-            ON CONFLICT (workflow_definition_node_id) DO NOTHING""",
-            wdn_id, def_id,
-            card['id'], f"card_{card['kind']}", 'card_executor',
-            card.get('task', card.get('goal', card.get('name', card['id']))),
-            json.dumps(card),  # full card as input spec
-            json.dumps({}),
-            json.dumps({}),
-            json.dumps({}),
-            json.dumps({'authority': card.get('authority', 'autonomous')}),
-            json.dumps({}),
-            i,
-        )
-
-    # 3. workflow_definition_edges
-    for i, edge in enumerate(edges):
-        wde_id = f"{def_id}:edge:{edge['id']}"
-        conn.execute(
-            """INSERT INTO workflow_definition_edges (
-                workflow_definition_edge_id, workflow_definition_id,
-                edge_id, edge_type, schema_version, from_node_id, to_node_id,
-                release_condition, payload_mapping, position_index
-            ) VALUES ($1, $2, $3, $4, 1, $5, $6, '{}'::jsonb, '{}'::jsonb, $7)
-            ON CONFLICT (workflow_definition_edge_id) DO NOTHING""",
-            wde_id, def_id,
-            edge['id'], edge.get('kind', 'proceeds_to'),
-            edge['from'], edge['to'], i,
-        )
-
-    # 4. admission_decisions
-    conn.execute(
-        """INSERT INTO admission_decisions (
-            admission_decision_id, workflow_id, request_id,
-            decision, reason_code, decided_at, decided_by,
-            policy_snapshot_ref, validation_result_ref, authority_context_ref
-        ) VALUES ($1, $2, $3, 'admit', 'model_auto', $4, 'model_executor',
-                  'model:auto', 'model:auto', 'model:auto')
-        ON CONFLICT (admission_decision_id) DO NOTHING""",
-        adm_id, workflow_id, request_id, now,
-    )
-
-    # 5. workflow_runs
-    conn.execute(
-        """INSERT INTO workflow_runs (
-            run_id, workflow_id, request_id, request_digest,
-            authority_context_digest, workflow_definition_id,
-            admitted_definition_hash, run_idempotency_key,
-            schema_version, request_envelope, context_bundle_id,
-            admission_decision_id, current_state, requested_at, admitted_at, started_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9::jsonb, $10, $11, 'running', $12, $12, $12)
-        ON CONFLICT (run_id) DO NOTHING""",
-        run_id, workflow_id, request_id,
-        uuid.uuid4().hex[:16], uuid.uuid4().hex[:16],
-        def_id, uuid.uuid4().hex[:16],
-        f"model:{model_id}:{run_id}",
-        json.dumps({
-            "type": "model_run", "model_id": model_id,
-            "model_name": model_name, "total_cards": len(cards),
-        }),
-        ctx_id, adm_id, now,
-    )
-
-    # 6. Build inbound edge map to determine root cards
-    inbound: dict[str, list[str]] = {card['id']: [] for card in cards}
-    for edge in edges:
-        to_id = edge['to']
-        if to_id in inbound:
-            inbound[to_id].append(edge['from'])
-
-    root_cards = [cid for cid, deps in inbound.items() if len(deps) == 0]
-
-    # 7. run_nodes (one per card)
-    for card in cards:
-        is_root = card['id'] in root_cards
-        wdn_id = f"{def_id}:node:{card['id']}"
-        rn_id = _uid('rn')
-        conn.execute(
-            """INSERT INTO run_nodes (
-                run_node_id, run_id, workflow_definition_node_id,
-                node_id, node_type, attempt_number, current_state,
-                adapter_type, context_bundle_id,
-                input_payload, output_payload
-            ) VALUES ($1, $2, $3, $4, $5, 1, $6, 'card_executor', $7,
-                      $8::jsonb, '{}'::jsonb)
-            ON CONFLICT (run_id, node_id, attempt_number) DO NOTHING""",
-            rn_id, run_id, wdn_id,
-            card['id'], f"card_{card['kind']}", 'ready' if is_root else 'waiting',
-            ctx_id, json.dumps(card),
-        )
-
-    # 8. run_edges
-    for edge in edges:
-        re_id = _uid('re')
-        wde_id = f"{def_id}:edge:{edge['id']}"
-
-        # Look up run_node_ids for upstream/downstream
-        upstream_rn = conn.execute(
-            "SELECT run_node_id FROM run_nodes WHERE run_id=$1 AND node_id=$2",
-            run_id, edge['from'],
-        )
-        downstream_rn = conn.execute(
-            "SELECT run_node_id FROM run_nodes WHERE run_id=$1 AND node_id=$2",
-            run_id, edge['to'],
-        )
-
-        conn.execute(
-            """INSERT INTO run_edges (
-                run_edge_id, run_id, workflow_definition_edge_id,
-                edge_id, from_node_id, to_node_id, edge_type,
-                release_state, payload_mapping_resolved,
-                upstream_run_node_id, downstream_run_node_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', '{}'::jsonb, $8, $9)
-            ON CONFLICT (run_id, edge_id) DO NOTHING""",
-            re_id, run_id, wde_id,
-            edge['id'], edge['from'], edge['to'], edge.get('kind', 'proceeds_to'),
-            upstream_rn[0]['run_node_id'] if upstream_rn else None,
-            downstream_rn[0]['run_node_id'] if downstream_rn else None,
-        )
-
-    logger.info("Model run started: %s (%d cards, %d edges, %d roots)",
-                run_id, len(cards), len(edges), len(root_cards))
-
-    return {
-        "run_id": run_id,
-        "workflow_id": workflow_id,
-        "total_cards": len(cards),
-        "ready_cards": root_cards,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -517,6 +346,7 @@ def release_downstream(conn, run_id: str, completed_card_id: str) -> list[str]:
     )
 
     released: list[str] = []
+    touched_downstream_nodes: set[str] = set()
     for edge in outbound:
         edge_type = edge['edge_type']
         should_fire = False
@@ -528,6 +358,8 @@ def release_downstream(conn, run_id: str, completed_card_id: str) -> list[str]:
         elif edge_type in ANY_TERMINAL_EDGES and completed_state in ('succeeded', 'failed'):
             should_fire = True
 
+        to_node = edge['to_node_id']
+        touched_downstream_nodes.add(to_node)
         if should_fire:
             # Mark edge as released
             conn.execute(
@@ -535,26 +367,31 @@ def release_downstream(conn, run_id: str, completed_card_id: str) -> list[str]:
                    WHERE run_edge_id=$1""",
                 edge['run_edge_id'],
             )
-
-            # Check if ALL inbound edges to the downstream card are released
-            to_node = edge['to_node_id']
-            unreleased = conn.execute(
-                """SELECT count(*) as cnt FROM run_edges
-                   WHERE run_id=$1 AND to_node_id=$2 AND release_state='pending'""",
-                run_id, to_node,
+        else:
+            conn.execute(
+                """UPDATE run_edges SET release_state='skipped', released_at=NOW()
+                   WHERE run_edge_id=$1
+                     AND release_state='pending'""",
+                edge['run_edge_id'],
             )
 
-            if unreleased and unreleased[0]['cnt'] == 0:
-                # All deps satisfied — release the downstream card
-                updated = conn.execute(
-                    """UPDATE run_nodes SET current_state='ready'
-                       WHERE run_id=$1 AND node_id=$2 AND current_state='waiting'
-                       RETURNING node_id""",
-                    run_id, to_node,
-                )
-                if updated:
-                    released.append(to_node)
-                    logger.info("Released card %s in run %s", to_node, run_id)
+    for to_node in sorted(touched_downstream_nodes):
+        unreleased = conn.execute(
+            """SELECT count(*) as cnt FROM run_edges
+               WHERE run_id=$1 AND to_node_id=$2 AND release_state='pending'""",
+            run_id, to_node,
+        )
+
+        if unreleased and unreleased[0]['cnt'] == 0:
+            updated = conn.execute(
+                """UPDATE run_nodes SET current_state='ready'
+                   WHERE run_id=$1 AND node_id=$2 AND current_state='waiting'
+                   RETURNING node_id""",
+                run_id, to_node,
+            )
+            if updated:
+                released.append(to_node)
+                logger.info("Released card %s in run %s", to_node, run_id)
 
     # Finalize the run once every card has reached a terminal state.
     _finalize_run_if_terminal(conn, run_id)
@@ -592,19 +429,25 @@ def _finalize_run_if_terminal(conn, run_id: str) -> None:
         logger.info("Model run %s completed: %s", run_id, terminal_state)
 
 
-def _latest_awaiting_human_run_node_id(conn, run_id: str, card_id: str) -> str:
+def _claim_awaiting_human_run_node_id(conn, run_id: str, card_id: str) -> str:
     run_node_id = conn.fetchval(
-        """SELECT run_node_id
-           FROM run_nodes
-           WHERE run_id=$1 AND node_id=$2 AND current_state='awaiting_human'
-           ORDER BY attempt_number DESC
-           LIMIT 1""",
+        """UPDATE run_nodes
+           SET current_state='running',
+               started_at = COALESCE(started_at, NOW())
+           WHERE run_node_id = (
+               SELECT run_node_id
+               FROM run_nodes
+               WHERE run_id=$1 AND node_id=$2 AND current_state='awaiting_human'
+               ORDER BY attempt_number DESC
+               LIMIT 1
+           )
+           RETURNING run_node_id""",
         run_id,
         card_id,
     )
     if not run_node_id:
         raise RuntimeError(
-            f"No awaiting_human run_node found for run_id={run_id!r} card_id={card_id!r}"
+            f"No claimable awaiting_human run_node found for run_id={run_id!r} card_id={card_id!r}"
         )
     return str(run_node_id)
 
@@ -621,7 +464,7 @@ def approve_card(conn, run_id: str, card_id: str, decision: str, notes: str = ''
         "decided_by": "human",
     }
     state_repository = PostgresRunNodeStateRepository(conn)
-    run_node_id = _latest_awaiting_human_run_node_id(conn, run_id, card_id)
+    run_node_id = _claim_awaiting_human_run_node_id(conn, run_id, card_id)
     if decision == 'approved':
         receipt_id = write_run_node_receipt(
             conn,
@@ -634,12 +477,17 @@ def approve_card(conn, run_id: str, card_id: str, decision: str, notes: str = ''
             agent_slug="human",
             executor_type="runtime.model_executor.approve_card",
         )
-        state_repository.mark_terminal_state(
+        updated = state_repository.mark_terminal_state(
             run_node_id=run_node_id,
             state="succeeded",
             output_payload=outputs,
             receipt_id=receipt_id,
+            expected_current_state="running",
         )
+        if not updated:
+            raise RuntimeError(
+                f"Approval conflict for run_id={run_id!r} card_id={card_id!r}"
+            )
         released = release_downstream(conn, run_id, card_id)
         return {"status": "approved", "released_cards": released}
     else:
@@ -655,25 +503,29 @@ def approve_card(conn, run_id: str, card_id: str, decision: str, notes: str = ''
             agent_slug="human",
             executor_type="runtime.model_executor.approve_card",
         )
-        state_repository.mark_terminal_state(
+        updated = state_repository.mark_terminal_state(
             run_node_id=run_node_id,
             state="failed",
             output_payload=outputs,
             failure_code="human_rejected",
             receipt_id=receipt_id,
+            expected_current_state="running",
         )
+        if not updated:
+            raise RuntimeError(
+                f"Approval conflict for run_id={run_id!r} card_id={card_id!r}"
+            )
         released = release_downstream(conn, run_id, card_id)
         _finalize_run_if_terminal(conn, run_id)
         return {"status": "rejected", "released_cards": released}
 
 
 def get_run_status(conn, run_id: str) -> dict:
-    """Get full status of a model run with per-card states."""
-    run = conn.execute(
-        "SELECT run_id, workflow_id, current_state FROM workflow_runs WHERE run_id=$1",
-        run_id,
-    )
-    if not run:
+    """Get canonical run status with legacy card state attached when present."""
+    from runtime.workflow._status import get_run_status as get_canonical_run_status
+
+    status = get_canonical_run_status(conn, run_id)
+    if status is None:
         return {"error": "Run not found"}
 
     nodes = conn.execute(
@@ -697,8 +549,8 @@ def get_run_status(conn, run_id: str) -> dict:
             "failure_code": n['failure_code'],
         }
 
-    return {
-        "run_id": run_id,
-        "status": run[0]['current_state'],
-        "cards": cards,
-    }
+    result = dict(status)
+    result["cards"] = cards
+    if cards:
+        result["model_runtime_status_projection"] = "run_nodes_compatibility"
+    return result

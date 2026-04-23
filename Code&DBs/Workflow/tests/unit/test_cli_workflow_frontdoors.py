@@ -2312,7 +2312,7 @@ def test_chain_frontdoor_legacy_mode_still_requires_two_specs(
 def test_chain_frontdoor_help_mentions_coordination_and_legacy_modes() -> None:
     stdout = StringIO()
     exit_code = workflow_cli_main(["chain", "--help"], stdout=stdout)
-    assert exit_code == 2  # argparse convention for help
+    assert exit_code == 0
     out = stdout.getvalue()
     assert "coordination.json" in out.lower() or "coordination-program" in out.lower()
     assert "spec1.json" in out  # legacy mode still documented

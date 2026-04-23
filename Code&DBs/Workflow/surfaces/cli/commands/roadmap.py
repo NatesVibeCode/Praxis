@@ -22,14 +22,14 @@ def _help_text() -> str:
             "",
             "CQRS roadmap surface:",
             "  Query:",
-            "    workflow roadmap view [--root <roadmap_item_id>] [--semantic-neighbor-limit <n>]",
+            "    workflow roadmap view [--root <roadmap_item_id>] [--semantic-neighbor-limit <n>] [--json]",
             "      Read roadmap items from the CQRS read model with semantic-first external neighbors (no run id required).",
             "    workflow roadmap status --run-id <run_id>",
             "    workflow roadmap scoreboard --run-id <run_id>",
             "    workflow roadmap graph --run-id <run_id>",
             "      Run-scoped operator views (require a workflow run id).",
             "  Command:",
-            "    workflow roadmap write <preview|validate|commit> --title <title> --intent-brief <brief> [options]",
+            "    workflow roadmap write <preview|validate|commit> --title <title> --intent-brief <brief> [options] [--json]",
             "      Options include --proof-kind capability_delivered_by_decision_filing for capability rows delivered by a decided operator decision.",
             "    workflow roadmap closeout <preview|commit> [--bug-id <id>]... [--roadmap-item-id <id>]...",
             "",
@@ -67,6 +67,9 @@ def _roadmap_view_command(args: list[str], *, stdout: TextIO) -> int:
                 return 2
             semantic_neighbor_limit = int(args[index + 1])
             index += 2
+            continue
+        if flag == "--json":
+            index += 1
             continue
         stdout.write(f"unknown argument: {flag}\n")
         return 2
@@ -120,7 +123,7 @@ def _roadmap_run_view_command(
 def _roadmap_write_command(args: list[str], *, stdout: TextIO) -> int:
     usage = (
         "usage: workflow roadmap write <preview|validate|commit> "
-        "--title <title> --intent-brief <brief> [options]\n"
+        "--title <title> --intent-brief <brief> [options] [--json]\n"
     )
     if not args or args[0] in {"-h", "--help", "help"}:
         stdout.write(usage)
@@ -147,6 +150,9 @@ def _roadmap_write_command(args: list[str], *, stdout: TextIO) -> int:
             continue
         if flag == "--not-phase-ready":
             params["phase_ready"] = False
+            index += 1
+            continue
+        if flag == "--json":
             index += 1
             continue
         if index + 1 >= len(args):
@@ -211,7 +217,7 @@ def _roadmap_write_command(args: list[str], *, stdout: TextIO) -> int:
 def _roadmap_closeout_command(args: list[str], *, stdout: TextIO) -> int:
     usage = (
         "usage: workflow roadmap closeout <preview|commit> "
-        "[--bug-id <id>]... [--roadmap-item-id <id>]...\n"
+        "[--bug-id <id>]... [--roadmap-item-id <id>]... [--json]\n"
     )
     if not args or args[0] in {"-h", "--help", "help"}:
         stdout.write(usage)
@@ -229,6 +235,9 @@ def _roadmap_closeout_command(args: list[str], *, stdout: TextIO) -> int:
     index = 1
     while index < len(args):
         flag = args[index]
+        if flag == "--json":
+            index += 1
+            continue
         if index + 1 >= len(args):
             stdout.write(f"missing value for {flag}\n")
             return 2
