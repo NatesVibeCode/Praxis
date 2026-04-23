@@ -2320,6 +2320,11 @@ button.moon-release__pill-inner {
   color: var(--moon-fg);
   transform: translateY(-1px);
 }
+.moon-dock-form__btn--secondary {
+  border-color: var(--moon-white-a10);
+  background: var(--moon-black-a18);
+  color: var(--moon-fg-muted);
+}
 .moon-dock-form__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -2363,6 +2368,114 @@ button.moon-release__pill-inner {
   margin-top: 6px;
   font-size: 12px;
   color: var(--moon-gate-green);
+}
+.moon-action__build-actions {
+  align-items: stretch;
+}
+.moon-action__compiler-loop {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--moon-accent-a20);
+  border-radius: 12px;
+  background: var(--moon-white-a025);
+  box-shadow: var(--moon-shadow-line-soft);
+}
+.moon-action__compiler-head,
+.moon-action__unit-topline,
+.moon-action__unit-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.moon-action__compiler-count {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--moon-white-a10);
+  border-radius: 999px;
+  color: var(--moon-fg);
+  font-size: var(--moon-font-size-xxs);
+  font-weight: 700;
+}
+.moon-action__unit-card,
+.moon-action__unit-empty {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--moon-white-a08);
+  border-radius: 10px;
+  background: var(--moon-black-a18);
+}
+.moon-action__unit-empty,
+.moon-action__unit-summary,
+.moon-action__unit-meta {
+  color: var(--moon-fg-muted);
+  font-size: var(--moon-font-size-xxs);
+  line-height: 1.45;
+}
+.moon-action__unit-topline span:first-child {
+  min-width: 0;
+  color: var(--moon-fg);
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.moon-action__unit-topline span:last-child {
+  flex-shrink: 0;
+  color: var(--moon-accent);
+  font-size: var(--moon-font-size-xxs);
+}
+.moon-action__unit-meta {
+  padding-top: 4px;
+  border-top: 1px solid var(--moon-white-a08);
+}
+.moon-action__check-list {
+  display: grid;
+  gap: 6px;
+}
+.moon-action__check {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--moon-white-a08);
+  border-radius: 10px;
+  background: var(--moon-black-a12);
+}
+.moon-action__check--passed {
+  border-color: var(--moon-success-a24);
+}
+.moon-action__check--warning {
+  border-color: var(--moon-warning-a32);
+}
+.moon-action__check--blocked {
+  border-color: var(--moon-danger-a28);
+}
+.moon-action__check-state {
+  color: var(--moon-fg-dim);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.moon-action__check-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.moon-action__check-copy span:first-child {
+  color: var(--moon-fg);
+  font-size: 11px;
+  font-weight: 650;
+}
+.moon-action__check-copy span:last-child {
+  color: var(--moon-fg-muted);
+  font-size: 10px;
+  line-height: 1.4;
 }
 .moon-action__save-card {
   display: grid;

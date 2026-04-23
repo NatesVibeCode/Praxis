@@ -2673,6 +2673,7 @@ def test_handle_workflow_build_post_delegates_to_runtime_owner() -> None:
         planning_notes=runtime_result["planning_notes"],
         intent_brief=runtime_result.get("intent_brief"),
         execution_manifest=runtime_result.get("execution_manifest"),
+        progressive_build=runtime_result.get("progressive_build"),
         undo_receipt=runtime_result.get("undo_receipt"),
         mutation_event_id=runtime_result.get("mutation_event_id"),
     )

@@ -350,6 +350,356 @@ def materialize_definition_from_build_graph(
     return recompute_definition_revision(base_definition)
 
 
+def _slug_fragment(value: str, *, fallback: str = "step") -> str:
+    out: list[str] = []
+    previous_dash = False
+    for char in value.lower():
+        if char.isalnum():
+            out.append(char)
+            previous_dash = False
+        elif not previous_dash:
+            out.append("-")
+            previous_dash = True
+    slug = "".join(out).strip("-")
+    return slug or fallback
+
+
+def _progressive_intent_units(prose: str) -> list[dict[str, Any]]:
+    normalized = prose.lower()
+    units: list[dict[str, Any]] = []
+    if any(token in normalized for token in ("validate", "non-empty", "nonempty", "check input", "required input")):
+        units.append({
+            "title": "Validate input",
+            "summary": "Confirm the input text is present before downstream work runs.",
+            "route": "auto/classify",
+            "prompt": "Validate that input_text is present and not empty. Return validated_input or a clear validation failure.",
+            "required_inputs": ["input_text"],
+            "outputs": ["validated_input"],
+        })
+    if any(token in normalized for token in ("summarize", "summary", "one sentence", "sentence")):
+        units.append({
+            "title": "Summarize input",
+            "summary": "Produce a one-sentence summary from the validated input.",
+            "route": "auto/draft",
+            "prompt": "Write one concise sentence that summarizes validated_input.",
+            "required_inputs": ["validated_input"],
+            "outputs": ["summary"],
+        })
+    if any(token in normalized for token in ("receipt", "record", "audit", "auditable", "persist")):
+        units.append({
+            "title": "Record execution receipt",
+            "summary": "Persist a small execution receipt so the run can be inspected later.",
+            "route": "auto/draft",
+            "prompt": "Record summary, status, and timestamp as an execution receipt.",
+            "required_inputs": ["summary"],
+            "outputs": ["execution_receipt"],
+            "persistence_targets": ["execution_receipt"],
+        })
+    if any(token in normalized for token in ("notify", "notification", "message operator", "send update")):
+        units.append({
+            "title": "Notify operator",
+            "summary": "Send a concise status update when the workflow completes.",
+            "route": "integration/notify",
+            "prompt": "Notify the operator with the final workflow status and receipt reference.",
+            "required_inputs": ["execution_receipt"],
+            "outputs": ["notification_status"],
+        })
+    if units:
+        return units
+
+    fragments = [
+        fragment.strip(" .")
+        for fragment in prose.replace("\n", ". ").split(".")
+        if fragment.strip(" .")
+    ]
+    return [
+        {
+            "title": fragment[:48].strip().capitalize() or f"Resolve intent {index + 1}",
+            "summary": fragment,
+            "route": "auto/draft",
+            "prompt": f"Complete this workflow unit: {fragment}",
+            "required_inputs": ["input_text"] if index == 0 else [f"unit_{index}_output"],
+            "outputs": [f"unit_{index + 1}_output"],
+        }
+        for index, fragment in enumerate(fragments[:6])
+    ] or [{
+        "title": "Resolve intent",
+        "summary": "Convert the requested workflow intent into one executable unit.",
+        "route": "auto/draft",
+        "prompt": "Resolve the requested workflow intent into one executable unit.",
+        "required_inputs": ["input_text"],
+        "outputs": ["result"],
+    }]
+
+
+def _progressive_existing_build_graph(definition: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    candidate = body.get("build_graph")
+    if isinstance(candidate, dict):
+        return {
+            "nodes": _json_clone(candidate.get("nodes")) if isinstance(candidate.get("nodes"), list) else [],
+            "edges": _json_clone(candidate.get("edges")) if isinstance(candidate.get("edges"), list) else [],
+            "schema_version": int(candidate.get("schema_version") or 1),
+        }
+    draft_flow = definition.get("draft_flow") if isinstance(definition.get("draft_flow"), list) else []
+    if draft_flow:
+        setup = definition.get("execution_setup") if isinstance(definition.get("execution_setup"), dict) else {}
+        phases = setup.get("phases") if isinstance(setup.get("phases"), list) else []
+        phases_by_step = {
+            _text(phase.get("step_id")): phase
+            for phase in phases
+            if isinstance(phase, dict) and _text(phase.get("step_id"))
+        }
+        nodes: list[dict[str, Any]] = []
+        triggers = definition.get("trigger_intent") if isinstance(definition.get("trigger_intent"), list) else []
+        for index, trigger in enumerate(triggers):
+            if not isinstance(trigger, dict):
+                continue
+            event_type = _text(trigger.get("event_type")) or "manual"
+            route = _TRIGGER_MANUAL_ROUTE
+            if event_type == "schedule":
+                route = _TRIGGER_SCHEDULE_ROUTE
+            elif event_type == _WEBHOOK_TRIGGER_EVENT_TYPE:
+                route = _TRIGGER_WEBHOOK_ROUTE
+            nodes.append({
+                "node_id": _text(trigger.get("source_node_id")) or f"trigger:{index + 1}",
+                "kind": "step",
+                "title": _text(trigger.get("title")) or "Manual launch",
+                "summary": _text(trigger.get("summary")) or "Operator starts the workflow explicitly.",
+                "route": route,
+                "trigger": {"event_type": event_type},
+                "status": "accepted",
+            })
+        for step in sorted(
+            [item for item in draft_flow if isinstance(item, dict)],
+            key=lambda item: int(item.get("order") or 0),
+        ):
+            step_id = _text(step.get("id"))
+            if not step_id:
+                continue
+            phase = phases_by_step.get(step_id, {})
+            nodes.append({
+                "node_id": step_id,
+                "kind": "step",
+                "title": _text(step.get("title")) or step_id,
+                "summary": _text(step.get("summary")),
+                "route": _text(phase.get("agent_route")) or "auto/draft",
+                "prompt": _text(phase.get("system_prompt")),
+                "required_inputs": _json_clone(phase.get("required_inputs") or []),
+                "outputs": _json_clone(phase.get("outputs") or []),
+                "persistence_targets": _json_clone(phase.get("persistence_targets") or []),
+                "status": "accepted",
+            })
+        edges: list[dict[str, Any]] = []
+        for left, right in zip(nodes, nodes[1:]):
+            from_node_id = _text(left.get("node_id"))
+            to_node_id = _text(right.get("node_id"))
+            if not from_node_id or not to_node_id:
+                continue
+            edges.append({
+                "edge_id": f"edge:{_slug_fragment(from_node_id)}:{_slug_fragment(to_node_id)}",
+                "kind": "proceeds_to",
+                "from_node_id": from_node_id,
+                "to_node_id": to_node_id,
+                "release": _progressive_release(),
+                "gateLabel": "compiler accepted",
+            })
+        return {"nodes": nodes, "edges": edges, "schema_version": 1}
+    from runtime.build_authority import build_authority_bundle
+
+    bundle = build_authority_bundle(definition)
+    graph = bundle.get("build_graph") if isinstance(bundle.get("build_graph"), dict) else {}
+    return {
+        "nodes": _json_clone(graph.get("nodes")) if isinstance(graph.get("nodes"), list) else [],
+        "edges": _json_clone(graph.get("edges")) if isinstance(graph.get("edges"), list) else [],
+        "schema_version": int(graph.get("schema_version") or 1),
+    }
+
+
+def _progressive_release(label: str = "compiler accepted") -> dict[str, Any]:
+    return {
+        "family": "after_success",
+        "edge_type": "after_success",
+        "release_condition": {"kind": "always"},
+        "label": label,
+        "state": "configured",
+    }
+
+
+def _apply_progressive_build_step(
+    definition: dict[str, Any],
+    *,
+    workflow_id: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    prose = _text(body.get("prose"))
+    if not prose:
+        raise WorkflowRuntimeBoundaryError("prose is required")
+    graph = _progressive_existing_build_graph(definition, body)
+    nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
+    edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
+    trigger_id = "trigger:manual"
+    if not any(_is_trigger_route(_text(node.get("route"))) for node in nodes):
+        nodes.insert(0, {
+            "node_id": trigger_id,
+            "kind": "step",
+            "title": "Manual launch",
+            "summary": "Operator starts the workflow explicitly.",
+            "route": _TRIGGER_MANUAL_ROUTE,
+            "trigger": {"event_type": "manual"},
+            "status": "accepted",
+        })
+    else:
+        trigger_id = next(
+            _text(node.get("node_id") or node.get("id"))
+            for node in nodes
+            if _is_trigger_route(_text(node.get("route")))
+        )
+
+    existing_node_ids = {
+        _text(node.get("node_id") or node.get("id"))
+        for node in nodes
+        if _text(node.get("node_id") or node.get("id"))
+    }
+    intent_units = _progressive_intent_units(prose)
+    selected_index = 0
+    selected_unit: dict[str, Any] | None = None
+    for index, unit in enumerate(intent_units):
+        candidate_id = f"step:{_slug_fragment(_text(unit.get('title')), fallback=f'unit-{index + 1}')}"
+        if candidate_id not in existing_node_ids:
+            selected_index = index
+            selected_unit = dict(unit)
+            selected_unit["node_id"] = candidate_id
+            break
+    if selected_unit is None:
+        selected_index = len([node for node in nodes if not _is_trigger_route(_text(node.get("route")))])
+        selected_unit = {
+            "node_id": f"step:follow-up-{selected_index + 1}",
+            "title": f"Follow-up unit {selected_index + 1}",
+            "summary": "Capture the next unresolved workflow detail as a checked unit.",
+            "route": "auto/draft",
+            "prompt": "Capture the next unresolved workflow detail as a checked unit.",
+            "required_inputs": ["result"],
+            "outputs": [f"follow_up_{selected_index + 1}_result"],
+        }
+    selected_unit["kind"] = "step"
+    selected_unit["status"] = "accepted"
+    nodes.append(selected_unit)
+
+    prior_steps = [
+        node
+        for node in nodes[:-1]
+        if not _is_trigger_route(_text(node.get("route")))
+        and _text(node.get("kind") or "step") in ("step", "")
+    ]
+    from_node_id = (
+        _text(prior_steps[-1].get("node_id") or prior_steps[-1].get("id"))
+        if prior_steps
+        else trigger_id
+    )
+    to_node_id = _text(selected_unit.get("node_id"))
+    edge_id = f"edge:{_slug_fragment(from_node_id)}:{_slug_fragment(to_node_id)}"
+    if from_node_id and to_node_id and not any(_text(edge.get("edge_id") or edge.get("id")) == edge_id for edge in edges):
+        edges.append({
+            "edge_id": edge_id,
+            "kind": "proceeds_to",
+            "from_node_id": from_node_id,
+            "to_node_id": to_node_id,
+            "release": _progressive_release(),
+            "gateLabel": "compiler accepted",
+        })
+
+    next_graph = {
+        "schema_version": int(graph.get("schema_version") or 1),
+        "nodes": nodes,
+        "edges": edges,
+    }
+    next_definition = materialize_definition_from_build_graph(definition, build_graph=next_graph)
+    accepted_units = []
+    previous_progress = next_definition.get("progressive_build")
+    if isinstance(previous_progress, dict) and isinstance(previous_progress.get("accepted_units"), list):
+        accepted_units = [
+            item for item in _json_clone(previous_progress.get("accepted_units")) if isinstance(item, dict)
+        ]
+    unit_receipt = {
+        "ordinal": len(accepted_units) + 1,
+        "node_id": to_node_id,
+        "edge_id": edge_id,
+        "title": _text(selected_unit.get("title")),
+        "route": _text(selected_unit.get("route")),
+        "summary": _text(selected_unit.get("summary")),
+        "status": "accepted",
+        "inputs": _json_clone(selected_unit.get("required_inputs") or []),
+        "outputs": _json_clone(selected_unit.get("outputs") or []),
+        "gate_label": "compiler accepted",
+    }
+    accepted_units.append(unit_receipt)
+    projected_steps = next_definition.get("draft_flow") if isinstance(next_definition.get("draft_flow"), list) else []
+    projected_phases = (
+        next_definition.get("execution_setup", {}).get("phases")
+        if isinstance(next_definition.get("execution_setup"), dict)
+        else []
+    )
+    checks = [
+        {
+            "id": "graph_schema",
+            "label": "Graph schema",
+            "state": "passed" if to_node_id and _text(selected_unit.get("route")) else "blocked",
+            "detail": "Accepted node has a stable id, route, inputs, and outputs.",
+            "authority": "runtime.build_graph",
+        },
+        {
+            "id": "compiler_projection",
+            "label": "Compiler projection",
+            "state": "passed" if any(_text(step.get("id")) == to_node_id for step in projected_steps) else "blocked",
+            "detail": "Node materialized into draft_flow for runtime planning.",
+            "authority": "runtime.canonical_workflows",
+        },
+        {
+            "id": "execution_phase",
+            "label": "Execution phase",
+            "state": "passed" if any(_text(phase.get("step_id")) == to_node_id for phase in projected_phases or []) else "blocked",
+            "detail": "Route materialized as an execution phase before hardening.",
+            "authority": "runtime.operating_model_planner",
+        },
+        {
+            "id": "release_gate",
+            "label": "Release gate",
+            "state": "passed",
+            "detail": "Downstream release is explicit and defaults to after-success.",
+            "authority": "runtime.edge_release",
+        },
+        {
+            "id": "dispatch_boundary",
+            "label": "Dispatch boundary",
+            "state": "passed",
+            "detail": "Authoring changed the draft only; Run still requires an approved execution manifest.",
+            "authority": "workflow.execution_manifest",
+        },
+    ]
+    next_definition["workflow_id"] = workflow_id
+    next_definition["source_prose"] = prose
+    next_definition["progressive_build"] = {
+        "version": 1,
+        "mode": "one_unit_at_a_time",
+        "source_prose": prose,
+        "last_unit": unit_receipt,
+        "accepted_units": accepted_units,
+        "checks": checks,
+        "surfaces": [
+            "Action dock",
+            "Build graph",
+            "Release tray",
+            "Run boundary",
+        ],
+        "next_index": selected_index + 1,
+        "completion": {
+            "accepted": len([node for node in nodes if not _is_trigger_route(_text(node.get("route")))]),
+            "planned": max(len(intent_units), 1),
+        },
+    }
+    return recompute_definition_revision(next_definition)
+
+
 def commit_workflow(
     conn: Any,
     *,
@@ -699,6 +1049,12 @@ def mutate_workflow_build(
             raise WorkflowRuntimeBoundaryError("bootstrap did not produce a definition")
         definition = _json_clone(compiled_definition)
         definition["workflow_id"] = workflow_id
+    elif subpath == "progressive":
+        definition = _apply_progressive_build_step(
+            definition,
+            workflow_id=workflow_id,
+            body=body,
+        )
     elif subpath.startswith("attachments/") and subpath.endswith("/restore"):
         attachment_id = subpath[len("attachments/") : -len("/restore")].strip("/")
         if not attachment_id:
@@ -922,6 +1278,11 @@ def mutate_workflow_build(
         "candidate_resolution_manifest": candidate_resolution_manifest,
         "reviewable_plan": reviewable_plan,
         "execution_manifest": execution_manifest,
+        "progressive_build": (
+            _json_clone(hydrated_definition.get("progressive_build"))
+            if isinstance(hydrated_definition.get("progressive_build"), dict)
+            else None
+        ),
         "undo_receipt": undo_receipt,
         "mutation_event_id": mutation_event_id,
     }

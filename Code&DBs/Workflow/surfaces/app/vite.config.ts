@@ -339,6 +339,7 @@ export default defineConfig(async ({ command }) => {
     base: isServe ? '/' : '/app/',
     plugins: isServe ? [react(), apiServerPlugin(apiPort)] : [react()],
     build: {
+      emptyOutDir: false,
       rollupOptions: {
         output: {
           manualChunks(id: string) {

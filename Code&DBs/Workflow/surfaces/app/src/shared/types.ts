@@ -205,6 +205,42 @@ export interface BuildUndoReceipt {
   steps: BuildUndoReceiptStep[];
 }
 
+export interface ProgressiveBuildCheck {
+  id: string;
+  label: string;
+  state: 'passed' | 'warning' | 'blocked';
+  detail?: string;
+  authority?: string;
+}
+
+export interface ProgressiveBuildUnit {
+  ordinal?: number;
+  node_id: string;
+  edge_id?: string;
+  title?: string;
+  route?: string;
+  summary?: string;
+  status?: string;
+  inputs?: string[];
+  outputs?: string[];
+  gate_label?: string;
+}
+
+export interface ProgressiveBuildState {
+  version?: number;
+  mode?: string;
+  source_prose?: string;
+  last_unit?: ProgressiveBuildUnit | null;
+  accepted_units?: ProgressiveBuildUnit[];
+  checks?: ProgressiveBuildCheck[];
+  surfaces?: string[];
+  next_index?: number;
+  completion?: {
+    accepted?: number;
+    planned?: number;
+  };
+}
+
 export interface BuildPayload {
   workflow?: { id: string; name: string; description?: string } | null;
   definition: Record<string, unknown>;
@@ -233,6 +269,7 @@ export interface BuildPayload {
     workflows?: string[];
   };
   undo_receipt?: BuildUndoReceipt | null;
+  progressive_build?: ProgressiveBuildState | null;
   mutation_event_id?: number | null;
 }
 

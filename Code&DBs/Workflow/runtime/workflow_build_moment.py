@@ -123,6 +123,7 @@ def build_workflow_build_moment(
     planning_notes: list[str] | None = None,
     intent_brief: dict[str, Any] | None = None,
     execution_manifest: dict[str, Any] | None = None,
+    progressive_build: dict[str, Any] | None = None,
     undo_receipt: dict[str, Any] | None = None,
     mutation_event_id: int | None = None,
 ) -> dict[str, Any]:
@@ -190,6 +191,11 @@ def build_workflow_build_moment(
         candidate_manifest=candidate_resolution_manifest,
     )
     review_state = effective_definition.get("review_state")
+    effective_progressive_build = (
+        progressive_build
+        if isinstance(progressive_build, dict)
+        else effective_definition.get("progressive_build")
+    )
     return {
         "workflow": {
             "id": row["id"],
@@ -215,6 +221,11 @@ def build_workflow_build_moment(
         "candidate_resolution_manifest": candidate_resolution_manifest,
         "reviewable_plan": reviewable_plan,
         "execution_manifest": execution_manifest,
+        "progressive_build": (
+            _serialize_json(effective_progressive_build)
+            if isinstance(effective_progressive_build, dict)
+            else None
+        ),
         "undo_receipt": undo_receipt,
         "mutation_event_id": mutation_event_id,
     }
