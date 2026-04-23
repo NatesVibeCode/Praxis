@@ -135,6 +135,26 @@ def _submit_intent(*, risk_level: str | None = None) -> control_commands.Control
     )
 
 
+def _api_submit_intent() -> control_commands.ControlIntent:
+    return control_commands.ControlIntent(
+        command_type=control_commands.ControlCommandType.WORKFLOW_SUBMIT,
+        requested_by_kind="http",
+        requested_by_ref="api.workflow_run",
+        idempotency_key="idem.submit.api.1",
+        payload={"repo_root": "/repo", "spec_path": "spec.queue.json"},
+    )
+
+
+def _mcp_submit_intent() -> control_commands.ControlIntent:
+    return control_commands.ControlIntent(
+        command_type=control_commands.ControlCommandType.WORKFLOW_SUBMIT,
+        requested_by_kind="mcp",
+        requested_by_ref="praxis_workflow.run",
+        idempotency_key="idem.submit.mcp.1",
+        payload={"repo_root": "/repo", "spec_path": "spec.queue.json"},
+    )
+
+
 def _inline_submit_intent() -> control_commands.ControlIntent:
     return control_commands.ControlIntent(
         command_type=control_commands.ControlCommandType.WORKFLOW_SUBMIT,
@@ -670,6 +690,8 @@ def test_request_workflow_chain_submit_command_bootstraps_and_shapes_intent(monk
     "intent_factory, expected_safe",
     [
         (_submit_intent, True),
+        (_api_submit_intent, True),
+        (_mcp_submit_intent, True),
         (_cancel_intent, False),
     ],
 )

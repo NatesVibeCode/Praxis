@@ -78,17 +78,72 @@ class _SyncAsyncBridge:
 
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._ready: threading.Event | None = None
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
         return self._loop
 
+    def _running_loop_in_current_thread(self) -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        return True
+
+    def _get_thread_loop(self) -> asyncio.AbstractEventLoop:
+        if self._thread is not None and self._loop is not None and not self._loop.is_closed():
+            return self._loop
+
+        loop = asyncio.new_event_loop()
+        ready = threading.Event()
+
+        def _run_loop() -> None:
+            asyncio.set_event_loop(loop)
+            ready.set()
+            loop.run_forever()
+            pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.close()
+
+        thread = threading.Thread(
+            target=_run_loop,
+            name="praxis-postgres-evidence-writer",
+            daemon=True,
+        )
+        self._loop = loop
+        self._ready = ready
+        self._thread = thread
+        thread.start()
+        ready.wait(timeout=5.0)
+        return loop
+
     def run(self, coro):
+        if self._running_loop_in_current_thread() or self._thread is not None:
+            loop = self._get_thread_loop()
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            return future.result()
+
         loop = self._get_loop()
         return loop.run_until_complete(coro)
 
     def close(self) -> None:
+        if self._thread is not None:
+            thread = self._thread
+            loop = self._loop
+            if loop is not None and not loop.is_closed():
+                loop.call_soon_threadsafe(loop.stop)
+            thread.join(timeout=5.0)
+            self._thread = None
+            self._ready = None
+            self._loop = None
+            return
+
         if self._loop is not None and not self._loop.is_closed():
             self._loop.close()
             self._loop = None

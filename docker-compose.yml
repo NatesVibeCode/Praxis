@@ -15,6 +15,7 @@ services:
       - .env
     environment:
       PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
+      PRAXIS_WORKSPACE_BASE_PATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
       PRAXIS_SEMANTIC_HOST: 0.0.0.0
       PRAXIS_SEMANTIC_PORT: 8421
       WORKFLOW_EMBEDDING_BACKEND: local
@@ -52,6 +53,7 @@ services:
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
+      PRAXIS_WORKSPACE_BASE_PATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
       PRAXIS_API_RELOAD: "0"
@@ -102,6 +104,7 @@ services:
     environment:
       WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
       PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
+      PRAXIS_WORKSPACE_BASE_PATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
@@ -138,6 +141,7 @@ services:
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
+      PRAXIS_WORKSPACE_BASE_PATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
       # Sandbox capacity: empirical peak RSS of a real CLI+MCP sandbox is
       # ~230 MB (measured 2026-04-21 on Dell with two active agent jobs).
       # 500 MB gives ~2x headroom over observed peak. The old 4 GB default

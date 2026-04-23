@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -270,3 +271,37 @@ def test_close_blocking_uses_writer_bridge_for_loop_safe_shutdown() -> None:
 
     assert events == ["bridge.run", "conn.close", "bridge.close"]
     assert writer._conn is None
+
+
+def test_commit_submission_from_running_loop_uses_dedicated_bridge_thread() -> None:
+    writer = PostgresEvidenceWriter(database_url="postgresql://unused")
+    expected = object()
+    events: list[tuple[str, int]] = []
+
+    class _FakeConn:
+        async def close(self) -> None:
+            events.append(("close", threading.get_ident()))
+
+    async def _persist(**_kwargs):
+        events.append(("persist", threading.get_ident()))
+        return expected
+
+    writer._conn = _FakeConn()
+    writer._owns_conn = True
+    writer._persist_submission = _persist
+
+    async def _invoke_from_running_loop():
+        result = writer.commit_submission(
+            route_identity=_route_identity("run-loop-safe"),
+            admitted_definition_ref="workflow_definition.run-loop-safe",
+            admitted_definition_hash="sha256:run-loop-safe",
+            request_payload={"payload": "value"},
+        )
+        writer.close_blocking()
+        return result
+
+    result = asyncio.run(_invoke_from_running_loop())
+
+    assert result is expected
+    assert [event for event, _thread_id in events] == ["persist", "close"]
+    assert len({thread_id for _event, thread_id in events}) == 1

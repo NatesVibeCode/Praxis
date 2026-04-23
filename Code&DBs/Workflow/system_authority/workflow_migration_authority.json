@@ -213,7 +213,8 @@
     "205_feedback_authority.sql",
     "206_legacy_schema_authority_backfill.sql",
     "207_legacy_domain_authority_assignment.sql",
-    "208_structured_document_semantic_authority.sql"
+    "208_structured_document_semantic_authority.sql",
+    "209_empty_thin_sandbox_runtime_targets.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5475,7 +5476,8 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.structured_documents.record_context_selection"
       }
-    ]
+    ],
+    "209_empty_thin_sandbox_runtime_targets.sql": []
   },
   "policy_buckets": {
     "canonical": [
@@ -5692,7 +5694,8 @@
       "205_feedback_authority.sql",
       "206_legacy_schema_authority_backfill.sql",
       "207_legacy_domain_authority_assignment.sql",
-      "208_structured_document_semantic_authority.sql"
+      "208_structured_document_semantic_authority.sql",
+      "209_empty_thin_sandbox_runtime_targets.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

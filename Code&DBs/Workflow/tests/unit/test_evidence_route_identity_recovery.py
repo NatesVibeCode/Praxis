@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
+
 import pytest
 
 from receipts import DataQualityIssue
-from storage.postgres.evidence import _route_identity_from_lineage
+from storage.postgres.evidence import _route_identity_from_lineage, _run_reader_coro
 from storage.postgres.validators import PostgresStorageError
 
 
@@ -140,3 +143,17 @@ def test_string_encoded_lineage_is_accepted() -> None:
     route_identity, issues = _call(payload)
     assert issues == ()
     assert route_identity.claim_id == "claim-1"
+
+
+def test_reader_sync_bridge_runs_from_existing_event_loop() -> None:
+    async def _read():
+        return threading.get_ident()
+
+    async def _inside_running_loop():
+        caller_thread = threading.get_ident()
+        reader_thread = _run_reader_coro(_read())
+        return caller_thread, reader_thread
+
+    caller_thread, reader_thread = asyncio.run(_inside_running_loop())
+
+    assert reader_thread != caller_thread

@@ -8,8 +8,10 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,10 @@ from registry.provider_execution_registry import build_command, resolve_api_key_
 from runtime.load_balancer import get_load_balancer
 from runtime.execution_transport import resolve_execution_transport
 from runtime.sandbox_runtime import SandboxRuntime, derive_sandbox_identity
-from runtime.workflow.agent_packet import AgentPacket
+from runtime.workflow.mcp_bridge import (
+    augment_cli_command_for_workflow_mcp,
+    workflow_mcp_workspace_overlays,
+)
 from runtime.workflow.mcp_session import mint_workflow_mcp_session_token
 from runtime.workflow.decision_context import decision_workspace_overlays
 from runtime.workspace_paths import workflow_root
@@ -172,8 +177,8 @@ def _build_execution_env(
             sandbox_env[_ALLOWED_MCP_TOOLS_ENV] = allowed_tools
             sandbox_env[_LEGACY_ALLOWED_MCP_TOOLS_ENV] = allowed_tools
             # Uniform shell-tool surface: every sandbox (codex/claude/gemini)
-            # gets a `praxis` workflow MCP front door baked into its image.
-            # It POSTs to the workflow MCP bridge using these two env vars. This
+            # gets a `praxis` CLI shim baked into its image. The shim POSTs
+            # to the workflow MCP bridge using these two env vars. This
             # replaces per-provider MCP-config wiring (which rotted on every
             # CLI upgrade — see architecture-policy::sandbox::
             # uniform-shell-tool-surface). The CLI itself does not need any
@@ -214,52 +219,6 @@ def _build_execution_env(
     if ripgrep_config:
         sandbox_env["RIPGREP_CONFIG_PATH"] = ripgrep_config
     return sandbox_env
-
-
-def _mcp_tool_names_from_bundle(execution_bundle: dict[str, Any] | None) -> tuple[str, ...]:
-    if not isinstance(execution_bundle, dict):
-        return ()
-    raw = execution_bundle.get("mcp_tool_names")
-    if not isinstance(raw, list):
-        return ()
-    return tuple(str(name).strip() for name in raw if str(name).strip())
-
-
-def _build_cli_agent_packet(
-    agent_config,
-    *,
-    rendered_prompt: str,
-    workdir: str,
-    execution_bundle: dict[str, Any] | None,
-) -> AgentPacket:
-    """Packet boundary for the already-rendered runtime prompt.
-
-    ``_execution_core`` owns prompt assembly. Re-running that assembly here
-    would double-inject context and bundle text, so this helper records the
-    prompt as the agent-facing packet exactly as received by ``execute_cli``.
-    """
-    bundle = execution_bundle if isinstance(execution_bundle, dict) else {}
-    provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
-    model_slug = getattr(agent_config, "model", None)
-    env = _build_execution_env(
-        agent_config,
-        workdir=workdir,
-        execution_bundle=execution_bundle,
-    )
-    return AgentPacket(
-        user_prompt=rendered_prompt,
-        system_prompt=str(getattr(agent_config, "system_prompt", "") or "") or "",
-        env=env,
-        mcp_tool_names=_mcp_tool_names_from_bundle(execution_bundle),
-        metadata={
-            "agent_slug": f"{provider_slug}/{model_slug or ''}".strip("/"),
-            "provider_slug": provider_slug or None,
-            "model_slug": model_slug,
-            "job_label": str(bundle.get("job_label") or "").strip(),
-            "run_id": str(bundle.get("run_id") or "").strip(),
-            "workflow_id": str(bundle.get("workflow_id") or "").strip(),
-        },
-    )
 
 
 def _sandbox_profile_from_bundle(
@@ -470,6 +429,94 @@ def _parse_llm_output(stdout: str) -> tuple[str, dict[str, Any]]:
     return parsed_stdout, telemetry
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _execute_api_control_plane(
+    *,
+    prompt: str,
+    api_protocol: str,
+    api_endpoint: str,
+    api_key_env: str,
+    api_key: str | None,
+    model_slug: str,
+    max_output_tokens: int,
+    timeout: int,
+    workdir: str,
+    reasoning_effort: str | None,
+    sandbox_session_id: str,
+    sandbox_group_id: str,
+    provider_slug: str,
+) -> dict[str, Any]:
+    started_at = _utc_now_iso()
+    started = time.monotonic()
+    try:
+        from runtime.http_transport import call_transport
+
+        stdout = call_transport(
+            api_protocol,
+            prompt,
+            model=model_slug,
+            max_tokens=max_output_tokens,
+            timeout=timeout,
+            api_endpoint=api_endpoint,
+            api_key=api_key,
+            api_key_env=api_key_env,
+            workdir=workdir,
+            reasoning_effort=reasoning_effort,
+        )
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "exit_code": 1,
+            "stdout": "",
+            "stderr": str(exc),
+            "error_code": getattr(exc, "reason_code", "api_transport_failed"),
+            "execution_mode": "control_plane",
+            "sandbox_provider": "control_plane",
+            "execution_transport": "api",
+            "sandbox_session_id": sandbox_session_id,
+            "sandbox_group_id": sandbox_group_id,
+            "artifact_refs": [],
+            "started_at": started_at,
+            "finished_at": _utc_now_iso(),
+            "workspace_snapshot_ref": "",
+            "workspace_snapshot_cache_hit": False,
+            "network_policy": "provider_only",
+            "provider_latency_ms": round((time.monotonic() - started) * 1000, 2),
+            "container_cpu_percent": None,
+            "container_mem_bytes": None,
+            "workspace_materialization": "none",
+            "api_execution_mode": "control_plane_transport",
+            "provider_slug": provider_slug,
+        }
+    return {
+        "status": "succeeded",
+        "exit_code": 0,
+        "stdout": stdout,
+        "stderr": "",
+        "error_code": "",
+        "execution_mode": "control_plane",
+        "sandbox_provider": "control_plane",
+        "execution_transport": "api",
+        "sandbox_session_id": sandbox_session_id,
+        "sandbox_group_id": sandbox_group_id,
+        "artifact_refs": [],
+        "started_at": started_at,
+        "finished_at": _utc_now_iso(),
+        "workspace_snapshot_ref": "",
+        "workspace_snapshot_cache_hit": False,
+        "network_policy": "provider_only",
+        "provider_latency_ms": round((time.monotonic() - started) * 1000, 2),
+        "container_cpu_percent": None,
+        "container_mem_bytes": None,
+        "workspace_materialization": "none",
+        "api_execution_mode": "control_plane_transport",
+        "provider_slug": provider_slug,
+    }
+
+
 def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[str, Any]:
     # Use stderr as fallback source if stdout is empty but stderr looks like JSON output
     raw_stdout = result.stdout
@@ -590,14 +637,13 @@ def execute_cli(
         if not acquired:
             return _provider_capacity_failure(provider_slug)
 
-        agent_packet = _build_cli_agent_packet(
+        env = _build_execution_env(
             agent_config,
-            rendered_prompt=prompt,
             workdir=workdir,
             execution_bundle=execution_bundle,
         )
 
-        stdin_text = agent_packet.user_prompt
+        stdin_text = prompt
         if getattr(agent_config, "wrapper_command", None):
             cmd = shlex.split(agent_config.wrapper_command)
             if "{prompt_file}" in cmd:
@@ -609,7 +655,7 @@ def execute_cli(
                     "error_code": "sandbox_error",
                 }
             if "{prompt}" in cmd:
-                cmd = [agent_packet.user_prompt if part == "{prompt}" else part for part in cmd]
+                cmd = [prompt if part == "{prompt}" else part for part in cmd]
                 stdin_text = ""
         else:
             try:
@@ -628,7 +674,21 @@ def execute_cli(
 
         cmd = normalize_command_parts_for_docker(cmd)
 
-        workspace_overlays = decision_workspace_overlays(execution_bundle)
+        decision_overlays = decision_workspace_overlays(execution_bundle)
+        workspace_overlays = [
+            *decision_overlays,
+            *workflow_mcp_workspace_overlays(
+                provider_slug=provider_slug,
+                execution_bundle=execution_bundle,
+                prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
+            ),
+        ]
+        cmd = augment_cli_command_for_workflow_mcp(
+            provider_slug=provider_slug,
+            command_parts=cmd,
+            execution_bundle=execution_bundle,
+            prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
+        )
         timeout = int(getattr(agent_config, "timeout_seconds", 900) or 900)
         network_policy = _sandbox_policy_value(
             agent_config,
@@ -641,7 +701,7 @@ def execute_cli(
         workspace_materialization = _sandbox_policy_value(
             agent_config,
             "workspace_materialization",
-            "copy",
+            "none",
             execution_bundle=execution_bundle,
         )
         sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
@@ -676,7 +736,7 @@ def execute_cli(
                 workdir=workdir,
                 command=shlex.join(cmd),
                 stdin_text=stdin_text,
-                env=dict(agent_packet.env),
+                env=env,
                 timeout_seconds=timeout,
                 network_policy=network_policy,
                 workspace_materialization=workspace_materialization,
@@ -684,10 +744,6 @@ def execute_cli(
                 image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
                 metadata={
                     "provider_slug": provider_slug,
-                    "agent_packet": {
-                        "mcp_tool_names": list(agent_packet.mcp_tool_names),
-                        "metadata": dict(agent_packet.metadata),
-                    },
                     "execution_bundle": execution_bundle or {},
                     **({"workspace_overlays": workspace_overlays} if workspace_overlays else {}),
                     **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
@@ -792,7 +848,7 @@ def execute_api(
         workspace_materialization = _sandbox_policy_value(
             agent_config,
             "workspace_materialization",
-            "copy",
+            "none",
             execution_bundle=execution_bundle,
         )
         sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
@@ -833,6 +889,25 @@ def execute_api(
                 "docker_image": _sandbox_image(agent_config, execution_bundle=execution_bundle),
             },
         )
+        if workspace_materialization.strip().lower() == "none":
+            payload = _execute_api_control_plane(
+                prompt=prompt,
+                api_protocol=_api_protocol,
+                api_endpoint=_api_endpoint,
+                api_key_env=_api_key_env,
+                api_key=str(env.get(_api_key_env, "")).strip() or None,
+                model_slug=model_slug,
+                max_output_tokens=max_output_tokens,
+                timeout=timeout,
+                workdir=resolved_workdir,
+                reasoning_effort=reasoning_effort,
+                sandbox_session_id=sandbox_session_id,
+                sandbox_group_id=sandbox_group_id,
+                provider_slug=provider_slug,
+            )
+            if sandbox_profile_ref:
+                payload["sandbox_profile_ref"] = sandbox_profile_ref
+            return payload
         try:
             result = SandboxRuntime().execute_command(
                 provider_name=sandbox_provider,

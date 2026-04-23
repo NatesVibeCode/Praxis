@@ -142,7 +142,12 @@ def _asyncpg_module():
 
 
 def _run_async(awaitable: Any) -> Any:
-    return asyncio.run(awaitable)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, awaitable).result()
 
 
 def _build_check(
@@ -1017,7 +1022,7 @@ def health_check_sync(
     fail_percent: float = 95.0,
 ) -> PreflightResult:
     """Synchronous wrapper around :func:`health_check`."""
-    return asyncio.run(
+    return _run_async(
         health_check(
             database_url=database_url,
             scheduler_state_file=scheduler_state_file,

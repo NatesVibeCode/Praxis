@@ -846,6 +846,127 @@ def test_get_run_status_graph_receipts_use_runtime_database_authority(monkeypatc
     assert "CURSOR_WORKFLOW_OK" in status["jobs"][0]["stdout_preview"]
 
 
+def test_get_run_status_prefers_graph_receipts_over_stale_legacy_jobs(monkeypatch) -> None:
+    now = datetime.now(timezone.utc)
+    run_row = {
+        "run_id": "dispatch_graph_stale_jobs",
+        "workflow_id": "workflow.graph",
+        "request_id": "request.graph",
+        "current_state": "succeeded",
+        "request_envelope": {
+            "name": "graph-spec",
+            "nodes": [
+                {
+                    "node_id": "http_echo",
+                    "adapter_type": "api_task",
+                    "position_index": 0,
+                    "display_name": "http_echo",
+                }
+            ],
+        },
+        "requested_at": now - timedelta(seconds=10),
+        "started_at": now - timedelta(seconds=9),
+        "finished_at": now - timedelta(seconds=1),
+    }
+    route_identity = RouteIdentity(
+        workflow_id="workflow.graph",
+        run_id="dispatch_graph_stale_jobs",
+        request_id="request.graph",
+        authority_context_ref="authority.graph",
+        authority_context_digest="digest.graph",
+        claim_id="claim.graph",
+        attempt_no=1,
+        transition_seq=1,
+    )
+    receipt = ReceiptV1(
+        receipt_id="receipt.graph.stale.1",
+        receipt_type="node_execution_receipt",
+        schema_version=1,
+        workflow_id="workflow.graph",
+        run_id="dispatch_graph_stale_jobs",
+        request_id="request.graph",
+        route_identity=route_identity,
+        transition_seq=1,
+        evidence_seq=2,
+        started_at=now - timedelta(seconds=8),
+        finished_at=now - timedelta(seconds=2),
+        executor_type="api_task",
+        status="succeeded",
+        inputs={},
+        outputs={"result": "API_TASK_OK"},
+        node_id="http_echo",
+        attempt_no=1,
+    )
+    evidence_row = EvidenceRow(
+        kind="receipt",
+        evidence_seq=2,
+        row_id="receipt.graph.stale.1",
+        route_identity=route_identity,
+        transition_seq=1,
+        record=receipt,
+    )
+
+    class _FakeReader:
+        def __init__(self, *, database_url=None, env=None):
+            pass
+
+        def evidence_timeline(self, run_id: str):
+            assert run_id == "dispatch_graph_stale_jobs"
+            return (evidence_row,)
+
+    class _StatusConn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized.startswith("SELECT * FROM workflow_runs"):
+                return [dict(run_row)]
+            if "FROM workflow_jobs WHERE run_id = $1 ORDER BY created_at" in normalized:
+                return [
+                    {
+                        "id": 1,
+                        "label": "http_echo",
+                        "agent_slug": "api_task",
+                        "resolved_agent": "api_task",
+                        "status": "pending",
+                        "attempt": 0,
+                        "max_attempts": 1,
+                        "last_error_code": "",
+                        "failure_category": "",
+                        "failure_zone": "",
+                        "is_transient": False,
+                        "duration_ms": 0,
+                        "cost_usd": 0.0,
+                        "token_input": 0,
+                        "token_output": 0,
+                        "stdout_preview": "",
+                        "created_at": run_row["requested_at"],
+                        "ready_at": None,
+                        "claimed_at": None,
+                        "started_at": None,
+                        "finished_at": None,
+                        "heartbeat_at": None,
+                        "next_retry_at": None,
+                        "claimed_by": None,
+                    }
+                ]
+            if "FROM execution_packets" in normalized:
+                return [{"packets": []}]
+            raise AssertionError(f"Unexpected query: {normalized}")
+
+    monkeypatch.setattr(
+        runtime_db,
+        "resolve_runtime_database_url",
+        lambda *, required=True, **_: "postgresql://postgres@repo.test/workflow",
+    )
+    monkeypatch.setattr(storage_postgres, "PostgresEvidenceReader", _FakeReader)
+
+    status = unified_dispatch.get_run_status(_StatusConn(), "dispatch_graph_stale_jobs")
+
+    assert status is not None
+    assert status["completed_jobs"] == 1
+    assert status["jobs"][0]["status"] == "succeeded"
+    assert "API_TASK_OK" in status["jobs"][0]["stdout_preview"]
+
+
 def test_execute_job_always_uses_job_prompt(monkeypatch) -> None:
     """Job prompt is truth — execution_packets are ignored, runtime context loaded from DB."""
     _unused_packet_row = {

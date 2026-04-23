@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import json
@@ -29,6 +30,15 @@ _MISSING_LINEAGE_SENTINEL = "missing"
 WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 
 
+def _run_reader_coro(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 @dataclass(frozen=True, slots=True)
 class PostgresEvidenceReader:
     """Read canonical evidence rows from explicit Postgres storage only."""
@@ -51,37 +61,13 @@ class PostgresEvidenceReader:
         return PostgresOperatorFrameRepository(ensure_postgres_available(env=env))
 
     def current_state_for_run(self, run_id: str) -> str | None:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.load_current_state(run_id=run_id))
-        raise PostgresStorageError(
-            "postgres.read_loop_active",
-            "sync current_state_for_run() requires an explicit non-async call boundary",
-            details={"run_id": run_id},
-        )
+        return _run_reader_coro(self.load_current_state(run_id=run_id))
 
     def resolved_run_id(self, run_id: str) -> str | None:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.load_resolved_run_id(run_id=run_id))
-        raise PostgresStorageError(
-            "postgres.read_loop_active",
-            "sync resolved_run_id() requires an explicit non-async call boundary",
-            details={"run_id": run_id},
-        )
+        return _run_reader_coro(self.load_resolved_run_id(run_id=run_id))
 
     def evidence_timeline(self, run_id: str) -> tuple[EvidenceRow, ...]:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.load_evidence_timeline(run_id=run_id))
-        raise PostgresStorageError(
-            "postgres.read_loop_active",
-            "sync evidence_timeline() requires an explicit non-async call boundary",
-            details={"run_id": run_id},
-        )
+        return _run_reader_coro(self.load_evidence_timeline(run_id=run_id))
 
     async def load_evidence_timeline(self, *, run_id: str) -> tuple[EvidenceRow, ...]:
         # Import here to avoid circular dependency

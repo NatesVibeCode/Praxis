@@ -17,14 +17,11 @@ For fresh clones:
 ./scripts/bootstrap
 ```
 
-This script is idempotent. It resolves repo DB authority, creates `.env` only from an explicit runtime/registry database URL, creates the target Postgres database, enables `pgvector`, creates `.venv`, installs dependencies, installs the config-backed Praxis runtime launcher, runs `db-bootstrap` (full migration set plus fresh-install authority seed), starts the REST API, and validates/submits/streams `examples/bootstrap_smoke.queue.json`. The bootstrap smoke is deterministic and provider-independent; `examples/hello_world.queue.json` remains the provider demo. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
+This script is idempotent. It resolves setup/registry DB authority, creates `.env` only from the selected target authority, creates the target Postgres database only for fresh local bootstrap, enables `pgvector`, creates `.venv`, installs dependencies, installs the config-backed Praxis launcher, runs `db-bootstrap` (full migration set plus fresh-install authority seed), starts the REST API, and validates/submits/streams `examples/bootstrap_smoke.queue.json`. The bootstrap smoke is deterministic and provider-independent; `examples/hello_world.queue.json` remains the provider demo. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
 
 ## Docker Setup
 
 Requires Docker and Docker Compose. The compose stack does **not** include its own database. It uses `WORKFLOW_DATABASE_URL` from `.env` or the shell, so the database can be host-local, remote on the LAN, or any reachable Postgres 16+ instance with `pgvector`.
-
-For a Windows host serving Postgres from WSL2 over a trusted LAN, use
-[docs/runtime-targets/windows-wsl-postgres.md](docs/runtime-targets/windows-wsl-postgres.md).
 
 ```bash
 # Start the cockpit services (semantic-backend + api-server + scheduler)
@@ -175,7 +172,7 @@ PYTHONPATH="Code&DBs/Workflow" \
 
 ## Database Bootstrap
 
-Migrations live in `Code&DBs/Databases/migrations/workflow/` — the repo is currently at migration **193**. They run in order, are idempotent, and are split into `canonical` (always applied) and `bootstrap_only` (applied on fresh instances). The classification is authored by `_generated_workflow_migration_authority.py`; fresh-install runtime rows are then reconciled from `config/runtime_profiles.json`.
+Migrations live in `Code&DBs/Databases/migrations/workflow/` — the repo is currently at migration **209**. They run in order, are idempotent, and are split into `canonical` (always applied) and `bootstrap_only` (applied on fresh instances). The classification is authored by `_generated_workflow_migration_authority.py`; fresh-install runtime rows are then reconciled from `config/runtime_profiles.json`.
 
 ```bash
 # Apply everything — idempotent
@@ -233,14 +230,37 @@ Located at `config/runtime_profiles.json`. Defines provider routing policy:
 | `WORKFLOW_DATABASE_URL` | (none) | PostgreSQL connection string |
 | `PRAXIS_API_PORT` | `8420` | HTTP API port |
 | `PRAXIS_API_HOST` | `0.0.0.0` | HTTP API bind address |
-| `PRAXIS_DOCKER_IMAGE` | `praxis-worker:latest` | Docker image for sandboxed execution. If unset and the default image is missing, Praxis will build it from `Code&DBs/Workflow/docker/praxis-worker.Dockerfile` on first use. |
-| `PRAXIS_DOCKER_MEMORY` | `4g` | Memory limit for Docker workers |
+| `PRAXIS_API_URL` | (runtime target) | Client-facing API authority for remote/runtime-target clients; do not use the bind address as the client URL |
+| `PRAXIS_DOCKER_IMAGE` | (unset) | Optional explicit debug image override for model sandboxes. Do not set this to `praxis-worker:latest`; the worker image is reserved for the workflow control service. |
+| `PRAXIS_DOCKER_MEMORY` | `500m` | Memory limit for model sandboxes |
 | `PRAXIS_DOCKER_CPUS` | `2` | CPU limit for Docker workers |
 | `PRAXIS_CLI_AUTH_HOME` | `$HOME` | Host directory containing `.codex`, `.claude`, and `.gemini` auth files for Docker workers |
 | `PRAXIS_WORKER_MAX_PARALLEL` | auto | Optional local workflow worker slot cap; unset derives slots from live CPU/RAM resources |
 | `PRAXIS_WORKFLOW_MAX_CONCURRENT_NODES` | auto | Compatibility alias for the same optional worker slot cap |
 | `PRAXIS_WORKFLOW_MCP_URL` | `http://host.docker.internal:8420/mcp` | MCP bridge URL for worker-launched model containers |
 | `PRAXIS_WORKFLOW_MCP_SIGNING_SECRET` | (none) | Shared secret used by the API and worker to mint and verify workflow MCP session tokens |
+
+### Runtime Target Setup
+
+Praxis setup is one distributed control-plane surface. API and MCP own the
+operation; CLI and website are clients of that authority.
+
+The setup doctor also reports `complete_repo_package`. That is the machine
+contract that this checkout contains the operator entrypoint, runtime,
+migrations, API, MCP, CLI, website, runtime profiles, and derived skill exports
+as one package. Missing pieces become blockers instead of tribal knowledge.
+
+| Surface | Pointer |
+|---------|---------|
+| CLI client | `praxis setup doctor --json`, `praxis setup plan --json`, `praxis setup apply --yes --json` |
+| Workflow CLI | `praxis workflow setup doctor --json` |
+| MCP authority | `praxis_setup(action="doctor")` |
+| API authority | `GET /api/setup/doctor`, `GET /api/setup/plan`, `POST /api/setup/apply` |
+| Website client | Launcher readiness consumes `/api/launcher/status`, which includes the same runtime-target and sandbox contract from setup doctor |
+
+SSH is not a setup path and not an authority layer. It is only build/deploy
+transport for a selected target when artifacts or thin images must be built
+there.
 
 ## MCP Setup
 
@@ -252,8 +272,12 @@ Add the Praxis MCP server to your Claude Code configuration:
 {
   "mcpServers": {
     "praxis": {
-      "command": "praxis",
-      "args": ["mcp", "serve"]
+      "command": "python",
+      "args": ["-m", "surfaces.mcp.server"],
+      "cwd": "/path/to/praxis/Code&DBs/Workflow",
+      "env": {
+        "WORKFLOW_DATABASE_URL": "<selected Praxis.db URL>"
+      }
     }
   }
 }

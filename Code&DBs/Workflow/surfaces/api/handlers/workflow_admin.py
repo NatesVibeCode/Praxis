@@ -337,6 +337,10 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/decompose": "Sprint decomposition (objective→micro-sprints)",
         "/research": "Research sessions (search local knowledge)",
         "/api/status": "Catalog-backed operator status snapshot with queue and failure breakdown.",
+        "/api/launcher/status": "Launcher readiness plus runtime target and sandbox contract status.",
+        "/api/setup/doctor": "Runtime-target setup doctor with sandbox, DB, API, workspace, and image contract.",
+        "/api/setup/plan": "Runtime-target setup plan showing authority rows, services, images, and cleanup checks.",
+        "/api/setup/apply": "Runtime-target setup apply gate; API/MCP own setup authority, SSH is build/deploy transport only.",
         "/api/operator/graph": "Catalog-backed cross-domain operator graph projection.",
         "/api/operator/issue-backlog": "Catalog-backed canonical issue backlog read.",
         "/api/operator/replay-ready-bugs": "Catalog-backed replay-ready bug backlog read.",
@@ -427,6 +431,12 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         dependency_truth=dependency_truth,
         tool_guidance=tool_guidance,
     )
+    try:
+        from runtime.setup_wizard import setup_payload
+
+        runtime_setup = setup_payload("doctor", repo_root=REPO_ROOT, authority_surface="api")
+    except Exception as exc:  # noqa: BLE001 — orient must report setup drift instead of hiding it
+        runtime_setup = {"error": f"runtime setup unavailable: {exc}"}
 
     return {
         "platform": "praxis-workflow",
@@ -468,6 +478,13 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "standing_orders": standing_orders,
         "authority_envelope": authority_envelope,
         "native_instance": authority_envelope.get("native_instance"),
+        "runtime_setup": runtime_setup,
+        "runtime_target": runtime_setup.get("runtime_target")
+        if isinstance(runtime_setup, dict)
+        else None,
+        "empty_thin_sandbox_default": runtime_setup.get("empty_thin_sandbox_default")
+        if isinstance(runtime_setup, dict)
+        else None,
         "tool_guidance": tool_guidance,
         "primitive_contracts": authority_envelope.get("primitive_contracts"),
         "capabilities": [
@@ -1007,6 +1024,34 @@ def _handle_launcher_status_get(request: Any, path: str) -> None:
         request._send_json(503, {"error": str(exc)})
 
 
+def _handle_setup_get(request: Any, path: str) -> None:
+    try:
+        from runtime.setup_wizard import setup_payload
+
+        mode = path.rsplit("/", 1)[-1]
+        if mode not in {"doctor", "plan"}:
+            request._send_json(404, {"error": "unknown setup mode"})
+            return
+        request._send_json(200, setup_payload(mode, repo_root=REPO_ROOT, authority_surface="api"))
+    except Exception as exc:
+        request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
+
+
+def _handle_setup_apply_post(request: Any, path: str) -> None:
+    del path
+    try:
+        body = _read_json_body(request)
+        from runtime.setup_wizard import setup_payload
+
+        approved = bool(body.get("yes") or body.get("apply") or body.get("approved"))
+        request._send_json(
+            200 if approved else 409,
+            setup_payload("apply", repo_root=REPO_ROOT, apply=approved, authority_surface="api"),
+        )
+    except Exception as exc:
+        request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
+
+
 def _handle_launcher_recover_post(request: Any, path: str) -> None:
     del path
     try:
@@ -1048,6 +1093,7 @@ def _handle_launcher_recover_post(request: Any, path: str) -> None:
 
 
 ADMIN_POST_ROUTES: list[RouteEntry] = [
+    (_exact("/api/setup/apply"), _handle_setup_apply_post),
     (_exact("/api/launcher/recover"), _handle_launcher_recover_post),
 ]
 
@@ -1055,6 +1101,8 @@ ADMIN_GET_ROUTES: list[RouteEntry] = [
     (_exact("/"), _handle_root_get),
     (_exact("/api/platform-overview"), _handle_platform_overview_get),
     (_exact("/api/launcher/status"), _handle_launcher_status_get),
+    (_exact("/api/setup/doctor"), _handle_setup_get),
+    (_exact("/api/setup/plan"), _handle_setup_get),
     (_exact("/api/workflow-templates"), _handle_workflow_templates_get),
 ]
 

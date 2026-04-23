@@ -462,7 +462,18 @@ _LOW_RISK_LOCAL_COMMAND_TYPES = frozenset(
         ControlCommandType.SYNC_REPAIR.value,
     }
 )
-_LOCAL_AUTO_EXECUTE_REQUESTER_KINDS = frozenset({"operator", "system", "cli", "workflow", "chat"})
+_LOCAL_AUTO_EXECUTE_REQUESTER_KINDS = frozenset(
+    {
+        "operator",
+        "system",
+        "cli",
+        "workflow",
+        "chat",
+        "api",
+        "http",
+        "mcp",
+    }
+)
 _UNSET = object()
 _DEFAULT_RISK_LEVELS = {
     ControlCommandType.WORKFLOW_SUBMIT.value: ControlRiskLevel.LOW.value,

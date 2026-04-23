@@ -159,10 +159,58 @@ def _load_status_job_rows(
 ) -> tuple[list[dict[str, Any]], bool]:
     workflow_jobs = _load_workflow_jobs(conn, run_id)
     if workflow_jobs:
+        graph_jobs = _graph_job_rows_from_evidence(run_row=run_row, run_id=run_id)
+        if _should_prefer_graph_job_projection(
+            run_row=run_row,
+            workflow_jobs=workflow_jobs,
+            graph_jobs=graph_jobs,
+        ):
+            return graph_jobs, False
         submission_by_label = _submission_state_by_job_label(conn, run_id=run_id)
         _attach_submission_state(workflow_jobs, submission_by_label)
         return workflow_jobs, True
     return _graph_job_rows_from_evidence(run_row=run_row, run_id=run_id), False
+
+
+def _terminal_job_count(job_rows: list[dict[str, Any]]) -> int:
+    return sum(1 for job in job_rows if str(job.get("status") or "") in _TERMINAL_JOB_STATUSES)
+
+
+def _workflow_jobs_projection_looks_stale(
+    *,
+    run_row: dict[str, Any],
+    workflow_jobs: list[dict[str, Any]],
+) -> bool:
+    run_state = str(run_row.get("current_state") or run_row.get("status") or "").strip()
+    if run_state not in _WORKFLOW_TERMINAL_STATES:
+        return False
+    if not workflow_jobs:
+        return False
+    for job in workflow_jobs:
+        if str(job.get("status") or "") not in {"pending", "ready"}:
+            return False
+        if any(job.get(key) is not None for key in ("claimed_at", "started_at", "finished_at", "heartbeat_at")):
+            return False
+        if int(job.get("duration_ms") or 0) > 0:
+            return False
+    return True
+
+
+def _should_prefer_graph_job_projection(
+    *,
+    run_row: dict[str, Any],
+    workflow_jobs: list[dict[str, Any]],
+    graph_jobs: list[dict[str, Any]],
+) -> bool:
+    if not graph_jobs:
+        return False
+    workflow_terminal = _terminal_job_count(workflow_jobs)
+    graph_terminal = _terminal_job_count(graph_jobs)
+    if graph_terminal > workflow_terminal:
+        return True
+    if not _workflow_jobs_projection_looks_stale(run_row=run_row, workflow_jobs=workflow_jobs):
+        return False
+    return any(str(job.get("status") or "") not in {"pending", "ready"} for job in graph_jobs)
 
 
 def _apply_run_totals(

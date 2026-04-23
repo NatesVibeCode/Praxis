@@ -340,6 +340,32 @@ def test_submit_workflow_via_service_bus_uses_control_command_request(monkeypatc
     }
 
 
+def test_standard_workflow_run_returns_approval_gate_without_run_id() -> None:
+    fake_spec = SimpleNamespace(name="approval gated", jobs=[{"label": "gate"}])
+    fake_result = {
+        "status": "approval_required",
+        "command_status": "requested",
+        "command_id": "control.command.needs_approval",
+        "approval_required": True,
+        "spec_name": "approval gated",
+        "total_jobs": 1,
+    }
+
+    with patch.object(workflow_run, "_workflow_spec_mod", return_value=SimpleNamespace(WorkflowSpec=SimpleNamespace(load=lambda _path: fake_spec))):
+        with patch.object(workflow_run, "_submit_workflow_via_service_bus", return_value=fake_result):
+            payload = workflow_run._handle_workflow(
+                SimpleNamespace(get_pg_conn=lambda: object()),
+                {"spec_path": "artifacts/workflow/gated.queue.json"},
+            )
+
+    assert payload["status"] == "approval_required"
+    assert payload["approval_required"] is True
+    assert payload["command_id"] == "control.command.needs_approval"
+    assert "run_id" not in payload
+    assert "stream_url" not in payload
+    assert "status_url" not in payload
+
+
 def test_workflow_spawn_post_uses_spawn_command_bus_helper() -> None:
     request = _RequestStub(
         {

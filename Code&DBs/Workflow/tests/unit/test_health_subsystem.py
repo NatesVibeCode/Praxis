@@ -3,6 +3,7 @@
 import importlib
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -72,6 +73,41 @@ class TestPostgresProbe:
             ),
         )
         assert _mod._resolve_database_url(None) is None
+
+
+def test_run_async_uses_worker_thread_inside_running_loop():
+    caller_thread = threading.get_ident()
+
+    async def _sample():
+        return threading.get_ident()
+
+    async def _invoke():
+        return _mod._run_async(_sample())
+
+    worker_thread = _mod._run_async(_invoke())
+
+    assert worker_thread != caller_thread
+
+
+def test_health_check_sync_works_inside_running_loop(monkeypatch):
+    async def _fake_health_check(**_kwargs):
+        return PreflightResult(
+            overall=HealthStatus.HEALTHY,
+            checks=(),
+            timestamp=datetime.now(timezone.utc),
+            duration_ms=1.0,
+            details={"mode": "test"},
+        )
+
+    monkeypatch.setattr(_mod, "health_check", _fake_health_check)
+
+    async def _invoke():
+        return _mod.health_check_sync()
+
+    result = _mod._run_async(_invoke())
+
+    assert result.overall is HealthStatus.HEALTHY
+    assert result.details == {"mode": "test"}
 
 
 # ---- DiskSpaceProbe -------------------------------------------------------

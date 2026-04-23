@@ -43,10 +43,10 @@ def test_praxis_help_uses_canonical_command_name() -> None:
 
     assert "Usage: praxis <command> [service]" in completed.stdout
     assert "workflow ...            Canonical execution, query, and operator authority" in completed.stdout
-    assert "mcp serve               Run the MCP server through launcher/workspace authority" in completed.stdout
     assert "db ...                  Schema authority plus SQL scaffolds" in completed.stdout
     assert "launch                  Start cockpit Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
     assert "doctor --json           Emit semantic launcher readiness as JSON" in completed.stdout
+    assert "setup ...               Runtime-target setup client for API/MCP authority" in completed.stdout
     assert "start [service...]" in completed.stdout
     assert "scheduler" in completed.stdout
     assert "Native launchd install/setup control has been removed." in completed.stdout
@@ -66,6 +66,50 @@ def test_praxis_workflow_passthrough_uses_workflow_frontdoor() -> None:
     assert completed.returncode == 0
     assert "Most used:" in completed.stdout
     assert "workflow tools list" in completed.stdout
+
+
+def test_praxis_setup_doctor_reports_empty_thin_contract() -> None:
+    env = dict(os.environ)
+    env.pop("PRAXIS_DOCKER_IMAGE", None)
+    completed = subprocess.run(
+        [str(REPO_ROOT / "scripts" / "praxis"), "setup", "doctor", "--json"],
+        cwd=REPO_ROOT,
+        env={**env, "PYTHON_BIN": sys.executable},
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["operator_authority_path"] == ["api", "mcp"]
+    assert payload["preferred_operator_path"] == ["api", "mcp"]
+    assert payload["client_surfaces"] == ["cli", "website"]
+    assert payload["cli_role"] == "client_only_api_or_mcp"
+    assert payload["ssh_role"] == "build_deploy_transport_only"
+    assert payload["build_transports"]["ssh"]["operator_authority"] is False
+    assert payload["build_transports"]["ssh"]["may_run_setup"] is False
+    assert payload["empty_thin_sandbox_default"] is True
+    assert payload["sandbox_contract"]["profile"]["workspace_materialization"] == "none"
+    assert payload["complete_repo_package"] is True
+    assert payload["package_contract"]["package_kind"] == "single_praxis_repo"
+    assert payload["package_contract"]["authority_model"] == (
+        "one_repo_many_client_surfaces_one_db_authority"
+    )
+    component_names = {
+        component["name"]
+        for component in payload["package_contract"]["components"]
+        if component["present"]
+    }
+    assert {
+        "operator_entrypoint",
+        "workflow_runtime",
+        "workflow_database_migrations",
+        "api_surface",
+        "mcp_surface",
+        "cli_surface",
+        "website_surface",
+    } <= component_names
 
 
 def test_praxis_workflow_run_no_longer_routes_through_workflow_sh(

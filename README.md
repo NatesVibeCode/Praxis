@@ -8,7 +8,9 @@ Praxis Engine is an autonomous workflow runner that executes multi-job DAG workf
 
 ## Quickstart
 
-One command. Requires Python 3.14 on `PATH`, a registry/runtime-provided `WORKFLOW_DATABASE_URL` for any reachable Postgres 16+ instance with `pgvector`, and at least one LLM provider API key in the runtime environment or provider secret authority.
+Praxis is one repo package: API, MCP, CLI, website, runtime, migrations, and setup authority live together in this checkout. The active runtime target and Praxis.db can be local, remote, Docker-backed, managed, or moved later; they are selected through setup authority, not hardcoded by OS or host path.
+
+One command for a fresh local target. Requires Python 3.14 on `PATH`, Postgres 16+ with pgvector reachable through `WORKFLOW_DATABASE_URL` or the repo `.env`, and provider credentials for provider-backed demos.
 
 ```bash
 git clone https://github.com/your-org/praxis.git
@@ -18,10 +20,10 @@ cd praxis
 
 `scripts/bootstrap` is idempotent. It:
 
-1. Resolves the repo DB authority and creates `.env` only from an explicit runtime/registry database URL.
-2. Creates the target Postgres database and enables `pgvector`.
+1. Resolves setup/registry DB authority and creates `.env` only from the selected target authority.
+2. Creates the selected target Postgres database only when using the fresh local bootstrap path and enables `pgvector`.
 3. Creates `.venv/` and installs `Code&DBs/Workflow/requirements.runtime.txt`.
-4. Installs the config-backed Praxis runtime launcher into the operator bin directory (add that to `PATH` if you don't already).
+4. Symlinks `scripts/praxis` into `~/.local/bin/praxis` (add that to `PATH` if you don't already).
 5. Runs `scripts/native-bootstrap.sh` — applies all migrations and the DB-backed fresh-install authority seed.
 6. Runs `scripts/native-smoke.sh` — verifies the native operator flow end to end.
 7. Starts the REST API on `PRAXIS_API_PORT` (default `8420`).
@@ -32,6 +34,9 @@ cd praxis
 Once bootstrap reports success:
 
 ```bash
+# Check the package, runtime target, DB authority, and empty thin sandbox contract
+praxis setup doctor --json
+
 # Orient on current state (standing orders, status, open bugs)
 praxis workflow query "status"
 
@@ -151,8 +156,12 @@ Praxis exposes catalog-backed tools via the Model Context Protocol. Add to your 
 {
   "mcpServers": {
     "praxis": {
-      "command": "praxis",
-      "args": ["mcp", "serve"]
+      "command": "python",
+      "args": ["-m", "surfaces.mcp.server"],
+      "cwd": "Code&DBs/Workflow",
+      "env": {
+        "WORKFLOW_DATABASE_URL": "<selected Praxis.db URL>"
+      }
     }
   }
 }

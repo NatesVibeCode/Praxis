@@ -173,15 +173,7 @@ def _handle_workflow(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     if result.get("error"):
         return result
 
-    return {
-        "run_id": result["run_id"],
-        "status": "queued",
-        "spec_name": result["spec_name"],
-        "total_jobs": result["total_jobs"],
-        "command_id": result["command_id"],
-        "stream_url": f"/api/workflow-runs/{result['run_id']}/stream",
-        "status_url": f"/api/workflow-runs/{result['run_id']}/status",
-    }
+    return _workflow_submission_payload(result)
 
 
 def _handle_workflow_spawn(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -214,22 +206,34 @@ def _handle_workflow_spawn(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     if result.get("error"):
         return result
 
-    return {
-        "run_id": result["run_id"],
-        "status": "queued",
-        "spec_name": result["spec_name"],
-        "total_jobs": result["total_jobs"],
-        "command_id": result["command_id"],
-        "stream_url": f"/api/workflow-runs/{result['run_id']}/stream",
-        "status_url": f"/api/workflow-runs/{result['run_id']}/status",
-        "lineage": {
-            "child_run_id": result["run_id"],
+    payload = _workflow_submission_payload(result)
+    run_id = str(payload.get("run_id") or "").strip()
+    if run_id:
+        payload["lineage"] = {
+            "child_run_id": run_id,
             "parent_run_id": parent_run_id,
             "parent_job_label": str(body.get("parent_job_label") or "").strip() or None,
             "dispatch_reason": dispatch_reason,
             "lineage_depth": body.get("lineage_depth"),
-        },
-    }
+        }
+    return payload
+
+
+def _workflow_submission_payload(result: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(result)
+    run_id = str(payload.get("run_id") or "").strip()
+    if run_id:
+        payload.setdefault("status", "queued")
+        payload.setdefault("stream_url", f"/api/workflow-runs/{run_id}/stream")
+        payload.setdefault("status_url", f"/api/workflow-runs/{run_id}/status")
+        return payload
+    if payload.get("approval_required"):
+        payload.setdefault("status", "approval_required")
+    else:
+        payload.setdefault("status", str(payload.get("command_status") or "requested"))
+    payload.pop("stream_url", None)
+    payload.pop("status_url", None)
+    return payload
 
 
 def _submit_workflow_via_service_bus(
@@ -973,15 +977,10 @@ def _handle_workflows_run_post(request: Any, path: str) -> None:
             if result.get("error"):
                 request._send_json(500, result)
                 return
-            request._send_json(
-                200,
-                {
-                    "workflow_run_id": result["run_id"],
-                    "status": result["status"],
-                    "stream_url": f"/api/workflow-runs/{result['run_id']}/stream",
-                    "status_url": f"/api/workflow-runs/{result['run_id']}/status",
-                },
-            )
+            payload = _workflow_submission_payload(result)
+            if payload.get("run_id"):
+                payload["workflow_run_id"] = payload["run_id"]
+            request._send_json(200, payload)
         finally:
             os.unlink(spec_path)
     except Exception as exc:
@@ -1036,15 +1035,7 @@ def _handle_workflow_job_post(request: Any, path: str) -> None:
             if result.get("error"):
                 request._send_json(500, result)
                 return
-            request._send_json(
-                200,
-                {
-                    "run_id": result["run_id"],
-                    "status": result["status"],
-                    "stream_url": f"/api/workflow-runs/{result['run_id']}/stream",
-                    "status_url": f"/api/workflow-runs/{result['run_id']}/status",
-                },
-            )
+            request._send_json(200, _workflow_submission_payload(result))
         finally:
             os.unlink(spec_path)
     except Exception as exc:

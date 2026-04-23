@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$REPO_ROOT/scripts/_workflow_env.sh"
 # Use the canonical workflow tree from the checked-in workspace layout config.
 WORKFLOW_DIR="$(workflow_repo_workflow_root)"
-PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
+PYTHON_BIN="${PYTHON_BIN:-$(workflow_python_bin)}"
 COMMAND_NAME="${PRAXIS_COMMAND_NAME:-praxis}"
 SERVICE_MANAGER_PATH="${PRAXIS_SERVICE_MANAGER_PATH:-scripts/praxis}"
 COMPATIBILITY_ALIAS_PATH="${PRAXIS_COMPATIBILITY_ALIAS_PATH:-scripts/praxis-ctl}"
@@ -76,6 +76,7 @@ Docker-only commands:
   logs [service...]       Show Docker logs (default: cockpit, tail=200)
 
 Other commands:
+  setup ...               Runtime-target setup client for API/MCP authority
   workflow ...            Delegate to workflow CLI
   mcp serve               Run the MCP server through launcher/workspace authority
   agent-run               Run the Praxis supervisor agent entrypoint
@@ -326,7 +327,19 @@ launcher_doctor_payload() {
     if docker_services_ready "$compose_json"; then
         services_ready="true"
     fi
-    run_local_alpha doctor --services-ready "$services_ready" --state-file "$LAUNCHER_STATE_FILE"
+    local base_payload
+    base_payload="$(run_local_alpha doctor --services-ready "$services_ready" --state-file "$LAUNCHER_STATE_FILE")"
+    PRAXIS_DOCTOR_BASE_PAYLOAD="$base_payload" \
+    PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+        "$PYTHON_BIN" - <<'PY'
+import json
+import os
+
+from runtime.setup_wizard import enrich_doctor_payload
+
+payload = json.loads(os.environ.get("PRAXIS_DOCTOR_BASE_PAYLOAD") or "{}")
+print(json.dumps(enrich_doctor_payload(payload), sort_keys=True))
+PY
 }
 
 doctor_field_is_true() {
@@ -791,7 +804,12 @@ case "${1:-}" in
         docker_only_logs "$@"
         exit 0
         ;;
-    install|uninstall|setup)
+    setup)
+        shift
+        export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
+        exec "$PYTHON_BIN" -m runtime.setup_wizard "$@"
+        ;;
+    install|uninstall)
         unsupported_native_command "${1:-}"
         exit 1
         ;;

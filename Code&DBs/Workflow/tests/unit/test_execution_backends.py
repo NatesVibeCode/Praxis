@@ -140,6 +140,16 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
+    monkeypatch.setattr(
+        execution_backends,
+        "workflow_mcp_workspace_overlays",
+        lambda **_kwargs: [],
+    )
 
     result = execution_backends.execute_cli(
         _agent(),
@@ -161,7 +171,7 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert captured["sandbox_session_id"] == "sandbox_session:run.alpha:job.alpha"
     assert captured["env"]["OPENAI_API_KEY"] == "test-key"
     assert captured["env"]["PRAXIS_ALLOWED_MCP_TOOLS"] == "praxis_query,praxis_discover"
-    assert captured["metadata"]["agent_packet"]["metadata"]["job_label"] == "job.alpha"
+    assert captured["env"]["PRAXIS_ALLOWED_MCP_TOOLS"] == "praxis_query,praxis_discover"
     assert captured["metadata"]["provider_slug"] == "openai"
     assert captured["metadata"]["execution_bundle"]["access_policy"]["write_scope"] == ["README.md"]
     assert result["status"] == "succeeded"
@@ -183,6 +193,11 @@ def test_execute_cli_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> No
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "get_load_balancer", lambda: load_balancer)
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
 
     result = execution_backends.execute_cli(_agent(), "hello from stdin", str(tmp_path))
 
@@ -192,7 +207,7 @@ def test_execute_cli_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> No
     assert result["status"] == "succeeded"
 
 
-def test_execute_cli_google_uses_packet_mcp_env_without_provider_settings_overlay(monkeypatch, tmp_path) -> None:
+def test_execute_cli_google_emits_manifest_backed_mcp_settings(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
 
     class _FakeRuntime:
@@ -206,6 +221,12 @@ def test_execute_cli_google_uses_packet_mcp_env_without_provider_settings_overla
         execution_backends,
         "build_command",
         lambda provider_slug, model=None: ["gemini", "-p", ".", "-o", "json", "--model", model or provider_slug],
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_mcp_args_template",
+        lambda provider_slug: ["--allowed-mcp-server-names", "dag-workflow"]
+        if provider_slug == "google"
+        else [],
     )
     monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_URL", "http://mcp.local/mcp")
     monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
@@ -235,20 +256,15 @@ def test_execute_cli_google_uses_packet_mcp_env_without_provider_settings_overla
         },
     )
 
-    assert captured["command"] == "gemini -p . -o json --model gemini-2.5-flash"
+    assert str(captured["command"]).endswith(" --allowed-mcp-server-names dag-workflow")
     overlays = captured["metadata"]["workspace_overlays"]
     overlay_paths = {overlay["relative_path"] for overlay in overlays}
-    assert ".gemini/settings.json" not in overlay_paths
+    assert ".gemini/settings.json" in overlay_paths
     assert "_context/decision_pack.json" in overlay_paths
     assert "_context/decision_summary.md" in overlay_paths
+    settings_overlay = next(overlay for overlay in overlays if overlay["relative_path"] == ".gemini/settings.json")
+    assert '"dag-workflow"' in settings_overlay["content"]
     assert captured["env"]["GEMINI_API_KEY"] == "test-key"
-    assert captured["env"]["PRAXIS_WORKFLOW_MCP_URL"] == "http://mcp.local/mcp"
-    assert captured["env"]["PRAXIS_WORKFLOW_MCP_TOKEN"]
-    assert captured["env"]["PRAXIS_ALLOWED_MCP_TOOLS"] == "praxis_query,praxis_discover"
-    assert captured["metadata"]["agent_packet"]["mcp_tool_names"] == [
-        "praxis_query",
-        "praxis_discover",
-    ]
     assert captured["metadata"]["provider_slug"] == "google"
     assert result["status"] == "succeeded"
 
@@ -322,6 +338,11 @@ def test_execute_cli_prefers_bundle_sandbox_profile_contract(monkeypatch, tmp_pa
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
 
     result = execution_backends.execute_cli(
         _agent(docker_image="agent-image:stale"),
@@ -371,6 +392,11 @@ def test_execute_cli_exports_ripgrep_config_path(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
 
     execution_backends.execute_cli(_agent(), "hello", str(workdir))
 
@@ -390,6 +416,11 @@ def test_execute_cli_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
 
     execution_backends.execute_cli(_agent(), "hello", str(tmp_path))
     execution_backends.execute_cli(_agent(), "hello", str(tmp_path))
@@ -410,6 +441,11 @@ def test_execute_cli_uses_argv_prompt_when_wrapper_declares_prompt_placeholder(m
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
 
     result = execution_backends.execute_cli(
         _agent(wrapper_command="wizard-cli --json '{prompt}'"),
@@ -443,6 +479,11 @@ def test_execute_cli_returns_sandbox_error_on_runtime_failure(monkeypatch, tmp_p
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
 
     result = execution_backends.execute_cli(_agent(), "hello", str(tmp_path))
 
@@ -461,6 +502,11 @@ def test_execute_cli_builds_default_command_from_provider_registry(monkeypatch, 
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
     monkeypatch.setattr(
         execution_backends,
         "build_command",
@@ -489,6 +535,11 @@ def test_execute_cli_parses_cursor_agent_usage_camel_case(monkeypatch, tmp_path)
 
     monkeypatch.setenv("CURSOR_API_KEY", "cursor-test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
     monkeypatch.setattr(
         execution_backends,
         "build_command",
@@ -592,6 +643,64 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert result["stdout"] == "api output"
     assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
     assert result["workspace_snapshot_cache_hit"] is True
+
+
+def test_execute_api_empty_materialization_uses_control_plane_transport(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _ForbiddenRuntime:
+        def execute_command(self, **kwargs):
+            raise AssertionError(f"empty API transport should not enter sandbox runtime: {kwargs}")
+
+    def _call_transport(protocol_family, prompt, **kwargs):
+        captured["protocol_family"] = protocol_family
+        captured["prompt"] = prompt
+        captured.update(kwargs)
+        return "direct api output"
+
+    monkeypatch.setenv("EXAMPLE_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _ForbiddenRuntime())
+    monkeypatch.setattr("runtime.http_transport.call_transport", _call_transport)
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.get_profile",
+        lambda provider_slug: _provider_profile(
+            api_protocol_family="example_messages",
+            api_endpoint="https://api.example.test/v1/messages",
+            api_key_env_vars=("EXAMPLE_API_KEY",),
+        )
+        if provider_slug == "example"
+        else None,
+    )
+
+    result = execution_backends.execute_api(
+        _agent(
+            provider="example",
+            model="example-model",
+            wrapper_command=None,
+            execution_transport="api",
+            sandbox_policy=SimpleNamespace(
+                network_policy="provider_only",
+                workspace_materialization="none",
+                secret_allowlist=(),
+            ),
+        ),
+        "hello from api",
+        workdir=str(tmp_path),
+        execution_bundle={"run_id": "run.alpha", "job_label": "job.api"},
+    )
+
+    assert captured["protocol_family"] == "example_messages"
+    assert captured["prompt"] == "hello from api"
+    assert captured["api_key"] == "test-key"
+    assert captured["workdir"] == str(tmp_path)
+    assert result["status"] == "succeeded"
+    assert result["stdout"] == "direct api output"
+    assert result["execution_mode"] == "control_plane"
+    assert result["api_execution_mode"] == "control_plane_transport"
+    assert result["workspace_materialization"] == "none"
 
 
 def test_execute_api_requires_registry_declared_auth_env(monkeypatch, tmp_path) -> None:
