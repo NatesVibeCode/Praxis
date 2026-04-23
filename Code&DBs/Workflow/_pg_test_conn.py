@@ -1,7 +1,8 @@
 """Shared Postgres test connection helpers for unit and integration tests.
 
-All tests use the local Postgres instance. The database is always running
-via launchd (com.praxis.postgres).
+Tests use an explicit workflow test database authority. If
+``WORKFLOW_TEST_DATABASE_URL`` is not set, the helper derives a ``praxis_test``
+database from the canonical runtime database authority.
 
 `get_test_conn()` returns the long-lived shared auto-commit wrapper.
 Tests that must avoid durable writes should use `get_isolated_conn()`,
@@ -11,6 +12,7 @@ when closed.
 from __future__ import annotations
 
 import os
+import socket
 import sys
 import threading
 from contextlib import contextmanager
@@ -31,7 +33,6 @@ _AUTHORITY_UNAVAILABLE = "postgres.authority_unavailable"
 _CONFIG_MISSING = "postgres.config_missing"
 _DEFAULT_TEST_DATABASE = "praxis_test"
 _TEST_DATABASE_URL_ENV = "WORKFLOW_TEST_DATABASE_URL"
-_DEFAULT_TEST_DATABASE_URL = f"postgresql://postgres@localhost:5432/{_DEFAULT_TEST_DATABASE}"
 _DUPLICATE_MIGRATION_SQLSTATES = frozenset({"42P07", "42701", "42710"})
 _DEFAULT_SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 
@@ -93,8 +94,19 @@ def _default_test_database_url() -> str:
         )
     runtime_database_url = resolve_runtime_database_url(required=False)
     if not runtime_database_url:
-        return resolve_workflow_database_url(
-            env={"WORKFLOW_DATABASE_URL": _DEFAULT_TEST_DATABASE_URL},
+        from storage.postgres import PostgresConfigurationError
+
+        raise PostgresConfigurationError(
+            _CONFIG_MISSING,
+            (
+                f"{_TEST_DATABASE_URL_ENV} must be set, or canonical "
+                "WORKFLOW_DATABASE_URL authority must be available to derive "
+                f"the {_DEFAULT_TEST_DATABASE} test database"
+            ),
+            details={
+                "environment_variable": _TEST_DATABASE_URL_ENV,
+                "derived_database": _DEFAULT_TEST_DATABASE,
+            },
         )
     return resolve_workflow_database_url(
         env={
@@ -185,15 +197,34 @@ def _get_pool():
     return _pool
 
 
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return chain
+
+
 def _skip_for_unavailable_authority(exc: BaseException) -> None:
     reason_code = getattr(exc, "reason_code", "")
     unavailable = reason_code in {_AUTHORITY_UNAVAILABLE, _CONFIG_MISSING}
-    if isinstance(exc, PermissionError):
-        unavailable = True
-        reason_code = reason_code or "postgres.permission_denied"
-    if isinstance(exc, asyncpg.InvalidAuthorizationSpecificationError):
-        unavailable = True
-        reason_code = reason_code or "postgres.invalid_authorization"
+    for item in _exception_chain(exc):
+        item_reason_code = getattr(item, "reason_code", "")
+        if item_reason_code in {_AUTHORITY_UNAVAILABLE, _CONFIG_MISSING}:
+            unavailable = True
+            reason_code = reason_code or item_reason_code
+        if isinstance(item, PermissionError):
+            unavailable = True
+            reason_code = reason_code or "postgres.permission_denied"
+        if isinstance(item, asyncpg.InvalidAuthorizationSpecificationError):
+            unavailable = True
+            reason_code = reason_code or "postgres.invalid_authorization"
+        if isinstance(item, (ConnectionError, TimeoutError, socket.gaierror)):
+            unavailable = True
+            reason_code = reason_code or _AUTHORITY_UNAVAILABLE
     if not unavailable:
         return
     import pytest

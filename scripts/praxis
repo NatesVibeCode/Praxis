@@ -431,6 +431,8 @@ payload = {
     "launch_url": doctor.get("launch_url"),
     "dashboard_url": doctor.get("dashboard_url"),
     "api_docs_url": doctor.get("api_docs_url"),
+    "workflow_api_base_url": doctor.get("workflow_api_base_url"),
+    "workflow_api_authority_source": doctor.get("workflow_api_authority_source"),
 }
 print(json.dumps(payload, indent=2, sort_keys=True))
 PY
@@ -573,9 +575,12 @@ ready = bool(doctor.get("api_server_ready")) and bool(doctor.get("ui_ready"))
 heading = "Links:" if ready else "Links (API/UI readiness degraded):"
 app_url = doctor.get("dashboard_url") or doctor.get("launch_url")
 docs_url = doctor.get("api_docs_url")
+workflow_api_url = doctor.get("workflow_api_base_url")
 print(heading)
 print(f"  - App:  {app_url or '(unavailable)'}")
 print(f"  - Docs: {docs_url or '(unavailable)'}")
+if workflow_api_url:
+    print(f"  - Workflow API: {workflow_api_url}")
 if not ready:
     print(f"  - Diagnose: {os.environ.get('COMMAND_NAME', 'praxis')} doctor --json")
 PY

@@ -66,6 +66,7 @@ class _BaseSubsystems:
         self._boot_done = False
         self._registry_sync_succeeded: list[str] = []
         self._registry_sync_skipped: list[str] = []
+        self._registry_sync_failures: list[dict[str, str]] = []
         self._registry_sync_done = False
         self._startup_wiring_done = False
 
@@ -123,26 +124,38 @@ class _BaseSubsystems:
         except Exception as exc:
             self._handle_startup_wiring_error(exc)
 
-    def _sync_registries_once(self) -> tuple[list[str], list[str]]:
+    def _sync_registries_once(self) -> tuple[list[str], list[dict[str, str]]]:
         if self._registry_sync_done:
-            return (list(self._registry_sync_succeeded), list(self._registry_sync_skipped))
-        succeeded, skipped = sync_registries(self.get_pg_conn())
+            return (list(self._registry_sync_succeeded), list(self._registry_sync_failures))
+        succeeded, failures = sync_registries(self.get_pg_conn())
         self._registry_sync_done = True
         self._registry_sync_succeeded = list(succeeded)
-        self._registry_sync_skipped = list(skipped)
-        if skipped:
+        self._registry_sync_failures = [dict(failure) for failure in failures]
+        self._registry_sync_skipped = [
+            failure.get("component", "unknown") for failure in self._registry_sync_failures
+        ]
+        if failures:
+            skipped = [failure.get("component", "unknown") for failure in failures]
             skipped_list = ", ".join(skipped)
+            failure_details = "; ".join(
+                f"{failure.get('component', 'unknown')}: "
+                f"{failure.get('exception_type', 'Exception')}: "
+                f"{failure.get('message', '')}"
+                for failure in failures
+            )
             if succeeded:
                 self._logger.warning(
-                    "startup registry sync completed with skipped steps: %s",
+                    "startup registry sync completed with skipped steps: %s (%s)",
                     skipped_list,
+                    failure_details,
                 )
             else:
                 self._logger.warning(
-                    "startup registry sync skipped all steps: %s",
+                    "startup registry sync skipped all steps: %s (%s)",
                     skipped_list,
+                    failure_details,
                 )
-        return (list(succeeded), list(skipped))
+        return (list(succeeded), [dict(failure) for failure in failures])
 
     def boot(self) -> dict[str, Any]:
         """Run explicit startup work once for long-lived surfaces."""
@@ -153,6 +166,7 @@ class _BaseSubsystems:
                 "registry_sync": {
                     "succeeded": list(self._registry_sync_succeeded),
                     "skipped": list(self._registry_sync_skipped),
+                    "failures": [dict(failure) for failure in self._registry_sync_failures],
                 },
                 "heartbeat_started": self._lifecycle.started,
             }
@@ -162,14 +176,16 @@ class _BaseSubsystems:
             workflow_root=self._workflow_root,
             env=self._postgres_env(),
         )
-        succeeded, skipped = self._sync_registries_once()
+        succeeded, failures = self._sync_registries_once()
         self._maybe_startup_wiring()
         self._boot_done = True
+        skipped = [failure.get("component", "unknown") for failure in failures]
         return {
             "booted": True,
             "registry_sync": {
                 "succeeded": list(succeeded),
                 "skipped": list(skipped),
+                "failures": [dict(failure) for failure in failures],
             },
             "heartbeat_started": self._lifecycle.started,
         }

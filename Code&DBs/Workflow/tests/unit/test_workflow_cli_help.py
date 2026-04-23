@@ -120,6 +120,64 @@ def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
     assert "resolve            Mark an existing bug fixed, deferred, or won't-fix; FIXED may run verifier proof" in rendered
 
 
+def test_bugs_subcommand_help_after_action_is_success() -> None:
+    stdout = StringIO()
+
+    rc = workflow_query._bugs_command(["file", "--help"], stdout=stdout)
+
+    assert rc == 0
+    assert "usage: workflow bugs" in stdout.getvalue()
+
+
+def test_bugs_duplicate_check_accepts_body_context(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"bugs": [], "count": 0, "returned_count": 0}
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._bugs_command(
+        [
+            "duplicate-check",
+            "--title",
+            "operator write failed",
+            "--body",
+            "missing intent brief at runtime",
+            "--json",
+        ],
+        stdout=stdout,
+    )
+
+    assert rc == 0
+    assert captured["tool_name"] == "praxis_bugs"
+    assert captured["params"]["action"] == "duplicate_check"
+    assert captured["params"]["title_like"] == "operator write failed"
+    assert captured["params"]["description"] == "missing intent brief at runtime"
+
+
+def test_roadmap_nested_action_help_is_success() -> None:
+    write_stdout = StringIO()
+    closeout_stdout = StringIO()
+
+    write_rc = workflow_main.main(
+        ["roadmap", "write", "preview", "--help"],
+        stdout=write_stdout,
+    )
+    closeout_rc = workflow_main.main(
+        ["roadmap", "closeout", "preview", "--help"],
+        stdout=closeout_stdout,
+    )
+
+    assert write_rc == 0
+    assert "usage: workflow roadmap write" in write_stdout.getvalue()
+    assert closeout_rc == 0
+    assert "usage: workflow roadmap closeout" in closeout_stdout.getvalue()
+
+
 def test_top_level_help_delegates_to_modern_command_index(capsys) -> None:
     legacy_rc, legacy_rendered = _run_legacy(["--help"], capsys)
     modern_rc, modern_rendered = _run_modern(["--help"])
@@ -128,6 +186,35 @@ def test_top_level_help_delegates_to_modern_command_index(capsys) -> None:
     assert legacy_rendered == modern_rendered
     assert "workflow help commands" in legacy_rendered
     assert "workflow mcp [list|search|describe|call|help]" in legacy_rendered
+
+
+def test_advertised_root_commands_have_successful_help() -> None:
+    failures: list[tuple[list[str], int, str]] = []
+    probed: set[tuple[str, ...]] = set()
+
+    for entry in workflow_main._COMMAND_INDEX_ENTRIES:
+        command = str(entry.get("command") or "")
+        if not command.startswith("workflow "):
+            continue
+        parts = command.split()
+        if len(parts) < 2:
+            continue
+        root = parts[1]
+        if any(character in root for character in "|[<"):
+            continue
+        argv = ["help", "--help"] if root == "help" else [root, "--help"]
+        argv_key = tuple(argv)
+        if argv_key in probed:
+            continue
+        probed.add(argv_key)
+
+        stdout = StringIO()
+        rc = workflow_main.main(argv, stdout=stdout)
+        rendered = stdout.getvalue()
+        if rc != 0 or not rendered.strip():
+            failures.append((argv, rc, rendered))
+
+    assert not failures
 
 
 def test_modern_help_index_mentions_bug_tracker_surface() -> None:

@@ -34,7 +34,7 @@ def tool_praxis_data_dictionary_wiring_audit(
 
     Actions:
       - all:          run every audit and return aggregated findings
-      - hard_paths:   only hardcoded paths / localhost / ports
+      - hard_paths:   classified hardcoded paths / localhost / ports
       - decisions:    only unreferenced operator decisions
       - orphans:      only code-orphan tables (dict entries nothing uses)
     """
@@ -46,9 +46,23 @@ def tool_praxis_data_dictionary_wiring_audit(
 
         if action == "hard_paths":
             findings = audit_hard_paths()
+            by_classification: dict[str, int] = {}
+            by_surface: dict[str, int] = {}
+            for finding in findings:
+                classification = str(
+                    finding.details.get("classification") or "unclassified"
+                )
+                surface = str(finding.details.get("surface") or "unknown")
+                by_classification[classification] = (
+                    by_classification.get(classification, 0) + 1
+                )
+                by_surface[surface] = by_surface.get(surface, 0) + 1
             return {
                 "action": "hard_paths",
                 "total": len(findings),
+                "by_classification": by_classification,
+                "by_surface": by_surface,
+                "actionable_total": by_classification.get("live_authority_bug", 0),
                 "findings": [f.to_payload() for f in findings],
             }
 
@@ -85,7 +99,9 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "Wiring + hard-path audit over Praxis. Reports two "
                 "classes of issue that bloat attention and/or break on "
                 "VPS migration: (1) hardcoded paths / localhost / "
-                "ports in source; (2) unwired authority rows — "
+                "ports in source, docs, skills, MCP metadata, CLI "
+                "surfaces, and queue specs, classified by authority "
+                "status; (2) unwired authority rows — "
                 "operator decisions nothing cites, and data-dictionary "
                 "tables zero code references. No automatic bug filing; "
                 "the output is a report the operator reviews."

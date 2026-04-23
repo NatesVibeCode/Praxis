@@ -130,7 +130,7 @@ class WorkflowPipeline:
         governance: GovernanceFilter,
         conflict_resolver: ConflictResolver,
         loop_detector: LoopDetector,
-        auto_retry: AutoRetryManager,
+        auto_retry: AutoRetryManager | None,
         retry_context_builder: RetryContextBuilder,
         posture_enforcer: PostureEnforcer,
         workflow_fn: Callable | None = None,
@@ -279,6 +279,14 @@ class WorkflowPipeline:
             )
 
         # --- Failure path -----------------------------------------------
+        if self._auto_retry is None:
+            return PostWorkflowAction(
+                action="halt",
+                retry_context=None,
+                wait_seconds=0,
+                reasons=("retry authority is DB-backed; in-memory retry disabled",),
+            )
+
         classification = self._auto_retry.classify(
             failure_code, stderr,
         )

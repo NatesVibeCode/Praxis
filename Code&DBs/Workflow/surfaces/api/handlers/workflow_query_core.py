@@ -12,6 +12,7 @@ from typing import Any
 
 from runtime.workspace_paths import repo_root as workspace_repo_root
 from runtime.primitive_contracts import bug_query_default_open_only_backlog
+from storage.postgres.workflow_runtime_repository import list_workflow_records
 from storage.postgres.validators import PostgresConfigurationError
 
 from surfaces._workflow_database import workflow_database_url_for_repo
@@ -45,9 +46,24 @@ _DATA_DICTIONARY_QUERIES = frozenset({"data dictionary", "list tables"})
 _CALIBRATION_QUERIES = frozenset({"calibration"})
 _ROUTE_STATUS_QUERIES = frozenset({"route status"})
 _DYNAMIC_TIMEOUT_QUERIES = frozenset({"dynamic timeout"})
+_WORKFLOW_NEVER_RUN_MARKERS = (
+    "never run",
+    "not run",
+    "unrun",
+    "un-run",
+    "unexecuted",
+    "unlaunched",
+)
 _IMPORT_PATH_PREFIXES = ("import path for ",)
 _TEST_COMMAND_PREFIXES = ("test command for ",)
-_DATA_DICTIONARY_PREFIXES = ("schema for ",)
+_DATA_DICTIONARY_PREFIXES = (
+    "schema for ",
+    "schema of ",
+    "columns for ",
+    "columns in ",
+    "fields for ",
+    "fields in ",
+)
 _SHOW_QUERY_PREFIXES = ("show me ", "show ")
 _OPERATOR_GRAPH_ALIAS_QUERIES = frozenset({"semantic graph", "cross-domain graph"})
 _SEMANTIC_ASSERTION_ALIAS_QUERIES = frozenset({"semantic links", "operator semantics"})
@@ -169,6 +185,70 @@ def _query_tail_after_prefix(
             tail = tail[4:].strip()
         return tail
     return None
+
+
+def _has_never_run_workflow_intent(question: str) -> bool:
+    normalized = _normalized_query(question)
+    return (
+        "workflow" in normalized
+        and (
+            any(marker in normalized for marker in _WORKFLOW_NEVER_RUN_MARKERS)
+            or ("never" in normalized and "run" in normalized)
+        )
+    )
+
+
+def _jsonish(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            import json as _json
+
+            return _json.loads(value)
+        except Exception:
+            return value
+    return value
+
+
+def _workflow_record_summary(row: dict[str, Any]) -> dict[str, Any]:
+    compiled_spec = _jsonish(row.get("compiled_spec"))
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "description": row.get("description"),
+        "has_spec": compiled_spec is not None,
+        "invocation_count": int(row.get("invocation_count") or 0),
+        "last_invoked_at": row.get("last_invoked_at"),
+        "is_template": bool(row.get("is_template")),
+        "updated_at": row.get("updated_at"),
+        "created_at": row.get("created_at"),
+    }
+
+
+def _never_run_workflows(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
+    conn = subs.get_pg_conn()
+    limit = body.get("limit", 100)
+    try:
+        bounded_limit = max(0, min(int(limit), 500))
+    except (TypeError, ValueError):
+        bounded_limit = 100
+    rows = list_workflow_records(conn, never_run=True, limit=bounded_limit)
+    workflows = [_serialize(_workflow_record_summary(dict(row))) for row in rows]
+    return {
+        "routed_to": "workflow_records",
+        "view": "never_run",
+        "source_authority": "public.workflows(invocation_count,last_invoked_at)",
+        "historical_filesystem_specs_considered": False,
+        "historical_filesystem_specs_reason": (
+            "Filesystem queue specs are derived or historical evidence unless admitted "
+            "into DB-backed workflow authority."
+        ),
+        "count": len(workflows),
+        "with_spec_count": sum(1 for workflow in workflows if workflow.get("has_spec")),
+        "draft_without_spec_count": sum(
+            1 for workflow in workflows if not workflow.get("has_spec")
+        ),
+        "workflows": workflows,
+    }
 
 
 def _rewrite_canonical_prefixed_query(
@@ -330,6 +410,9 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         )
         backlog["routed_to"] = "issue_backlog"
         return backlog
+
+    if _has_data_dictionary_intent(question):
+        return _data_dictionary(subs, question)
 
     if _matches(question, ["bug", "defect"]):
         bt = subs.get_bug_tracker()
@@ -709,18 +792,36 @@ def _run_staleness_query(subs: Any, params: dict) -> dict:
 
 def _extract_data_dictionary_table(question: str) -> str | None:
     lowered = question.lower()
+    table_ref = r"([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)"
     patterns = [
-        r"schema for ([a-z_][a-z0-9_]*)",
-        r"schema of ([a-z_][a-z0-9_]*)",
-        r"table ([a-z_][a-z0-9_]*)",
-        r"columns? for ([a-z_][a-z0-9_]*)",
-        r"fields? for ([a-z_][a-z0-9_]*)",
+        rf"schema for {table_ref}",
+        rf"schema of {table_ref}",
+        rf"table {table_ref}",
+        rf"columns? for {table_ref}",
+        rf"columns? in {table_ref}",
+        rf"fields? for {table_ref}",
+        rf"fields? in {table_ref}",
+        rf"what columns? does {table_ref} have",
+        rf"what fields? does {table_ref} have",
+        rf"what is the schema for {table_ref}",
+        rf"what is the schema of {table_ref}",
     ]
     for pattern in patterns:
         match = re.search(pattern, lowered)
         if match:
-            return match.group(1)
+            return match.group(1).split(".")[-1]
     return None
+
+
+def _has_data_dictionary_intent(question: str) -> bool:
+    normalized = _normalized_query(question)
+    if _query_is(normalized, _DATA_DICTIONARY_QUERIES):
+        return True
+    if _query_starts_with(normalized, _DATA_DICTIONARY_PREFIXES):
+        return True
+    if _extract_data_dictionary_table(normalized) is None:
+        return False
+    return any(marker in normalized for marker in ("schema", "table", "column", "field"))
 
 
 def _data_dictionary(subs: Any, question: str) -> dict:
@@ -915,7 +1016,7 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
     if _query_starts_with(question, _TEST_COMMAND_PREFIXES):
         return _test_command_resolver(subs, question)
 
-    if _query_is(question, _DATA_DICTIONARY_QUERIES) or _query_starts_with(question, _DATA_DICTIONARY_PREFIXES):
+    if _has_data_dictionary_intent(question):
         return _data_dictionary(subs, question)
 
     if _query_is(question, _CALIBRATION_QUERIES):
@@ -961,6 +1062,9 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
             "routed_to": "dynamic_timeout",
             "message": "Timeouts are auto-computed per complexity tier. Use praxis_query 'calibration' to see tuned parameters.",
         }
+
+    if _has_never_run_workflow_intent(question):
+        return _never_run_workflows(subs, body)
 
     deprecated_alias = _deprecated_specialized_query_alias(question)
     if deprecated_alias is not None:

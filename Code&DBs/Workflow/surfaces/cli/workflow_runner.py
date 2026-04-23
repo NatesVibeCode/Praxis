@@ -132,7 +132,7 @@ class WorkflowRunner:
             governance=dp.GovernanceFilter(),
             conflict_resolver=dp.ConflictResolver(),
             loop_detector=dp.LoopDetector(),
-            auto_retry=dp.AutoRetryManager(),
+            auto_retry=None,
             retry_context_builder=dp.RetryContextBuilder(),
             posture_enforcer=dp.PostureEnforcer(dp.Posture.BUILD),
         )
@@ -543,16 +543,6 @@ class WorkflowRunner:
     # Verify commands
     # ------------------------------------------------------------------
 
-    _API_MAX_RETRIES = 3
-    _API_BACKOFF = (5, 15, 60)  # seconds per retry attempt
-
-    @staticmethod
-    def _is_retryable_api_error(exc: Exception) -> bool:
-        """Check if an API exception is retryable (rate limit, server error)."""
-        from runtime.failure_classifier import classify_failure_from_stderr
-        classification = classify_failure_from_stderr(str(exc))
-        return classification.is_retryable
-
     def _execute_api_job(
         self,
         label: str,
@@ -561,47 +551,43 @@ class WorkflowRunner:
         prompt: str,
         timeout: int,
     ) -> JobExecution:
-        """Execute a job via the normalized sandboxed API transport."""
-        start = time.monotonic()
-        last_exc = None
-        for attempt in range(self._API_MAX_RETRIES + 1):
-            if attempt > 0:
-                backoff = self._API_BACKOFF[min(attempt - 1, len(self._API_BACKOFF) - 1)]
-                print(f"  [retry {attempt}/{self._API_MAX_RETRIES}] {label}: backing off {backoff}s...", flush=True)
-                time.sleep(backoff)
+        """Execute a job via the normalized sandboxed API transport.
 
-            try:
-                result = execute_api_in_sandbox(
-                    agent_config,
-                    prompt,
-                    workdir=str(self._repo_root),
-                )
-                duration = time.monotonic() - start
-                return JobExecution(
-                    job_label=label,
-                    agent_slug=agent_slug,
-                    status=str(result.get("status") or "failed"),
-                    exit_code=int(result.get("exit_code", 1)) if result.get("exit_code") is not None else None,
-                    stdout=str(result.get("stdout") or ""),
-                    stderr=str(result.get("stderr") or ""),
-                    duration_seconds=round(duration, 2),
-                    verify_passed=None,
-                    retry_count=attempt,
-                )
-            except Exception as exc:
-                last_exc = exc
-                if attempt < self._API_MAX_RETRIES and self._is_retryable_api_error(exc):
-                    continue  # retry
-                break  # non-retryable or exhausted retries
+        Retry/failover belongs to the DB-backed workflow job transition path,
+        not this synchronous CLI transport wrapper.
+        """
+        start = time.monotonic()
+        try:
+            result = execute_api_in_sandbox(
+                agent_config,
+                prompt,
+                workdir=str(self._repo_root),
+            )
+        except Exception as exc:
+            duration = time.monotonic() - start
+            return JobExecution(
+                job_label=label,
+                agent_slug=agent_slug,
+                status="failed",
+                exit_code=1,
+                stdout="",
+                stderr=f"{type(exc).__name__}: {exc}",
+                duration_seconds=round(duration, 2),
+                verify_passed=None,
+                retry_count=0,
+            )
 
         duration = time.monotonic() - start
-        retry_count = min(attempt, self._API_MAX_RETRIES)
-        exc = last_exc or Exception("unknown error")
         return JobExecution(
-            job_label=label, agent_slug=agent_slug, status="failed",
-            exit_code=1, stdout="", stderr=f"{type(exc).__name__}: {exc}",
-            duration_seconds=round(duration, 2), verify_passed=None,
-            retry_count=retry_count,
+            job_label=label,
+            agent_slug=agent_slug,
+            status=str(result.get("status") or "failed"),
+            exit_code=int(result.get("exit_code", 1)) if result.get("exit_code") is not None else None,
+            stdout=str(result.get("stdout") or ""),
+            stderr=str(result.get("stderr") or ""),
+            duration_seconds=round(duration, 2),
+            verify_passed=None,
+            retry_count=0,
         )
 
     # ------------------------------------------------------------------

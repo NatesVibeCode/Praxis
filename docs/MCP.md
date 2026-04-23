@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 75 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 76 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -30,7 +30,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_data_dictionary_lineage` | `general` | `advanced` | - | `read` | Directed lineage graph over data dictionary objects. Auto-projected from Postgres FK constraints, view dependencies, dataset_promotions, integration manifests, and MCP tool input schemas. Operator-authored edges take precedence. |
 | `praxis_data_dictionary_quality` | `general` | `advanced` | - | `read` | Declarative data-quality rules + their runs. Auto-projected from Postgres schema (NOT NULL, UNIQUE, FK referential checks) with operator overrides. |
 | `praxis_data_dictionary_stewardship` | `general` | `advanced` | - | `read` | Stewardship authority for data dictionary objects. Auto-projected from audit-column names, namespace prefix → service owner, and known projector modules. Operator stewards take precedence. |
-| `praxis_data_dictionary_wiring_audit` | `general` | `advanced` | - | `read` | Wiring + hard-path audit over Praxis. Reports two classes of issue that bloat attention and/or break on VPS migration: (1) hardcoded paths / localhost / ports in source; (2) unwired authority rows — operator decisions nothing cites, and data-dictionary tables zero code references. No automatic bug filing; the output is a report the operator reviews. |
+| `praxis_data_dictionary_wiring_audit` | `general` | `advanced` | - | `read` | Wiring + hard-path audit over Praxis. Reports two classes of issue that bloat attention and/or break on VPS migration: (1) hardcoded paths / localhost / ports in source, docs, skills, MCP metadata, CLI surfaces, and queue specs, classified by authority status; (2) unwired authority rows — operator decisions nothing cites, and data-dictionary tables zero code references. No automatic bug filing; the output is a report the operator reviews. |
 | `praxis_governance` | `governance` | `advanced` | - | `read` | Safety checks before launching a workflow. Scan prompts for leaked secrets (API keys, tokens, passwords) or verify that a set of file paths falls within allowed scope. |
 | `praxis_heal` | `governance` | `advanced` | - | `read` | Diagnose why a workflow job failed and get a recommended recovery action: retry (transient error), escalate (needs human attention), skip (non-critical), or halt (stop the pipeline). |
 | `praxis_integration` | `integration` | `advanced` | `workflow integration` | `launch`, `read`, `write` | Call, list, or describe registered integrations (API connectors, webhooks, and other external services). |
@@ -80,6 +80,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_context_shard` | `session` | `session` | - | `session` | Return the bounded execution shard for the current workflow MCP session. This is only valid inside workflow Docker jobs using the signed MCP bridge. |
 | `praxis_session_context` | `session` | `session` | - | `session` | Read or write persistent context on your agent session. Context survives across tool calls and is available on retry. |
 | `praxis_subscribe_events` | `session` | `session` | - | `session` | Pull build state events since the agent's last cursor position. Returns new events and advances the cursor. Call repeatedly to stay in sync with platform state changes. |
+| `praxis_setup` | `setup` | `core` | - | `read`, `write` | Runtime-target setup authority for Praxis. Reports the active runtime_target_ref, substrate kind, API authority, DB authority, native_instance contract, workspace authority, provider-family thin sandbox image contract, and the empty_thin_sandbox_default pass/fail. USE WHEN: moving Praxis between machines, adopting an existing runtime, repointing the package at a DB, or checking that the CLI, MCP, and API are bound to the same repo-local instance. Operations belong to API/MCP; CLI and website are clients. SSH is build/deploy transport only. |
 | `praxis_get_submission` | `submissions` | `session` | - | `session` | Read a sealed workflow submission within the current workflow MCP session. The session token owns run_id/workflow_id and the tool only accepts submission_id or job_label for the target submission. |
 | `praxis_review_submission` | `submissions` | `session` | - | `session` | Review a sealed workflow submission within the current workflow MCP session. The session token owns run_id/workflow_id/job_label for the reviewer. The tool only accepts submission_id or job_label for the target submission. |
 | `praxis_submit_artifact_bundle` | `submissions` | `session` | - | `session` | Submit a sealed artifact bundle result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
@@ -1545,6 +1546,29 @@ Example input:
 }
 ```
 
+### Setup
+
+#### `praxis_setup`
+
+- Surface: `setup`
+- Tier: `core`
+- Badges: `core`, `setup`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow tools call praxis_setup`
+- CLI schema help: `workflow tools describe praxis_setup`
+- When to use: Inspect or plan runtime-target setup through the same authority as `praxis setup doctor|plan|apply`, including the native_instance contract.
+- When not to use: Do not use as a workflow launch/status tool.
+- Selector: `action`; default `doctor`; values `doctor`, `plan`, `apply`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "doctor"
+}
+```
+
 ### Submissions
 
 #### `praxis_get_submission`
@@ -1719,7 +1743,7 @@ Example input:
 - Risks: `launch`, `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_workflow`
 - CLI schema help: `workflow tools describe praxis_workflow`
-- When to use: Run, preview, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.
+- When to use: Run, preview, inspect, spawn, chain, claim, acknowledge, retry, cancel, repair, or list workflows through the MCP workflow surface.
 - When not to use: Do not use it for natural-language questions or health checks.
 - Selector: `action`; default `run`; values `run`, `spawn`, `preview`, `status`, `inspect`, `claim`, `acknowledge`, `cancel`, `list`, `notifications`, `retry`, `repair`, `chain`
 - Required args: (none)

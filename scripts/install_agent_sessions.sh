@@ -13,7 +13,8 @@ default_launchd_dir() {
 
 LAUNCHD_DIR="${PRAXIS_LAUNCHD_DIR:-$(default_launchd_dir)}"
 DST="$LAUNCHD_DIR/com.praxis.agent-sessions.plist"
-PORT=8421
+HOST="${PRAXIS_AGENT_SESSIONS_HOST:-127.0.0.1}"
+PORT="${PRAXIS_AGENT_SESSIONS_PORT:-8421}"
 PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"
 LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-$(getconf PATH 2>/dev/null || printf '/usr/bin:/bin:/usr/sbin:/sbin')}"
 DATABASE_URL="${WORKFLOW_DATABASE_URL:-}"
@@ -62,17 +63,23 @@ sed \
   -e "s|__PRAXIS_REPO_ROOT__|$(sed_escape "$(xml_escape "$REPO")")|g" \
   -e "s|__PRAXIS_PYTHON_BIN__|$(sed_escape "$(xml_escape "$PYTHON_BIN")")|g" \
   -e "s|__PRAXIS_PATH__|$(sed_escape "$(xml_escape "$LAUNCHD_PATH")")|g" \
+  -e "s|__PRAXIS_AGENT_SESSIONS_HOST__|$(sed_escape "$(xml_escape "$HOST")")|g" \
+  -e "s|__PRAXIS_AGENT_SESSIONS_PORT__|$(sed_escape "$(xml_escape "$PORT")")|g" \
   "$SRC" > "$DST"
 log "plist rendered to $DST"
 
 launchctl unload "$DST" 2>/dev/null || true
 launchctl load "$DST"
-log "launchd loaded — waiting for 127.0.0.1:$PORT"
+CHECK_HOST="$HOST"
+case "$CHECK_HOST" in
+  0.0.0.0|::|[::]) CHECK_HOST=127.0.0.1 ;;
+esac
+log "launchd loaded — waiting for $CHECK_HOST:$PORT"
 
 for i in $(seq 1 20); do
-  if curl -sf "http://127.0.0.1:$PORT/agents" >/dev/null 2>&1; then
-    log "service is answering on 127.0.0.1:$PORT"
-    log "try: curl -X POST http://127.0.0.1:$PORT/agents -d '{\"prompt\":\"hello\"}'"
+  if curl -sf "http://$CHECK_HOST:$PORT/agents" >/dev/null 2>&1; then
+    log "service is answering on $CHECK_HOST:$PORT"
+    log "try: curl -X POST http://$CHECK_HOST:$PORT/agents -d '{\"prompt\":\"hello\"}'"
     exit 0
   fi
   sleep 0.5

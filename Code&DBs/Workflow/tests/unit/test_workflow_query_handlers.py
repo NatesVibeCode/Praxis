@@ -2830,6 +2830,95 @@ def test_handle_workflows_get_leaves_definition_only_workflows_without_current_p
     assert revision_state["current_plan_revision"] is None
 
 
+def test_handle_query_routes_never_run_workflows_to_workflow_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [
+        {
+            "id": "wf_draft",
+            "name": "Draft Flow",
+            "description": "Not launched yet.",
+            "compiled_spec": None,
+            "invocation_count": 0,
+            "last_invoked_at": None,
+            "is_template": False,
+            "created_at": "2026-04-23T00:00:00Z",
+            "updated_at": "2026-04-23T01:00:00Z",
+        }
+    ]
+
+    captured: dict[str, Any] = {}
+
+    def _list_records(conn, *, never_run=False, limit=100, **_kwargs):
+        captured["conn"] = conn
+        captured["never_run"] = never_run
+        captured["limit"] = limit
+        return rows
+
+    monkeypatch.setattr(workflow_query_core, "list_workflow_records", _list_records)
+    conn = object()
+    subs = SimpleNamespace(get_pg_conn=lambda: conn)
+
+    payload = workflow_query_core.handle_query(
+        subs,
+        {"question": "what workflow specs or registered workflows exist but have never been run"},
+    )
+
+    assert payload["routed_to"] == "workflow_records"
+    assert payload["view"] == "never_run"
+    assert payload["count"] == 1
+    assert payload["draft_without_spec_count"] == 1
+    assert payload["workflows"][0]["id"] == "wf_draft"
+    assert captured == {"conn": conn, "never_run": True, "limit": 100}
+
+
+@pytest.mark.parametrize(
+    ("question", "table_name"),
+    [
+        ("What columns does public.bugs have?", "bugs"),
+        ("fields for workflow_runs", "workflow_runs"),
+        ("schema of workflow_runs", "workflow_runs"),
+    ],
+)
+def test_handle_query_routes_schema_and_column_questions_to_data_dictionary(
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+    table_name: str,
+) -> None:
+    import runtime.operation_catalog_gateway as operation_catalog_gateway
+
+    captured: dict[str, Any] = {}
+
+    def _execute_operation_from_subsystems(subsystems, *, operation_name, payload=None):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = dict(payload or {})
+        return {
+            "routed_to": "operator.data_dictionary",
+            "table_name": captured["payload"].get("table_name"),
+        }
+
+    monkeypatch.setattr(
+        operation_catalog_gateway,
+        "execute_operation_from_subsystems",
+        _execute_operation_from_subsystems,
+    )
+
+    subs = SimpleNamespace(get_pg_conn=lambda: object())
+    payload = workflow_query_core.handle_query(subs, {"question": question})
+
+    assert payload["routed_to"] == "operator.data_dictionary"
+    assert payload["table_name"] == table_name
+    assert captured == {
+        "subsystems": subs,
+        "operation_name": "operator.data_dictionary",
+        "payload": {
+            "table_name": table_name,
+            "include_relationships": True,
+        },
+    }
+
+
 def test_handle_workflows_get_marks_definition_only_packets_current_without_plan_authority() -> None:
     pg = _RecordingPg(
         workflow_rows={
@@ -4384,6 +4473,52 @@ def test_handle_query_routes_bug_questions_to_bug_tracker(monkeypatch) -> None:
         "bugs": [{"bug_id": "BUG-001", "replay_ready": False}],
         "count": 1,
     }
+
+
+@pytest.mark.parametrize(
+    ("question", "table_name"),
+    [
+        ("What columns does public.bugs have?", "bugs"),
+        ("schema of workflow_runs", "workflow_runs"),
+        ("fields for bugs", "bugs"),
+        ("table public.receipts", "receipts"),
+    ],
+)
+def test_handle_query_routes_table_questions_to_data_dictionary(
+    monkeypatch,
+    question: str,
+    table_name: str,
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    def _execute_operation_from_subsystems(subs: Any, *, operation_name: str, payload: dict[str, Any]):
+        captured.append(
+            {
+                "subsystems": subs,
+                "operation_name": operation_name,
+                "payload": payload,
+            }
+        )
+        return {"routed_to": "operator.data_dictionary", "table_name": payload["table_name"]}
+
+    import runtime.operation_catalog_gateway as gateway
+
+    monkeypatch.setattr(gateway, "execute_operation_from_subsystems", _execute_operation_from_subsystems)
+    subs = SimpleNamespace(get_bug_tracker=lambda: pytest.fail("bug fallback is not expected"))
+
+    result = workflow_query_core.handle_query(
+        subs,
+        {"question": question},
+    )
+
+    assert captured == [
+        {
+            "subsystems": subs,
+            "operation_name": "operator.data_dictionary",
+            "payload": {"table_name": table_name, "include_relationships": True},
+        }
+    ]
+    assert result == {"routed_to": "operator.data_dictionary", "table_name": table_name}
 
 
 def test_handle_query_routes_operator_graph_view(monkeypatch) -> None:

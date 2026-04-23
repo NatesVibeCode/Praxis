@@ -51,6 +51,28 @@ class ChatStore:
         )
         return [dict(row) for row in rows]
 
+    def list_recent_context_messages(
+        self,
+        *,
+        exclude_conversation_id: str,
+        limit: int = 80,
+    ) -> list[dict[str, Any]]:
+        """Return recent persisted chat messages that can seed context recall."""
+        rows = self._pg.execute(
+            "SELECT cm.id, cm.conversation_id, c.title, cm.role, cm.content, cm.created_at "
+            "FROM conversation_messages cm "
+            "JOIN conversations c ON c.id = cm.conversation_id "
+            "WHERE cm.conversation_id <> $1 "
+            "AND cm.role IN ('user', 'assistant') "
+            "AND cm.content IS NOT NULL "
+            "AND LENGTH(TRIM(cm.content)) > 0 "
+            "ORDER BY cm.created_at DESC "
+            "LIMIT $2",
+            exclude_conversation_id,
+            limit,
+        )
+        return [dict(row) for row in rows]
+
     def append_message(
         self,
         conversation_id: str,

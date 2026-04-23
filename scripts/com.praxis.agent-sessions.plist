@@ -20,6 +20,10 @@
         <string>__PRAXIS_REPO_ROOT__/Code&amp;DBs/Workflow</string>
         <key>PATH</key>
         <string>__PRAXIS_PATH__</string>
+        <key>PRAXIS_AGENT_SESSIONS_HOST</key>
+        <string>__PRAXIS_AGENT_SESSIONS_HOST__</string>
+        <key>PRAXIS_AGENT_SESSIONS_PORT</key>
+        <string>__PRAXIS_AGENT_SESSIONS_PORT__</string>
     </dict>
 
     <key>KeepAlive</key>

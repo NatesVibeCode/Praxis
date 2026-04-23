@@ -23,6 +23,7 @@ _POLICY_DECISION_KEY = (
 )
 
 _API_BASE_URL_ENV = "PRAXIS_API_BASE_URL"
+_WORKFLOW_API_BASE_URL_ENV = "PRAXIS_WORKFLOW_API_BASE_URL"
 _API_PORT_ENV = "PRAXIS_API_PORT"
 _DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 _DATABASE_AUTHORITY_SOURCE_ENV = "WORKFLOW_DATABASE_AUTHORITY_SOURCE"
@@ -263,6 +264,13 @@ def build_runtime_binding_contract(
         api_base = f"http://127.0.0.1:{port}"
         api_source = f"env:{_API_PORT_ENV}" if _clean_text(env.get(_API_PORT_ENV)) else "default:api_port"
 
+    workflow_api_base = _clean_text(env.get(_WORKFLOW_API_BASE_URL_ENV)) or api_base
+    workflow_api_source = (
+        f"env:{_WORKFLOW_API_BASE_URL_ENV}"
+        if _clean_text(env.get(_WORKFLOW_API_BASE_URL_ENV))
+        else api_source
+    )
+
     database_url = _clean_text(env.get(_DATABASE_URL_ENV))
     database_source = _clean_text(env.get(_DATABASE_AUTHORITY_SOURCE_ENV)) or "unknown"
     native_contract = dict(native_instance or {})
@@ -281,10 +289,12 @@ def build_runtime_binding_contract(
         },
         "http_endpoints": {
             "api_base_url": api_base.rstrip("/"),
+            "workflow_api_base_url": workflow_api_base.rstrip("/"),
             "launch_url": _join_url(api_base, "app"),
             "dashboard_url": _join_url(api_base, "app"),
             "api_docs_url": _join_url(api_base, "docs"),
             "authority_source": api_source,
+            "workflow_api_authority_source": workflow_api_source,
         },
         "native_instance_ref": "/orient#authority_envelope.native_instance",
         "workspace": {
@@ -315,10 +325,14 @@ def resolve_runtime_http_endpoints(
     assert isinstance(endpoints, Mapping)
     return {
         "api_base_url": _clean_text(endpoints.get("api_base_url")),
+        "workflow_api_base_url": _clean_text(endpoints.get("workflow_api_base_url")),
         "launch_url": _clean_text(endpoints.get("launch_url")),
         "dashboard_url": _clean_text(endpoints.get("dashboard_url")),
         "api_docs_url": _clean_text(endpoints.get("api_docs_url")),
         "authority_source": _clean_text(endpoints.get("authority_source")),
+        "workflow_api_authority_source": _clean_text(
+            endpoints.get("workflow_api_authority_source")
+        ),
     }
 
 

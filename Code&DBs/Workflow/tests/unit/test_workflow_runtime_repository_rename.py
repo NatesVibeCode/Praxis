@@ -152,3 +152,29 @@ def test_rename_workflow_record_rejects_existing_target(monkeypatch: pytest.Monk
             workflow_id="agent_handoff_search_db_probe",
             new_workflow_id="runtime_regression_probe",
         )
+
+
+def test_list_workflow_records_filters_never_run_and_bounds_limit() -> None:
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class _ListConn:
+        def execute(self, query: str, *args):
+            calls.append((query, args))
+            return [
+                {
+                    "id": "wf_draft",
+                    "name": "Draft Flow",
+                    "definition": {"type": "pipeline"},
+                    "compiled_spec": None,
+                    "invocation_count": 0,
+                    "last_invoked_at": None,
+                }
+            ]
+
+    rows = repo.list_workflow_records(_ListConn(), never_run=True, limit=999)
+
+    assert rows[0]["id"] == "wf_draft"
+    query, args = calls[0]
+    assert "COALESCE(invocation_count, 0) = 0" in query
+    assert "last_invoked_at IS NULL" in query
+    assert args == (500,)

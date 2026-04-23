@@ -17,10 +17,9 @@ from typing import Any, Mapping
 from runtime.instance import (
     native_instance_contract,
 )
-from storage.dev_postgres import (
-    local_postgres_bootstrap,
-    local_postgres_health,
-    local_postgres_restart,
+from surfaces.api._frontdoor_health import (
+    database_bootstrap_service,
+    database_status_service,
 )
 
 def _instance_contract(env: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -40,24 +39,31 @@ def show_instance_contract(env: Mapping[str, str] | None = None) -> dict[str, An
 
 
 def db_health(env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """Return the repo-local Postgres health snapshot."""
+    """Return the explicit workflow database authority health snapshot."""
 
-    status = local_postgres_health() if env is None else local_postgres_health(env=env)
+    status = database_status_service(env=env)
     return status.to_json()
 
 
 def db_bootstrap(env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """Return the repo-local Postgres bootstrap snapshot."""
+    """Bootstrap and return the explicit workflow database authority snapshot."""
 
-    status = local_postgres_bootstrap() if env is None else local_postgres_bootstrap(env=env)
+    status = database_bootstrap_service(env=env)
     return status.to_json()
 
 
 def db_restart(env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    """Return the repo-local Postgres restart snapshot."""
+    """Report that database process restart is not an authority operation."""
 
-    status = local_postgres_restart() if env is None else local_postgres_restart(env=env)
-    return status.to_json()
+    del env
+    return {
+        "status": "unsupported",
+        "reason_code": "native_ops.db_restart.not_authoritative",
+        "message": (
+            "Database process restart is not owned by native_ops; use the runtime "
+            "target/service lifecycle authority for process control."
+        ),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

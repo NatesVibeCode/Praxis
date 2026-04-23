@@ -2697,6 +2697,10 @@ async def workflows_get(request: Request) -> Response:
 async def workflows_post(request: Request) -> Response:
     return await _route_to_handler(request)
 
+@app.post("/api/workflows/{rest_of_path:path}")
+async def workflows_path_post(request: Request, rest_of_path: str) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/workflows/{rest_of_path:path}")
 async def workflows_path_get(request: Request, rest_of_path: str) -> Response:
     return await _route_to_handler(request)

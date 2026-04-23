@@ -6,18 +6,28 @@ from datetime import datetime, timezone
 from typing import Any
 import uuid
 
+from runtime.bug_evidence import ALLOWED_EVIDENCE_KINDS, ALLOWED_EVIDENCE_ROLES
+
 from .validators import PostgresWriteError, _optional_text, _require_text, _require_utc
 
 
-_ALLOWED_EVIDENCE_ROLES = frozenset({"observed_in", "attempted_fix", "validates_fix"})
+def _require_evidence_kind(value: object, *, field_name: str) -> str:
+    normalized = _require_text(value, field_name=field_name)
+    if normalized not in ALLOWED_EVIDENCE_KINDS:
+        raise PostgresWriteError(
+            "bug_evidence.invalid_submission",
+            f"{field_name} must be one of {', '.join(sorted(ALLOWED_EVIDENCE_KINDS))}",
+            details={"field": field_name},
+        )
+    return normalized
 
 
 def _require_evidence_role(value: object, *, field_name: str) -> str:
     normalized = _require_text(value, field_name=field_name)
-    if normalized not in _ALLOWED_EVIDENCE_ROLES:
+    if normalized not in ALLOWED_EVIDENCE_ROLES:
         raise PostgresWriteError(
             "bug_evidence.invalid_submission",
-            f"{field_name} must be one of {', '.join(sorted(_ALLOWED_EVIDENCE_ROLES))}",
+            f"{field_name} must be one of {', '.join(sorted(ALLOWED_EVIDENCE_ROLES))}",
             details={"field": field_name},
         )
     return normalized
@@ -42,7 +52,7 @@ class PostgresBugEvidenceRepository:
         created_at: datetime | None = None,
     ) -> dict[str, Any] | None:
         normalized_bug_id = _require_text(bug_id, field_name="bug_id")
-        normalized_evidence_kind = _require_text(
+        normalized_evidence_kind = _require_evidence_kind(
             evidence_kind,
             field_name="evidence_kind",
         )

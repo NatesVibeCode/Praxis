@@ -37,6 +37,8 @@ _MAX_TOOL_ITERATIONS = 5
 _MAX_HISTORY_TOKENS = 100_000
 _CHARS_PER_TOKEN = 4.0
 _MAX_CONVERSATION_COST_USD = 10.0
+_MAX_VALUABLE_CONTEXT_TOKENS = 1_200
+_MAX_VALUABLE_CONTEXT_MESSAGES = 80
 _LAST_GOOD_CLI_ROUTE: tuple[str, str] | None = None
 _RECENTLY_FAILED_ROUTES: dict[tuple[str, str], float] = {}
 _ROUTE_FAILURE_TTL_SECONDS = 300  # skip routes that failed in the last 5 minutes
@@ -70,6 +72,60 @@ If the user has selected items (shown in the context), reference them when relev
 When showing workflow status, always include cost and token information when available.
 
 Be concise. Take action directly instead of explaining what you could do."""
+
+_CONTEXT_STOPWORDS = {
+    "about",
+    "after",
+    "again",
+    "also",
+    "build",
+    "chat",
+    "could",
+    "from",
+    "have",
+    "help",
+    "into",
+    "just",
+    "make",
+    "need",
+    "next",
+    "please",
+    "that",
+    "the",
+    "then",
+    "there",
+    "this",
+    "what",
+    "when",
+    "with",
+    "work",
+    "would",
+    "your",
+}
+
+
+def _content_terms(content: str) -> set[str]:
+    terms: set[str] = set()
+    for raw in content.lower().replace("_", " ").replace("-", " ").split():
+        term = "".join(ch for ch in raw if ch.isalnum())
+        if len(term) < 4 or term in _CONTEXT_STOPWORDS:
+            continue
+        terms.add(term)
+    return terms
+
+
+def _context_relevance_score(query_terms: set[str], content: str, title: str) -> float:
+    haystack = _content_terms(f"{title} {content}")
+    if not query_terms or not haystack:
+        return 0.0
+    overlap = len(query_terms & haystack)
+    if overlap == 0:
+        return 0.0
+    title_terms = _content_terms(title)
+    title_boost = 0.2 if query_terms & title_terms else 0.0
+    coverage = overlap / max(len(query_terms), 1)
+    density = overlap / max(len(haystack), 1)
+    return min(1.0, 0.35 + coverage + density + title_boost)
 
 
 def _load_chat_tools() -> tuple[list[dict[str, Any]], Any]:
@@ -473,7 +529,81 @@ class ChatOrchestrator:
                 ctx_text += f"  ... and {len(selection_context) - 10} more]\n"
             messages[-1]["content"] += ctx_text
 
+        if messages:
+            valuable_context = self._load_valuable_context(
+                conversation_id=conversation_id,
+                user_content=str(messages[-1].get("content") or ""),
+            )
+            if valuable_context:
+                messages[-1]["content"] += valuable_context
+
         return messages
+
+    def _load_valuable_context(self, *, conversation_id: str, user_content: str) -> str:
+        """Pack relevant prior chat messages into a bounded prompt appendix.
+
+        This is intentionally deterministic and DB-backed. It does not create a
+        second memory authority; it narrows existing persisted chat history into
+        a small context packet that can later be replaced by the memory graph.
+        """
+        query_terms = _content_terms(user_content)
+        if not query_terms:
+            return ""
+
+        try:
+            from memory.packer import ContextPacker, ContextSection, estimate_tokens
+        except Exception as exc:
+            _log.debug("Skipping valuable chat context: memory packer unavailable: %s", exc)
+            return ""
+
+        try:
+            rows = self._chat_store.list_recent_context_messages(
+                exclude_conversation_id=conversation_id,
+                limit=_MAX_VALUABLE_CONTEXT_MESSAGES,
+            )
+        except Exception as exc:
+            _log.debug("Skipping valuable chat context: context query failed: %s", exc)
+            return ""
+
+        sections: list[ContextSection] = []
+        for row in rows:
+            content = str(row.get("content") or "").strip()
+            if not content:
+                continue
+            score = _context_relevance_score(query_terms, content, str(row.get("title") or ""))
+            if score <= 0:
+                continue
+            title = str(row.get("title") or "Previous conversation")
+            role = str(row.get("role") or "message")
+            clipped = content[:1_000]
+            sections.append(
+                ContextSection(
+                    name=f"Prior chat: {title}",
+                    content=f"{title} ({role}): {clipped}",
+                    priority=score,
+                    token_estimate=estimate_tokens(clipped) + 12,
+                    source=f"conversation:{row.get('conversation_id')}:{row.get('id')}",
+                )
+            )
+
+        if not sections:
+            return ""
+
+        packed = ContextPacker(token_budget=_MAX_VALUABLE_CONTEXT_TOKENS).pack(sections)
+        if not packed.sections:
+            return ""
+
+        lines = [
+            "",
+            "",
+            "[Relevant prior Praxis chat context selected from persisted conversations:",
+        ]
+        for section in packed.sections[:8]:
+            lines.append(f"- {section.content}")
+        if packed.dropped_sections:
+            lines.append(f"- Omitted {len(packed.dropped_sections)} lower-priority prior context sections.")
+        lines.append("Use this only when it is directly relevant; newer instructions in this conversation override older chat context.]")
+        return "\n".join(lines)
 
     def _resolve_route_chain(self) -> list[ResolvedChatRoute]:
         """Resolve chat failover routes and filter to currently usable lanes."""

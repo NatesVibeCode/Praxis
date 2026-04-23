@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
     "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.build.json && node ./node_modules/vite/bin/vite.js build",
-    "test": "node ./node_modules/vitest/vitest.mjs run",
+    "test": "node ./node_modules/vitest/vitest.mjs run --bail=1",
+    "test:all": "node ./node_modules/vitest/vitest.mjs run",
     "test:watch": "node ./node_modules/vitest/vitest.mjs",
     "typecheck": "node ./node_modules/typescript/bin/tsc -p tsconfig.build.json",
     "preview": "node ./node_modules/vite/bin/vite.js preview"

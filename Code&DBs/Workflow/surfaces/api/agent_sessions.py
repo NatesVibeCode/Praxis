@@ -1,6 +1,7 @@
 """Agent Sessions surface — persistent Claude session management.
 
-Standalone FastAPI app bound to 127.0.0.1:8421.
+Standalone FastAPI app. Bind host/port default to PRAXIS_AGENT_SESSIONS_HOST
+and PRAXIS_AGENT_SESSIONS_PORT when set, otherwise 127.0.0.1:8421.
 
 Run:
     python Code&DBs/Workflow/surfaces/api/agent_sessions.py
@@ -8,6 +9,7 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -29,6 +31,8 @@ PRAXIS_ROOT = Path(__file__).resolve().parents[4]
 ARTIFACTS_DIR = PRAXIS_ROOT / "artifacts"
 AGENTS_DIR = ARTIFACTS_DIR / "agents"
 _PUBLIC_AUTH_TOKEN_ENV = "PRAXIS_API_TOKEN"
+_AGENT_SESSIONS_HOST_ENV = "PRAXIS_AGENT_SESSIONS_HOST"
+_AGENT_SESSIONS_PORT_ENV = "PRAXIS_AGENT_SESSIONS_PORT"
 _HTTP_BEARER = HTTPBearer(auto_error=False)
 
 
@@ -44,6 +48,24 @@ def _public_api_token(env: dict[str, str] | None = None) -> str | None:
     source = env if env is not None else os.environ
     value = (source.get(_PUBLIC_AUTH_TOKEN_ENV) or "").strip()
     return value or None
+
+
+def _agent_sessions_host(env: dict[str, str] | None = None) -> str:
+    source = env if env is not None else os.environ
+    value = (source.get(_AGENT_SESSIONS_HOST_ENV) or "127.0.0.1").strip()
+    return value or "127.0.0.1"
+
+
+def _agent_sessions_port(env: dict[str, str] | None = None) -> int:
+    source = env if env is not None else os.environ
+    raw_value = (source.get(_AGENT_SESSIONS_PORT_ENV) or "8421").strip()
+    try:
+        port = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{_AGENT_SESSIONS_PORT_ENV} must be an integer") from exc
+    if port <= 0 or port > 65535:
+        raise ValueError(f"{_AGENT_SESSIONS_PORT_ENV} must be between 1 and 65535")
+    return port
 
 
 async def _require_agent_session_access(
@@ -548,7 +570,34 @@ async def list_agents(
     return agents
 
 
-if __name__ == "__main__":
+def start_server(*, host: str, port: int) -> None:
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8421)
+    uvicorn.run(app, host=host, port=port)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Agent Sessions service")
+    parser.add_argument(
+        "--host",
+        default=_agent_sessions_host(),
+        help=(
+            "Bind address (default from PRAXIS_AGENT_SESSIONS_HOST, otherwise "
+            "127.0.0.1)"
+        ),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=_agent_sessions_port(),
+        help=(
+            "TCP port (default from PRAXIS_AGENT_SESSIONS_PORT, otherwise 8421)"
+        ),
+    )
+    args = parser.parse_args(argv)
+    start_server(host=args.host, port=args.port)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

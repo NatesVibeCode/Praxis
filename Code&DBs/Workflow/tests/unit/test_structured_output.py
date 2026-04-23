@@ -17,6 +17,155 @@ from adapters.structured_output import (
 )
 
 
+def _profile_row(
+    *,
+    provider_slug: str,
+    binary_name: str,
+    base_flags: list[str],
+    forbidden_flags: list[str],
+    default_model: str,
+    lane_policies: dict[str, dict[str, object]],
+    adapter_economics: dict[str, dict[str, object]],
+    api_endpoint: str | None = None,
+    api_protocol_family: str | None = None,
+    api_key_env_vars: list[str] | None = None,
+    model_flag: str | None = "--model",
+    system_prompt_flag: str | None = None,
+    json_schema_flag: str | None = None,
+    output_format: str = "json",
+    output_envelope_key: str = "result",
+    default_timeout: int = 300,
+) -> dict[str, object]:
+    return {
+        "provider_slug": provider_slug,
+        "binary_name": binary_name,
+        "default_model": default_model,
+        "api_endpoint": api_endpoint,
+        "api_protocol_family": api_protocol_family,
+        "api_key_env_vars": api_key_env_vars or [],
+        "prompt_mode": "stdin",
+        "base_flags": base_flags,
+        "model_flag": model_flag,
+        "system_prompt_flag": system_prompt_flag,
+        "json_schema_flag": json_schema_flag,
+        "output_format": output_format,
+        "output_envelope_key": output_envelope_key,
+        "forbidden_flags": forbidden_flags,
+        "default_timeout": default_timeout,
+        "aliases": [],
+        "mcp_config_style": None,
+        "mcp_args_template": None,
+        "sandbox_env_overrides": {},
+        "exclude_from_rotation": False,
+        "lane_policies": lane_policies,
+        "adapter_economics": adapter_economics,
+    }
+
+
+def _cli_lane_policy() -> dict[str, object]:
+    return {
+        "admitted_by_policy": True,
+        "execution_topology": "local_cli",
+        "transport_kind": "cli",
+        "policy_reason": "Admitted local CLI lane.",
+    }
+
+
+def _http_lane_policy() -> dict[str, object]:
+    return {
+        "admitted_by_policy": True,
+        "execution_topology": "direct_http",
+        "transport_kind": "http",
+        "policy_reason": "Admitted direct HTTP lane.",
+    }
+
+
+def _prepaid_economics(provider_slug: str, *, allow_payg_fallback: bool) -> dict[str, object]:
+    return {
+        "billing_mode": "subscription_included",
+        "budget_bucket": f"{provider_slug}_monthly",
+        "effective_marginal_cost": 0.0,
+        "prefer_prepaid": True,
+        "allow_payg_fallback": allow_payg_fallback,
+    }
+
+
+def _metered_economics(provider_slug: str) -> dict[str, object]:
+    return {
+        "billing_mode": "metered_api",
+        "budget_bucket": f"{provider_slug}_api_payg",
+        "effective_marginal_cost": 1.0,
+        "prefer_prepaid": False,
+        "allow_payg_fallback": True,
+    }
+
+
+def _provider_profiles():
+    from registry.provider_execution_registry import _parse_profile_row
+
+    rows = (
+        _profile_row(
+            provider_slug="anthropic",
+            binary_name="claude",
+            default_model="claude-sonnet-4-6",
+            base_flags=["-p", "--output-format", "json"],
+            model_flag="--model",
+            system_prompt_flag="--system-prompt",
+            json_schema_flag="--json-schema",
+            output_format="json",
+            output_envelope_key="result",
+            forbidden_flags=[
+                "--dangerously-skip-permissions",
+                "--allow-dangerously-skip-permissions",
+                "--add-dir",
+            ],
+            lane_policies={"cli_llm": _cli_lane_policy()},
+            adapter_economics={
+                "cli_llm": _prepaid_economics("anthropic", allow_payg_fallback=False)
+            },
+        ),
+        _profile_row(
+            provider_slug="openai",
+            binary_name="codex",
+            default_model="gpt-4.1",
+            api_endpoint="https://api.openai.com/v1/chat/completions",
+            api_protocol_family="openai_chat_completions",
+            api_key_env_vars=["OPENAI_API_KEY"],
+            base_flags=["exec", "-", "--json"],
+            output_format="ndjson",
+            output_envelope_key="text",
+            forbidden_flags=["--full-auto"],
+            lane_policies={"cli_llm": _cli_lane_policy(), "llm_task": _http_lane_policy()},
+            adapter_economics={
+                "cli_llm": _prepaid_economics("openai", allow_payg_fallback=True),
+                "llm_task": _metered_economics("openai"),
+            },
+        ),
+        _profile_row(
+            provider_slug="google",
+            binary_name="gemini",
+            default_model="gemini-2.5-flash",
+            api_endpoint="https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            api_protocol_family="google_generate_content",
+            api_key_env_vars=["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+            base_flags=["-p", ".", "-o", "json"],
+            output_format="json",
+            output_envelope_key="response",
+            forbidden_flags=["--approval-mode", "--yolo", "-y"],
+            default_timeout=600,
+            lane_policies={"cli_llm": _cli_lane_policy(), "llm_task": _http_lane_policy()},
+            adapter_economics={
+                "cli_llm": _prepaid_economics("google", allow_payg_fallback=True),
+                "llm_task": _metered_economics("google"),
+            },
+        ),
+    )
+    return {
+        profile.provider_slug: profile
+        for profile in (_parse_profile_row(row) for row in rows)
+    }
+
+
 class TestParseJSON:
     """JSON structured output parsing."""
 
@@ -212,37 +361,19 @@ class TestNoFilesystemFlags:
     """Verify the adapter never passes filesystem-granting flags."""
 
     def test_anthropic_profile_no_dangerous_flags(self):
-        from adapters import provider_transport
-
-        anthropic = next(
-            profile
-            for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
-            if profile.provider_slug == "anthropic"
-        )
+        anthropic = _provider_profiles()["anthropic"]
         flags = " ".join(anthropic.base_flags)
         assert "--dangerously-skip-permissions" not in flags
         assert "--add-dir" not in flags
 
     def test_openai_profile_no_full_auto(self):
-        from adapters import provider_transport
-
-        openai = next(
-            profile
-            for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
-            if profile.provider_slug == "openai"
-        )
+        openai = _provider_profiles()["openai"]
         flags = " ".join(openai.base_flags)
         assert "--full-auto" not in flags
         # "exec" subcommand is fine — it's "--full-auto" that grants filesystem access
 
     def test_google_profile_no_yolo(self):
-        from adapters import provider_transport
-
-        google = next(
-            profile
-            for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
-            if profile.provider_slug == "google"
-        )
+        google = _provider_profiles()["google"]
         flags = " ".join(google.base_flags)
         assert "yolo" not in flags
 
@@ -251,7 +382,7 @@ class TestNoFilesystemFlags:
 
         cmd = provider_transport.build_command(
             "anthropic",
-            profiles={profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES},
+            profiles=_provider_profiles(),
             model="claude-sonnet-4-6",
             binary_override="/usr/bin/claude",
         )
@@ -264,21 +395,16 @@ class TestNoFilesystemFlags:
         from adapters import provider_transport
 
         for slug, report in provider_transport.validate_profiles(
-            {profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES},
+            _provider_profiles(),
             adapter_config={},
             failure_mappings={},
         ).items():
             assert report["flags_safe"], f"{slug} has forbidden flags in base_flags"
 
     def test_registry_forbidden_flags_enforced(self):
-        from adapters import provider_transport
-
+        profiles = _provider_profiles()
         for slug in ("anthropic", "openai", "google"):
-            profile = next(
-                candidate
-                for candidate in provider_transport.BUILTIN_PROVIDER_PROFILES
-                if candidate.provider_slug == slug
-            )
+            profile = profiles.get(slug)
             assert profile is not None, f"missing profile for {slug}"
             assert len(profile.forbidden_flags) > 0, f"{slug} has no forbidden flags"
             flags_str = " ".join(profile.base_flags)

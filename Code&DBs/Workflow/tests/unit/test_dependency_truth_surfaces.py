@@ -302,6 +302,10 @@ def test_orient_projects_mandatory_authority_envelope(monkeypatch) -> None:
     )
     assert runtime_binding["database"]["secret_policy"].startswith("never emit raw DSN")
     assert runtime_binding["http_endpoints"]["authority_source"] == "env:PRAXIS_API_BASE_URL"
+    assert runtime_binding["http_endpoints"]["workflow_api_base_url"] == "http://praxis.test:8420"
+    assert runtime_binding["http_endpoints"]["workflow_api_authority_source"] == (
+        "env:PRAXIS_API_BASE_URL"
+    )
     assert runtime_binding["http_endpoints"]["launch_url"] == "http://praxis.test:8420/app"
     assert runtime_binding["workspace"]["repo_root"] == "/repo"
 
@@ -328,10 +332,32 @@ def test_runtime_http_endpoints_resolve_from_binding_authority() -> None:
 
     assert endpoints == {
         "api_base_url": "http://praxis.test:9444",
+        "workflow_api_base_url": "http://praxis.test:9444",
         "launch_url": "http://praxis.test:9444/app",
         "dashboard_url": "http://praxis.test:9444/app",
         "api_docs_url": "http://praxis.test:9444/docs",
         "authority_source": "env:PRAXIS_API_BASE_URL",
+        "workflow_api_authority_source": "env:PRAXIS_API_BASE_URL",
+    }
+
+
+def test_runtime_http_endpoints_resolve_separate_workflow_api_base_when_configured() -> None:
+    endpoints = resolve_runtime_http_endpoints(
+        workflow_env={
+            "PRAXIS_API_BASE_URL": "http://api.test:9444",
+            "PRAXIS_WORKFLOW_API_BASE_URL": "http://workflow.test:9555",
+        },
+        native_instance={"repo_root": "/repo", "workdir": "/repo"},
+    )
+
+    assert endpoints == {
+        "api_base_url": "http://api.test:9444",
+        "workflow_api_base_url": "http://workflow.test:9555",
+        "launch_url": "http://api.test:9444/app",
+        "dashboard_url": "http://api.test:9444/app",
+        "api_docs_url": "http://api.test:9444/docs",
+        "authority_source": "env:PRAXIS_API_BASE_URL",
+        "workflow_api_authority_source": "env:PRAXIS_WORKFLOW_API_BASE_URL",
     }
 
 
@@ -361,7 +387,7 @@ def test_praxis_ctl_frontdoor_urls_come_from_runtime_binding(monkeypatch) -> Non
         return 404, b"{}"
 
     monkeypatch.setenv("PRAXIS_API_BASE_URL", "https://praxis.example:9443")
-    monkeypatch.delenv("PRAXIS_WORKFLOW_API_BASE_URL", raising=False)
+    monkeypatch.setenv("PRAXIS_WORKFLOW_API_BASE_URL", "https://workflow.example:9445")
     monkeypatch.setattr(local_alpha, "_http_request", _fake_http_request)
 
     payload = local_alpha._probe_frontdoor_semantics()
@@ -371,13 +397,15 @@ def test_praxis_ctl_frontdoor_urls_come_from_runtime_binding(monkeypatch) -> Non
     assert payload["workflow_api_ready"] is True
     assert payload["mcp_bridge_ready"] is True
     assert payload["ui_ready"] is True
+    assert payload["workflow_api_base_url"] == "https://workflow.example:9445"
+    assert payload["workflow_api_authority_source"] == "env:PRAXIS_WORKFLOW_API_BASE_URL"
     assert payload["launch_url"] == "https://praxis.example:9443/app"
     assert payload["dashboard_url"] == "https://praxis.example:9443/app"
     assert payload["api_docs_url"] == "https://praxis.example:9443/docs"
     assert calls == [
         "https://praxis.example:9443/api/health",
-        "https://praxis.example:9443/orient",
-        "https://praxis.example:9443/mcp",
+        "https://workflow.example:9445/orient",
+        "https://workflow.example:9445/mcp",
         "https://praxis.example:9443/app",
     ]
 
@@ -429,6 +457,8 @@ def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path
             "launch_url": "http://127.0.0.1:8420/app",
             "dashboard_url": "http://127.0.0.1:8420/app",
             "api_docs_url": "http://127.0.0.1:8420/docs",
+            "workflow_api_base_url": "http://127.0.0.1:8420",
+            "workflow_api_authority_source": "env:PRAXIS_API_BASE_URL",
         },
     )
 
@@ -495,6 +525,8 @@ def test_praxis_ctl_doctor_reports_operational_authority_with_schema_drift(
             "launch_url": "http://127.0.0.1:8420/app",
             "dashboard_url": "http://127.0.0.1:8420/app",
             "api_docs_url": "http://127.0.0.1:8420/docs",
+            "workflow_api_base_url": "http://127.0.0.1:8420",
+            "workflow_api_authority_source": "env:PRAXIS_API_BASE_URL",
         },
     )
 
@@ -547,9 +579,11 @@ def test_praxis_ctl_runtime_endpoints_use_runtime_binding_contract(monkeypatch) 
         captured["workflow_env_error"] = workflow_env_error
         return {
             "api_base_url": "https://runtime.example",
+            "workflow_api_base_url": "https://workflow.runtime.example",
             "launch_url": "https://runtime.example/app",
             "dashboard_url": "https://runtime.example/app",
             "api_docs_url": "https://runtime.example/docs",
+            "workflow_api_authority_source": "env:PRAXIS_WORKFLOW_API_BASE_URL",
         }
 
     monkeypatch.setattr(
@@ -561,6 +595,7 @@ def test_praxis_ctl_runtime_endpoints_use_runtime_binding_contract(monkeypatch) 
     endpoints = local_alpha._runtime_binding_http_endpoints({})
 
     assert endpoints["api_base_url"] == "https://runtime.example"
+    assert endpoints["workflow_api_base_url"] == "https://workflow.runtime.example"
     assert endpoints["launch_url"] == "https://runtime.example/app"
     assert captured["workflow_env"] == {
         "WORKFLOW_DATABASE_URL": "postgresql://repo.test/praxis",
@@ -577,6 +612,7 @@ def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatc
     local_alpha = _load_local_alpha()
     calls: list[tuple[str, str, dict[str, str] | None]] = []
     monkeypatch.setenv("PRAXIS_API_BASE_URL", "http://praxis.test:9555")
+    monkeypatch.setenv("PRAXIS_WORKFLOW_API_BASE_URL", "http://workflow.test:9666")
 
     def _fake_http_request(
         url: str,
@@ -608,6 +644,7 @@ def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatc
     assert payload["launch_url"] == "http://praxis.test:9555/app"
     assert payload["dashboard_url"] == "http://praxis.test:9555/app"
     assert payload["api_docs_url"] == "http://praxis.test:9555/docs"
+    assert payload["workflow_api_base_url"] == "http://workflow.test:9666"
     assert payload["workflow_api_ready"] is True
     assert payload["mcp_bridge_ready"] is True
     assert any(
@@ -618,3 +655,5 @@ def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatc
         url.endswith("/mcp") and method == "POST" and headers == {"X-Praxis-UI": "1"}
         for url, method, headers in calls
     )
+    assert any(url == "http://workflow.test:9666/orient" for url, _, _ in calls)
+    assert any(url == "http://workflow.test:9666/mcp" for url, _, _ in calls)

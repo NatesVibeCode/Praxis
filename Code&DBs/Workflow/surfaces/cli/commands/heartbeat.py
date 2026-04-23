@@ -15,7 +15,7 @@ from runtime.daily_heartbeat import run_daily_heartbeat
 from surfaces.cli.mcp_tools import print_json
 
 
-def _parse(args: list[str]) -> argparse.Namespace | int:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="workflow heartbeat",
         description=(
@@ -29,6 +29,11 @@ def _parse(args: list[str]) -> argparse.Namespace | int:
         default="all",
     )
     parser.add_argument("--pretty", action="store_true", help="Human-readable summary instead of JSON.")
+    return parser
+
+
+def _parse(args: list[str]) -> argparse.Namespace | int:
+    parser = _parser()
     try:
         return parser.parse_args(args)
     except SystemExit as exc:
@@ -57,6 +62,9 @@ def _pretty(result_json: dict, stdout: TextIO) -> None:
 
 
 def _heartbeat_command(args: list[str], *, stdout: TextIO) -> int:
+    if args and args[0] in {"-h", "--help"}:
+        _parser().print_help(stdout)
+        return 0
     parsed = _parse(args)
     if isinstance(parsed, int):
         return parsed

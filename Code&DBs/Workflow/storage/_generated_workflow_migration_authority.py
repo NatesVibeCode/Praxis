@@ -220,7 +220,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '206_legacy_schema_authority_backfill.sql',
  '207_legacy_domain_authority_assignment.sql',
  '208_structured_document_semantic_authority.sql',
- '209_empty_thin_sandbox_runtime_targets.sql')
+ '209_empty_thin_sandbox_runtime_targets.sql',
+ '210_javascript_vitest_verifier.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -457,7 +458,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '206_legacy_schema_authority_backfill.sql',
  '207_legacy_domain_authority_assignment.sql',
  '208_structured_document_semantic_authority.sql',
- '209_empty_thin_sandbox_runtime_targets.sql')
+ '209_empty_thin_sandbox_runtime_targets.sql',
+ '210_javascript_vitest_verifier.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -673,7 +675,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '206_legacy_schema_authority_backfill.sql',
                '207_legacy_domain_authority_assignment.sql',
                '208_structured_document_semantic_authority.sql',
-               '209_empty_thin_sandbox_runtime_targets.sql'),
+               '209_empty_thin_sandbox_runtime_targets.sql',
+               '210_javascript_vitest_verifier.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -913,6 +916,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '207_legacy_domain_authority_assignment.sql': 'canonical',
  '208_structured_document_semantic_authority.sql': 'canonical',
  '209_empty_thin_sandbox_runtime_targets.sql': 'canonical',
+ '210_javascript_vitest_verifier.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -2759,7 +2763,11 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                                      'semantic_predicates.constrains'),
                                                     ('row',
                                                      'operation_catalog_registry.structured_documents.record_context_selection')),
- '209_empty_thin_sandbox_runtime_targets.sql': ()}
+ '209_empty_thin_sandbox_runtime_targets.sql': (),
+ '210_javascript_vitest_verifier.sql': (('row',
+                                         'verification_registry.javascript.vitest_file'),
+                                        ('row',
+                                         'verifier_registry.job.javascript.vitest_file'))}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -4205,9 +4213,20 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
    ('row', 'semantic_predicates.constrains'),
    ('row',
     'operation_catalog_registry.structured_documents.record_context_selection'))),
- ('209_empty_thin_sandbox_runtime_targets.sql', ()))
+ ('209_empty_thin_sandbox_runtime_targets.sql', ()),
+ ('210_javascript_vitest_verifier.sql',
+  (('row', 'verification_registry.javascript.vitest_file'),
+   ('row', 'verifier_registry.job.javascript.vitest_file'))))
 
-WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_task_type_route_eligibility.sql'),
+WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'100': ('100_adapter_config_authority.sql',
+         '100_task_type_profile_scope_defaults.sql',
+         '100_webhook_system_events_bridge.sql'),
+ '101': ('101_analysis_classify_routing.sql', '101_model_sync_authority.sql'),
+ '102': ('102_connector_integration_bridge.sql', '102_pg_trgm_extension.sql'),
+ '107': ('107_name_cleanup_praxis_branding.sql',
+         '107_workflow_notifications_resource_telemetry.sql'),
+ '182': ('182_audit_exclusions.sql', '182_restore_anthropic_cli_only.sql'),
+ '012': ('012_execution_leases.sql', '012_task_type_route_eligibility.sql'),
  '024': ('024_authority_checkpoints.sql', '024_task_type_routing.sql'),
  '028': ('028_conversations.sql', '028_unified_workflow_jobs.sql'),
  '029': ('029_dispatch_consolidation_fixes.sql', '029_workflows.sql'),
@@ -4236,13 +4255,5 @@ WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_t
  '094': ('094_model_capability_audit.sql', '094_provider_profile_capabilities.sql'),
  '095': ('095_ipaas_rate_limit_config.sql', '095_model_profile_auto_seed_trigger.sql'),
  '096': ('096_ipaas_webhook_ingestion.sql', '096_workflow_submission_acceptance.sql'),
- '099': ('099_task_type_profile_authority.sql', '099_webhook_notify_trigger.sql'),
- '100': ('100_adapter_config_authority.sql',
-         '100_task_type_profile_scope_defaults.sql',
-         '100_webhook_system_events_bridge.sql'),
- '101': ('101_analysis_classify_routing.sql', '101_model_sync_authority.sql'),
- '102': ('102_connector_integration_bridge.sql', '102_pg_trgm_extension.sql'),
- '107': ('107_name_cleanup_praxis_branding.sql',
-         '107_workflow_notifications_resource_telemetry.sql'),
- '182': ('182_audit_exclusions.sql', '182_restore_anthropic_cli_only.sql')}
+ '099': ('099_task_type_profile_authority.sql', '099_webhook_notify_trigger.sql')}
 

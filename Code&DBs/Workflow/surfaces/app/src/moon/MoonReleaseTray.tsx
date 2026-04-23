@@ -50,11 +50,23 @@ function summarizeTriggers(triggers: Array<{ event_type?: string; source_ref?: s
 
 function disabledReason(release: ReleaseStatus, payload: BuildPayload | null, jobCount: number): string | null {
   if (!payload) return 'No workflow — build first';
+  const blockingIssue = (payload.build_issues || []).find(issue => issue.severity === 'blocking');
+  if (blockingIssue) return blockingIssue.summary || blockingIssue.label || 'Resolve blocking build issues first';
+  const projectionState = payload.projection_status?.state || (payload.build_graph as any)?.projection_status?.state;
+  if (projectionState === 'blocked') return 'Resolve blocking build issues first';
+  const firstBlocker = release.blockers[0];
+  if (release.readiness === 'blocked' && firstBlocker) return firstBlocker.message;
   const hasDefinition = payload.definition && Object.keys(payload.definition).length > 0;
   const hasNodes = (payload.build_graph?.nodes || []).some(n => n.route);
   if (!hasDefinition && !hasNodes) return 'No steps configured — pick a trigger and add steps';
   if (jobCount === 0 && !hasNodes) return 'No jobs projected — compile first';
   return null;
+}
+
+function blockerActionLabel(issue: NonNullable<BuildPayload['build_issues']>[number]): string {
+  if (issue.kind === 'missing_route') return 'Choose route';
+  if (issue.kind === 'missing_workflow_target') return 'Choose target';
+  return 'Resolve';
 }
 
 export function MoonReleaseTray({
@@ -221,6 +233,7 @@ export function MoonReleaseTray({
   const totalChecks = release.checklist.length;
   const failedChecks = release.checklist.filter(c => !c.passed);
   const firstBlocker = release.blockers[0];
+  const blockingIssues = (payload?.build_issues || []).filter(issue => issue.severity === 'blocking');
 
   return (
     <>
@@ -331,7 +344,7 @@ export function MoonReleaseTray({
             The workflow changed after preview. Preview plan again before dispatch.
           </div>
         )}
-        {firstBlocker && !dispatchResult && (
+        {firstBlocker && !dispatchResult && blockingIssues.length === 0 && (
           <div className="moon-release__hint moon-release__hint--blocker">
             <span className="moon-release__hint-dot" aria-hidden="true" />
             <span>{firstBlocker.message}</span>
@@ -347,6 +360,31 @@ export function MoonReleaseTray({
             {release.blockers.length > 1 && (
               <span className="moon-release__hint-more">+{release.blockers.length - 1} more</span>
             )}
+          </div>
+        )}
+        {blockingIssues.length > 0 && !dispatchResult && (
+          <div className="moon-release__blocker-panel" aria-label="Blocking build issues">
+            <div className="moon-release__blocker-panel-head">
+              <span className="moon-release__blocker-panel-kicker">Needs decisions</span>
+              <span className="moon-release__blocker-panel-count">{blockingIssues.length}</span>
+            </div>
+            <div className="moon-release__blocker-list">
+              {blockingIssues.map(issue => (
+                <button
+                  key={issue.issue_id}
+                  type="button"
+                  className="moon-release__blocker-card"
+                  onClick={() => issue.node_id && onSelectNode?.(issue.node_id)}
+                  disabled={!issue.node_id || !onSelectNode}
+                >
+                  <span className="moon-release__blocker-card-action">{blockerActionLabel(issue)}</span>
+                  <span className="moon-release__blocker-card-copy">
+                    <strong>{issue.label || 'Blocked step'}</strong>
+                    <span>{issue.summary || 'This must be resolved before the workflow can run.'}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {dispatchError && (

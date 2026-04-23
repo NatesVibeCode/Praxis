@@ -831,8 +831,18 @@ def _submit_coordination_chain(
     return 0
 
 
-def _status_command(*, stdout: TextIO) -> int:
+def _status_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow status` — print recent workflow summary as JSON."""
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write("usage: workflow status\n")
+        return 0
+    if args:
+        stdout.write(
+            "error: workflow status does not support arguments; "
+            "time-window filtering is not implemented for this summary surface\n"
+        )
+        return 2
 
     import json as _json
 
@@ -1033,16 +1043,33 @@ def _verify_platform_command(args: list[str], *, stdout: TextIO) -> int:
             stdout.write(f"unknown verify-platform argument: {args[i]}\n")
             return 2
 
-    payload = (
-        run_registered_verifier(
-            verifier_ref,
-            inputs=inputs,
-            target_kind=target_kind,
-            target_ref=target_ref,
+    try:
+        payload = (
+            run_registered_verifier(
+                verifier_ref,
+                inputs=inputs,
+                target_kind=target_kind,
+                target_ref=target_ref,
+            )
+            if verifier_ref
+            else registry_snapshot()
         )
-        if verifier_ref
-        else registry_snapshot()
-    )
+    except Exception as exc:
+        reason_code = (
+            "verifier.db_authority_unavailable"
+            if exc.__class__.__name__ == "PostgresConfigurationError"
+            else "verifier.error"
+        )
+        print_json(
+            stdout,
+            {
+                "error": str(exc),
+                "status": "error",
+                "reason_code": reason_code,
+                "source_authority": "verifier_registry",
+            },
+        )
+        return 1
     stdout.write(_json.dumps(payload, indent=2, default=str) + "\n")
     return 0 if not verifier_ref or payload.get("status") == "passed" else 1
 
@@ -1821,26 +1848,37 @@ def _deprecated_workflow_records_alias_command(
     stdout: TextIO,
 ) -> int:
     stdout.write(
-        f"error: workflow {alias} is deprecated; use workflow records create|update|rename instead\n"
+        f"error: workflow {alias} is deprecated; use workflow records list|get|create|update|rename instead\n"
     )
     return 2
 
 
-def _records_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle workflow record create/update/rename through the CLI."""
+def _records_help_text() -> str:
+    return (
+        "usage: workflow records list [--never-run] [--limit N] [--include-definition] [--json]\n"
+        "       workflow records get <workflow_id> [--include-definition] [--json]\n"
+        "       workflow records create (--input-json <json> | --input-file <path>) [--json]\n"
+        "       workflow records update <workflow_id> (--input-json <json> | --input-file <path>) [--json]\n"
+        "       workflow records rename <workflow_id> --to <new_workflow_id> [--name <display_name>] [--json]\n"
+    )
 
-    if not args or args[0] in {"-h", "--help"}:
-        stdout.write(
-            "usage: workflow records create (--input-json <json> | --input-file <path>)\n"
-            "       workflow records update <workflow_id> (--input-json <json> | --input-file <path>)\n"
-            "       workflow records rename <workflow_id> --to <new_workflow_id> [--name <display_name>]\n"
-        )
+
+def _records_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle workflow record reads and writes through the CLI."""
+
+    if not args:
+        stdout.write(_records_help_text())
         return 2
+    if args[0] in {"-h", "--help"}:
+        stdout.write(_records_help_text())
+        return 0
 
     subcommand = args[0]
+    if any(token in {"-h", "--help"} for token in args[1:]):
+        stdout.write(_records_help_text())
+        return 0
     tail = args[1:]
     query_mod = _workflow_query_mod()
-    conn = _workflow_subsystems().get_pg_conn()
 
     try:
         input_json = None
@@ -1848,6 +1886,9 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
         workflow_id = None
         new_workflow_id = None
         rename_name = None
+        include_definition = False
+        never_run = False
+        limit = 100
         i = 0
         while i < len(tail):
             if tail[i] == "--input-json" and i + 1 < len(tail):
@@ -1862,6 +1903,20 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
             elif tail[i] == "--name" and i + 1 < len(tail):
                 rename_name = tail[i + 1]
                 i += 2
+            elif tail[i] == "--include-definition":
+                include_definition = True
+                i += 1
+            elif tail[i] == "--json":
+                i += 1
+            elif tail[i] == "--never-run":
+                never_run = True
+                i += 1
+            elif tail[i] == "--limit" and i + 1 < len(tail):
+                limit = int(tail[i + 1])
+                i += 2
+            elif subcommand == "get" and workflow_id is None:
+                workflow_id = tail[i].strip()
+                i += 1
             elif subcommand == "update" and workflow_id is None:
                 workflow_id = tail[i].strip()
                 i += 1
@@ -1872,6 +1927,65 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
                 stdout.write(f"unknown argument: {tail[i]}\n")
                 return 2
 
+        if subcommand == "list":
+            if input_json is not None or input_file is not None or workflow_id or new_workflow_id or rename_name:
+                stdout.write(
+                    "usage: workflow records list [--never-run] [--limit N] "
+                    "[--include-definition] [--json]\n"
+                )
+                return 2
+            from storage.postgres.workflow_runtime_repository import list_workflow_records
+
+            conn = _workflow_subsystems().get_pg_conn()
+            rows = list_workflow_records(
+                conn,
+                never_run=never_run,
+                limit=limit,
+            )
+            workflows = [
+                query_mod._workflow_to_dict(dict(row), include_definition=include_definition)
+                for row in rows
+            ]
+            print_json(
+                stdout,
+                {
+                    "workflows": workflows,
+                    "count": len(workflows),
+                    "filters": {
+                        "never_run": never_run,
+                        "limit": max(0, min(int(limit), 500)),
+                        "include_definition": include_definition,
+                    },
+                    "source_authority": "public.workflows",
+                },
+            )
+            return 0
+
+        if subcommand == "get":
+            if input_json is not None or input_file is not None or not workflow_id:
+                stdout.write("usage: workflow records get <workflow_id> [--include-definition] [--json]\n")
+                return 2
+            from storage.postgres.workflow_runtime_repository import load_workflow_record
+
+            conn = _workflow_subsystems().get_pg_conn()
+            row = load_workflow_record(conn, workflow_id=workflow_id)
+            if row is None:
+                print_json(
+                    stdout,
+                    {
+                        "error": f"workflow not found: {workflow_id}",
+                        "status": "not_found",
+                        "reason_code": "workflow_records.not_found",
+                        "workflow_id": workflow_id,
+                    },
+                )
+                return 1
+            print_json(
+                stdout,
+                {"workflow": query_mod._workflow_to_dict(dict(row), include_definition=include_definition)},
+            )
+            return 0
+
         if subcommand == "rename":
             if input_json is not None or input_file is not None:
                 stdout.write("error: rename does not accept input-json or input-file\n")
@@ -1879,11 +1993,12 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
             if not workflow_id or not new_workflow_id:
                 stdout.write(
                     "usage: workflow records rename <workflow_id> --to <new_workflow_id> "
-                    "[--name <display_name>]\n"
+                    "[--name <display_name>] [--json]\n"
                 )
                 return 2
             from runtime.canonical_workflows import rename_workflow
 
+            conn = _workflow_subsystems().get_pg_conn()
             row = rename_workflow(
                 conn,
                 workflow_id=workflow_id,
@@ -1907,6 +2022,7 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
                 return 2
             from runtime.canonical_workflows import save_workflow
 
+            conn = _workflow_subsystems().get_pg_conn()
             row = save_workflow(conn, workflow_id=None, body=payload)
             print_json(stdout, {"workflow": query_mod._workflow_to_dict(dict(row), include_definition=True)})
             return 0
@@ -1915,7 +2031,7 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
             if not workflow_id:
                 stdout.write(
                     "usage: workflow records update <workflow_id> "
-                    "(--input-json <json> | --input-file <path>)\n"
+                    "(--input-json <json> | --input-file <path>) [--json]\n"
                 )
                 return 2
             error = query_mod._validate_workflow_body(
@@ -1931,6 +2047,7 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
                 return 2
             from runtime.canonical_workflows import save_workflow
 
+            conn = _workflow_subsystems().get_pg_conn()
             row = save_workflow(conn, workflow_id=workflow_id, body=payload)
             print_json(stdout, {"workflow": query_mod._workflow_to_dict(dict(row), include_definition=True)})
             return 0
@@ -1938,7 +2055,20 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"error: {exc}\n")
         return 2
     except Exception as exc:
-        print_json(stdout, {"error": str(exc)})
+        reason_code = (
+            "workflow_records.db_authority_unavailable"
+            if exc.__class__.__name__ == "PostgresConfigurationError"
+            else "workflow_records.error"
+        )
+        print_json(
+            stdout,
+            {
+                "error": str(exc),
+                "status": "error",
+                "reason_code": reason_code,
+                "source_authority": "public.workflows",
+            },
+        )
         return 1
 
     stdout.write(f"unknown records subcommand: {subcommand}\n")

@@ -34,6 +34,8 @@ import urllib.request
 import uuid
 from typing import Any
 
+from surfaces.cli.commands.tools import _render_tool_lookup_failure, _resolve_tool_definition
+
 _ENV_URL = "PRAXIS_WORKFLOW_MCP_URL"
 _ENV_TOKEN = "PRAXIS_WORKFLOW_MCP_TOKEN"
 _ENV_ALLOWED = "PRAXIS_ALLOWED_MCP_TOOLS"
@@ -363,7 +365,7 @@ def _print_result(result: Any) -> None:
 
 
 def _parse_workflow_tools_call_args(argv: list[str]) -> tuple[str, dict[str, Any]]:
-    """Support the canonical host-CLI shape `praxis workflow tools call <tool> --input-json '{...}'`.
+    """Support the canonical host-CLI shape `praxis workflow tools call <tool|alias|entrypoint> --input-json '{...}'`.
 
     The agent's prompts and CLAUDE.md instructions teach this exact syntax for
     every tool call on the host CLI. Keeping the sandbox binary compatible
@@ -382,28 +384,28 @@ def _parse_workflow_tools_call_args(argv: list[str]) -> tuple[str, dict[str, Any
         return ("__tools_search__", {"argv": argv[1:]})
     if verb == "describe":
         if len(argv) < 2:
-            _die(1, "usage: praxis workflow tools describe <tool_name>")
-        return ("__tools_describe__", {"tool": argv[1]})
+            _die(1, "usage: praxis workflow tools describe <tool|alias|entrypoint>")
+        return ("__tools_describe__", {"argv": argv[1:]})
     if verb != "call":
         _die(1, f"unknown workflow tools verb: {verb!r}")
     if len(argv) < 2:
-        _die(1, "usage: praxis workflow tools call <tool_name> [--input-json '{...}'] [--yes]")
-    tool_name = argv[1]
-    if not tool_name.startswith("praxis_"):
-        tool_name = f"praxis_{tool_name}"
-    parser = argparse.ArgumentParser(prog="praxis workflow tools call", add_help=False)
-    parser.add_argument("--input-json", dest="input_json", default="{}")
-    parser.add_argument("--yes", dest="yes", action="store_true", default=False)
-    parser.add_argument("--args", dest="args_json", default=None)
-    ns, _extra = parser.parse_known_args(argv[2:])
-    raw = ns.args_json if ns.args_json is not None else ns.input_json
-    try:
-        arguments = json.loads(raw) if raw else {}
-    except json.JSONDecodeError as exc:
-        _die(1, f"--input-json must be valid JSON: {exc}")
-    if not isinstance(arguments, dict):
-        _die(1, "--input-json must parse to a JSON object")
-    return (tool_name, arguments)
+        _die(1, "usage: praxis workflow tools call <tool|alias|entrypoint> [--input-json '{...}'] [--yes]")
+    return ("__tools_call__", {"argv": argv[1:]})
+
+
+def _split_tool_reference_and_flags(argv: list[str]) -> tuple[str, list[str]]:
+    """Split a tool reference from trailing flags.
+
+    Tool references can contain spaces, so we keep consuming tokens until the
+    first flag-style argument and then hand the rest to the normal parser.
+    """
+
+    reference_tokens: list[str] = []
+    for index, arg in enumerate(argv):
+        if arg.startswith("--"):
+            return (" ".join(reference_tokens).strip(), argv[index:])
+        reference_tokens.append(arg)
+    return (" ".join(reference_tokens).strip(), [])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -425,8 +427,8 @@ def main(argv: list[str] | None = None) -> int:
             "2) Canonical workflow shape (matches the host CLI):\n"
             "  praxis workflow tools list\n"
             "  praxis workflow tools search <text> [--exact]\n"
-            "  praxis workflow tools describe <tool_name>\n"
-            "  praxis workflow tools call <tool_name> --input-json '{...}' [--yes]\n\n"
+            "  praxis workflow tools describe <tool|alias|entrypoint>\n"
+            "  praxis workflow tools call <tool|alias|entrypoint> --input-json '{...}' [--yes]\n\n"
             "Aliases — `praxis workflow query`/`discover`/`recall`/`bugs`/`artifacts`/`health` also work.\n"
             "\nEnvironment:\n"
             f"  {_ENV_URL}      MCP bridge endpoint (injected by worker)\n"
@@ -443,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Route 1: canonical `praxis workflow ...` shape used by CLAUDE.md-trained
     # prompts and host-CLI muscle memory. The worker's host CLI exposes
-    # `praxis workflow tools call <tool> --input-json '{...}'`; we mirror
+    # `praxis workflow tools call <tool|alias|entrypoint> --input-json '{...}'`; we mirror
     # that exactly inside the sandbox so the agent's vocabulary is stable
     # regardless of context.
     if argv[0] == "workflow":
@@ -487,12 +489,66 @@ def main(argv: list[str] | None = None) -> int:
             if tool_name == "__tools_describe__":
                 allowed_tools = str(os.environ.get(_ENV_ALLOWED, "")).strip() or ""
                 tools = _call_tools_list(url=url, token=token, allowed_tools=allowed_tools)
-                tool = _match_tool_definition(tools, str(arguments["tool"]))
+                describe_argv = list(arguments.get("argv") or [])
+                tool_reference, extra_flags = _split_tool_reference_and_flags(describe_argv)
+                if not tool_reference:
+                    _die(1, "usage: praxis workflow tools describe <tool|alias|entrypoint>")
+                parser = argparse.ArgumentParser(prog="praxis workflow tools describe", add_help=False)
+                parser.add_argument("--json", dest="as_json", action="store_true", default=False)
+                ns, remaining = parser.parse_known_args(extra_flags)
+                if remaining:
+                    _die(1, f"unknown describe flag: {remaining[0]}")
+                resolved_definition, candidates = _resolve_tool_definition(tool_reference)
+                if resolved_definition is None:
+                    _render_tool_lookup_failure(tool_reference, candidates, stdout=sys.stdout)
+                    return 2
+                tool = _match_tool_definition(tools, resolved_definition.name)
                 if tool is None:
-                    _die(2, f"unknown tool: {arguments['tool']}")
+                    _render_tool_lookup_failure(tool_reference, [], stdout=sys.stdout)
+                    return 2
+                if ns.as_json:
+                    print(json.dumps(tool, indent=2, sort_keys=True, default=str))
+                    return 0
                 _render_tool_description(tool)
                 return 0
-            # Fall through to tools/call POST.
+            if tool_name == "__tools_call__":
+                allowed_tools = str(os.environ.get(_ENV_ALLOWED, "")).strip() or ""
+                tools = _call_tools_list(url=url, token=token, allowed_tools=allowed_tools)
+                call_argv = list(arguments.get("argv") or [])
+                tool_reference, extra_flags = _split_tool_reference_and_flags(call_argv)
+                if not tool_reference:
+                    _die(1, "usage: praxis workflow tools call <tool|alias|entrypoint> [--input-json '{...}'] [--yes]")
+                resolved_definition, candidates = _resolve_tool_definition(tool_reference)
+                if resolved_definition is None:
+                    _render_tool_lookup_failure(tool_reference, candidates, stdout=sys.stdout)
+                    return 2
+                if _match_tool_definition(tools, resolved_definition.name) is None:
+                    _render_tool_lookup_failure(tool_reference, [], stdout=sys.stdout)
+                    return 2
+                parser = argparse.ArgumentParser(prog="praxis workflow tools call", add_help=False)
+                parser.add_argument("--input-json", dest="input_json", default="{}")
+                parser.add_argument("--yes", dest="yes", action="store_true", default=False)
+                parser.add_argument("--args", dest="args_json", default=None)
+                ns, remaining = parser.parse_known_args(extra_flags)
+                if remaining:
+                    _die(1, f"unknown call flag: {remaining[0]}")
+                raw = ns.args_json if ns.args_json is not None else ns.input_json
+                try:
+                    call_arguments = json.loads(raw) if raw else {}
+                except json.JSONDecodeError as exc:
+                    _die(1, f"--input-json must be valid JSON: {exc}")
+                if not isinstance(call_arguments, dict):
+                    _die(1, "--input-json must parse to a JSON object")
+                result = _post_jsonrpc(
+                    url=url,
+                    token=token,
+                    tool_name=resolved_definition.name,
+                    arguments=call_arguments,
+                    allowed_tools=allowed_tools or resolved_definition.name,
+                )
+                _print_result(result)
+                return 0
+            # Fall through to tools/call POST for the older canonical MCP tool-name path.
             allowed_tools = str(os.environ.get(_ENV_ALLOWED, "")).strip() or tool_name
             result = _post_jsonrpc(
                 url=url, token=token, tool_name=tool_name,

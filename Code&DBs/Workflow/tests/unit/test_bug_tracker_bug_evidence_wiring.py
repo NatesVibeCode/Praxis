@@ -183,6 +183,42 @@ def test_link_evidence_writes_through_bug_evidence_repository(monkeypatch) -> No
     assert result["notes"] == "wired through repository"
 
 
+def test_governance_scan_evidence_reference_validates_against_scan_table() -> None:
+    class _Conn:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def fetchval(self, query: str, *params: object) -> int:
+            self.calls.append((query, params))
+            return 1
+
+    conn = _Conn()
+    tracker = BugTracker(conn=conn)
+
+    tracker._validate_evidence_reference(
+        evidence_kind=_mod.EVIDENCE_KIND_GOVERNANCE_SCAN,
+        evidence_ref="governance-scan-123",
+    )
+
+    assert len(conn.calls) == 1
+    assert "FROM data_dictionary_governance_scans" in conn.calls[0][0]
+    assert conn.calls[0][1] == ("governance-scan-123",)
+
+
+def test_governance_scan_evidence_reference_rejects_unknown_scan() -> None:
+    class _Conn:
+        def fetchval(self, query: str, *params: object) -> int:
+            return 0
+
+    tracker = BugTracker(conn=_Conn())
+
+    with pytest.raises(ValueError, match="unknown governance_scan reference"):
+        tracker._validate_evidence_reference(
+            evidence_kind=_mod.EVIDENCE_KIND_GOVERNANCE_SCAN,
+            evidence_ref="missing-scan",
+        )
+
+
 def test_resolve_fixed_requires_passed_validates_fix_verification(monkeypatch) -> None:
     tracker = BugTracker(conn=object())
     bug = _sample_bug()

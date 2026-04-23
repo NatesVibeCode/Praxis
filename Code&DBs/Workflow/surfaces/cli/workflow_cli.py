@@ -8,7 +8,7 @@ Usage:
     python workflow_cli.py validate <spec.json>
     python workflow_cli.py chain <coordination.json>
     python workflow_cli.py chain-status [<chain_id>] [--limit N]
-    python workflow_cli.py status [--since-hours N]
+    python workflow_cli.py status
     python workflow_cli.py active
     python workflow_cli.py diagnose <run_id>
     python workflow_cli.py retry <run_id> <label>

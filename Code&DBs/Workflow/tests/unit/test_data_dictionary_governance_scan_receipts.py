@@ -17,6 +17,7 @@ from runtime.data_dictionary_governance import (
     GovernanceViolation,
     run_governance_scan,
 )
+from runtime.bug_evidence import EVIDENCE_ROLE_DISCOVERED_BY
 from runtime import data_dictionary_governance as governance
 
 
@@ -85,7 +86,7 @@ def _audit_spy(monkeypatch) -> dict[str, Any]:
         captured["inserts"].append(kw)
         return {"scan_id": f"SCAN-{len(captured['inserts'])}", "scanned_at": "T"}
 
-    def _link(conn, *, bug_id, scan_id, role="discovered_by"):
+    def _link(conn, *, bug_id, scan_id, role=EVIDENCE_ROLE_DISCOVERED_BY):
         captured["links"].append({"bug_id": bug_id, "scan_id": scan_id, "role": role})
 
     import storage.postgres.data_dictionary_governance_scans_repository as repo
@@ -120,6 +121,7 @@ def test_dry_run_records_audit_row(_audit_spy, monkeypatch) -> None:
     assert insert["total_violations"] == 1
     assert insert["bugs_filed"] == 0
     assert insert["filed_bug_ids"] == []
+    assert result["scan_recording_status"] == "complete"
     # No bug links for a dry run.
     assert _audit_spy["links"] == []
 
@@ -156,13 +158,15 @@ def test_enforce_links_every_filed_bug_to_scan(_audit_spy, _no_impact, monkeypat
     # One link per filed bug.
     assert len(_audit_spy["links"]) == 2
     roles = {l["role"] for l in _audit_spy["links"]}
-    assert roles == {"discovered_by"}
+    assert roles == {EVIDENCE_ROLE_DISCOVERED_BY}
+    assert result["scan_recording_status"] == "complete"
 
 
 def test_scan_id_exposed_on_returned_summary(_audit_spy, _no_impact, monkeypatch) -> None:
     monkeypatch.setattr(governance, "scan_violations", lambda conn: [])
     result = run_governance_scan(_FakeConn(), tracker=_FakeTracker(), dry_run=False)
     assert result["scan_id"] == "SCAN-1"
+    assert result["scan_recording_status"] == "complete"
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +197,10 @@ def test_audit_write_failure_is_swallowed(monkeypatch) -> None:
     result = run_governance_scan(_FakeConn(), tracker=None, dry_run=True)
     assert result["total_violations"] == 0
     assert "scan_id" not in result
+    assert result["scan_recording_status"] == "degraded"
+    assert result["scan_recording_errors"] == [
+        {"scope": "governance_scan", "error": "audit db down"}
+    ]
 
 
 def test_link_failures_are_swallowed(_audit_spy, _no_impact, monkeypatch) -> None:
@@ -211,3 +219,82 @@ def test_link_failures_are_swallowed(_audit_spy, _no_impact, monkeypatch) -> Non
     # Scan still recorded, bug still filed — linking failure is best-effort.
     assert result["scan_id"] == "SCAN-1"
     assert len(result["filed_bugs"]) == 1
+    assert result["scan_recording_status"] == "degraded"
+    assert result["scan_recording_errors"] == [
+        {"scope": "bug_evidence_link", "bug_id": "BUG-0001", "error": "link dead"}
+    ]
+
+
+def test_link_bug_to_scan_uses_canonical_bug_evidence_repository() -> None:
+    import storage.postgres.data_dictionary_governance_scans_repository as repo
+
+    class _Conn:
+        def __init__(self) -> None:
+            self.executed: list[tuple[str, tuple[Any, ...]]] = []
+
+        def fetchrow(self, sql: str, *args: Any) -> dict[str, Any] | None:
+            assert "FROM data_dictionary_governance_scans" in sql
+            assert args == ("scan-123",)
+            return {
+                "scan_id": "scan-123",
+                "scanned_at": "T",
+                "triggered_by": "unit",
+                "dry_run": False,
+                "total_violations": 1,
+                "bugs_filed": 1,
+                "bugs_skipped": 0,
+                "bugs_errored": 0,
+                "by_policy": {},
+                "violations": [],
+                "filed_bug_ids": ["BUG-0001"],
+                "metadata": {},
+            }
+
+        def execute(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+            self.executed.append((sql, args))
+            return [{
+                "bug_evidence_link_id": args[0],
+                "bug_id": args[1],
+                "evidence_kind": args[2],
+                "evidence_ref": args[3],
+                "evidence_role": args[4],
+                "created_at": args[5],
+                "created_by": args[6],
+                "notes": args[7],
+            }]
+
+    conn = _Conn()
+
+    row = repo.link_bug_to_scan(conn, bug_id="BUG-0001", scan_id="scan-123")
+
+    assert row is not None
+    assert row["bug_id"] == "BUG-0001"
+    assert row["evidence_kind"] == "governance_scan"
+    assert row["evidence_ref"] == "scan-123"
+    assert row["evidence_role"] == EVIDENCE_ROLE_DISCOVERED_BY
+    assert row["created_by"] == "governance_compliance_heartbeat"
+    assert len(conn.executed) == 1
+    assert "INSERT INTO bug_evidence_links" in conn.executed[0][0]
+
+
+def test_link_bug_to_scan_rejects_unknown_scan_before_writing_evidence() -> None:
+    import storage.postgres.data_dictionary_governance_scans_repository as repo
+
+    class _Conn:
+        def __init__(self) -> None:
+            self.executed: list[tuple[str, tuple[Any, ...]]] = []
+
+        def fetchrow(self, sql: str, *args: Any) -> None:
+            assert "FROM data_dictionary_governance_scans" in sql
+            return None
+
+        def execute(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+            self.executed.append((sql, args))
+            return []
+
+    conn = _Conn()
+
+    with pytest.raises(ValueError, match="unknown governance_scan reference"):
+        repo.link_bug_to_scan(conn, bug_id="BUG-0001", scan_id="missing-scan")
+
+    assert conn.executed == []

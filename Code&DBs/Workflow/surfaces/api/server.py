@@ -23,6 +23,7 @@ from runtime.dependency_contract import (
     format_dependency_truth_report,
     require_runtime_dependencies,
 )
+from runtime.primitive_contracts import resolve_runtime_http_endpoints
 from surfaces.api.handlers._subsystems import workflow_database_env
 
 
@@ -42,13 +43,25 @@ def _prime_workflow_database_env() -> None:
     workflow_database_env()
 
 
+def _runtime_http_endpoints(*, host: str, port: int) -> dict[str, str]:
+    """Project the client-facing HTTP authority for this API process."""
+
+    client_host = host.strip()
+    if client_host in {"0.0.0.0", "::", "[::]"}:
+        client_host = "localhost"
+    return resolve_runtime_http_endpoints(
+        workflow_env={"PRAXIS_API_BASE_URL": f"http://{client_host}:{port}"},
+        native_instance={},
+    )
+
+
 def start_server(
     host: str = "127.0.0.1",
     port: int = 8420,
     *,
     reload: bool = False,
     reload_dirs: tuple[str, ...] | None = None,
-    ) -> None:
+) -> None:
     """Start the Praxis Engine REST API server.
 
     Args:
@@ -87,12 +100,15 @@ def start_server(
 
         app_target = app
 
-    print(f"Starting Praxis Engine API on http://{host}:{port}")
+    endpoints = _runtime_http_endpoints(host=host, port=port)
+    api_base_url = str(endpoints["api_base_url"]).rstrip("/")
+    print(f"Starting Praxis Engine API on {api_base_url}")
+    print(f"  Bind:    http://{host}:{port}")
     print(f"Dependency contract: {report['manifest_path']}")
     print(f"  Reload: {'enabled' if reload else 'disabled'}")
-    print(f"  Docs:    http://localhost:{port}/docs")
-    print(f"  Health:  http://localhost:{port}/api/health")
-    print(f"  Dashboard: http://localhost:{port}/api/dashboard")
+    print(f"  Docs:    {endpoints['api_docs_url']}")
+    print(f"  Health:  {api_base_url}/api/health")
+    print(f"  Dashboard: {api_base_url}/api/dashboard")
     print("Press Ctrl+C to stop.\n")
 
     uvicorn.run(app_target, **uvicorn_kwargs)

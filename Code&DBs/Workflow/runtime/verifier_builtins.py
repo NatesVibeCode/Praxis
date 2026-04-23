@@ -12,10 +12,14 @@ class VerifierBuiltinsError(RuntimeError):
     """Raised when a builtin verifier or healer ref is unknown."""
 
 
-def builtin_verify_schema_authority(*, inputs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    from storage.dev_postgres import local_postgres_health
+def _workflow_database_status_payload(*, bootstrap: bool) -> dict[str, Any]:
+    from surfaces._boot import workflow_database_status_payload
 
-    health = local_postgres_health().to_json()
+    return workflow_database_status_payload(bootstrap=bootstrap)
+
+
+def builtin_verify_schema_authority(*, inputs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    health = _workflow_database_status_payload(bootstrap=False)
     passed = bool(health.get("schema_bootstrapped")) and not health.get("missing_schema_objects")
     return (
         "passed" if passed else "failed",
@@ -196,10 +200,7 @@ def builtin_verify_connector_capability(
 
 
 def builtin_heal_schema_bootstrap(*, inputs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    from storage.dev_postgres import local_postgres_bootstrap, local_postgres_up
-
-    local_postgres_up()
-    health = local_postgres_bootstrap().to_json()
+    health = _workflow_database_status_payload(bootstrap=True)
     status = "succeeded" if bool(health.get("schema_bootstrapped")) else "failed"
     return status, {"health": health, "inputs": dict(inputs)}
 
@@ -264,4 +265,3 @@ def run_builtin_healer(
     if action_ref == "proof_backfill":
         return builtin_heal_proof_backfill(inputs=inputs, conn=conn, connection_fn=connection_fn)
     raise VerifierBuiltinsError(f"unknown builtin healer action: {action_ref}")
-

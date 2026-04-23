@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 from typing import Any, TextIO
 
 from runtime.workspace_paths import repo_root as workspace_repo_root
+from runtime.instance import native_instance_contract
+from runtime.primitive_contracts import build_runtime_binding_contract, redact_url
 from surfaces.cli._db import cli_sync_conn
+from surfaces._workflow_database import workflow_database_authority_for_repo
 from surfaces.cli.mcp_tools import (
     get_definition,
     print_json,
@@ -16,6 +23,7 @@ from surfaces.cli.mcp_tools import (
     require_confirmation,
     run_cli_tool,
 )
+from surfaces.mcp.subsystems import workflow_database_env as mcp_workflow_database_env
 
 
 def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
@@ -40,6 +48,187 @@ def _api_discovery_text() -> str:
         "  workflow tools list            browse catalog-backed MCP tools\n"
         "  workflow tools search <text>    search tools by topic, alias, or entrypoint\n"
     )
+
+
+def _as_dict(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _coerce_text(value: object, fallback: str = "<unset>") -> str:
+    text = str(value or "").strip()
+    return text if text else fallback
+
+
+def _endpoint_signature(raw: str) -> str:
+    parsed = urlsplit(raw)
+    if not parsed.scheme and not parsed.netloc:
+        return raw.strip().rstrip("/") if raw else "<unset>"
+    host = parsed.hostname or ""
+    if not host:
+        return raw.strip().rstrip("/") if raw else "<unset>"
+    port = parsed.port
+    if port is None:
+        return f"{parsed.scheme}://{host}"
+    return f"{parsed.scheme}://{host}:{port}"
+
+
+def _instances_command(args: list[str], *, stdout: TextIO) -> int:
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow instances [check] [--json]\n"
+            "\n"
+            "Show resolved API/MCP/DB authority and report any obvious instance drift.\n"
+            "Use `workflow instances check` to print an alignment report.\n"
+            "Use `workflow instances --json` for machine-readable output.\n"
+        )
+        return 0
+
+    perform_check = False
+    as_json = False
+    for arg in args:
+        if arg == "check":
+            perform_check = True
+        elif arg == "--json":
+            as_json = True
+        elif arg.startswith("--"):
+            stdout.write(f"error: unknown flag: {arg}\n")
+            return 2
+        else:
+            stdout.write(f"error: unknown argument: {arg}\n")
+            return 2
+
+    from runtime.setup_wizard import setup_payload_for_cli
+    from surfaces.api.rest import list_api_routes
+
+    setup_payload = setup_payload_for_cli("doctor", repo_root=workspace_repo_root())
+    runtime_target = _as_dict(setup_payload.get("runtime_target"))
+    orient_exit_code, orient_payload = run_cli_tool("praxis_orient", {})
+    orient_data = _as_dict(orient_payload if orient_exit_code == 0 else {})
+    authority_envelope = _as_dict(orient_data.get("authority_envelope"))
+    primitive_contracts = _as_dict(authority_envelope.get("primitive_contracts"))
+    if not primitive_contracts and isinstance(orient_data.get("primitive_contracts"), dict):
+        primitive_contracts = _as_dict(orient_data.get("primitive_contracts"))
+    runtime_binding = _as_dict(primitive_contracts.get("runtime_binding"))
+    binding_http = _as_dict(runtime_binding.get("http_endpoints"))
+    binding_db = _as_dict(runtime_binding.get("database"))
+    native_instance = _as_dict(orient_data.get("native_instance"))
+    route_payload = list_api_routes()
+
+    cli_surface = _as_dict(orient_data.get("cli_surface"))
+    tool_count = 0
+    raw_tool_count = cli_surface.get("tool_count")
+    if raw_tool_count is None:
+        raw_tool_count = orient_data.get("tool_guidance", {}).get("preferred_operator_surface", {}).get("tool_count")
+    if raw_tool_count is not None:
+        try:
+            tool_count = int(raw_tool_count)
+        except (TypeError, ValueError):
+            tool_count = 0
+
+    setup_api = _coerce_text(runtime_target.get("api_authority"))
+    setup_db = _coerce_text(runtime_target.get("db_authority"))
+    binding_api = _coerce_text(binding_http.get("api_base_url"))
+    binding_db_display = _coerce_text(binding_db.get("redacted_url"), fallback=_coerce_text(binding_db.get("configured")))
+    api_match = _endpoint_signature(setup_api) == _endpoint_signature(binding_api)
+    db_match = setup_db == binding_db_display
+
+    alignment_errors: list[str] = []
+    if setup_api == "<unset>":
+        alignment_errors.append("runtime target API authority is not set")
+    if setup_db == "<unset>":
+        alignment_errors.append("runtime target DB authority is not set")
+    if not api_match:
+        alignment_errors.append(
+            f"API authority mismatch: runtime_target={setup_api} orient={binding_api}"
+        )
+    if not db_match:
+        alignment_errors.append(
+            f"DB authority mismatch: runtime_target={setup_db} orient={binding_db_display}"
+        )
+    if orient_exit_code != 0:
+        alignment_errors.append("praxis_orient call failed")
+
+    payload = {
+        "setup": setup_payload,
+        "orient": orient_data,
+        "route_catalog": {
+            "visibility": "public",
+            "count": route_payload.get("count"),
+            "docs_url": route_payload.get("docs_url"),
+            "openapi_url": route_payload.get("openapi_url"),
+            "redoc_url": route_payload.get("redoc_url"),
+        },
+        "instances": {
+            "native_instance": native_instance,
+            "runtime_binding": runtime_binding,
+            "setup_api": setup_api,
+            "bind_api": binding_api,
+            "setup_db": setup_db,
+            "bind_db": binding_db_display,
+            "mcp_transport": os.environ.get("PRAXIS_MCP_STDIO_TRANSPORT", "mirror"),
+            "tool_count": tool_count,
+            "api_routes": route_payload.get("count"),
+            "setup_authority_reachable": bool(
+                setup_payload.get("api_mcp_authority_reachable", True)
+            ),
+        },
+        "checks": {
+            "do_check": perform_check,
+            "api_match": api_match,
+            "db_match": db_match,
+            "errors": alignment_errors,
+        },
+    }
+
+    if as_json:
+        stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
+        if perform_check and alignment_errors:
+            return 1
+        if orient_exit_code != 0 or setup_payload.get("error"):
+            return 1
+        return 0
+
+    native_instance_name = _coerce_text(
+        native_instance.get("instance_name"),
+        fallback="<unknown>",
+    )
+    runtime_profile_ref = _coerce_text(native_instance.get("runtime_profile_ref"), fallback="<unknown>")
+    repo_root = _coerce_text(
+        native_instance.get("repo_root"),
+        fallback=_coerce_text(setup_payload.get("workspace")),
+    )
+    route_count = route_payload.get("count")
+    route_count_text = str(route_count) if isinstance(route_count, int) else "n/a"
+    stdout.write("runtime instances:\n")
+    stdout.write(f"  native_instance_name: {native_instance_name}\n")
+    stdout.write(f"  runtime_profile_ref: {runtime_profile_ref}\n")
+    stdout.write(f"  repo_root: {repo_root}\n")
+    stdout.write("  authority_targets:\n")
+    stdout.write(f"    api_target_setup: {setup_api}\n")
+    stdout.write(f"    api_target_bind:  {binding_api}\n")
+    stdout.write(f"    db_target_setup:  {setup_db}\n")
+    stdout.write(f"    db_target_bind:   {binding_db_display}\n")
+    stdout.write("  mcp_surface:\n")
+    stdout.write(f"    stdio_transport: {os.environ.get('PRAXIS_MCP_STDIO_TRANSPORT', 'mirror')}\n")
+    stdout.write(f"    catalog_tools:   {tool_count}\n")
+    stdout.write("  api_contract:\n")
+    stdout.write(f"    public_routes:  {route_count_text}\n")
+    stdout.write(f"    docs_url:       {_coerce_text(route_payload.get('docs_url'))}\n")
+    stdout.write(f"    openapi_url:    {_coerce_text(route_payload.get('openapi_url'))}\n")
+    stdout.write(f"    redoc_url:      {_coerce_text(route_payload.get('redoc_url'))}\n")
+
+    if perform_check:
+        if alignment_errors:
+            stdout.write("\nalignment: FAIL\n")
+            for issue in alignment_errors:
+                stdout.write(f"  - {issue}\n")
+            return 1
+        stdout.write("\nalignment: PASS\n")
+        stdout.write(
+            "  API, MCP, and DB contracts are aligned across setup + /orient surfaces.\n"
+        )
+
+    return 0
 
 
 def _api_help_text() -> str:
@@ -1737,6 +1926,279 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
         return 1
     except KeyboardInterrupt:
         pass
+
+    return 0
+
+
+def _read_repo_env(repo_root: object) -> dict[str, str]:
+    root = repo_root if isinstance(repo_root, os.PathLike) else workspace_repo_root()
+    path = Path(root) / ".env"
+    env: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return env
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        env[key] = value.strip().strip('"\'')
+    return env
+
+
+def _resolve_authority_env() -> tuple[dict[str, str], bool]:
+    repo_root = workspace_repo_root()
+    authority_env = _read_repo_env(repo_root)
+    authority_env.update({k: v for k, v in os.environ.items() if k and isinstance(v, str)})
+    configured = bool(authority_env.get("WORKFLOW_DATABASE_URL"))
+    return authority_env, configured
+
+
+def _build_runtime_binding(env: dict[str, str], *, native_instance) -> dict[str, Any]:
+    try:
+        return build_runtime_binding_contract(
+            workflow_env=env,
+            native_instance=native_instance,
+            workflow_env_error=None,
+        )
+    except Exception:
+        return build_runtime_binding_contract(
+            workflow_env=env,
+            native_instance=None,
+            workflow_env_error=None,
+        )
+
+
+def _probe_orient_url(base_url: str) -> tuple[bool, str]:
+    orient_url = f"{base_url.rstrip('/')}/orient"
+    try:
+        request = Request(
+            orient_url,
+            data=b"{}",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(request, timeout=2) as response:
+            if response.status != 200:
+                return False, f"HTTP {response.status} {response.reason}"
+            return True, "ok"
+    except URLError as exc:
+        return False, f"network error: {exc}"
+    except Exception as exc:
+        return False, f"error: {exc}"
+
+
+def _compare_authority_field(label: str, left: str, right: str) -> str:
+    return (
+        f"{label}: match" if left == right else
+        f"{label}: mismatch\n    - cli:  {left}\n    - api:  {right}"
+    )
+
+
+def _authority_command(args: list[str], *, stdout: TextIO) -> int:
+    if args and args[0] in {"-h", "--help", "help"}:
+        stdout.write(
+            "usage: workflow authority [--json] [--check] [--instance]\n"
+            "\n"
+            "Show resolved authority targets for CLI, MCP, and API surfaces and detect drift.\n"
+            "\n"
+            "Options:\n"
+            "  --json   emit machine-readable payload\n"
+            "  --check  probe API /orient endpoint for runtime liveness\n"
+            "  --instance  include native-instance metadata (name, profile, and workdir)\n"
+        )
+        return 0
+
+    unknown = [
+        arg
+        for arg in args
+        if arg not in {"--json", "--check", "--instance"}
+    ]
+    if unknown:
+        stdout.write(f"unknown authority argument: {unknown[0]}\n")
+        stdout.write("usage: workflow authority [--json] [--check] [--instance]\n")
+        return 2
+
+    as_json = "--json" in args
+    check_api = "--check" in args
+    show_instance = "--instance" in args
+    repo_root = workspace_repo_root()
+    authority_env, configured = _resolve_authority_env()
+
+    cli_authority: dict[str, object]
+    cli_source = "unknown"
+    cli_db_url = ""
+    cli_error = ""
+    try:
+        authority = workflow_database_authority_for_repo(repo_root, env=authority_env)
+        cli_source = str(authority.source)
+        cli_db_url = str(authority.database_url or "")
+        cli_authority = {
+            "url_redacted": redact_url(cli_db_url),
+            "configured": bool(cli_db_url),
+            "source": cli_source,
+        }
+    except Exception as exc:
+        cli_error = str(exc)
+        cli_authority = {"configured": False, "error": cli_error, "source": "unresolved"}
+
+    mcp_authority_env = mcp_workflow_database_env()
+    mcp_db_url = str(mcp_authority_env.get("WORKFLOW_DATABASE_URL") or "")
+    mcp_source = str(mcp_authority_env.get("WORKFLOW_DATABASE_AUTHORITY_SOURCE") or "unknown")
+    mcp_authority = {
+        "url_redacted": redact_url(mcp_db_url),
+        "configured": bool(mcp_db_url),
+        "source": mcp_source,
+    }
+
+    try:
+        native_instance = native_instance_contract(env=authority_env)
+    except Exception as exc:
+        native_instance = {"error": f"{type(exc).__name__}: {exc}"}
+
+    binding_contract = _build_runtime_binding(authority_env, native_instance=native_instance)
+    api_authority = binding_contract.get("database", {})
+    api_workspace = binding_contract.get("workspace", {})
+    if not isinstance(api_workspace, dict):
+        api_workspace = {}
+    api_http_endpoints = binding_contract.get("http_endpoints", {})
+    api_base = str(api_http_endpoints.get("api_base_url") or "unknown")
+    api_redacted_db = str(api_authority.get("redacted_url") or "")
+    api_runtime_profile = str(api_workspace.get("runtime_profile") or "")
+
+    orient_exit_code, orient_payload = run_cli_tool("praxis_orient", {})
+    orient_contract = orient_payload.get("primitive_contracts", {})
+    orient_contract = orient_contract if isinstance(orient_contract, dict) else {}
+    orient_binding = orient_contract.get("runtime_binding", {})
+    orient_binding = orient_binding if isinstance(orient_binding, dict) else {}
+    orient_db = str(
+        orient_binding.get("database", {}).get("redacted_url")
+        if isinstance(orient_binding.get("database"), dict)
+        else ""
+    )
+    orient_api = str(
+        orient_binding.get("http_endpoints", {}).get("api_base_url", "")
+        if isinstance(orient_binding.get("http_endpoints"), dict)
+        else ""
+    )
+
+    api_check = None
+    if check_api:
+        api_check = {
+            "api_base_url": api_base,
+            "reachable": False,
+            "detail": "not_checked",
+        }
+        if api_base != "unknown":
+            ok, detail = _probe_orient_url(api_base)
+            api_check.update({"reachable": ok, "detail": detail})
+        else:
+            api_check["detail"] = "api base URL is unknown"
+
+    checks = {
+        "cli_matches_mcp_db": cli_authority.get("url_redacted") == mcp_authority.get("url_redacted"),
+        "cli_matches_orient_db": bool(orient_db) and cli_authority.get("url_redacted") == orient_db,
+        "api_matches_orient_db": bool(orient_db) and api_redacted_db == orient_db,
+        "api_matches_orient_http": bool(orient_api) and api_base == orient_api,
+        "cli_instance_profile_known": bool(str(native_instance.get("praxis_runtime_profile") or ""))
+        if isinstance(native_instance, dict)
+        else False,
+        "cli_api_runtime_profile_match": bool(
+            isinstance(native_instance, dict)
+            and native_instance.get("praxis_runtime_profile")
+            and native_instance.get("praxis_runtime_profile") == api_runtime_profile
+        ),
+    }
+
+    if as_json:
+        print_json(
+            stdout,
+            {
+                "kind": "workflow_authority_report",
+                "cli": cli_authority,
+                "mcp": mcp_authority,
+                "api": {
+                    "api_base_url": api_base,
+                    "http_endpoints": api_http_endpoints,
+                    "database": api_authority,
+                    "workspace": api_workspace,
+                },
+                "native_instance": native_instance,
+                "orient": {
+                    "exit_code": orient_exit_code,
+                    "payload_ok": orient_exit_code == 0,
+                    "runtime_binding": orient_binding,
+                },
+                "alignment_checks": checks,
+                "api_instance_profile": api_runtime_profile,
+                "api_probe": api_check,
+                "db_configured": configured,
+            },
+        )
+        return 0
+
+    status = "ok"
+    if cli_error or not configured:
+        status = "warn"
+    if api_check and not api_check.get("reachable", False):
+        status = "warn"
+    if not all(checks.values()):
+        status = "warn"
+
+    stdout.write(f"workflow authority report: {status}\n")
+    stdout.write(f"  CLI DB:      {cli_authority.get('url_redacted') or 'unconfigured'} ({cli_authority.get('source')})\n")
+    stdout.write(f"  MCP DB:      {mcp_authority.get('url_redacted') or 'unconfigured'} ({mcp_authority.get('source')})\n")
+    stdout.write(f"  API base:    {api_base}\n")
+    stdout.write(f"  API DB:      {api_redacted_db or 'unconfigured'}\n")
+    if show_instance and isinstance(native_instance, dict):
+        stdout.write("\nInstance context:\n")
+        if "error" in native_instance:
+            stdout.write(f"  CLI native instance: error ({native_instance.get('error')})\n")
+        else:
+            stdout.write(
+                f"  CLI native instance: "
+                f"{native_instance.get('praxis_instance_name') or 'unknown'}\n"
+            )
+            stdout.write(
+                f"  CLI runtime profile: "
+                f"{native_instance.get('praxis_runtime_profile') or 'unknown'}\n"
+            )
+            stdout.write(f"  CLI workdir:         {native_instance.get('workdir') or 'unknown'}\n")
+            stdout.write(
+                f"  API runtime profile:  {api_runtime_profile or 'unknown'}\n"
+            )
+    if orient_exit_code == 0:
+        stdout.write("  /orient:    ok\n")
+    else:
+        stdout.write(f"  /orient:    unavailable ({orient_payload.get('error')})\n")
+
+    stdout.write("\nAlignment checks:\n")
+    stdout.write(f"  { _compare_authority_field('  cli==mcp db', str(cli_authority.get('url_redacted') or ''), str(mcp_authority.get('url_redacted') or '')) }\n")
+    stdout.write(f"  { _compare_authority_field('  cli==orient db', str(cli_authority.get('url_redacted') or ''), orient_db) }\n")
+    stdout.write(f"  { _compare_authority_field('  api==orient db', api_redacted_db, orient_db) }\n")
+    stdout.write(f"  { _compare_authority_field('  api==orient http', api_base, orient_api) }\n")
+    if show_instance and isinstance(native_instance, dict):
+        stdout.write(
+            "  "
+            + _compare_authority_field(
+                'cli==api runtime profile',
+                str(native_instance.get('praxis_runtime_profile') or ''),
+                api_runtime_profile,
+            )
+            + "\n"
+        )
+
+    if api_check:
+        status_text = "reachable" if api_check["reachable"] else "not reachable"
+        stdout.write(f"\nAPI /orient probe: {status_text}\n")
+        if api_check.get("detail"):
+            stdout.write(f"  {api_check['detail']}\n")
+
+    if not checks.get("cli_matches_mcp_db"):
+        stdout.write("\nTip: run `workflow setup doctor` to reconcile runtime environment authority values.\n")
 
     return 0
 

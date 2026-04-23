@@ -15,9 +15,13 @@ Find real ATS-backed opportunities without pretending weak search is complete.
 
 Actual job discovery and review:
 
-- `/Users/nate/Builds/recruiter-runtime/bin/recruiter-operator`
-- `/Users/nate/Builds/recruiter-runtime/bin/recruiter-runtime`
-- `/Users/nate/Builds/recruiter-runtime/bin/recruiter-tracker`
+- `recruiter-operator`
+- `recruiter-runtime`
+- `recruiter-tracker`
+
+Resolve these through `RECRUITER_RUNTIME_BIN` when the runtime exports it;
+otherwise use the binaries on `PATH`. Do not bake an operator-local checkout
+path into prompts, workflow specs, or docs.
 
 Praxis support surfaces for architecture, integrations, and memory:
 

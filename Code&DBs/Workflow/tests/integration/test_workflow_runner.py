@@ -946,3 +946,29 @@ class TestTelemetryParsing:
         )
         assert je.telemetry.input_tokens == 100
         assert je.telemetry.cost_usd == 0.01
+
+    def test_api_execution_does_not_retry_locally(self, monkeypatch):
+        """Retry authority belongs to durable workflow job transitions."""
+        calls = 0
+
+        def _fail_once(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("rate limit")
+
+        monkeypatch.setattr(_workflow_runner, "execute_api_in_sandbox", _fail_once)
+        runner = object.__new__(WorkflowRunner)
+        runner._repo_root = Path(_REPO_ROOT)
+
+        result = runner._execute_api_job(
+            label="api_job",
+            agent_slug="openai/gpt-5.4",
+            agent_config=SimpleNamespace(),
+            prompt="hello",
+            timeout=30,
+        )
+
+        assert calls == 1
+        assert result.status == "failed"
+        assert result.retry_count == 0
+        assert "RuntimeError: rate limit" in result.stderr

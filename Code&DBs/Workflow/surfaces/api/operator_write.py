@@ -474,6 +474,11 @@ def _slugify_roadmap_text(value: str) -> str:
     return ".".join(tokens) or "item"
 
 
+def _looks_like_full_roadmap_ref(value: str) -> bool:
+    normalized = value.strip().lower()
+    return normalized.startswith(("roadmap_item.", "roadmap.item.", "roadmap."))
+
+
 def _roadmap_key_from_item_id(roadmap_item_id: str) -> str:
     prefix = "roadmap_item."
     if roadmap_item_id.startswith(prefix):
@@ -3476,6 +3481,11 @@ class OperatorControlFrontdoor:
             normalized_slug = _slugify_roadmap_text(normalized_title)
             auto_fixes.append(f"slug generated from title: {normalized_slug}")
         else:
+            if _looks_like_full_roadmap_ref(normalized_slug):
+                blocking_errors.append(
+                    "slug must be a roadmap slug fragment, not a full roadmap item id or key: "
+                    f"{normalized_slug}"
+                )
             normalized_slug = _slugify_roadmap_text(normalized_slug)
 
         normalized_item_kind = _normalize_roadmap_item_kind(

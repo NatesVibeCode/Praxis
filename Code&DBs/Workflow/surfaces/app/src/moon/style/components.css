@@ -1034,49 +1034,81 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--moon-glow-black-soft);
+  background:
+    radial-gradient(circle at 50% 36%, var(--moon-white-a08), transparent 42%),
+    linear-gradient(180deg, var(--moon-white-a05), var(--moon-white-a02));
+  box-shadow:
+    inset 0 0 0 1px var(--moon-white-a08),
+    inset 0 -8px 18px rgba(0, 0, 0, 0.22),
+    0 8px 22px rgba(0, 0, 0, 0.28);
   transition: border-color var(--moon-motion-node), background var(--moon-motion-node), box-shadow var(--moon-motion-node), opacity var(--moon-motion-node);
 }
 
 /* unresolved: hollow white ring */
 .moon-chain__ring--unresolved {
-  border: 1.5px solid var(--moon-ring-strong);
-  background: transparent;
-  box-shadow: var(--moon-glow-neutral-soft);
+  border: 1.25px solid var(--moon-ring-strong);
+  background:
+    radial-gradient(circle at 50% 36%, var(--moon-white-a06), transparent 42%),
+    linear-gradient(180deg, var(--moon-white-a03), transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--moon-white-a05),
+    0 8px 18px rgba(0, 0, 0, 0.24);
 }
 
 /* active-unresolved: hollow white + blue glow */
 .moon-chain__ring--active-unresolved {
-  border: 1.5px solid var(--moon-fg);
-  background: transparent;
-  box-shadow: var(--moon-glow-accent-mid);
+  border: 1.5px solid var(--moon-accent);
+  background:
+    radial-gradient(circle at 50% 36%, var(--moon-accent-a12), transparent 42%),
+    linear-gradient(180deg, var(--moon-white-a05), transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--moon-white-a08),
+    0 0 0 4px var(--moon-accent-a08),
+    0 10px 22px rgba(0, 0, 0, 0.28);
 }
 
 /* decided-grounded: hollow white ring + soft accent glow */
 .moon-chain__ring--decided-grounded {
-  border: 1.5px solid var(--moon-fg);
-  background: transparent;
+  border: 1.25px solid var(--moon-fg);
+  background:
+    radial-gradient(circle at 50% 36%, var(--moon-white-a08), transparent 42%),
+    linear-gradient(180deg, var(--moon-white-a05), var(--moon-white-a02));
   color: var(--moon-fg);
-  box-shadow: var(--moon-glow-accent-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--moon-white-a08),
+    0 8px 20px rgba(0, 0, 0, 0.26);
 }
 
 /* decided-incomplete: hollow white ring + soft accent glow */
 .moon-chain__ring--decided-incomplete {
-  border: 1.5px solid var(--moon-fg);
-  background: transparent;
+  border: 1.25px dashed var(--moon-accent);
+  background:
+    radial-gradient(circle at 50% 36%, var(--moon-accent-a10), transparent 42%),
+    linear-gradient(180deg, var(--moon-white-a05), var(--moon-white-a02));
   color: var(--moon-fg);
-  box-shadow: var(--moon-glow-accent-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--moon-white-a08),
+    0 0 0 4px var(--moon-accent-a06),
+    0 8px 20px rgba(0, 0, 0, 0.26);
 }
 
 /* blocked: amber/red rim */
 .moon-chain__ring--blocked {
-  border: 2px solid var(--moon-error);
-  background: transparent;
-  box-shadow: var(--moon-glow-danger-soft);
+  border: 1.75px solid var(--moon-error);
+  background:
+    radial-gradient(circle at 50% 36%, var(--moon-danger-a08), transparent 42%),
+    linear-gradient(180deg, var(--moon-white-a04), transparent);
+  color: var(--moon-error);
+  box-shadow:
+    inset 0 0 0 1px var(--moon-white-a06),
+    0 0 0 4px var(--moon-danger-a08),
+    0 8px 20px rgba(0, 0, 0, 0.26);
 }
 .moon-chain__ring--blocked.moon-chain__ring--has-route {
-  background: var(--moon-accent);
-  color: var(--moon-color-white);
+  background:
+    radial-gradient(circle at 50% 36%, var(--moon-danger-a10), transparent 42%),
+    linear-gradient(180deg, var(--moon-white-a04), transparent);
+  color: var(--moon-error);
 }
 
 /* projected: smaller dashed ring */
@@ -1113,14 +1145,19 @@
 }
 .moon-chain__ring--run-failed {
   border: 1.5px solid var(--moon-error);
-  background: transparent;
-  color: var(--moon-color-white);
+  background:
+    radial-gradient(circle at 50% 36%, var(--moon-danger-a10), transparent 42%),
+    linear-gradient(180deg, var(--moon-white-a04), transparent);
+  color: var(--moon-error);
   box-shadow: var(--moon-glow-danger-soft);
 }
 
 /* Selected overlay — works on any state */
 .moon-chain__ring--selected {
-  box-shadow: 0 0 0 3px var(--moon-accent), var(--moon-glow-accent-strong);
+  box-shadow:
+    0 0 0 2px var(--moon-accent),
+    0 0 0 7px var(--moon-accent-a12),
+    var(--moon-glow-accent-mid);
 }
 
 /* Emphasis for decided nodes behind active (left of center) */
@@ -1842,6 +1879,107 @@ button.moon-release__pill-inner {
   margin-left: 4px;
   font-size: 10px;
   opacity: 0.7;
+}
+
+.moon-release__blocker-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 190, 130, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(255, 180, 90, 0.10), transparent 55%),
+    rgba(255, 255, 255, 0.025);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.moon-release__blocker-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.moon-release__blocker-panel-kicker {
+  color: rgba(255, 216, 180, 0.84);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.moon-release__blocker-panel-count {
+  min-width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 190, 130, 0.22);
+  background: rgba(255, 190, 130, 0.10);
+  color: rgba(255, 225, 195, 0.92);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.moon-release__blocker-list {
+  display: grid;
+  gap: 6px;
+}
+
+.moon-release__blocker-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.13);
+  color: var(--moon-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.moon-release__blocker-card:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.moon-release__blocker-card:not(:disabled):hover {
+  border-color: rgba(255, 190, 130, 0.26);
+  background: rgba(255, 190, 130, 0.075);
+}
+
+.moon-release__blocker-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.moon-release__blocker-card-copy strong {
+  font-size: 11px;
+  color: rgba(255, 235, 215, 0.92);
+}
+
+.moon-release__blocker-card-copy span {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--moon-fg-muted);
+}
+
+.moon-release__blocker-card-action {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 190, 130, 0.20);
+  background: rgba(255, 190, 130, 0.08);
+  color: rgba(255, 220, 185, 0.88);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 /* ---- Expandable plan details ---- */

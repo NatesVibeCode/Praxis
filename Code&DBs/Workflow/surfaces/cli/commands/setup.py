@@ -17,6 +17,8 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
                     "usage: workflow setup <doctor|plan|apply> [--json] [--yes]",
                     "",
                     "Runtime-target setup client. API/MCP own setup authority;",
+                    "the doctor payload now includes the native_instance contract so",
+                    "operators can compare runtime target and repo-local instance.",
                     "SSH is build/deploy transport only.",
                 ]
             )

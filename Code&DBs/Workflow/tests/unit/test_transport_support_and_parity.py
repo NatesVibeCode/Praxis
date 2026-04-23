@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-import types
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -22,12 +21,215 @@ from runtime.task_type_router import TaskTypeRouter
 from runtime.workflow.execution_policy import resolve_cli_execution_policy
 
 
-def _builtin_profiles_map():
-    return {profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES}
+def _provider_authority_row(
+    *,
+    provider_slug: str,
+    binary_name: str,
+    default_model: str | None,
+    api_endpoint: str | None,
+    api_protocol_family: str | None,
+    api_key_env_vars: list[str],
+    base_flags: list[str],
+    model_flag: str | None,
+    system_prompt_flag: str | None,
+    json_schema_flag: str | None,
+    output_format: str,
+    output_envelope_key: str,
+    forbidden_flags: list[str],
+    default_timeout: int,
+    lane_policies: dict[str, dict[str, object]],
+    adapter_economics: dict[str, dict[str, object]],
+    prompt_mode: str = "stdin",
+    aliases: list[str] | None = None,
+    mcp_config_style: str | None = None,
+    mcp_args_template: list[str] | None = None,
+    sandbox_env_overrides: dict[str, object] | None = None,
+    exclude_from_rotation: bool = False,
+) -> dict[str, object]:
+    return {
+        "provider_slug": provider_slug,
+        "binary_name": binary_name,
+        "default_model": default_model,
+        "api_endpoint": api_endpoint,
+        "api_protocol_family": api_protocol_family,
+        "api_key_env_vars": api_key_env_vars,
+        "prompt_mode": prompt_mode,
+        "base_flags": base_flags,
+        "model_flag": model_flag,
+        "system_prompt_flag": system_prompt_flag,
+        "json_schema_flag": json_schema_flag,
+        "output_format": output_format,
+        "output_envelope_key": output_envelope_key,
+        "forbidden_flags": forbidden_flags,
+        "default_timeout": default_timeout,
+        "aliases": aliases or [],
+        "mcp_config_style": mcp_config_style,
+        "mcp_args_template": mcp_args_template,
+        "sandbox_env_overrides": sandbox_env_overrides or {},
+        "exclude_from_rotation": exclude_from_rotation,
+        "lane_policies": lane_policies,
+        "adapter_economics": adapter_economics,
+    }
+
+
+def _cli_lane_policy(reason: str = "Admitted local CLI lane.") -> dict[str, object]:
+    return {
+        "admitted_by_policy": True,
+        "execution_topology": "local_cli",
+        "transport_kind": "cli",
+        "policy_reason": reason,
+    }
+
+
+def _http_lane_policy(
+    *,
+    execution_topology: str = "direct_http",
+    reason: str = "Admitted direct HTTP lane.",
+) -> dict[str, object]:
+    return {
+        "admitted_by_policy": True,
+        "execution_topology": execution_topology,
+        "transport_kind": "http",
+        "policy_reason": reason,
+    }
+
+
+def _prepaid_economics(provider_slug: str, *, allow_payg_fallback: bool) -> dict[str, object]:
+    return {
+        "billing_mode": "subscription_included",
+        "budget_bucket": f"{provider_slug}_monthly",
+        "effective_marginal_cost": 0.0,
+        "prefer_prepaid": True,
+        "allow_payg_fallback": allow_payg_fallback,
+    }
+
+
+def _metered_economics(provider_slug: str) -> dict[str, object]:
+    return {
+        "billing_mode": "metered_api",
+        "budget_bucket": f"{provider_slug}_api_payg",
+        "effective_marginal_cost": 1.0,
+        "prefer_prepaid": False,
+        "allow_payg_fallback": True,
+    }
+
+
+def _provider_authority_rows() -> tuple[dict[str, object], ...]:
+    return (
+        _provider_authority_row(
+            provider_slug="anthropic",
+            binary_name="claude",
+            default_model="claude-sonnet-4-6",
+            api_endpoint=None,
+            api_protocol_family=None,
+            api_key_env_vars=[],
+            base_flags=["-p", "--output-format", "json"],
+            model_flag="--model",
+            system_prompt_flag="--system-prompt",
+            json_schema_flag="--json-schema",
+            output_format="json",
+            output_envelope_key="result",
+            forbidden_flags=[
+                "--dangerously-skip-permissions",
+                "--allow-dangerously-skip-permissions",
+                "--add-dir",
+            ],
+            default_timeout=300,
+            lane_policies={"cli_llm": _cli_lane_policy()},
+            adapter_economics={
+                "cli_llm": _prepaid_economics("anthropic", allow_payg_fallback=False)
+            },
+        ),
+        _openai_provider_authority_row(),
+        _provider_authority_row(
+            provider_slug="cursor",
+            binary_name="cursor-api",
+            default_model="auto",
+            api_endpoint="https://api.cursor.com/v0/agents",
+            api_protocol_family="cursor_background_agent",
+            api_key_env_vars=["CURSOR_API_KEY"],
+            base_flags=[],
+            model_flag=None,
+            system_prompt_flag=None,
+            json_schema_flag=None,
+            output_format="text",
+            output_envelope_key="text",
+            forbidden_flags=[],
+            default_timeout=900,
+            lane_policies={
+                "llm_task": _http_lane_policy(
+                    execution_topology="repo_agent_http",
+                    reason="Admitted Cursor background-agent API lane.",
+                )
+            },
+            adapter_economics={
+                "llm_task": _prepaid_economics("cursor", allow_payg_fallback=False)
+            },
+        ),
+        _provider_authority_row(
+            provider_slug="cursor_local",
+            binary_name="cursor-agent",
+            default_model="composer-2",
+            api_endpoint=None,
+            api_protocol_family=None,
+            api_key_env_vars=["CURSOR_API_KEY"],
+            base_flags=["-p", "--output-format", "json", "--mode", "ask", "-f", "--sandbox", "disabled"],
+            model_flag="--model",
+            system_prompt_flag=None,
+            json_schema_flag=None,
+            output_format="json",
+            output_envelope_key="result",
+            forbidden_flags=["--cloud", "--workspace", "-w", "--worktree"],
+            default_timeout=900,
+            aliases=["cursor-cli"],
+            lane_policies={
+                "cli_llm": _cli_lane_policy("Admitted local Cursor Agent CLI lane.")
+            },
+            adapter_economics={
+                "cli_llm": _prepaid_economics("cursor", allow_payg_fallback=False)
+            },
+        ),
+        _provider_authority_row(
+            provider_slug="google",
+            binary_name="gemini",
+            default_model="gemini-2.5-flash",
+            api_endpoint="https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            api_protocol_family="google_generate_content",
+            api_key_env_vars=["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+            base_flags=["-p", ".", "-o", "json"],
+            model_flag="--model",
+            system_prompt_flag=None,
+            json_schema_flag=None,
+            output_format="json",
+            output_envelope_key="response",
+            forbidden_flags=["--approval-mode", "--yolo", "-y"],
+            default_timeout=600,
+            lane_policies={"cli_llm": _cli_lane_policy(), "llm_task": _http_lane_policy()},
+            adapter_economics={
+                "cli_llm": _prepaid_economics("google", allow_payg_fallback=True),
+                "llm_task": _metered_economics("google"),
+            },
+            mcp_config_style="gemini_project_settings",
+            mcp_args_template=["--allowed-mcp-server-names", "dag-workflow"],
+            aliases=["gemini-cli"],
+        ),
+    )
+
+
+def _authority_profiles_map():
+    import registry.provider_execution_registry as provider_registry_authority
+
+    return {
+        profile.provider_slug: profile
+        for profile in (
+            provider_registry_authority._parse_profile_row(row)
+            for row in _provider_authority_rows()
+        )
+    }
 
 
 def _test_profiles_with_declared_auth():
-    profiles = _builtin_profiles_map()
+    profiles = _authority_profiles_map()
     auth_envs = {
         "cursor": ("CURSOR_API_KEY",),
         "cursor_local": ("CURSOR_API_KEY",),
@@ -37,6 +239,61 @@ def _test_profiles_with_declared_auth():
     return {
         slug: replace(profile, api_key_env_vars=auth_envs.get(slug, profile.api_key_env_vars))
         for slug, profile in profiles.items()
+    }
+
+
+def _openai_provider_authority_row() -> dict[str, object]:
+    return {
+        "provider_slug": "openai",
+        "binary_name": "codex",
+        "default_model": "gpt-4.1",
+        "api_endpoint": "https://api.openai.com/v1/chat/completions",
+        "api_protocol_family": "openai_chat_completions",
+        "api_key_env_vars": ["OPENAI_API_KEY"],
+        "prompt_mode": "stdin",
+        "base_flags": ["exec", "-", "--json"],
+        "model_flag": "--model",
+        "system_prompt_flag": None,
+        "json_schema_flag": None,
+        "output_format": "ndjson",
+        "output_envelope_key": "text",
+        "forbidden_flags": ["--full-auto"],
+        "default_timeout": 300,
+        "aliases": [],
+        "mcp_config_style": None,
+        "mcp_args_template": None,
+        "sandbox_env_overrides": {},
+        "exclude_from_rotation": False,
+        "lane_policies": {
+            "cli_llm": {
+                "admitted_by_policy": True,
+                "execution_topology": "local_cli",
+                "transport_kind": "cli",
+                "policy_reason": "Admitted local CLI lane.",
+            },
+            "llm_task": {
+                "admitted_by_policy": True,
+                "execution_topology": "direct_http",
+                "transport_kind": "http",
+                "policy_reason": "Admitted direct HTTP lane.",
+            },
+        },
+        "adapter_economics": {
+            "cli_llm": {
+                "billing_mode": "subscription_included",
+                "budget_bucket": "openai_monthly",
+                "effective_marginal_cost": 0.0,
+                "prefer_prepaid": True,
+                "allow_payg_fallback": True,
+            },
+            "llm_task": {
+                "billing_mode": "metered_api",
+                "budget_bucket": "openai_api_payg",
+                "effective_marginal_cost": 1.0,
+                "prefer_prepaid": False,
+                "allow_payg_fallback": True,
+            },
+        },
     }
 
 
@@ -328,100 +585,44 @@ def test_http_transport_requires_configured_protocol_family(monkeypatch) -> None
 
 
 def test_db_backed_provider_profile_inherits_http_contract_fields(monkeypatch) -> None:
-    import registry.provider_execution_registry as provider_registry_mod
     import registry.provider_execution_registry as provider_registry_authority
 
-    original_registry = dict(provider_registry_authority._REGISTRY)
-    original_loaded = provider_registry_authority._DB_LOADED
-
-    class _FakeConn:
-        async def fetch(self, query: str):
-            if "FROM provider_cli_profiles" in query:
-                return [
-                    {
-                        "provider_slug": "openai",
-                        "binary_name": "codex",
-                        "default_model": "gpt-5.4",
-                        "api_endpoint": "https://api.openai.com/v1/chat/completions",
-                        "api_protocol_family": "openai_chat_completions",
-                        "api_key_env_vars": ["OPENAI_API_KEY"],
-                        "prompt_mode": "stdin",
-                        "base_flags": ["exec", "-", "--json"],
-                        "model_flag": "--model",
-                        "system_prompt_flag": None,
-                        "json_schema_flag": None,
-                        "output_format": "ndjson",
-                        "output_envelope_key": "text",
-                        "forbidden_flags": ["--full-auto"],
-                        "default_timeout": 300,
-                        "aliases": [],
-                        "lane_policies": {
-                            "cli_llm": {
-                                "admitted_by_policy": True,
-                                "execution_topology": "local_cli",
-                                "transport_kind": "cli",
-                                "policy_reason": "Admitted local CLI lane.",
-                            },
-                            "llm_task": {
-                                "admitted_by_policy": True,
-                                "execution_topology": "direct_http",
-                                "transport_kind": "http",
-                                "policy_reason": "Admitted direct HTTP lane.",
-                            },
-                        },
-                        "adapter_economics": {
-                            "cli_llm": {
-                                "billing_mode": "subscription_included",
-                                "budget_bucket": "openai_monthly",
-                                "effective_marginal_cost": 0.0,
-                                "prefer_prepaid": True,
-                                "allow_payg_fallback": True,
-                            },
-                            "llm_task": {
-                                "billing_mode": "metered_api",
-                                "budget_bucket": "openai_api_payg",
-                                "effective_marginal_cost": 1.0,
-                                "prefer_prepaid": False,
-                                "allow_payg_fallback": True,
-                            },
-                        },
-                    }
-                ]
-            return []
-
-        async def close(self) -> None:
-            return None
-
-    async def _connect(_db_url: str):
-        return _FakeConn()
-
-    try:
-        monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
-        monkeypatch.setattr(provider_registry_authority, "_ASYNCPG_AVAILABLE", True)
-        monkeypatch.setattr(provider_registry_authority, "_asyncpg", types.SimpleNamespace(connect=_connect))
-        provider_registry_authority._REGISTRY.clear()
-        provider_registry_authority._REGISTRY.update(original_registry)
-        provider_registry_authority._DB_LOADED = False
-
-        report = provider_registry_mod.validate_profiles()
-
-        profile = provider_registry_mod.get_profile("openai")
-        assert profile is not None
-        assert profile.api_protocol_family == "openai_chat_completions"
-        assert profile.api_key_env_vars == ("OPENAI_API_KEY",)
-        assert provider_registry_mod.resolve_adapter_economics("openai", "llm_task") == {
-            "billing_mode": "metered_api",
-            "budget_bucket": "openai_api_payg",
-            "effective_marginal_cost": 1.0,
-            "prefer_prepaid": False,
-            "allow_payg_fallback": True,
+    del monkeypatch
+    profile = provider_registry_authority._parse_profile_row(
+        {
+            **_openai_provider_authority_row(),
+            "default_model": "gpt-5.4",
         }
-        assert report["openai"]["api_protocol_family"] == "openai_chat_completions"
-        assert provider_registry_mod.supports_adapter("openai", "llm_task") is True
-    finally:
-        provider_registry_authority._REGISTRY.clear()
-        provider_registry_authority._REGISTRY.update(original_registry)
-        provider_registry_authority._DB_LOADED = original_loaded
+    )
+    profiles = {"openai": profile}
+
+    report = provider_transport.validate_profiles(
+        profiles,
+        adapter_config={},
+        failure_mappings={},
+    )
+
+    assert profile.api_protocol_family == "openai_chat_completions"
+    assert profile.api_key_env_vars == ("OPENAI_API_KEY",)
+    assert provider_transport.resolve_adapter_economics(
+        "openai",
+        "llm_task",
+        profiles=profiles,
+    ) == {
+        "billing_mode": "metered_api",
+        "budget_bucket": "openai_api_payg",
+        "effective_marginal_cost": 1.0,
+        "prefer_prepaid": False,
+        "allow_payg_fallback": True,
+    }
+    assert report["openai"]["api_protocol_family"] == "openai_chat_completions"
+    assert provider_transport.supports_adapter(
+        "openai",
+        "llm_task",
+        profiles=profiles,
+        adapter_config={},
+        failure_mappings={},
+    ) is True
 
 
 def test_cursor_profile_is_registered_from_db_authority(monkeypatch) -> None:
@@ -454,7 +655,7 @@ def test_resolve_adapter_economics_rejects_sparse_authority_rows() -> None:
     disagree with its sibling. The contract now refuses sparse rows so the
     authority split cannot re-emerge.
     """
-    profiles = _builtin_profiles_map()
+    profiles = _authority_profiles_map()
     openai_profile = profiles["openai"]
     profiles["openai"] = replace(
         openai_profile,
@@ -491,7 +692,7 @@ def test_cursor_local_profile_is_registered_for_local_cli(monkeypatch) -> None:
         else original_resolve_binary(provider_slug, profiles=profiles),
     )
 
-    profile = _builtin_profiles_map()["cursor_local"]
+    profile = _authority_profiles_map()["cursor_local"]
     assert profile.binary == "cursor-agent"
     assert profile.prompt_mode == "stdin"
     assert provider_registry_mod.supports_adapter("cursor_local", "cli_llm") is True
@@ -855,7 +1056,7 @@ def test_cli_execution_policy_uses_explicit_sandbox_contract() -> None:
 
 
 def test_cli_execution_policy_defaults_cli_only_provider_to_networked_lane() -> None:
-    profile = _builtin_profiles_map()["anthropic"]
+    profile = _authority_profiles_map()["anthropic"]
 
     policy = resolve_cli_execution_policy({}, profile=profile)
 
@@ -1150,82 +1351,87 @@ def test_route_economics_prefers_prepaid_adapter_over_metered_default(monkeypatc
 
 
 def test_llm_task_uses_contract_retry_policy_and_failure_mapping(monkeypatch) -> None:
-    import adapters.provider_transport as provider_transport
     import registry.provider_execution_registry as _reg
 
-    # Force built-in profiles so llm_task lane is admitted (DB may have it disabled).
-    original_registry = dict(_reg._REGISTRY)
-    original_loaded = _reg._DB_LOADED
-    builtin_registry = {p.provider_slug: p for p in provider_transport.BUILTIN_PROVIDER_PROFILES}
-    _reg._REGISTRY.clear()
-    _reg._REGISTRY.update(builtin_registry)
-    _reg._DB_LOADED = True
-    try:
-        from registry.provider_execution_registry import resolve_adapter_contract
+    profiles = {"openai": _reg._parse_profile_row(_openai_provider_authority_row())}
+    contract = provider_transport.resolve_adapter_contract(
+        "openai",
+        "llm_task",
+        profiles=profiles,
+        adapter_config={},
+        failure_mappings={},
+    )
+    assert contract is not None
 
-        contract = resolve_adapter_contract("openai", "llm_task")
-        assert contract is not None
+    captured: dict[str, object] = {}
 
-        captured: dict[str, object] = {}
+    def _boom(request: LLMRequest) -> LLMResponse:
+        captured["timeout_seconds"] = request.timeout_seconds
+        captured["retry_attempts"] = request.retry_attempts
+        captured["retry_backoff_seconds"] = request.retry_backoff_seconds
+        captured["retryable_status_codes"] = request.retryable_status_codes
+        captured["protocol_family"] = request.protocol_family
+        raise LLMClientError("llm_client.timeout", "request timed out")
 
-        def _boom(request: LLMRequest) -> LLMResponse:
-            captured["timeout_seconds"] = request.timeout_seconds
-            captured["retry_attempts"] = request.retry_attempts
-            captured["retry_backoff_seconds"] = request.retry_backoff_seconds
-            captured["retryable_status_codes"] = request.retryable_status_codes
-            captured["protocol_family"] = request.protocol_family
-            raise LLMClientError("llm_client.timeout", "request timed out")
+    import adapters.llm_task as llm_task_mod
 
-        import adapters.llm_task as llm_task_mod
+    monkeypatch.setattr(llm_task_mod, "call_llm", _boom)
+    monkeypatch.setattr(
+        llm_task_mod,
+        "resolve_adapter_contract",
+        lambda provider_slug, adapter_type: provider_transport.resolve_adapter_contract(
+            provider_slug,
+            adapter_type,
+            profiles=profiles,
+            adapter_config={},
+            failure_mappings={},
+        ),
+    )
+    monkeypatch.setattr(
+        llm_task_mod,
+        "supports_adapter",
+        lambda provider_slug, adapter_type: provider_transport.supports_adapter(
+            provider_slug,
+            adapter_type,
+            profiles=profiles,
+            adapter_config={},
+            failure_mappings={},
+        ),
+    )
 
-        monkeypatch.setattr(llm_task_mod, "call_llm", _boom)
+    adapter = LLMTaskAdapter(
+        default_provider="openai",
+        default_model="gpt-4.1",
+        credential_env={"OPENAI_API_KEY": "sk-test"},
+    )
+    request = DeterministicTaskRequest(
+        node_id="node_0",
+        task_name="contract_retry_policy",
+        input_payload={"prompt": "hello", "provider_slug": "openai"},
+        expected_outputs={},
+        dependency_inputs={},
+        execution_boundary_ref="workspace:test",
+    )
 
-        adapter = LLMTaskAdapter(
-            default_provider="openai",
-            default_model="gpt-4.1",
-            credential_env={"OPENAI_API_KEY": "sk-test"},
-        )
-        request = DeterministicTaskRequest(
-            node_id="node_0",
-            task_name="contract_retry_policy",
-            input_payload={"prompt": "hello", "provider_slug": "openai"},
-            expected_outputs={},
-            dependency_inputs={},
-            execution_boundary_ref="workspace:test",
-        )
+    result = adapter.execute(request=request)
 
-        result = adapter.execute(request=request)
-
-        assert result.status == "failed"
-        assert result.failure_code == "adapter.timeout"
-        assert captured["timeout_seconds"] == contract.timeout_seconds
-        assert captured["retry_attempts"] == contract.retry_policy["retry_attempts"]
-        assert captured["retry_backoff_seconds"] == tuple(contract.retry_policy["backoff_seconds"])
-        assert captured["retryable_status_codes"] == tuple(contract.retry_policy["retryable_status_codes"])
-        assert captured["protocol_family"] == contract.prompt_envelope["protocol_family"]
-    finally:
-        _reg._REGISTRY.clear()
-        _reg._REGISTRY.update(original_registry)
-        _reg._DB_LOADED = original_loaded
+    assert result.status == "failed"
+    assert result.failure_code == "adapter.timeout"
+    assert captured["timeout_seconds"] == contract.timeout_seconds
+    assert captured["retry_attempts"] == contract.retry_policy["retry_attempts"]
+    assert captured["retry_backoff_seconds"] == tuple(contract.retry_policy["backoff_seconds"])
+    assert captured["retryable_status_codes"] == tuple(contract.retry_policy["retryable_status_codes"])
+    assert captured["protocol_family"] == contract.prompt_envelope["protocol_family"]
 
 
-def test_provider_registry_prefers_openai_as_default_provider(monkeypatch) -> None:
-    import adapters.provider_transport as provider_transport
+def test_provider_authority_row_preserves_openai_default_provider_contract() -> None:
     import registry.provider_execution_registry as _reg
 
-    del monkeypatch
-    original_registry = dict(_reg._REGISTRY)
-    original_loaded = _reg._DB_LOADED
-    builtin_registry = {p.provider_slug: p for p in provider_transport.BUILTIN_PROVIDER_PROFILES}
-    _reg._REGISTRY.clear()
-    _reg._REGISTRY.update(builtin_registry)
-    _reg._DB_LOADED = True
-    try:
-        assert _reg.default_provider_slug() == "openai"
-    finally:
-        _reg._REGISTRY.clear()
-        _reg._REGISTRY.update(original_registry)
-        _reg._DB_LOADED = original_loaded
+    profile = _reg._parse_profile_row(_openai_provider_authority_row())
+
+    assert profile.provider_slug == "openai"
+    assert profile.api_protocol_family == "openai_chat_completions"
+    assert profile.lane_policies["llm_task"]["admitted_by_policy"] is True
 
 
 def test_llm_task_accepts_explicit_first_party_route_contract_without_registry_lookup(

@@ -19,6 +19,7 @@ from runtime import bug_evidence as _bug_evidence
 from runtime.bug_evidence import (
     ALLOWED_EVIDENCE_KINDS as _ALLOWED_EVIDENCE_KINDS,
     ALLOWED_EVIDENCE_ROLES as _ALLOWED_EVIDENCE_ROLES,
+    EVIDENCE_KIND_GOVERNANCE_SCAN,
     EVIDENCE_ROLE_VALIDATES_FIX,
 )
 from runtime.primitive_contracts import (
@@ -465,11 +466,18 @@ class BugTracker:
                 "SELECT 1 FROM verification_runs WHERE verification_run_id = $1",
                 evidence_ref,
             )
-        else:
+        elif evidence_kind == "healing_run":
             exists = self._record_exists(
                 "SELECT 1 FROM healing_runs WHERE healing_run_id = $1",
                 evidence_ref,
             )
+        elif evidence_kind == EVIDENCE_KIND_GOVERNANCE_SCAN:
+            exists = self._record_exists(
+                "SELECT 1 FROM data_dictionary_governance_scans WHERE scan_id::text = $1",
+                evidence_ref,
+            )
+        else:
+            exists = False
         if not exists:
             raise ValueError(f"unknown {evidence_kind} reference: {evidence_ref}")
 
@@ -1971,6 +1979,50 @@ class BugTracker:
         parsed_status = self._normalize_status(status, default=None) if status is not None else None
         parsed_severity = self._normalize_severity(severity, default=None) if severity is not None else None
         parsed_category = self._normalize_category(category, default=None) if category is not None else None
+        query_text = str(query or "").strip()
+
+        if re.fullmatch(r"(?i)BUG-[0-9A-F]{8}", query_text):
+            clauses = ["bug_id = $1"]
+            params: list[object] = [query_text.upper()]
+            idx = 2
+            if parsed_status is not None:
+                clauses.append(f"status = ${idx}")
+                params.append(parsed_status.value)
+                idx += 1
+            elif open_only:
+                clauses.append(
+                    f"status NOT IN ({bug_status_sql_in_literal(alias_style='both')})"
+                )
+            if parsed_severity is not None:
+                clauses.append(f"severity = ${idx}")
+                params.append(parsed_severity.value)
+                idx += 1
+            if parsed_category is not None:
+                clauses.append(f"category = ${idx}")
+                params.append(parsed_category.value)
+                idx += 1
+            if source_issue_id is not None:
+                clauses.append(f"source_issue_id = ${idx}")
+                params.append(source_issue_id)
+                idx += 1
+            if tags:
+                for tag in tags:
+                    clauses.append(f"LOWER(',' || COALESCE(tags, '') || ',') LIKE ${idx}")
+                    params.append(f"%,{str(tag).strip().lower()},%")
+                    idx += 1
+            if exclude_tags:
+                for tag in exclude_tags:
+                    clauses.append(
+                        f"NOT (LOWER(',' || COALESCE(tags, '') || ',') LIKE ${idx})"
+                    )
+                    params.append(f"%,{str(tag).strip().lower()},%")
+                    idx += 1
+            row = self._conn.fetchrow(
+                f"SELECT * FROM bugs WHERE {' AND '.join(clauses)}",
+                *params,
+            )
+            return [self._row_to_bug(row)] if row else []
+
         where, params, next_idx = self._build_list_bugs_where_clause(
             status=parsed_status,
             severity=parsed_severity,

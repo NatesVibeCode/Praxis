@@ -134,6 +134,47 @@ def _workflow_result_from_metric_row(row: Mapping[str, Any]) -> "WorkflowResult"
     )
 
 
+def _workflow_result_from_run_row(row: Mapping[str, Any]) -> "WorkflowResult":
+    from .workflow.orchestrator import WorkflowResult
+
+    requested_at = _normalize_datetime(row.get("requested_at"))
+    started_at = _normalize_datetime(row.get("started_at") or requested_at)
+    finished_at = _normalize_datetime(row.get("finished_at") or started_at)
+    latency_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
+    status = str(row.get("current_state") or "unknown").strip() or "unknown"
+    workflow_id = str(row.get("workflow_id") or "").strip()
+    spec_name = str(row.get("spec_name") or workflow_id or row.get("run_id") or "").strip()
+    outputs = {
+        "cost_usd": 0.0,
+        "total_cost_usd": 0.0,
+        "workflow_id": workflow_id,
+        "spec_name": spec_name,
+        "history_source": "workflow_runs",
+    }
+
+    return WorkflowResult(
+        run_id=str(row.get("run_id") or ""),
+        status=status,
+        reason_code=str(row.get("terminal_reason_code") or status),
+        completion="done" if status == "succeeded" else None,
+        outputs=outputs,
+        evidence_count=0,
+        started_at=started_at,
+        finished_at=finished_at,
+        latency_ms=latency_ms,
+        provider_slug="workflow_runs",
+        model_slug=None,
+        adapter_type="workflow_runtime",
+        failure_code=row.get("terminal_reason_code"),
+        attempts=1,
+        label=spec_name or None,
+        author_model="workflow_runs",
+        parent_run_id=row.get("parent_run_id"),
+        persisted=True,
+        sync_status="complete",
+    )
+
+
 class WorkflowHistory:
     """Workflow history backed by Postgres metrics, with process-local fallback."""
 
@@ -159,6 +200,27 @@ class WorkflowHistory:
         metrics_view = get_workflow_metrics_view()
         rows = metrics_view.recent_workflows(limit=limit)
         return tuple(_workflow_result_from_metric_row(row) for row in rows)
+
+    def _recent_workflows_from_runs(self, limit: int) -> tuple["WorkflowResult", ...]:
+        from storage.postgres import ensure_postgres_available
+
+        conn = ensure_postgres_available()
+        rows = conn.execute(
+            """SELECT run_id,
+                      workflow_id,
+                      current_state,
+                      terminal_reason_code,
+                      requested_at,
+                      started_at,
+                      finished_at,
+                      request_envelope->>'name' AS spec_name,
+                      request_envelope->>'parent_run_id' AS parent_run_id
+               FROM public.workflow_runs
+               ORDER BY requested_at DESC, run_id DESC
+               LIMIT $1""",
+            max(0, int(limit)),
+        )
+        return tuple(_workflow_result_from_run_row(row) for row in (rows or []))
 
     def _recent_workflows_snapshot(
         self,
@@ -186,6 +248,22 @@ class WorkflowHistory:
             metrics_query_failed = True
             metrics_query_error = f"{type(exc).__name__}: {exc}"
 
+        run_history_included = False
+        if not recent:
+            try:
+                for result in self._recent_workflows_from_runs(limit=bounded_limit):
+                    if result.run_id:
+                        recent[result.run_id] = result
+                        run_history_included = True
+            except Exception as exc:
+                if metrics_query_error:
+                    metrics_query_error = (
+                        f"{metrics_query_error}; workflow_runs fallback "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                else:
+                    metrics_query_error = f"workflow_runs fallback {type(exc).__name__}: {exc}"
+
         fallback_included = False
         for result in self._fallback_recent_workflows(limit=self._max_size):
             if not result.run_id:
@@ -201,8 +279,11 @@ class WorkflowHistory:
             reverse=True,
         )
         if metrics_query_failed:
-            source = "fallback"
+            source = "workflow_runs" if run_history_included else "fallback"
             status = "degraded"
+        elif run_history_included:
+            source = "workflow_runs"
+            status = "complete"
         elif fallback_included:
             source = "mixed"
             status = "mixed"
@@ -256,7 +337,7 @@ class WorkflowHistory:
                 "provider_slug": result.provider_slug,
                 "finished_at": result.finished_at.isoformat(),
             }
-            for result in self.recent_workflows(limit=5)
+            for result in recent[:5]
         ]
 
         return {

@@ -118,54 +118,62 @@ def bootstrap_pg_conn(
     return ensure_postgres_available(env=resolved_env)
 
 
-def sync_registries(conn: Any) -> tuple[list[str], list[str]]:
+def _registry_sync_failure(component: str, exc: Exception) -> dict[str, str]:
+    return {
+        "component": component,
+        "exception_type": type(exc).__name__,
+        "message": str(exc),
+    }
+
+
+def sync_registries(conn: Any) -> tuple[list[str], list[dict[str, str]]]:
     """Run registry syncs that used to happen as side effects in get_pg_conn.
 
-    Returns (succeeded, skipped) lists for observability.
+    Returns (succeeded, failures) for observability.
     """
     succeeded: list[str] = []
-    skipped: list[str] = []
+    failures: list[dict[str, str]] = []
 
     try:
         from registry.integration_registry_sync import sync_integration_registry
         sync_integration_registry(conn)
         succeeded.append("integration_registry")
-    except Exception:
-        skipped.append("integration_registry")
+    except Exception as exc:
+        failures.append(_registry_sync_failure("integration_registry", exc))
 
     try:
         from runtime.capability_catalog import sync_capability_catalog
 
         sync_capability_catalog(conn)
         succeeded.append("capability_catalog")
-    except Exception:
-        skipped.append("capability_catalog")
+    except Exception as exc:
+        failures.append(_registry_sync_failure("capability_catalog", exc))
 
     try:
         from registry.native_runtime_profile_sync import sync_native_runtime_profile_authority
 
         sync_native_runtime_profile_authority(conn)
         succeeded.append("native_runtime_profile_authority")
-    except Exception:
-        skipped.append("native_runtime_profile_authority")
+    except Exception as exc:
+        failures.append(_registry_sync_failure("native_runtime_profile_authority", exc))
 
     try:
         from runtime.integrations.connector_registrar import sync_built_connectors
 
         sync_built_connectors(conn)
         succeeded.append("connector_registry")
-    except Exception:
-        skipped.append("connector_registry")
+    except Exception as exc:
+        failures.append(_registry_sync_failure("connector_registry", exc))
 
     try:
         from runtime.reference_catalog_seeder import seed_reference_catalog
 
         seed_reference_catalog(conn)
         succeeded.append("reference_catalog")
-    except Exception:
-        skipped.append("reference_catalog")
+    except Exception as exc:
+        failures.append(_registry_sync_failure("reference_catalog", exc))
 
-    return succeeded, skipped
+    return succeeded, failures
 
 
 def workflow_database_status(

@@ -826,7 +826,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="workflow",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Run, preview, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.",
+        when_to_use="Run, preview, inspect, spawn, chain, claim, acknowledge, retry, cancel, repair, or list workflows through the MCP workflow surface.",
         when_not_to_use="Do not use it for natural-language questions or health checks.",
         risks={
             "default": "launch",
@@ -839,8 +839,11 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "notifications": "read",
                 "preview": "read",
                 "run": "launch",
+                "spawn": "launch",
+                "chain": "launch",
                 "retry": "launch",
                 "cancel": "launch",
+                "repair": "launch",
             },
         },
         examples=[
@@ -848,12 +851,24 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Run a spec", {"action": "run", "spec_path": "config/specs/example.queue.json"}),
             _example("Preview execution inputs", {"action": "preview", "spec_path": "config/specs/example.queue.json"}),
             _example(
+                "Spawn a child workflow",
+                {"action": "spawn", "spec_path": "config/specs/child_workflow.queue.json", "parent_run_id": "workflow_parent_001", "dispatch_reason": "manual.spawn"},
+            ),
+            _example(
+                "Submit a chain",
+                {"action": "chain", "coordination_path": "config/chains/example-chain.json", "adopt_active": True},
+            ),
+            _example(
                 "Read claimable worker work",
                 {"action": "claim", "subscription_id": "workflow:worker:bridge", "run_id": "workflow_001"},
             ),
             _example(
                 "Acknowledge a worker batch",
                 {"action": "acknowledge", "work": {"claimable": True}, "through_evidence_seq": 2},
+            ),
+            _example(
+                "Repair a degraded sync state",
+                {"action": "repair", "run_id": "workflow_001"},
             ),
         ],
     ),

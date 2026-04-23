@@ -24,6 +24,7 @@ from runtime.docker_image_authority import (
     CONTROL_WORKER_IMAGE,
     DOCKER_IMAGE_ENV,
 )
+from runtime.instance import native_instance_contract
 from runtime.workspace_paths import repo_root as workspace_repo_root
 
 
@@ -356,6 +357,21 @@ def setup_payload(
     runtime_target = runtime_target_report(repo_root=root)
     sandbox_contract = sandbox_contract_report(repo_root=root)
     package_contract = package_contract_report(repo_root=root)
+    native_instance = native_instance_contract(allow_authority_fallback=True)
+    expected_receipts_dir = str((root / "artifacts" / "runtime_receipts").resolve())
+    expected_topology_dir = str((root / "artifacts" / "runtime_topology").resolve())
+    native_instance_checks = {
+        "repo_root_matches_workspace_authority": native_instance.get("repo_root")
+        == runtime_target.get("workspace_authority"),
+        "workdir_matches_repo_root": native_instance.get("workdir")
+        == native_instance.get("repo_root"),
+        "receipts_dir_matches_contract": native_instance.get("praxis_receipts_dir")
+        == expected_receipts_dir,
+        "topology_dir_matches_contract": native_instance.get("praxis_topology_dir")
+        == expected_topology_dir,
+        "instance_name_is_praxis": native_instance.get("praxis_instance_name") == "praxis",
+        "runtime_profile_is_praxis": native_instance.get("praxis_runtime_profile") == "praxis",
+    }
     actions = [
         {
             "action": "select_runtime_target",
@@ -385,6 +401,9 @@ def setup_payload(
         "mode": mode,
         "authority_surface": authority_surface,
         "runtime_target": runtime_target,
+        "native_instance": native_instance,
+        "native_instance_checks": native_instance_checks,
+        "native_instance_checks_ok": all(native_instance_checks.values()),
         "sandbox_contract": sandbox_contract,
         "package_contract": package_contract,
         "empty_thin_sandbox_default": sandbox_contract["empty_thin_sandbox_default"],

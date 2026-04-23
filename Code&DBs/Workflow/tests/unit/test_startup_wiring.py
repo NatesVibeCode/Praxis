@@ -329,9 +329,19 @@ def test_boot_warns_when_registry_sync_steps_are_skipped(
     subs._should_auto_startup_wiring = lambda: False
 
     with caplog.at_level("WARNING"):
-        subs.boot()
+        result = subs.boot()
 
     assert "startup registry sync completed with skipped steps: capability_catalog" in caplog.text
+    assert "catalog offline" in caplog.text
+    assert result["registry_sync"]["skipped"] == ["capability_catalog"]
+    assert result["registry_sync"]["failures"] == [
+        {
+            "component": "capability_catalog",
+            "exception_type": "RuntimeError",
+            "message": "catalog offline",
+        }
+    ]
+    assert subs.boot()["registry_sync"]["failures"] == result["registry_sync"]["failures"]
 
 
 def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:

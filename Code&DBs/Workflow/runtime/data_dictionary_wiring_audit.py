@@ -2,13 +2,21 @@
 
 Two categories of finding, each shipped as a separate report:
 
-**Hard-path findings** — things in source code that will break when
-Praxis moves off the developer's laptop:
+**Hard-path findings** — things in source, docs, skills, queue specs, and
+surface metadata that will break when Praxis moves off the developer's laptop:
 
   * `absolute_user_path`   — `/Users/nate/...` or `/Users/...` outside
     of configured env vars
   * `hardcoded_localhost`  — `localhost` / `127.0.0.1` literal in code
   * `hardcoded_port`       — numeric ports like `:5432`, `:8420`, `:6379`
+
+Each hard-path finding is classified so cleanup can separate live authority
+from historical evidence:
+
+  * `live_authority_bug`
+  * `generated_derived_artifact`
+  * `historical_receipt_evidence`
+  * `test_fixture`
 
 **Unwired findings** — things that exist but nothing references:
 
@@ -75,11 +83,46 @@ def _resolve_default_root() -> Path:
 
 
 _DEFAULT_ROOT = _resolve_default_root()
+_DEFAULT_REPO_ROOT = _DEFAULT_ROOT.parents[1]
 
 _EXCLUDED_DIRS = frozenset({
     "__pycache__", ".git", ".pytest_cache", ".mypy_cache", "node_modules",
-    "dist", "build", "venv", ".venv", "artifacts",
+    "dist", "build", "venv", ".venv",
 })
+
+_AUDIT_FILE_SUFFIXES = frozenset({
+    ".css",
+    ".js",
+    ".json",
+    ".jsx",
+    ".md",
+    ".py",
+    ".sh",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".yaml",
+    ".yml",
+})
+_MAX_AUDIT_FILE_BYTES = 1_000_000
+_DEFAULT_AUDIT_ROOTS = (
+    ".claude",
+    "AGENTS.md",
+    "Code&DBs/Workflow/adapters",
+    "Code&DBs/Workflow/bin",
+    "Code&DBs/Workflow/memory",
+    "Code&DBs/Workflow/registry",
+    "Code&DBs/Workflow/runtime",
+    "Code&DBs/Workflow/storage",
+    "Code&DBs/Workflow/surfaces/cli",
+    "Code&DBs/Workflow/surfaces/mcp",
+    "GEMINI.md",
+    "Skills",
+    "config/cascade/specs",
+    "config/workspace_layout.json",
+    "docs",
+    "scripts",
+)
 
 _EXCLUDED_PATH_SUBSTRINGS = (
     "/tests/",
@@ -88,6 +131,11 @@ _EXCLUDED_PATH_SUBSTRINGS = (
     "/_generated_",
     "/generated/",
     # Skip self: the audit module necessarily mentions the patterns it hunts.
+    "/data_dictionary_wiring_audit.py",
+)
+_AUDIT_EXCLUDED_PATH_SUBSTRINGS = (
+    # Skip audit definitions: they necessarily mention the patterns they hunt.
+    "/audit_primitive_wiring.py",
     "/data_dictionary_wiring_audit.py",
 )
 
@@ -107,6 +155,153 @@ def _iter_python_files(root: Path) -> Iterable[Path]:
             yield p
 
 
+def _iter_audit_files(root: Path) -> Iterable[Path]:
+    """Walk repo-facing text files that may carry operator path authority."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_DIRS]
+        for filename in filenames:
+            path = Path(dirpath) / filename
+            path_text = path.as_posix()
+            if any(ex in path_text for ex in _AUDIT_EXCLUDED_PATH_SUBSTRINGS):
+                continue
+            if path.suffix.lower() not in _AUDIT_FILE_SUFFIXES:
+                continue
+            try:
+                if path.stat().st_size > _MAX_AUDIT_FILE_BYTES:
+                    continue
+            except OSError:
+                continue
+            yield path
+
+
+def _iter_default_audit_files(repo_root: Path) -> Iterable[Path]:
+    """Yield live repo surfaces without walking bulk historical trees."""
+    yielded: set[Path] = set()
+    for rel in _DEFAULT_AUDIT_ROOTS:
+        path = repo_root / rel
+        if not path.exists():
+            continue
+        if path.is_file():
+            if path.suffix.lower() in _AUDIT_FILE_SUFFIXES:
+                yielded.add(path)
+                yield path
+            continue
+        for candidate in _iter_audit_files(path):
+            if candidate in yielded:
+                continue
+            yielded.add(candidate)
+            yield candidate
+
+
+def _repo_relative(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _classify_hard_path_subject(rel: str) -> tuple[str, str, str]:
+    """Return (classification, surface, recommended_action)."""
+    normalized = rel.replace("\\", "/")
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    parts = normalized.split("/")
+    name = parts[-1] if parts else normalized
+
+    if (
+        "/tests/" in f"/{normalized}/"
+        or normalized.startswith("tests/")
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+        or name.endswith(".test.ts")
+        or name.endswith(".test.tsx")
+    ):
+        return (
+            "test_fixture",
+            "test",
+            "Keep only if the literal is asserting path-drift behavior; otherwise use a tmp_path fixture.",
+        )
+
+    if normalized.startswith("Code&DBs/Workflow/artifacts/workflow/") and normalized.endswith((".json", ".queue.json")):
+        return (
+            "historical_workflow_packet",
+            "historical_artifact",
+            "Do not execute directly; inspect as evidence or regenerate from DB-backed workflow authority.",
+        )
+
+    if (
+        normalized.startswith("artifacts/")
+        or normalized.startswith("Code&DBs/Workflow/artifacts/")
+        or normalized.startswith("planning/")
+    ):
+        return (
+            "historical_receipt_evidence",
+            "historical_artifact",
+            "Do not rewrite blindly; preserve as evidence or regenerate from live authority.",
+        )
+
+    if (
+        "/_generated_" in normalized
+        or "/generated/" in normalized
+        or normalized == "docs/MCP.md"
+        or normalized.startswith("Code&DBs/Workflow/storage/_generated_")
+        or normalized.startswith("Code&DBs/Workflow/system_authority/")
+    ):
+        return (
+            "generated_derived_artifact",
+            "generated_artifact",
+            "Fix the source authority, then regenerate this derived file.",
+        )
+
+    if normalized.startswith("Skills/") and normalized.endswith("/SKILL.md"):
+        return (
+            "live_authority_bug",
+            "skill",
+            "Replace operator-local paths with registry, env, PATH, or repo-relative authority.",
+        )
+
+    if normalized.startswith("config/cascade/specs/") and normalized.endswith((".json", ".queue.json")):
+        return (
+            "live_authority_bug",
+            "queue_spec",
+            "Use repo-relative workdir/spec paths or runtime workspace authority.",
+        )
+
+    if normalized.startswith("docs/") or name in {"AGENTS.md", "GEMINI.md", "CLAUDE.md"}:
+        return (
+            "live_authority_bug",
+            "doc",
+            "Point docs at runtime authority and repo-relative commands, not one checkout.",
+        )
+
+    if normalized.startswith("Code&DBs/Workflow/surfaces/mcp/"):
+        return (
+            "live_authority_bug",
+            "mcp_surface",
+            "Use examples and schemas that resolve through repo/runtime authority.",
+        )
+
+    if normalized.startswith("Code&DBs/Workflow/surfaces/cli/") or normalized.startswith("scripts/"):
+        return (
+            "live_authority_bug",
+            "cli_surface",
+            "Resolve through launcher/workspace authority or environment.",
+        )
+
+    if normalized.startswith(".claude/") or normalized.startswith(".cursor") or normalized == ".cursorrules":
+        return (
+            "live_authority_bug",
+            "harness_adapter",
+            "Keep harness adapters derived from Praxis authority; avoid local checkout paths.",
+        )
+
+    return (
+        "live_authority_bug",
+        "source",
+        "Route path authority through runtime.workspace_paths, runtime profile, env, or repo-relative refs.",
+    )
+
+
 def _excerpt(line: str, match: re.Match[str], width: int = 80) -> str:
     """Return a trimmed context snippet around the match."""
     line = line.rstrip("\n")
@@ -122,47 +317,104 @@ def _excerpt(line: str, match: re.Match[str], width: int = 80) -> str:
 # Hard-path audits
 # ---------------------------------------------------------------------------
 
-_RE_ABS_USER_PATH = re.compile(r"""/Users/[a-zA-Z0-9_.-]+(?:/[^"'\s)]*)?""")
+_RE_ABS_USER_PATH = re.compile(
+    r"""(?:/Volumes)?/Users/[a-zA-Z0-9_.-]+(?:/[^"'\s)]*)?"""
+)
 _RE_LOCALHOST    = re.compile(r"""\b(?:localhost|127\.0\.0\.1)\b""")
-_RE_PORT_LITERAL = re.compile(r"""(?<!\w):(?P<port>5432|6379|8420|8000|9000|3000|5000)\b""")
+_RE_PORT_LITERAL = re.compile(r""":(?P<port>5432|6379|8420|8000|9000|3000|5000)\b""")
+_PORT_SENTINELS = (":5432", ":6379", ":8420", ":8000", ":9000", ":3000", ":5000")
+_PORT_CONTEXT_TOKENS = (
+    "localhost",
+    "127.0.0.1",
+    "http://",
+    "https://",
+    "postgres://",
+    "postgresql://",
+    "redis://",
+    "host",
+    "listen",
+    "port",
+    "server",
+    "url",
+    "dsn",
+)
+
+
+def _line_has_port_context(line: str) -> bool:
+    lowered = line.lower()
+    return any(token in lowered for token in _PORT_CONTEXT_TOKENS)
+
+
+def _is_slice_port_false_positive(line: str, match: re.Match[str]) -> bool:
+    return match.start() > 0 and line[match.start() - 1] == "["
 
 
 def audit_hard_paths(root: Path | str | None = None) -> list[WiringFinding]:
-    """Scan source tree for non-portable hardcoded paths / hostnames / ports."""
-    rp = Path(root) if root else _DEFAULT_ROOT
+    """Scan repo-facing text for non-portable paths / hostnames / ports."""
+    rp = Path(root) if root else _DEFAULT_REPO_ROOT
+    files = _iter_audit_files(rp) if root else _iter_default_audit_files(rp)
     findings: list[WiringFinding] = []
-    for path in _iter_python_files(rp):
+    for path in files:
         try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        rel = str(path.relative_to(rp)) if path.is_relative_to(rp) else str(path)
+        if (
+            "/Users/" not in text
+            and "localhost" not in text
+            and "127.0.0.1" not in text
+            and not any(port in text for port in _PORT_SENTINELS)
+        ):
+            continue
+        lines = text.splitlines()
+        rel = _repo_relative(path, rp)
+        classification, surface, recommended_action = _classify_hard_path_subject(rel)
         for lineno, line in enumerate(lines, start=1):
             # Skip docstring / comment-heavy lines? Too aggressive. Keep raw.
-            for m in _RE_ABS_USER_PATH.finditer(line):
-                findings.append(WiringFinding(
-                    category="hard_path",
-                    kind="absolute_user_path",
-                    subject=f"{rel}:{lineno}",
-                    evidence=_excerpt(line, m),
-                    details={"match": m.group(0)},
-                ))
-            for m in _RE_LOCALHOST.finditer(line):
-                findings.append(WiringFinding(
-                    category="hard_path",
-                    kind="hardcoded_localhost",
-                    subject=f"{rel}:{lineno}",
-                    evidence=_excerpt(line, m),
-                    details={"match": m.group(0)},
-                ))
-            for m in _RE_PORT_LITERAL.finditer(line):
-                findings.append(WiringFinding(
-                    category="hard_path",
-                    kind="hardcoded_port",
-                    subject=f"{rel}:{lineno}",
-                    evidence=_excerpt(line, m),
-                    details={"port": m.group("port")},
-                ))
+            if "/Users/" in line:
+                for m in _RE_ABS_USER_PATH.finditer(line):
+                    findings.append(WiringFinding(
+                        category="hard_path",
+                        kind="absolute_user_path",
+                        subject=f"{rel}:{lineno}",
+                        evidence=_excerpt(line, m),
+                        details={
+                            "match": m.group(0),
+                            "classification": classification,
+                            "surface": surface,
+                            "recommended_action": recommended_action,
+                        },
+                    ))
+            if "localhost" in line or "127.0.0.1" in line:
+                for m in _RE_LOCALHOST.finditer(line):
+                    findings.append(WiringFinding(
+                        category="hard_path",
+                        kind="hardcoded_localhost",
+                        subject=f"{rel}:{lineno}",
+                        evidence=_excerpt(line, m),
+                        details={
+                            "match": m.group(0),
+                            "classification": classification,
+                            "surface": surface,
+                            "recommended_action": recommended_action,
+                        },
+                    ))
+            if any(port in line for port in _PORT_SENTINELS) and _line_has_port_context(line):
+                for m in _RE_PORT_LITERAL.finditer(line):
+                    if _is_slice_port_false_positive(line, m):
+                        continue
+                    findings.append(WiringFinding(
+                        category="hard_path",
+                        kind="hardcoded_port",
+                        subject=f"{rel}:{lineno}",
+                        evidence=_excerpt(line, m),
+                        details={
+                            "port": m.group("port"),
+                            "classification": classification,
+                            "surface": surface,
+                            "recommended_action": recommended_action,
+                        },
+                    ))
     return findings
 
 
@@ -267,6 +519,101 @@ def _excluded_orphan_subjects(conn: Any) -> set[str]:
         return set()
 
 
+def _object_ref_table_name(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for prefix in ("table.public.", "table:", "public."):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text.strip() or None
+
+
+def _db_native_table_references(conn: Any, table_names: list[str]) -> set[str]:
+    """Return tables with DB-native proof that Python string search can miss."""
+    if not table_names:
+        return set()
+
+    referenced: set[str] = set()
+
+    def _add_rows(sql: str, *params: Any) -> None:
+        try:
+            rows = conn.execute(sql, *params) or []
+        except Exception:
+            return
+        for row in rows:
+            if isinstance(row, dict):
+                value = row.get("table_name")
+            else:
+                value = row[0] if row else None
+            table_name = _object_ref_table_name(value)
+            if table_name:
+                referenced.add(table_name)
+
+    _add_rows(
+        """
+        SELECT DISTINCT rel.relname AS table_name
+          FROM pg_class rel
+          JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+         WHERE ns.nspname = 'public'
+           AND rel.relname = ANY($1::text[])
+           AND rel.relkind IN ('v', 'm')
+        """,
+        table_names,
+    )
+    _add_rows(
+        """
+        SELECT DISTINCT source.relname AS table_name
+          FROM pg_class source
+          JOIN pg_namespace ns ON ns.oid = source.relnamespace
+         WHERE ns.nspname = 'public'
+           AND source.relname = ANY($1::text[])
+           AND EXISTS (
+                SELECT 1
+                  FROM pg_depend dep
+                  JOIN pg_rewrite rewrite ON rewrite.oid = dep.objid
+                  JOIN pg_class view_rel ON view_rel.oid = rewrite.ev_class
+                 WHERE dep.refobjid = source.oid
+                   AND view_rel.oid <> source.oid
+           )
+        """,
+        table_names,
+    )
+    _add_rows(
+        """
+        SELECT DISTINCT target.relname AS table_name
+          FROM pg_class target
+          JOIN pg_namespace ns ON ns.oid = target.relnamespace
+          JOIN pg_constraint con ON con.confrelid = target.oid
+         WHERE ns.nspname = 'public'
+           AND target.relname = ANY($1::text[])
+           AND con.contype = 'f'
+           AND con.conrelid <> target.oid
+        """,
+        table_names,
+    )
+    _add_rows(
+        """
+        SELECT DISTINCT regexp_replace(ref, '^(table\\.public\\.|table:|public\\.)', '') AS table_name
+          FROM (
+                SELECT source_ref AS ref
+                  FROM authority_projection_contracts
+                 WHERE enabled IS TRUE AND source_ref_kind = 'table'
+                UNION ALL
+                SELECT read_model_object_ref AS ref
+                  FROM authority_projection_contracts
+                 WHERE enabled IS TRUE
+               ) refs
+         WHERE regexp_replace(ref, '^(table\\.public\\.|table:|public\\.)', '') = ANY($1::text[])
+        """,
+        table_names,
+    )
+    return referenced
+
+
 def audit_code_orphan_tables(
     conn: Any,
     *,
@@ -308,6 +655,8 @@ def audit_code_orphan_tables(
             if re.search(rf"\b{re.escape(t)}\b", text):
                 seen.add(t)
 
+    seen.update(_db_native_table_references(conn, table_names))
+
     orphans = sorted(set(table_names) - seen)
     return [
         WiringFinding(
@@ -343,14 +692,23 @@ def run_full_audit(
 
     by_kind: dict[str, int] = {}
     by_category: dict[str, int] = {}
+    by_classification: dict[str, int] = {}
+    by_surface: dict[str, int] = {}
     for f in findings:
         by_kind[f.kind] = by_kind.get(f.kind, 0) + 1
         by_category[f.category] = by_category.get(f.category, 0) + 1
+        classification = str(f.details.get("classification") or "unclassified")
+        surface = str(f.details.get("surface") or "unknown")
+        by_classification[classification] = by_classification.get(classification, 0) + 1
+        by_surface[surface] = by_surface.get(surface, 0) + 1
 
     return {
         "total": len(findings),
         "by_category": by_category,
         "by_kind": by_kind,
+        "by_classification": by_classification,
+        "by_surface": by_surface,
+        "actionable_total": by_classification.get("live_authority_bug", 0),
         "findings": [f.to_payload() for f in findings],
     }
 

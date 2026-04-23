@@ -43,11 +43,13 @@ from .commands.heartbeat import _heartbeat_command
 from .commands.maintenance import _maintenance_command
 from .commands.operate import (
     _api_command,
+    _authority_command,
     _cache_command,
     _capabilities_command,
     _circuits_command,
     _config_command,
     _dashboard_command,
+    _instances_command,
     _events_command,
     _integrations_command,
     _health_command,
@@ -81,6 +83,7 @@ from .commands.query import (
 from .commands.roadmap import _roadmap_command
 from .commands.setup import _setup_command
 from .commands.tools import _tools_command, _tools_quickstart_text
+from .friction import TrackingStdout, record_cli_command_failure
 from .render import (
     render_graph_lineage,
     render_graph_topology,
@@ -144,8 +147,8 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
         "description": "Spawn a child workflow with explicit parent lineage",
     },
     {"command": "workflow validate <spec.json>", "description": "Validate a spec without running"},
-    {"command": "workflow records <create|update|rename>", "description": "Persist canonical workflow records"},
-    {"command": "workflow status [--since-hours N]", "description": "Show recent workflow status"},
+    {"command": "workflow records <list|get|create|update|rename>", "description": "Read and persist canonical workflow records"},
+    {"command": "workflow status", "description": "Show recent workflow status"},
     {"command": "workflow run-status <run_id>", "description": "Inspect one run and explain idle recovery options"},
     {"command": "workflow active", "description": "Show active workflow runs"},
     {"command": "workflow stream <run_id>", "description": "Stream one workflow run"},
@@ -155,7 +158,9 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {"command": "workflow work <claim|acknowledge>", "description": "Claim or acknowledge worker work"},
     {"command": "workflow tools [list|search|describe|call|help]", "description": "Discover and call catalog-backed MCP tools"},
     {"command": "workflow orient", "description": "Return the canonical /orient authority envelope"},
-    {"command": "workflow setup <doctor|plan|apply>", "description": "Runtime-target setup client for API/MCP authority"},
+    {"command": "workflow instances [check] [--json]", "description": "Compare runtime setup targets vs discovered API/MCP/DB instances"},
+    {"command": "workflow authority [--json] [--check] [--instance]", "description": "Compare CLI, MCP, and API authority targets"},
+    {"command": "workflow setup <doctor|plan|apply>", "description": "Runtime-target setup client for API/MCP authority and native instance contract"},
     {"command": "workflow integrations", "description": "Scoped route discovery for /api/integrations"},
     {"command": "workflow api integrations", "description": "Scoped route discovery for /api/integrations"},
     {"command": "workflow api data-dictionary", "description": "Scoped route discovery for /api/data-dictionary"},
@@ -204,6 +209,10 @@ _COMMAND_INDEX_TIPS: list[str] = [
     "run `workflow integrations` for the integration API route scope",
     "run `workflow api integrations` or `workflow api data-dictionary` for scoped route discovery",
     "run `workflow integration` for integration management",
+    "run `workflow instances` for resolved API/MCP/DB instance mapping",
+    "run `workflow instances check` to fail fast on authority mapping drift",
+    "run `workflow authority --check` to verify CLI, MCP, and API authority alignment",
+    "run `workflow authority --instance` to print resolved native instance details before running CQRS surfaces",
     "run `workflow help tools` or `workflow mcp` for catalog-backed tool discovery",
 ]
 
@@ -449,6 +458,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "discover": _discover_command,
         "artifacts": _artifacts_command,
         "health": _health_command,
+        "authority": _authority_command,
         "orient": _orient_command,
         "heartbeat": _heartbeat_command,
         "receipts": _receipts_command,
@@ -466,6 +476,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "proof": _lazy_workflow_args_command("_proof_command"),
         "heal": _lazy_workflow_args_command("_heal_command"),
         "run-status": _lazy_workflow_args_command("_run_status_command"),
+        "status": _lazy_workflow_args_command("_status_command"),
         "scheduler": _lazy_workflow_args_command("_scheduler_command"),
         "loop": _lazy_workflow_args_command("_loop_command"),
         "debate": _lazy_workflow_args_command("_debate_command"),
@@ -498,6 +509,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "tools": _tools_command,
         "dictionary": _data_dictionary_command,
         "authority-memory": _authority_memory_command,
+        "instances": _instances_command,
         "generate": _generate_command,
         "validate": _validate_command,
         "stream": _stream_command,
@@ -512,7 +524,6 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
     return _ARG_COMMANDS
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
-    "status": _lazy_workflow_stdout_command("_status_command"),
     "costs": _costs_command,
     "slots": _slots_command,
     "active": _lazy_workflow_stdout_command("_active_command"),
@@ -645,6 +656,8 @@ def _help_text() -> str:
             "  workflow help mcp",
             "  workflow routes",
             "  workflow orient",
+            "  workflow instances [check] [--json]",
+            "  workflow authority [--json] [--check] [--instance]",
             "  workflow api help",
             "  workflow integrations",
             "  workflow integration list",
@@ -664,6 +677,8 @@ def _help_text() -> str:
             "  workflow decompose 'build real-time notifications'",
             "  workflow data profile artifacts/data/users.csv",
             "  workflow authority-index",
+            "  workflow instances [check] [--json]",
+            "  workflow authority [--json] [--check] [--instance]",
             "  workflow maintenance backfill-failure-categories --yes",
             "  workflow files list --scope instance",
             "  workflow handoff latest --artifact-kind packet_lineage --revision-ref <ref>",
@@ -681,6 +696,8 @@ def _help_text() -> str:
             "  workflow tools [list|search|describe|call|help]",
             "  workflow dictionary <list|describe|set-override|clear-override|reproject>",
             "  workflow authority-memory refresh",
+            "  workflow authority [--json] [--check] [--instance]",
+            "  workflow instances [check] [--json]",
             "  workflow maintenance <backfill-failure-categories|help>",
             "  workflow integration [list|describe|health|test|call|create|secret|reload|help]",
             "  workflow data <action>",
@@ -695,7 +712,7 @@ def _help_text() -> str:
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
             "  workflow setup|orient|health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|integrations|data-dictionary|--host|--port]|routes|supervisor|capabilities|work",
             "  workflow setup <doctor|plan|apply>",
-            "                                                  Runtime-target setup client for API/MCP authority",
+            "                                                  Runtime-target setup client for API/MCP authority and native instance contract",
             "  workflow integrations",
             "                                                  Scoped route discovery for /api/integrations",
             "  workflow integration",
@@ -763,7 +780,7 @@ def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
 
     if topic in _STDOUT_COMMANDS:
         usage = {
-            "status": "usage: workflow status [--since-hours N]",
+            "status": "usage: workflow status",
             "active": "usage: workflow active",
             "costs": "usage: workflow costs",
             "slots": "usage: workflow slots",
@@ -880,11 +897,44 @@ def main(
 
     stdout = sys.stdout if stdout is None else stdout
     args = _normalize_namespace_tokens(sys.argv[1:] if argv is None else argv)
+    tracking_stdout = TrackingStdout(stdout)
+    exit_code = _main_impl(
+        args,
+        inspect_replay_service=inspect_replay_service,
+        runtime_orchestrator=runtime_orchestrator,
+        graph_service=graph_service,
+        observability_service=observability_service,
+        env=env,
+        stdout=tracking_stdout,
+    )
+    if exit_code != 0:
+        record_cli_command_failure(
+            args=args,
+            exit_code=exit_code,
+            output_text=tracking_stdout.captured_output(),
+            output_truncated=tracking_stdout.truncated,
+            env=env,
+        )
+    return exit_code
+
+
+def _main_impl(
+    args: Sequence[str],
+    *,
+    inspect_replay_service: InspectReplayService | None = None,
+    runtime_orchestrator: InspectReplayService | None = None,
+    graph_service: GraphSurfaceService | None = None,
+    observability_service: GraphSurfaceService | None = None,
+    env: Mapping[str, str] | None = None,
+    stdout: TextIO,
+) -> int:
     if not args or args[0] in {"-h", "--help", "help"}:
-        if len(args) >= 2 and args[0] == "help":
+        if len(args) >= 2 and args[0] == "help" and args[1] not in {"-h", "--help"}:
             return _help_topic_text(args[1], stdout=stdout)
         stdout.write(_help_text() + "\n")
         return 0
+    if len(args) == 2 and args[1] in {"-h", "--help"} and args[0] in _known_root_commands():
+        return _help_topic_text(args[0], stdout=stdout)
     if args and args[0] == "native-operator":
         from . import native_operator
 
@@ -895,7 +945,7 @@ def main(
     if args[0] not in _known_root_commands():
         if args[0] == "defs":
             stdout.write(
-                "workflow defs has been removed; use workflow records create|update|rename instead\n"
+                "workflow defs has been removed; use workflow records list|get|create|update|rename instead\n"
             )
             stdout.write(f"{_usage()}\n")
             return 2

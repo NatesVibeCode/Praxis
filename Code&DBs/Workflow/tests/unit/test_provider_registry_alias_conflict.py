@@ -70,7 +70,7 @@ def _install_fake_db(monkeypatch, rows: list[dict[str, object]]) -> None:
     """Make ``reload_from_db`` load ``rows`` without touching a real DB."""
 
     async def _fake_fetch(_db_url: str):
-        return rows, [], []
+        return rows, [], [], []
 
     monkeypatch.setattr(provider_registry_mod, "_ASYNCPG_AVAILABLE", True)
     monkeypatch.setattr(provider_registry_mod, "_require_database_url", lambda: "postgresql://fake/db")
@@ -94,6 +94,8 @@ def _registry_state_guard():
         "_load_status": provider_registry_mod._load_status,
         "_load_error": provider_registry_mod._load_error,
         "_load_timestamp": provider_registry_mod._load_timestamp,
+        "_load_skipped_rows": provider_registry_mod._load_skipped_rows,
+        "_load_auxiliary_errors": provider_registry_mod._load_auxiliary_errors,
     }
     try:
         yield
@@ -110,6 +112,8 @@ def _registry_state_guard():
         provider_registry_mod._load_status = snapshot["_load_status"]
         provider_registry_mod._load_error = snapshot["_load_error"]
         provider_registry_mod._load_timestamp = snapshot["_load_timestamp"]
+        provider_registry_mod._load_skipped_rows = snapshot["_load_skipped_rows"]
+        provider_registry_mod._load_auxiliary_errors = snapshot["_load_auxiliary_errors"]
 
 
 def test_alias_conflict_between_two_providers_fails_load_closed(

@@ -514,10 +514,11 @@ class _FakeBugTracker:
             "run": {"run-123"},
             "verification_run": {"verification-run-123"},
             "healing_run": {"healing-run-123"},
+            "governance_scan": {"governance-scan-123"},
         }
         if evidence_kind not in allowed_refs:
             raise ValueError(
-                "evidence_kind must be one of receipt, run, verification_run, healing_run"
+                "evidence_kind must be one of governance_scan, receipt, run, verification_run, healing_run"
             )
         if evidence_ref not in allowed_refs[evidence_kind]:
             raise ValueError(f"unknown {evidence_kind} reference: {evidence_ref}")

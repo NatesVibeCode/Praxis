@@ -152,9 +152,13 @@ def _runtime_binding_http_endpoints(
     )
     return {
         "api_base_url": str(endpoints.get("api_base_url") or "").rstrip("/"),
+        "workflow_api_base_url": str(endpoints.get("workflow_api_base_url") or "").rstrip("/"),
         "launch_url": str(endpoints.get("launch_url") or ""),
         "dashboard_url": str(endpoints.get("dashboard_url") or ""),
         "api_docs_url": str(endpoints.get("api_docs_url") or ""),
+        "workflow_api_authority_source": str(
+            endpoints.get("workflow_api_authority_source") or ""
+        ),
     }
 
 
@@ -169,7 +173,7 @@ def _workflow_database_operational(database_json: Mapping[str, object]) -> bool:
 def _probe_frontdoor_semantics() -> dict[str, object]:
     runtime_endpoints = _runtime_binding_http_endpoints(os.environ)
     api_base = runtime_endpoints["api_base_url"]
-    workflow_api_base = os.environ.get("PRAXIS_WORKFLOW_API_BASE_URL", api_base).rstrip("/")
+    workflow_api_base = runtime_endpoints["workflow_api_base_url"] or api_base
     workflow_probe_headers = {"X-Praxis-UI": "1"}
     api_health_timeout_s = _timeout_override("PRAXIS_ALPHA_TIMEOUT_API_HEALTH_S", 4.0)
     workflow_orient_timeout_s = _timeout_override("PRAXIS_ALPHA_TIMEOUT_WORKFLOW_ORIENT_S", 10.0)
@@ -242,6 +246,8 @@ def _probe_frontdoor_semantics() -> dict[str, object]:
         "helm_url": f"{api_base}/app/helm",
         "dashboard_url": runtime_endpoints["dashboard_url"],
         "api_docs_url": runtime_endpoints["api_docs_url"],
+        "workflow_api_base_url": workflow_api_base,
+        "workflow_api_authority_source": runtime_endpoints["workflow_api_authority_source"],
     }
 
 
@@ -446,6 +452,8 @@ def cmd_doctor(*, services_ready: str, state_file: str) -> int:
             "launch_url": readiness["launch_url"],
             "dashboard_url": readiness["dashboard_url"],
             "api_docs_url": readiness["api_docs_url"],
+            "workflow_api_base_url": readiness["workflow_api_base_url"],
+            "workflow_api_authority_source": readiness["workflow_api_authority_source"],
             "dependency_truth": dependency_truth_report(scope="all"),
         }
     )

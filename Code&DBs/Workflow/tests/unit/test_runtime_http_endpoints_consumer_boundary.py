@@ -172,6 +172,7 @@ def test_contract_resolves_api_base_url_from_env() -> None:
         native_instance={},
     )
     assert endpoints["api_base_url"] == "http://api.test:9010"
+    assert endpoints["workflow_api_base_url"] == "http://api.test:9010"
     assert endpoints["launch_url"] == "http://api.test:9010/app"
     assert endpoints["api_docs_url"] == "http://api.test:9010/docs"
 
@@ -185,5 +186,21 @@ def test_contract_synthesizes_default_when_env_missing() -> None:
         native_instance={},
     )
     assert endpoints["api_base_url"] == "http://127.0.0.1:9042"
+    assert endpoints["workflow_api_base_url"] == "http://127.0.0.1:9042"
     assert endpoints["launch_url"] == "http://127.0.0.1:9042/app"
     assert endpoints["api_docs_url"] == "http://127.0.0.1:9042/docs"
+
+
+def test_contract_projects_separate_workflow_api_base_when_configured() -> None:
+    from runtime.primitive_contracts import resolve_runtime_http_endpoints
+
+    endpoints = resolve_runtime_http_endpoints(
+        workflow_env={
+            "PRAXIS_API_BASE_URL": "http://api.test:9010",
+            "PRAXIS_WORKFLOW_API_BASE_URL": "http://workflow.test:9555",
+        },
+        native_instance={},
+    )
+    assert endpoints["api_base_url"] == "http://api.test:9010"
+    assert endpoints["workflow_api_base_url"] == "http://workflow.test:9555"
+    assert endpoints["workflow_api_authority_source"] == "env:PRAXIS_WORKFLOW_API_BASE_URL"
