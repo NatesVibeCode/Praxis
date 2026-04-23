@@ -2585,6 +2585,20 @@ def public_get_receipt(
     return get_receipt(receipt_id)
 
 
+def _public_runtime_catalog_payload() -> dict[str, Any]:
+    try:
+        return build_catalog_payload(_shared_pg_conn())
+    except Exception as exc:
+        logger.warning("public runtime catalog unavailable: %s: %s", type(exc).__name__, exc)
+        return {
+            "items": [],
+            "available": False,
+            "error_code": "runtime_catalog_unavailable",
+            "error_type": type(exc).__name__,
+            "message": "Runtime catalog is unavailable because the database authority could not be reached.",
+        }
+
+
 @app.get("/v1/catalog", tags=["public", "catalog"])
 def public_get_catalog(
     _auth: str | None = Security(_require_public_api_access),
@@ -2598,7 +2612,7 @@ def public_get_catalog(
             "token_env": _PUBLIC_AUTH_TOKEN_ENV,
         },
         "routes": list_api_routes(visibility="public"),
-        "runtime_catalog": build_catalog_payload(_shared_pg_conn()),
+        "runtime_catalog": _public_runtime_catalog_payload(),
     }
 
 

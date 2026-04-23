@@ -85,6 +85,23 @@ def _integration_help_text() -> str:
     )
 
 
+def _orient_command(args: list[str], *, stdout: TextIO) -> int:
+    if args and args[0] in {"-h", "--help", "help"}:
+        stdout.write(
+            "usage: workflow orient [--json]\n\n"
+            "Return the canonical /orient authority envelope through the catalog-backed MCP tool.\n"
+        )
+        return 0
+    unknown = [arg for arg in args if arg != "--json"]
+    if unknown:
+        stdout.write(f"error: unknown orient argument: {unknown[0]}\n")
+        stdout.write("usage: workflow orient [--json]\n")
+        return 2
+    exit_code, payload = run_cli_tool("praxis_orient", {})
+    print_json(stdout, payload)
+    return exit_code
+
+
 def _load_json_value(raw: str, *, field_name: str) -> Any:
     try:
         return json.loads(raw)

@@ -200,6 +200,41 @@ def test_commands_index_includes_daily_heartbeat() -> None:
     assert "Run the daily external-health heartbeat" in rendered
 
 
+def test_commands_index_includes_orient_alias() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["commands"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "workflow orient" in rendered
+    assert "Return the canonical /orient authority envelope" in rendered
+
+
+def test_workflow_orient_alias_calls_catalog_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        operate_commands,
+        "run_cli_tool",
+        lambda tool_name, params: (
+            0,
+            {
+                "tool_name": tool_name,
+                "params": params,
+                "kind": "orient_authority_envelope",
+            },
+        ),
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["orient"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert payload == {
+        "tool_name": "praxis_orient",
+        "params": {},
+        "kind": "orient_authority_envelope",
+    }
+
+
 def test_tools_search_prioritizes_exact_alias_matches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         tools_commands,

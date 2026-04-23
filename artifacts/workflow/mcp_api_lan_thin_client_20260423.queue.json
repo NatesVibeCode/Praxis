@@ -1,0 +1,41 @@
+{
+  "name": "mcp_api_lan_thin_client_20260423",
+  "workflow_id": "mcp_api_lan_thin_client_20260423",
+  "phase": "build",
+  "outcome_goal": "Local-network thin clients can authenticate to the Praxis API and HTTP MCP bridge with the same operator API bearer token, while workflow-scoped MCP session tokens remain constrained to their allowed tools.",
+  "target_repo": "/Volumes/Users/natha/Documents/Builds/Praxis",
+  "workdir": "/Volumes/Users/natha/Documents/Builds/Praxis",
+  "anti_requirements": [
+    "Do not use SSH as the operator login path.",
+    "Do not create a second MCP authority.",
+    "Do not weaken workflow-scoped MCP session tokens.",
+    "Do not rely on localhost Postgres as operator authority."
+  ],
+  "jobs": [
+    {
+      "label": "mcp_api_lan_auth_bridge",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "read": [
+        "Code&DBs/Workflow/surfaces/api/rest.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py",
+        "Code&DBs/Workflow/surfaces/mcp/protocol.py",
+        "Code&DBs/Workflow/surfaces/mcp/invocation.py",
+        "Code&DBs/Workflow/runtime/workflow/mcp_session.py",
+        "Code&DBs/Workflow/surfaces/cli/main.py",
+        "Code&DBs/Workflow/surfaces/cli/commands/operate.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/api/rest.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py",
+        "Code&DBs/Workflow/surfaces/cli/main.py",
+        "Code&DBs/Workflow/surfaces/cli/commands/operate.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_mcp_http_bridge_auth.py",
+        "Code&DBs/Workflow/tests/unit/test_cli_tools_surface.py",
+        "Code&DBs/Workflow/tests/unit/test_api_public_contract.py"
+      ],
+      "prompt": "Make the advertised API/MCP operator surface interchangeable for local-network thin clients. The HTTP MCP bridge should accept the same configured PRAXIS_API_TOKEN bearer token for ordinary operator MCP tools, while still preserving signed workflow-token scope for job/session tools. Add the missing workflow orient CLI alias so the catalog-advertised orient entrypoint exists."
+    }
+  ],
+  "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_workflow_mcp_http_bridge_auth.py Code\\&DBs/Workflow/tests/unit/test_cli_tools_surface.py Code\\&DBs/Workflow/tests/unit/test_api_public_contract.py"
+}

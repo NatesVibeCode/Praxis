@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
 from typing import Any
 
 from runtime.workflow.mcp_session import (
@@ -13,6 +15,8 @@ from surfaces.mcp.protocol import handle_request
 from surfaces.mcp.runtime_context import workflow_mcp_request_context
 
 from ._shared import RouteEntry, _ClientError, _exact, _query_params, _read_json_body
+
+_PUBLIC_AUTH_TOKEN_ENV = "PRAXIS_API_TOKEN"
 
 
 def _allowed_tool_names(request: Any) -> list[str] | None:
@@ -49,6 +53,15 @@ def _workflow_token(request: Any) -> str:
     return token
 
 
+def _public_api_token() -> str:
+    return str(os.environ.get(_PUBLIC_AUTH_TOKEN_ENV) or "").strip()
+
+
+def _is_public_api_token(token: str) -> bool:
+    expected_token = _public_api_token()
+    return bool(expected_token and token and secrets.compare_digest(token, expected_token))
+
+
 def _intersect_allowed_tools(token_allowed_tools: list[str], request_allowed_tools: list[str] | None) -> list[str]:
     if not request_allowed_tools:
         return list(token_allowed_tools)
@@ -72,6 +85,29 @@ def _handle_mcp_post(request: Any, path: str) -> None:
         try:
             claims = verify_workflow_mcp_session_token(workflow_token)
         except WorkflowMcpSessionError as exc:
+            if _is_public_api_token(workflow_token):
+                allowed_tool_names = _allowed_tool_names(request)
+                try:
+                    response = handle_request(
+                        body,
+                        transport="jsonl",
+                        allowed_tool_names=allowed_tool_names,
+                        workflow_token="",
+                    )
+                except Exception as handler_exc:
+                    request._send_json(
+                        500,
+                        {
+                            "error": f"{type(handler_exc).__name__}: {handler_exc}",
+                            "error_code": "internal_error",
+                        },
+                    )
+                    return
+                if response is None:
+                    request._send_json(202, {})
+                    return
+                request._send_json(200, response)
+                return
             request._send_json(401, {"error": str(exc), "reason_code": exc.reason_code})
             return
         allowed_tool_names = _intersect_allowed_tools(

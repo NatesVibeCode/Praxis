@@ -145,6 +145,28 @@ def test_public_v1_catalog_lists_only_public_routes(monkeypatch) -> None:
     assert payload["runtime_catalog"] == {"items": []}
 
 
+def test_public_v1_catalog_degrades_when_runtime_catalog_is_unavailable(monkeypatch) -> None:
+    monkeypatch.delenv("PRAXIS_API_TOKEN", raising=False)
+
+    def _raise_runtime_catalog_error():
+        raise RuntimeError("database authority unavailable")
+
+    monkeypatch.setattr(rest, "_shared_pg_conn", _raise_runtime_catalog_error)
+
+    with TestClient(rest.app) as client:
+        response = client.get("/v1/catalog")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runtime_catalog"] == {
+        "items": [],
+        "available": False,
+        "error_code": "runtime_catalog_unavailable",
+        "error_type": "RuntimeError",
+        "message": "Runtime catalog is unavailable because the database authority could not be reached.",
+    }
+
+
 def test_internal_routes_no_longer_emit_tracebacks(monkeypatch) -> None:
     monkeypatch.setitem(
         api_handlers.ROUTES,
