@@ -64,7 +64,7 @@ COPY scripts/export_dependency_scope.py /opt/praxis/workflow/scripts/export_depe
 # ── uniform sandbox tool surface ────────────────────────────────────
 # `praxis` is the single shell-callable binary that replaces per-provider
 # MCP client configuration. Every CLI (claude/codex/gemini) can invoke
-# `praxis workflow tools ...` via its native Bash tool. See
+# `praxis <subcommand>` via its native Bash tool. See
 # architecture-policy::sandbox::uniform-shell-tool-surface.
 COPY bin/praxis_sandbox_client.py /usr/local/bin/praxis
 RUN chmod 0755 /usr/local/bin/praxis

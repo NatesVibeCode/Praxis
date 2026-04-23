@@ -1955,6 +1955,26 @@ def _translate_definition_collision(
     )
 
 
+def _assert_provider_availability_for_submit(conn: SyncPostgresConnection, spec: object) -> None:
+    """Block launch when selected providers are known unavailable.
+
+    This is the submit-time enforcement twin of workflow validation preflight.
+    Runtime execution still has a circuit-breaker guard, but admission should
+    reject a workflow before it queues doomed jobs against an exhausted provider.
+    """
+    from runtime.workflow_validation import _preflight_provider_availability
+
+    findings = _preflight_provider_availability(spec, pg_conn=conn)
+    blockers = [finding for finding in findings if finding.get("severity") == "error"]
+    if not blockers:
+        return
+    first = blockers[0]
+    raise RuntimeError(
+        "workflow submit blocked by provider availability: "
+        f"{first.get('message') or first.get('kind') or 'provider unavailable'}"
+    )
+
+
 def submit_workflow(
     conn: SyncPostgresConnection,
     spec_path: str,
@@ -2000,6 +2020,7 @@ def submit_workflow(
                 raise translated from exc
             raise
     with _submit_transaction(conn) as submit_conn:
+        _assert_provider_availability_for_submit(submit_conn, spec)
         try:
             return _do_submit_workflow(
                 submit_conn,
@@ -2066,6 +2087,7 @@ def submit_workflow_inline(
     spec = _inline_spec_object(spec_dict)
 
     with _submit_transaction(conn) as submit_conn:
+        _assert_provider_availability_for_submit(submit_conn, spec)
         return _do_submit_workflow(
             submit_conn,
             spec,

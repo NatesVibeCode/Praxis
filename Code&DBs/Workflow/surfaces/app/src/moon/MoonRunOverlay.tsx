@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { RunDetail, RunJob } from '../dashboard/useLiveRunSnapshot';
+import type { RunDetail, RunGraphNode, RunJob } from '../dashboard/useLiveRunSnapshot';
 import { MoonStatusRing } from './MoonStatusRing';
 import { statusState, type MoonStatusState } from './moonStatus';
 
@@ -55,6 +55,25 @@ function jobSelectionId(job: RunJob): string {
   return job.label || String(job.id);
 }
 
+function compactStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+}
+
+function hasRunGraphContract(node: RunGraphNode | null): boolean {
+  return Boolean(
+    node
+    && (
+      node.completion_contract
+      || node.task_type
+      || node.description
+      || node.outcome_goal
+      || node.prompt
+    ),
+  );
+}
+
 export function MoonRunOverlay({
   run,
   loading,
@@ -84,6 +103,12 @@ export function MoonRunOverlay({
         ) ?? null
       )
     : null;
+  const selectedCompletionContract = selectedGraphNode?.completion_contract ?? null;
+  const selectedContractResultKind = typeof selectedCompletionContract?.result_kind === 'string'
+    ? selectedCompletionContract.result_kind.trim()
+    : '';
+  const selectedContractSubmitTools = compactStringList(selectedCompletionContract?.submit_tool_names);
+  const selectedHasContract = hasRunGraphContract(selectedGraphNode);
 
   const runStatusRaw = run?.status ?? (loading ? 'loading' : 'queued');
   const runState: MoonStatusState = statusState(runStatusRaw);
@@ -269,6 +294,62 @@ export function MoonRunOverlay({
               </div>
             )}
           </dl>
+          {selectedHasContract && selectedGraphNode && (
+            <section className="moon-run-overlay__contract" aria-label="Job completion gate">
+              <div className="moon-run-overlay__contract-head">
+                <span>Completion gate</span>
+                <span className="moon-run-overlay__contract-badges">
+                  {selectedCompletionContract?.submission_required === true && (
+                    <span className="moon-truth-badge moon-truth-badge--runtime">Submission required</span>
+                  )}
+                  {selectedCompletionContract?.verification_required === true && (
+                    <span className="moon-truth-badge moon-truth-badge--alias">Verification required</span>
+                  )}
+                  {selectedCompletionContract && selectedCompletionContract.submission_required !== true && selectedCompletionContract.verification_required !== true && (
+                    <span className="moon-truth-badge moon-truth-badge--persisted">Recorded contract</span>
+                  )}
+                </span>
+              </div>
+              <dl className="moon-run-overlay__contract-grid">
+                {selectedGraphNode.task_type && (
+                  <div>
+                    <dt>Task type</dt>
+                    <dd>{selectedGraphNode.task_type}</dd>
+                  </div>
+                )}
+                {selectedContractResultKind && (
+                  <div>
+                    <dt>Result</dt>
+                    <dd>{selectedContractResultKind}</dd>
+                  </div>
+                )}
+                {selectedContractSubmitTools.length > 0 && (
+                  <div>
+                    <dt>Submit with</dt>
+                    <dd>{selectedContractSubmitTools.join(', ')}</dd>
+                  </div>
+                )}
+                {selectedGraphNode.outcome_goal && (
+                  <div>
+                    <dt>Outcome</dt>
+                    <dd>{selectedGraphNode.outcome_goal}</dd>
+                  </div>
+                )}
+                {selectedGraphNode.description && (
+                  <div>
+                    <dt>Scope</dt>
+                    <dd>{selectedGraphNode.description}</dd>
+                  </div>
+                )}
+              </dl>
+              {selectedGraphNode.prompt && (
+                <details className="moon-run-overlay__contract-prompt">
+                  <summary>Prompt</summary>
+                  <pre>{selectedGraphNode.prompt}</pre>
+                </details>
+              )}
+            </section>
+          )}
           {selectedJob.stdout_preview && (
             <div className="moon-run-overlay__receipt-output">
               <div className="moon-run-overlay__receipt-output-head">

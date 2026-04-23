@@ -244,6 +244,54 @@ describe('presentRun', () => {
     expect(vm.blockedNodes).toBe(2);
   });
 
+  test('carries completion contracts and configured run edge gates', () => {
+    const run = makeRun({
+      graph: {
+        nodes: [
+          {
+            id: 'enter_data',
+            label: 'enter_data',
+            type: 'job',
+            adapter: 'auto/build',
+            position: 0,
+            status: 'succeeded',
+            task_type: 'data_entry',
+            outcome_goal: 'CRM record is populated.',
+            prompt: 'Enter the applicant data in the CRM tool.',
+            completion_contract: {
+              result_kind: 'artifact_bundle',
+              submit_tool_names: ['praxis_submit_artifact_bundle'],
+              submission_required: true,
+              verification_required: false,
+            },
+          },
+          { id: 'review', label: 'review', type: 'job', adapter: 'auto/review', position: 1, status: 'pending' },
+        ],
+        edges: [
+          {
+            id: 'edge-enter-review',
+            from: 'enter_data',
+            to: 'review',
+            type: 'conditional',
+            condition: { field: 'approved', op: 'equals', value: true },
+          },
+        ],
+      },
+    });
+
+    const vm = presentRun(run, 'enter_data');
+
+    expect(vm.selectedNode?.completionContract?.submission_required).toBe(true);
+    expect(vm.selectedNode?.taskType).toBe('data_entry');
+    expect(vm.selectedNode?.summary).toContain('submit artifact_bundle via praxis_submit_artifact_bundle');
+    expect(vm.edges[0].gateState).toBe('configured');
+    expect(vm.edges[0].gateFamily).toBe('conditional');
+    expect(vm.edges[0].gateLabel).toBe('Condition');
+    expect(vm.edges[0].gateConfig).toEqual({
+      condition: { field: 'approved', op: 'equals', value: true },
+    });
+  });
+
   test('release.readiness reflects overall run status', () => {
     const withGraph = (status: RunDetail['status']): RunDetail => makeRun({
       status,

@@ -305,13 +305,20 @@ def _orient_hint(
         "analysis": f"What status, prior findings, and graph context matter for analysis job {label} around {scope_hint}?",
         "architecture": f"What existing contracts, workflows, and graph surfaces matter for architecture job {label} touching {scope_hint}?",
     }.get(bucket, f"What status and existing system context matter for job {label} in {scope_hint}?")
+    # The normalized_entrypoint is an MCP tool name like `praxis_query`. In
+    # the sandbox, those tools are callable via the uniform `praxis` CLI
+    # (drop the `praxis_` prefix): `praxis_query` → `praxis query "..."`.
+    # This replaces per-provider MCP client config (.claude.json,
+    # .codex/config.toml, etc.) with a single shell-callable binary the
+    # agent can invoke from any CLI's native Bash/shell tool.
+    cli_subcommand = normalized_entrypoint.removeprefix("praxis_") or "query"
     return {
         "entrypoint_tool": normalized_entrypoint,
         "suggested_question": question,
         "notes": [
-            f"Call tools through `praxis workflow tools call <tool_name> --input-json '{{...}}'`. Use `praxis workflow tools describe {normalized_entrypoint}` when you need the input schema.",
-            "Use `praxis workflow tools search <text>` to discover allowed MCP tools from inside the sandbox.",
-            "At the end of mutating jobs, submit results through the cataloged `praxis_submit_*` tool with `praxis workflow tools call`; the sealed submission is the authoritative deliverable.",
+            f"Call tools via the `praxis` shell command. Start with `praxis {cli_subcommand} \"...\"` before broader tool use.",
+            "Every tool in mcp_tool_names is callable as `praxis <subcommand> ...`. Run `praxis --help` for the full list.",
+            "At the end of mutating jobs, submit results via `praxis submit_code_change` or `praxis submit_artifact_bundle` — the sealed submission is the authoritative deliverable.",
             "Stay inside the declared read/write boundary and verification refs.",
         ],
     }
@@ -583,25 +590,28 @@ def render_execution_bundle(bundle: Mapping[str, Any] | None) -> str:
         submit_tools = _string_list(completion_contract.get("submit_tool_names"))
         if completion_contract.get("submission_required") and submit_tools:
             tool_name = submit_tools[0]
+            # Shell-shape instruction matches the uniform sandbox tool surface:
+            # every sandbox image has `/usr/local/bin/praxis` that POSTs to the
+            # MCP bridge. The agent invokes the tool via its native shell/Bash
+            # tool — no per-provider MCP client config. Strip the `praxis_`
+            # prefix for the `praxis <verb>` shell form.
+            shell_verb = tool_name.removeprefix("praxis_") or tool_name
             result_kind = str(completion_contract.get("result_kind") or "").strip()
-            payload = {
-                "summary": "<one-sentence description>",
-                "primary_paths": ["<path1>", "<path2>"],
-            }
-            if result_kind:
-                payload["result_kind"] = result_kind
-            payload["notes"] = "<evidence/rationale>"
+            result_kind_arg = f" --result-kind {result_kind}" if result_kind else ""
             parts.append(
                 f"\n** SUBMISSION REQUIRED **\n"
                 f"When you have completed your task, you MUST seal your work with the "
                 f"{tool_name} tool. Your output is NOT recorded unless you submit it — "
                 f"describing the work in stdout does not count.\n\n"
                 f"Invoke from your shell/Bash tool:\n"
-                f"  praxis workflow tools call {tool_name} --input-json "
-                f"'{json.dumps(payload, sort_keys=True)}'\n\n"
+                f"  praxis {shell_verb} --summary \"<one-sentence description>\" "
+                f"--primary-paths '[\"<path1>\", \"<path2>\"]'{result_kind_arg} "
+                f"[--notes \"<evidence/rationale>\"]\n\n"
                 f"The `praxis` binary is preinstalled at /usr/local/bin/praxis and reads "
                 f"its credentials from PRAXIS_WORKFLOW_MCP_URL + PRAXIS_WORKFLOW_MCP_TOKEN "
-                f"which are already set in your environment.\n"
+                f"which are already set in your environment. Alternatively: "
+                f"`praxis workflow tools call {tool_name} --input-json '{{\"summary\":\"...\", "
+                f"\"primary_paths\":[\"...\"], \"result_kind\":\"{result_kind or '<kind>'}\"}}'`.\n"
             )
         else:
             parts.append(

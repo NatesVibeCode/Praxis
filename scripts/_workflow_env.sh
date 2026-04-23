@@ -24,8 +24,20 @@ else
 fi
 
 workflow_python_bin() {
+  local candidate
+  local probe
   if [ -n "${PYTHON_BIN:-}" ] && command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
     printf '%s\n' "${PYTHON_BIN}"
+    return 0
+  fi
+  candidate="${workflow_env_repo_root}/.venv/bin/python"
+  if [ -x "${candidate}" ]; then
+    probe="$("${candidate}" -c 'import sys; print(sys.version_info[0])' 2>/dev/null || true)"
+  else
+    probe=""
+  fi
+  if [ "${probe}" = "3" ]; then
+    printf '%s\n' "${candidate}"
     return 0
   fi
   command -v python3.14 >/dev/null 2>&1 && { command -v python3.14; return 0; }

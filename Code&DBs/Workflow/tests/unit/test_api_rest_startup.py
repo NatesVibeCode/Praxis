@@ -116,7 +116,6 @@ def test_launcher_resolve_endpoint_returns_workspace_authority(monkeypatch) -> N
     class _FakeConn:
         def execute(self, query: str, *args: object):
             assert "registry_workspace_base_path_authority" in query
-            assert "workspace.workspace_ref = $1" in query
             assert args == ("praxis", "default")
             return [
                 {
@@ -142,102 +141,6 @@ def test_launcher_resolve_endpoint_returns_workspace_authority(monkeypatch) -> N
     assert payload["ok"] is True
     assert payload["resolution"]["base_path_ref"] == "workspace_base.praxis.default"
     assert payload["resolution"]["base_path"] == "${PRAXIS_WORKSPACE_BASE_PATH}"
-    assert response.headers["Cache-Control"].startswith("no-store")
-
-
-def test_launcher_resolve_endpoint_returns_structured_unresolved_error(monkeypatch) -> None:
-    class _FakeConn:
-        def execute(self, _query: str, *args: object):
-            assert args == ("missing", "default")
-            return []
-
-    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _FakeConn())
-
-    with TestClient(rest.app) as client:
-        response = client.get(
-            "/api/launcher/resolve",
-            params={"workspace_ref": "missing", "host_ref": "default"},
-        )
-
-    assert response.status_code == 404
-    payload = response.json()
-    assert payload["ok"] is False
-    assert payload["warnings"] == []
-    assert payload["errors"][0]["reason_code"] == "launcher_workspace_unresolved"
-    assert payload["errors"][0]["details"] == {
-        "workspace_ref": "missing",
-        "host_ref": "default",
-    }
-    assert response.headers["Cache-Control"].startswith("no-store")
-
-
-def test_launcher_resolve_endpoint_returns_structured_ambiguous_error(monkeypatch) -> None:
-    row = {
-        "workspace_ref": "praxis",
-        "host_ref": "default",
-        "base_path_ref": "workspace_base.praxis.default",
-        "base_path": "${PRAXIS_WORKSPACE_BASE_PATH}",
-        "repo_root_path": ".",
-        "workdir_path": ".",
-    }
-
-    class _FakeConn:
-        def execute(self, _query: str, *args: object):
-            assert args == ("praxis", "default")
-            return [row, dict(row)]
-
-    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _FakeConn())
-
-    with TestClient(rest.app) as client:
-        response = client.get(
-            "/api/launcher/resolve",
-            params={"workspace_ref": "praxis", "host_ref": "default"},
-        )
-
-    assert response.status_code == 409
-    payload = response.json()
-    assert payload["ok"] is False
-    assert payload["errors"][0]["reason_code"] == "launcher_workspace_ambiguous"
-
-
-def test_launcher_resolve_endpoint_returns_structured_invalid_request(monkeypatch) -> None:
-    class _ForbiddenConn:
-        def execute(self, *_args: object):
-            raise AssertionError("invalid launcher requests should not query postgres")
-
-    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _ForbiddenConn())
-
-    with TestClient(rest.app) as client:
-        response = client.get(
-            "/api/launcher/resolve",
-            params={"workspace_ref": "   ", "host_ref": "default"},
-        )
-
-    assert response.status_code == 400
-    payload = response.json()
-    assert payload["ok"] is False
-    assert payload["errors"][0]["reason_code"] == "launcher_config_invalid"
-    assert payload["errors"][0]["details"] == {"field": "workspace_ref"}
-
-
-def test_launcher_resolve_endpoint_returns_structured_database_unavailable(monkeypatch) -> None:
-    class _BrokenConn:
-        def execute(self, *_args: object):
-            raise RuntimeError("database offline")
-
-    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: _BrokenConn())
-
-    with TestClient(rest.app) as client:
-        response = client.get(
-            "/api/launcher/resolve",
-            params={"workspace_ref": "praxis", "host_ref": "default"},
-        )
-
-    assert response.status_code == 503
-    payload = response.json()
-    assert payload["ok"] is False
-    assert payload["errors"][0]["reason_code"] == "launcher_database_unavailable"
-    assert payload["errors"][0]["details"] == {"error_type": "RuntimeError"}
 
 
 def test_agent_sessions_surface_is_mounted(monkeypatch, tmp_path) -> None:
@@ -1307,6 +1210,79 @@ def test_run_detail_graph_shows_control_gates_and_operator_frames(monkeypatch) -
         "field": "mode",
         "op": "equals",
         "value": "manual",
+    }
+
+
+def test_build_run_graph_projects_completion_contract_from_spec_snapshot() -> None:
+    class _Conn:
+        def execute(self, query: str, *params: object) -> list[dict[str, object]]:
+            normalized = " ".join(query.split())
+            if normalized == "SELECT request_envelope->'spec_snapshot' AS spec_snapshot FROM workflow_runs WHERE run_id = $1":
+                assert params == ("run-contract",)
+                return [
+                    {
+                        "spec_snapshot": {
+                            "jobs": [
+                                {
+                                    "label": "enter_data",
+                                    "agent": "openai/gpt-5.4",
+                                    "task_type": "data_entry",
+                                    "description": "Enter applicant data into the target system.",
+                                    "outcome_goal": "Applicant record is populated in the CRM.",
+                                    "prompt": "Open the CRM tool and enter the supplied applicant data.",
+                                    "completion_contract": {
+                                        "result_kind": "artifact_bundle",
+                                        "submit_tool_names": ["praxis_submit_artifact_bundle"],
+                                        "submission_required": True,
+                                        "verification_required": False,
+                                    },
+                                },
+                                {
+                                    "label": "review",
+                                    "depends_on": ["enter_data"],
+                                    "agent": "openai/gpt-5.4",
+                                },
+                            ]
+                        }
+                    }
+                ]
+            raise AssertionError(f"unexpected query: {query}")
+
+    jobs = [
+        {
+            "label": "enter_data",
+            "status": "succeeded",
+            "cost_usd": 0.25,
+            "duration_ms": 1200,
+            "resolved_agent": "openai/gpt-5.4",
+            "agent_slug": "openai/gpt-5.4",
+            "attempt": 1,
+            "last_error_code": None,
+        },
+        {
+            "label": "review",
+            "status": "pending",
+            "cost_usd": 0,
+            "duration_ms": 0,
+            "resolved_agent": "openai/gpt-5.4",
+            "agent_slug": "openai/gpt-5.4",
+            "attempt": 0,
+            "last_error_code": None,
+        },
+    ]
+
+    graph = rest._build_run_graph(_Conn(), "run-contract", jobs)
+
+    assert graph is not None
+    nodes = {node["id"]: node for node in graph["nodes"]}
+    assert nodes["enter_data"]["task_type"] == "data_entry"
+    assert nodes["enter_data"]["outcome_goal"] == "Applicant record is populated in the CRM."
+    assert nodes["enter_data"]["prompt"] == "Open the CRM tool and enter the supplied applicant data."
+    assert nodes["enter_data"]["completion_contract"] == {
+        "result_kind": "artifact_bundle",
+        "submit_tool_names": ["praxis_submit_artifact_bundle"],
+        "submission_required": True,
+        "verification_required": False,
     }
 
 

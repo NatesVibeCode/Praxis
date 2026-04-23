@@ -547,7 +547,7 @@ ONLY JSON."""
             sandbox_provider=sandbox_provider,
             sandbox_policy=SimpleNamespace(
                 network_policy="provider_only",
-                workspace_materialization="copy",
+                workspace_materialization="none",
                 secret_allowlist=(),
             ),
         )

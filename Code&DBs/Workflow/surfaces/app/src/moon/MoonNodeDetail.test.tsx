@@ -37,6 +37,7 @@ describe('MoonNodeDetail', () => {
       branchReason: 'then',
       siblingCount: 2,
       siblingIndex: 0,
+      inLineage: true,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {
@@ -164,6 +165,7 @@ describe('MoonNodeDetail', () => {
       branchReason: 'then',
       siblingCount: 2,
       siblingIndex: 0,
+      inLineage: true,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {
@@ -258,6 +260,7 @@ describe('MoonNodeDetail', () => {
       gateState: 'empty',
       siblingCount: 1,
       siblingIndex: 0,
+      inLineage: true,
     };
 
     render(
@@ -280,6 +283,53 @@ describe('MoonNodeDetail', () => {
     expect(screen.queryByRole('button', { name: 'Remove gate' })).not.toBeInTheDocument();
   });
 
+  test('renders run completion gate contracts for selected run nodes', () => {
+    const node: OrbitNode = {
+      id: 'enter_data',
+      kind: 'step',
+      title: 'Enter data',
+      summary: 'submit artifact_bundle via praxis_submit_artifact_bundle',
+      glyphType: 'tool',
+      ringState: 'run-succeeded',
+      isOnDominantPath: true,
+      issueCount: 0,
+      dominantPathIndex: 0,
+      x: 0,
+      y: 0,
+      rank: 0,
+      multiplicity: null,
+      taskType: 'data_entry',
+      outcomeGoal: 'CRM record is populated.',
+      prompt: 'Enter the applicant data in the CRM tool.',
+      completionContract: {
+        result_kind: 'artifact_bundle',
+        submit_tool_names: ['praxis_submit_artifact_bundle'],
+        submission_required: true,
+        verification_required: false,
+      },
+      outgoingEdgeCount: 0,
+      inLineage: true,
+    };
+
+    render(
+      <MoonNodeDetail
+        node={node}
+        content={null}
+        workflowId="wf_1"
+        onMutate={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Run completion gate')).toBeInTheDocument();
+    expect(screen.getByText('Submission required')).toBeInTheDocument();
+    expect(screen.getByText('data_entry')).toBeInTheDocument();
+    expect(screen.getByText('artifact_bundle')).toBeInTheDocument();
+    expect(screen.getByText('praxis_submit_artifact_bundle')).toBeInTheDocument();
+    expect(screen.getByText('CRM record is populated.')).toBeInTheDocument();
+    expect(screen.getByText('Enter the applicant data in the CRM tool.')).toBeInTheDocument();
+  });
+
   test('renders block contract string lists as data fields with values from the build graph', () => {
     const node: OrbitNode = {
       id: 'n-step',
@@ -296,6 +346,7 @@ describe('MoonNodeDetail', () => {
       rank: 0,
       multiplicity: null,
       outgoingEdgeCount: 0,
+      inLineage: true,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {
@@ -352,6 +403,7 @@ describe('MoonNodeDetail', () => {
       route: 'trigger/webhook',
       multiplicity: null,
       outgoingEdgeCount: 0,
+      inLineage: true,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {
@@ -416,6 +468,7 @@ describe('MoonNodeDetail', () => {
       route: longRoute,
       multiplicity: null,
       outgoingEdgeCount: 0,
+      inLineage: true,
     };
 
     const buildGraph: NonNullable<BuildPayload['build_graph']> = {

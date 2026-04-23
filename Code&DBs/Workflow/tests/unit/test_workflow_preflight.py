@@ -15,6 +15,7 @@ from typing import Any
 from runtime.workflow_validation import (
     _preflight_deterministic_builders,
     _preflight_provider_admissions,
+    _preflight_provider_availability,
     _preflight_workdir_drift,
     _preflight_workflow_id_collision,
 )
@@ -147,11 +148,14 @@ class _FakeCursor:
 
 
 class _FakeConn:
-    def __init__(self, rows: list[tuple]) -> None:
+    def __init__(self, rows: list[Any]) -> None:
         self._rows = rows
 
     def cursor(self) -> _FakeCursor:
         return _FakeCursor(self._rows)
+
+    def execute(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+        return self._rows
 
 
 class _ExplodingConn:
@@ -165,7 +169,12 @@ def test_provider_admission_admitted_is_quiet() -> None:
         "adapter_type": "cli_llm",
         "agent": "anthropic/claude-haiku",
     }])
-    conn = _FakeConn([("anthropic", "cli_llm", True, "")])
+    conn = _FakeConn([{
+        "provider_slug": "anthropic",
+        "adapter_type": "cli_llm",
+        "admitted_by_policy": True,
+        "policy_reason": "",
+    }])
 
     warnings = _preflight_provider_admissions(spec, pg_conn=conn)
 
@@ -178,7 +187,12 @@ def test_provider_admission_denied_is_error() -> None:
         "adapter_type": "llm_task",
         "agent": "openai/gpt-x",
     }])
-    conn = _FakeConn([("openai", "llm_task", False, "credential missing")])
+    conn = _FakeConn([{
+        "provider_slug": "openai",
+        "adapter_type": "llm_task",
+        "admitted_by_policy": False,
+        "policy_reason": "credential missing",
+    }])
 
     warnings = _preflight_provider_admissions(spec, pg_conn=conn)
 
@@ -229,12 +243,113 @@ def test_provider_admission_ignores_non_agent_jobs() -> None:
     assert _preflight_provider_admissions(spec, pg_conn=conn) == []
 
 
+# ----- Provider availability checks --------------------------------------
+
+
+class _FakeCircuitBreakers:
+    def __init__(self, states: dict[str, dict[str, Any]] | None = None) -> None:
+        self._states = states or {}
+
+    def all_states(self) -> dict[str, dict[str, Any]]:
+        return self._states
+
+
+def test_provider_availability_blocks_degraded_provider_usage_snapshot() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "agent": "anthropic/claude-sonnet-4-6",
+    }])
+    conn = _FakeConn([{
+        "subject_id": "anthropic",
+        "subject_sub": "cli_llm",
+        "status": "degraded",
+        "summary": "anthropic/cli_llm: degraded",
+        "details": {"rate_limited": True, "stderr_excerpt": "quota exhausted"},
+        "captured_at": "2026-04-23T10:00:00Z",
+    }])
+
+    warnings = _preflight_provider_availability(
+        spec,
+        pg_conn=conn,
+        circuit_breakers=_FakeCircuitBreakers(),
+    )
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "provider_unavailable"
+    assert warnings[0]["severity"] == "error"
+    assert "anthropic" in warnings[0]["message"]
+    assert "quota exhausted" in warnings[0]["message"]
+
+
+def test_provider_availability_allows_ok_provider_usage_snapshot() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "agent": "openai/gpt-5.4",
+    }])
+    conn = _FakeConn([{
+        "subject_id": "openai",
+        "subject_sub": "cli_llm",
+        "status": "ok",
+        "summary": "openai/cli_llm: ok",
+        "details": {},
+        "captured_at": "2026-04-23T10:00:00Z",
+    }])
+
+    assert _preflight_provider_availability(
+        spec,
+        pg_conn=conn,
+        circuit_breakers=_FakeCircuitBreakers(),
+    ) == []
+
+
+def test_provider_availability_blocks_open_circuit_breaker() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "agent": "openai/gpt-5.4",
+    }])
+    conn = _FakeConn([])
+    circuit_breakers = _FakeCircuitBreakers({
+        "openai": {
+            "state": "OPEN",
+            "manual_override": {"rationale": "operator forced outage"},
+        }
+    })
+
+    warnings = _preflight_provider_availability(
+        spec,
+        pg_conn=conn,
+        circuit_breakers=circuit_breakers,
+    )
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "provider_circuit_open"
+    assert warnings[0]["severity"] == "error"
+    assert "operator forced outage" in warnings[0]["message"]
+
+
+def test_provider_availability_query_failure_is_warning() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "agent": "openai/gpt-5.4",
+    }])
+
+    warnings = _preflight_provider_availability(
+        spec,
+        pg_conn=_ExplodingConn(),
+        circuit_breakers=_FakeCircuitBreakers(),
+    )
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "provider_availability_query_failed"
+    assert warnings[0]["severity"] == "warning"
+
+
 # ----- workflow_id collision check ---------------------------------------
 
 
 def test_workflow_id_collision_emits_warning() -> None:
     spec = _FakeSpec(workflow_id="e2e_sample")
-    conn = _FakeConn([(1, "active")])
+    conn = _FakeConn([{"definition_version": 1, "status": "active"}])
 
     warnings = _preflight_workflow_id_collision(spec, pg_conn=conn)
 
@@ -256,7 +371,7 @@ def test_workflow_id_without_existing_row_is_quiet() -> None:
 def test_workflow_id_from_raw_dict_is_detected() -> None:
     # Some spec loaders leave workflow_id only in the raw dict.
     spec = _FakeSpec(workflow_id=None, raw={"workflow_id": "from_raw"})
-    conn = _FakeConn([(7, "active")])
+    conn = _FakeConn([{"definition_version": 7, "status": "active"}])
 
     warnings = _preflight_workflow_id_collision(spec, pg_conn=conn)
 

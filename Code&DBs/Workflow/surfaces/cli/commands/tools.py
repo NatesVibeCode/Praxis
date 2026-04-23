@@ -19,11 +19,6 @@ from surfaces.cli.mcp_tools import (
     run_cli_tool,
 )
 from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
-from surfaces.mcp.frontdoor_authority import (
-    build_mcp_tool_authority_payload,
-    tool_authority_contract_for_params,
-    tool_authority_contracts,
-)
 
 
 _TOOL_LIST_CONTEXT_LIMIT = 5
@@ -262,15 +257,6 @@ def _tools_help_text(topic: str | None = None) -> str:
                 "Tip: multi-word entrypoints such as `workflow query` can be passed directly without quotes.",
             ]
         )
-    if topic == "authority":
-        return "\n".join(
-            [
-                "usage: workflow tools authority [--json] [--risk <risk>] [--surface <surface>]",
-                "",
-                "Show CQRS authority contracts for catalog-backed MCP tools.",
-                "Tip: add --json for the full machine-readable boundary payload.",
-            ]
-        )
     return "\n".join(
         [
             f"unknown tools help topic: {topic}",
@@ -280,7 +266,6 @@ def _tools_help_text(topic: str | None = None) -> str:
             "  workflow tools help search",
             "  workflow tools help describe",
             "  workflow tools help call",
-            "  workflow tools help authority",
         ]
     )
 
@@ -297,15 +282,14 @@ def _tools_quickstart_text() -> str:
         direct_entrypoints = alias_definitions[:6]
 
     lines = [
-        "usage: workflow tools [list|search|describe|authority|call|help]",
+        "usage: workflow tools [list|search|describe|call|help]",
         "",
         "Tool discovery quickstart:",
         "  workflow tools list",
         "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
         "  workflow tools describe <tool|alias>",
-        "  workflow tools authority --json",
         "  workflow tools call <tool|alias> --input-json '<json>' --yes",
-        "  workflow tools help <list|search|describe|authority|call>",
+        "  workflow tools help <list|search|describe|call>",
         "  workflow tools help <tool|alias>",
         "",
         "Tip: each subcommand also accepts --help for command-specific usage.",
@@ -320,7 +304,6 @@ def _tools_quickstart_text() -> str:
         [
             f"Catalog size: {len(definitions)} tools",
             "Tip: run `workflow tools list --json` for machine-readable discovery.",
-            "Tip: run `workflow tools authority --json` to inspect CQRS front-door contracts.",
             "Tip: list/search JSON include when_to_use and when_not_to_use guidance for each tool.",
             "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
             "Tip: add `--exact` when you already know the alias, tool name, or entrypoint.",
@@ -350,7 +333,6 @@ def _tool_catalog_brief_payload(definition: McpToolDefinition) -> dict[str, obje
         "description": definition.description,
         "when_to_use": definition.cli_when_to_use,
         "when_not_to_use": definition.cli_when_not_to_use,
-        "authority": tool_authority_contract_for_params(definition, {}).to_payload(),
     }
 
 
@@ -363,7 +345,7 @@ def _tools_command(args: list[str], *, stdout: TextIO) -> int:
             stdout.write(_tools_quickstart_text() + "\n")
             return 0
         topic = args[1].strip()
-        if topic in {"list", "search", "describe", "call", "authority"}:
+        if topic in {"list", "search", "describe", "call"}:
             stdout.write(_tools_help_text(topic) + "\n")
             return 0
         return _tools_describe_command(args[1:], stdout=stdout)
@@ -378,8 +360,6 @@ def _tools_command(args: list[str], *, stdout: TextIO) -> int:
         return _tools_describe_command(tail, stdout=stdout)
     if subcommand == "call":
         return _tools_call_command(tail, stdout=stdout)
-    if subcommand == "authority":
-        return _tools_authority_command(tail, stdout=stdout)
     stdout.write(f"unknown tools subcommand: {subcommand}\n")
     return 2
 
@@ -639,7 +619,6 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
         "input_schema": definition.input_schema,
         "risk_levels": list(definition.risk_levels),
         "requires_workflow_token": definition.requires_workflow_token,
-        "authority_contracts": tool_authority_contracts(definition),
         "examples": list(definition.cli_examples),
         "example_input": definition.example_input(),
     }
@@ -676,61 +655,6 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
     if interpretive_context:
         stdout.write("interpretive_context:\n")
         stdout.write(json.dumps(interpretive_context, indent=2, default=str) + "\n")
-    stdout.write("authority_contracts:\n")
-    stdout.write(json.dumps(tool_authority_contracts(definition), indent=2, default=str) + "\n")
-    return 0
-
-
-def _tools_authority_command(args: list[str], *, stdout: TextIO) -> int:
-    if any(arg in {"-h", "--help"} for arg in args):
-        stdout.write(_tools_help_text("authority") + "\n")
-        return 0
-    as_json = False
-    risk = "all"
-    surface = None
-    i = 0
-    while i < len(args):
-        if args[i] == "--json":
-            as_json = True
-            i += 1
-        elif args[i] == "--risk" and i + 1 < len(args):
-            risk = args[i + 1].strip()
-            i += 2
-        elif args[i] == "--surface" and i + 1 < len(args):
-            surface = args[i + 1].strip()
-            i += 2
-        elif args[i] in {"--risk", "--surface"}:
-            stdout.write(f"{args[i]} requires a value\n")
-            return 2
-        else:
-            stdout.write(f"unknown argument: {args[i]}\n")
-            return 2
-
-    payload = build_mcp_tool_authority_payload()
-    contracts = [
-        contract
-        for contract in payload["contracts"]
-        if isinstance(contract, dict)
-        if risk == "all" or contract.get("risk") == risk
-        if surface is None or contract.get("surface") == surface
-    ]
-    rendered_payload = {**payload, "contracts": contracts, "filtered_count": len(contracts)}
-    if as_json:
-        print_json(stdout, rendered_payload)
-        return 0
-
-    stdout.write(
-        "CQRS front-door authority: "
-        f"{payload['mutating_contract_count']} mutating contract(s), "
-        f"ok={payload['ok']}\n"
-    )
-    for contract in contracts:
-        stdout.write(
-            f"{contract['tool_name']}:{contract['selector_value']} "
-            f"risk={contract['risk']} domain={contract['authority_domain_ref']} "
-            f"via={contract['cqrs_entrypoint']}\n"
-        )
-    stdout.write(f"\n{len(contracts)} contract(s)\n")
     return 0
 
 

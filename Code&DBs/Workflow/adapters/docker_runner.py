@@ -79,7 +79,7 @@ def _docker_image() -> str:
 
 
 def _docker_memory() -> str:
-    return os.environ.get(_PRAXIS_DOCKER_MEMORY_ENV, "").strip() or "4g"
+    return os.environ.get(_PRAXIS_DOCKER_MEMORY_ENV, "").strip() or "500m"
 
 
 def _docker_cpus() -> str:
@@ -244,7 +244,7 @@ def run_in_docker(
     network:
         Allow network access (False for build tasks, True for research).
     image:
-        Docker image to use. Defaults to PRAXIS_DOCKER_IMAGE env var.
+        Docker image to use. Defaults to provider-family thin image authority.
     memory:
         Memory limit. Defaults to PRAXIS_DOCKER_MEMORY env var.
     cpus:
@@ -253,14 +253,21 @@ def run_in_docker(
     docker_image, image_meta = resolve_docker_image(
         requested_image=image,
         image_exists=_has_docker_image,
+        agent_slug=provider_slug,
     )
     docker_memory = memory or _docker_memory()
     docker_cpus = cpus or _docker_cpus()
+    if image_meta.get("rejected") or not docker_image:
+        detail = str(image_meta.get("message") or image_meta.get("reason_code") or "").strip()
+        raise RuntimeError(
+            "Docker sandbox execution requires provider-family thin image authority."
+            + (f" {detail}" if detail else "")
+        )
     if not _has_docker_image(docker_image):
         detail = str(image_meta.get("build_error") or "").strip()
         raise RuntimeError(
-            f"Docker image {docker_image!r} is unavailable. Build it or set "
-            f"{DOCKER_IMAGE_ENV} before execution."
+            f"Docker image {docker_image!r} is unavailable. Build the thin image "
+            "on the selected runtime target or run praxis setup doctor."
             + (f" {detail}" if detail else "")
         )
 

@@ -51,52 +51,33 @@ def test_resolve_docker_image_prefers_explicit_sources(monkeypatch) -> None:
     assert meta["built_default"] is False
 
 
-def test_resolve_docker_image_autobuilds_missing_default(monkeypatch) -> None:
-    attempts = {"count": 0}
-
+def test_resolve_docker_image_without_agent_fails_closed(monkeypatch) -> None:
     monkeypatch.delenv("PRAXIS_DOCKER_IMAGE", raising=False)
-
-    def _exists(image: str) -> bool:
-        if image != authority.DEFAULT_DOCKER_IMAGE:
-            return False
-        return attempts["count"] > 0
-
-    def _build_default(image_name: str = authority.DEFAULT_DOCKER_IMAGE, timeout_seconds: int = authority.DEFAULT_BUILD_TIMEOUT_SECONDS):
-        del timeout_seconds
-        assert image_name == authority.DEFAULT_DOCKER_IMAGE
-        attempts["count"] += 1
-        return True, None
-
-    monkeypatch.setattr(authority, "build_default_docker_image", _build_default)
 
     image, meta = authority.resolve_docker_image(
         requested_image=None,
-        image_exists=_exists,
+        image_exists=lambda _image: False,
     )
 
-    assert image == authority.DEFAULT_DOCKER_IMAGE
-    assert meta["source"] == "default"
-    assert meta["built_default"] is True
-    assert attempts["count"] == 1
+    assert image == ""
+    assert meta["source"] == "unresolved"
+    assert meta["rejected"] is True
+    assert meta["reason_code"] == "agent_family_image_unresolved"
 
 
-def test_resolve_docker_image_surfaces_build_failure(monkeypatch) -> None:
-    monkeypatch.delenv("PRAXIS_DOCKER_IMAGE", raising=False)
-    monkeypatch.setattr(
-        authority,
-        "build_default_docker_image",
-        lambda **kwargs: (False, "boom"),
-    )
+def test_resolve_docker_image_rejects_control_worker_override(monkeypatch) -> None:
+    monkeypatch.setenv("PRAXIS_DOCKER_IMAGE", authority.CONTROL_WORKER_IMAGE)
 
     image, meta = authority.resolve_docker_image(
         requested_image=None,
         image_exists=lambda image: False,
+        agent_slug="openai/gpt-5.4",
     )
 
-    assert image == authority.DEFAULT_DOCKER_IMAGE
-    assert meta["source"] == "default"
-    assert meta["built_default"] is False
-    assert meta["build_error"] == "boom"
+    assert image == authority.CONTROL_WORKER_IMAGE
+    assert meta["source"] == "env"
+    assert meta["rejected"] is True
+    assert meta["reason_code"] == "control_worker_image_not_model_sandbox"
 
 
 # -----------------------------------------------------------------------------
@@ -167,14 +148,13 @@ def test_resolve_docker_image_autobuilds_thin_when_missing(monkeypatch) -> None:
     assert meta["built_default"] is True
 
 
-def test_resolve_docker_image_falls_back_to_fat_when_thin_build_fails(monkeypatch) -> None:
-    """If the thin image can't be built, fall through to the fat default so
-    jobs never hard-fail on a missing thin image."""
+def test_resolve_docker_image_fails_closed_when_thin_build_fails(monkeypatch) -> None:
+    """If the thin image can't be built, do not fall back to the worker image."""
     monkeypatch.delenv("PRAXIS_DOCKER_IMAGE", raising=False)
     calls: list[str] = []
 
     def _exists(image: str) -> bool:
-        return image == authority.DEFAULT_DOCKER_IMAGE  # only fat exists
+        return image == authority.DEFAULT_DOCKER_IMAGE  # only control worker exists
 
     def _build(image_name: str = authority.DEFAULT_DOCKER_IMAGE, timeout_seconds: int = authority.DEFAULT_BUILD_TIMEOUT_SECONDS):
         del timeout_seconds
@@ -191,9 +171,10 @@ def test_resolve_docker_image_falls_back_to_fat_when_thin_build_fails(monkeypatc
         agent_slug="google/gemini-3-pro",
     )
 
-    # Fell through to fat default after thin build failed.
-    assert image == authority.DEFAULT_DOCKER_IMAGE
-    assert meta["source"] == "default"
+    assert image == "praxis-gemini:latest"
+    assert meta["source"] == "agent_family"
+    assert meta["reason_code"] == "thin_sandbox_image_unavailable"
+    assert meta["build_error"] == "no dockerfile"
     assert "praxis-gemini:latest" in calls
 
 

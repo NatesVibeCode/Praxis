@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from storage.postgres import PostgresModuleEmbeddingsRepository
 from runtime.workspace_paths import to_repo_ref
 
 # ---------------------------------------------------------------------------
@@ -702,6 +703,7 @@ class ModuleIndexer:
         self._repo_root = repo_root
         self._embedder = EmbeddingService(model_name)
         self._vector_store = PostgresVectorStore(conn, self._embedder)
+        self._embeddings_repo = PostgresModuleEmbeddingsRepository(conn)
 
     def index_codebase(
         self,
@@ -742,33 +744,23 @@ class ModuleIndexer:
         pruned_missing = 0
         try:
             for path, ids in walked_ids_by_path.items():
-                stale_rows = self._conn.execute(
-                    "SELECT module_id FROM module_embeddings "
-                    "WHERE module_path = $1 AND module_id <> ALL($2::text[])",
-                    path,
-                    list(ids),
+                stale_module_ids = self._embeddings_repo.fetch_module_ids_for_path(
+                    module_path=path,
+                    module_ids=list(ids),
                 )
-                for row in stale_rows:
-                    self._conn.execute(
-                        "DELETE FROM module_embeddings WHERE module_id = $1",
-                        row["module_id"],
-                    )
+                for stale_module_id in stale_module_ids:
+                    self._embeddings_repo.delete_module_id(module_id=stale_module_id)
                     pruned_orphans += 1
 
             for subdir in subdirs:
                 like = f"{to_repo_ref(subdir)}/%"
-                candidate_rows = self._conn.execute(
-                    "SELECT DISTINCT module_path FROM module_embeddings WHERE module_path LIKE $1",
-                    like,
+                candidate_rows = self._embeddings_repo.fetch_module_paths_like(
+                    like_pattern=like
                 )
-                for row in candidate_rows:
-                    candidate_path = row["module_path"]
+                for candidate_path in candidate_rows:
                     if candidate_path in walked_paths:
                         continue
-                    self._conn.execute(
-                        "DELETE FROM module_embeddings WHERE module_path = $1",
-                        candidate_path,
-                    )
+                    self._embeddings_repo.delete_module_path(module_path=candidate_path)
                     pruned_missing += 1
         except Exception as exc:
             import sys
@@ -779,10 +771,7 @@ class ModuleIndexer:
         existing_hashes = {}
         if not force:
             try:
-                rows = self._conn.execute(
-                    "SELECT module_id, source_hash FROM module_embeddings"
-                )
-                existing_hashes = {r["module_id"]: r["source_hash"] for r in rows}
+                existing_hashes = self._embeddings_repo.fetch_source_hashes()
             except Exception:
                 pass
 
@@ -832,30 +821,17 @@ class ModuleIndexer:
                 if not normalized_embedding:
                     raise RuntimeError("embedding_empty")
                 vector_literal = format_vector_literal(normalized_embedding)
-                self._conn.execute(
-                    """INSERT INTO module_embeddings
-                       (module_id, module_path, kind, name, docstring, signature,
-                        behavior, summary, source_hash, embedding, indexed_at)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::vector, NOW())
-                       ON CONFLICT (module_id) DO UPDATE SET
-                           module_path = EXCLUDED.module_path,
-                           kind = EXCLUDED.kind,
-                           name = EXCLUDED.name,
-                           docstring = EXCLUDED.docstring,
-                           signature = EXCLUDED.signature,
-                           behavior = EXCLUDED.behavior,
-                           summary = EXCLUDED.summary,
-                           source_hash = EXCLUDED.source_hash,
-                           embedding = EXCLUDED.embedding,
-                           indexed_at = NOW()
-                    """,
-                    unit.module_id, unit.module_path, unit.kind, unit.name,
-                    unit.docstring[:2000] if unit.docstring else "",
-                    unit.signature[:500] if unit.signature else "",
-                    json.dumps(unit.behavior.to_dict()),
-                    unit.summary[:3000],
-                    unit.source_hash,
-                    vector_literal,
+                self._embeddings_repo.upsert_embedding(
+                    module_id=unit.module_id,
+                    module_path=unit.module_path,
+                    kind=unit.kind,
+                    name=unit.name,
+                    docstring=(unit.docstring[:2000] if unit.docstring else ""),
+                    signature=(unit.signature[:500] if unit.signature else ""),
+                    behavior_json=json.dumps(unit.behavior.to_dict()),
+                    summary=unit.summary[:3000],
+                    source_hash=unit.source_hash,
+                    embedding_literal=vector_literal,
                 )
                 indexed += 1
             except Exception as exc:
@@ -1010,13 +986,11 @@ class ModuleIndexer:
     def stats(self) -> dict[str, Any]:
         """Return index statistics."""
         try:
-            total = self._conn.fetchval("SELECT COUNT(*) FROM module_embeddings") or 0
-            by_kind = self._conn.execute(
-                "SELECT kind, COUNT(*) as cnt FROM module_embeddings GROUP BY kind ORDER BY cnt DESC"
-            )
+            total = self._embeddings_repo.fetch_total()
+            by_kind_rows = self._embeddings_repo.fetch_counts_by_kind()
             return {
                 "total_indexed": total,
-                "by_kind": {r["kind"]: int(r["cnt"]) for r in by_kind},
+                "by_kind": {kind: count for kind, count in by_kind_rows},
                 "observability_state": "complete",
                 "errors": (),
             }
@@ -1043,10 +1017,7 @@ class ModuleIndexer:
         """
 
         try:
-            rows = self._conn.execute(
-                "SELECT module_path, MIN(source_hash) AS source_hash "
-                "FROM module_embeddings GROUP BY module_path"
-            )
+            rows = self._embeddings_repo.fetch_path_hash_rows()
         except Exception as exc:
             return {
                 "stale_count": 0,

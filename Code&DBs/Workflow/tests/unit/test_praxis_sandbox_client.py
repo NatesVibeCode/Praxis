@@ -150,31 +150,3 @@ def test_workflow_tools_describe_reports_unknown_tool(
 
     assert excinfo.value.code == 2
     assert "unknown tool: missing" in capsys.readouterr().err
-
-
-def test_help_only_teaches_canonical_workflow_tools_shape(capsys: pytest.CaptureFixture[str]) -> None:
-    module = _load_sandbox_client()
-
-    rc = module.main(["--help"])
-
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "praxis workflow tools call <tool_name>" in rendered
-    assert "Short form" not in rendered
-    assert "praxis submit_code_change" not in rendered
-    assert "praxis query" not in rendered
-
-
-def test_short_form_commands_are_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    module = _load_sandbox_client()
-    monkeypatch.setenv(module._ENV_URL, "http://mcp.local/mcp")
-    monkeypatch.setenv(module._ENV_TOKEN, "test-token")
-
-    with pytest.raises(SystemExit) as excinfo:
-        module.main(["query", "what is failing?"])
-
-    assert excinfo.value.code == 1
-    assert "unknown command shape" in capsys.readouterr().err

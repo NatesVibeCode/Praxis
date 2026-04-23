@@ -9,12 +9,7 @@ import pytest
 from runtime.launcher_authority import (
     LauncherAuthorityError,
     LauncherSeedConfig,
-    launcher_error_payload,
-    launcher_error_status_code,
-    launcher_resolution_row_payload,
-    launcher_resolution_sql,
     looks_like_legacy_sql_locator,
-    normalize_launcher_resolution_request,
     read_launcher_seed_config,
     resolve_launcher_workspace,
     write_launcher_seed_config,
@@ -183,34 +178,6 @@ def test_database_seed_resolution_uses_python_runtime_not_shell_sql(tmp_path: Pa
 
     assert resolution.authority_source == "database"
     assert calls == [(("postgresql://authority.example/praxis",), {"connect_timeout": 5})]
-
-
-def test_launcher_resolution_sql_supports_runtime_and_api_placeholders() -> None:
-    api_sql = launcher_resolution_sql(placeholder_style="dollar")
-    runtime_sql = launcher_resolution_sql(placeholder_style="pyformat")
-
-    assert "workspace.workspace_ref = $1" in api_sql
-    assert "base_path.host_ref = $2" in api_sql
-    assert "workspace.workspace_ref = %s" in runtime_sql
-    assert "base_path.host_ref = %s" in runtime_sql
-
-
-def test_launcher_resolution_row_payload_uses_structured_errors() -> None:
-    with pytest.raises(LauncherAuthorityError) as exc_info:
-        launcher_resolution_row_payload([], workspace_ref="praxis", host_ref="default")
-
-    assert launcher_error_status_code(exc_info.value) == 404
-    assert launcher_error_payload(exc_info.value)["errors"][0]["reason_code"] == (
-        "launcher_workspace_unresolved"
-    )
-
-
-def test_launcher_resolution_request_must_be_explicit() -> None:
-    with pytest.raises(LauncherAuthorityError) as exc_info:
-        normalize_launcher_resolution_request(workspace_ref=" ", host_ref="default")
-
-    assert exc_info.value.reason_code == "launcher_config_invalid"
-    assert launcher_error_status_code(exc_info.value) == 400
 
 
 def test_legacy_sql_locator_content_is_detected() -> None:

@@ -3,7 +3,7 @@
 Historically the workflow runtime tangled three distinct jobs across
 ``execution_backends.py``, ``sandbox_runtime.py``, ``execution_bundle.py``,
 ``_context_building.py``, ``prompt_renderer.py``, ``docker_runner.py``, and
-per-provider MCP helper plumbing:
+``mcp_bridge.py``:
 
 1. **Agent interaction**  — what the agent sees (prompt + env + tool manifest).
 2. **Sandbox lifecycle**  — how the CLI binary is spawned (docker args + stdin).

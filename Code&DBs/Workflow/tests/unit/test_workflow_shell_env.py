@@ -143,24 +143,3 @@ def test_workflow_env_detects_repo_root_when_sourced_from_zsh() -> None:
     )
 
     assert completed.stdout.strip() == str(_REPO_ROOT)
-
-
-def test_workflow_env_prefers_launcher_resolved_repo_root(tmp_path: Path) -> None:
-    repo_root = _sandbox_repo(tmp_path)
-    completed = subprocess.run(
-        [
-            "bash",
-            "-c",
-            f"source {_HELPER!s}; printf '%s' \"$workflow_env_repo_root\"",
-        ],
-        cwd=tmp_path,
-        env={
-            "PATH": os.environ.get("PATH", ""),
-            "PRAXIS_LAUNCHER_RESOLVED_REPO_ROOT": str(repo_root),
-        },
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.stdout.strip() == str(repo_root)

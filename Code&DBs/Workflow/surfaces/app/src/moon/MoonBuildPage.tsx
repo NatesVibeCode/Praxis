@@ -1148,22 +1148,19 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       applyCatalogToNode(catalogId, nodeId);
       return;
     }
+    // Unresolved nodes need the action-picker popout; SELECT_NODE suppresses it
+    // while a dock is open, so close the stale context dock first.
     const clicked = viewModel.nodes.find(n => n.id === nodeId);
     const isUnresolved = !!clicked && !(clicked.route || '').trim();
+    if (isUnresolved && state.openDock !== null) {
+      dispatch({ type: 'CLOSE_DOCK' });
+    }
     if (isSelected && nodeId !== state.activeNodeId) {
       dispatch({ type: 'SELECT_NODE', nodeId: null });
-      dispatch({ type: 'CLOSE_DOCK' });
     } else {
       dispatch({ type: 'SELECT_NODE', nodeId });
-      dispatch({ type: 'OPEN_DOCK', dock: isUnresolved ? 'action' : 'context' });
     }
-  }, [state.viewMode, state.pendingCatalogId, state.activeNodeId, applyCatalogToNode, viewModel.nodes]);
-
-  const handleNodeDoubleClick = useCallback((nodeId: string) => {
-    if (state.viewMode === 'run') return;
-    dispatch({ type: 'SELECT_NODE', nodeId });
-    dispatch({ type: 'OPEN_POPOUT' });
-  }, [state.viewMode]);
+  }, [state.viewMode, state.pendingCatalogId, state.activeNodeId, state.openDock, applyCatalogToNode, viewModel.nodes]);
 
   const appendNode = useCallback(async (label?: string) => {
     if (!payload?.build_graph) return;
@@ -1756,7 +1753,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                         data-multiplicity={multiplicityAttr || undefined}
                         data-in-lineage={node.inLineage || undefined}
                         onClick={() => handleNodeClick(node.id, isSelected)}
-                        onDoubleClick={() => handleNodeDoubleClick(node.id)}
                         onKeyDown={(event) => {
                           if (event.key !== 'Enter' && event.key !== ' ') return;
                           event.preventDefault();

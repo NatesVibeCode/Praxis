@@ -4,9 +4,25 @@
   "sandbox_profiles": {
     "sandbox_profile.praxis.default": {
       "sandbox_provider": "docker_local",
-      "docker_image": "praxis-worker:latest",
+      "docker_image": null,
       "docker_cpus": "2",
-      "docker_memory": "4g",
+      "docker_memory": "500m",
+      "network_policy": "provider_only",
+      "workspace_materialization": "none",
+      "secret_allowlist": [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY"
+      ],
+      "auth_mount_policy": "provider_scoped",
+      "timeout_profile": "default"
+    },
+    "sandbox_profile.praxis.legacy_copy_debug": {
+      "sandbox_provider": "docker_local",
+      "docker_image": null,
+      "docker_cpus": "2",
+      "docker_memory": "500m",
       "network_policy": "provider_only",
       "workspace_materialization": "copy",
       "secret_allowlist": [

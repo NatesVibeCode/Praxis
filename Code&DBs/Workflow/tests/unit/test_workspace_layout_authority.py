@@ -48,16 +48,6 @@ def test_canonical_tree_dirname_matches_disk() -> None:
     ), f"neither canonical {canonical!r} nor aliases {tree_aliases()!r} exist on disk"
 
 
-def test_code_tree_root_ignores_literal_alias_files(tmp_path: Path) -> None:
-    canonical = code_tree_dirname()
-    canonical_root = tmp_path / canonical
-    canonical_root.mkdir()
-    for alias in tree_aliases():
-        (tmp_path / alias).write_text(canonical, encoding="utf-8")
-
-    assert code_tree_root(tmp_path) == canonical_root
-
-
 def test_workflow_root_exists() -> None:
     assert workflow_root().is_dir()
 
@@ -107,14 +97,6 @@ def test_container_auth_seed_dir_comes_from_layout_authority() -> None:
 def test_authority_workspace_roots_includes_explicit_host_override() -> None:
     roots = authority_workspace_roots(env={"PRAXIS_HOST_WORKSPACE_ROOT": "/host/workspace"})
     assert roots[0] == Path("/host/workspace")
-
-
-def test_authority_workspace_roots_includes_launcher_resolved_repo_root() -> None:
-    roots = authority_workspace_roots(
-        env={"PRAXIS_LAUNCHER_RESOLVED_REPO_ROOT": "/authority/resolved/praxis"}
-    )
-
-    assert roots[0] == Path("/authority/resolved/praxis")
 
 
 def test_authority_workspace_roots_propagates_instance_authority_errors(monkeypatch) -> None:

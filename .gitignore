@@ -29,6 +29,7 @@ venv/
 artifacts/sandboxes/
 artifacts/dispatch_outputs/
 artifacts/workflow_outputs/
+artifacts/sandbox_cleanup_*/
 artifacts/*.log
 artifacts/*.err
 artifacts/workflow_results/

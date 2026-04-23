@@ -82,7 +82,6 @@ function layoutLayeredRunNodes(
 
   const nodeSet = new Set(nodeIds);
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-
   const adj = new Map<string, string[]>();
   const radj = new Map<string, string[]>();
   const inDeg = new Map<string, number>();
@@ -404,6 +403,11 @@ export function presentRun(
       y: pos.y,
       rank: pos.rank,
       multiplicity: null,
+      taskType: n.task_type,
+      description: n.description,
+      outcomeGoal: n.outcome_goal,
+      prompt: n.prompt,
+      completionContract: n.completion_contract ?? null,
       outgoingEdgeCount: outgoingByNode.get(n.id) || 0,
       inLineage: isInLineage(n.id),
     };
@@ -426,13 +430,19 @@ export function presentRun(
 
   const edges: OrbitEdge[] = graph.edges.map((e) => {
     const sm = siblingMetaById.get(e.id) || { index: 0, count: 1 };
+    const gateFamily = runEdgeGateFamily(e);
+    const gateConfig = runEdgeGateConfig(e);
     return {
       id: e.id,
       from: e.from,
       to: e.to,
       kind: e.type || 'sequence',
       isOnDominantPath: pathSet.has(e.from) && pathSet.has(e.to),
-      gateState: 'empty' as const,
+      gateState: gateFamily && gateFamily !== 'after_success' ? 'configured' as const : 'empty' as const,
+      gateLabel: runEdgeGateLabel(e, gateFamily),
+      gateFamily: gateFamily && gateFamily !== 'after_success' ? gateFamily : undefined,
+      branchReason: typeof e.condition?.branch === 'string' ? e.condition.branch : undefined,
+      gateConfig,
       siblingCount: sm.count,
       siblingIndex: sm.index,
       inLineage: isInLineage(e.from) && isInLineage(e.to),
@@ -470,9 +480,29 @@ export function presentRun(
   };
 }
 
+function summarizeCompletionContract(node: RunGraphNode): string | null {
+  const contract = node.completion_contract;
+  if (!contract) return null;
+  const resultKind = typeof contract.result_kind === 'string' && contract.result_kind.trim()
+    ? contract.result_kind.trim()
+    : 'result';
+  const tools = Array.isArray(contract.submit_tool_names)
+    ? contract.submit_tool_names.filter((tool): tool is string => typeof tool === 'string' && tool.trim().length > 0)
+    : [];
+  if (contract.submission_required) {
+    return tools.length
+      ? `submit ${resultKind} via ${tools.join(', ')}`
+      : `submit ${resultKind}`;
+  }
+  if (contract.verification_required) return `verify ${resultKind}`;
+  return resultKind;
+}
+
 function summarizeNode(node: RunGraphNode, job: RunJob | undefined): string {
   const parts: string[] = [];
   if (node.agent || job?.agent_slug) parts.push(node.agent || job!.agent_slug!);
+  const contractSummary = summarizeCompletionContract(node);
+  if (contractSummary) parts.push(contractSummary);
   if (node.duration_ms || job?.duration_ms) {
     const ms = node.duration_ms ?? job!.duration_ms!;
     parts.push(`${(ms / 1000).toFixed(1)}s`);
@@ -481,6 +511,41 @@ function summarizeNode(node: RunGraphNode, job: RunJob | undefined): string {
     parts.push(`$${node.cost_usd.toFixed(2)}`);
   }
   return parts.join(' · ');
+}
+
+function runEdgeGateFamily(edge: RunGraphEdge): string | undefined {
+  if (edge.condition) return 'conditional';
+  const type = (edge.type || '').trim();
+  if (type === 'conditional' || type === 'after_failure' || type === 'after_any' || type === 'after_success') {
+    return type;
+  }
+  return undefined;
+}
+
+function runEdgeGateLabel(edge: RunGraphEdge, family: string | undefined): string | undefined {
+  switch (family) {
+    case 'conditional':
+      return typeof edge.condition?.branch === 'string' && edge.condition.branch.trim()
+        ? edge.condition.branch.trim()
+        : 'Condition';
+    case 'after_failure':
+      return 'On failure';
+    case 'after_any':
+      return 'On any';
+    case 'after_success':
+      return 'On success';
+    default:
+      return undefined;
+  }
+}
+
+function runEdgeGateConfig(edge: RunGraphEdge): Record<string, unknown> | undefined {
+  const config: Record<string, unknown> = {};
+  if (edge.condition) config.condition = edge.condition;
+  if (edge.data_mapping && Object.keys(edge.data_mapping).length > 0) {
+    config.data_mapping = edge.data_mapping;
+  }
+  return Object.keys(config).length > 0 ? config : undefined;
 }
 
 function runReleaseStatus(run: RunDetail): MoonBuildViewModel['release'] {

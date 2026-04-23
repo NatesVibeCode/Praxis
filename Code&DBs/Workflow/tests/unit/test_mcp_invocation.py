@@ -100,10 +100,6 @@ def test_invoke_tool_records_surface_usage_on_success(monkeypatch: pytest.Monkey
     result = invocation.invoke_tool("praxis_query", {"question": "status"})
 
     assert result == {"ok": True}
-    assert len(recorded) == 1
-    authority_contract = recorded[0].pop("authority_contract")
-    assert authority_contract["tool_name"] == "praxis_query"
-    assert authority_contract["authority_domain_ref"] == "authority.read_models"
     assert recorded == [
         {
             "canonical_name": "praxis_query",
@@ -156,8 +152,6 @@ def test_invoke_tool_enforces_allowed_tools_from_workflow_token(monkeypatch: pyt
 
     assert exc_info.value.reason_code == "workflow_mcp.tool_not_allowed"
     assert "Tool not allowed by workflow token" in exc_info.value.message
-    assert len(recorded) == 1
-    assert recorded[0].pop("authority_contract") is None
     assert recorded == [
         {
             "canonical_name": "session_tool",

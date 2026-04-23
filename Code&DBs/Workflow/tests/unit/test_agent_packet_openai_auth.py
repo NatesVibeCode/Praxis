@@ -24,8 +24,8 @@ def test_openai_sandbox_spec_bootstraps_auth_as_root_then_drops_privileges(monke
         container_name="praxis-test",
         sandbox_session_id="sandbox_session:run.alpha:job.alpha",
         workspace_source_root="/tmp/workspace",
-        docker_image="praxis-worker:latest",
-        docker_memory="4g",
+        docker_image="praxis-codex:latest",
+        docker_memory="500m",
         docker_cpus="2",
         timeout_seconds=10,
     )
@@ -33,6 +33,6 @@ def test_openai_sandbox_spec_bootstraps_auth_as_root_then_drops_privileges(monke
     args = list(spec.docker_run_args)
     assert args[args.index("--user") + 1] == "0:0"
     assert f"{AUTH_HOME}/.codex/auth.json:{_OPENAI_AUTH_SEED_PATH}:ro" in args
-    assert args[-4:-1] == ["praxis-worker:latest", "bash", "-lc"]
+    assert args[-4:-1] == ["praxis-codex:latest", "bash", "-lc"]
     assert f"cp {_OPENAI_AUTH_SEED_PATH} /home/praxis-agent/.codex/auth.json" in args[-1]
     assert "setpriv --reuid=1100 --regid=1100" in args[-1]

@@ -1,13 +1,14 @@
 #!/bin/bash
-# Fake-agent helper for plumbing smoke tests. The real CLIs (codex/claude/gemini)
-# make LLM calls that cost money and take 5-10 minutes per job. This helper
+# Fake-agent shim for plumbing smoke tests. The real CLIs (codex/claude/gemini)
+# make LLM calls that cost money and take 5-10 minutes per job. This shim
 # does the one thing we want to test: call the `praxis` shell tool to seal
 # a submission. It completes in under 1 second.
 #
 # Usage (from inside a sandbox spawn, matching the CLI command shape):
 #   /usr/local/bin/praxis-fake-agent <submit_verb> [extra args...]
 #
-# The helper only supplies the mandatory fields with stub values so the submission
+# All args after the verb are passed through to `praxis <verb>` — the shim
+# only supplies the mandatory fields with stub values so the submission
 # row lands in workflow_job_submissions. Use this to verify:
 #
 #   1. The sandbox image has /usr/local/bin/praxis mounted / baked
@@ -38,19 +39,25 @@ fi
 
 case "$verb" in
   submit_code_change)
-    exec praxis workflow tools call praxis_submit_code_change \
-      --input-json '{"summary":"fake-agent plumbing smoke","primary_paths":[],"result_kind":"code_change","notes":"issued by praxis_fake_agent.sh; proves env+binary+bridge"}' \
+    exec praxis submit_code_change \
+      --summary "fake-agent plumbing smoke" \
+      --primary-paths '[]' \
+      --result-kind code_change \
+      --notes "issued by praxis_fake_agent.sh — proves env+binary+bridge" \
       "$@"
     ;;
   submit_artifact_bundle)
-    exec praxis workflow tools call praxis_submit_artifact_bundle \
-      --input-json '{"summary":"fake-agent plumbing smoke","primary_paths":[],"result_kind":"artifact_bundle","notes":"issued by praxis_fake_agent.sh; proves env+binary+bridge"}' \
+    exec praxis submit_artifact_bundle \
+      --summary "fake-agent plumbing smoke" \
+      --primary-paths '[]' \
+      --result-kind artifact_bundle \
+      --notes "issued by praxis_fake_agent.sh — proves env+binary+bridge" \
       "$@"
     ;;
   health)
-    exec praxis workflow tools call praxis_health --input-json '{}' "$@"
+    exec praxis health "$@"
     ;;
   *)
-    exec praxis workflow tools call "$verb" "$@"
+    exec praxis "$verb" "$@"
     ;;
 esac

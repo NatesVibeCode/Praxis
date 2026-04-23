@@ -25,31 +25,6 @@ LAUNCHER_CONFIG_ENV = "PRAXIS_LAUNCHER_CONFIG"
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "praxis" / "launcher.json"
 SUPPORTED_SCHEMA_VERSION = 1
 _ENV_TOKEN_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
-_LAUNCHER_RESOLUTION_SQL_TEMPLATE = """
-SELECT workspace.workspace_ref,
-       base_path.host_ref,
-       workspace.base_path_ref,
-       base_path.base_path,
-       workspace.repo_root_path,
-       workspace.workdir_path
-FROM registry_workspace_authority workspace
-JOIN registry_workspace_base_path_authority base_path
-  ON base_path.base_path_ref = workspace.base_path_ref
- AND base_path.workspace_ref = workspace.workspace_ref
- AND base_path.is_active = TRUE
-WHERE workspace.workspace_ref = {workspace_ref_placeholder}
-  AND base_path.host_ref = {host_ref_placeholder}
-ORDER BY base_path.priority DESC,
-         base_path.recorded_at DESC
-LIMIT 2
-"""
-_ERROR_HTTP_STATUS_BY_REASON = {
-    "launcher_config_invalid": 400,
-    "launcher_config_unsupported": 400,
-    "launcher_authority_seed_missing": 400,
-    "launcher_workspace_unresolved": 404,
-    "launcher_workspace_ambiguous": 409,
-}
 
 
 class LauncherAuthorityError(RuntimeError):
@@ -142,108 +117,6 @@ def _optional_text(value: object, *, field_name: str) -> str | None:
 
 def _row_get(row: Mapping[str, Any], key: str, default: object = None) -> object:
     return row.get(key, default)
-
-
-def launcher_resolution_sql(*, placeholder_style: str = "dollar") -> str:
-    """Return the canonical workspace/base-path resolution query.
-
-    ``placeholder_style`` keeps transport adapters honest without duplicating
-    the registry shape. The REST API uses dollar placeholders; psycopg2 uses
-    ``%s`` placeholders.
-    """
-
-    if placeholder_style == "dollar":
-        workspace_placeholder = "$1"
-        host_placeholder = "$2"
-    elif placeholder_style == "pyformat":
-        workspace_placeholder = "%s"
-        host_placeholder = "%s"
-    else:
-        raise LauncherAuthorityError(
-            "launcher_config_invalid",
-            "unsupported launcher SQL placeholder style",
-            details={"placeholder_style": placeholder_style},
-        )
-    return _LAUNCHER_RESOLUTION_SQL_TEMPLATE.format(
-        workspace_ref_placeholder=workspace_placeholder,
-        host_ref_placeholder=host_placeholder,
-    )
-
-
-def launcher_error_status_code(error: LauncherAuthorityError) -> int:
-    """Map launcher authority failures to stable HTTP statuses."""
-
-    return _ERROR_HTTP_STATUS_BY_REASON.get(error.reason_code, 503)
-
-
-def launcher_error_payload(error: LauncherAuthorityError) -> dict[str, Any]:
-    """Return the standard launcher authority failure envelope."""
-
-    return {"ok": False, "errors": [error.to_dict()], "warnings": []}
-
-
-def normalize_launcher_resolution_request(
-    *,
-    workspace_ref: str,
-    host_ref: str,
-) -> tuple[str, str]:
-    """Validate and normalize a launcher resolution request."""
-
-    return (
-        _require_text(workspace_ref, field_name="workspace_ref"),
-        _require_text(host_ref, field_name="host_ref"),
-    )
-
-
-def require_single_launcher_resolution_row(
-    rows: object,
-    *,
-    workspace_ref: str,
-    host_ref: str,
-) -> dict[str, Any]:
-    """Validate DB/API launcher resolution rows without resolving local paths."""
-
-    workspace, host = normalize_launcher_resolution_request(
-        workspace_ref=workspace_ref,
-        host_ref=host_ref,
-    )
-    if not isinstance(rows, list):
-        rows = list(rows or [])  # type: ignore[arg-type]
-    normalized_rows = [dict(row) for row in rows]
-    if not normalized_rows:
-        raise LauncherAuthorityError(
-            "launcher_workspace_unresolved",
-            "registry workspace/base-path authority did not resolve this workspace and host",
-            details={"workspace_ref": workspace, "host_ref": host},
-        )
-    if len(normalized_rows) > 1:
-        raise LauncherAuthorityError(
-            "launcher_workspace_ambiguous",
-            "registry workspace/base-path authority returned multiple active rows",
-            details={"workspace_ref": workspace, "host_ref": host},
-        )
-    return normalized_rows[0]
-
-
-def launcher_resolution_row_payload(
-    rows: object,
-    *,
-    workspace_ref: str,
-    host_ref: str,
-) -> dict[str, Any]:
-    """Return the REST-safe launcher resolution envelope.
-
-    The API publishes the registry row for the requested host. The caller that
-    will execute locally remains responsible for resolving env tokens and
-    proving ``scripts/praxis`` exists on that host.
-    """
-
-    row = require_single_launcher_resolution_row(
-        rows,
-        workspace_ref=workspace_ref,
-        host_ref=host_ref,
-    )
-    return {"ok": True, "resolution": row, "errors": [], "warnings": []}
 
 
 def launcher_config_path(
@@ -597,7 +470,24 @@ def _fetch_database_resolution(
         with conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    launcher_resolution_sql(placeholder_style="pyformat"),
+                    """
+                    SELECT workspace.workspace_ref,
+                           base_path.host_ref,
+                           workspace.base_path_ref,
+                           base_path.base_path,
+                           workspace.repo_root_path,
+                           workspace.workdir_path
+                    FROM registry_workspace_authority workspace
+                    JOIN registry_workspace_base_path_authority base_path
+                      ON base_path.base_path_ref = workspace.base_path_ref
+                     AND base_path.workspace_ref = workspace.workspace_ref
+                     AND base_path.is_active = TRUE
+                    WHERE workspace.workspace_ref = %s
+                      AND base_path.host_ref = %s
+                    ORDER BY base_path.priority DESC,
+                             base_path.recorded_at DESC
+                    LIMIT 2
+                    """,
                     (seed.workspace_ref, seed.host_ref),
                 )
                 columns = [column[0] for column in cursor.description]
@@ -607,13 +497,20 @@ def _fetch_database_resolution(
         if callable(close):
             close()
 
-    row = require_single_launcher_resolution_row(
-        rows,
-        workspace_ref=seed.workspace_ref,
-        host_ref=seed.host_ref,
-    )
+    if not rows:
+        raise LauncherAuthorityError(
+            "launcher_workspace_unresolved",
+            "registry workspace/base-path authority did not resolve this workspace and host",
+            details={"workspace_ref": seed.workspace_ref, "host_ref": seed.host_ref},
+        )
+    if len(rows) > 1:
+        raise LauncherAuthorityError(
+            "launcher_workspace_ambiguous",
+            "registry workspace/base-path authority returned multiple active rows",
+            details={"workspace_ref": seed.workspace_ref, "host_ref": seed.host_ref},
+        )
     return _resolution_from_authority_row(
-        row,
+        rows[0],
         authority_source="database",
         env=env,
     )

@@ -863,6 +863,59 @@ class TaskTypeRouter:
             rows = self._routing_repository.load_routes_for_task(task_type=f"auto/{task_type}")
         return [dict(row) for row in rows]
 
+    def _provider_usage_unavailable_slugs(self, provider_slugs: set[str]) -> set[str]:
+        if not provider_slugs:
+            return set()
+        try:
+            rows = self._conn.execute(
+                """
+                SELECT DISTINCT ON (subject_id)
+                       subject_id,
+                       status
+                  FROM heartbeat_probe_snapshots
+                 WHERE probe_kind = 'provider_usage'
+                   AND subject_id = ANY($1::text[])
+                   AND captured_at >= now() - interval '24 hours'
+                 ORDER BY subject_id, captured_at DESC
+                """,
+                sorted(provider_slugs),
+            )
+        except Exception as exc:
+            logger.warning("provider usage availability unavailable during routing: %s", exc)
+            return set()
+        unavailable: set[str] = set()
+        for row in rows or []:
+            provider_slug = str(row.get("subject_id") or "").strip().lower()
+            status = str(row.get("status") or "").strip().lower()
+            if provider_slug and status in {"degraded", "failed"}:
+                unavailable.add(provider_slug)
+        return unavailable
+
+    def _apply_provider_usage_availability_filter(
+        self,
+        task_type: str,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        unavailable = self._provider_usage_unavailable_slugs(
+            {str(row.get("provider_slug") or "").strip().lower() for row in rows}
+        )
+        if not unavailable:
+            return rows
+        filtered = [
+            row
+            for row in rows
+            if str(row.get("provider_slug") or "").strip().lower() not in unavailable
+        ]
+        dropped = len(rows) - len(filtered)
+        if dropped:
+            logger.warning(
+                "auto/%s routing dropped %d candidate(s) due to provider_usage availability: %s",
+                task_type,
+                dropped,
+                ", ".join(sorted(unavailable)),
+            )
+        return filtered
+
 
     def _load_budget_authority_snapshot(self) -> BudgetAuthoritySnapshot:
         return _load_budget_authority_snapshot(self._conn)
@@ -1036,6 +1089,7 @@ class TaskTypeRouter:
         # under the CLI-only standing order). Keeps auto/review from being
         # routed to Anthropic HTTP and collapsing on 401.
         rows = self._apply_provider_transport_admission_filter(task_type, rows)
+        rows = self._apply_provider_usage_availability_filter(task_type, rows)
         if not rows:
             raise ValueError(f"No permitted models for task type '{task_type}'")
         policy = self._policy_for(task_type)
@@ -1107,6 +1161,7 @@ class TaskTypeRouter:
         # profile resolution is the hot path for auto/review routes, so the
         # filter must live here too, not only on explicit task-type routes.
         rows = self._apply_provider_transport_admission_filter(profile_value, rows)
+        rows = self._apply_provider_usage_availability_filter(profile_value, rows)
         if not rows:
             raise ValueError(f"No permitted models for auto/{profile_value}")
         rows = _rerank_rows(rows, prefer_cost, self._policy)

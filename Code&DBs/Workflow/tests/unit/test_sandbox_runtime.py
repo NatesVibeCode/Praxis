@@ -1111,7 +1111,14 @@ def test_docker_local_requires_available_image(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("runtime.sandbox_runtime._docker_image_available", lambda image: False)
     monkeypatch.setattr(
         "runtime.sandbox_runtime.resolve_docker_image",
-        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None}),
+        lambda **kwargs: (
+            "praxis-codex:latest",
+            {
+                "source": "agent_family",
+                "build_error": None,
+                "required_image": "praxis-codex:latest",
+            },
+        ),
     )
 
     provider = DockerLocalSandboxProvider()
@@ -1131,7 +1138,7 @@ def test_docker_local_requires_available_image(monkeypatch, tmp_path) -> None:
     )
 
     try:
-        with pytest.raises(RuntimeError, match="PRAXIS_DOCKER_IMAGE"):
+        with pytest.raises(RuntimeError, match="thin sandbox image"):
             provider.exec(
                 session,
                 type(
@@ -1285,14 +1292,17 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
         provider.destroy_session(session, "completed")
 
 
-def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_path) -> None:
+def test_docker_local_autobuilds_thin_image_when_missing(monkeypatch, tmp_path) -> None:
     seen: dict[str, str] = {}
 
     monkeypatch.delenv("PRAXIS_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
     monkeypatch.setattr(
         "runtime.sandbox_runtime.resolve_docker_image",
-        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None, "built_default": True}),
+        lambda **kwargs: (
+            "praxis-codex:latest",
+            {"source": "agent_family", "build_error": None, "built_default": True},
+        ),
     )
     monkeypatch.setattr(
         "runtime.sandbox_runtime._docker_image_available",
@@ -1321,7 +1331,7 @@ def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_pat
                 "network_policy": "disabled",
                 "workspace_materialization": "copy",
                 "timeout_seconds": 30,
-                "metadata": {},
+                "metadata": {"provider_slug": "openai"},
             },
         )()
     )
@@ -1343,7 +1353,7 @@ def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_pat
             )(),
         )
 
-        assert seen["image"] == "praxis-worker:latest"
+        assert seen["image"] == "praxis-codex:latest"
         assert result.execution_mode == "docker_local"
     finally:
         provider.destroy_session(session, "completed")

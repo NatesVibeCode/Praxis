@@ -29,11 +29,11 @@ def _write_runtime_profiles_config(repo_root: Path) -> None:
                 "sandbox_profiles": {
                     "sandbox_profile.praxis.default": {
                         "sandbox_provider": "docker_local",
-                        "docker_image": "praxis-worker:latest",
+                        "docker_image": None,
                         "docker_cpus": "2",
-                        "docker_memory": "4g",
+                        "docker_memory": "500m",
                         "network_policy": "provider_only",
-                        "workspace_materialization": "copy",
+                        "workspace_materialization": "none",
                         "secret_allowlist": ["OPENAI_API_KEY"],
                         "auth_mount_policy": "provider_scoped",
                         "timeout_profile": "default",

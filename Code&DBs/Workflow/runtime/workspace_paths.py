@@ -18,7 +18,6 @@ _HOST_WORKSPACE_ROOT_ENV = "PRAXIS_HOST_WORKSPACE_ROOT"
 _CONTAINER_WORKSPACE_ROOT_ENV = "PRAXIS_CONTAINER_WORKSPACE_ROOT"
 _CONTAINER_HOME_ENV = "PRAXIS_CONTAINER_HOME"
 _CONTAINER_AUTH_SEED_DIR_ENV = "PRAXIS_CONTAINER_AUTH_SEED_DIR"
-_LAUNCHER_RESOLVED_REPO_ROOT_ENV = "PRAXIS_LAUNCHER_RESOLVED_REPO_ROOT"
 
 
 def _repo_root() -> Path:
@@ -63,9 +62,7 @@ def code_tree_root(repo_root: Path | None = None) -> Path:
     canonical = code_tree_dirname()
     for alias in tree_aliases():
         candidate = root / alias
-        # Some hosts cannot preserve the alias as a symlink and may check it
-        # out as a regular file. Only a real directory can be path authority.
-        if candidate.is_dir():
+        if candidate.exists():
             return candidate
     return root / canonical
 
@@ -151,7 +148,6 @@ def authority_workspace_roots(*, env: Mapping[str, str] | None = None) -> tuple[
             roots.append(candidate)
 
     _append(source.get(_HOST_WORKSPACE_ROOT_ENV))
-    _append(source.get(_LAUNCHER_RESOLVED_REPO_ROOT_ENV))
     try:
         from runtime.instance import native_instance_contract
     except ImportError:

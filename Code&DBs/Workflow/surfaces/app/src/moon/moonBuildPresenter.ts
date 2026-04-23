@@ -115,6 +115,14 @@ export interface NodeMultiplicity {
   count: number | null;
 }
 
+export interface NodeCompletionContract {
+  result_kind?: string;
+  submit_tool_names?: string[];
+  submission_required?: boolean;
+  verification_required?: boolean;
+  [key: string]: unknown;
+}
+
 export interface OrbitNode {
   id: string;
   kind: 'step' | 'gate' | 'state';
@@ -130,6 +138,11 @@ export interface OrbitNode {
   y: number;
   rank: number;
   multiplicity: NodeMultiplicity | null;
+  taskType?: string;
+  description?: string;
+  outcomeGoal?: string;
+  prompt?: string;
+  completionContract?: NodeCompletionContract | null;
   /** Number of outgoing edges that leave this node in the graph. */
   outgoingEdgeCount: number;
   /**

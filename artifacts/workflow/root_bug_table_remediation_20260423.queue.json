@@ -1,0 +1,327 @@
+{
+  "name": "root_bug_table_remediation_20260423",
+  "workflow_id": "root_bug_table_remediation_20260423",
+  "phase": "build",
+  "outcome_goal": "Resolve the current 49 OPEN bugs from the authoritative Praxis bugs table through root-cause authority repairs, verifier-backed evidence, and explicit bug closeout. Keep work inside /Volumes/Users/natha/Documents/Builds/Praxis and do not launch deprecated localhost Postgres fallbacks.",
+  "target_repo": "/Volumes/Users/natha/Documents/Builds/Praxis",
+  "workdir": "/Volumes/Users/natha/Documents/Builds/Praxis",
+  "bug_source": {
+    "authority": "praxis workflow tools call praxis_bugs",
+    "snapshot_date": "2026-04-23",
+    "open_count": 49,
+    "replay_ready_count": 4,
+    "replay_blocked_count": 45
+  },
+  "anti_requirements": [
+    "Do not create wrapper scripts for orchestration when this queue spec already expresses the DAG.",
+    "Do not use or document localhost Postgres as authority.",
+    "Do not revert dirty worktree changes made by others.",
+    "Do not close a bug without verifier-backed evidence or an explicit non-fixed resolution rationale.",
+    "Do not paper over duplicated authority with compatibility layers; replace the weak authority path."
+  ],
+  "verify_refs": [
+    "praxis workflow tools call praxis_workflow_validate --input-json '{\"spec_path\":\"artifacts/workflow/root_bug_table_remediation_20260423.queue.json\"}'",
+    "./scripts/test.sh validate artifacts/workflow/root_bug_table_remediation_20260423.queue.json"
+  ],
+  "jobs": [
+    {
+      "label": "wave0_backlog_collision_guard",
+      "agent": "openai/gpt-5.4",
+      "bug_ids": [],
+      "write_scope": [
+        "artifacts/workflow/root_bug_table_remediation_20260423_COLLISION_GUARD.md"
+      ],
+      "prompt": "Create the launch collision guard for this remediation run.\n\nYou are not alone in the repo. Start by running `git status --short`, `praxis workflow bugs stats --json`, `praxis workflow tools call praxis_bugs --input-json '{\"action\":\"list\",\"status\":\"OPEN\",\"open_only\":true,\"limit\":250,\"include_replay_state\":true,\"include_clusters\":true}'`, and `praxis workflow tools call praxis_replay_ready_bugs --input-json '{\"limit\":100}'`.\n\nWrite `artifacts/workflow/root_bug_table_remediation_20260423_COLLISION_GUARD.md` with: current dirty files grouped by subsystem, the 49 open bug IDs grouped by this workflow's waves, write-scope collision warnings, any bugs that appear already fixed by dirty changes, and a go/no-go recommendation for each downstream wave.\n\nDo not fix code. Do not resolve bugs. This packet exists to prevent the automated workers from trampling in-flight edits."
+    },
+    {
+      "label": "wave1_bug_authority_and_replay_provenance",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave0_backlog_collision_guard"
+      ],
+      "bug_ids": [
+        "BUG-1DBACCD8",
+        "BUG-1D9FAF57",
+        "BUG-A75BC81E",
+        "BUG-69870BA5",
+        "BUG-07771B2A",
+        "BUG-8D8C5256"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/bug_tracker.py",
+        "Code&DBs/Workflow/runtime/bug_evidence.py",
+        "Code&DBs/Workflow/runtime/receipt_store.py",
+        "Code&DBs/Workflow/runtime/work_item_clustering.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/bugs.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/discover.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/_bug_surface_contract.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/_query_bugs.py",
+        "Code&DBs/Workflow/storage/postgres/bug_evidence_repository.py",
+        "Code&DBs/Workflow/tests/unit/test_bug_tracker.py",
+        "Code&DBs/Workflow/tests/unit/test_bug_tracker_read_only.py",
+        "Code&DBs/Workflow/tests/unit/test_bug_tracker_bug_evidence_wiring.py",
+        "Code&DBs/Workflow/tests/unit/test_bug_surface_db_isolation_guardrail.py"
+      ],
+      "prompt": "Fix the bug authority root cluster for BUG-1DBACCD8, BUG-1D9FAF57, BUG-A75BC81E, BUG-69870BA5, BUG-07771B2A, and BUG-8D8C5256.\n\nBefore editing, read `artifacts/workflow/root_bug_table_remediation_20260423_COLLISION_GUARD.md`, then inspect `praxis workflow bugs packet` and `praxis workflow bugs history` for every assigned bug. Use `praxis workflow discover` for bug file/evidence/replay/search behavior and `praxis workflow recall` for bug authority policy.\n\nRequired outcome: one bug authority, one DB authority identity, and observable evidence linkage. Add a redacted database-authority fingerprint to orient/bug stats/list payloads if still missing. Remove or hard-gate fallback paths that can inspect a different bug table. Make runtime/receipt bug filing create observed evidence in the same transaction or fail loudly. Expose underlinked bugs as a remediation queue. Split cheap duplicate/title search from semantic enrichment and add bounded timeout/telemetry so search and duplicate_check do not hang silently.\n\nDo not add ad hoc SQL scripts as the authority. If a test writes bugs, it must use rollback isolation. Run focused bug-surface tests and either resolve assigned bugs with verifier evidence or patch their resume_context with the exact blocker."
+    },
+    {
+      "label": "wave2_secret_env_runtime_policy",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave0_backlog_collision_guard"
+      ],
+      "bug_ids": [
+        "BUG-D74C9598",
+        "BUG-2CF335E3",
+        "BUG-25224975",
+        "BUG-A8B8F200",
+        "BUG-EBE6B0E1",
+        "BUG-76A0519D",
+        "BUG-A9A42870",
+        "BUG-EE9CD6E9"
+      ],
+      "write_scope": [
+        "docker-compose.yml",
+        "scripts/_workflow_env.sh",
+        "scripts/praxis",
+        "Code&DBs/Workflow/adapters/keychain.py",
+        "Code&DBs/Workflow/adapters/credentials.py",
+        "Code&DBs/Workflow/adapters/oauth_lifecycle.py",
+        "Code&DBs/Workflow/runtime/workflow/execution_backends.py",
+        "Code&DBs/Workflow/runtime/sandbox_runtime.py",
+        "Code&DBs/Workflow/runtime/workspace_paths.py",
+        "Code&DBs/Workflow/surfaces/api/rest.py",
+        "Code&DBs/Workflow/tests/unit/test_execution_backends.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py",
+        "Code&DBs/Workflow/tests/unit/test_workspace_layout_authority.py"
+      ],
+      "prompt": "Fix the runtime target, secret, env, and CORS policy cluster for BUG-D74C9598, BUG-2CF335E3, BUG-25224975, BUG-A8B8F200, BUG-EBE6B0E1, BUG-76A0519D, BUG-A9A42870, and BUG-EE9CD6E9.\n\nStart with bug packets/history, the standing orders for runtime-target neutrality, resource-derived worker concurrency, and secret-path inventory, plus `praxis workflow discover` for sandbox env assembly, OAuth refresh, compose worker startup, and API CORS setup.\n\nRequired outcome: compose must not force fixed worker parallelism; the worker should derive concurrency unless the operator explicitly overrides. Sandbox and execution env assembly must be allowlist/provenance based rather than broad host env copying. OAuth refresh client credentials must resolve through the secret authority or DB credential refs, with typed errors when auth_shape lacks credential authority. Production must not allow PRAXIS_HOST_WORKSPACE_ROOT binary overlay without an explicit dev guard. REST CORS must require explicit allowed origins outside local dev/test. Repo env loading must tolerate BOM/CRLF without shell noise. `scripts/praxis restart api` must load canonical workflow env before Compose interpolation.\n\nDo not weaken the CLI-only Anthropic policy. Run focused unit tests for env, sandbox, OAuth, CORS, and worker startup. Resolve only with verifier proof."
+    },
+    {
+      "label": "wave3_input_validation_boundary",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave0_backlog_collision_guard"
+      ],
+      "bug_ids": [
+        "BUG-34C2F2DA",
+        "BUG-5FBAF694",
+        "BUG-FF008A47",
+        "BUG-EC542D26",
+        "BUG-3E0DDC73",
+        "BUG-419EDA6D",
+        "BUG-C4497068",
+        "BUG-24F87D0F",
+        "BUG-616A0D2E",
+        "BUG-94DB9A53",
+        "BUG-AD855F0C",
+        "BUG-DB815755",
+        "BUG-B3315290"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/surfaces/api/rest.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+        "Code&DBs/Workflow/contracts/domain.py",
+        "Code&DBs/Workflow/runtime/workflow_spec.py",
+        "Code&DBs/Workflow/tests/unit/test_api_rest_startup.py",
+        "Code&DBs/Workflow/tests/unit/test_cli_tools_surface.py",
+        "Code&DBs/Workflow/tests/unit/test_mcp_invocation.py",
+        "Code&DBs/Workflow/tests/contracts/test_workflow_intake_contract.py"
+      ],
+      "prompt": "Fix the input-validation boundary cluster for BUG-34C2F2DA, BUG-5FBAF694, BUG-FF008A47, BUG-EC542D26, BUG-3E0DDC73, BUG-419EDA6D, BUG-C4497068, BUG-24F87D0F, BUG-616A0D2E, BUG-94DB9A53, BUG-AD855F0C, BUG-DB815755, and BUG-B3315290.\n\nStart with bug packets/history. Use `praxis workflow discover` for MCP action dispatch validation, spec path containment, REST request models, catch-all route path handling, queue cancel parsing, body size limits, and WorkflowRequest validation.\n\nRequired outcome: upfront enum validation for MCP actions; bounded read limits with explicit type errors; `spec_path` containment inside the active workspace; no silent coercion on operator tools; REST payload ceilings; constrained WorkflowRunRequest fields; traversal guards for catch-all path segments; explicit queue job id parsing before SQL; code-hotspot root/path_prefix sanitization; capability endpoint source precedence that names whether path, query, or body wins; and distinct WorkflowRequest validation error reasons instead of collapsing every graph error to one code.\n\nPreserve valid callers. Add negative tests for malformed actions, out-of-workspace paths, oversized bodies, bad ids, and traversal-like segments. Resolve assigned bugs only after focused tests pass."
+    },
+    {
+      "label": "wave4_deployment_launcher_pwa",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave0_backlog_collision_guard",
+        "wave2_secret_env_runtime_policy"
+      ],
+      "bug_ids": [
+        "BUG-839B787D",
+        "BUG-8B3AED45",
+        "BUG-22B49805"
+      ],
+      "write_scope": [
+        "scripts/praxis",
+        "Code&DBs/Workflow/runtime/launcher_authority.py",
+        "Code&DBs/Workflow/surfaces/api/rest.py",
+        "Code&DBs/Workflow/surfaces/app/public/manifest.webmanifest",
+        "Code&DBs/Workflow/surfaces/app/public/sw.js",
+        "Code&DBs/Workflow/surfaces/app/src/main.tsx",
+        "Code&DBs/Workflow/surfaces/app/package.json",
+        "Code&DBs/Workflow/surfaces/app/vite.config.ts",
+        "Code&DBs/Workflow/tests/unit/test_launcher_authority.py",
+        "Code&DBs/Workflow/tests/unit/test_launcher_entrypoints.py",
+        "Code&DBs/Workflow/tests/unit/test_api_rest_startup.py"
+      ],
+      "prompt": "Fix the hosted-app launcher and PWA cluster for BUG-839B787D, BUG-8B3AED45, and BUG-22B49805.\n\nStart with bug packets/history and inspect current app static assets before editing. Preserve the product decision if the repo already has a PWA contract: `/app/manifest.webmanifest` and `/sw.js` must be served as static assets with correct content type and update-safe cache policy before any SPA catch-all route. If the current architecture intentionally drops PWA support, remove the registration and close both PWA bugs with that explicit decision instead.\n\nAdd a canonical launcher-owned rebuild action instead of documenting SSH/WSL one-liners. The action must build the app, refresh the served bundle, prove `/app/workflow` references the new asset hash, prove `/app/manifest.webmanifest` is not HTML, prove `/sw.js` is not 404, and check `/api/health`.\n\nDo not create a second launcher authority. Route through the current launcher/frontdoor shape. Run focused API static-route, launcher, and app build tests."
+    },
+    {
+      "label": "wave5_operator_registry_governance",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave0_backlog_collision_guard",
+        "wave1_bug_authority_and_replay_provenance"
+      ],
+      "bug_ids": [
+        "BUG-317E3347",
+        "BUG-DF4CAB94",
+        "BUG-121B5049",
+        "BUG-1FB4A132"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/semantic_assertions.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/surfaces/api/operator_write.py",
+        "Code&DBs/Workflow/runtime/data_dictionary_governance.py",
+        "Code&DBs/Workflow/runtime/data_dictionary_wiring_audit.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/data_dictionary_wiring_audit.py",
+        "Code&DBs/Workflow/registry/agent_config.py",
+        "Code&DBs/Databases/migrations/workflow/README.md",
+        "Code&DBs/Workflow/tests/unit/test_cqrs_authority_unification.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_migration_idempotence.py"
+      ],
+      "prompt": "Fix the operator registry and governance authority cluster for BUG-317E3347, BUG-DF4CAB94, BUG-121B5049, and BUG-1FB4A132.\n\nStart with bug packets/history and recall the decisions for operator_decisions, DB-backed skills, scripts-support-only, and queryable control. Use discovery before creating any new registry/table/tool.\n\nRequired outcome: roadmap/operator write commit must be idempotent when semantic assertions already exist; manual migration promotion must have a safe schema_migrations receipt helper owned by runtime/DB authority, not a freehand SQL snippet; maintain_wiring_health must either meet the governance scorecard floor or expose the exact remaining blockers; agent skills must have a DB-backed registry/operator surface with identity, source revision, harness compatibility, enabled status, and receipts, while filesystem skill files become derived compatibility exports.\n\nIf a migration is needed, choose the next valid migration id from the current migration authority; do not reuse deleted 207/208 files unless the active migration authority explicitly says to. Run focused operator-write, semantic assertion, migration, and governance tests."
+    },
+    {
+      "label": "wave6_contract_drift_and_audit_quality",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave5_operator_registry_governance"
+      ],
+      "bug_ids": [
+        "BUG-0AC033CF",
+        "BUG-08E4B65C",
+        "BUG-AA6AC4E0",
+        "BUG-BFEA3DEE",
+        "BUG-0C0174D7",
+        "BUG-9ACEE016",
+        "BUG-E162C5F1",
+        "BUG-7C80AB3F"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/data_dictionary_wiring_audit.py",
+        "Code&DBs/Workflow/runtime/audit_primitive_wiring.py",
+        "Code&DBs/Workflow/runtime/build_planning_contract.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_contract.py",
+        "Code&DBs/Workflow/contracts/data_contracts.py",
+        "Code&DBs/Workflow/contracts/domain.py",
+        "Code&DBs/Workflow/adapters/provider_types.py",
+        "Code&DBs/Workflow/tests/unit/test_verify_refs_contract.py",
+        "Code&DBs/Workflow/tests/contracts/test_workflow_intake_contract.py"
+      ],
+      "prompt": "Fix audit-quality and contract-drift bugs BUG-0AC033CF, BUG-08E4B65C, BUG-AA6AC4E0, BUG-BFEA3DEE, BUG-0C0174D7, BUG-9ACEE016, BUG-E162C5F1, and BUG-7C80AB3F.\n\nStart with bug packets/history. Use discovery for wiring audit, provider adapter contracts, data contract operations, WorkflowRequest serialization, build planning contract projection, and submission contract tests.\n\nRequired outcome: hardcoded_port detection must stop flagging Python slice/truncation literals while preserving real URL/DSN/host:port findings; active standing orders consumed by orient must not be reported as unwired decisions; build planning manifest shape must be tested against DB projection; SUPPORTED_DATA_OPERATIONS must stay in parity with dispatcher behavior; ProviderAdapterContract needs inverse serialization/round-trip coverage; submission_contract needs dedicated tests; WorkflowRequest needs JSON round-trip tests.\n\nDo not broaden contract APIs without proving the existing consumer shape. Run the relevant unit and contract test slices, then resolve or patch_resume each assigned bug."
+    },
+    {
+      "label": "wave7_dependency_security_updates",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave0_backlog_collision_guard"
+      ],
+      "bug_ids": [
+        "BUG-EE65C154",
+        "BUG-ABBEFC6F",
+        "BUG-AAE46E22"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/requirements.runtime.txt",
+        "Code&DBs/Workflow/surfaces/app/package.json",
+        "Code&DBs/Workflow/surfaces/app/package-lock.json",
+        "Code&DBs/Workflow/tests/unit/test_execution_backends.py"
+      ],
+      "prompt": "Fix dependency-audit bugs BUG-EE65C154, BUG-ABBEFC6F, and BUG-AAE46E22.\n\nStart by reading packets/history and re-running the current npm and pip audit commands to confirm the advisories still apply. Update the minimum necessary dependency pins: the Python anthropic package must satisfy the CVE rows while preserving the Anthropic CLI-only policy, and the app Vite/Vitest update must preserve current tests and build behavior.\n\nRun `npm test`/focused Vitest where applicable, `npm audit` with the repo's chosen threshold, provider-surface Python tests for the anthropic adapter path, and `pip-audit -r Code&DBs/Workflow/requirements.runtime.txt` if available. If an audit tool is unavailable, record that in resume_context and provide the best grounded proof. Resolve only after verifier-backed evidence."
+    },
+    {
+      "label": "wave8_replay_ready_receipt_failures",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave1_bug_authority_and_replay_provenance"
+      ],
+      "bug_ids": [
+        "BUG-A3B51E8D",
+        "BUG-1980557E",
+        "BUG-7C5D8AE4",
+        "BUG-39D02693"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow",
+        "Code&DBs/Workflow/runtime/sandbox_runtime.py",
+        "Code&DBs/Workflow/runtime/receipt_store.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_contract.py",
+        "artifacts/workflow/root_bug_table_remediation_20260423_REPLAY_FAILURES.md"
+      ],
+      "prompt": "Debug and fix the four replay-ready receipt failures BUG-A3B51E8D, BUG-1980557E, BUG-7C5D8AE4, and BUG-39D02693.\n\nStart with `praxis workflow tools call praxis_replay_ready_bugs --input-json '{\"limit\":100}'`, then `praxis workflow bugs packet` and `praxis workflow bugs replay` for each assigned bug. Use the stored replay_run_id and replay_receipt_id as authority. If replay fails because the replay surface itself is broken, fix or patch_resume that as the blocker rather than guessing from the title.\n\nRequired outcome: workflow.timeout, workflow_submission.required_missing, and duplicate sandbox_error failures have root-cause fixes or explicit non-code resolution. The two sandbox_error bugs should dedupe through the canonical receipt failure aggregation introduced by wave1; do not leave duplicate open rows for the same failure_code plus job label unless the signatures prove separate root causes.\n\nWrite `artifacts/workflow/root_bug_table_remediation_20260423_REPLAY_FAILURES.md` with replay commands, observed failure signatures, fixes, and residual risk. Run replay/verification again before resolving bugs."
+    },
+    {
+      "label": "wave9_closeout_resolution_and_validation",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "wave1_bug_authority_and_replay_provenance",
+        "wave2_secret_env_runtime_policy",
+        "wave3_input_validation_boundary",
+        "wave4_deployment_launcher_pwa",
+        "wave6_contract_drift_and_audit_quality",
+        "wave7_dependency_security_updates",
+        "wave8_replay_ready_receipt_failures"
+      ],
+      "bug_ids": [
+        "BUG-07771B2A",
+        "BUG-839B787D",
+        "BUG-8B3AED45",
+        "BUG-EE9CD6E9",
+        "BUG-317E3347",
+        "BUG-22B49805",
+        "BUG-8D8C5256",
+        "BUG-DF4CAB94",
+        "BUG-A9A42870",
+        "BUG-121B5049",
+        "BUG-1FB4A132",
+        "BUG-D74C9598",
+        "BUG-A75BC81E",
+        "BUG-69870BA5",
+        "BUG-1D9FAF57",
+        "BUG-0AC033CF",
+        "BUG-08E4B65C",
+        "BUG-2CF335E3",
+        "BUG-25224975",
+        "BUG-1DBACCD8",
+        "BUG-A3B51E8D",
+        "BUG-A8B8F200",
+        "BUG-EBE6B0E1",
+        "BUG-AA6AC4E0",
+        "BUG-EE65C154",
+        "BUG-ABBEFC6F",
+        "BUG-34C2F2DA",
+        "BUG-419EDA6D",
+        "BUG-C4497068",
+        "BUG-24F87D0F",
+        "BUG-5FBAF694",
+        "BUG-616A0D2E",
+        "BUG-FF008A47",
+        "BUG-EC542D26",
+        "BUG-3E0DDC73",
+        "BUG-94DB9A53",
+        "BUG-AD855F0C",
+        "BUG-DB815755",
+        "BUG-76A0519D",
+        "BUG-B3315290",
+        "BUG-BFEA3DEE",
+        "BUG-0C0174D7",
+        "BUG-9ACEE016",
+        "BUG-E162C5F1",
+        "BUG-7C80AB3F",
+        "BUG-1980557E",
+        "BUG-7C5D8AE4",
+        "BUG-39D02693",
+        "BUG-AAE46E22"
+      ],
+      "write_scope": [
+        "artifacts/workflow/root_bug_table_remediation_20260423_CLOSEOUT.md"
+      ],
+      "prompt": "Review the full remediation run and close it cleanly.\n\nRead every prior job result, the collision guard, replay failure artifact, git diff, and current bug stats/list. Run `praxis workflow bugs stats --json`, `praxis workflow tools call praxis_bugs --input-json '{\"action\":\"list\",\"status\":\"OPEN\",\"open_only\":true,\"limit\":250,\"include_replay_state\":true,\"include_clusters\":true}'`, and the broadest safe test plan available through `./scripts/test.sh` for changed files. Parse the JSON test envelope when `test.sh` is used.\n\nFor each assigned bug: verify FIXED bugs have linked proof, leave unresolved bugs OPEN with updated resume_context and next steps, and do not mark anything fixed on prose alone. Write `artifacts/workflow/root_bug_table_remediation_20260423_CLOSEOUT.md` with before/after bug counts, resolved IDs, still-open IDs, verifier evidence, test output summary, residual risks, and exact launch/run IDs.\n\nThis is a review/closeout packet. Do not widen into new feature work unless the validation path proves a blocking regression created by this remediation."
+    }
+  ]
+}

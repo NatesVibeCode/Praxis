@@ -54,6 +54,14 @@ export interface RunJob {
   created_at: string | null;
 }
 
+export interface RunCompletionContract {
+  result_kind?: string;
+  submit_tool_names?: string[];
+  submission_required?: boolean;
+  verification_required?: boolean;
+  [key: string]: unknown;
+}
+
 export interface RunGraphNode {
   id: string;
   label: string;
@@ -67,6 +75,11 @@ export interface RunGraphNode {
   attempt?: number;
   error_code?: string;
   loop?: { count: number; succeeded: number; failed: number; running: number };
+  task_type?: string;
+  description?: string;
+  outcome_goal?: string;
+  prompt?: string;
+  completion_contract?: RunCompletionContract | null;
 }
 
 export interface RunGraphEdge {

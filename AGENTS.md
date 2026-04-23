@@ -84,3 +84,20 @@ Beyond standing orders, `POST /orient` returns:
 - `cli_surface` — curated CLI aliases
 
 Read `standing_orders` first, then `instruction_authority.packet_read_order` for the rest.
+
+## Commit coordination
+
+Before staging or committing, check repo-level commit ownership:
+
+```
+./scripts/git-commit-guard --json
+```
+
+For longer commit preparation, claim and release the gate around index writes:
+
+```
+./scripts/git-commit-guard claim --owner "<agent-or-session>" --json
+./scripts/git-commit-guard release --owner "<agent-or-session>" --json
+```
+
+If the gate reports `claimed` or `git_index_locked`, wait instead of forcing Git.

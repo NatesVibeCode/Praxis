@@ -1,8 +1,9 @@
-"""Docker worker image authority for sandboxed execution.
+"""Docker image authority for sandboxed execution.
 
-This module owns the default image story for Praxis sandbox runners:
+This module owns the model-sandbox image story for Praxis sandbox runners:
   - resolve the requested image from arg/env/default authority
-  - auto-build the canonical default image when it is missing
+  - auto-build provider-family thin images when they are missing
+  - reject the workflow control-plane worker image as a model sandbox
   - keep build behavior explicit and shared across runtime surfaces
 """
 
@@ -16,16 +17,17 @@ from typing import Callable
 from runtime.workspace_paths import container_home, container_workspace_root
 
 DOCKER_IMAGE_ENV = "PRAXIS_DOCKER_IMAGE"
-DEFAULT_DOCKER_IMAGE = "praxis-worker:latest"
+CONTROL_WORKER_IMAGE = "praxis-worker:latest"
+DEFAULT_DOCKER_IMAGE = CONTROL_WORKER_IMAGE
 DEFAULT_DOCKERFILE_RELATIVE = Path("docker") / "praxis-worker.Dockerfile"
 DEFAULT_BUILD_TIMEOUT_SECONDS = 900
 
 # Per-agent-family thin images. When an agent slug starts with one of these
-# prefixes and no explicit image override is declared, the sandbox prefers
-# the thin image. Each thin image contains one CLI + MCP bridge target +
-# bash — no Python runtime, no Praxis repo, no sibling CLIs. Falls back
-# gracefully to DEFAULT_DOCKER_IMAGE if the thin image is not present on
-# the host and cannot be auto-built.
+# prefixes and no explicit image override is declared, the sandbox uses the
+# thin image. Each thin image contains one CLI + the Praxis MCP/submission
+# bridge target + bash, without a Praxis repo copy. Missing thin images fail
+# closed with an actionable doctor/setup error; they never fall back to the
+# workflow control-plane worker image.
 AGENT_FAMILY_IMAGE_MAP: dict[str, str] = {
     "anthropic": "praxis-claude:latest",
     "claude": "praxis-claude:latest",
@@ -130,12 +132,11 @@ def resolve_docker_image(
 
       1. ``requested_image`` (explicit spec/bundle override)
       2. ``PRAXIS_DOCKER_IMAGE`` env (operator override)
-      3. Per-agent-family thin image (via ``agent_slug``) when it exists
-         or can be auto-built
-      4. ``DEFAULT_DOCKER_IMAGE`` fat image (with auto-build)
+      3. Per-agent-family thin image (via ``agent_slug``) when it exists or
+         can be auto-built
 
-    A thin image that can't be built or pulled falls through to the default
-    fat image so callers never hard-fail on a missing thin image.
+    ``praxis-worker:latest`` is the workflow control service image. It is not
+    a valid default or fallback for nested model sandboxes.
     """
     explicit_arg = str(requested_image or "").strip()
     explicit_env = os.environ.get(DOCKER_IMAGE_ENV, "").strip()
@@ -144,6 +145,18 @@ def resolve_docker_image(
     if explicit_arg or explicit_env:
         image = explicit_arg or explicit_env
         source = "argument" if explicit_arg else "env"
+        if image == CONTROL_WORKER_IMAGE:
+            return image, {
+                "source": source,
+                "built_default": False,
+                "build_error": None,
+                "rejected": True,
+                "reason_code": "control_worker_image_not_model_sandbox",
+                "message": (
+                    f"{CONTROL_WORKER_IMAGE} is the workflow control-plane "
+                    "worker image, not a model sandbox image."
+                ),
+            }
         if image_exists(image):
             return image, {"source": source, "built_default": False, "build_error": None}
         return image, {"source": source, "built_default": False, "build_error": None}
@@ -165,41 +178,34 @@ def resolve_docker_image(
                     "built_default": True,
                     "build_error": None,
                 }
-            # Thin build failed — fall through to fat default with a note so the
-            # caller can see the thin attempt in metadata if they care.
-            _thin_fallback_note = thin_error
-
-    # 4 — fat default (existing behavior, preserves legacy specs).
-    image = DEFAULT_DOCKER_IMAGE
-    source = "default"
-
-    if image_exists(image):
-        return image, {
-            "source": source,
+        else:
+            thin_error = None
+        return thin_image, {
+            "source": "agent_family",
             "built_default": False,
-            "build_error": None,
+            "build_error": thin_error,
+            "rejected": False,
+            "reason_code": "thin_sandbox_image_unavailable",
+            "required_image": thin_image,
         }
 
-    build_error = None
-    built_default = False
-    if auto_build_default:
-        built_default, build_error = build_default_docker_image(image_name=image)
-        if built_default and image_exists(image):
-            return image, {
-                "source": source,
-                "built_default": True,
-                "build_error": None,
-            }
-
-    return image, {
-        "source": source,
-        "built_default": built_default,
-        "build_error": build_error,
+    return "", {
+        "source": "unresolved",
+        "built_default": False,
+        "build_error": None,
+        "rejected": True,
+        "reason_code": "agent_family_image_unresolved",
+        "message": (
+            "sandbox execution requires a provider-family thin image. "
+            "Set agent_slug to openai/*, anthropic/*, google/*, codex, "
+            "claude, or gemini; or configure an explicit non-worker debug image."
+        ),
     }
 
 
 __all__ = [
     "AGENT_FAMILY_IMAGE_MAP",
+    "CONTROL_WORKER_IMAGE",
     "DEFAULT_DOCKER_IMAGE",
     "DOCKER_IMAGE_ENV",
     "THIN_IMAGE_DOCKERFILES",

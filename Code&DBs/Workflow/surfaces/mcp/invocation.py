@@ -16,7 +16,6 @@ from runtime.workflow.mcp_session import (
 )
 
 from .catalog import canonical_tool_name, get_tool_catalog, resolve_tool_entry
-from .frontdoor_authority import assert_mcp_tool_authority_contract
 from .runtime_context import (
     get_current_workflow_mcp_context,
     workflow_mcp_request_context,
@@ -88,7 +87,6 @@ def invoke_tool(
     claims: dict[str, Any] | None = None
     tool_input: dict[str, Any] = {}
     result_payload: dict[str, Any] | None = None
-    authority_contract: dict[str, Any] | None = None
     try:
         allowed = normalize_allowed_tool_names(allowed_tool_names)
         if token_text:
@@ -119,10 +117,6 @@ def invoke_tool(
                 f"Tool arguments must be a JSON object: {tool_name}",
                 reason_code="mcp.invalid_arguments",
             )
-        authority_contract = assert_mcp_tool_authority_contract(
-            definition,
-            tool_input,
-        ).to_payload()
 
         if definition.requires_workflow_token and not token_text:
             active_context = get_current_workflow_mcp_context()
@@ -167,7 +161,6 @@ def invoke_tool(
             tool_input=tool_input,
             result_payload=result_payload or {},
             claims=claims,
-            authority_contract=authority_contract,
         )
 
 
@@ -207,7 +200,6 @@ def _record_tool_usage(
     tool_input: dict[str, Any],
     result_payload: dict[str, Any],
     claims: dict[str, Any] | None,
-    authority_contract: Mapping[str, Any] | None,
 ) -> None:
     query_chars = 0
     result_count = 0
@@ -215,8 +207,6 @@ def _record_tool_usage(
     reason_code = str(result_payload.get("reason_code") or "").strip()
     result_state = "error" if int(status_code) >= 400 else "ok"
     metadata: dict[str, Any] = {}
-    if authority_contract:
-        metadata["authority_contract"] = dict(authority_contract)
     if canonical_name == "praxis_query":
         query_chars = len(str(tool_input.get("question") or ""))
         routed_to = str(result_payload.get("routed_to") or "").strip()

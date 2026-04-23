@@ -542,7 +542,7 @@ def _docker_memory(metadata: Mapping[str, Any] | None = None) -> str:
         configured = str(metadata.get("docker_memory") or "").strip()
         if configured:
             return configured
-    return os.environ.get(_DOCKER_MEMORY_ENV, "4g")
+    return os.environ.get(_DOCKER_MEMORY_ENV, "500m")
 
 
 def _docker_cpus(metadata: Mapping[str, Any] | None = None) -> str:
@@ -1074,16 +1074,20 @@ class DockerLocalSandboxProvider:
         docker_image, image_meta = resolve_docker_image(
             requested_image=request.image,
             image_exists=_docker_image_available,
-            agent_slug=getattr(request, "agent_slug", None),
+            agent_slug=getattr(request, "agent_slug", None) or _provider_slug(session.metadata),
         )
+        if image_meta.get("rejected") or not docker_image:
+            detail = str(image_meta.get("message") or image_meta.get("reason_code") or "").strip()
+            raise RuntimeError(
+                "docker_local requires provider-family thin sandbox image authority."
+                + (f" {detail}" if detail else "")
+            )
         if not _docker_image_available(docker_image):
-            build_hint = f" Build or configure {DOCKER_IMAGE_ENV} before sandbox execution."
-            if image_meta.get("source") == "default":
-                build_hint = (
-                    " Praxis auto-build also failed."
-                    if image_meta.get("build_error")
-                    else " Build or configure PRAXIS_DOCKER_IMAGE before sandbox execution."
-                )
+            required_image = str(image_meta.get("required_image") or docker_image).strip()
+            build_hint = (
+                f" Build thin sandbox image {required_image!r} on the selected "
+                "runtime target, or run praxis setup doctor for the exact image contract."
+            )
             detail = str(image_meta.get("build_error") or "").strip()
             raise RuntimeError(
                 "docker_local requires image "
@@ -1155,7 +1159,7 @@ class DockerLocalSandboxProvider:
         if session.network_policy == "disabled":
             docker_cmd.append("--network=none")
 
-        # Live-edit overlay for the `praxis` workflow MCP front door. When
+        # Live-edit overlay for the `praxis` shell-tool shim. When
         # PRAXIS_HOST_WORKSPACE_ROOT is set, we bind-mount the source file
         # over the baked-in /usr/local/bin/praxis so edits to
         # bin/praxis_sandbox_client.py are picked up by the next sandbox

@@ -25,8 +25,7 @@ RUN test -n "$PRAXIS_CONTAINER_WORKSPACE_ROOT" && test -n "$PRAXIS_CONTAINER_HOM
 
 # Minimal system — bash for the command launcher, curl for health probes,
 # ca-certificates for TLS to MCP / upstream APIs, python3-minimal for the
-# `praxis` workflow MCP front door (uses only stdlib urllib, no pip).
-# Nothing else.
+# `praxis` shell shim (uses only stdlib urllib, no pip). Nothing else.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
@@ -40,8 +39,8 @@ RUN npm install -g @openai/codex@latest \
 
 # ── uniform sandbox tool surface ────────────────────────────────────
 # `praxis` is the single shell-callable binary that replaces per-provider
-# MCP client config. The agent invokes tools through the canonical
-# `praxis workflow tools ...` grammar via its native Bash tool. No
+# MCP client config. The agent invokes tools via its native Bash tool
+# (e.g. `praxis discover "..."` or `praxis submit_code_change ...`). No
 # claude/codex/gemini-specific MCP wiring needed. See
 # architecture-policy::sandbox::uniform-shell-tool-surface.
 COPY bin/praxis_sandbox_client.py /usr/local/bin/praxis
@@ -56,5 +55,5 @@ RUN useradd -m -d "${PRAXIS_CONTAINER_HOME}" -u 1100 -s /bin/bash praxis-agent \
     && mkdir -p "${PRAXIS_CONTAINER_HOME}/.codex" \
     && chown -R 1100:1100 "${PRAXIS_CONTAINER_HOME}"
 
-# Smoke test — verify the CLI and the praxis front door are reachable.
+# Smoke test — verify the CLI and the praxis shim are reachable.
 RUN bash -lc "node --version && which codex && which praxis && id praxis-agent"

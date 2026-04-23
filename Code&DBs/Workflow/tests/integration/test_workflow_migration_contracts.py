@@ -99,8 +99,7 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "166_data_dictionary_authority.sql" in filenames
     assert "167_scratch_agent_runtime_lane.sql" in filenames
     assert "168_openrouter_provider_authority_repair.sql" in filenames
-    assert "208_structured_document_semantic_authority.sql" in filenames
-    assert filenames[-1] == "208_structured_document_semantic_authority.sql"
+    assert filenames[-1] == "168_openrouter_provider_authority_repair.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -257,24 +256,6 @@ def test_operation_catalog_operator_control_bindings_expected_objects_are_regist
         {
             "operation_catalog_registry.operator.roadmap_write",
             "operation_catalog_registry.operator.work_item_closeout",
-        }
-    )
-
-
-def test_structured_document_semantic_authority_expected_objects_are_registered() -> None:
-    objects = workflow_migration_expected_objects(
-        "208_structured_document_semantic_authority.sql"
-    )
-    names = {item.object_name for item in objects}
-    assert names.issuperset(
-        {
-            "structured_document_revisions",
-            "structured_document_sections",
-            "structured_document_section_embeddings",
-            "structured_document_context_selection_receipts",
-            "structured_document_section_semantics",
-            "structured_document_context_receipt_summary",
-            "operation_catalog_registry.structured_documents.record_context_selection",
         }
     )
 

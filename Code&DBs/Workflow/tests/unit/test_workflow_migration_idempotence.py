@@ -134,53 +134,6 @@ def test_legacy_schema_authority_backfill_marks_history_as_legacy_inventory() ->
     assert "authority.objects.adoption" in sql
 
 
-def test_legacy_domain_assignment_rehomes_inventory_without_modernization_theater() -> None:
-    sql = _migration_sql("207_legacy_domain_authority_assignment.sql")
-
-    assert "CREATE TABLE IF NOT EXISTS authority_legacy_domain_assignment_rules" in sql
-    assert "authority_legacy_domain_assignment_summary" in sql
-    assert "domain_assigned_legacy" in sql
-    assert "authority.mobile_access" in sql
-    assert "authority.objects.domain_summary" in sql
-    assert "Column discovered from information_schema for the CQRS legacy domain assignment rules table" in sql
-    assert "legacy_domain.rule.schema_migrations" in sql
-    assert "legacy_domain.rule.provider_route_health', 319" in sql
-    assert "legacy_domain.rule.capability_outcomes', 259" in sql
-    assert "These rules do not claim command/event modernization" in sql
-
-
-def test_structured_document_semantic_authority_splits_structure_meaning_and_recall() -> None:
-    sql = _migration_sql("208_structured_document_semantic_authority.sql")
-
-    for table_name in (
-        "structured_document_revisions",
-        "structured_document_sections",
-        "structured_document_section_embeddings",
-        "structured_document_context_selection_receipts",
-    ):
-        assert f"CREATE TABLE IF NOT EXISTS {table_name}" in sql
-
-    for predicate in (
-        "'defines'",
-        "'cites'",
-        "'supersedes'",
-        "'applies_to'",
-        "'constrains'",
-        "'aliases'",
-    ):
-        assert predicate in sql
-
-    assert "authority.structured_documents" in sql
-    assert "structured_document_section_semantics" in sql
-    assert "semantic_current_assertions" in sql
-    assert "semantic_assertions provide meaning" in sql
-    assert "embedding vector(384)" in sql
-    assert "projection_only" in sql
-    assert "vector similarity may recall candidates but cannot select authoritative context alone" in sql
-    assert "structured_documents.record_context_selection" in sql
-    assert "deterministic_reason_codes ?| ARRAY" in sql
-
-
 def test_document_objects_migration_handles_object_field_cutover() -> None:
     sql = _migration_sql("025_document_objects.sql")
 

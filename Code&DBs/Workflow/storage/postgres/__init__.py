@@ -103,6 +103,7 @@ from .roadmap_authoring_repository import PostgresRoadmapAuthoringRepository
 from .observability_maintenance_repository import (
     PostgresObservabilityMaintenanceRepository,
 )
+from .module_embeddings_repository import PostgresModuleEmbeddingsRepository
 from .bug_evidence_repository import PostgresBugEvidenceRepository
 from .workflow_metrics_repository import PostgresWorkflowMetricsRepository
 from .workflow_surface_usage_repository import PostgresWorkflowSurfaceUsageRepository
@@ -152,6 +153,7 @@ __all__ = [
     "PostgresProviderConcurrencyRepository",
     "PostgresReceiptRepository",
     "PostgresRoadmapAuthoringRepository",
+    "PostgresModuleEmbeddingsRepository",
     "PostgresSemanticAssertionRepository",
     "PostgresSchemaError",
     "PostgresStorageError",

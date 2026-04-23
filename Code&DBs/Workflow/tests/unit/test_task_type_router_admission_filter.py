@@ -92,11 +92,32 @@ class _RouterShim:
         # Default used by most callers — explicit map can override.
         return self._adapter_for_provider.get(provider_slug, "llm_task")
 
+    def _provider_usage_unavailable_slugs(self, provider_slugs: set[str]) -> set[str]:
+        return TaskTypeRouter._provider_usage_unavailable_slugs(self, provider_slugs)
+
 
 def _call_filter(router: Any, task_type: str, rows: list[dict[str, Any]]):
     """Invoke the unbound method against the shim so we don't need a real
     ``TaskTypeRouter`` instance."""
     return TaskTypeRouter._apply_provider_transport_admission_filter(
+        router, task_type, rows
+    )
+
+
+class _AvailabilityConn:
+    def __init__(self, snapshot_rows: list[dict[str, Any]] | None = None):
+        self._snapshot_rows = snapshot_rows or []
+        self.calls: list[tuple[Any, ...]] = []
+
+    def execute(self, sql: str, *params):
+        self.calls.append(params)
+        if "heartbeat_probe_snapshots" in sql:
+            return list(self._snapshot_rows)
+        raise AssertionError(f"unexpected SQL: {sql[:80]}")
+
+
+def _call_availability_filter(router: Any, task_type: str, rows: list[dict[str, Any]]):
+    return TaskTypeRouter._apply_provider_usage_availability_filter(
         router, task_type, rows
     )
 
@@ -222,6 +243,48 @@ def test_empty_input_short_circuits():
     kept = _call_filter(router, "review", [])
     assert kept == []
     assert conn.calls == [], "no query should have been issued"
+
+
+# ---------------------------------------------------- availability cases
+
+
+def test_provider_usage_degraded_snapshot_drops_candidate():
+    conn = _AvailabilityConn([
+        {"subject_id": "anthropic", "status": "degraded"},
+        {"subject_id": "openai", "status": "ok"},
+    ])
+    router = _RouterShim(conn)
+    rows = [
+        {"provider_slug": "anthropic", "model_slug": "claude-sonnet-4-6"},
+        {"provider_slug": "openai", "model_slug": "gpt-5.4"},
+    ]
+
+    kept = _call_availability_filter(router, "build", rows)
+
+    assert [row["provider_slug"] for row in kept] == ["openai"]
+
+
+def test_provider_usage_failed_snapshot_drops_candidate():
+    conn = _AvailabilityConn([
+        {"subject_id": "anthropic", "status": "failed"},
+    ])
+    router = _RouterShim(conn)
+    rows = [
+        {"provider_slug": "anthropic", "model_slug": "claude-sonnet-4-6"},
+    ]
+
+    assert _call_availability_filter(router, "build", rows) == []
+
+
+def test_provider_usage_availability_query_failure_fails_open():
+    class _MissingHeartbeatConn:
+        def execute(self, sql: str, *params):
+            raise RuntimeError("heartbeat table missing")
+
+    router = _RouterShim(_MissingHeartbeatConn())
+    rows = [{"provider_slug": "openai", "model_slug": "gpt-5.4"}]
+
+    assert _call_availability_filter(router, "build", rows) == rows
 
 
 # --------------------------------------------------- SQL payload contract

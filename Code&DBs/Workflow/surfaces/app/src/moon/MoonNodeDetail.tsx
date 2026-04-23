@@ -1416,6 +1416,23 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     const order: Record<string, number> = { unresolved: 0, accepted: 1, rejected: 2 };
     return (order[a.state || 'unresolved'] || 0) - (order[b.state || 'unresolved'] || 0);
   });
+  const runCompletionContract = node?.completionContract ?? null;
+  const runContractResultKind = typeof runCompletionContract?.result_kind === 'string'
+    ? runCompletionContract.result_kind.trim()
+    : '';
+  const runContractSubmitTools = Array.isArray(runCompletionContract?.submit_tool_names)
+    ? runCompletionContract.submit_tool_names.filter((tool): tool is string => typeof tool === 'string' && tool.trim().length > 0)
+    : [];
+  const hasRunContract = Boolean(
+    node
+    && (
+      runCompletionContract
+      || node.taskType
+      || node.description
+      || node.outcomeGoal
+      || node.prompt
+    ),
+  );
 
   return (
     <>
@@ -1611,6 +1628,62 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   ))
                 )}
               </div>
+            </div>
+          )}
+          {hasRunContract && (
+            <div className="moon-dock-section-card moon-dock-section-card--dense" aria-label="Run completion gate">
+              <div className="moon-dock-section-card__header">
+                <div className="moon-dock__section-label">Completion gate</div>
+                <div className="moon-run-contract__badges">
+                  {runCompletionContract?.submission_required === true && (
+                    <span className="moon-truth-badge moon-truth-badge--runtime">Submission required</span>
+                  )}
+                  {runCompletionContract?.verification_required === true && (
+                    <span className="moon-truth-badge moon-truth-badge--alias">Verification required</span>
+                  )}
+                  {runCompletionContract && runCompletionContract.submission_required !== true && runCompletionContract.verification_required !== true && (
+                    <span className="moon-truth-badge moon-truth-badge--persisted">Recorded contract</span>
+                  )}
+                </div>
+              </div>
+              <div className="moon-run-contract__grid">
+                {node.taskType && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Task type</span>
+                    <span className="moon-run-contract__value">{node.taskType}</span>
+                  </div>
+                )}
+                {runContractResultKind && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Result</span>
+                    <span className="moon-run-contract__value">{runContractResultKind}</span>
+                  </div>
+                )}
+                {runContractSubmitTools.length > 0 && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Submit with</span>
+                    <span className="moon-run-contract__value">{runContractSubmitTools.join(', ')}</span>
+                  </div>
+                )}
+                {node.outcomeGoal && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Outcome</span>
+                    <span className="moon-run-contract__value">{node.outcomeGoal}</span>
+                  </div>
+                )}
+                {node.description && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Scope</span>
+                    <span className="moon-run-contract__value">{node.description}</span>
+                  </div>
+                )}
+              </div>
+              {node.prompt && (
+                <details className="moon-run-contract__prompt">
+                  <summary>Prompt</summary>
+                  <pre>{node.prompt}</pre>
+                </details>
+              )}
             </div>
           )}
           {isTriggerNode && (

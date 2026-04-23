@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""In-sandbox workflow MCP front door.
+"""In-sandbox CLI shim for the workflow MCP bridge.
 
 This is the `praxis` command that gets baked into every sandbox image
 (`praxis-worker`, `praxis-codex`, `praxis-claude`, `praxis-gemini`). It gives
-the agent a single shell-callable interface for the workflow MCP surface:
+the agent a single, uniform shell-callable interface for the workflow MCP
+surface — no per-provider CLI-flag template, no `.claude.json` / `config.toml`
+overlay, no auto-discovered client config. The agent just calls:
 
-    praxis workflow tools search "retry logic"
-    praxis workflow tools call praxis_query --input-json '{"question":"what is failing right now?"}'
-    praxis workflow tools call praxis_submit_code_change --input-json '{"summary":"...","primary_paths":["foo.py"],"result_kind":"code_change"}'
+    praxis discover "retry logic"
+    praxis query "what is failing right now?"
+    praxis submit_code_change --summary "..." --primary-paths '["foo.py"]' --result-kind code_change
 
 Each invocation is one HTTP POST to ``$PRAXIS_WORKFLOW_MCP_URL`` with the
 signed session token from ``$PRAXIS_WORKFLOW_MCP_TOKEN`` as a bearer. This
@@ -36,10 +38,104 @@ _ENV_URL = "PRAXIS_WORKFLOW_MCP_URL"
 _ENV_TOKEN = "PRAXIS_WORKFLOW_MCP_TOKEN"
 _ENV_ALLOWED = "PRAXIS_ALLOWED_MCP_TOOLS"
 
+# Subcommand → (MCP tool name, argspec)
+# argspec is a list of (flag, dest, kind, required). kind ∈ {"str", "json", "positional"}.
+_COMMANDS: dict[str, tuple[str, list[tuple[str, str, str, bool]]]] = {
+    "discover": (
+        "praxis_discover",
+        [("query", "query", "positional", True)],
+    ),
+    "query": (
+        "praxis_query",
+        [("question", "question", "positional", True)],
+    ),
+    "recall": (
+        "praxis_recall",
+        [
+            ("query", "query", "positional", True),
+            ("--entity-type", "entity_type", "str", False),
+            ("--limit", "limit", "str", False),
+        ],
+    ),
+    "context_shard": (
+        "praxis_context_shard",
+        [
+            ("--view", "view", "str", False),
+            ("--section-name", "section_name", "str", False),
+            ("--include-bundle", "include_bundle", "str", False),
+        ],
+    ),
+    "health": ("praxis_health", []),
+    "integration": (
+        "praxis_integration",
+        [
+            ("action", "action", "positional", True),
+            ("--integration-id", "integration_id", "str", False),
+            ("--integration-action", "integration_action", "str", False),
+            ("--args", "args", "json", False),
+        ],
+    ),
+    "submit_code_change": (
+        "praxis_submit_code_change",
+        [
+            ("--summary", "summary", "str", True),
+            ("--primary-paths", "primary_paths", "json", True),
+            ("--result-kind", "result_kind", "str", True),
+            ("--tests-ran", "tests_ran", "json", False),
+            ("--notes", "notes", "str", False),
+            ("--declared-operations", "declared_operations", "json", False),
+        ],
+    ),
+    "submit_artifact_bundle": (
+        "praxis_submit_artifact_bundle",
+        [
+            ("--summary", "summary", "str", True),
+            ("--primary-paths", "primary_paths", "json", True),
+            ("--result-kind", "result_kind", "str", True),
+            ("--notes", "notes", "str", False),
+        ],
+    ),
+    "get_submission": (
+        "praxis_get_submission",
+        [
+            ("--submission-id", "submission_id", "str", False),
+            ("--job-label", "job_label", "str", False),
+        ],
+    ),
+}
+
 
 def _die(exit_code: int, message: str) -> None:
     sys.stderr.write(f"praxis: {message}\n")
     sys.exit(exit_code)
+
+
+def _parse_subcommand_args(
+    subcommand: str, specs: list[tuple[str, str, str, bool]], argv: list[str]
+) -> dict[str, Any]:
+    parser = argparse.ArgumentParser(
+        prog=f"praxis {subcommand}",
+        description=f"Call the {_COMMANDS[subcommand][0]} MCP tool.",
+    )
+    for flag, dest, kind, required in specs:
+        if kind == "positional":
+            parser.add_argument(dest, help=f"{dest} ({kind})")
+        else:
+            parser.add_argument(flag, dest=dest, required=required, help=f"{dest} ({kind})")
+    namespace = parser.parse_args(argv)
+    arguments: dict[str, Any] = {}
+    for _flag, dest, kind, _required in specs:
+        value = getattr(namespace, dest, None)
+        if value is None:
+            continue
+        if kind == "json":
+            try:
+                arguments[dest] = json.loads(value)
+            except json.JSONDecodeError as exc:
+                _die(1, f"--{dest.replace('_', '-')} must be valid JSON: {exc}")
+        else:
+            arguments[dest] = value
+    return arguments
 
 
 def _post_jsonrpc(
@@ -314,12 +410,24 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in {"-h", "--help", "help"}:
         print(
-            "praxis — in-sandbox workflow MCP front door\n\n"
-            "Canonical workflow shape:\n"
+            "praxis — in-sandbox MCP shim\n\n"
+            "Two call shapes are supported:\n\n"
+            "1) Short form:\n"
+            "  praxis discover \"<query>\"\n"
+            "  praxis query \"<question>\"\n"
+            "  praxis recall \"<query>\" [--entity-type X] [--limit N]\n"
+            "  praxis context_shard [--view X]\n"
+            "  praxis health\n"
+            "  praxis integration <list|describe|call> ...\n"
+            "  praxis submit_code_change --summary ... --primary-paths ... --result-kind ...\n"
+            "  praxis submit_artifact_bundle --summary ... --primary-paths ... --result-kind ...\n"
+            "  praxis get_submission --submission-id X | --job-label Y\n\n"
+            "2) Canonical workflow shape (matches the host CLI):\n"
             "  praxis workflow tools list\n"
             "  praxis workflow tools search <text> [--exact]\n"
             "  praxis workflow tools describe <tool_name>\n"
             "  praxis workflow tools call <tool_name> --input-json '{...}' [--yes]\n\n"
+            "Aliases — `praxis workflow query`/`discover`/`recall`/`bugs`/`artifacts`/`health` also work.\n"
             "\nEnvironment:\n"
             f"  {_ENV_URL}      MCP bridge endpoint (injected by worker)\n"
             f"  {_ENV_TOKEN}    Signed session token (injected by worker)\n"
@@ -333,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
     if not token:
         _die(2, f"{_ENV_TOKEN} is not set — this binary must run inside a workflow sandbox.")
 
-    # Canonical `praxis workflow ...` shape used by CLAUDE.md-trained
+    # Route 1: canonical `praxis workflow ...` shape used by CLAUDE.md-trained
     # prompts and host-CLI muscle memory. The worker's host CLI exposes
     # `praxis workflow tools call <tool> --input-json '{...}'`; we mirror
     # that exactly inside the sandbox so the agent's vocabulary is stable
@@ -392,9 +500,50 @@ def main(argv: list[str] | None = None) -> int:
             )
             _print_result(result)
             return 0
+        # `praxis workflow <short-subcommand>` aliases: query, discover, recall,
+        # health, artifacts, bugs. Map to the tool_name directly.
+        alias_map = {
+            "query": "praxis_query",
+            "discover": "praxis_discover",
+            "recall": "praxis_recall",
+            "health": "praxis_health",
+            "artifacts": "praxis_artifacts",
+            "bugs": "praxis_bugs",
+        }
+        if sub in alias_map:
+            tool_name = alias_map[sub]
+            remaining = argv[2:]
+            # Reuse the short-form parser by mapping to a known _COMMANDS entry.
+            short_name = sub
+            if short_name in _COMMANDS:
+                _, specs = _COMMANDS[short_name]
+                arguments = _parse_subcommand_args(short_name, specs, remaining)
+            else:
+                # Default: treat first positional as the primary string input.
+                arguments = {"query": " ".join(remaining)} if remaining else {}
+            allowed_tools = str(os.environ.get(_ENV_ALLOWED, "")).strip() or tool_name
+            result = _post_jsonrpc(
+                url=url, token=token, tool_name=tool_name,
+                arguments=arguments, allowed_tools=allowed_tools,
+            )
+            _print_result(result)
+            return 0
         _die(1, f"unknown workflow subcommand: {sub!r}. Try `praxis workflow tools call ...`.")
 
-    _die(1, "unknown command shape. Use `praxis workflow tools call ...`.")
+    # Route 2: short form `praxis <subcommand> ...`.
+    subcommand = argv[0]
+    if subcommand not in _COMMANDS:
+        _die(1, f"unknown subcommand: {subcommand!r}. Run `praxis --help` for the list.")
+
+    tool_name, specs = _COMMANDS[subcommand]
+    arguments = _parse_subcommand_args(subcommand, specs, argv[1:])
+    allowed_tools = str(os.environ.get(_ENV_ALLOWED, "")).strip() or tool_name
+
+    result = _post_jsonrpc(
+        url=url, token=token, tool_name=tool_name, arguments=arguments, allowed_tools=allowed_tools
+    )
+    _print_result(result)
+    return 0
 
 
 if __name__ == "__main__":

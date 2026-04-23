@@ -45,25 +45,12 @@ from registry.provider_execution_registry import (
 )
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
-from runtime.launcher_authority import (
-    LauncherAuthorityError,
-    launcher_error_payload,
-    launcher_error_status_code,
-    launcher_resolution_row_payload,
-    launcher_resolution_sql,
-    normalize_launcher_resolution_request,
-)
 from runtime.mobile_security import apply_no_store_headers, no_store_headers, set_mobile_session_cookie
 from runtime.operation_catalog_bindings import resolve_http_operation_binding
 from runtime.operation_catalog_gateway import aexecute_operation_binding
 from runtime.atlas_graph import build_atlas_payload
 from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
-from surfaces.api.api_authority import (
-    ApiAuthorityBoundaryError,
-    assert_api_mutation_routes_classified,
-    build_api_authority_payload,
-)
 from surfaces.api.catalog_authority import build_catalog_payload
 from surfaces.api.operation_catalog_authority import build_operation_catalog_payload
 from surfaces.api import agent_sessions as agent_sessions_app
@@ -457,14 +444,6 @@ def _boot_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
     return subsystems
 
 
-def _assert_api_authority_boundary(target_app: FastAPI) -> None:
-    try:
-        assert_api_mutation_routes_classified(target_app)
-    except ApiAuthorityBoundaryError:
-        logger.exception("API mutating route authority boundary failed")
-        raise
-
-
 def _json_response_payload(value: Any) -> Any:
     """Preserve repo-local UTC timestamp shape after generic JSON encoding."""
     if isinstance(value, datetime):
@@ -492,7 +471,6 @@ async def _app_lifespan(target_app: FastAPI):
         mount_capabilities(target_app)
     except Exception:
         logger.exception("capability mount failed during startup; API continues in degraded mode")
-    _assert_api_authority_boundary(target_app)
     yield
 
 
@@ -678,21 +656,6 @@ def mount_capabilities(target_app: FastAPI) -> None:
             openapi_extra={
                 "x-praxis-binding-source": mount_source,
                 "x-praxis-operation-name": route_name,
-                "x-praxis-operation-kind": binding.operation_kind,
-                "x-praxis-authority-domain": getattr(
-                    binding,
-                    "authority_domain_ref",
-                    binding.authority_ref,
-                ),
-                "x-praxis-receipt-required": bool(getattr(binding, "receipt_required", True)),
-                "x-praxis-event-required": bool(getattr(binding, "event_required", True)),
-                "x-praxis-event-policy": getattr(binding, "event_type", None)
-                or (
-                    "required"
-                    if bool(getattr(binding, "event_required", True))
-                    else "not_required"
-                ),
-                "x-praxis-projection-ref": getattr(binding, "projection_ref", None),
             },
         )
         _promote_last_capability_route(target_app)
@@ -1650,36 +1613,59 @@ def launcher_resolve(
 ) -> JSONResponse:
     """Return launcher workspace/base-path authority for the global command."""
 
-    headers = no_store_headers()
-    try:
-        workspace, host = normalize_launcher_resolution_request(
-            workspace_ref=str(workspace_ref or ""),
-            host_ref=str(host_ref or ""),
+    workspace = str(workspace_ref or "").strip()
+    host = str(host_ref or "").strip()
+    if not workspace or not host:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "launcher_resolution_invalid_request",
+                "message": "workspace_ref and host_ref must be non-empty",
+            },
         )
-        try:
-            rows = _shared_pg_conn().execute(
-                launcher_resolution_sql(placeholder_style="dollar"),
-                workspace,
-                host,
-            )
-        except Exception as exc:
-            raise LauncherAuthorityError(
-                "launcher_database_unavailable",
-                "launcher registry database authority is unavailable",
-                details={"error_type": type(exc).__name__},
-            ) from exc
-        payload = launcher_resolution_row_payload(
-            rows,
-            workspace_ref=workspace,
-            host_ref=host,
+    rows = _shared_pg_conn().execute(
+        """
+        SELECT workspace.workspace_ref,
+               base_path.host_ref,
+               workspace.base_path_ref,
+               base_path.base_path,
+               workspace.repo_root_path,
+               workspace.workdir_path
+        FROM registry_workspace_authority workspace
+        JOIN registry_workspace_base_path_authority base_path
+          ON base_path.base_path_ref = workspace.base_path_ref
+         AND base_path.workspace_ref = workspace.workspace_ref
+         AND base_path.is_active = TRUE
+        WHERE workspace.workspace_ref = $1
+          AND base_path.host_ref = $2
+        ORDER BY base_path.priority DESC,
+                 base_path.recorded_at DESC
+        LIMIT 2
+        """,
+        workspace,
+        host,
+    )
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "launcher_workspace_unresolved",
+                "message": "workspace/base-path authority did not resolve",
+                "workspace_ref": workspace,
+                "host_ref": host,
+            },
         )
-    except LauncherAuthorityError as exc:
-        return JSONResponse(
-            status_code=launcher_error_status_code(exc),
-            content=jsonable_encoder(launcher_error_payload(exc)),
-            headers=headers,
+    if len(rows) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "launcher_workspace_ambiguous",
+                "message": "workspace/base-path authority returned multiple active rows",
+                "workspace_ref": workspace,
+                "host_ref": host,
+            },
         )
-    return JSONResponse(content=jsonable_encoder(payload), headers=headers)
+    return JSONResponse(content={"ok": True, "resolution": jsonable_encoder(dict(rows[0]))})
 
 
 @app.get("/api/atlas.html", response_model=None)
@@ -2005,6 +1991,79 @@ def _graph_condition_for_branch(
     return None
 
 
+def _run_spec_jobs_from_snapshot(spec_snapshot: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(spec_snapshot, dict):
+        return []
+    spec_jobs_raw = spec_snapshot.get("jobs")
+    if spec_jobs_raw is None:
+        return []
+    try:
+        spec_jobs = json.loads(spec_jobs_raw) if isinstance(spec_jobs_raw, str) else spec_jobs_raw
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(spec_jobs, list):
+        return []
+    return [dict(job) for job in spec_jobs if isinstance(job, dict)]
+
+
+def _index_run_spec_jobs_by_label(spec_jobs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+
+    def add_job(job: dict[str, Any], *, owner_label: str | None = None, branch: str | None = None) -> None:
+        label = str(job.get("label") or "").strip()
+        if label:
+            indexed.setdefault(label, job)
+            if owner_label and branch:
+                indexed.setdefault(f"{owner_label}__{branch}__{label}", job)
+
+        branches = job.get("branches")
+        if isinstance(branches, dict) and label:
+            for branch_name, branch_jobs in branches.items():
+                if not isinstance(branch_jobs, list):
+                    continue
+                for branch_job in branch_jobs:
+                    if isinstance(branch_job, dict):
+                        add_job(dict(branch_job), owner_label=label, branch=str(branch_name))
+
+        template_jobs = job.get("template_jobs")
+        if isinstance(template_jobs, list) and label:
+            for template_job in template_jobs:
+                if isinstance(template_job, dict):
+                    add_job(dict(template_job), owner_label=label, branch="template")
+
+    for spec_job in spec_jobs:
+        add_job(spec_job)
+
+    return indexed
+
+
+def _run_graph_contract_fields_from_spec_job(spec_job: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(spec_job, dict):
+        return {}
+
+    fields: dict[str, Any] = {}
+    for spec_key, graph_key in (
+        ("task_type", "task_type"),
+        ("description", "description"),
+        ("outcome_goal", "outcome_goal"),
+        ("prompt", "prompt"),
+    ):
+        value = spec_job.get(spec_key)
+        if isinstance(value, str) and value.strip():
+            fields[graph_key] = value
+
+    contract = spec_job.get("completion_contract")
+    if isinstance(contract, str):
+        try:
+            contract = json.loads(contract)
+        except json.JSONDecodeError:
+            contract = None
+    if isinstance(contract, dict):
+        fields["completion_contract"] = dict(contract)
+
+    return fields
+
+
 def _build_run_graph_from_graph_spec(
     *,
     conn: Any,
@@ -2031,6 +2090,7 @@ def _build_run_graph_from_graph_spec(
 
     visible_node_ids = {node.node_id for node in visible_nodes}
     job_by_label = {str(job.get("label") or ""): job for job in jobs}
+    spec_job_by_label = _index_run_spec_jobs_by_label(_run_spec_jobs_from_snapshot(spec_snapshot))
     operator_frame_counts = _load_operator_frame_counts(conn, run_id)
 
     graph_nodes: list[dict[str, Any]] = []
@@ -2061,6 +2121,7 @@ def _build_run_graph_from_graph_spec(
             "position": int(node.position_index),
             "status": status,
         }
+        node_payload.update(_run_graph_contract_fields_from_spec_job(spec_job_by_label.get(node.node_id)))
         if job is not None:
             node_payload["cost_usd"] = float(job.get("cost_usd") or 0)
             node_payload["duration_ms"] = int(job.get("duration_ms") or 0)
@@ -2132,12 +2193,8 @@ def _build_run_graph(conn: Any, run_id: str, jobs: list[dict[str, Any]]) -> dict
     if not jobs:
         return None
     try:
-        spec_jobs_raw = spec_snapshot.get("jobs") if isinstance(spec_snapshot, dict) else None
-        if spec_jobs_raw is None:
-            return _build_run_graph_from_jobs(jobs)
-
-        spec_jobs = json.loads(spec_jobs_raw) if isinstance(spec_jobs_raw, str) else spec_jobs_raw
-        if not isinstance(spec_jobs, list) or not spec_jobs:
+        spec_jobs = _run_spec_jobs_from_snapshot(spec_snapshot)
+        if not spec_jobs:
             return _build_run_graph_from_jobs(jobs)
 
         # Build job status lookup
@@ -2165,6 +2222,7 @@ def _build_run_graph(conn: Any, run_id: str, jobs: list[dict[str, Any]]) -> dict
                 "adapter": sj.get("agent") or "auto",
                 "position": i,
             }
+            node.update(_run_graph_contract_fields_from_spec_job(sj))
 
             if label in loop_groups:
                 children = loop_groups[label]
@@ -3188,6 +3246,18 @@ async def workflow_status_alias_get(request: Request) -> Response:
 async def launcher_status_get(request: Request) -> Response:
     return await _route_to_handler(request)
 
+@app.get("/api/setup/doctor")
+async def setup_doctor_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/setup/plan")
+async def setup_plan_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/setup/apply")
+async def setup_apply_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/agent-sessions")
 def agent_sessions_index_get() -> dict[str, Any]:
     return {
@@ -4095,12 +4165,6 @@ def get_catalog() -> dict[str, Any]:
 def get_operation_catalog() -> dict[str, Any]:
     """Return DB-backed CQRS operation definitions and source policies."""
     return build_operation_catalog_payload(_shared_pg_conn())
-
-
-@app.get("/api/catalog/api-authority")
-def get_api_authority_catalog() -> dict[str, Any]:
-    """Return authority classifications for mutating API routes."""
-    return build_api_authority_payload(app)
 
 
 @app.get("/api/operate/catalog")

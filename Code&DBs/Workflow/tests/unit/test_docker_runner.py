@@ -268,7 +268,7 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
 
     monkeypatch.setattr(
         "adapters.docker_runner.resolve_docker_image",
-        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None}),
+        lambda **kwargs: ("praxis-codex:latest", {"source": "agent_family", "build_error": None}),
     )
     monkeypatch.setattr("adapters.docker_runner._has_docker_image", lambda image: True)
     monkeypatch.setattr(
@@ -295,7 +295,7 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
         "--rm",
         "-i",
         "--memory",
-        "4g",
+        "500m",
         "--cpus",
         "2",
     ]
@@ -311,7 +311,7 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
     assert captured["cmd"][user_idx + 1] == "0:0"
     assert "-v" in captured["cmd"]
     assert f"{AUTH_HOME}/.codex/auth.json:{_OPENAI_AUTH_SEED_PATH}:ro" in captured["cmd"]
-    assert captured["cmd"][-4:-1] == ["praxis-worker:latest", "bash", "-c"]
+    assert captured["cmd"][-4:-1] == ["praxis-codex:latest", "bash", "-c"]
     assert "setpriv --reuid=1100 --regid=1100" in captured["cmd"][-1]
     assert f"cp {_OPENAI_AUTH_SEED_PATH} {CONTAINER_HOME}/.codex/auth.json" in captured["cmd"][-1]
 
@@ -329,7 +329,7 @@ def test_run_in_docker_skips_cli_home_tmpfs_when_auth_mounts_disabled(monkeypatc
 
     monkeypatch.setattr(
         "adapters.docker_runner.resolve_docker_image",
-        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None}),
+        lambda **kwargs: ("praxis-codex:latest", {"source": "agent_family", "build_error": None}),
     )
     monkeypatch.setattr("adapters.docker_runner._has_docker_image", lambda image: True)
     monkeypatch.setattr(
@@ -364,15 +364,22 @@ def test_run_in_docker_rejects_unknown_auth_mount_policy(monkeypatch):
         )
 
 
-def test_run_in_docker_requires_local_image(monkeypatch):
+def test_run_in_docker_requires_local_thin_image(monkeypatch):
     monkeypatch.setattr("adapters.docker_runner._has_docker", lambda: True)
     monkeypatch.setattr("adapters.docker_runner._has_docker_image", lambda image: False)
     monkeypatch.setattr(
         "adapters.docker_runner.resolve_docker_image",
-        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None}),
+        lambda **kwargs: (
+            "praxis-codex:latest",
+            {
+                "source": "agent_family",
+                "build_error": None,
+                "required_image": "praxis-codex:latest",
+            },
+        ),
     )
 
-    with pytest.raises(RuntimeError, match="PRAXIS_DOCKER_IMAGE"):
+    with pytest.raises(RuntimeError, match="thin image"):
         run_model(
             command="echo hello",
             stdin_text="",
@@ -404,13 +411,16 @@ def test_run_in_docker_reads_image_from_env_per_call(monkeypatch):
     assert result.execution_mode == "docker"
 
 
-def test_run_in_docker_accepts_autobuilt_default_image(monkeypatch):
+def test_run_in_docker_accepts_autobuilt_thin_image(monkeypatch):
     seen: dict[str, str] = {}
 
     monkeypatch.delenv("PRAXIS_DOCKER_IMAGE", raising=False)
     monkeypatch.setattr(
         "adapters.docker_runner.resolve_docker_image",
-        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "built_default": True, "build_error": None}),
+        lambda **kwargs: (
+            "praxis-codex:latest",
+            {"source": "agent_family", "built_default": True, "build_error": None},
+        ),
     )
     monkeypatch.setattr(
         "adapters.docker_runner._has_docker_image",
@@ -429,7 +439,8 @@ def test_run_in_docker_accepts_autobuilt_default_image(monkeypatch):
         command="echo hello",
         stdin_text="",
         timeout=1,
+        provider_slug="openai",
     )
 
-    assert seen["image"] == "praxis-worker:latest"
+    assert seen["image"] == "praxis-codex:latest"
     assert result.execution_mode == "docker"

@@ -6,11 +6,9 @@ from uuid import uuid4
 import runtime.operation_catalog_gateway as gateway
 from runtime.authority_objects import (
     ListAuthorityAdoptionCommand,
-    ListAuthorityDomainSummaryCommand,
     ListAuthorityDriftCommand,
     ListAuthorityObjectsCommand,
     handle_list_authority_adoption,
-    handle_list_authority_domain_summary,
     handle_list_authority_drift,
     handle_list_authority_objects,
 )
@@ -104,12 +102,6 @@ class _FakeConn:
                 "adoption_status": "legacy_inventory",
                 "authority_domain_ref": "authority.legacy_schema",
             }]
-        if "authority_legacy_domain_assignment_summary" in query:
-            return [{
-                "authority_domain_ref": "authority.workflow_runs",
-                "adoption_status": "domain_assigned_legacy",
-                "table_count": 12,
-            }]
         if "authority_feedback_event_projection" in query:
             return [{"feedback_event_id": self.feedback_event_id}]
         return []
@@ -162,20 +154,6 @@ def test_authority_adoption_runtime_reports_legacy_inventory() -> None:
     assert result["adoption"][0]["table_name"] == "legacy_table"
     assert result["adoption"][0]["authority_domain_ref"] == "authority.legacy_schema"
     assert "authority_schema_adoption_report" in conn.fetch_calls[0][0]
-
-
-def test_authority_domain_summary_runtime_reports_assigned_legacy_domains() -> None:
-    conn = _FakeConn()
-
-    result = handle_list_authority_domain_summary(
-        ListAuthorityDomainSummaryCommand(adoption_status="domain_assigned_legacy"),
-        _Subsystems(conn),
-    )
-
-    assert result["status"] == "listed"
-    assert result["summary"][0]["authority_domain_ref"] == "authority.workflow_runs"
-    assert result["summary"][0]["table_count"] == 12
-    assert "authority_legacy_domain_assignment_summary" in conn.fetch_calls[0][0]
 
 
 def test_feedback_authority_records_immutable_feedback_and_authority_event() -> None:

@@ -81,14 +81,6 @@ def test_path_authority_surfaces_do_not_bake_host_specific_defaults() -> None:
     assert "postgresql://localhost:5432/praxis" not in _read(
         "scripts/install_authority_memory_refresh.sh"
     )
-    for doc_path in ("README.md", "SETUP.md"):
-        doc = _read(doc_path)
-        assert "postgresql://localhost:5432/praxis" not in doc
-        assert "symlinks `scripts/praxis`" not in doc
-        assert '"args": ["-m", "surfaces.mcp.server"]' not in doc
-        assert '"cwd": "Code&DBs/Workflow"' not in doc
-        assert '"command": "praxis"' in doc
-        assert '"args": ["mcp", "serve"]' in doc
     assert 'local_bin="${PRAXIS_LOCAL_BIN_DIR:-${XDG_BIN_HOME:-}}"' in _read(
         "scripts/bootstrap"
     )

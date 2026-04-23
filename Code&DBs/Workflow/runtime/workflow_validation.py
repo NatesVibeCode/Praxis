@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import os
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 from runtime.workspace_paths import authority_workspace_roots, container_workspace_root
@@ -124,17 +125,30 @@ def _preflight_provider_admissions(spec, *, pg_conn) -> list[dict[str, Any]]:
     if not provider_adapter_pairs:
         return warnings
 
+    provider_slugs = sorted({provider_slug for provider_slug, _adapter_type in provider_adapter_pairs})
+    adapter_types = sorted({adapter_type for _provider_slug, adapter_type in provider_adapter_pairs})
     try:
-        cur = pg_conn.cursor()
-        cur.execute(
+        raw_rows = pg_conn.execute(
             """
             SELECT provider_slug, adapter_type, admitted_by_policy, policy_reason
             FROM provider_transport_admissions
-            WHERE (provider_slug, adapter_type) = ANY($1::record[])
+            WHERE provider_slug = ANY($1::text[])
+              AND adapter_type = ANY($2::text[])
             """,
-            (list(provider_adapter_pairs),),
+            provider_slugs,
+            adapter_types,
         )
-        rows = {(str(r[0]), str(r[1])): (bool(r[2]), str(r[3] or "")) for r in cur.fetchall()}
+        rows: dict[tuple[str, str], tuple[bool, str]] = {}
+        for row in raw_rows or []:
+            item = _row_mapping(row)
+            provider_slug = str(item.get("provider_slug") or "").strip()
+            adapter_type = str(item.get("adapter_type") or "").strip()
+            if not provider_slug or not adapter_type:
+                continue
+            rows[(provider_slug, adapter_type)] = (
+                bool(item.get("admitted_by_policy")),
+                str(item.get("policy_reason") or ""),
+            )
     except Exception as exc:
         # Don't fail preflight on DB hiccup — that's not what this check is
         # for. Surface a non-fatal warning so the operator knows the gate
@@ -173,6 +187,199 @@ def _preflight_provider_admissions(spec, *, pg_conn) -> list[dict[str, Any]]:
                     + (f": {reason}" if reason else "")
                     + "; re-run 'praxis_provider_onboard' or fix the credential source"
                 ),
+            })
+    return warnings
+
+
+def _row_mapping(row: Any) -> dict[str, Any]:
+    if isinstance(row, Mapping):
+        return dict(row)
+    try:
+        return dict(row)
+    except Exception:
+        return {}
+
+
+def _provider_slug_from_agent(agent_slug: str) -> str:
+    agent = str(agent_slug or "").strip()
+    if not agent or agent == "human" or agent.startswith("integration/") or agent.startswith("auto/"):
+        return ""
+    if "/" not in agent:
+        return ""
+    provider_slug = agent.split("/", 1)[0].strip().lower()
+    return provider_slug
+
+
+def _provider_usage_detail_excerpt(details: object) -> str:
+    if isinstance(details, str):
+        return details[:240]
+    if isinstance(details, Mapping):
+        for key in ("stderr_excerpt", "error", "detail", "message"):
+            value = details.get(key)
+            if value not in (None, ""):
+                return str(value)[:240]
+        if details.get("rate_limited") is True:
+            return "rate_limited=true"
+    return ""
+
+
+def _provider_refs_from_jobs(
+    spec,
+    *,
+    agent_resolution_details: list[dict[str, Any]] | None = None,
+) -> dict[str, set[str]]:
+    refs: dict[str, set[str]] = {}
+    for job in getattr(spec, "jobs", ()) or ():
+        label = str(job.get("label") or "?")
+        provider_slug = _provider_slug_from_agent(str(job.get("agent") or ""))
+        if provider_slug:
+            refs.setdefault(provider_slug, set()).add(label)
+
+    for detail in agent_resolution_details or []:
+        label = str(detail.get("label") or "?")
+        resolved_slug = str(detail.get("resolved_slug") or "")
+        provider_slug = _provider_slug_from_agent(resolved_slug)
+        if provider_slug:
+            refs.setdefault(provider_slug, set()).add(label)
+    return refs
+
+
+def _preflight_provider_availability(
+    spec,
+    *,
+    pg_conn,
+    agent_resolution_details: list[dict[str, Any]] | None = None,
+    circuit_breakers: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Fail closed when a selected provider is known unavailable right now.
+
+    Registration/admission answers "may this provider be used in principle".
+    This check answers the operator-facing launch question: "is this provider
+    usable at this moment?"  The durable source is the provider_usage heartbeat
+    snapshots table; process-local circuit-breaker state is consulted only as
+    a second read model for manual/open-circuit decisions.
+    """
+    warnings: list[dict[str, Any]] = []
+    provider_refs = _provider_refs_from_jobs(
+        spec,
+        agent_resolution_details=agent_resolution_details,
+    )
+    if not provider_refs:
+        return warnings
+
+    provider_slugs = sorted(provider_refs)
+
+    try:
+        raw_rows = pg_conn.execute(
+            """
+            SELECT DISTINCT ON (subject_id)
+                   subject_id,
+                   subject_sub,
+                   status,
+                   summary,
+                   details,
+                   captured_at
+              FROM heartbeat_probe_snapshots
+             WHERE probe_kind = 'provider_usage'
+               AND subject_id = ANY($1::text[])
+               AND captured_at >= now() - interval '24 hours'
+             ORDER BY subject_id, captured_at DESC
+            """,
+            provider_slugs,
+        )
+    except Exception as exc:
+        warnings.append({
+            "kind": "provider_availability_query_failed",
+            "severity": "warning",
+            "label": None,
+            "message": (
+                "could not check provider_usage heartbeat snapshots: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        })
+        raw_rows = ()
+
+    for row in raw_rows or ():
+        item = _row_mapping(row)
+        provider_slug = str(item.get("subject_id") or "").strip().lower()
+        if provider_slug not in provider_refs:
+            continue
+        status = str(item.get("status") or "").strip().lower()
+        if status not in {"degraded", "failed", "warning"}:
+            continue
+        labels = ", ".join(sorted(provider_refs[provider_slug])[:5])
+        details = item.get("details")
+        detail_excerpt = _provider_usage_detail_excerpt(details)
+        captured_at = item.get("captured_at")
+        severity = "error" if status in {"degraded", "failed"} else "warning"
+        message = (
+            f"provider {provider_slug!r} has latest provider_usage status "
+            f"{status!r}; affected job(s): {labels or 'unknown'}"
+        )
+        if item.get("summary"):
+            message += f"; summary: {item.get('summary')}"
+        if detail_excerpt:
+            message += f"; detail: {detail_excerpt}"
+        if captured_at:
+            message += f"; captured_at: {captured_at}"
+        warnings.append({
+            "kind": "provider_unavailable",
+            "severity": severity,
+            "label": None,
+            "message": message,
+        })
+
+    if circuit_breakers is None:
+        try:
+            from runtime.circuit_breaker import get_circuit_breakers
+
+            circuit_breakers = get_circuit_breakers()
+        except Exception as exc:
+            warnings.append({
+                "kind": "provider_circuit_query_failed",
+                "severity": "warning",
+                "label": None,
+                "message": (
+                    "could not check circuit-breaker state: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            })
+            circuit_breakers = None
+
+    if circuit_breakers is not None:
+        try:
+            states = circuit_breakers.all_states()
+        except Exception as exc:
+            warnings.append({
+                "kind": "provider_circuit_query_failed",
+                "severity": "warning",
+                "label": None,
+                "message": (
+                    "could not check circuit-breaker state: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
+            })
+            states = {}
+        for provider_slug in provider_slugs:
+            state = _row_mapping(states.get(provider_slug))
+            if str(state.get("state") or "").upper() != "OPEN":
+                continue
+            labels = ", ".join(sorted(provider_refs[provider_slug])[:5])
+            override = state.get("manual_override")
+            rationale = ""
+            if isinstance(override, Mapping):
+                rationale = str(override.get("rationale") or "").strip()
+            message = (
+                f"provider {provider_slug!r} circuit breaker is OPEN; "
+                f"affected job(s): {labels or 'unknown'}"
+            )
+            if rationale:
+                message += f"; rationale: {rationale}"
+            warnings.append({
+                "kind": "provider_circuit_open",
+                "severity": "error",
+                "label": None,
+                "message": message,
             })
     return warnings
 
@@ -280,12 +487,10 @@ def _preflight_workflow_id_collision(spec, *, pg_conn) -> list[dict[str, Any]]:
     if not workflow_id:
         return warnings
     try:
-        cur = pg_conn.cursor()
-        cur.execute(
+        rows = pg_conn.execute(
             "SELECT definition_version, status FROM workflow_definitions WHERE workflow_id = $1",
-            (workflow_id,),
+            workflow_id,
         )
-        rows = cur.fetchall()
     except Exception as exc:
         warnings.append({
             "kind": "workflow_id_collision_query_failed",
@@ -295,7 +500,10 @@ def _preflight_workflow_id_collision(spec, *, pg_conn) -> list[dict[str, Any]]:
         })
         return warnings
     if rows:
-        versions = ", ".join(str(r[0]) for r in rows) or "unknown"
+        versions = ", ".join(
+            str(_row_mapping(row).get("definition_version") or "")
+            for row in rows
+        ).strip(", ") or "unknown"
         warnings.append({
             "kind": "workflow_id_already_registered",
             "severity": "warning",
@@ -489,6 +697,13 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
     preflight_warnings.extend(verification_preflight_errors)
     preflight_warnings.extend(_preflight_deterministic_builders(spec))
     preflight_warnings.extend(_preflight_provider_admissions(spec, pg_conn=pg_conn))
+    preflight_warnings.extend(
+        _preflight_provider_availability(
+            spec,
+            pg_conn=pg_conn,
+            agent_resolution_details=details,
+        )
+    )
     preflight_warnings.extend(_preflight_workflow_id_collision(spec, pg_conn=pg_conn))
     preflight_warnings.extend(_preflight_workdir_drift(spec))
     preflight_errors = [w for w in preflight_warnings if w.get("severity") == "error"]

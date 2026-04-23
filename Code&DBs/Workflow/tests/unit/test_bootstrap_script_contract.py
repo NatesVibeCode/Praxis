@@ -29,21 +29,9 @@ def test_bootstrap_does_not_bake_host_default_paths() -> None:
     assert '$HOME/.local/bin' not in source
 
 
-def test_bootstrap_can_seed_repo_env_from_explicit_database_authority() -> None:
-    source = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
-    body = source.split("resolve_database_authority() {", 1)[1].split("\n}", 1)[0]
-
-    assert "workflow_database_authority_for_repo" in body
-    assert "without_contract_env" not in body
-
-
 def test_bootstrap_installs_runtime_launcher_not_repo_local_symlink() -> None:
     source = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
 
     assert "Installing praxis runtime launcher" in source
     assert "Praxis runtime launcher. Managed by ./scripts/bootstrap." in source
-    assert "Self-contained: resolves the checkout through launcher authority" in source
-    assert "runtime/launcher_authority.py" in source
-    assert "PRAXIS_LAUNCHER_WORKFLOW_ROOT" not in source
-    assert "WORKFLOW_ROOT = Path" not in source
     assert "ln -s \"$shim_source\" \"$shim_target\"" not in source

@@ -17,6 +17,15 @@ interface LauncherDoctor {
     ok?: boolean;
     missing_count?: number;
   };
+  runtime_target?: {
+    runtime_target_ref?: string;
+    substrate_kind?: string;
+  };
+  sandbox_contract?: {
+    empty_thin_sandbox_default?: boolean;
+    blockers?: string[];
+  };
+  empty_thin_sandbox_default?: boolean;
 }
 
 interface LauncherService {
@@ -125,24 +134,30 @@ export function LauncherFrontdoor() {
         { id: 'engine', label: APP_CONFIG.engineName, detail: 'workflow lane', ok: undefined, meta: 'checking' },
         { id: 'mcp', label: 'MCP', detail: 'tool bridge', ok: undefined, meta: 'checking' },
         { id: 'ui', label: 'UI', detail: 'suite shell', ok: undefined, meta: 'checking' },
-        { id: 'deps', label: 'Deps', detail: 'manifest truth', ok: undefined, meta: 'checking' },
+        { id: 'target', label: 'Target', detail: 'runtime authority', ok: undefined, meta: 'checking' },
+        { id: 'sandbox', label: 'Sandbox', detail: 'thin default', ok: undefined, meta: 'checking' },
       ];
     }
     const doctor = status.doctor ?? {};
     const databaseReady = Boolean(doctor.database_reachable)
       && Boolean(doctor.workflow_operational ?? doctor.schema_bootstrapped);
+    const sandboxReady = Boolean(
+      doctor.empty_thin_sandbox_default ?? doctor.sandbox_contract?.empty_thin_sandbox_default,
+    );
+    const targetRef = doctor.runtime_target?.runtime_target_ref ?? 'target';
+    const targetMeta = doctor.runtime_target?.substrate_kind ?? 'unbound';
     return [
       { id: 'db', label: APP_CONFIG.databaseName, detail: 'authority', ok: databaseReady, meta: databaseReady ? 'bound' : 'needs recovery' },
       { id: 'api', label: 'API', detail: 'suite origin', ok: Boolean(doctor.api_server_ready), meta: doctor.api_server_ready ? 'ready' : 'down' },
       { id: 'engine', label: APP_CONFIG.engineName, detail: 'workflow lane', ok: Boolean(doctor.workflow_api_ready), meta: doctor.workflow_api_ready ? 'ready' : 'down' },
       { id: 'mcp', label: 'MCP', detail: 'tool bridge', ok: Boolean(doctor.mcp_bridge_ready), meta: doctor.mcp_bridge_ready ? 'bounded' : 'down' },
-      { id: 'ui', label: 'UI', detail: 'suite shell', ok: Boolean(doctor.ui_ready), meta: doctor.ui_ready ? 'ready' : 'down' },
+      { id: 'target', label: 'Target', detail: targetRef, ok: Boolean(doctor.runtime_target), meta: targetMeta },
       {
-        id: 'deps',
-        label: 'Deps',
-        detail: 'manifest truth',
-        ok: Boolean(doctor.dependency_truth?.ok),
-        meta: doctor.dependency_truth?.ok ? 'clean' : `${doctor.dependency_truth?.missing_count ?? 0} missing`,
+        id: 'sandbox',
+        label: 'Sandbox',
+        detail: 'thin default',
+        ok: sandboxReady,
+        meta: sandboxReady ? 'empty 500m' : `${doctor.sandbox_contract?.blockers?.length ?? 1} blocker`,
       },
     ];
   }, [status]);

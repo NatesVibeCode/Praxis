@@ -311,6 +311,55 @@
   border-radius: 16px;
   background: var(--moon-white-a02);
 }
+.moon-run-contract__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.moon-run-contract__grid {
+  display: grid;
+  gap: 8px;
+}
+.moon-run-contract__row {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.35fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.moon-run-contract__label {
+  color: var(--moon-fg-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.moon-run-contract__value {
+  color: var(--moon-fg);
+  font-size: var(--moon-font-size-xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.moon-run-contract__prompt {
+  border-top: 1px solid var(--moon-white-a08);
+  padding-top: 10px;
+}
+.moon-run-contract__prompt summary {
+  color: var(--moon-fg-muted);
+  cursor: pointer;
+  font-size: var(--moon-font-size-xs);
+  font-weight: 700;
+}
+.moon-run-contract__prompt pre {
+  margin: 10px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--moon-fg);
+  font-family: inherit;
+  font-size: var(--moon-font-size-xs);
+  line-height: 1.45;
+}
 .moon-dock-form__actions {
   display: flex;
   flex-wrap: wrap;
@@ -3379,6 +3428,80 @@ button.moon-release__dispatch-btn {
   font-size: 12px;
   margin: 0;
   font-family: ui-monospace, "SF Mono", Monaco, monospace;
+}
+.moon-run-overlay__contract {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--moon-muted-slate);
+  border-radius: 8px;
+  background: var(--moon-white-a03);
+}
+.moon-run-overlay__contract-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--moon-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.moon-run-overlay__contract-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.moon-run-overlay__contract-grid {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.moon-run-overlay__contract-grid div {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.35fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.moon-run-overlay__contract-grid dt {
+  color: var(--moon-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin: 0;
+  text-transform: uppercase;
+}
+.moon-run-overlay__contract-grid dd {
+  color: var(--moon-color-white);
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.moon-run-overlay__contract-prompt {
+  border-top: 1px solid var(--moon-muted-slate);
+  padding-top: 8px;
+}
+.moon-run-overlay__contract-prompt summary {
+  color: var(--moon-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.moon-run-overlay__contract-prompt pre {
+  margin: 8px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .moon-run-overlay__receipt-output {
