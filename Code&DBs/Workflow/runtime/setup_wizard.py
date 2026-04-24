@@ -35,7 +35,7 @@ from runtime.workspace_paths import repo_root as workspace_repo_root
 _DEFAULT_PROFILE_REF = "sandbox_profile.praxis.default"
 _LEGACY_COPY_DEBUG_REF = "sandbox_profile.praxis.legacy_copy_debug"
 _DEFAULT_RUNTIME_TARGET_REF = "runtime_target.praxis.default"
-_SETUP_MODES = {"doctor", "plan", "apply"}
+_SETUP_MODES = {"doctor", "plan", "apply", "graph"}
 _OPERATOR_AUTHORITY_PATH = ("api", "mcp")
 _CLIENT_SURFACES = ("cli", "website")
 _LEGACY_SUBSTRATE_KIND_ALIASES = {
@@ -615,6 +615,68 @@ def setup_payload_from_api(
     return payload, None
 
 
+def _gate_result_to_dict(result: Any, probe: Any) -> dict[str, Any]:
+    return {
+        "gate_ref": result.gate_ref,
+        "domain": probe.domain,
+        "title": probe.title,
+        "purpose": probe.purpose,
+        "depends_on": list(probe.depends_on),
+        "platforms": list(probe.platforms),
+        "status": result.status,
+        "observed_state": dict(result.observed_state),
+        "remediation_hint": result.remediation_hint,
+        "remediation_doc_url": result.remediation_doc_url,
+        "apply_ref": result.apply_ref,
+        "evaluated_at": result.evaluated_at.isoformat(),
+    }
+
+
+def setup_graph_payload(
+    *,
+    repo_root: Path | None = None,
+    env: dict[str, str] | None = None,
+    authority_surface: str = "api_or_mcp",
+) -> dict[str, Any]:
+    """Evaluate the onboarding gate graph and return a surface-neutral payload.
+
+    Every gate contributes one entry in ``gates``; ``summary`` counts each
+    status bucket. CLI, HTTP, and MCP surfaces all render this shape.
+    """
+    from runtime.onboarding import ONBOARDING_GRAPH
+
+    root = repo_root or workspace_repo_root()
+    evaluation_env = dict(env) if env is not None else dict(os.environ)
+    # If WORKFLOW_DATABASE_URL is not already set, surface it from resolver authority
+    # so postgres_role and pgvector probes can evaluate without the caller threading it.
+    if not (evaluation_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+        authority_env, _ = _setup_authority_env(repo_root=root)
+        if authority_env.get("WORKFLOW_DATABASE_URL"):
+            evaluation_env["WORKFLOW_DATABASE_URL"] = authority_env["WORKFLOW_DATABASE_URL"]
+
+    results = ONBOARDING_GRAPH.evaluate(evaluation_env, root)
+    probes_by_ref = {probe.gate_ref: probe for probe in ONBOARDING_GRAPH.probes()}
+
+    gates = [
+        _gate_result_to_dict(result, probes_by_ref[result.gate_ref])
+        for result in results
+    ]
+
+    summary = {"total": len(results)}
+    for status in ("ok", "missing", "blocked", "unknown"):
+        summary[status] = sum(1 for r in results if r.status == status)
+
+    return {
+        "ok": summary["missing"] == 0 and summary["blocked"] == 0,
+        "mode": "graph",
+        "authority_surface": authority_surface,
+        "platform": platform.system().lower() if hasattr(platform, "system") else sys.platform,
+        "repo_root": str(root),
+        "gates": gates,
+        "summary": summary,
+    }
+
+
 def setup_payload_for_cli(
     mode: str,
     *,
@@ -627,12 +689,18 @@ def setup_payload_for_cli(
         payload.setdefault("cli_role", "client_only_api_or_mcp")
         return payload
 
-    local_payload = setup_payload(
-        mode,
-        repo_root=repo_root,
-        apply=apply,
-        authority_surface="local_bootstrap_diagnostic",
-    )
+    if mode == "graph":
+        local_payload = setup_graph_payload(
+            repo_root=repo_root,
+            authority_surface="local_bootstrap_diagnostic",
+        )
+    else:
+        local_payload = setup_payload(
+            mode,
+            repo_root=repo_root,
+            apply=apply,
+            authority_surface="local_bootstrap_diagnostic",
+        )
     local_payload["not_authority"] = True
     local_payload["api_mcp_authority_reachable"] = False
     local_payload["authority_error"] = error

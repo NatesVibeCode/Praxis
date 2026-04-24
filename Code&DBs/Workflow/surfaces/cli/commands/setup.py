@@ -14,11 +14,15 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(
             "\n".join(
                 [
-                    "usage: workflow setup <doctor|plan|apply> [--json] [--yes]",
+                    "usage: workflow setup <doctor|plan|apply|graph> [--json] [--yes]",
                     "",
                     "Runtime-target setup client. API/MCP own setup authority;",
                     "the doctor payload now includes the native_instance contract so",
                     "operators can compare runtime target and repo-local instance.",
+                    "",
+                    "'graph' evaluates the onboarding gate-probe graph and returns",
+                    "each gate's status, observed state, and remediation hint.",
+                    "",
                     "SSH is build/deploy transport only.",
                 ]
             )
@@ -26,8 +30,8 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
         )
         return 0
     mode = args[0]
-    if mode not in {"doctor", "plan", "apply"}:
-        stdout.write("usage: workflow setup <doctor|plan|apply> [--json] [--yes]\n")
+    if mode not in {"doctor", "plan", "apply", "graph"}:
+        stdout.write("usage: workflow setup <doctor|plan|apply|graph> [--json] [--yes]\n")
         return 2
     approved = "--yes" in args
     payload = setup_payload_for_cli(mode, repo_root=workspace_repo_root(), apply=approved)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from runtime.setup_wizard import setup_payload
+from runtime.setup_wizard import setup_graph_payload, setup_payload
 from ..subsystems import REPO_ROOT
 
 
@@ -12,11 +12,13 @@ def tool_praxis_setup(params: dict, _progress_emitter=None) -> dict:
     """Inspect or plan runtime-target setup through the shared setup authority."""
     del _progress_emitter
     action = str(params.get("action") or "doctor").strip().lower()
+    if action == "graph":
+        return setup_graph_payload(repo_root=REPO_ROOT, authority_surface="mcp")
     if action not in {"doctor", "plan", "apply"}:
         return {
             "ok": False,
             "error_code": "setup.invalid_action",
-            "message": "action must be one of: doctor, plan, apply",
+            "message": "action must be one of: doctor, plan, apply, graph",
         }
     approved = bool(params.get("yes") or params.get("approved") or params.get("apply"))
     return setup_payload(action, repo_root=REPO_ROOT, apply=approved, authority_surface="mcp")
@@ -40,8 +42,13 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["doctor", "plan", "apply"],
+                        "enum": ["doctor", "plan", "apply", "graph"],
                         "default": "doctor",
+                        "description": (
+                            "doctor/plan/apply = runtime-target contract; "
+                            "graph = onboarding gate-probe graph (per-gate status + "
+                            "observed state + remediation hints)."
+                        ),
                     },
                     "yes": {
                         "type": "boolean",
@@ -65,6 +72,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "doctor": "read",
                         "plan": "read",
                         "apply": "read",
+                        "graph": "read",
                     },
                 },
                 "examples": [
@@ -75,6 +83,10 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     {
                         "label": "Setup plan",
                         "input": {"action": "plan"},
+                    },
+                    {
+                        "label": "Onboarding gate graph",
+                        "input": {"action": "graph"},
                     },
                 ],
             },

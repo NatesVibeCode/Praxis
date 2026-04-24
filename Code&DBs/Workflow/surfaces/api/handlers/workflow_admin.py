@@ -416,6 +416,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/api/setup/doctor": "Runtime-target setup doctor with sandbox, DB, API, workspace, and image contract.",
         "/api/setup/plan": "Runtime-target setup plan showing authority rows, services, images, and cleanup checks.",
         "/api/setup/apply": "Runtime-target setup apply gate; API/MCP own setup authority, SSH is build/deploy transport only.",
+        "/api/setup/graph": "Onboarding gate-probe graph: per-gate status, observed state, and copy-pasteable remediation hints.",
         "/api/operator/graph": "Catalog-backed cross-domain operator graph projection.",
         "/api/operator/issue-backlog": "Catalog-backed canonical issue backlog read.",
         "/api/operator/replay-ready-bugs": "Catalog-backed replay-ready bug backlog read.",
@@ -1228,12 +1229,20 @@ def _handle_launcher_status_get(request: Any, path: str) -> None:
 
 def _handle_setup_get(request: Any, path: str) -> None:
     try:
-        from runtime.setup_wizard import setup_payload
-
         mode = path.rsplit("/", 1)[-1]
+        if mode == "graph":
+            from runtime.setup_wizard import setup_graph_payload
+
+            request._send_json(
+                200,
+                setup_graph_payload(repo_root=REPO_ROOT, authority_surface="api"),
+            )
+            return
         if mode not in {"doctor", "plan"}:
             request._send_json(404, {"error": "unknown setup mode"})
             return
+        from runtime.setup_wizard import setup_payload
+
         request._send_json(200, setup_payload(mode, repo_root=REPO_ROOT, authority_surface="api"))
     except Exception as exc:
         request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
@@ -1306,6 +1315,7 @@ ADMIN_GET_ROUTES: list[RouteEntry] = [
     (_exact("/api/launcher/status"), _handle_launcher_status_get),
     (_exact("/api/setup/doctor"), _handle_setup_get),
     (_exact("/api/setup/plan"), _handle_setup_get),
+    (_exact("/api/setup/graph"), _handle_setup_get),
     (_exact("/api/workflow-templates"), _handle_workflow_templates_get),
 ]
 

@@ -3940,6 +3940,10 @@ async def setup_plan_get(request: Request) -> Response:
 async def setup_apply_post(request: Request) -> Response:
     return await _route_to_handler(request)
 
+@app.get("/api/setup/graph")
+async def setup_graph_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/agent-sessions")
 def agent_sessions_index_get() -> dict[str, Any]:
     return {
