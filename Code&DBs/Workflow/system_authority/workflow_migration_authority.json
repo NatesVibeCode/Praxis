@@ -220,7 +220,12 @@
     "212_operation_replay_receipts.sql",
     "213_ui_experience_graph_operator_tool.sql",
     "214_cursor_api_composer_default.sql",
-    "215_roadmap_tree_query_non_idempotent.sql"
+    "215_roadmap_tree_query_non_idempotent.sql",
+    "216_ui_surface_action_registry.sql",
+    "217_ui_shell_route_registry.sql",
+    "218_ui_feature_flow_registry.sql",
+    "219_custom_integration_builder_launch_action.sql",
+    "221_onboarding_gate_state.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5571,6 +5576,59 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.operator-roadmap-tree"
       }
+    ],
+    "216_ui_surface_action_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "ui_surface_action_registry"
+      },
+      {
+        "object_type": "index",
+        "object_name": "ui_surface_action_registry_surface_order_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "ui_surface_action_registry_target_idx"
+      }
+    ],
+    "217_ui_shell_route_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "ui_shell_route_registry"
+      },
+      {
+        "object_type": "index",
+        "object_name": "ui_shell_route_registry_surface_order_idx"
+      }
+    ],
+    "218_ui_feature_flow_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "ui_feature_flow_registry"
+      },
+      {
+        "object_type": "index",
+        "object_name": "ui_feature_flow_registry_surface_order_idx"
+      }
+    ],
+    "219_custom_integration_builder_launch_action.sql": [],
+    "221_onboarding_gate_state.sql": [
+      {
+        "object_type": "table",
+        "object_name": "onboarding_gate_state"
+      },
+      {
+        "object_type": "index",
+        "object_name": "onboarding_gate_state_domain_status_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "onboarding_gate_state_evaluated_at_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "onboarding_gate_state_apply_ref_idx"
+      }
     ]
   },
   "policy_buckets": {
@@ -5795,7 +5853,12 @@
       "212_operation_replay_receipts.sql",
       "213_ui_experience_graph_operator_tool.sql",
       "214_cursor_api_composer_default.sql",
-      "215_roadmap_tree_query_non_idempotent.sql"
+      "215_roadmap_tree_query_non_idempotent.sql",
+      "216_ui_surface_action_registry.sql",
+      "217_ui_shell_route_registry.sql",
+      "218_ui_feature_flow_registry.sql",
+      "219_custom_integration_builder_launch_action.sql",
+      "221_onboarding_gate_state.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

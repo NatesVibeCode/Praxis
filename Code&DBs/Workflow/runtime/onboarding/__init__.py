@@ -12,7 +12,7 @@ Public API:
 
 from __future__ import annotations
 
-from . import probes_mcp, probes_platform, probes_provider, probes_runtime
+from . import applies, probes_mcp, probes_platform, probes_provider, probes_runtime
 from .graph import (
     GateApply,
     GateGraph,
@@ -21,6 +21,11 @@ from .graph import (
     GateResult,
     GateStatus,
     ONBOARDING_GRAPH,
+)
+from .persistence import (
+    read_all_gate_states,
+    read_gate_state,
+    write_gate_state,
 )
 
 __all__ = [
@@ -31,6 +36,9 @@ __all__ = [
     "GateResult",
     "GateStatus",
     "ONBOARDING_GRAPH",
+    "read_all_gate_states",
+    "read_gate_state",
+    "write_gate_state",
 ]
 
 
@@ -39,6 +47,7 @@ def _register_all() -> None:
     probes_runtime.register(ONBOARDING_GRAPH)
     probes_provider.register(ONBOARDING_GRAPH)
     probes_mcp.register(ONBOARDING_GRAPH)
+    applies.register(ONBOARDING_GRAPH)
 
 
 _register_all()

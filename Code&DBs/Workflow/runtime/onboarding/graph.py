@@ -124,10 +124,22 @@ class GateGraph:
         repo_root: Path,
         *,
         platform: str | None = None,
+        conn: Any = None,
+        use_cache: bool = True,
     ) -> list[GateResult]:
         platform_ref = platform or sys.platform
         order = self._topological_order()
         results: dict[str, GateResult] = {}
+
+        cached: dict[str, GateResult] = {}
+        if conn is not None and use_cache:
+            try:
+                from .persistence import read_all_gate_states
+
+                cached = read_all_gate_states(conn)
+            except Exception:
+                cached = {}
+
         for gate_ref in order:
             probe, fn = self._probes[gate_ref]
             if not _platform_matches(probe, platform_ref):
@@ -147,10 +159,13 @@ class GateGraph:
                     ),
                 )
                 continue
+            if gate_ref in cached:
+                results[gate_ref] = cached[gate_ref]
+                continue
             try:
-                results[gate_ref] = fn(env, repo_root)
+                fresh = fn(env, repo_root)
             except Exception as exc:
-                results[gate_ref] = gate_result(
+                fresh = gate_result(
                     probe,
                     status="unknown",
                     observed_state={
@@ -158,7 +173,51 @@ class GateGraph:
                         "error_type": type(exc).__name__,
                     },
                 )
+            results[gate_ref] = fresh
+            if conn is not None:
+                try:
+                    from .persistence import write_gate_state
+
+                    write_gate_state(conn, fresh, probe, platform=platform_ref)
+                except Exception:
+                    pass
         return list(results.values())
+
+    def apply_gate(
+        self,
+        apply_ref: str,
+        env: Mapping[str, str],
+        repo_root: Path,
+        *,
+        applied_by: str = "onboarding_apply",
+        conn: Any = None,
+        **kwargs: Any,
+    ) -> GateResult:
+        if apply_ref not in self._applies:
+            raise GateGraphError(f"unknown apply_ref: {apply_ref}")
+        apply = self._applies[apply_ref]
+        probe, _fn = self._probes[apply.gate_ref]
+        result = apply.handler(env, repo_root, **kwargs)
+        if conn is not None:
+            try:
+                from .persistence import write_gate_state
+
+                write_gate_state(
+                    conn,
+                    result,
+                    probe,
+                    applied_by=applied_by,
+                    applied_at=_now(),
+                )
+            except Exception:
+                pass
+        return result
+
+    def apply_for_gate(self, gate_ref: str) -> GateApply | None:
+        for apply in self._applies.values():
+            if apply.gate_ref == gate_ref:
+                return apply
+        return None
 
     def _topological_order(self) -> list[str]:
         in_degree: dict[str, int] = {ref: 0 for ref in self._probes}

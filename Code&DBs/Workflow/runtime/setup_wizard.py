@@ -632,6 +632,89 @@ def _gate_result_to_dict(result: Any, probe: Any) -> dict[str, Any]:
     }
 
 
+def setup_apply_gate_payload(
+    *,
+    gate_ref: str | None = None,
+    apply_ref: str | None = None,
+    repo_root: Path | None = None,
+    env: dict[str, str] | None = None,
+    approved: bool = False,
+    applied_by: str = "setup_apply_gate",
+    authority_surface: str = "api_or_mcp",
+) -> dict[str, Any]:
+    """Apply one onboarding gate's registered handler and return the fresh result."""
+    from runtime.onboarding import ONBOARDING_GRAPH
+
+    if not apply_ref and not gate_ref:
+        return {
+            "ok": False,
+            "mode": "apply",
+            "error_code": "setup.apply_gate_required",
+            "message": "Provide gate_ref or apply_ref to apply a specific gate.",
+            "authority_surface": authority_surface,
+        }
+
+    resolved_apply = None
+    if apply_ref:
+        for apply in ONBOARDING_GRAPH.applies():
+            if apply.apply_ref == apply_ref:
+                resolved_apply = apply
+                break
+    elif gate_ref:
+        resolved_apply = ONBOARDING_GRAPH.apply_for_gate(gate_ref)
+
+    if resolved_apply is None:
+        return {
+            "ok": False,
+            "mode": "apply",
+            "error_code": "setup.apply_gate_unknown",
+            "message": (
+                f"No apply handler registered for gate_ref={gate_ref!r} "
+                f"apply_ref={apply_ref!r}."
+            ),
+            "authority_surface": authority_surface,
+        }
+
+    if resolved_apply.requires_approval and not approved:
+        return {
+            "ok": False,
+            "mode": "apply",
+            "error_code": "setup.apply_requires_approval",
+            "message": (
+                f"Apply {resolved_apply.apply_ref} mutates "
+                f"{list(resolved_apply.mutates) or ['nothing on disk']} and requires "
+                "explicit approval. Pass approved=True (or --yes) to proceed."
+            ),
+            "apply_ref": resolved_apply.apply_ref,
+            "gate_ref": resolved_apply.gate_ref,
+            "mutates": list(resolved_apply.mutates),
+            "authority_surface": authority_surface,
+        }
+
+    root = repo_root or workspace_repo_root()
+    evaluation_env = dict(env) if env is not None else dict(os.environ)
+    if not (evaluation_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+        authority_env, _ = _setup_authority_env(repo_root=root)
+        if authority_env.get("WORKFLOW_DATABASE_URL"):
+            evaluation_env["WORKFLOW_DATABASE_URL"] = authority_env["WORKFLOW_DATABASE_URL"]
+
+    result = ONBOARDING_GRAPH.apply_gate(
+        resolved_apply.apply_ref,
+        evaluation_env,
+        root,
+        applied_by=applied_by,
+    )
+    probe = ONBOARDING_GRAPH.probe(result.gate_ref)
+    return {
+        "ok": result.status == "ok",
+        "mode": "apply",
+        "apply_ref": resolved_apply.apply_ref,
+        "gate": _gate_result_to_dict(result, probe),
+        "mutates": list(resolved_apply.mutates),
+        "authority_surface": authority_surface,
+    }
+
+
 def setup_graph_payload(
     *,
     repo_root: Path | None = None,

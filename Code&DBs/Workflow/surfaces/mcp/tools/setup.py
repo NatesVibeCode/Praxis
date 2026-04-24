@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from runtime.setup_wizard import setup_graph_payload, setup_payload
+from runtime.setup_wizard import (
+    setup_apply_gate_payload,
+    setup_graph_payload,
+    setup_payload,
+)
 from ..subsystems import REPO_ROOT
 
 
@@ -21,6 +25,18 @@ def tool_praxis_setup(params: dict, _progress_emitter=None) -> dict:
             "message": "action must be one of: doctor, plan, apply, graph",
         }
     approved = bool(params.get("yes") or params.get("approved") or params.get("apply"))
+
+    gate_ref = str(params.get("gate") or params.get("gate_ref") or "").strip() or None
+    apply_ref = str(params.get("apply_ref") or "").strip() or None
+    if action == "apply" and (gate_ref or apply_ref):
+        return setup_apply_gate_payload(
+            gate_ref=gate_ref,
+            apply_ref=apply_ref,
+            repo_root=REPO_ROOT,
+            approved=approved,
+            applied_by="mcp_setup_apply",
+            authority_surface="mcp",
+        )
     return setup_payload(action, repo_root=REPO_ROOT, apply=approved, authority_surface="mcp")
 
 
@@ -54,6 +70,21 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "boolean",
                         "default": False,
                         "description": "Explicit approval for apply-mode gates.",
+                    },
+                    "gate": {
+                        "type": "string",
+                        "description": (
+                            "Onboarding gate_ref to apply (e.g. 'mcp.claude_code'). "
+                            "Required when action='apply' and you want to run a specific "
+                            "gate's apply handler rather than the runtime-target apply."
+                        ),
+                    },
+                    "apply_ref": {
+                        "type": "string",
+                        "description": (
+                            "Apply handler ref (e.g. 'apply.mcp.claude_code.write'). "
+                            "Alternative to 'gate' when multiple handlers target one gate."
+                        ),
                     },
                 },
             },

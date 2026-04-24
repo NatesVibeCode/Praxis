@@ -1252,9 +1252,34 @@ def _handle_setup_apply_post(request: Any, path: str) -> None:
     del path
     try:
         body = _read_json_body(request)
+        approved = bool(body.get("yes") or body.get("apply") or body.get("approved"))
+        gate_ref = (body.get("gate") or body.get("gate_ref") or "").strip() or None
+        apply_ref = (body.get("apply_ref") or "").strip() or None
+
+        if gate_ref or apply_ref:
+            from runtime.setup_wizard import setup_apply_gate_payload
+
+            payload = setup_apply_gate_payload(
+                gate_ref=gate_ref,
+                apply_ref=apply_ref,
+                repo_root=REPO_ROOT,
+                approved=approved,
+                applied_by="api_setup_apply",
+                authority_surface="api",
+            )
+            if payload.get("ok"):
+                status_code = 200
+            elif payload.get("error_code") == "setup.apply_requires_approval":
+                status_code = 409
+            elif payload.get("error_code") in {"setup.apply_gate_required", "setup.apply_gate_unknown"}:
+                status_code = 400
+            else:
+                status_code = 409
+            request._send_json(status_code, payload)
+            return
+
         from runtime.setup_wizard import setup_payload
 
-        approved = bool(body.get("yes") or body.get("apply") or body.get("approved"))
         payload = setup_payload("apply", repo_root=REPO_ROOT, apply=approved, authority_surface="api")
         status_code = 200 if payload.get("ok") else (501 if approved else 409)
         request._send_json(status_code, payload)
