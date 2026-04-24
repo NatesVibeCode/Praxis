@@ -29,8 +29,11 @@ from runtime.intent_decomposition import (
     decompose_intent,
 )
 from runtime.spec_compiler import (
+    LaunchReceipt,
     PlanPacket,
     ProposedPlan,
+    approve_proposed_plan,
+    launch_approved,
     propose_plan,
 )
 
@@ -145,7 +148,132 @@ def compose_plan_from_intent(
     return propose_plan(plan_dict, conn=conn, workdir=workdir)
 
 
+class ComposeAndLaunchBlocked(ValueError):
+    """Raised when compose_and_launch refuses to launch for safety reasons.
+
+    ``reasons`` carries the structured list: unresolved_routes,
+    unbound_pills, budget_exceeded. Callers render the blocked reasons
+    to the operator; fixing any of them requires re-composing or
+    explicitly disabling the check.
+    """
+
+    def __init__(self, reasons: list[dict[str, Any]]) -> None:
+        self.reasons = reasons
+        summary = ", ".join(str(entry.get("kind") or "?") for entry in reasons)
+        super().__init__(
+            f"compose_and_launch blocked by {len(reasons)} check(s): {summary}. "
+            "Inspect receipt.reasons for the structured detail."
+        )
+
+
+def compose_and_launch(
+    intent: str,
+    *,
+    conn: Any,
+    approved_by: str,
+    approval_note: str | None = None,
+    plan_name: str | None = None,
+    why: str | None = None,
+    workdir: str | None = None,
+    allow_single_step: bool = False,
+    write_scope_per_step: list[list[str]] | None = None,
+    default_write_scope: list[str] | None = None,
+    default_stage: str = "build",
+    refuse_unresolved_routes: bool = True,
+    refuse_unbound_pills: bool = True,
+    budget_cap_tokens: int | None = None,
+) -> LaunchReceipt:
+    """End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt.
+
+    Wraps :func:`compose_plan_from_intent`, :func:`approve_proposed_plan`,
+    and :func:`launch_approved` into one call for trusted automation (CI,
+    scripts, experienced operators).
+
+    Bulletproof defaults — any of these fail closed with a structured
+    :class:`ComposeAndLaunchBlocked` unless the caller explicitly disables
+    the check:
+
+      - ``refuse_unresolved_routes``: block if any job has an unresolved
+        auto-route (i.e. no admitted provider for the requested stage).
+      - ``refuse_unbound_pills``: block if any packet description
+        references an object.field that doesn't exist in the data
+        dictionary (typo or hallucination).
+      - ``budget_cap_tokens``: block if the projected total prompt +
+        output tokens exceeds the cap.
+
+    ``approved_by`` is required — no anonymous automation. The approval is
+    still hash-bound to the exact spec_dict, so any tampering between the
+    compose step and submit will still fail at launch_approved.
+    """
+    proposed = compose_plan_from_intent(
+        intent,
+        conn=conn,
+        plan_name=plan_name,
+        why=why,
+        workdir=workdir,
+        allow_single_step=allow_single_step,
+        write_scope_per_step=write_scope_per_step,
+        default_write_scope=default_write_scope,
+        default_stage=default_stage,
+    )
+
+    blocked: list[dict[str, Any]] = []
+
+    if refuse_unresolved_routes and proposed.unresolved_routes:
+        blocked.append(
+            {
+                "kind": "unresolved_routes",
+                "count": len(proposed.unresolved_routes),
+                "detail": list(proposed.unresolved_routes),
+            }
+        )
+
+    if refuse_unbound_pills:
+        unbound = proposed.binding_summary.get("unbound_refs") if isinstance(
+            proposed.binding_summary, dict
+        ) else None
+        if unbound:
+            blocked.append(
+                {
+                    "kind": "unbound_pills",
+                    "count": len(unbound),
+                    "detail": list(unbound),
+                }
+            )
+
+    if budget_cap_tokens is not None:
+        from runtime.plan_budget import project_plan_budget
+
+        projection = project_plan_budget(proposed)
+        if projection.total_estimated_tokens > int(budget_cap_tokens):
+            blocked.append(
+                {
+                    "kind": "budget_exceeded",
+                    "cap": int(budget_cap_tokens),
+                    "estimated_total_tokens": projection.total_estimated_tokens,
+                    "estimated_prompt_tokens": projection.total_estimated_prompt_tokens,
+                    "estimated_output_tokens": projection.total_estimated_output_tokens,
+                }
+            )
+
+    if blocked:
+        raise ComposeAndLaunchBlocked(blocked)
+
+    approved = approve_proposed_plan(
+        proposed,
+        approved_by=approved_by,
+        approval_note=approval_note,
+    )
+    return launch_approved(
+        approved,
+        conn=conn,
+        requested_by_kind="compose_and_launch",
+    )
+
+
 __all__ = [
+    "ComposeAndLaunchBlocked",
+    "compose_and_launch",
     "compose_plan_from_intent",
     "packets_from_steps",
 ]

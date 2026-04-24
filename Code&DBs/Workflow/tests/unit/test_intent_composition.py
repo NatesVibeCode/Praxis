@@ -11,6 +11,8 @@ import pytest
 
 from runtime import spec_compiler
 from runtime.intent_composition import (
+    ComposeAndLaunchBlocked,
+    compose_and_launch,
     compose_plan_from_intent,
     packets_from_steps,
 )
@@ -18,7 +20,7 @@ from runtime.intent_decomposition import (
     DecompositionRequiresLLMError,
     StepIntent,
 )
-from runtime.spec_compiler import CompiledSpec, PlanPacket
+from runtime.spec_compiler import CompiledSpec, LaunchReceipt, PlanPacket
 
 
 class _FakeConn:
@@ -204,3 +206,201 @@ def test_compose_plan_from_intent_honors_per_step_write_scope(monkeypatch) -> No
         ["Code&DBs/Workflow/scripts/backfill.py"],
         ["Code&DBs/Workflow/surfaces/app/src/"],
     ]
+
+
+def _install_submit_command_stub(monkeypatch, *, run_id: str = "workflow_composed_abc"):
+    """Wire submit_workflow_command to a stub so compose_and_launch can complete."""
+
+    captured: dict[str, object] = {}
+
+    def _fake_submit(conn, **kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "run_id": run_id,
+            "status": "queued",
+            "total_jobs": kwargs["total_jobs"],
+            "spec_name": kwargs["spec_name"],
+        }
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _fake_submit)
+    return captured
+
+
+def test_compose_and_launch_happy_path(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+    captured = _install_submit_command_stub(monkeypatch)
+
+    receipt = compose_and_launch(
+        "1. Add timezone column\n2. Backfill existing rows\n3. Update UI",
+        conn=_FakeConn(),
+        approved_by="ci@praxis",
+        approval_note="CI flow",
+        plan_name="tz_rollout",
+    )
+
+    assert isinstance(receipt, LaunchReceipt)
+    assert receipt.run_id == "workflow_composed_abc"
+    assert receipt.spec_name == "tz_rollout"
+    # Audit trail distinguishes end-to-end pipeline from plain launch_approved.
+    assert captured["kwargs"]["requested_by_kind"] == "compose_and_launch"
+    # approved_by threads into requested_by_ref for the audit trail.
+    assert captured["kwargs"]["requested_by_ref"] == "ci@praxis"
+
+
+def test_compose_and_launch_refuses_unresolved_routes_by_default(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    import runtime.intent_binding as intent_binding_mod
+
+    monkeypatch.setattr(
+        intent_binding_mod,
+        "bind_data_pills",
+        lambda intent, *, conn, object_kinds=None: intent_binding_mod.BoundIntent(intent=intent),
+    )
+
+    import runtime.workflow._admission as admission_mod
+
+    def _unresolved_preview(conn, *, inline_spec, **_kwargs):
+        return {
+            "action": "preview",
+            "jobs": [
+                {
+                    "label": job["label"],
+                    "requested_agent": "auto/build",
+                    "resolved_agent": None,
+                    "route_status": "unresolved",
+                    "route_reason": "no admitted route",
+                }
+                for job in inline_spec["jobs"]
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(admission_mod, "preview_workflow_execution", _unresolved_preview)
+
+    # Submit must NOT be called — compose_and_launch fails closed first.
+    def _forbid_submit(*_args, **_kwargs):
+        raise AssertionError("submit should not run when routes are unresolved")
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
+
+    with pytest.raises(ComposeAndLaunchBlocked) as exc_info:
+        compose_and_launch(
+            "1. Step one\n2. Step two",
+            conn=_FakeConn(),
+            approved_by="ci@praxis",
+        )
+    reasons = exc_info.value.reasons
+    assert any(entry["kind"] == "unresolved_routes" for entry in reasons)
+
+
+def test_compose_and_launch_refuses_unbound_pills_by_default(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+
+    # Override binding to surface an unbound pill on one step.
+    import runtime.intent_binding as intent_binding_mod
+
+    def _fake_bind_with_unbound(intent, *, conn, object_kinds=None):
+        return intent_binding_mod.BoundIntent(
+            intent=intent,
+            unbound=[
+                intent_binding_mod.UnboundCandidate(
+                    matched_span="users.first_nm",
+                    object_kind="users",
+                    field_path="first_nm",
+                    reason="field_path_not_in_object",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(intent_binding_mod, "bind_data_pills", _fake_bind_with_unbound)
+
+    def _forbid_submit(*_args, **_kwargs):
+        raise AssertionError("submit should not run when pills are unbound")
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
+
+    with pytest.raises(ComposeAndLaunchBlocked) as exc_info:
+        compose_and_launch(
+            "1. Copy users.first_nm somewhere\n2. Verify it copied",
+            conn=_FakeConn(),
+            approved_by="ci@praxis",
+        )
+    reasons = exc_info.value.reasons
+    assert any(entry["kind"] == "unbound_pills" for entry in reasons)
+
+
+def test_compose_and_launch_refuses_over_budget(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+
+    def _forbid_submit(*_args, **_kwargs):
+        raise AssertionError("submit should not run when budget cap is exceeded")
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
+
+    # 3 build-stage jobs × 4000 estimated output tokens each = 12000. Cap at
+    # 5000 trips the budget block.
+    with pytest.raises(ComposeAndLaunchBlocked) as exc_info:
+        compose_and_launch(
+            "1. Do one\n2. Do two\n3. Do three",
+            conn=_FakeConn(),
+            approved_by="ci@praxis",
+            budget_cap_tokens=5000,
+        )
+    reasons = exc_info.value.reasons
+    budget_reason = next(
+        entry for entry in reasons if entry["kind"] == "budget_exceeded"
+    )
+    assert budget_reason["cap"] == 5000
+    assert budget_reason["estimated_total_tokens"] > 5000
+
+
+def test_compose_and_launch_requires_approved_by(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+
+    with pytest.raises(ValueError, match="approved_by is required"):
+        compose_and_launch(
+            "1. A\n2. B",
+            conn=_FakeConn(),
+            approved_by="",
+        )
+
+
+def test_compose_and_launch_allows_explicit_safety_override(monkeypatch) -> None:
+    """Caller can disable a safety check explicitly — but not by default."""
+    _install_quiet_preview_and_binding(monkeypatch)
+
+    # Simulate unbound pills but caller explicitly opts out of the refusal.
+    import runtime.intent_binding as intent_binding_mod
+
+    def _fake_bind_with_unbound(intent, *, conn, object_kinds=None):
+        return intent_binding_mod.BoundIntent(
+            intent=intent,
+            unbound=[
+                intent_binding_mod.UnboundCandidate(
+                    matched_span="users.x",
+                    object_kind="users",
+                    field_path="x",
+                    reason="field_path_not_in_object",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(intent_binding_mod, "bind_data_pills", _fake_bind_with_unbound)
+    _install_submit_command_stub(monkeypatch)
+
+    receipt = compose_and_launch(
+        "1. Touch users.x\n2. Verify users.x",
+        conn=_FakeConn(),
+        approved_by="ci@praxis",
+        refuse_unbound_pills=False,  # explicit opt-out
+    )
+    assert isinstance(receipt, LaunchReceipt)

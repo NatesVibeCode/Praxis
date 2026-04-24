@@ -889,6 +889,38 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
+    "praxis_compose_and_launch": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="ship-intent",
+        when_to_use=(
+            "End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt "
+            "in one call. For trusted automation (CI, scripts, experienced "
+            "operators). Fails closed by default on unresolved routes, unbound "
+            "pills, or budget-cap overrun."
+        ),
+        when_not_to_use=(
+            "Do not use it for untrusted input or when the caller needs to inspect "
+            "the ProposedPlan first. Use praxis_compose_plan + praxis_approve_proposed_plan "
+            "+ praxis_launch_plan(approved_plan=...) for the three-step flow."
+        ),
+        risks={"default": "launch"},
+        examples=[
+            _example(
+                "Ship an intent through the full pipeline",
+                {
+                    "intent": (
+                        "1. Add a timezone column to users.\n"
+                        "2. Backfill existing rows with UTC.\n"
+                        "3. Update the profile UI to expose the field."
+                    ),
+                    "approved_by": "nate@praxis",
+                    "plan_name": "timezone_rollout",
+                    "budget_cap_tokens": 150000,
+                },
+            ),
+        ],
+    ),
     "praxis_project_plan_budget": _tool(
         surface="workflow",
         tier="stable",

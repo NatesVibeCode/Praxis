@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_project_plan_budget."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_project_plan_budget, praxis_compose_and_launch."""
 from __future__ import annotations
 
 import json
@@ -1744,6 +1744,109 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     return payload
 
 
+def tool_praxis_compose_and_launch(params: dict) -> dict:
+    """End-to-end: prose intent → compose → approve → launch in one call.
+
+    For trusted automation (CI, scripts, experienced operators). Fails
+    closed by default if any job has unresolved routes, unbound pills,
+    or exceeds an explicit budget cap. approved_by is required — no
+    anonymous automation. Approval is hash-bound to the exact spec_dict
+    so tampering between compose and submit still fails closed.
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str) or not intent.strip():
+        return {
+            "ok": False,
+            "error": "intent must be a non-empty string",
+            "reason_code": "intent.invalid",
+        }
+    approved_by = params.get("approved_by")
+    if not isinstance(approved_by, str) or not approved_by.strip():
+        return {
+            "ok": False,
+            "error": "approved_by is required — no anonymous automation",
+            "reason_code": "approved_by.invalid",
+        }
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    refuse_unresolved_routes = params.get("refuse_unresolved_routes")
+    if refuse_unresolved_routes is None:
+        refuse_unresolved_routes = True
+    refuse_unbound_pills = params.get("refuse_unbound_pills")
+    if refuse_unbound_pills is None:
+        refuse_unbound_pills = True
+    budget_cap_tokens = params.get("budget_cap_tokens")
+    if budget_cap_tokens is not None:
+        try:
+            budget_cap_tokens = int(budget_cap_tokens)
+        except (TypeError, ValueError):
+            return {
+                "ok": False,
+                "error": "budget_cap_tokens must be an integer",
+                "reason_code": "budget_cap.invalid",
+            }
+
+    try:
+        from runtime.intent_composition import (
+            ComposeAndLaunchBlocked,
+            compose_and_launch,
+        )
+        from runtime.intent_decomposition import DecompositionRequiresLLMError
+        from runtime.spec_compiler import ApprovalHashMismatchError
+
+        receipt = compose_and_launch(
+            intent,
+            conn=pg_conn,
+            approved_by=approved_by,
+            approval_note=params.get("approval_note"),
+            plan_name=params.get("plan_name"),
+            why=params.get("why"),
+            workdir=params.get("workdir"),
+            allow_single_step=bool(params.get("allow_single_step")),
+            write_scope_per_step=params.get("write_scope_per_step"),
+            default_write_scope=params.get("default_write_scope"),
+            default_stage=str(params.get("default_stage") or "build"),
+            refuse_unresolved_routes=bool(refuse_unresolved_routes),
+            refuse_unbound_pills=bool(refuse_unbound_pills),
+            budget_cap_tokens=budget_cap_tokens,
+        )
+    except DecompositionRequiresLLMError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "decomposition.requires_llm",
+        }
+    except ComposeAndLaunchBlocked as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "compose_and_launch.blocked",
+            "blocked_reasons": exc.reasons,
+        }
+    except ApprovalHashMismatchError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "approval.hash_mismatch",
+        }
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "reason_code": "compose.invalid"}
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="compose_and_launch")
+
+    payload = receipt.to_dict()
+    payload["ok"] = True
+    return payload
+
+
 def tool_praxis_project_plan_budget(params: dict) -> dict:
     """Project token budgets for a ProposedPlan before launch.
 
@@ -2326,6 +2429,70 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         ),
                     },
                 },
+            },
+        },
+    ),
+    "praxis_compose_and_launch": (
+        tool_praxis_compose_and_launch,
+        {
+            "description": (
+                "End-to-end: prose intent → compose → approve → launch in one call. "
+                "Compose the ProposedPlan through Layers 2 → 1 → 5, wrap with an explicit "
+                "approval record (approved_by + hash), and submit through the CQRS "
+                "control-command bus.\n\n"
+                "USE WHEN: automation (CI, scripts, experienced operators) needs to run "
+                "the full pipeline without stopping for a manual approval tool call. The "
+                "pipeline still fails closed on safety checks: unresolved routes, unbound "
+                "pills, and (if supplied) budget-cap overrun all block the submit.\n\n"
+                "DO NOT USE TO: skip review for untrusted input. Anonymous approval is "
+                "rejected — approved_by is required. Tampering between compose and "
+                "submit still fails at launch_approved via the spec_dict hash check.\n\n"
+                "EXAMPLE: praxis_compose_and_launch(intent='1. Add timezone column\\n"
+                "2. Backfill UTC\\n3. Update UI', approved_by='ci@praxis', "
+                "budget_cap_tokens=150000)"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Prose with explicit step markers.",
+                    },
+                    "approved_by": {
+                        "type": "string",
+                        "description": "Identifier of the approver (required).",
+                    },
+                    "approval_note": {"type": "string"},
+                    "plan_name": {"type": "string"},
+                    "why": {"type": "string"},
+                    "workdir": {"type": "string"},
+                    "allow_single_step": {"type": "boolean", "default": False},
+                    "write_scope_per_step": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "default_write_scope": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "default_stage": {
+                        "type": "string",
+                        "enum": ["build", "fix", "review", "test", "research"],
+                        "default": "build",
+                    },
+                    "refuse_unresolved_routes": {"type": "boolean", "default": True},
+                    "refuse_unbound_pills": {"type": "boolean", "default": True},
+                    "budget_cap_tokens": {
+                        "type": "integer",
+                        "description": (
+                            "Optional total-token cap. If the projected prompt + output "
+                            "total exceeds this, the submit is refused with "
+                            "reason_code='compose_and_launch.blocked' and blocked_reasons "
+                            "carries the 'budget_exceeded' entry."
+                        ),
+                    },
+                },
+                "required": ["intent", "approved_by"],
             },
         },
     ),
