@@ -56,28 +56,60 @@ Standing-order row: `platform_architecture / one-graph-many-lenses`
 ## Active program — Public Beta Ramp
 
 Master plan filed as `decision.2026-04-24.public-beta-ramp-master-plan`
-(`decision_kind=delivery_plan`). Five phases over ~10 weeks. **Phase 1.1
-currently active: LLM-first Launch Compiler lunchbox** — description-only
-`PlanPacket` → `source_refs: []` resolve → data-dictionary compile-time
-binding → atomic `compile_plan` → typed gaps (no silent fallbacks) → derived
-`packet_map` (inferred_stage, resolved_agent, capabilities, write_envelope,
-expected_gates, verification_gaps) → `plan.launched` conceptual event.
-Filed as `roadmap_item.praxis.public.beta.ramp.llm.first.infrastructure.wedge.phase.1.1.launch.compiler`
-(phase_order 33.1).
+(`decision_kind=delivery_plan`). Five phases over ~10 weeks.
 
-**Phase 1.7 — Roadmap authoring template fix** (partially delivered 2026-04-24):
-`delivery_plan` scope policy registered, `praxis_operator_write` gains
-`roadmap_item_id` + `phase_order` + `lifecycle=retired` via migration 223.
-Claims the 5 auto-generated template children (contracts, validation_gate,
-frontdoors, derived_views, proof) as subtree 33.2.1–33.2.5. Closes
-BUG-BAC9B36F. Remaining: preview-first re-parent validation, `praxis_operator_closeout`
-branch for authoring cleanup vs proof-backed closeout.
+**Phase 1 (foundations) — substantially shipped 2026-04-24.** 12 commits,
+280+ tests passing. Summary by sub-phase:
+
+- **1.1** LLM-first Launch Compiler ✅ `source_refs: []` plural + polymorphic
+  resolver; `UnresolvedSourceRefError` / `UnresolvedStageError` /
+  `UnresolvedWriteScopeError` with atomic pre-validation; enriched
+  `packet_map` (inferred_stage, resolved_agent, capabilities,
+  write_envelope, expected_gates, verification_gaps, data_pills);
+  `plan.launched` event; `bind_data_pills` wired into compile path.
+  Roadmap item `phase.1.1.launch.compiler` closed out (lifecycle=completed).
+- **1.2** Built-not-wired sweep ✅ type-flow validation wired into
+  `_handle_workflows_post` (Moon commit backend) and `compose_plan_from_intent`;
+  `plan.launched` event contract registered via migration 224.
+- **1.3** Data dictionary as universal clamp ✅ 14 bug-lifecycle type slugs
+  registered as `data_dictionary_objects` rows (migration 225);
+  catalog-level validator `validate_type_contract_slugs_against_data_dictionary`
+  surfaces unresolved slugs as structured findings.
+- **1.4** DataPill primitive family ✅ (via policy) Primitives map to
+  existing `data_dictionary_entries` + `data_dictionary_lineage` authority;
+  new tables (PillConflict, PillRedactionPolicy) deferred until concrete
+  consumer forces them.
+- **1.5** Fail-closed verifier path ✅ (via 1.1.c surfacing)
+  `_compute_verification_gaps` emits structured rows for files without
+  admitted verifiers; deeper catalog-backed dispatch deferred until
+  concrete need.
+- **1.6** `typed_gap.created` event ✅ Contract registered via migration
+  226; `emit_typed_gap` / `emit_typed_gaps_for_findings` /
+  `emit_typed_gaps_for_compile_errors` / `emit_typed_gaps_for_verification_gaps`
+  helpers; `compile_plan` wires emission before raising Unresolved*
+  errors (opt-in via `conn`).
+- **1.7** Roadmap authoring template fix ✅ (Codex delivery 2026-04-24)
+  `delivery_plan` scope policy registered, `praxis_operator_write` gains
+  `roadmap_item_id` + `phase_order` + `lifecycle=retired` via migration
+  223. Remaining: preview-first re-parent validation + `praxis_operator_closeout`
+  branch for authoring cleanup vs proof-backed closeout.
+
+**CQRS follow-ups queued:** register `launch_plan` + `plan.composed` as
+operations in `operation_catalog_registry` so emission flows through
+`operation_receipt.event_ids`. Event *contracts* are already registered
+(migrations 224/226) — the missing piece is the operation registration
+that unlocks receipt-backed emission. Emission currently via
+`emit_system_event` observability sidecar.
+
+**Parallel work (other model):** Phase 2 Moon Composer — query-side
+projections (`legal_modules_for(pills)`, `surface_for(workflow_run)`),
+modules subscribing to `graph.mutated` instead of polling REST.
+Supporting policy filed: `platform_architecture / legal-equals-computable-to-non-gap-output`.
 
 Before resuming any Praxis work, check:
 - `praxis workflow query "public beta ramp master plan"`
-- `praxis_operator_decisions(action="list", decision_kind="delivery_plan")`
-- `praxis_orient` for standing orders (11 architecture policies bind this
-  program)
+- `praxis_operator_decisions(action="list", decision_kind="architecture_policy")` (14 policies now bind this program)
+- `praxis_orient` for standing orders
 
 ## Database
 
