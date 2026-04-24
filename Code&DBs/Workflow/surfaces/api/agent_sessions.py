@@ -1506,11 +1506,15 @@ async def create_agent(
     turn_events: list[dict[str, Any]] = []
     exit_code: int | None = None
     if body.prompt:
+        validated_mode = _validate_permission_mode(body.permission_mode)
+        user_payload: dict[str, Any] = {"principal_ref": _auth["principal_ref"]}
+        if validated_mode is not None:
+            user_payload["permission_mode"] = validated_mode
         append_interactive_agent_event(
             pg_conn,
             agent_id=agent_id,
             event_kind="user.prompt",
-            payload={"principal_ref": _auth["principal_ref"]},
+            payload=user_payload,
             text_content=body.prompt,
         )
         _claim_turn(agent_id)
@@ -1523,16 +1527,19 @@ async def create_agent(
                 body.prompt,
                 provider_slug=provider_slug,
                 pg_conn=pg_conn,
-                permission_mode=_validate_permission_mode(body.permission_mode),
+                permission_mode=validated_mode,
             )
         finally:
             lock.release()
             _release_turn(agent_id)
+        assistant_payload: dict[str, Any] = {"exit_code": exit_code}
+        if validated_mode is not None:
+            assistant_payload["permission_mode"] = validated_mode
         append_interactive_agent_event(
             pg_conn,
             agent_id=agent_id,
             event_kind="assistant.reply",
-            payload={"exit_code": exit_code},
+            payload=assistant_payload,
             text_content=reply,
         )
 
@@ -1575,11 +1582,15 @@ async def send_message(
     if session is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
     _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.message")
+    validated_mode = _validate_permission_mode(body.permission_mode)
+    user_payload: dict[str, Any] = {"principal_ref": _auth["principal_ref"]}
+    if validated_mode is not None:
+        user_payload["permission_mode"] = validated_mode
     append_interactive_agent_event(
         pg_conn,
         agent_id=agent_id,
         event_kind="user.prompt",
-        payload={"principal_ref": _auth["principal_ref"]},
+        payload=user_payload,
         text_content=body.prompt,
     )
 
@@ -1602,16 +1613,19 @@ async def send_message(
             body.prompt,
             provider_slug=provider_slug,
             pg_conn=pg_conn,
-            permission_mode=_validate_permission_mode(body.permission_mode),
+            permission_mode=validated_mode,
         )
     finally:
         lock.release()
         _release_turn(agent_id)
+    assistant_payload: dict[str, Any] = {"exit_code": exit_code}
+    if validated_mode is not None:
+        assistant_payload["permission_mode"] = validated_mode
     append_interactive_agent_event(
         pg_conn,
         agent_id=agent_id,
         event_kind="assistant.reply",
-        payload={"exit_code": exit_code},
+        payload=assistant_payload,
         text_content=reply,
     )
 

@@ -21,6 +21,7 @@ shim).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from runtime.intent_decomposition import (
@@ -453,10 +454,100 @@ def compose_and_launch(
     return receipt
 
 
+@dataclass(frozen=True)
+class PlanLifecycleEvent:
+    """One plan.* event from the system_events log."""
+
+    event_id: int | None
+    event_type: str
+    created_at: str
+    payload: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "created_at": self.created_at,
+            "payload": dict(self.payload),
+        }
+
+
+@dataclass(frozen=True)
+class PlanLifecycle:
+    """Ordered read of every plan.* system_event for one workflow_id.
+
+    Q-side of the planning stack's CQRS pattern: the C path emits
+    plan.composed / plan.approved / plan.launched / plan.blocked via
+    compose_and_launch; this dataclass pulls them back for Moon, CLI, or
+    ad-hoc inspection.
+    """
+
+    workflow_id: str
+    events: list[PlanLifecycleEvent]
+
+    @property
+    def latest_event_type(self) -> str | None:
+        return self.events[-1].event_type if self.events else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "workflow_id": self.workflow_id,
+            "events": [event.to_dict() for event in self.events],
+            "latest_event_type": self.latest_event_type,
+        }
+
+
+def get_plan_lifecycle(workflow_id: str, *, conn: Any) -> PlanLifecycle:
+    """Read every plan.* system_event for one workflow_id in order.
+
+    Returns :class:`PlanLifecycle` with events sorted oldest → newest so a
+    reader sees compose → approve → launch (or blocked) in the order they
+    fired. Q-side read — no mutations, no side effects.
+    """
+    normalized = (workflow_id or "").strip()
+    if not normalized:
+        raise ValueError("workflow_id is required")
+
+    rows = conn.execute(
+        "SELECT id, event_type, payload, created_at "
+        "FROM system_events "
+        "WHERE source_type = 'plan' AND source_id = $1 "
+        "ORDER BY created_at ASC, id ASC",
+        normalized,
+    )
+
+    events: list[PlanLifecycleEvent] = []
+    for row in rows or []:
+        row_dict = dict(row)
+        payload = row_dict.get("payload") or {}
+        if isinstance(payload, str):
+            import json as _json
+
+            try:
+                payload = _json.loads(payload)
+            except (TypeError, ValueError):
+                payload = {}
+        created_at = row_dict.get("created_at")
+        if hasattr(created_at, "isoformat"):
+            created_at = created_at.isoformat()
+        events.append(
+            PlanLifecycleEvent(
+                event_id=row_dict.get("id"),
+                event_type=str(row_dict.get("event_type") or ""),
+                created_at=str(created_at or ""),
+                payload=payload if isinstance(payload, dict) else {},
+            )
+        )
+    return PlanLifecycle(workflow_id=normalized, events=events)
+
+
 __all__ = [
     "ComposeAndLaunchBlocked",
+    "PlanLifecycle",
+    "PlanLifecycleEvent",
     "compose_and_launch",
     "compose_plan_from_intent",
+    "get_plan_lifecycle",
     "packets_from_steps",
     "reorder_packets_by_write_conflicts",
 ]
