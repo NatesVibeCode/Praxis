@@ -10,9 +10,11 @@ can enumerate and repair them — matching architecture-policy::
 platform-architecture::fail-closed-at-compile-no-silent-defaults.
 
 Scope: this module is a query-side validator that runs against the
-catalog + data dictionary authority. It does not modify state. A future
-typed_gap emitter (Phase 1.5/1.6) may consume the findings to produce
-durable repair rows.
+catalog + data dictionary authority. It does not modify state by
+default. Opt-in ``emit_typed_gaps_for_findings`` promotes findings to
+durable ``typed_gap.created`` events per architecture-policy::platform-
+architecture::conceptual-events-register-through-operation-catalog-
+registry (migration 226 registers the event contract).
 """
 from __future__ import annotations
 
@@ -128,13 +130,63 @@ def validate_type_contract_slugs_against_data_dictionary(
                     "slug": slug,
                     "missing_type": "data_dictionary_object",
                     "reason_code": "data_dictionary.object_kind.missing",
-                    "legal_repair_actions": "add_data_dictionary_objects_row",
+                    "legal_repair_actions": ["add_data_dictionary_objects_row"],
                 }
             )
     return findings
 
 
+def emit_typed_gaps_for_findings(
+    conn: Any,
+    findings: Iterable[dict[str, Any]],
+) -> int:
+    """Promote type-contract findings to durable ``typed_gap.created``
+    events.
+
+    Opt-in companion to
+    :func:`validate_type_contract_slugs_against_data_dictionary`: callers
+    who want the findings to land as authority events (not just returned
+    values) call this with a live conn. Each finding becomes one event
+    with ``gap_kind="type_contract_slug"`` and the finding's own
+    missing_type / reason_code / legal_repair_actions propagated into
+    the event payload. The slug and owning tool land in context for
+    triage.
+
+    Returns the count of successfully emitted events. Best-effort:
+    individual emission failures don't abort the loop and don't raise —
+    consistent with how system_events writes are treated elsewhere.
+    """
+    from runtime.typed_gap_events import emit_typed_gap
+
+    emitted = 0
+    for finding in findings or ():
+        if not isinstance(finding, dict):
+            continue
+        repair = finding.get("legal_repair_actions")
+        if isinstance(repair, str):
+            repair_list = [repair]
+        elif isinstance(repair, list):
+            repair_list = [str(a) for a in repair]
+        else:
+            repair_list = []
+        gap_id = emit_typed_gap(
+            conn,
+            gap_kind="type_contract_slug",
+            missing_type=str(finding.get("missing_type") or "data_dictionary_object"),
+            reason_code=str(
+                finding.get("reason_code") or "data_dictionary.object_kind.missing"
+            ),
+            legal_repair_actions=repair_list,
+            source_ref=f"tool:{finding.get('tool') or ''}",
+            context={"slug": str(finding.get("slug") or "")},
+        )
+        if gap_id:
+            emitted += 1
+    return emitted
+
+
 __all__ = [
     "collect_catalog_type_contract_slugs",
+    "emit_typed_gaps_for_findings",
     "validate_type_contract_slugs_against_data_dictionary",
 ]

@@ -10,6 +10,7 @@ from __future__ import annotations
 from runtime.catalog_type_contract_validation import (
     _extract_slugs_from_type_contract,
     collect_catalog_type_contract_slugs,
+    emit_typed_gaps_for_findings,
     validate_type_contract_slugs_against_data_dictionary,
 )
 
@@ -172,3 +173,120 @@ def test_validator_uses_single_select_for_all_slugs():
     # Only one execute() call should have happened; _StubConn records the last.
     assert conn.last_sql is not None
     assert "SELECT object_kind FROM data_dictionary_objects" in conn.last_sql
+
+
+def test_validator_findings_have_legal_repair_actions_as_list():
+    """legal_repair_actions is a list (consistent with Unresolved* errors),
+    not a single string. Consumers iterate unconditionally."""
+    conn = _StubConn(existing=[])
+    findings = validate_type_contract_slugs_against_data_dictionary(conn)
+    for f in findings:
+        assert isinstance(f["legal_repair_actions"], list)
+        assert "add_data_dictionary_objects_row" in f["legal_repair_actions"]
+
+
+# ---------------------------------------------------------------------------
+# emit_typed_gaps_for_findings (Phase 1.6 emission wiring)
+# ---------------------------------------------------------------------------
+
+
+class _EventCaptureConn:
+    """Captures system_events INSERTs for emit_typed_gap verification."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, tuple]] = []
+
+    def execute(self, sql: str, *args):
+        self.events.append((sql, args))
+        return []
+
+
+def test_emit_typed_gaps_for_findings_returns_emitted_count():
+    conn = _EventCaptureConn()
+    findings = [
+        {
+            "tool": "praxis_bugs",
+            "slug": "praxis.bug.record",
+            "missing_type": "data_dictionary_object",
+            "reason_code": "data_dictionary.object_kind.missing",
+            "legal_repair_actions": ["add_data_dictionary_objects_row"],
+        },
+        {
+            "tool": "praxis_bugs",
+            "slug": "praxis.bug.other",
+            "missing_type": "data_dictionary_object",
+            "reason_code": "data_dictionary.object_kind.missing",
+            "legal_repair_actions": ["add_data_dictionary_objects_row"],
+        },
+    ]
+    emitted = emit_typed_gaps_for_findings(conn, findings)
+    assert emitted == 2
+    assert len(conn.events) == 2
+
+
+def test_emit_typed_gaps_for_findings_empty_list_emits_zero():
+    conn = _EventCaptureConn()
+    emitted = emit_typed_gaps_for_findings(conn, [])
+    assert emitted == 0
+    assert conn.events == []
+
+
+def test_emit_typed_gaps_payload_carries_slug_and_tool():
+    import json
+
+    conn = _EventCaptureConn()
+    finding = {
+        "tool": "praxis_bugs",
+        "slug": "praxis.bug.observation",
+        "missing_type": "data_dictionary_object",
+        "reason_code": "data_dictionary.object_kind.missing",
+        "legal_repair_actions": ["add_data_dictionary_objects_row"],
+    }
+    emit_typed_gaps_for_findings(conn, [finding])
+    assert len(conn.events) == 1
+    sql, args = conn.events[0]
+    assert args[0] == "typed_gap.created"
+    payload = json.loads(args[3])
+    assert payload["gap_kind"] == "type_contract_slug"
+    assert payload["missing_type"] == "data_dictionary_object"
+    assert payload["source_ref"] == "tool:praxis_bugs"
+    assert payload["context"] == {"slug": "praxis.bug.observation"}
+    assert payload["legal_repair_actions"] == ["add_data_dictionary_objects_row"]
+
+
+def test_emit_typed_gaps_accepts_string_legal_repair_actions_for_backcompat():
+    """If a finding slipped through with legal_repair_actions as a single
+    string (legacy shape), the emitter still wraps it correctly."""
+    import json
+
+    conn = _EventCaptureConn()
+    finding = {
+        "tool": "praxis_x",
+        "slug": "praxis.x.y",
+        "missing_type": "data_dictionary_object",
+        "reason_code": "r",
+        "legal_repair_actions": "a_single_action",  # legacy string shape
+    }
+    emit_typed_gaps_for_findings(conn, [finding])
+    payload = json.loads(conn.events[0][1][3])
+    assert payload["legal_repair_actions"] == ["a_single_action"]
+
+
+def test_emit_typed_gaps_skips_non_dict_findings():
+    """Malformed findings (not dicts) are skipped silently, no crash."""
+    conn = _EventCaptureConn()
+    emitted = emit_typed_gaps_for_findings(
+        conn,
+        [
+            None,  # type: ignore[list-item]
+            "not a dict",  # type: ignore[list-item]
+            {
+                "tool": "ok",
+                "slug": "s",
+                "missing_type": "m",
+                "reason_code": "r",
+                "legal_repair_actions": ["a"],
+            },
+        ],
+    )
+    assert emitted == 1
