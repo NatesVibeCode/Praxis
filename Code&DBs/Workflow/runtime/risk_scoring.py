@@ -4,6 +4,10 @@ Analyzes workflow receipt history to identify risky files (high failure rate,
 frequently touched, slow to work on). This helps route risky files to stronger
 models and identify areas that need refactoring.
 
+Risk scores are derived from Postgres receipt authority. Manual export remains
+available for diagnostics only when a caller provides an explicit output path;
+there is no default artifact JSON authority.
+
 Risk dimensions (6 weighted factors, 0-100 scale):
   - (1 - success_rate) × 35  — failure history dominates
   - min(touch_count / 10, 1.0) × 15  — churn rate
@@ -17,25 +21,17 @@ The formula rewards success, low churn, fast execution, and recent activity.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Tuple, Dict, List
 
 from .receipt_store import list_receipt_payloads
-from runtime.workspace_paths import repo_root as workspace_repo_root
 
 _log = logging.getLogger(__name__)
-
-_DEFAULT_ARTIFACTS_SUBDIR = os.path.join("artifacts", "risk_scores.json")
-_ENV_RISK_SCORES_PATH = "PRAXIS_RISK_SCORES_PATH"
-
-
-def _repo_root() -> Path:
-    """Return the repository root directory."""
-    return workspace_repo_root()
 
 
 def _utc_now() -> datetime:
@@ -253,19 +249,17 @@ class RiskScorer:
         return scores[:limit]
 
     def persist(self, path: Optional[str] = None) -> str:
-        """Write risk scores to disk as JSON.
+        """Export risk scores to an explicit JSON path for diagnostics.
 
         Args:
-            path: Optional override for output path. Defaults to
-                  artifacts/risk_scores.json
+            path: Required output path. Risk scoring has no default local
+                  artifact authority.
 
         Returns:
             Path where scores were written
         """
         if path is None:
-            path = os.environ.get(_ENV_RISK_SCORES_PATH)
-            if path is None:
-                path = str(_repo_root() / _DEFAULT_ARTIFACTS_SUBDIR)
+            raise ValueError("risk score export requires an explicit path")
 
         output_dir = Path(path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -292,18 +286,16 @@ class RiskScorer:
 
     @staticmethod
     def load(path: Optional[str] = None) -> Dict[str, Any]:
-        """Load risk scores from disk.
+        """Load an explicitly exported risk-score diagnostic artifact.
 
         Args:
-            path: Optional override for input path
+            path: Required input path
 
         Returns:
             Loaded risk scores dict (with 'scores' key)
         """
         if path is None:
-            path = os.environ.get(_ENV_RISK_SCORES_PATH)
-            if path is None:
-                path = str(_repo_root() / _DEFAULT_ARTIFACTS_SUBDIR)
+            raise ValueError("risk score load requires an explicit path")
 
         if not os.path.exists(path):
             return {"kind": "risk_scores", "scores": []}

@@ -1,37 +1,21 @@
 """ELO-based trust scoring for LLM providers.
 
 Tracks reliability of (provider, model) pairs using ELO rating system from
-competitive games. Baseline 1000, K-factor 32. Persists scores to disk.
+competitive games. Baseline 1000, K-factor 32.
 
-Module-level singleton via get_trust_scorer().
+The live scorer is deliberately not file-backed: public reads rebuild from
+Postgres receipt authority before exposing scores, and in-process updates are
+only an ephemeral helper for immediate runtime feedback.
 """
 
-import json
-import os
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, TYPE_CHECKING, Optional, Dict, Tuple
-
-from runtime.workspace_paths import repo_root as workspace_repo_root
-
-if TYPE_CHECKING:
-    from .workflow import WorkflowResult
+from typing import Optional, Dict, Tuple
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _repo_root() -> Path:
-    return workspace_repo_root()
-
-
-def _artifacts_dir() -> Path:
-    artifacts = _repo_root() / "artifacts"
-    artifacts.mkdir(parents=True, exist_ok=True)
-    return artifacts
 
 
 @dataclass(frozen=True)
@@ -60,20 +44,19 @@ class TrustScorer:
     """
 
     def __init__(self, persistence_path: Optional[str] = None) -> None:
-        """Initialize scorer.
+        """Initialize an ephemeral scorer.
 
-        Args:
-            persistence_path: Path to trust_scores.json. If None, uses
-              artifacts/trust_scores.json in repo root.
+        persistence_path is retained only to fail loudly for stale callers.
+        Trust scores are operational authority and must be rebuilt from
+        Postgres receipts rather than loaded from or written to local JSON.
         """
-        if persistence_path:
-            self._persistence_path = persistence_path
-        else:
-            self._persistence_path = str(_artifacts_dir() / "trust_scores.json")
-
+        if persistence_path is not None:
+            raise ValueError(
+                "TrustScorer no longer accepts a file persistence path; "
+                "use Postgres receipt authority via compute_from_receipts()."
+            )
         self._scores: Dict[Tuple[str, Optional[str]], TrustScore] = {}
         self._lock = threading.Lock()
-        self._load_from_disk()
 
     def _elo_expected_win_rate(self, current_elo: float) -> float:
         """Compute expected win rate against baseline 1000.
@@ -143,7 +126,6 @@ class TrustScorer:
             )
 
             self._scores[key] = new_score
-            self._persist_to_disk()
 
         return new_score
 
@@ -235,68 +217,6 @@ class TrustScorer:
                 )
 
                 self._scores[key] = new_score
-
-            self._persist_to_disk()
-
-    def _persist_to_disk(self) -> None:
-        """Write current scores to disk as JSON."""
-        try:
-            scores_data = [asdict(s) for s in self._scores.values()]
-            # Convert datetime to ISO format string for JSON serialization
-            for item in scores_data:
-                if isinstance(item["last_updated"], datetime):
-                    item["last_updated"] = item["last_updated"].isoformat()
-
-            # Ensure parent directory exists for custom persistence paths
-            Path(self._persistence_path).parent.mkdir(parents=True, exist_ok=True)
-
-            with open(self._persistence_path, "w", encoding="utf-8") as fh:
-                json.dump(scores_data, fh, indent=2)
-                fh.write("\n")
-        except Exception as exc:
-            # Never fail a dispatch due to persistence issues
-            import sys
-            print(
-                f"[trust_scoring] persist failed: {exc}",
-                file=sys.stderr,
-            )
-
-    def _load_from_disk(self) -> None:
-        """Load scores from disk if they exist."""
-        if not os.path.exists(self._persistence_path):
-            return
-
-        try:
-            with open(self._persistence_path, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-
-            with self._lock:
-                for item in data:
-                    # Parse datetime from ISO format
-                    last_updated_str = item.get("last_updated")
-                    if isinstance(last_updated_str, str):
-                        last_updated = datetime.fromisoformat(last_updated_str)
-                    else:
-                        last_updated = _utc_now()
-
-                    score = TrustScore(
-                        provider_slug=item["provider_slug"],
-                        model_slug=item.get("model_slug"),
-                        elo_score=float(item["elo_score"]),
-                        total_runs=int(item["total_runs"]),
-                        wins=int(item["wins"]),
-                        losses=int(item["losses"]),
-                        win_rate=float(item["win_rate"]),
-                        last_updated=last_updated,
-                    )
-                    key = (score.provider_slug, score.model_slug)
-                    self._scores[key] = score
-        except Exception as exc:
-            import sys
-            print(
-                f"[trust_scoring] load from disk failed: {exc}",
-                file=sys.stderr,
-            )
 
 
 _TRUST_SCORER = TrustScorer()

@@ -18,6 +18,7 @@ from surfaces.cli.mcp_tools import (
     require_confirmation,
     run_cli_tool,
 )
+from surfaces.cli._db import cli_database_env
 from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
 
 
@@ -390,7 +391,7 @@ def _filtered_tools(
 def _workflow_conn():
     from storage.postgres import SyncPostgresConnection, get_workflow_pool
 
-    return SyncPostgresConnection(get_workflow_pool())
+    return SyncPostgresConnection(get_workflow_pool(env=cli_database_env()))
 
 
 def _tool_interpretive_context(definition: McpToolDefinition) -> dict[str, Any]:
@@ -616,6 +617,7 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
         "selector_enum": list(definition.selector_enum),
         "selector_default": definition.selector_default or definition.default_action,
         "required_args": list(definition.required_args),
+        "action_requirements": definition.action_requirements,
         "input_schema": definition.input_schema,
         "risk_levels": list(definition.risk_levels),
         "requires_workflow_token": definition.requires_workflow_token,
@@ -647,6 +649,9 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
     else:
         stdout.write("selector: none\n")
     stdout.write(f"required_args: {', '.join(definition.required_args) or '(none)'}\n")
+    if definition.action_requirements:
+        stdout.write("action_requirements:\n")
+        stdout.write(json.dumps(definition.action_requirements, indent=2, default=str) + "\n")
     stdout.write(f"workflow_token_required: {'yes' if definition.requires_workflow_token else 'no'}\n")
     stdout.write("example_input:\n")
     stdout.write(json.dumps(definition.example_input(), indent=2, default=str) + "\n")

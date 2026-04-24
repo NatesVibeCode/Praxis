@@ -1,14 +1,12 @@
 """Tools: praxis_research_workflow."""
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
 from ..subsystems import REPO_ROOT
 
 
-_SPECS_DIR = REPO_ROOT / "config" / "specs"
 _DEFAULT_WORKER_AGENT = "deepseek/deepseek-r3"
 _DEFAULT_WORKER_COUNT = 40
 
@@ -65,6 +63,20 @@ def _launch_workflow(spec_path: str) -> dict[str, Any]:
     return tool_praxis_workflow({"action": "run", "spec_path": spec_path, "wait": False})
 
 
+def _research_spec_path(slug: str) -> str:
+    return str(REPO_ROOT / "artifacts" / "workflow" / "research" / f"research_{slug}.queue.json")
+
+
+def _write_research_workflow_spec(spec: dict[str, Any], *, slug: str) -> str:
+    from runtime.data_plane import write_workflow_spec
+
+    return write_workflow_spec(
+        spec,
+        workspace_root=REPO_ROOT,
+        output_path=_research_spec_path(slug),
+    )
+
+
 def tool_praxis_research_workflow(params: dict) -> dict:
     """Launch parallel research workflows or query past results."""
     action = params.get("action", "run")
@@ -81,10 +93,9 @@ def tool_praxis_research_workflow(params: dict) -> dict:
             threshold = int(threshold)
 
         spec = _build_spec(topic, slug, workers, agent, threshold=threshold)
-        launch_path = _SPECS_DIR / f"research_{slug}.queue.json"
-        launch_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+        launch_path = _write_research_workflow_spec(spec, slug=slug)
 
-        run_result = _launch_workflow(str(launch_path))
+        run_result = _launch_workflow(launch_path)
 
         return {
             "action": "run",
@@ -93,6 +104,7 @@ def tool_praxis_research_workflow(params: dict) -> dict:
             "workers": workers,
             "agent": agent,
             "total_jobs": workers + 2,
+            "workflow_spec_path": launch_path,
             "workflow": run_result,
         }
 

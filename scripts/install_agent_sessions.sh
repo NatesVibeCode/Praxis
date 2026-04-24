@@ -16,7 +16,9 @@ DST="$LAUNCHD_DIR/com.praxis.agent-sessions.plist"
 HOST="${PRAXIS_AGENT_SESSIONS_HOST:-127.0.0.1}"
 PORT="${PRAXIS_AGENT_SESSIONS_PORT:-8421}"
 PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"
-LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-$(getconf PATH 2>/dev/null || printf '/usr/bin:/bin:/usr/sbin:/sbin')}"
+LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-/opt/homebrew/bin:/usr/local/bin:$(getconf PATH 2>/dev/null || printf '/usr/bin:/bin:/usr/sbin:/sbin')}"
+CLI_PROVIDER="${PRAXIS_AGENT_CLI_PROVIDER:-codex}"
+CODEX_SANDBOX="${PRAXIS_AGENT_CODEX_SANDBOX:-workspace-write}"
 DATABASE_URL="${WORKFLOW_DATABASE_URL:-}"
 
 ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -63,8 +65,11 @@ sed \
   -e "s|__PRAXIS_REPO_ROOT__|$(sed_escape "$(xml_escape "$REPO")")|g" \
   -e "s|__PRAXIS_PYTHON_BIN__|$(sed_escape "$(xml_escape "$PYTHON_BIN")")|g" \
   -e "s|__PRAXIS_PATH__|$(sed_escape "$(xml_escape "$LAUNCHD_PATH")")|g" \
+  -e "s|__PRAXIS_AGENT_CLI_PROVIDER__|$(sed_escape "$(xml_escape "$CLI_PROVIDER")")|g" \
+  -e "s|__PRAXIS_AGENT_CODEX_SANDBOX__|$(sed_escape "$(xml_escape "$CODEX_SANDBOX")")|g" \
   -e "s|__PRAXIS_AGENT_SESSIONS_HOST__|$(sed_escape "$(xml_escape "$HOST")")|g" \
   -e "s|__PRAXIS_AGENT_SESSIONS_PORT__|$(sed_escape "$(xml_escape "$PORT")")|g" \
+  -e "s|__WORKFLOW_DATABASE_URL__|$(sed_escape "$(xml_escape "$DATABASE_URL")")|g" \
   "$SRC" > "$DST"
 log "plist rendered to $DST"
 
@@ -77,9 +82,9 @@ esac
 log "launchd loaded — waiting for $CHECK_HOST:$PORT"
 
 for i in $(seq 1 20); do
-  if curl -sf "http://$CHECK_HOST:$PORT/agents" >/dev/null 2>&1; then
+  if curl -sf "http://$CHECK_HOST:$PORT/" >/dev/null 2>&1; then
     log "service is answering on $CHECK_HOST:$PORT"
-    log "try: curl -X POST http://$CHECK_HOST:$PORT/agents -d '{\"prompt\":\"hello\"}'"
+    log "try: scripts/praxis-agent list"
     exit 0
   fi
   sleep 0.5

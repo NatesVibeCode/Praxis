@@ -873,6 +873,7 @@ def main(
     observability_service: GraphSurfaceService | None = None,
     env: Mapping[str, str] | None = None,
     stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
 ) -> int:
     """Parse argv and route into application services.
 
@@ -880,23 +881,30 @@ def main(
     """
 
     stdout = sys.stdout if stdout is None else stdout
+    stderr = sys.stderr if stderr is None else stderr
     args = _normalize_namespace_tokens(sys.argv[1:] if argv is None else argv)
     tracking_stdout = TrackingStdout(stdout)
-    exit_code = _main_impl(
-        args,
-        inspect_replay_service=inspect_replay_service,
-        runtime_orchestrator=runtime_orchestrator,
-        graph_service=graph_service,
-        observability_service=observability_service,
-        env=env,
-        stdout=tracking_stdout,
-    )
+    tracking_stderr = TrackingStdout(stderr)
+    with contextlib.redirect_stderr(tracking_stderr):
+        exit_code = _main_impl(
+            args,
+            inspect_replay_service=inspect_replay_service,
+            runtime_orchestrator=runtime_orchestrator,
+            graph_service=graph_service,
+            observability_service=observability_service,
+            env=env,
+            stdout=tracking_stdout,
+        )
     if exit_code != 0:
+        output_text = tracking_stdout.captured_output()
+        stderr_text = tracking_stderr.captured_output()
+        if stderr_text:
+            output_text = f"{output_text}\n[stderr]\n{stderr_text}" if output_text else stderr_text
         record_cli_command_failure(
             args=args,
             exit_code=exit_code,
-            output_text=tracking_stdout.captured_output(),
-            output_truncated=tracking_stdout.truncated,
+            output_text=output_text,
+            output_truncated=tracking_stdout.truncated or tracking_stderr.truncated,
             env=env,
         )
     return exit_code

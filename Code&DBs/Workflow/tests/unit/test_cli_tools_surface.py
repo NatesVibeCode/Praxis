@@ -113,6 +113,36 @@ def test_tools_list_json_can_attach_interpretive_context(monkeypatch: pytest.Mon
     ]
 
 
+def test_tools_interpretive_context_uses_cli_database_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        tools_commands,
+        "cli_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://cli-authority.example/praxis"},
+    )
+
+    def _pool(*, env=None):
+        captured["env"] = env
+        return object()
+
+    class _Conn:
+        def __init__(self, pool):
+            captured["pool"] = pool
+
+    monkeypatch.setattr("storage.postgres.get_workflow_pool", _pool)
+    monkeypatch.setattr("storage.postgres.SyncPostgresConnection", _Conn)
+
+    conn = tools_commands._workflow_conn()
+
+    assert isinstance(conn, _Conn)
+    assert captured["env"] == {
+        "WORKFLOW_DATABASE_URL": "postgresql://cli-authority.example/praxis"
+    }
+
+
 def test_tools_root_shows_quickstart() -> None:
     stdout = StringIO()
 
@@ -212,7 +242,11 @@ def test_workflow_orient_alias_calls_catalog_tool(monkeypatch: pytest.MonkeyPatc
     payload = json.loads(stdout.getvalue())
     assert payload == {
         "tool_name": "praxis_orient",
-        "params": {},
+        "params": {
+            "compact": True,
+            "fast": True,
+            "skip_engineering_observability": True,
+        },
         "kind": "orient_authority_envelope",
     }
 
@@ -749,9 +783,9 @@ def test_help_text_explains_search_semantics() -> None:
     recall_stdout = StringIO()
     query_stdout = StringIO()
 
-    assert workflow_cli_main(["discover", "--help"], stdout=discover_stdout) == 2
-    assert workflow_cli_main(["recall", "--help"], stdout=recall_stdout) == 2
-    assert workflow_cli_main(["query", "--help"], stdout=query_stdout) == 2
+    assert workflow_cli_main(["discover", "--help"], stdout=discover_stdout) == 0
+    assert workflow_cli_main(["recall", "--help"], stdout=recall_stdout) == 0
+    assert workflow_cli_main(["query", "--help"], stdout=query_stdout) == 0
 
     assert "hybrid retrieval" in discover_stdout.getvalue()
     assert "graph traversal" in recall_stdout.getvalue()

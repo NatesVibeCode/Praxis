@@ -6,6 +6,9 @@ from types import ModuleType
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+from fastapi import HTTPException
+
 from surfaces.api import rest
 
 
@@ -20,6 +23,53 @@ def test_workflow_run_request_construction_does_not_resolve_registry_defaults(mo
 
     assert req.provider_slug is None
     assert req.adapter_type is None
+    assert req.workspace_ref is None
+    assert req.runtime_profile_ref is None
+
+
+def test_workflow_request_defaults_fail_closed_when_authority_is_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(
+        rest,
+        "default_native_authority_refs",
+        lambda: (_ for _ in ()).throw(RuntimeError("runtime target registry unavailable")),
+    )
+
+    req = rest.WorkflowRunRequest(prompt="Draft the support report")
+
+    with pytest.raises(HTTPException) as exc_info:
+        rest._spec_from_request(req)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["error_code"] == "runtime_target_authority_unavailable"
+    assert req.workspace_ref is None
+    assert req.runtime_profile_ref is None
+
+
+def test_explicit_workflow_request_refs_do_not_touch_default_authority(monkeypatch) -> None:
+    monkeypatch.setattr(
+        rest,
+        "default_native_authority_refs",
+        lambda: (_ for _ in ()).throw(AssertionError("authority defaults should not be used")),
+    )
+
+    req = rest.WorkflowRunRequest(
+        prompt="Draft the support report",
+        workspace_ref="workspace.explicit",
+        runtime_profile_ref="runtime.explicit",
+    )
+
+    module = ModuleType("runtime.workflow")
+
+    class _WorkflowSpecStub:
+        def __init__(self, **kwargs) -> None:
+            self.__dict__.update(kwargs)
+
+    module.WorkflowSpec = _WorkflowSpecStub
+    with patch.dict(sys.modules, {"runtime.workflow": module}):
+        spec = rest._spec_from_request(req)
+
+    assert spec.workspace_ref == "workspace.explicit"
+    assert spec.runtime_profile_ref == "runtime.explicit"
 
 
 def test_submit_queue_job_uses_command_bus_helper(tmp_path, monkeypatch) -> None:

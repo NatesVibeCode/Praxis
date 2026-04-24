@@ -88,3 +88,31 @@ def test_pytest_commands_bootstrap_database_authority_without_leaking_dsn(
     )
     assert "postgresql://localhost/praxis_test" not in command
     assert " -m pytest --noconftest -q " in command
+
+
+def test_check_affected_rejects_queue_with_no_known_suite_matches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    frontdoor = _load_test_frontdoor(monkeypatch)
+    queue_file = tmp_path / "unmapped.queue.json"
+    queue_file.write_text(
+        json.dumps(
+            {
+                "name": "unmapped queue",
+                "workflow_id": "workflow.unmapped",
+                "read_scope": ["docs/operator-notes/not-covered-by-suite.md"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = frontdoor._check_affected_payload([str(queue_file)])
+
+    assert payload["ok"] is False
+    assert payload["errors"] == ["no known test suites matched the queue file paths"]
+    assert payload["warnings"] == []
+    assert payload["results"]["affected_suites"] == []
+    assert payload["results"]["unclassified_paths"] == [
+        "docs/operator-notes/not-covered-by-suite.md"
+    ]

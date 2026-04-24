@@ -8,7 +8,9 @@ import pytest
 
 from runtime.launcher_authority import (
     LauncherAuthorityError,
+    LauncherResolution,
     LauncherSeedConfig,
+    launcher_main,
     looks_like_legacy_sql_locator,
     read_launcher_seed_config,
     resolve_launcher_workspace,
@@ -20,6 +22,10 @@ def _make_checkout(base_path: Path, *, executable: bool = True) -> Path:
     repo_root = base_path / "repo"
     scripts = repo_root / "scripts"
     scripts.mkdir(parents=True)
+    (repo_root / "Code&DBs" / "Workflow").mkdir(parents=True)
+    config = repo_root / "config"
+    config.mkdir()
+    (config / "workspace_layout.json").write_text("{}", encoding="utf-8")
     command = scripts / "praxis"
     command.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     if executable:
@@ -255,6 +261,49 @@ def test_workspace_base_path_token_can_come_from_launcher_seed_environment(tmp_p
     )
 
     assert resolution.repo_root == tmp_path / "repo"
+
+
+def test_global_launcher_fails_fast_inside_different_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    active_checkout = tmp_path / "active"
+    resolved_base = tmp_path / "resolved"
+    _make_checkout(active_checkout)
+    resolved_repo = _make_checkout(resolved_base)
+
+    seed = LauncherSeedConfig(
+        config_path=tmp_path / "launcher.json",
+        workspace_ref="praxis",
+        host_ref="default",
+        api_url=None,
+        database_url="postgresql://authority.example/praxis",
+        environment={},
+    )
+    resolution = LauncherResolution(
+        workspace_ref="praxis",
+        host_ref="default",
+        base_path_ref="workspace_base.praxis.default",
+        base_path=resolved_base,
+        repo_root=resolved_repo,
+        workdir=resolved_repo,
+        executable_path=resolved_repo / "scripts" / "praxis",
+        authority_source="database",
+    )
+
+    monkeypatch.chdir(active_checkout / "repo")
+    monkeypatch.setattr("runtime.launcher_authority.read_launcher_seed_config", lambda: seed)
+    monkeypatch.setattr("runtime.launcher_authority.resolve_launcher_workspace", lambda _seed: resolution)
+    monkeypatch.setattr(
+        "runtime.launcher_authority.os.execve",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not delegate")),
+    )
+
+    assert launcher_main(["workflow", "--help"]) == 1
+    captured = capsys.readouterr()
+    assert "different Praxis checkout" in captured.err
+    assert "run ./scripts/bootstrap or praxis launcher configure" in captured.err
 
 
 def test_runtime_launcher_source_has_no_shell_sql_or_localhost_default() -> None:

@@ -18,16 +18,19 @@ class _RequestStub:
 
 
 class _PgStub:
+    def __init__(self, *, templates: list[dict[str, Any]] | None = None) -> None:
+        self._templates = templates if templates is not None else [
+            {
+                "id": "manifest_support",
+                "name": "Support Workspace",
+                "description": "Workspace for support operations",
+            }
+        ]
+
     def execute(self, query: str, *params: Any) -> list[dict[str, Any]]:
         normalized = " ".join(query.split())
         if "FROM app_manifests" in normalized:
-            return [
-                {
-                    "id": "manifest_support",
-                    "name": "Support Workspace",
-                    "description": "Workspace for support operations",
-                }
-            ]
+            return self._templates
         if "FROM integration_registry" in normalized:
             return [
                 {
@@ -104,7 +107,34 @@ def test_intent_analyze_uses_intent_matcher_and_returns_analysis() -> None:
     assert payload["templates"][0]["id"] == "manifest_support"
     assert payload["integrations"][0]["display_name"] == "Gmail"
     assert payload["analysis"]["source"] == "intent_matcher"
+    assert payload["analysis"]["observability_state"] == "complete"
+    assert "reason_code" not in payload["analysis"]
+    assert "error" not in payload["analysis"]
     assert payload["analysis"]["matches"]["total_count"] == 2
     assert payload["analysis"]["matches"]["ui_components"][0]["id"] == "search-panel"
     assert payload["analysis"]["composition"]["layout_suggestion"] == "main=[search-panel]"
+    assert payload["can_generate"] is False
+
+
+def test_intent_analyze_does_not_enable_generation_when_matcher_falls_back() -> None:
+    def _unavailable_matcher() -> None:
+        raise RuntimeError("intent matcher unavailable")
+
+    subsystems = SimpleNamespace(
+        get_pg_conn=lambda: _PgStub(templates=[]),
+        get_intent_matcher=_unavailable_matcher,
+    )
+    request = _RequestStub(path="/api/intent/analyze?q=bespoke dashboard", subsystems=subsystems)
+
+    workflow_query._handle_intent_analyze_get(request, "/api/intent/analyze")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["templates"] == []
+    assert payload["analysis"]["source"] == "fallback"
+    assert payload["analysis"]["observability_state"] == "degraded"
+    assert payload["analysis"]["reason_code"] == "intent_matcher.unavailable"
+    assert payload["analysis"]["error"] == "RuntimeError: intent matcher unavailable"
+    assert payload["analysis"]["matches"]["total_count"] == 0
     assert payload["can_generate"] is False

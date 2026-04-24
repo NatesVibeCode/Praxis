@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import subprocess
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -140,6 +141,276 @@ def test_commands_index_mentions_routes_alias() -> None:
     assert "workflow authority-memory refresh" in rendered
     assert "workflow records <list|get|create|update|rename>" in rendered
     assert "workflow defs <create|update>" not in rendered
+
+
+def test_instances_check_uses_fast_orient_and_compares_cli_mcp_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import surfaces._workflow_database as workflow_database
+    import surfaces.mcp.subsystems as mcp_subsystems
+    import runtime.setup_wizard as setup_wizard
+
+    captured: dict[str, object] = {}
+
+    def _fake_setup_payload_for_cli(mode, *, repo_root=None, apply=False):
+        assert mode == "doctor"
+        return {
+            "ok": True,
+            "runtime_target": {
+                "api_authority": "http://localhost:8420",
+                "db_authority": "postgresql://***@host.docker.internal:5432/praxis",
+            },
+            "native_instance": {
+                "praxis_instance_name": "praxis",
+                "praxis_runtime_profile": "praxis",
+                "repo_root": "/repo",
+            },
+        }
+
+    def _fake_run_cli_tool(tool_name, params):
+        captured["tool_name"] = tool_name
+        captured["params"] = params
+        return 0, {
+            "authority_envelope": {
+                "primitive_contracts": {
+                    "runtime_binding": {
+                        "http_endpoints": {"api_base_url": "http://localhost:8420"},
+                        "database": {
+                            "redacted_url": "postgresql://postgres:***@localhost:5432/praxis",
+                        },
+                    }
+                }
+            },
+            "native_instance": {"status": "skipped", "reason": "orient_fast_path"},
+            "cli_surface": {"tool_count": 42},
+        }
+
+    monkeypatch.setattr(setup_wizard, "setup_payload_for_cli", _fake_setup_payload_for_cli)
+    monkeypatch.setattr(operate_commands, "run_cli_tool", _fake_run_cli_tool)
+    monkeypatch.setattr(
+        workflow_database,
+        "workflow_database_authority_for_repo",
+        lambda repo_root, env: SimpleNamespace(
+            database_url="postgresql://postgres:secret@localhost:5432/praxis",
+            source="test",
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_subsystems,
+        "workflow_database_env",
+        lambda: {
+            "WORKFLOW_DATABASE_URL": "postgresql://postgres:secret@localhost:5432/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "test",
+        },
+    )
+
+    stdout = StringIO()
+    assert workflow_cli_main(["instances", "check", "--json"], stdout=stdout) == 0
+    payload = json.loads(stdout.getvalue())
+
+    assert captured["tool_name"] == "praxis_orient"
+    assert captured["params"] == {
+        "fast": True,
+        "skip_engineering_observability": True,
+        "compact": True,
+    }
+    assert payload["route_catalog"]["included"] is False
+    assert payload["route_catalog"]["status"] == "skipped"
+    assert payload["instances"]["cli_db"] == "postgresql://postgres:***@localhost:5432/praxis"
+    assert payload["instances"]["mcp_db"] == "postgresql://postgres:***@localhost:5432/praxis"
+    assert payload["instances"]["db_signatures"]["setup"] == (
+        "postgresql://local-runtime-db-host:5432/praxis"
+    )
+    assert payload["instances"]["db_signatures"]["orient"] == (
+        "postgresql://local-runtime-db-host:5432/praxis"
+    )
+    assert payload["checks"]["cli_mcp_db_match"] is True
+    assert payload["checks"]["cli_orient_db_match"] is True
+    assert payload["checks"]["db_match"] is True
+
+
+def test_instances_check_fails_on_mcp_db_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    import surfaces._workflow_database as workflow_database
+    import surfaces.mcp.subsystems as mcp_subsystems
+    import runtime.setup_wizard as setup_wizard
+
+    monkeypatch.setattr(
+        setup_wizard,
+        "setup_payload_for_cli",
+        lambda mode, *, repo_root=None, apply=False: {
+            "ok": True,
+            "runtime_target": {
+                "api_authority": "http://127.0.0.1:8420",
+                "db_authority": "postgresql://postgres:***@db.example/praxis",
+            },
+            "native_instance": {
+                "praxis_instance_name": "praxis",
+                "praxis_runtime_profile": "praxis",
+                "repo_root": "/repo",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        operate_commands,
+        "run_cli_tool",
+        lambda tool_name, params: (
+            0,
+            {
+                "authority_envelope": {
+                    "primitive_contracts": {
+                        "runtime_binding": {
+                            "http_endpoints": {"api_base_url": "http://localhost:8420"},
+                            "database": {
+                                "redacted_url": "postgresql://postgres:***@db.example/praxis",
+                            },
+                        }
+                    }
+                },
+                "native_instance": {"status": "skipped", "reason": "orient_fast_path"},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_database,
+        "workflow_database_authority_for_repo",
+        lambda repo_root, env: SimpleNamespace(
+            database_url="postgresql://postgres:secret@db.example/praxis",
+            source="test",
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_subsystems,
+        "workflow_database_env",
+        lambda: {
+            "WORKFLOW_DATABASE_URL": "postgresql://postgres:secret@other.example/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "test-other",
+        },
+    )
+
+    stdout = StringIO()
+    assert workflow_cli_main(["instances", "check", "--json"], stdout=stdout) == 1
+    payload = json.loads(stdout.getvalue())
+
+    assert payload["checks"]["cli_mcp_db_match"] is False
+    assert payload["checks"]["db_match"] is False
+    assert any("cli=" in error and "mcp=" in error for error in payload["checks"]["errors"])
+
+
+def test_global_launcher_resolution_flags_other_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(operate_commands.shutil, "which", lambda name: "/usr/local/bin/praxis")
+
+    def _fake_run(*_args, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=["praxis", "launcher", "resolve", "--json"],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "resolution": {
+                        "repo_root": "/repo/other",
+                        "workdir": "/repo/other",
+                        "executable_path": "/repo/other/scripts/praxis",
+                        "authority_source": "database",
+                    },
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(operate_commands.subprocess, "run", _fake_run)
+
+    payload = operate_commands._global_launcher_resolution(Path("/repo/current"))
+
+    assert payload["status"] == "ok"
+    assert payload["matches_current_repo"] is False
+    assert payload["repo_root"] == "/repo/other"
+
+
+def test_authority_command_reports_launcher_alignment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from runtime import instance as instance_module
+    from surfaces import _workflow_database as workflow_database_module
+    from surfaces.mcp import subsystems as mcp_subsystems
+
+    monkeypatch.setattr(operate_commands, "_workspace_repo_root", lambda: Path("/repo/current"))
+    monkeypatch.setattr(
+        operate_commands,
+        "_resolve_authority_env",
+        lambda: ({"WORKFLOW_DATABASE_URL": "postgresql://user:pw@db.local:5432/praxis"}, True),
+    )
+    monkeypatch.setattr(
+        operate_commands,
+        "_global_launcher_resolution",
+        lambda _repo_root: {
+            "available": True,
+            "status": "ok",
+            "binary": "/usr/local/bin/praxis",
+            "matches_current_repo": False,
+            "repo_root": "/repo/other",
+            "workdir": "/repo/other",
+            "executable_path": "/repo/other/scripts/praxis",
+            "authority_source": "database",
+        },
+    )
+    monkeypatch.setattr(
+        workflow_database_module,
+        "workflow_database_authority_for_repo",
+        lambda _repo_root, env: SimpleNamespace(
+            database_url="postgresql://user:pw@db.local:5432/praxis",
+            source="test_env",
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_subsystems,
+        "workflow_database_env",
+        lambda: {
+            "WORKFLOW_DATABASE_URL": "postgresql://user:pw@db.local:5432/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "test_env",
+        },
+    )
+    monkeypatch.setattr(
+        instance_module,
+        "native_instance_contract",
+        lambda env: {
+            "praxis_instance_name": "praxis",
+            "praxis_runtime_profile": "praxis",
+            "repo_root": "/repo/current",
+            "workdir": "/repo/current",
+        },
+    )
+    monkeypatch.setattr(
+        operate_commands,
+        "_build_runtime_binding",
+        lambda _env, native_instance: {
+            "database": {"redacted_url": "postgresql://user:***@db.local:5432/praxis"},
+            "workspace": {"runtime_profile": "praxis"},
+            "http_endpoints": {"api_base_url": "http://127.0.0.1:8420"},
+        },
+    )
+    monkeypatch.setattr(
+        operate_commands,
+        "run_cli_tool",
+        lambda _tool, _params: (
+            0,
+            {
+                "primitive_contracts": {
+                    "runtime_binding": {
+                        "database": {
+                            "redacted_url": "postgresql://user:***@db.local:5432/praxis",
+                        },
+                        "http_endpoints": {"api_base_url": "http://127.0.0.1:8420"},
+                        "workspace": {"runtime_profile": "praxis"},
+                    }
+                }
+            },
+        ),
+    )
+
+    stdout = StringIO()
+    assert operate_commands._authority_command(["--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["global_launcher"]["repo_root"] == "/repo/other"
+    assert payload["alignment_checks"]["global_launcher_matches_repo"] is False
 
 
 def test_integration_help_subcommand_is_discoverable() -> None:

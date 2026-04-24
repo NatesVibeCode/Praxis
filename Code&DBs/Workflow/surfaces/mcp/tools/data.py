@@ -408,10 +408,42 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "object",
                         "description": "Optional full deterministic data job. Use for action='run', 'workflow_spec', or 'launch'.",
                     },
+                    "operation": {
+                        "type": "string",
+                        "enum": [
+                            "parse",
+                            "profile",
+                            "filter",
+                            "sort",
+                            "normalize",
+                            "repair",
+                            "repair_loop",
+                            "backfill",
+                            "redact",
+                            "checkpoint",
+                            "replay",
+                            "approve",
+                            "apply",
+                            "validate",
+                            "transform",
+                            "join",
+                            "merge",
+                            "aggregate",
+                            "split",
+                            "export",
+                            "dead_letter",
+                            "dedupe",
+                            "reconcile",
+                            "sync",
+                        ],
+                        "description": "Deterministic operation to place inside generated workflow specs for action='workflow_spec' or action='launch'.",
+                    },
+                    "input": {"type": "object"},
                     "input_path": {"type": "string"},
                     "input_format": {"type": "string", "enum": ["json", "jsonl", "csv", "tsv"]},
                     "workspace_root": {"type": "string"},
                     "records": {"type": "array"},
+                    "secondary_input": {"type": "object"},
                     "secondary_input_path": {"type": "string"},
                     "secondary_input_format": {"type": "string", "enum": ["json", "jsonl", "csv", "tsv"]},
                     "secondary_records": {"type": "array"},
@@ -473,6 +505,247 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "wait": {"type": "boolean", "default": False},
                     "fresh": {"type": "boolean", "default": False},
                     "run_id": {"type": "string"},
+                },
+                "$defs": {
+                    "input_source": {
+                        "anyOf": [
+                            {"required": ["input"]},
+                            {"required": ["input_path"]},
+                            {"required": ["records"]},
+                        ],
+                    },
+                    "secondary_input_source": {
+                        "anyOf": [
+                            {"required": ["secondary_input"]},
+                            {"required": ["secondary_input_path"]},
+                            {"required": ["secondary_records"]},
+                        ],
+                    },
+                    "plan_source": {
+                        "anyOf": [
+                            {"required": ["plan"]},
+                            {"required": ["plan_path"]},
+                            {"required": ["plan_manifest_id"]},
+                        ],
+                    },
+                    "approval_source": {
+                        "anyOf": [
+                            {"required": ["approval"]},
+                            {"required": ["approval_path"]},
+                            {"required": ["approval_manifest_id"]},
+                        ],
+                    },
+                    "checkpoint_source": {
+                        "anyOf": [
+                            {"required": ["checkpoint"]},
+                            {"required": ["checkpoint_path"]},
+                            {"required": ["checkpoint_manifest_id"]},
+                        ],
+                    },
+                    "workflow_job_source": {
+                        "anyOf": [
+                            {"required": ["job"]},
+                            {"required": ["operation"]},
+                        ],
+                    },
+                },
+                "allOf": [
+                    {
+                        "if": {"properties": {"action": {"enum": ["parse", "profile"]}}, "required": ["action"]},
+                        "then": {"$ref": "#/$defs/input_source"},
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "filter"}}, "required": ["action"]},
+                        "then": {"allOf": [{"$ref": "#/$defs/input_source"}, {"required": ["predicates"]}]},
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "sort"}}, "required": ["action"]},
+                        "then": {"allOf": [{"$ref": "#/$defs/input_source"}, {"required": ["sort"]}]},
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "normalize"}}, "required": ["action"]},
+                        "then": {"allOf": [{"$ref": "#/$defs/input_source"}, {"required": ["rules"]}]},
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "repair"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {"anyOf": [{"required": ["repairs"]}, {"required": ["drop_fields"]}]},
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "repair_loop"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {
+                                    "anyOf": [
+                                        {"required": ["repairs"]},
+                                        {"required": ["backfill"]},
+                                        {"required": ["rules"]},
+                                        {"required": ["drop_fields"]},
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "backfill"}}, "required": ["action"]},
+                        "then": {"allOf": [{"$ref": "#/$defs/input_source"}, {"required": ["backfill"]}]},
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "redact"}}, "required": ["action"]},
+                        "then": {"allOf": [{"$ref": "#/$defs/input_source"}, {"required": ["redactions"]}]},
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "checkpoint"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {"anyOf": [{"required": ["keys"]}, {"required": ["cursor_field"]}]},
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "replay"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {
+                                    "anyOf": [
+                                        {"required": ["cursor_field"]},
+                                        {"$ref": "#/$defs/checkpoint_source"},
+                                    ],
+                                },
+                                {
+                                    "anyOf": [
+                                        {"required": ["after"]},
+                                        {"required": ["before"]},
+                                        {"$ref": "#/$defs/checkpoint_source"},
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "approve"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/plan_source"},
+                                {"required": ["approved_by", "approval_reason"]},
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "apply"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/secondary_input_source"},
+                                {"$ref": "#/$defs/approval_source"},
+                                {"required": ["keys"]},
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "validate"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {"anyOf": [{"required": ["schema"]}, {"required": ["checks"]}]},
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "transform"}}, "required": ["action"]},
+                        "then": {"allOf": [{"$ref": "#/$defs/input_source"}, {"required": ["mapping"]}]},
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "join"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {"$ref": "#/$defs/secondary_input_source"},
+                                {
+                                    "anyOf": [
+                                        {"required": ["keys"]},
+                                        {"required": ["left_keys", "right_keys"]},
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"enum": ["merge", "reconcile", "sync"]}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {"$ref": "#/$defs/secondary_input_source"},
+                                {"required": ["keys"]},
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "aggregate"}}, "required": ["action"]},
+                        "then": {"allOf": [{"$ref": "#/$defs/input_source"}, {"required": ["aggregations"]}]},
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "split"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {"anyOf": [{"required": ["split_by_field"]}, {"required": ["partitions"]}]},
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "export"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {"anyOf": [{"required": ["fields"]}, {"required": ["field_map"]}]},
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "dead_letter"}}, "required": ["action"]},
+                        "then": {
+                            "allOf": [
+                                {"$ref": "#/$defs/input_source"},
+                                {
+                                    "anyOf": [
+                                        {"required": ["schema"]},
+                                        {"required": ["checks"]},
+                                        {"required": ["predicates"]},
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                    {
+                        "if": {"properties": {"action": {"const": "dedupe"}}, "required": ["action"]},
+                        "then": {"allOf": [{"$ref": "#/$defs/input_source"}, {"required": ["keys"]}]},
+                    },
+                    {
+                        "if": {"properties": {"action": {"enum": ["run", "workflow_spec", "launch"]}}, "required": ["action"]},
+                        "then": {"$ref": "#/$defs/workflow_job_source"},
+                    },
+                ],
+                "x-action-requirements": {
+                    "filter": {"required": ["predicates"]},
+                    "sort": {"required": ["sort"]},
+                    "normalize": {"required": ["rules"]},
+                    "backfill": {"required": ["backfill"]},
+                    "redact": {"required": ["redactions"]},
+                    "approve": {"required": ["approved_by", "approval_reason"]},
+                    "apply": {"required": ["keys"]},
+                    "transform": {"required": ["mapping"]},
+                    "merge": {"required": ["keys"]},
+                    "aggregate": {"required": ["aggregations"]},
+                    "dedupe": {"required": ["keys"]},
+                    "reconcile": {"required": ["keys"]},
+                    "sync": {"required": ["keys"]},
                 },
             },
         },

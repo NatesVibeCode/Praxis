@@ -64,7 +64,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "actions": {
                         "doctor": "read",
                         "plan": "read",
-                        "apply": "write",
+                        "apply": "read",
                     },
                 },
                 "examples": [

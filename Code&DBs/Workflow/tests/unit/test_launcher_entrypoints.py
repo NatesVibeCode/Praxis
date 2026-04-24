@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from runtime import setup_wizard
 from surfaces.api.handlers import workflow_launcher
 
 
@@ -115,6 +116,71 @@ def test_praxis_setup_doctor_reports_empty_thin_contract() -> None:
         "cli_surface",
         "website_surface",
     } <= component_names
+
+
+def test_setup_doctor_uses_one_resolved_database_authority_for_native_instance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path
+    (repo_root / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://operator:secret@db.example/praxis\n",
+        encoding="utf-8",
+    )
+    (repo_root / "artifacts" / "runtime_receipts").mkdir(parents=True)
+    (repo_root / "artifacts" / "runtime_topology").mkdir(parents=True)
+
+    captured_env: dict[str, str] = {}
+
+    def _native_instance_contract(env=None, *, allow_authority_fallback=False):
+        captured_env.update(dict(env or {}))
+        assert allow_authority_fallback is True
+        return {
+            "praxis_instance_name": "praxis",
+            "praxis_receipts_dir": str((repo_root / "artifacts" / "runtime_receipts").resolve()),
+            "praxis_runtime_profile": "praxis",
+            "praxis_topology_dir": str((repo_root / "artifacts" / "runtime_topology").resolve()),
+            "repo_root": str(repo_root),
+            "runtime_profiles_config": str(repo_root / "config" / "runtime_profiles.json"),
+            "workdir": str(repo_root),
+        }
+
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setattr(setup_wizard, "_docker_info", lambda: {"available": False})
+    monkeypatch.setattr(setup_wizard, "_docker_image_available", lambda _image: None)
+    monkeypatch.setattr(setup_wizard, "_orphan_container_count", lambda: None)
+    monkeypatch.setattr(setup_wizard, "native_instance_contract", _native_instance_contract)
+    monkeypatch.setattr(
+        setup_wizard,
+        "package_contract_report",
+        lambda repo_root=None: {
+            "complete_repo_package": True,
+            "components": [],
+            "checks": {},
+            "blockers": [],
+        },
+    )
+    monkeypatch.setattr(
+        setup_wizard,
+        "sandbox_contract_report",
+        lambda repo_root=None: {
+            "empty_thin_sandbox_default": True,
+            "checks": {},
+            "blockers": [],
+        },
+    )
+
+    payload = setup_wizard.setup_payload("doctor", repo_root=repo_root, authority_surface="cli")
+
+    assert captured_env["WORKFLOW_DATABASE_URL"] == (
+        "postgresql://operator:secret@db.example/praxis"
+    )
+    assert captured_env["WORKFLOW_DATABASE_AUTHORITY_SOURCE"].startswith("repo_env:")
+    assert captured_env["PRAXIS_WORKSPACE_BASE_PATH"] == str(repo_root)
+    assert payload["runtime_target"]["db_authority"] == "postgresql://***@db.example/praxis"
+    assert payload["surface_alignment"]["db_authority_source"].startswith("repo_env:")
+    assert payload["surface_alignment"]["same_repo_local_instance"] is True
+    assert payload["surface_alignment"]["cqrs_authority"] == "operation_catalog_gateway"
 
 
 def test_praxis_workflow_run_no_longer_routes_through_workflow_sh(

@@ -616,15 +616,21 @@ def _collect_staleness_candidates_from_database(
     conn,
     *,
     per_source_limit: int,
-) -> tuple[list[dict], list[dict], list[str]]:
+) -> tuple[list[dict], list[dict], list[str], list[dict]]:
     candidates: list[dict] = []
     sources: list[dict] = []
     warnings: list[str] = []
+    errors: list[dict] = []
     seen: set[tuple[str, str]] = set()
     limit = max(per_source_limit, 1)
 
     if conn is None:
-        return candidates, sources, warnings
+        errors.append({
+            "source": "database",
+            "reason_code": "workflow_query.staleness_database_unavailable",
+            "message": "No Postgres connection is available for staleness candidate discovery.",
+        })
+        return candidates, sources, warnings, errors
 
     def _run_query(
         name: str,
@@ -659,6 +665,11 @@ def _collect_staleness_candidates_from_database(
             else:
                 details = f"{name} query unsupported"
             warnings.append(f"{details}: {exc}")
+            errors.append({
+                "source": name,
+                "reason_code": "workflow_query.staleness_candidate_query_failed",
+                "message": str(exc),
+            })
 
     _run_query(
         name="memory_entities",
@@ -714,7 +725,7 @@ def _collect_staleness_candidates_from_database(
         last_activity_columns=["finished_at", "started_at", "created_at"],
     )
 
-    return candidates, sources, warnings
+    return candidates, sources, warnings, errors
 
 
 def _run_staleness_query(subs: Any, params: dict) -> dict:
@@ -743,23 +754,40 @@ def _run_staleness_query(subs: Any, params: dict) -> dict:
     candidates = direct_items
     sources = [{"source": "direct", "count": len(direct_items), "requested": len(direct_items)}] if direct_items else []
     warnings: list[str] = []
+    errors: list[dict] = []
+    candidate_authority_ready = True
 
     if not candidates:
         conn = getattr(subs, "_pg_conn", None)
-        db_candidates, db_sources, db_warnings = _collect_staleness_candidates_from_database(
+        db_candidates, db_sources, db_warnings, db_errors = _collect_staleness_candidates_from_database(
             conn,
             per_source_limit=per_source_limit,
         )
         candidates.extend(db_candidates)
         sources.extend(db_sources)
         warnings.extend(db_warnings)
+        errors.extend(db_errors)
+        candidate_authority_ready = not (db_errors and not db_sources)
 
     if not candidates:
+        if not candidate_authority_ready:
+            return {
+                "routed_to": "staleness_detector",
+                "status": "degraded",
+                "reason_code": "workflow_query.staleness_candidate_authority_failed",
+                "message": "Could not inspect DB-backed staleness candidates.",
+                "sources": sources,
+                "warnings": warnings,
+                "errors": errors,
+                "candidate_authority_ready": False,
+            }
         return {
             "routed_to": "staleness_detector",
+            "status": "ok",
             "message": "No staleness candidates available. Provide 'items' or run this tool with active DB connectivity.",
             "sources": sources,
             "warnings": warnings,
+            "candidate_authority_ready": candidate_authority_ready,
         }
 
     try:
@@ -770,6 +798,8 @@ def _run_staleness_query(subs: Any, params: dict) -> dict:
             "error": str(exc),
             "sources": sources,
             "warnings": warnings,
+            "errors": errors,
+            "candidate_authority_ready": candidate_authority_ready,
         }
 
     stale_items = [_serialize(item) for item in stale[:max_items]]
@@ -781,6 +811,8 @@ def _run_staleness_query(subs: Any, params: dict) -> dict:
             "returned_count": len(stale_items),
             "sources": sources,
             "warnings": warnings,
+            "errors": errors,
+            "candidate_authority_ready": candidate_authority_ready,
             "summary": detector.alert_summary(stale),
             "items": stale_items,
         }
@@ -792,6 +824,8 @@ def _run_staleness_query(subs: Any, params: dict) -> dict:
         "returned_count": 0,
         "sources": sources,
         "warnings": warnings,
+        "errors": errors,
+        "candidate_authority_ready": candidate_authority_ready,
         "message": "Scanned items are all fresh according to configured staleness rules.",
         "summary": detector.alert_summary(stale),
     }

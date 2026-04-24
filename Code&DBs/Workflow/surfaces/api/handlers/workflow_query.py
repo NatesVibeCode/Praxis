@@ -2480,6 +2480,9 @@ def _handle_intent_analyze_get(request: Any, path: str) -> None:
 
         analysis = {
             "source": "fallback",
+            "observability_state": "degraded",
+            "reason_code": "intent_matcher.unavailable",
+            "error": None,
             "matches": {
                 "ui_components": [],
                 "calculations": [],
@@ -2510,6 +2513,7 @@ def _handle_intent_analyze_get(request: Any, path: str) -> None:
             workflows = [_serialize_match(item) for item in getattr(match_result, "workflows", ()) or ()]
             analysis = {
                 "source": "intent_matcher",
+                "observability_state": "complete",
                 "matches": {
                     "ui_components": ui_components,
                     "calculations": calculations,
@@ -2537,7 +2541,8 @@ def _handle_intent_analyze_get(request: Any, path: str) -> None:
                 },
             }
         except Exception as exc:
-            logger.info("IntentMatcher unavailable for intent analysis: %s", exc)
+            logger.warning("IntentMatcher unavailable for intent analysis: %s", exc)
+            analysis["error"] = f"{exc.__class__.__name__}: {exc}"
 
         request._send_json(
             200,
@@ -2563,7 +2568,7 @@ def _handle_intent_analyze_get(request: Any, path: str) -> None:
                     for row in integrations
                 ],
                 "analysis": analysis,
-                "can_generate": len(templates) == 0,
+                "can_generate": len(templates) == 0 and analysis.get("source") == "intent_matcher",
             },
         )
     except Exception as exc:

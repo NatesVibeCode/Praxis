@@ -63,6 +63,7 @@ export const IntentBoxModule: React.FC<QuadrantProps> = ({ config }) => {
 
       if (query) {
         const analysis = data.analysis ?? {};
+        const matcherAuthoritative = analysis.source === 'intent_matcher';
         const matches = analysis.matches ?? {};
         const uiCount = Array.isArray(matches.ui_components) ? matches.ui_components.length : 0;
         const calcCount = Array.isArray(matches.calculations) ? matches.calculations.length : 0;
@@ -79,10 +80,12 @@ export const IntentBoxModule: React.FC<QuadrantProps> = ({ config }) => {
             `No templates match "${query}" but the intent matcher found ${totalMatches} related piece${totalMatches > 1 ? 's' : ''} `
             + `(${uiCount} components, ${calcCount} calculations, ${wfCount} workflows). A custom workspace can be assembled.`
           );
+        } else if (!matcherAuthoritative) {
+          setMessage(`No matches for "${query}". Intent matcher is unavailable, so generation is paused until analysis recovers.`);
         } else {
           setMessage(`No matches for "${query}".`);
         }
-        setShowGenerate(Boolean(data.can_generate ?? false) && found.length === 0);
+        setShowGenerate(Boolean(data.can_generate ?? false) && matcherAuthoritative && found.length === 0);
       } else {
         setTemplates(found);
         setMessage(`All templates (${found.length})`);

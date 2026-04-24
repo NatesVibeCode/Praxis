@@ -187,6 +187,92 @@ def test_execute_query_operation_also_attaches_operation_receipt(monkeypatch) ->
     assert conn.transaction_commits == 1
 
 
+def test_requested_query_mode_rejects_command_before_handler_or_receipt(monkeypatch) -> None:
+    handled: list[object] = []
+    binding = SimpleNamespace(
+        operation_ref="operator.command_example",
+        operation_name="operator.command_example",
+        source_kind="operation_command",
+        operation_kind="command",
+        command_class=_ExampleCommand,
+        handler=lambda command, _subsystems: handled.append(command) or {"value": command.value},
+        authority_ref="authority.example",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="non_idempotent",
+        binding_revision="binding.operation.command_example.20260416",
+        decision_ref="decision.operation.command_example.20260416",
+    )
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    try:
+        gateway.execute_operation_from_subsystems(
+            _Subsystems(),
+            operation_name="operator.command_example",
+            payload={"value": "blocked"},
+            requested_mode="query",
+        )
+    except gateway.OperationModeViolation as exc:
+        assert exc.requested_mode == "query"
+        assert exc.operation_kind == "command"
+        assert exc.posture == "operate"
+    else:
+        raise AssertionError("query mode should reject command operations")
+
+    assert handled == []
+    assert conn.fetchrow_calls == []
+    assert conn.execute_calls == []
+
+
+def test_requested_query_mode_admits_read_only_query(monkeypatch) -> None:
+    binding = SimpleNamespace(
+        operation_ref="operator.query_example",
+        operation_name="operator.query_example",
+        source_kind="operation_query",
+        operation_kind="query",
+        command_class=_ExampleCommand,
+        handler=lambda command, _subsystems: {"value": command.value},
+        authority_ref="authority.example_query",
+        projection_ref="projection.example_query",
+        posture="observe",
+        idempotency_policy="read_only",
+        binding_revision="binding.operation.query_example.20260416",
+        decision_ref="decision.operation.query_example.20260416",
+    )
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.query_example",
+        payload={"value": "query"},
+        requested_mode="query",
+    )
+
+    assert result["value"] == "query"
+    assert result["operation_receipt"]["operation_kind"] == "query"
+    assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
+
+
 def test_aexecute_operation_from_subsystems_awaits_async_handlers(monkeypatch) -> None:
     async def _handler(command: _ExampleCommand, _subsystems: object) -> dict[str, object]:
         return {"value": command.value}
@@ -320,10 +406,12 @@ def test_execute_operation_from_subsystems_runs_async_handlers_for_sync_surfaces
     assert result["operation_receipt"]["operation_name"] == "semantic_assertions.list"
 
 
-def test_idempotent_operation_returns_prior_receipt_payload(monkeypatch) -> None:
+def test_idempotent_operation_records_replay_receipt(monkeypatch) -> None:
+    input_hash = gateway._stable_hash({"value": "same"})
     cached = {
         "receipt_id": "00000000-0000-0000-0000-000000000001",
-        "result_payload": {"value": "cached", "operation_receipt": {"execution_status": "replayed"}},
+        "input_hash": input_hash,
+        "result_payload": {"value": "cached", "operation_receipt": {"execution_status": "completed"}},
     }
     conn = _FakeAuthorityConn(cached_result=cached)
     binding = SimpleNamespace(
@@ -359,4 +447,60 @@ def test_idempotent_operation_returns_prior_receipt_payload(monkeypatch) -> None
     )
 
     assert result["value"] == "cached"
+    assert result["operation_receipt"]["execution_status"] == "replayed"
+    assert result["operation_receipt"]["idempotency_key"]
+    assert result["operation_receipt"]["receipt_id"] != cached["receipt_id"]
+    assert result["operation_receipt"]["event_ids"] == []
+    assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
+    assert "INSERT INTO authority_events" not in conn.executed_sql()
+    assert conn.transaction_enters == 1
+    assert conn.transaction_commits == 1
+
+
+def test_idempotent_operation_rejects_same_key_with_different_input(monkeypatch) -> None:
+    cached = {
+        "receipt_id": "00000000-0000-0000-0000-000000000001",
+        "input_hash": gateway._stable_hash({"value": "original"}),
+        "result_payload": {"value": "cached"},
+    }
+    conn = _FakeAuthorityConn(cached_result=cached)
+    binding = SimpleNamespace(
+        operation_ref="operator.idempotent_example",
+        operation_name="operator.idempotent_example",
+        source_kind="operation_command",
+        operation_kind="command",
+        command_class=_ExampleCommand,
+        handler=lambda _command, _subsystems: {"value": "should-not-run"},
+        authority_ref="authority.example",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="non_idempotent",
+        idempotency_key_fields=[],
+        binding_revision="binding.operation.idempotent_example.20260416",
+        decision_ref="decision.operation.idempotent_example.20260416",
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    try:
+        gateway.execute_operation_from_subsystems(
+            _Subsystems(),
+            operation_name="operator.idempotent_example",
+            payload={"value": "different"},
+            idempotency_key_override="caller-key-1",
+        )
+    except gateway.OperationIdempotencyConflict as exc:
+        assert exc.operation_ref == "operator.idempotent_example"
+        assert exc.idempotency_key == "caller-key-1"
+    else:
+        raise AssertionError("idempotency conflict should reject different input")
+
     assert conn.execute_calls == []

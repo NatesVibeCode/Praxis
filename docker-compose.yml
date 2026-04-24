@@ -61,6 +61,7 @@ services:
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
       PRAXIS_API_RELOAD: "0"
+      PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
       PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
       # Integration secrets hydrated from host Keychain at compose-up time
       # (bin/praxis-compose-env exports account="praxis" services into shell).
@@ -81,9 +82,17 @@ services:
       # architecture-policy::providers::provider-auth-mode-single-authority.
       ANTHROPIC_API_KEY: ""
       ANTHROPIC_AUTH_TOKEN: ""
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      PRAXIS_AGENT_CLI_PROVIDER: ${PRAXIS_AGENT_CLI_PROVIDER:-openrouter}
+      PRAXIS_AGENT_OPENROUTER_MODEL: ${PRAXIS_AGENT_OPENROUTER_MODEL:-qwen/qwen3-coder}
+      PRAXIS_AGENT_CWD: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+      PRAXIS_AGENT_SESSIONS_RUNNER_URL: ${PRAXIS_AGENT_SESSIONS_RUNNER_URL:-}
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude.json:/root/.claude.json:ro
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
     command:
       - sh
       - -c
@@ -152,6 +161,7 @@ services:
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
       PRAXIS_WORKSPACE_BASE_PATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
       # Sandbox capacity: empirical peak RSS of a real CLI+MCP sandbox is

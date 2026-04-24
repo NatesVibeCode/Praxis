@@ -6,14 +6,15 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 from ..subsystems import REPO_ROOT
 from ..subsystems import workflow_database_env
 
 
-_TEMPLATE_PATH = REPO_ROOT / "config" / "specs" / "connector_builder.template.queue.json"
+_TEMPLATE_PATH = REPO_ROOT / "config" / "cascade" / "specs" / "W_integration_builder_template.queue.json"
 _CONNECTORS_DIR = REPO_ROOT / "artifacts" / "connectors"
-_SPECS_DIR = REPO_ROOT / "config" / "specs"
+_SPECS_DIR = REPO_ROOT / "artifacts" / "workflow" / "integration_builder"
 
 
 def _slugify(name: str) -> str:
@@ -22,20 +23,34 @@ def _slugify(name: str) -> str:
     return slug
 
 
-def _stamp_spec(app_name: str, app_slug: str) -> tuple[str, dict]:
+def _default_auth_docs_url(app_name: str) -> str:
+    return f"https://www.google.com/search?q={quote_plus(app_name + ' API documentation')}"
+
+
+def _default_secret_env_var(app_slug: str) -> str:
+    return f"{app_slug.upper().replace('-', '_').replace('.', '_')}_API_TOKEN"
+
+
+def _stamp_spec(
+    app_name: str,
+    app_slug: str,
+    *,
+    auth_docs_url: str = "",
+    secret_env_var: str = "",
+) -> tuple[str, dict]:
     """Read the template, replace placeholders, write the stamped spec. Return (abs_path, spec)."""
     template_text = _TEMPLATE_PATH.read_text(encoding="utf-8")
     stamped_text = (
         template_text
-        .replace("{{APP_NAME}}", app_name)
-        .replace("{{APP_SLUG}}", app_slug)
+        .replace("<<INTEGRATION_NAME>>", app_name)
+        .replace("<<INTEGRATION_SLUG>>", app_slug)
+        .replace("<<AUTH_DOCS_URL>>", auth_docs_url or _default_auth_docs_url(app_name))
+        .replace("<<SECRET_ENV_VAR>>", secret_env_var or _default_secret_env_var(app_slug))
     )
     spec = json.loads(stamped_text)
 
-    # Ensure output dir exists for the build job.
-    os.makedirs(_CONNECTORS_DIR / app_slug, exist_ok=True)
-
-    # Write launch spec — absolute path so the workflow runner always finds it.
+    # Write launch spec under the workflow artifact authority, not retired config/specs.
+    os.makedirs(_SPECS_DIR, exist_ok=True)
     launch_path = _SPECS_DIR / f"connector_{app_slug}.queue.json"
     launch_path.write_text(json.dumps(spec, indent=2), encoding="utf-8")
 
@@ -127,18 +142,26 @@ def tool_praxis_connector(params: dict) -> dict:
         if not app_name:
             return {"error": "app_name is required for action='build'"}
         app_slug = params.get("app_slug") or _slugify(app_name)
+        auth_docs_url = str(params.get("auth_docs_url") or "").strip()
+        secret_env_var = str(params.get("secret_env_var") or "").strip()
 
         if not _TEMPLATE_PATH.exists():
             return {"error": f"Template not found at {_TEMPLATE_PATH}"}
 
-        spec_path, spec = _stamp_spec(app_name, app_slug)
+        spec_path, spec = _stamp_spec(
+            app_name,
+            app_slug,
+            auth_docs_url=auth_docs_url,
+            secret_env_var=secret_env_var,
+        )
         run_result = _launch_workflow(spec_path)
 
         return {
             "action": "build",
             "app_name": app_name,
             "app_slug": app_slug,
-            "output_dir": f"artifacts/connectors/{app_slug}",
+            "output_dir": f"artifacts/integration_builder_{app_slug}",
+            "workflow_spec_path": spec_path,
             "jobs": [j.get("label") for j in spec.get("jobs", [])],
             "workflow": run_result,
         }
@@ -227,6 +250,20 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "app_name if not provided. Required for 'get'."
                         ),
                     },
+                    "auth_docs_url": {
+                        "type": "string",
+                        "description": "Public API documentation URL used by action='build'. Defaults to a web-search URL for the app.",
+                    },
+                    "secret_env_var": {
+                        "type": "string",
+                        "description": "Secret env var/keychain service name the generated manifest should use. Defaults to <APP_SLUG>_API_TOKEN.",
+                    },
+                },
+                "x-action-requirements": {
+                    "build": {"required": ["app_name"]},
+                    "get": {"required": ["app_slug"]},
+                    "register": {"required": ["app_slug"]},
+                    "verify": {"required": ["app_slug"]},
                 },
             },
         },

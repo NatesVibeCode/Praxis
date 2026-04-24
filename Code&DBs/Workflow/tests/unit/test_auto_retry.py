@@ -144,6 +144,20 @@ class TestClassification:
         assert c.is_retryable is False
         assert "sealed workflow_job_submissions row" in c.recommended_action
 
+    def test_host_resource_capacity_is_transient_timeout_not_provider_failover(self):
+        c = failure_classifier.classify_failure("host_resource_capacity")
+
+        assert c.category == OrchestratorFailureCategory.TIMEOUT
+        assert c.is_retryable is True
+        assert c.is_transient is True
+
+    def test_host_resource_admission_unavailable_is_transient_timeout(self):
+        c = failure_classifier.classify_failure("host_resource_admission_unavailable")
+
+        assert c.category == OrchestratorFailureCategory.TIMEOUT
+        assert c.is_retryable is True
+        assert c.is_transient is True
+
 
 # ── Retry decision tests ─────────────────────────────────────────────────
 
@@ -366,4 +380,21 @@ class TestRetryOrchestrator:
 
         assert decision.action == "failover"
         assert decision.next_agent == "openai/gpt-5.4"
+        assert decision.should_requeue is True
+
+    def test_host_resource_capacity_retries_same_agent(self):
+        pre_classified = failure_classifier.classify_failure("host_resource_capacity")
+
+        decision = retry_orchestrator.decide(
+            error_code="host_resource_capacity",
+            stderr="Host resource at capacity",
+            attempt=1,
+            max_attempts=3,
+            failover_chain=["google/gemini-3.1-pro-preview", "openai/gpt-5.4"],
+            resolved_agent="google/gemini-3.1-pro-preview",
+            pre_classified=pre_classified,
+        )
+
+        assert decision.action == "retry_same"
+        assert decision.next_agent == "google/gemini-3.1-pro-preview"
         assert decision.should_requeue is True

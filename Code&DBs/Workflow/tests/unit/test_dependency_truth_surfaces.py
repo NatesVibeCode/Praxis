@@ -324,6 +324,49 @@ def test_orient_projects_mandatory_authority_envelope(monkeypatch) -> None:
     assert failure_identity["fingerprint_field"] == "fingerprint"
 
 
+def test_fast_orient_still_projects_database_binding(monkeypatch) -> None:
+    monkeypatch.setattr(workflow_admin, "dependency_truth_report", lambda scope="all": {"ok": True})
+    monkeypatch.setattr(
+        workflow_admin,
+        "_handle_health",
+        lambda subs, body: {
+            "preflight": {"overall": "skipped"},
+            "operator_snapshot": {},
+            "proof_metrics": {},
+            "schema_authority": {},
+            "lane_recommendation": {},
+        },
+    )
+    monkeypatch.setattr(workflow_admin, "_build_standing_orders", lambda subs: [])
+    monkeypatch.setattr(
+        workflow_admin,
+        "_workflow_env",
+        lambda subs: {
+            "WORKFLOW_DATABASE_URL": "postgresql://nate:secret@repo.test:5432/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "repo_env:/repo/.env",
+            "PRAXIS_API_BASE_URL": "http://praxis.test:8420",
+        },
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "native_instance_contract",
+        lambda env=None: (_ for _ in ()).throw(AssertionError("fast orient skips native instance")),
+    )
+
+    result = workflow_admin._handle_orient(
+        _FakeSubsystems(),
+        {"fast": True, "skip_engineering_observability": True, "compact": True},
+    )
+
+    assert result["native_instance"] == {"status": "skipped", "reason": "orient_fast_path"}
+    runtime_binding = result["primitive_contracts"]["runtime_binding"]
+    assert runtime_binding["database"]["authority_source"] == "repo_env:/repo/.env"
+    assert runtime_binding["database"]["redacted_url"] == (
+        "postgresql://nate:***@repo.test:5432/praxis"
+    )
+    assert runtime_binding["http_endpoints"]["api_base_url"] == "http://praxis.test:8420"
+
+
 def test_runtime_http_endpoints_resolve_from_binding_authority() -> None:
     endpoints = resolve_runtime_http_endpoints(
         workflow_env={"PRAXIS_API_BASE_URL": "http://praxis.test:9444"},

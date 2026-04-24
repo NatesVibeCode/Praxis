@@ -46,6 +46,7 @@ class AuthorityGateway:
             self.subsystems,
             operation_name=operation_name,
             payload=payload,
+            requested_mode="command",
         )
 
     def query(self, operation_name: str, payload: Mapping[str, Any] | None = None) -> Any:
@@ -53,7 +54,70 @@ class AuthorityGateway:
             self.subsystems,
             operation_name=operation_name,
             payload=payload,
+            requested_mode="query",
         )
+
+
+class OperationIdempotencyConflict(RuntimeError):
+    """Raised when an idempotency key is reused with different input."""
+
+    def __init__(self, *, operation_ref: str, idempotency_key: str) -> None:
+        super().__init__(
+            f"Idempotency conflict for {operation_ref}: key={idempotency_key} "
+            "exists with different input"
+        )
+        self.operation_ref = operation_ref
+        self.idempotency_key = idempotency_key
+
+
+class OperationModeViolation(RuntimeError):
+    """Raised when a caller-requested execution mode does not admit an operation."""
+
+    def __init__(
+        self,
+        *,
+        operation_ref: str,
+        requested_mode: str,
+        operation_kind: str,
+        posture: str,
+    ) -> None:
+        super().__init__(
+            f"Operation {operation_ref} is {operation_kind}/{posture} and cannot run as {requested_mode}"
+        )
+        self.operation_ref = operation_ref
+        self.requested_mode = requested_mode
+        self.operation_kind = operation_kind
+        self.posture = posture
+
+
+def _normalized_requested_mode(requested_mode: str | None) -> str:
+    return str(requested_mode or "call").strip().lower().replace("-", "_")
+
+
+def _assert_mode_admits_operation(
+    binding: ResolvedHttpOperationBinding,
+    *,
+    requested_mode: str | None,
+) -> None:
+    mode = _normalized_requested_mode(requested_mode)
+    if mode == "call":
+        return
+
+    operation_kind = str(_binding_value(binding, "operation_kind", "") or "").strip()
+    posture = str(_binding_value(binding, "posture", "") or "").strip()
+    idempotency_policy = str(_binding_value(binding, "idempotency_policy", "") or "").strip()
+    if mode == "query":
+        if operation_kind == "query" and (posture == "observe" or idempotency_policy == "read_only"):
+            return
+    elif mode == "command" and operation_kind == "command":
+        return
+
+    raise OperationModeViolation(
+        operation_ref=binding.operation_ref,
+        requested_mode=mode,
+        operation_kind=operation_kind,
+        posture=posture,
+    )
 
 
 def resolve_named_operation_binding(
@@ -88,7 +152,10 @@ def _idempotency_key(
     *,
     payload: Mapping[str, Any] | None,
     input_hash: str,
+    idempotency_key_override: str | None = None,
 ) -> str | None:
+    if idempotency_key_override is not None and idempotency_key_override.strip():
+        return idempotency_key_override.strip()
     policy = str(_binding_value(binding, "idempotency_policy", "") or "").strip()
     if policy not in {"idempotent", "read_only"}:
         return None
@@ -101,16 +168,22 @@ def _idempotency_key(
     return f"{binding.operation_ref}:{_stable_hash(material)}"
 
 
-def _fetch_existing_idempotent_result(conn: Any, *, operation_ref: str, idempotency_key: str | None) -> dict[str, Any] | None:
+def _fetch_existing_idempotent_result(
+    conn: Any,
+    *,
+    operation_ref: str,
+    idempotency_key: str | None,
+    input_hash: str,
+) -> dict[str, Any] | None:
     if not idempotency_key:
         return None
     row = conn.fetchrow(
         """
-        SELECT receipt_id, result_payload
+        SELECT receipt_id, input_hash, result_payload
           FROM authority_operation_receipts
          WHERE operation_ref = $1
            AND idempotency_key = $2
-           AND execution_status IN ('completed', 'replayed')
+           AND execution_status = 'completed'
          ORDER BY created_at DESC
          LIMIT 1
         """,
@@ -119,6 +192,12 @@ def _fetch_existing_idempotent_result(conn: Any, *, operation_ref: str, idempote
     )
     if row is None:
         return None
+    existing_input_hash = row.get("input_hash") if isinstance(row, Mapping) else row["input_hash"]
+    if existing_input_hash != input_hash:
+        raise OperationIdempotencyConflict(
+            operation_ref=operation_ref,
+            idempotency_key=idempotency_key,
+        )
     payload = row.get("result_payload") if isinstance(row, Mapping) else row["result_payload"]
     if isinstance(payload, str):
         try:
@@ -126,6 +205,12 @@ def _fetch_existing_idempotent_result(conn: Any, *, operation_ref: str, idempote
         except json.JSONDecodeError:
             payload = {}
     return dict(payload) if isinstance(payload, Mapping) else None
+
+
+def _cached_result_body(cached: Mapping[str, Any]) -> dict[str, Any]:
+    result = dict(cached)
+    result.pop("operation_receipt", None)
+    return result
 
 
 def _projection_freshness(result: Any) -> dict[str, Any]:
@@ -505,17 +590,38 @@ async def aexecute_operation_binding(
     *,
     payload: Mapping[str, Any] | None = None,
     subsystems: Any,
+    idempotency_key_override: str | None = None,
+    requested_mode: str | None = None,
 ) -> Any:
+    _assert_mode_admits_operation(binding, requested_mode=requested_mode)
     conn = subsystems.get_pg_conn()
     input_hash = _stable_hash(payload or {})
-    idempotency_key = _idempotency_key(binding, payload=payload, input_hash=input_hash)
+    idempotency_key = _idempotency_key(
+        binding,
+        payload=payload,
+        input_hash=input_hash,
+        idempotency_key_override=idempotency_key_override,
+    )
     cached = _fetch_existing_idempotent_result(
         conn,
         operation_ref=binding.operation_ref,
         idempotency_key=idempotency_key,
+        input_hash=input_hash,
     )
     if cached is not None:
-        return cached
+        started_ns = time.monotonic_ns()
+        result = _cached_result_body(cached)
+        receipt = _persist_operation_outcome(
+            conn,
+            binding,
+            payload=payload,
+            result=result,
+            input_hash=input_hash,
+            idempotency_key=idempotency_key,
+            started_ns=started_ns,
+            execution_status="replayed",
+        )
+        return _with_operation_receipt(binding, result, receipt=receipt)
     command = build_operation_command(binding, payload=payload)
     started_ns = time.monotonic_ns()
     try:
@@ -555,17 +661,38 @@ def execute_operation_binding(
     *,
     payload: Mapping[str, Any] | None = None,
     subsystems: Any,
+    idempotency_key_override: str | None = None,
+    requested_mode: str | None = None,
 ) -> Any:
+    _assert_mode_admits_operation(binding, requested_mode=requested_mode)
     conn = subsystems.get_pg_conn()
     input_hash = _stable_hash(payload or {})
-    idempotency_key = _idempotency_key(binding, payload=payload, input_hash=input_hash)
+    idempotency_key = _idempotency_key(
+        binding,
+        payload=payload,
+        input_hash=input_hash,
+        idempotency_key_override=idempotency_key_override,
+    )
     cached = _fetch_existing_idempotent_result(
         conn,
         operation_ref=binding.operation_ref,
         idempotency_key=idempotency_key,
+        input_hash=input_hash,
     )
     if cached is not None:
-        return cached
+        started_ns = time.monotonic_ns()
+        result = _cached_result_body(cached)
+        receipt = _persist_operation_outcome(
+            conn,
+            binding,
+            payload=payload,
+            result=result,
+            input_hash=input_hash,
+            idempotency_key=idempotency_key,
+            started_ns=started_ns,
+            execution_status="replayed",
+        )
+        return _with_operation_receipt(binding, result, receipt=receipt)
     command = build_operation_command(binding, payload=payload)
     started_ns = time.monotonic_ns()
     try:
@@ -607,6 +734,8 @@ async def aexecute_operation_from_subsystems(
     *,
     operation_name: str,
     payload: Mapping[str, Any] | None = None,
+    idempotency_key_override: str | None = None,
+    requested_mode: str | None = None,
 ) -> Any:
     if not hasattr(subsystems, "get_pg_conn") or not callable(subsystems.get_pg_conn):
         raise RuntimeError("operation execution requires subsystems.get_pg_conn()")
@@ -618,6 +747,8 @@ async def aexecute_operation_from_subsystems(
         binding,
         payload=payload,
         subsystems=subsystems,
+        idempotency_key_override=idempotency_key_override,
+        requested_mode=requested_mode,
     )
 
 
@@ -626,6 +757,8 @@ def execute_operation_from_subsystems(
     *,
     operation_name: str,
     payload: Mapping[str, Any] | None = None,
+    idempotency_key_override: str | None = None,
+    requested_mode: str | None = None,
 ) -> Any:
     if not hasattr(subsystems, "get_pg_conn") or not callable(subsystems.get_pg_conn):
         raise RuntimeError("operation execution requires subsystems.get_pg_conn()")
@@ -637,6 +770,8 @@ def execute_operation_from_subsystems(
         binding,
         payload=payload,
         subsystems=subsystems,
+        idempotency_key_override=idempotency_key_override,
+        requested_mode=requested_mode,
     )
 
 
@@ -658,6 +793,8 @@ def execute_operation_from_env(
 
 __all__ = [
     "AuthorityGateway",
+    "OperationIdempotencyConflict",
+    "OperationModeViolation",
     "aexecute_operation_binding",
     "aexecute_operation_from_subsystems",
     "build_operation_command",

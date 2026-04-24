@@ -81,6 +81,13 @@ def test_compose_allows_docker_specific_database_authority_override() -> None:
     assert compose_text.count('"host.docker.internal:host-gateway"') == 3
 
 
+def test_compose_worker_receives_openrouter_credentials() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}" in compose_text
+
+
 def test_start_worker_checks_dependency_contract_before_launch(monkeypatch) -> None:
     observed: dict[str, object] = {}
     monkeypatch.delenv("PRAXIS_WORKSPACE_BASE_PATH", raising=False)

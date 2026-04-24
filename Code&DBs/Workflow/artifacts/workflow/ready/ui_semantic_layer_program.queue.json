@@ -1,0 +1,95 @@
+{
+  "name": "ui-semantic-layer-program",
+  "outcome_goal": "Deliver a DB-backed UI semantic layer so future agents can understand and operate Praxis UI surfaces through queryable contracts instead of slowly inspecting the rendered browser. The implementation must keep authority in Praxis.db, treat React as a renderer/projection, and use browser/accessibility/screenshot checks only as receipts that prove the declared contracts render and remain usable.",
+  "task_type": "code_generation",
+  "agent": "auto/build",
+  "workdir": ".",
+  "verify_refs": [
+    "./scripts/test.sh suite list",
+    "./scripts/test.sh check-affected"
+  ],
+  "authoring_contract": {
+    "artifact_kind": "code",
+    "required_sections": [
+      "authority_model",
+      "schema_or_registry_shape",
+      "operator_surface",
+      "projection_behavior",
+      "verification"
+    ],
+    "notes": [
+      "Use DB-backed authority and existing Praxis workflow/operator surfaces.",
+      "Prefer projections and registries over hardcoded UI sidecars.",
+      "Do not store raw DOM dumps or screenshots as semantic authority."
+    ]
+  },
+  "acceptance_contract": {
+    "verify_refs": [
+      "./scripts/test.sh suite list",
+      "./scripts/test.sh check-affected"
+    ],
+    "review": {
+      "criteria": [
+        "UI meaning is represented by durable contracts and projections, not screenshots or local browser-only state.",
+        "Every new operator-facing write/read path is exposed through canonical Praxis workflow surfaces.",
+        "Receipts prove rendering and usability without becoming source authority."
+      ]
+    }
+  },
+  "anti_requirements": [
+    "Do not create an ad hoc script as the real UI semantic authority.",
+    "Do not make screenshots, accessibility snapshots, or DOM dumps the source of truth.",
+    "Do not bypass app_manifests, surface_catalog_registry, registry_ui_components, operator_decisions, or other existing DB-backed authority when they already own the concept.",
+    "Do not cross workspace boundaries or encode operator-local absolute paths."
+  ],
+  "jobs": [
+    {
+      "sprint": 1,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "Roadmap item roadmap_item.define.db.backed.ui.surface.contracts. Define canonical DB-backed UI surface contracts for screens, tabs, and panels. Capture route or deep link, purpose, owner authority domain, expected regions, data sources, allowed actions, and revision hash. Reuse or extend existing manifest and surface catalog authority before introducing a new table."
+      }
+    },
+    {
+      "sprint": 2,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "Roadmap item roadmap_item.project.ui.region.graph.for.agent.inspection. Project a meaningful UI region graph for agent inspection: surface-to-region relationships, role, visibility conditions, loading/empty/error states, and stable semantic selectors. Keep it focused on agent reasoning, not raw DOM structure."
+      }
+    },
+    {
+      "sprint": 3,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "Roadmap item roadmap_item.register.ui.action.and.affordance.contracts. Register meaningful UI actions as first-class DB records with label, intent, target object, preconditions, disabled reasons, input schema, mutation authority, undo/recovery behavior, and success receipt."
+      }
+    },
+    {
+      "sprint": 4,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "Roadmap item roadmap_item.materialize.runtime.ui.semantic.snapshots. Materialize an expiring runtime read model for current UI semantics: active surface, active entity ids, visible regions, visible actions, validation errors, selected filters, draft/proposed state, stale/loading/empty status, and latest receipts. Treat snapshots as derived state, not source authority."
+      }
+    },
+    {
+      "sprint": 5,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "Roadmap item roadmap_item.record.ui.observation.receipts.as.evidence. Record browser, accessibility, screenshot, and layout checks as durable observation receipts linked to UI contracts. Receipts prove declared UI contracts render and remain usable, but must not become the authority for UI meaning."
+      }
+    },
+    {
+      "sprint": 6,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "Roadmap item roadmap_item.expose.agent.ui.query.surface. Expose a first-class operator query surface for agents to describe a UI surface, answer how-to-operate questions, and return current session UI packets with regions, actions, blockers, deep links, authorities, and receipts."
+      }
+    }
+  ]
+}

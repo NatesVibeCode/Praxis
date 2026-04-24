@@ -24,7 +24,11 @@ from runtime.docker_image_authority import (
     CONTROL_WORKER_IMAGE,
     DOCKER_IMAGE_ENV,
 )
-from runtime.instance import native_instance_contract
+from runtime._workflow_database import (
+    WorkflowDatabaseAuthority,
+    resolve_runtime_database_authority,
+)
+from runtime.instance import NativeInstanceResolutionError, native_instance_contract
 from runtime.workspace_paths import repo_root as workspace_repo_root
 
 
@@ -34,6 +38,14 @@ _DEFAULT_RUNTIME_TARGET_REF = "runtime_target.praxis.default"
 _SETUP_MODES = {"doctor", "plan", "apply"}
 _OPERATOR_AUTHORITY_PATH = ("api", "mcp")
 _CLIENT_SURFACES = ("cli", "website")
+_LEGACY_SUBSTRATE_KIND_ALIASES = {
+    "local_docker": "container",
+    "docker": "container",
+    "docker_local": "container",
+    "remote_api": "cloud_service",
+    "api": "cloud_service",
+    "http_api": "cloud_service",
+}
 _SSH_BUILD_TRANSPORT = {
     "transport": "ssh",
     "role": "build_deploy_transport_only",
@@ -155,6 +167,32 @@ def _env_value(name: str, *, repo_root: Path | None = None) -> str:
     return _env_file_values(repo_root).get(name, "").strip()
 
 
+def _setup_authority_env(
+    *,
+    repo_root: Path | None = None,
+    required: bool = False,
+) -> tuple[dict[str, str], WorkflowDatabaseAuthority]:
+    """Resolve one setup DB authority and return the env all setup probes share."""
+
+    root = repo_root or workspace_repo_root()
+    source = dict(os.environ)
+    try:
+        authority = resolve_runtime_database_authority(
+            env=source,
+            repo_root=root,
+            required=required,
+        )
+    except Exception as exc:  # noqa: BLE001 - setup doctor reports authority drift
+        authority = WorkflowDatabaseAuthority(database_url=None, source=f"error:{exc}")
+    for key, value in _env_file_values(root).items():
+        source.setdefault(key, value)
+    if authority.database_url:
+        source["WORKFLOW_DATABASE_URL"] = authority.database_url
+        source["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] = authority.source
+    source.setdefault("PRAXIS_WORKSPACE_BASE_PATH", str(root))
+    return source, authority
+
+
 def _docker_info() -> dict[str, Any]:
     try:
         result = subprocess.run(
@@ -206,35 +244,67 @@ def _orphan_container_count() -> int | None:
     return len([line for line in result.stdout.splitlines() if line.strip()])
 
 
+def _runtime_target_substrate_kind(raw_value: object, *, docker_available: bool) -> str:
+    raw = str(raw_value or "").strip()
+    if raw:
+        return _LEGACY_SUBSTRATE_KIND_ALIASES.get(raw, raw)
+    return "container" if docker_available else "cloud_service"
+
+
 def runtime_target_report(*, repo_root: Path | None = None) -> dict[str, Any]:
+    authority_env, db_authority = _setup_authority_env(repo_root=repo_root)
     docker = _docker_info()
-    api_url = _env_value("PRAXIS_API_URL", repo_root=repo_root)
-    api_bind_host = _env_value("PRAXIS_API_HOST", repo_root=repo_root) or "127.0.0.1"
+    api_url = str(
+        authority_env.get("PRAXIS_API_URL")
+        or _env_value("PRAXIS_API_URL", repo_root=repo_root)
+    )
+    api_bind_host = (
+        str(
+            authority_env.get("PRAXIS_API_HOST")
+            or _env_value("PRAXIS_API_HOST", repo_root=repo_root)
+        )
+        or "127.0.0.1"
+    )
     if not api_url:
         host = api_bind_host
         if host in {"0.0.0.0", "::", "[::]"}:
             host = "127.0.0.1"
-        port = _env_value("PRAXIS_API_PORT", repo_root=repo_root) or "8420"
+        port = str(
+            authority_env.get("PRAXIS_API_PORT")
+            or _env_value("PRAXIS_API_PORT", repo_root=repo_root)
+            or "8420"
+        )
         api_url = f"http://{host}:{port}"
-    substrate_kind = _env_value("PRAXIS_RUNTIME_SUBSTRATE_KIND", repo_root=repo_root)
-    if not substrate_kind:
-        substrate_kind = "local_docker" if docker.get("available") else "remote_api"
+    substrate_kind = str(
+        authority_env.get("PRAXIS_RUNTIME_SUBSTRATE_KIND")
+        or _env_value("PRAXIS_RUNTIME_SUBSTRATE_KIND", repo_root=repo_root)
+    )
+    substrate_kind = _runtime_target_substrate_kind(
+        substrate_kind,
+        docker_available=bool(docker.get("available")),
+    )
     return {
         "runtime_target_ref": (
-            _env_value("PRAXIS_RUNTIME_TARGET_REF", repo_root=repo_root)
+            str(
+                authority_env.get("PRAXIS_RUNTIME_TARGET_REF")
+                or _env_value("PRAXIS_RUNTIME_TARGET_REF", repo_root=repo_root)
+            )
             or _DEFAULT_RUNTIME_TARGET_REF
         ),
         "substrate_kind": substrate_kind,
         "api_authority": api_url,
-        "db_authority": _redact_database_url(
-            _env_value("WORKFLOW_DATABASE_URL", repo_root=repo_root)
-        ),
+        "db_authority": _redact_database_url(db_authority.database_url),
+        "db_authority_source": db_authority.source,
         "workspace_authority": str(repo_root or workspace_repo_root()),
         "host_traits": {
             "os": platform.system().lower() or "unknown",
             "architecture": platform.machine() or "unknown",
             "docker_available": bool(docker.get("available")),
-            "docker_socket": _env_value("DOCKER_HOST", repo_root=repo_root) or "default",
+            "docker_socket": str(
+                authority_env.get("DOCKER_HOST")
+                or _env_value("DOCKER_HOST", repo_root=repo_root)
+                or "default"
+            ),
             "api_bind_host": api_bind_host,
         },
     }
@@ -346,6 +416,30 @@ def package_contract_report(*, repo_root: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _native_instance_for_setup(authority_env: dict[str, str]) -> dict[str, Any]:
+    try:
+        return native_instance_contract(
+            env=authority_env,
+            allow_authority_fallback=True,
+        )
+    except NativeInstanceResolutionError as exc:
+        if exc.reason_code not in {
+            "native_instance.authority_unavailable",
+            "native_instance.profile_unknown",
+        }:
+            raise
+        fallback_env = dict(authority_env)
+        fallback_env.pop("WORKFLOW_DATABASE_URL", None)
+        fallback = native_instance_contract(
+            env=fallback_env,
+            allow_authority_fallback=True,
+        )
+        fallback["authority_state"] = "degraded"
+        fallback["authority_reason_code"] = exc.reason_code
+        fallback["authority_error"] = str(exc)
+        return fallback
+
+
 def setup_payload(
     mode: str,
     *,
@@ -354,10 +448,11 @@ def setup_payload(
     authority_surface: str = "api_or_mcp",
 ) -> dict[str, Any]:
     root = repo_root or workspace_repo_root()
+    authority_env, db_authority = _setup_authority_env(repo_root=root)
     runtime_target = runtime_target_report(repo_root=root)
     sandbox_contract = sandbox_contract_report(repo_root=root)
     package_contract = package_contract_report(repo_root=root)
-    native_instance = native_instance_contract(allow_authority_fallback=True)
+    native_instance = _native_instance_for_setup(authority_env)
     expected_receipts_dir = str((root / "artifacts" / "runtime_receipts").resolve())
     expected_topology_dir = str((root / "artifacts" / "runtime_topology").resolve())
     native_instance_checks = {
@@ -371,6 +466,22 @@ def setup_payload(
         == expected_topology_dir,
         "instance_name_is_praxis": native_instance.get("praxis_instance_name") == "praxis",
         "runtime_profile_is_praxis": native_instance.get("praxis_runtime_profile") == "praxis",
+    }
+    native_instance_checks_ok = all(native_instance_checks.values())
+    authority_alignment = {
+        "ok": bool(native_instance_checks_ok and runtime_target.get("db_authority")),
+        "cqrs_authority": "operation_catalog_gateway",
+        "operation_authority_model": "commands_mutate_queries_project",
+        "operator_authority_surfaces": list(_OPERATOR_AUTHORITY_PATH),
+        "client_surfaces": list(_CLIENT_SURFACES),
+        "active_surface": authority_surface,
+        "db_authority_source": db_authority.source,
+        "db_authority": runtime_target.get("db_authority"),
+        "native_instance_authority_state": native_instance.get("authority_state", "db_backed"),
+        "native_instance_contract_matches_workspace": native_instance_checks_ok,
+        "same_repo_local_instance": native_instance_checks_ok,
+        "api_authority": runtime_target.get("api_authority"),
+        "runtime_target_ref": runtime_target.get("runtime_target_ref"),
     }
     actions = [
         {
@@ -403,7 +514,9 @@ def setup_payload(
         "runtime_target": runtime_target,
         "native_instance": native_instance,
         "native_instance_checks": native_instance_checks,
-        "native_instance_checks_ok": all(native_instance_checks.values()),
+        "native_instance_checks_ok": native_instance_checks_ok,
+        "surface_alignment": authority_alignment,
+        "authority_alignment": authority_alignment,
         "sandbox_contract": sandbox_contract,
         "package_contract": package_contract,
         "empty_thin_sandbox_default": sandbox_contract["empty_thin_sandbox_default"],
@@ -421,16 +534,25 @@ def setup_payload(
     }
     if mode == "apply":
         payload["applied"] = False
-        payload["requires_authority_apply"] = True
+        payload["ok"] = False
+        payload["requires_authority_apply"] = False
+        payload["mutation_performed"] = False
         payload["apply_note"] = (
-            "This setup surface is the gate and plan, not a hidden mutation shim. "
-            "DB/runtime-target writes must be performed by migration or catalog-backed "
-            "authority operations, then reconciled by the selected runtime target."
+            "This setup surface is a gate and plan, not a hidden mutation shim. "
+            "No service-lifecycle state was changed. DB/runtime-target writes must "
+            "be performed by a catalog-backed authority operation with durable "
+            "command, event, and receipt readback."
         )
         if not apply:
-            payload["ok"] = False
             payload["error_code"] = "setup.approval_required"
             payload["message"] = "setup apply requires explicit approval."
+        else:
+            payload["error_code"] = "setup.apply_not_implemented"
+            payload["message"] = (
+                "setup apply is not implemented as a mutating authority operation; "
+                "use doctor or plan until service-lifecycle apply records durable "
+                "command/event/receipt state."
+            )
     return payload
 
 

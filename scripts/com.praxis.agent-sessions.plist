@@ -20,10 +20,18 @@
         <string>__PRAXIS_REPO_ROOT__/Code&amp;DBs/Workflow</string>
         <key>PATH</key>
         <string>__PRAXIS_PATH__</string>
+        <key>PRAXIS_AGENT_CLI_PROVIDER</key>
+        <string>__PRAXIS_AGENT_CLI_PROVIDER__</string>
+        <key>PRAXIS_AGENT_CWD</key>
+        <string>__PRAXIS_REPO_ROOT__</string>
+        <key>PRAXIS_AGENT_CODEX_SANDBOX</key>
+        <string>__PRAXIS_AGENT_CODEX_SANDBOX__</string>
         <key>PRAXIS_AGENT_SESSIONS_HOST</key>
         <string>__PRAXIS_AGENT_SESSIONS_HOST__</string>
         <key>PRAXIS_AGENT_SESSIONS_PORT</key>
         <string>__PRAXIS_AGENT_SESSIONS_PORT__</string>
+        <key>WORKFLOW_DATABASE_URL</key>
+        <string>__WORKFLOW_DATABASE_URL__</string>
     </dict>
 
     <key>KeepAlive</key>

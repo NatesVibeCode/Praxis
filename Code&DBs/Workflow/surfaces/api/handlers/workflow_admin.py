@@ -297,16 +297,25 @@ def _build_orient_authority_envelope(
 
     workflow_env: dict[str, str] = {}
     workflow_env_error: str | None = None
+    try:
+        workflow_env = _workflow_env(subs)
+    except Exception as exc:  # noqa: BLE001 — orient must report drift instead of hiding it
+        workflow_env_error = f"{type(exc).__name__}: {exc}"
+
     if fast:
         native_instance = {"status": "skipped", "reason": "orient_fast_path"}
     else:
-        try:
-            workflow_env = _workflow_env(subs)
-            native_instance = native_instance_contract(
-                env=workflow_env,
-            )
-        except Exception as exc:  # noqa: BLE001 — orient must report drift instead of hiding it
-            workflow_env_error = f"{type(exc).__name__}: {exc}"
+        if workflow_env_error is None:
+            try:
+                native_instance = native_instance_contract(
+                    env=workflow_env,
+                )
+            except Exception as exc:  # noqa: BLE001 — orient must report drift instead of hiding it
+                workflow_env_error = f"{type(exc).__name__}: {exc}"
+                native_instance = {
+                    "error": f"native_instance unavailable: {workflow_env_error}",
+                }
+        else:
             native_instance = {
                 "error": f"native_instance unavailable: {workflow_env_error}",
             }
@@ -1236,10 +1245,9 @@ def _handle_setup_apply_post(request: Any, path: str) -> None:
         from runtime.setup_wizard import setup_payload
 
         approved = bool(body.get("yes") or body.get("apply") or body.get("approved"))
-        request._send_json(
-            200 if approved else 409,
-            setup_payload("apply", repo_root=REPO_ROOT, apply=approved, authority_surface="api"),
-        )
+        payload = setup_payload("apply", repo_root=REPO_ROOT, apply=approved, authority_surface="api")
+        status_code = 200 if payload.get("ok") else (501 if approved else 409)
+        request._send_json(status_code, payload)
     except Exception as exc:
         request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
 

@@ -216,7 +216,8 @@
     "208_structured_document_semantic_authority.sql",
     "209_empty_thin_sandbox_runtime_targets.sql",
     "210_javascript_vitest_verifier.sql",
-    "211_interactive_agent_session_authority.sql"
+    "211_interactive_agent_session_authority.sql",
+    "212_operation_replay_receipts.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5531,6 +5532,12 @@
         "object_type": "index",
         "object_name": "idx_agent_session_events_session_created"
       }
+    ],
+    "212_operation_replay_receipts.sql": [
+      {
+        "object_type": "index",
+        "object_name": "authority_operation_receipts_idempotency_success_idx"
+      }
     ]
   },
   "policy_buckets": {
@@ -5751,7 +5758,8 @@
       "208_structured_document_semantic_authority.sql",
       "209_empty_thin_sandbox_runtime_targets.sql",
       "210_javascript_vitest_verifier.sql",
-      "211_interactive_agent_session_authority.sql"
+      "211_interactive_agent_session_authority.sql",
+      "212_operation_replay_receipts.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

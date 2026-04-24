@@ -47,7 +47,7 @@ def test_operation_gateway_persists_authority_events_and_receipts() -> None:
 
     assert "INSERT INTO authority_operation_receipts" in source
     assert "INSERT INTO authority_events" in source
-    assert "UPDATE authority_operation_receipts" in source
+    assert "UPDATE authority_events" in source
 
 
 def test_primary_surfaces_do_not_mutate_authority_tables_directly() -> None:

@@ -18,8 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         git \
         jq \
+        nodejs \
+        npm \
         ripgrep \
     && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @anthropic-ai/claude-code@latest @openai/codex@latest \
+    && npm cache clean --force
 
 RUN mkdir -p /opt/praxis/workflow/runtime /opt/praxis/workflow/scripts
 COPY requirements.runtime.txt /opt/praxis/workflow/requirements.runtime.txt

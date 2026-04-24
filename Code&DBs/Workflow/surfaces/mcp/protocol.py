@@ -26,6 +26,7 @@ from storage.postgres import PostgresStorageError
 
 from .catalog import canonical_tool_name, get_tool_catalog, resolve_tool_entry
 from .invocation import ToolInvocationError, invoke_tool, normalize_allowed_tool_names
+from .subsystems import workflow_database_env
 
 
 _TRANSPORT_JSONL = "jsonl"
@@ -301,7 +302,7 @@ def handle_tools_list(request_id: Any, *, allowed_tool_names: object | None = No
 def _workflow_conn():
     from storage.postgres import SyncPostgresConnection, get_workflow_pool
 
-    return SyncPostgresConnection(get_workflow_pool())
+    return SyncPostgresConnection(get_workflow_pool(env=workflow_database_env()))
 
 
 def _attach_tools_list_interpretive_context(

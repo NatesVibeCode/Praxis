@@ -106,6 +106,25 @@ def _classify_signal(failure_code: str, *, outputs: dict | None = None) -> Failu
             recommended_action="Setup/initialization failed. Check environment and retry.",
             severity="high",
         )
+    if failure_code == "host_resource_capacity":
+        return FailureClassification(
+            category=FailureCategory.TIMEOUT,
+            is_retryable=True,
+            is_transient=True,
+            recommended_action=(
+                "Host execution resources are saturated. Keep the job queued and retry "
+                "after local sandbox capacity frees up."
+            ),
+            severity="medium",
+        )
+    if failure_code == "host_resource_admission_unavailable":
+        return FailureClassification(
+            category=FailureCategory.TIMEOUT,
+            is_retryable=True,
+            is_transient=True,
+            recommended_action="Host resource admission authority is unavailable. Restore DB-backed admission before retrying.",
+            severity="high",
+        )
     if failure_code == "google_auth_not_configured":
         return FailureClassification(
             category=FailureCategory.CREDENTIAL_ERROR,

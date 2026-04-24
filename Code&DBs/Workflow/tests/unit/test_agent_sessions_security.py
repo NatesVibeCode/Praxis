@@ -53,10 +53,11 @@ class _FakeAgentSessionConn:
             agent_id = args[0]
             row = {
                 "session_id": agent_id,
-                "external_session_id": args[5],
-                "display_title": args[6],
-                "principal_ref": args[7],
-                "workspace_ref": args[8],
+                "external_session_id": args[6],
+                "display_title": args[7],
+                "agent_slug": args[4],
+                "principal_ref": args[8],
+                "workspace_ref": args[9],
                 "status": "active",
                 "created_at": "2026-04-23T00:00:00+00:00",
                 "last_activity_at": "2026-04-23T00:00:00+00:00",
@@ -97,10 +98,14 @@ class _FakeAgentSessionConn:
         if "UPDATE agent_sessions" in sql:
             row = self.sessions.get(args[0])
             if row is not None:
-                row["status"] = "terminated"
-                row["revoked_at"] = "2026-04-23T00:00:00+00:00"
-                row["revoked_by"] = args[1]
-                row["revoke_reason"] = args[2]
+                if "external_session_id = $2" in sql:
+                    row["external_session_id"] = args[1]
+                    row["agent_slug"] = args[2]
+                else:
+                    row["status"] = "terminated"
+                    row["revoked_at"] = "2026-04-23T00:00:00+00:00"
+                    row["revoked_by"] = args[1]
+                    row["revoke_reason"] = args[2]
             return []
 
         return []
@@ -118,11 +123,6 @@ def isolated_agent_sessions(monkeypatch, tmp_path):
     agent_sessions._active_turns.clear()
     agent_sessions._claimed_turns.clear()
     yield fake_conn
-    if hasattr(agent_sessions.app.state, "pg_conn_factory"):
-        try:
-            delattr(agent_sessions.app.state, "pg_conn_factory")
-        except KeyError:
-            pass
 
 
 def _auth_headers(token: str = "session-token") -> dict[str, str]:
@@ -200,3 +200,268 @@ def test_agent_sessions_accept_mobile_session_cookie_without_public_api_token(is
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_agent_session_runner_uses_explicit_session_id_and_noninteractive_permission_mode() -> None:
+    cmd = agent_sessions._build_claude_command(
+        "00000000-0000-4000-8000-000000000001",
+        "hello",
+        {"PRAXIS_AGENT_PERMISSION_MODE": "auto"},
+    )
+
+    assert "--session-id" in cmd
+    assert "--resume" not in cmd
+    assert cmd[cmd.index("--permission-mode") + 1] == "auto"
+    assert cmd[-1] == "hello"
+
+
+def test_agent_session_runner_builds_codex_resume_command() -> None:
+    cmd = agent_sessions._build_codex_command(
+        "019dbcd1-b64c-7013-8ee4-f1e6a099df1e",
+        "hello",
+        Path("/tmp/reply.txt"),
+        {"PRAXIS_AGENT_CODEX_SANDBOX": "read-only"},
+    )
+
+    assert cmd[:4] == ["codex", "exec", "resume", "019dbcd1-b64c-7013-8ee4-f1e6a099df1e"]
+    assert "--json" in cmd
+    assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+    assert cmd[-1] == "hello"
+
+
+def test_agent_session_runner_extracts_codex_thread_id() -> None:
+    assert (
+        agent_sessions._thread_id_from_events(
+            [{"type": "thread.started", "thread_id": "019dbcd1-b64c-7013-8ee4-f1e6a099df1e"}],
+            "fallback",
+        )
+        == "019dbcd1-b64c-7013-8ee4-f1e6a099df1e"
+    )
+
+
+def test_agent_session_runner_accepts_openrouter_provider() -> None:
+    assert agent_sessions._cli_provider("openrouter") == "openrouter"
+
+
+def test_agent_session_openrouter_default_is_paid_tool_capable_route() -> None:
+    assert agent_sessions._openrouter_model({}) == "qwen/qwen3-coder"
+
+
+def test_openrouter_messages_preserve_prior_turns(isolated_agent_sessions) -> None:
+    agent_id = "00000000-0000-4000-8000-000000000003"
+    agent_sessions.create_interactive_agent_session(
+        isolated_agent_sessions,
+        agent_id=agent_id,
+        cli_session_id="session",
+        title="api",
+        provider_slug="openrouter",
+        principal_ref="mobile:nate",
+        workspace_ref="praxis.default",
+    )
+    agent_sessions.append_interactive_agent_event(
+        isolated_agent_sessions,
+        agent_id=agent_id,
+        event_kind="user.prompt",
+        text_content="first",
+    )
+    agent_sessions.append_interactive_agent_event(
+        isolated_agent_sessions,
+        agent_id=agent_id,
+        event_kind="assistant.reply",
+        text_content="second",
+    )
+
+    messages = agent_sessions._openrouter_messages(
+        isolated_agent_sessions,
+        agent_id=agent_id,
+        prompt="third",
+    )
+
+    assert messages[-3:] == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+        {"role": "user", "content": "third"},
+    ]
+
+
+def test_mobile_workflow_launch_defaults_to_paid_openrouter_route(monkeypatch) -> None:
+    from runtime import control_commands, spec_compiler
+
+    captured: dict[str, object] = {}
+
+    class _PromptLaunchSpec:
+        name = "Run affected tests"
+        workflow_id = "mobile_prompt.test"
+        jobs = [{"agent": "openrouter/qwen/qwen3-coder"}]
+
+        def to_inline_spec_dict(self) -> dict[str, object]:
+            return {"workflow_id": self.workflow_id, "jobs": list(self.jobs)}
+
+    def _fake_compile_prompt_launch_spec(**kwargs):
+        captured["compile"] = kwargs
+        return _PromptLaunchSpec()
+
+    def _fake_submit_workflow_command(_conn, **kwargs):
+        captured["submit"] = kwargs
+        return {
+            "run_id": "dispatch_mobile_001",
+            "status": "queued",
+            "command_id": "control.command.mobile.001",
+        }
+
+    monkeypatch.setattr(spec_compiler, "compile_prompt_launch_spec", _fake_compile_prompt_launch_spec)
+    monkeypatch.setattr(control_commands, "submit_workflow_command", _fake_submit_workflow_command)
+
+    payload = agent_sessions._launch_workflow_from_mobile(
+        _FakeAgentSessionConn(),
+        prompt="Run affected tests",
+        principal_ref="mobile:nate",
+    )
+
+    assert captured["compile"]["provider_slug"] == "openrouter"
+    assert captured["compile"]["model_slug"] == "qwen/qwen3-coder"
+    assert captured["compile"]["adapter_type"] == "llm_task"
+    assert captured["compile"]["task_type"] == "build"
+    assert captured["compile"]["workflow_id"].startswith("mobile_prompt.")
+    assert captured["submit"]["requested_by_kind"] == "mobile"
+    assert captured["submit"]["requested_by_ref"] == "mobile:nate"
+    assert captured["submit"]["inline_spec"]["workflow_id"] == "mobile_prompt.test"
+    assert captured["submit"]["repo_root"] == str(agent_sessions.PRAXIS_ROOT)
+    assert payload["status_url"] == "/api/workflow-runs/dispatch_mobile_001/status"
+    assert payload["stream_url"] == "/api/workflow-runs/dispatch_mobile_001/stream"
+    assert payload["launch"] == {
+        "source": "mobile",
+        "provider": "openrouter",
+        "model": "qwen/qwen3-coder",
+        "agent": "openrouter/qwen/qwen3-coder",
+        "task_type": "build",
+        "timeout": 900,
+    }
+
+
+def test_mobile_workflow_launch_endpoint_uses_mobile_auth_and_persists_thread_event(
+    isolated_agent_sessions,
+    monkeypatch,
+) -> None:
+    isolated_agent_sessions.add_mobile_session("mobile-secret")
+    agent_id = "00000000-0000-4000-8000-000000000003"
+    agent_sessions.create_interactive_agent_session(
+        isolated_agent_sessions,
+        agent_id=agent_id,
+        cli_session_id="session",
+        title="road",
+        provider_slug="openrouter",
+        principal_ref="mobile:nate",
+        workspace_ref="praxis.default",
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_launch(_conn, **kwargs):
+        captured.update(kwargs)
+        return {
+            "run_id": "dispatch_mobile_002",
+            "status": "queued",
+            "launch": {
+                "source": "mobile",
+                "provider": "openrouter",
+                "model": "qwen/qwen3-coder",
+                "agent": "openrouter/qwen/qwen3-coder",
+                "task_type": "build",
+                "timeout": 900,
+            },
+        }
+
+    monkeypatch.setattr(agent_sessions, "_launch_workflow_from_mobile", _fake_launch)
+
+    with TestClient(agent_sessions.app) as client:
+        response = client.post(
+            "/workflows/launch",
+            cookies={"praxis_mobile_session": "mobile-secret"},
+            json={
+                "agent_id": agent_id,
+                "prompt": "Run affected tests",
+                "title": "Affected tests",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["run_id"] == "dispatch_mobile_002"
+    assert captured == {
+        "prompt": "Run affected tests",
+        "principal_ref": "mobile:nate",
+        "provider_slug": None,
+        "model_slug": None,
+        "title": "Affected tests",
+        "task_type": None,
+        "timeout": None,
+        "idempotency_key": None,
+    }
+    launch_events = [
+        event for event in isolated_agent_sessions.events
+        if event["event_kind"] == "workflow.launch.requested"
+    ]
+    assert len(launch_events) == 1
+    assert launch_events[0]["text_content"] == "Workflow launched: dispatch_mobile_002 (queued)"
+
+
+def test_mobile_workflow_approve_endpoint_uses_mobile_auth_and_principal(
+    isolated_agent_sessions,
+    monkeypatch,
+) -> None:
+    isolated_agent_sessions.add_mobile_session("mobile-secret")
+    captured: dict[str, object] = {}
+
+    def _fake_approve(_conn, **kwargs):
+        captured.update(kwargs)
+        return {
+            "run_id": "dispatch_mobile_003",
+            "status": "queued",
+            "approval": {
+                "command_id": "control.command.mobile.003",
+                "approved_by": "mobile:mobile:nate",
+            },
+        }
+
+    monkeypatch.setattr(agent_sessions, "_approve_workflow_command_from_mobile", _fake_approve)
+
+    with TestClient(agent_sessions.app) as client:
+        response = client.post(
+            "/workflows/commands/control.command.mobile.003/approve",
+            cookies={"praxis_mobile_session": "mobile-secret"},
+            json={"decision": "approve"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["run_id"] == "dispatch_mobile_003"
+    assert captured == {
+        "command_id": "control.command.mobile.003",
+        "principal_ref": "mobile:nate",
+    }
+
+
+def test_mobile_workflow_approve_rejects_non_approve_decision(isolated_agent_sessions) -> None:
+    isolated_agent_sessions.add_mobile_session("mobile-secret")
+
+    with TestClient(agent_sessions.app) as client:
+        response = client.post(
+            "/workflows/commands/control.command.mobile.003/approve",
+            cookies={"praxis_mobile_session": "mobile-secret"},
+            json={"decision": "reject"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "agent_sessions_workflow_command_decision_rejected"
+
+
+def test_agent_session_runner_strips_blank_anthropic_api_env() -> None:
+    env = agent_sessions._claude_subprocess_env(
+        {
+            "ANTHROPIC_API_KEY": "",
+            "ANTHROPIC_AUTH_TOKEN": " ",
+            "CLAUDE_CODE_OAUTH_TOKEN": "oauth-token",
+        }
+    )
+
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth-token"

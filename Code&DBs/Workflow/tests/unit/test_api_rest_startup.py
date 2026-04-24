@@ -170,6 +170,8 @@ def test_agent_sessions_surface_is_mounted(monkeypatch, tmp_path) -> None:
     assert index_response.status_code == 200
     assert index_response.json()["service"] == "agent_sessions"
     assert index_response.json()["base_path"] == "/api/agent-sessions"
+    assert "/api/agent-sessions/workflows/launch" in index_response.json()["routes"]
+    assert "/api/agent-sessions/workflows/commands/{command_id}/approve" in index_response.json()["routes"]
     assert agents_response.status_code == 200
     assert agents_response.json() == []
 
@@ -209,6 +211,10 @@ def test_mobile_app_routes_are_inline_and_installable() -> None:
     assert app_response.headers["content-type"].startswith("text/html")
     assert "Praxis" in app_response.text
     assert "/api/agent-sessions/agents" in app_response.text
+    assert "/api/agent-sessions/workflows/launch" in app_response.text
+    assert "/api/agent-sessions/workflows/commands/" in app_response.text
+    assert "providerMeta" in app_response.text
+    assert "waitForWorkflow" in app_response.text
     assert manifest_response.status_code == 200
     assert manifest_response.headers["content-type"].startswith("application/manifest+json")
     assert manifest_response.json()["start_url"] == "/mobile"
@@ -283,6 +289,72 @@ def test_launcher_recover_endpoint_returns_structured_payload(monkeypatch) -> No
     assert response.status_code == 200
     assert response.json()["action"] == "restart_service"
     assert response.json()["service"] == "workflow-api"
+
+
+def test_service_lifecycle_catalog_http_routes_execute_handlers(monkeypatch) -> None:
+    calls: list[tuple[str, object]] = []
+
+    def _handler(name: str):
+        def _capture(command, _subsystems):
+            calls.append((name, command))
+            return {"status": name}
+
+        return _capture
+
+    monkeypatch.setattr(rest, "handle_register_runtime_target", _handler("target_registered"))
+    monkeypatch.setattr(rest, "handle_list_runtime_targets", _handler("targets_listed"))
+    monkeypatch.setattr(rest, "handle_register_service_definition", _handler("service_registered"))
+    monkeypatch.setattr(rest, "handle_declare_service_desired_state", _handler("desired_state_declared"))
+    monkeypatch.setattr(rest, "handle_record_service_lifecycle_event", _handler("event_recorded"))
+    monkeypatch.setattr(rest, "handle_query_service_projection", _handler("projection_found"))
+
+    with TestClient(rest.app) as client:
+        responses = [
+            client.post(
+                "/api/service-lifecycle/targets",
+                json={"runtime_target_ref": "target.alpha", "substrate_kind": "container"},
+            ),
+            client.get("/api/service-lifecycle/targets?workspace_ref=praxis&limit=5"),
+            client.post(
+                "/api/service-lifecycle/services",
+                json={"service_ref": "service.api", "service_kind": "http_api"},
+            ),
+            client.post(
+                "/api/service-lifecycle/desired-state",
+                json={
+                    "service_ref": "service.api",
+                    "runtime_target_ref": "target.alpha",
+                    "desired_status": "running",
+                },
+            ),
+            client.post(
+                "/api/service-lifecycle/events",
+                json={
+                    "service_ref": "service.api",
+                    "runtime_target_ref": "target.alpha",
+                    "event_type": "health_check_passed",
+                },
+            ),
+            client.get("/api/service-lifecycle/projection/service.api/target.alpha"),
+        ]
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 200, 200, 200]
+    assert [response.json()["status"] for response in responses] == [
+        "target_registered",
+        "targets_listed",
+        "service_registered",
+        "desired_state_declared",
+        "event_recorded",
+        "projection_found",
+    ]
+    assert [name for name, _command in calls] == [
+        "target_registered",
+        "targets_listed",
+        "service_registered",
+        "desired_state_declared",
+        "event_recorded",
+        "projection_found",
+    ]
 
 
 def test_api_routes_endpoint_lists_the_live_http_surface() -> None:
@@ -703,6 +775,33 @@ def test_launcher_app_reports_missing_build(monkeypatch, tmp_path: Path) -> None
     payload = response.json()
     assert payload["error"] == "launcher_build_missing"
     assert payload["launch_url"] is None
+
+
+def test_launcher_app_reports_unreadable_build(monkeypatch, tmp_path: Path) -> None:
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    index_path = dist_dir / "index.html"
+    index_path.write_text("<!doctype html><html><body><div id='root'></div></body></html>", encoding="utf-8")
+    monkeypatch.setattr(rest, "_APP_DIST_DIR", dist_dir)
+
+    original_read_text = Path.read_text
+
+    def _raise_for_index(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path == index_path:
+            raise OSError(23, "Too many open files in system")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _raise_for_index)
+
+    with TestClient(rest.app) as client:
+        response = client.get("/app")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["error"] == "launcher_build_unreadable"
+    assert payload["error_type"] == "OSError"
+    assert payload["launch_url"] is None
+    assert "Too many open files" in payload["error_message"]
 
 
 class _FakeRunConn:

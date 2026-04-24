@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -72,24 +74,40 @@ def _endpoint_signature(raw: str) -> str:
     return f"{parsed.scheme}://{host}:{port}"
 
 
+def _database_authority_signature(raw: str) -> str:
+    parsed = urlsplit(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return raw.strip() if raw else "<unset>"
+    host = (parsed.hostname or "").lower()
+    if host in {"localhost", "127.0.0.1", "::1", "host.docker.internal"}:
+        host = "local-runtime-db-host"
+    port = parsed.port or 5432
+    path = parsed.path.rstrip("/")
+    return f"{parsed.scheme}://{host}:{port}{path}"
+
+
 def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow instances [check] [--json]\n"
+            "usage: workflow instances [check] [--json] [--include-routes]\n"
             "\n"
             "Show resolved API/MCP/DB authority and report any obvious instance drift.\n"
             "Use `workflow instances check` to print an alignment report.\n"
             "Use `workflow instances --json` for machine-readable output.\n"
+            "Use `workflow instances --include-routes` to include the live HTTP route count.\n"
         )
         return 0
 
     perform_check = False
     as_json = False
+    include_routes = False
     for arg in args:
         if arg == "check":
             perform_check = True
         elif arg == "--json":
             as_json = True
+        elif arg == "--include-routes":
+            include_routes = True
         elif arg.startswith("--"):
             stdout.write(f"error: unknown flag: {arg}\n")
             return 2
@@ -97,12 +115,17 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             stdout.write(f"error: unknown argument: {arg}\n")
             return 2
 
+    from runtime.primitive_contracts import redact_url
     from runtime.setup_wizard import setup_payload_for_cli
-    from surfaces.api.rest import list_api_routes
+    from surfaces._workflow_database import workflow_database_authority_for_repo
+    from surfaces.mcp.subsystems import workflow_database_env as mcp_workflow_database_env
 
     setup_payload = setup_payload_for_cli("doctor", repo_root=_workspace_repo_root())
     runtime_target = _as_dict(setup_payload.get("runtime_target"))
-    orient_exit_code, orient_payload = run_cli_tool("praxis_orient", {})
+    orient_exit_code, orient_payload = run_cli_tool(
+        "praxis_orient",
+        {"fast": True, "skip_engineering_observability": True, "compact": True},
+    )
     orient_data = _as_dict(orient_payload if orient_exit_code == 0 else {})
     authority_envelope = _as_dict(orient_data.get("authority_envelope"))
     primitive_contracts = _as_dict(authority_envelope.get("primitive_contracts"))
@@ -112,7 +135,14 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     binding_http = _as_dict(runtime_binding.get("http_endpoints"))
     binding_db = _as_dict(runtime_binding.get("database"))
     native_instance = _as_dict(orient_data.get("native_instance"))
-    route_payload = list_api_routes()
+    if native_instance.get("status") == "skipped":
+        native_instance = _as_dict(setup_payload.get("native_instance"))
+
+    route_payload: dict[str, object] = {"status": "skipped", "reason": "use --include-routes"}
+    if include_routes:
+        from surfaces.api.rest import list_api_routes
+
+        route_payload = list_api_routes()
 
     cli_surface = _as_dict(orient_data.get("cli_surface"))
     tool_count = 0
@@ -129,8 +159,35 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     setup_db = _coerce_text(runtime_target.get("db_authority"))
     binding_api = _coerce_text(binding_http.get("api_base_url"))
     binding_db_display = _coerce_text(binding_db.get("redacted_url"), fallback=_coerce_text(binding_db.get("configured")))
+    cli_db_display = "<unset>"
+    cli_db_source = "unresolved"
+    try:
+        cli_authority = workflow_database_authority_for_repo(
+            _workspace_repo_root(),
+            env=os.environ,
+        )
+        cli_db_display = _coerce_text(redact_url(cli_authority.database_url))
+        cli_db_source = str(cli_authority.source)
+    except Exception as exc:
+        cli_db_source = f"error:{type(exc).__name__}"
+
+    mcp_env = mcp_workflow_database_env()
+    mcp_db_display = _coerce_text(redact_url(mcp_env.get("WORKFLOW_DATABASE_URL")))
+    mcp_db_source = _coerce_text(mcp_env.get("WORKFLOW_DATABASE_AUTHORITY_SOURCE"))
     api_match = _endpoint_signature(setup_api) == _endpoint_signature(binding_api)
-    db_match = setup_db == binding_db_display
+    setup_db_match = (
+        _database_authority_signature(setup_db)
+        == _database_authority_signature(binding_db_display)
+    )
+    cli_mcp_db_match = (
+        _database_authority_signature(cli_db_display)
+        == _database_authority_signature(mcp_db_display)
+    )
+    cli_orient_db_match = (
+        _database_authority_signature(cli_db_display)
+        == _database_authority_signature(binding_db_display)
+    )
+    db_match = setup_db_match and cli_mcp_db_match and cli_orient_db_match
 
     alignment_errors: list[str] = []
     if setup_api == "<unset>":
@@ -142,9 +199,18 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             f"API authority mismatch: runtime_target={setup_api} orient={binding_api}"
         )
     if not db_match:
-        alignment_errors.append(
-            f"DB authority mismatch: runtime_target={setup_db} orient={binding_db_display}"
-        )
+        if not setup_db_match:
+            alignment_errors.append(
+                f"DB authority mismatch: runtime_target={setup_db} orient={binding_db_display}"
+            )
+        if not cli_mcp_db_match:
+            alignment_errors.append(
+                f"DB authority mismatch: cli={cli_db_display} mcp={mcp_db_display}"
+            )
+        if not cli_orient_db_match:
+            alignment_errors.append(
+                f"DB authority mismatch: cli={cli_db_display} orient={binding_db_display}"
+            )
     if orient_exit_code != 0:
         alignment_errors.append("praxis_orient call failed")
 
@@ -152,11 +218,14 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
         "setup": setup_payload,
         "orient": orient_data,
         "route_catalog": {
+            "included": include_routes,
             "visibility": "public",
             "count": route_payload.get("count"),
             "docs_url": route_payload.get("docs_url"),
             "openapi_url": route_payload.get("openapi_url"),
             "redoc_url": route_payload.get("redoc_url"),
+            "status": route_payload.get("status"),
+            "reason": route_payload.get("reason"),
         },
         "instances": {
             "native_instance": native_instance,
@@ -165,17 +234,30 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             "bind_api": binding_api,
             "setup_db": setup_db,
             "bind_db": binding_db_display,
+            "cli_db": cli_db_display,
+            "cli_db_source": cli_db_source,
+            "mcp_db": mcp_db_display,
+            "mcp_db_source": mcp_db_source,
             "mcp_transport": os.environ.get("PRAXIS_MCP_STDIO_TRANSPORT", "mirror"),
             "tool_count": tool_count,
             "api_routes": route_payload.get("count"),
             "setup_authority_reachable": bool(
                 setup_payload.get("api_mcp_authority_reachable", True)
             ),
+            "db_signatures": {
+                "setup": _database_authority_signature(setup_db),
+                "orient": _database_authority_signature(binding_db_display),
+                "cli": _database_authority_signature(cli_db_display),
+                "mcp": _database_authority_signature(mcp_db_display),
+            },
         },
         "checks": {
             "do_check": perform_check,
             "api_match": api_match,
             "db_match": db_match,
+            "setup_db_match": setup_db_match,
+            "cli_mcp_db_match": cli_mcp_db_match,
+            "cli_orient_db_match": cli_orient_db_match,
             "errors": alignment_errors,
         },
     }
@@ -189,10 +271,13 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
         return 0
 
     native_instance_name = _coerce_text(
-        native_instance.get("instance_name"),
+        native_instance.get("instance_name") or native_instance.get("praxis_instance_name"),
         fallback="<unknown>",
     )
-    runtime_profile_ref = _coerce_text(native_instance.get("runtime_profile_ref"), fallback="<unknown>")
+    runtime_profile_ref = _coerce_text(
+        native_instance.get("runtime_profile_ref") or native_instance.get("praxis_runtime_profile"),
+        fallback="<unknown>",
+    )
     repo_root = _coerce_text(
         native_instance.get("repo_root"),
         fallback=_coerce_text(setup_payload.get("workspace")),
@@ -208,14 +293,19 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     stdout.write(f"    api_target_bind:  {binding_api}\n")
     stdout.write(f"    db_target_setup:  {setup_db}\n")
     stdout.write(f"    db_target_bind:   {binding_db_display}\n")
+    stdout.write(f"    db_target_cli:    {cli_db_display} ({cli_db_source})\n")
+    stdout.write(f"    db_target_mcp:    {mcp_db_display} ({mcp_db_source})\n")
     stdout.write("  mcp_surface:\n")
     stdout.write(f"    stdio_transport: {os.environ.get('PRAXIS_MCP_STDIO_TRANSPORT', 'mirror')}\n")
     stdout.write(f"    catalog_tools:   {tool_count}\n")
-    stdout.write("  api_contract:\n")
-    stdout.write(f"    public_routes:  {route_count_text}\n")
-    stdout.write(f"    docs_url:       {_coerce_text(route_payload.get('docs_url'))}\n")
-    stdout.write(f"    openapi_url:    {_coerce_text(route_payload.get('openapi_url'))}\n")
-    stdout.write(f"    redoc_url:      {_coerce_text(route_payload.get('redoc_url'))}\n")
+    if include_routes:
+        stdout.write("  api_contract:\n")
+        stdout.write(f"    public_routes:  {route_count_text}\n")
+        stdout.write(f"    docs_url:       {_coerce_text(route_payload.get('docs_url'))}\n")
+        stdout.write(f"    openapi_url:    {_coerce_text(route_payload.get('openapi_url'))}\n")
+        stdout.write(f"    redoc_url:      {_coerce_text(route_payload.get('redoc_url'))}\n")
+    else:
+        stdout.write("  api_contract: skipped (use --include-routes)\n")
 
     if perform_check:
         if alignment_errors:
@@ -2005,6 +2095,81 @@ def _compare_authority_field(label: str, left: str, right: str) -> str:
     )
 
 
+def _global_launcher_resolution(repo_root: Path) -> dict[str, object]:
+    praxis_bin = shutil.which("praxis")
+    if not praxis_bin:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "detail": "praxis binary was not found on PATH",
+        }
+
+    try:
+        result = subprocess.run(
+            [praxis_bin, "launcher", "resolve", "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "available": True,
+            "status": "timeout",
+            "binary": praxis_bin,
+            "detail": "praxis launcher resolve did not return within 3 seconds",
+        }
+    except OSError as exc:
+        return {
+            "available": True,
+            "status": "error",
+            "binary": praxis_bin,
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return {
+            "available": True,
+            "status": "error",
+            "binary": praxis_bin,
+            "exit_code": result.returncode,
+            "detail": detail,
+        }
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return {
+            "available": True,
+            "status": "error",
+            "binary": praxis_bin,
+            "detail": f"launcher resolve returned non-JSON output: {exc}",
+        }
+
+    resolution = payload.get("resolution") if isinstance(payload, dict) else None
+    if not isinstance(resolution, dict):
+        return {
+            "available": True,
+            "status": "error",
+            "binary": praxis_bin,
+            "detail": "launcher resolve did not include a resolution object",
+        }
+
+    resolved_repo_root = str(resolution.get("repo_root") or "")
+    matches_repo = resolved_repo_root == str(repo_root)
+    return {
+        "available": True,
+        "status": "ok",
+        "binary": praxis_bin,
+        "matches_current_repo": matches_repo,
+        "repo_root": resolved_repo_root,
+        "workdir": str(resolution.get("workdir") or ""),
+        "executable_path": str(resolution.get("executable_path") or ""),
+        "authority_source": str(resolution.get("authority_source") or ""),
+    }
+
+
 def _authority_command(args: list[str], *, stdout: TextIO) -> int:
     from runtime.instance import native_instance_contract
     from runtime.primitive_contracts import redact_url
@@ -2039,6 +2204,7 @@ def _authority_command(args: list[str], *, stdout: TextIO) -> int:
     show_instance = "--instance" in args
     repo_root = _workspace_repo_root()
     authority_env, configured = _resolve_authority_env()
+    launcher = _global_launcher_resolution(repo_root)
 
     cli_authority: dict[str, object]
     cli_source = "unknown"
@@ -2111,6 +2277,10 @@ def _authority_command(args: list[str], *, stdout: TextIO) -> int:
             api_check["detail"] = "api base URL is unknown"
 
     checks = {
+        "global_launcher_matches_repo": (
+            launcher.get("status") != "ok"
+            or launcher.get("matches_current_repo") is True
+        ),
         "cli_matches_mcp_db": cli_authority.get("url_redacted") == mcp_authority.get("url_redacted"),
         "cli_matches_orient_db": bool(orient_db) and cli_authority.get("url_redacted") == orient_db,
         "api_matches_orient_db": bool(orient_db) and api_redacted_db == orient_db,
@@ -2132,6 +2302,7 @@ def _authority_command(args: list[str], *, stdout: TextIO) -> int:
                 "kind": "workflow_authority_report",
                 "cli": cli_authority,
                 "mcp": mcp_authority,
+                "global_launcher": launcher,
                 "api": {
                     "api_base_url": api_base,
                     "http_endpoints": api_http_endpoints,
@@ -2161,6 +2332,16 @@ def _authority_command(args: list[str], *, stdout: TextIO) -> int:
         status = "warn"
 
     stdout.write(f"workflow authority report: {status}\n")
+    if launcher.get("status") == "ok":
+        stdout.write(
+            f"  Global praxis: {launcher.get('repo_root') or 'unknown'} "
+            f"({launcher.get('authority_source') or 'unknown'})\n"
+        )
+    else:
+        stdout.write(
+            f"  Global praxis: {launcher.get('status')} "
+            f"({launcher.get('detail') or 'no detail'})\n"
+        )
     stdout.write(f"  CLI DB:      {cli_authority.get('url_redacted') or 'unconfigured'} ({cli_authority.get('source')})\n")
     stdout.write(f"  MCP DB:      {mcp_authority.get('url_redacted') or 'unconfigured'} ({mcp_authority.get('source')})\n")
     stdout.write(f"  API base:    {api_base}\n")
@@ -2188,6 +2369,8 @@ def _authority_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"  /orient:    unavailable ({orient_payload.get('error')})\n")
 
     stdout.write("\nAlignment checks:\n")
+    if launcher.get("status") == "ok":
+        stdout.write(f"  { _compare_authority_field('  global praxis repo', str(launcher.get('repo_root') or ''), str(repo_root)) }\n")
     stdout.write(f"  { _compare_authority_field('  cli==mcp db', str(cli_authority.get('url_redacted') or ''), str(mcp_authority.get('url_redacted') or '')) }\n")
     stdout.write(f"  { _compare_authority_field('  cli==orient db', str(cli_authority.get('url_redacted') or ''), orient_db) }\n")
     stdout.write(f"  { _compare_authority_field('  api==orient db', api_redacted_db, orient_db) }\n")
@@ -2211,6 +2394,8 @@ def _authority_command(args: list[str], *, stdout: TextIO) -> int:
 
     if not checks.get("cli_matches_mcp_db"):
         stdout.write("\nTip: run `workflow setup doctor` to reconcile runtime environment authority values.\n")
+    if not checks.get("global_launcher_matches_repo"):
+        stdout.write("\nTip: run `praxis launcher resolve --json` to inspect the global front door target before using bare `praxis workflow ...`.\n")
 
     return 0
 

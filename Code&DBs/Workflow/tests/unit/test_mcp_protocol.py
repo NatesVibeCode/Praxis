@@ -158,6 +158,34 @@ def test_tools_list_context_attachment_is_non_blocking(monkeypatch):
     assert protocol._attach_tools_list_interpretive_context(tools) is tools
 
 
+def test_mcp_interpretive_context_uses_mcp_database_authority(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        protocol,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://mcp-authority.example/praxis"},
+    )
+
+    def _pool(*, env=None):
+        captured["env"] = env
+        return object()
+
+    class _Conn:
+        def __init__(self, pool):
+            captured["pool"] = pool
+
+    monkeypatch.setattr("storage.postgres.get_workflow_pool", _pool)
+    monkeypatch.setattr("storage.postgres.SyncPostgresConnection", _Conn)
+
+    conn = protocol._workflow_conn()
+
+    assert isinstance(conn, _Conn)
+    assert captured["env"] == {
+        "WORKFLOW_DATABASE_URL": "postgresql://mcp-authority.example/praxis"
+    }
+
+
 def test_tools_call_rejects_unallowed_tool_before_execution():
     response = protocol.handle_request(
         {

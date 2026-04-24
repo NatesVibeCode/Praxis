@@ -36,6 +36,7 @@ from runtime.workflow.execution_backends import (
     _provider_slot_acquisition_failure,
     provider_slot_bypass,
 )
+from runtime.host_resource_admission import HostResourceCapacityError
 
 
 # ------------------------------------------------------------------- helpers
@@ -252,3 +253,35 @@ def test_capacity_path_still_uses_route_unhealthy(monkeypatch):
     assert result["status"] == "failed"
     assert result["error_code"] == "route.unhealthy"
     assert result["error_code"] != "provider_slot_acquisition_error"
+
+
+def test_execute_cli_returns_structured_failure_on_host_resource_capacity(monkeypatch):
+    """Host-resource admission is a second gate after provider admission.
+    Capacity pressure there must surface as its own retryable code instead of
+    collapsing into sandbox_error."""
+    monkeypatch.setattr(eb, "get_load_balancer", lambda: _HealthyLoadBalancer(granted=True))
+    monkeypatch.setattr(eb, "build_command", lambda **_kwargs: ["provider-cli"])
+    monkeypatch.setattr(eb, "normalize_command_parts_for_docker", lambda parts: list(parts))
+    monkeypatch.setattr(eb, "_sandbox_provider_for_execution", lambda *_args, **_kwargs: "docker_local")
+    monkeypatch.setattr(eb, "_sandbox_image", lambda *_args, **_kwargs: "praxis-worker:test")
+
+    def _capacity_block(*_args, **_kwargs):
+        raise HostResourceCapacityError(
+            holder_id="sandbox_session:run.alpha:job.one",
+            host_id="unit-host",
+            resource_name="sandbox_local_docker",
+            capacity=1,
+            wait_s=0,
+        )
+
+    monkeypatch.setattr(eb, "hold_host_resources_for_sandbox", _capacity_block)
+
+    result = eb.execute_cli(
+        _minimal_agent_config("anthropic"),
+        prompt="irrelevant",
+        workdir="/tmp",
+    )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "host_resource_capacity"
+    assert result["host_resource_admission"]["resource_name"] == "sandbox_local_docker"

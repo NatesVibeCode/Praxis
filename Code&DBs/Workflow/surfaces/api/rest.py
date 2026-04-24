@@ -46,17 +46,35 @@ from registry.provider_execution_registry import (
 )
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
+from runtime.service_lifecycle import (
+    DeclareServiceDesiredStateCommand,
+    ListRuntimeTargetsCommand,
+    QueryServiceProjectionCommand,
+    RecordServiceLifecycleEventCommand,
+    RegisterRuntimeTargetCommand,
+    RegisterServiceDefinitionCommand,
+    ServiceLifecycleError,
+    handle_declare_service_desired_state,
+    handle_list_runtime_targets,
+    handle_query_service_projection,
+    handle_record_service_lifecycle_event,
+    handle_register_runtime_target,
+    handle_register_service_definition,
+)
 from runtime.mobile_security import apply_no_store_headers, no_store_headers, set_mobile_session_cookie
 from runtime.operation_catalog_bindings import resolve_http_operation_binding
-from runtime.operation_catalog_gateway import aexecute_operation_binding
+from runtime.operation_catalog_gateway import (
+    OperationIdempotencyConflict,
+    OperationModeViolation,
+    aexecute_operation_binding,
+    execute_operation_from_subsystems,
+)
 from runtime.atlas_graph import build_atlas_payload
 from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
 from surfaces.api.operation_catalog_authority import build_operation_catalog_payload
 from surfaces.api import agent_sessions as agent_sessions_app
-from surfaces.mcp.catalog import McpToolDefinition, canonical_tool_name, get_tool_catalog
-from surfaces.mcp.invocation import ToolInvocationError, invoke_tool
 from storage.postgres import PostgresWorkflowSurfaceUsageRepository
 from .handlers._subsystems import _Subsystems
 from .handlers._surface_usage import (
@@ -493,7 +511,7 @@ app = FastAPI(
 from .handlers.webhook_ingest import webhook_ingest_router
 app.include_router(webhook_ingest_router)
 
-from runtime.operation_catalog import list_resolved_operation_definitions
+from runtime.operation_catalog import OperationCatalogBoundaryError, list_resolved_operation_definitions
 
 
 def _create_capability_endpoint(
@@ -768,17 +786,35 @@ app.mount(
 app.mount("/api/agent-sessions", agent_sessions_app.app)
 
 def _default_workspace_ref() -> str:
-    try:
-        return default_native_authority_refs()[0]
-    except Exception:
-        return "native"
+    return default_native_authority_refs()[0]
 
 
 def _default_runtime_profile_ref() -> str:
+    return default_native_authority_refs()[1]
+
+
+def _request_authority_refs(
+    workspace_ref: str | None,
+    runtime_profile_ref: str | None,
+) -> tuple[str, str]:
+    if workspace_ref and runtime_profile_ref:
+        return workspace_ref, runtime_profile_ref
     try:
-        return default_native_authority_refs()[1]
-    except Exception:
-        return "native"
+        default_workspace_ref, default_runtime_profile_ref = default_native_authority_refs()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": (
+                    "Runtime target authority is unavailable. Provide explicit "
+                    "workspace_ref and runtime_profile_ref or retry when authority recovers."
+                ),
+                "error_code": "runtime_target_authority_unavailable",
+                "cause_type": type(exc).__name__,
+                "cause": str(exc),
+            },
+        ) from exc
+    return workspace_ref or default_workspace_ref, runtime_profile_ref or default_runtime_profile_ref
 
 
 def _default_workflow_provider_slug() -> str:
@@ -798,135 +834,30 @@ def _normalize_operate_mode(value: object) -> str:
     )
 
 
-def _split_operate_operation(
-    operation: str,
-    catalog: dict[str, McpToolDefinition],
-) -> tuple[McpToolDefinition, dict[str, Any], str]:
-    """Resolve an operation id to a catalog tool and selector patch.
-
-    Accepted forms:
-    - ``praxis_bugs`` -> call the tool as-is.
-    - ``praxis_bugs.file`` -> call ``praxis_bugs`` with ``{"action": "file"}``.
-    - ``praxis_query.operator_graph`` -> call ``praxis_query`` with the tool's
-      selector field when it declares one.
-    """
-
-    raw_operation = str(operation or "").strip()
-    if not raw_operation:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "operation is required",
-                "error_code": "operate.operation_required",
-            },
-        )
-
-    canonical_operation = canonical_tool_name(raw_operation)
-    direct = catalog.get(canonical_operation)
-    if direct is not None:
-        return direct, {}, direct.name
-
-    if "." not in canonical_operation:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "message": f"unknown operation: {raw_operation}",
-                "error_code": "operate.operation_not_found",
-            },
-        )
-
-    tool_name, selector_value = canonical_operation.rsplit(".", 1)
-    definition = catalog.get(tool_name)
-    if definition is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "message": f"unknown operation: {raw_operation}",
-                "error_code": "operate.operation_not_found",
-            },
-        )
-    selector_field = definition.selector_field
-    if selector_field is None:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": f"operation {raw_operation!r} names a sub-action, but {tool_name!r} has no selector field",
-                "error_code": "operate.selector_not_supported",
-            },
-        )
-    selector = selector_value.strip().replace("-", "_")
-    if definition.selector_enum and selector not in definition.selector_enum:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": f"unknown {selector_field} {selector!r} for operation {tool_name!r}",
-                "error_code": "operate.selector_not_found",
-                "allowed": list(definition.selector_enum),
-            },
-        )
-    return definition, {selector_field: selector}, f"{tool_name}.{selector}"
-
-
-def _operate_catalog_tool(definition: McpToolDefinition) -> dict[str, Any]:
-    return {
-        "name": definition.name,
-        "description": definition.description,
-        "entrypoint": definition.cli_entrypoint,
-        "describe_command": definition.cli_describe_command,
-        "badges": list(definition.cli_badges),
-        "surface": definition.cli_surface,
-        "tier": definition.cli_tier,
-        "selector_field": definition.selector_field,
-        "selector_default": definition.selector_default,
-        "selector_enum": list(definition.selector_enum),
-        "risk_levels": list(definition.risk_levels),
-        "requires_workflow_token": definition.requires_workflow_token,
-        "input_schema": definition.input_schema,
-        "example_input": definition.example_input(),
-    }
-
-
-def _operate_catalog_operation(definition: McpToolDefinition, action: str) -> dict[str, Any]:
-    selector_field = definition.selector_field
-    params = {selector_field: action} if selector_field else {}
-    operation_name = f"{definition.name}.{action}" if selector_field else definition.name
-    return {
-        "operation": operation_name,
-        "tool": definition.name,
-        "selector_field": selector_field,
-        "selector_value": action if selector_field else None,
-        "risk": definition.risk_for_params(params),
-        "surface": definition.cli_surface,
-        "tier": definition.cli_tier,
-        "description": definition.description,
-        "input_schema": definition.input_schema,
-    }
-
-
 def build_operate_catalog_payload() -> dict[str, Any]:
-    catalog = get_tool_catalog()
-    tools = [_operate_catalog_tool(definition) for _, definition in sorted(catalog.items())]
-    operations: list[dict[str, Any]] = []
-    for _, definition in sorted(catalog.items()):
-        capabilities = definition.capability_rows()
-        if not capabilities:
-            operations.append(_operate_catalog_operation(definition, definition.default_action))
-            continue
-        for capability in capabilities:
-            action = str(capability.get("action") or definition.default_action).strip()
-            if action:
-                operations.append(_operate_catalog_operation(definition, action))
+    subsystems = _ensure_shared_subsystems(app)
+    if subsystems is None:
+        return {
+            "ok": False,
+            "routed_to": "operation_catalog_gateway",
+            "contract_version": 1,
+            "authority": "operation_catalog_registry",
+            "call_path": "/api/operate",
+            "catalog_path": "/api/catalog/operations",
+            "operations": [],
+            "operation_count": 0,
+            "error": "shared subsystems unavailable",
+            "reason_code": "operate.subsystems_unavailable",
+        }
+    payload = build_operation_catalog_payload(subsystems.get_pg_conn())
     return {
+        **payload,
         "ok": True,
-        "routed_to": "unified_operator_catalog",
-        "contract_version": 1,
-        "authority": "surfaces.mcp.catalog.get_tool_catalog",
+        "routed_to": "operation_catalog_gateway",
+        "authority": "operation_catalog_registry",
         "call_path": "/api/operate",
-        "catalog_path": "/api/operate/catalog",
-        "tool_count": len(tools),
-        "operation_count": len(operations),
-        "tools": tools,
-        "operations": operations,
+        "catalog_path": "/api/catalog/operations",
+        "operation_count": int(payload.get("count") or 0),
     }
 
 
@@ -934,10 +865,19 @@ def execute_operate_request(
     body: OperateRequest,
     *,
     header_workflow_token: str | None = None,
+    header_idempotency_key: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    catalog = get_tool_catalog()
-    definition, selector_patch, operation_name = _split_operate_operation(body.operation, catalog)
+    operation_name = str(body.operation or "").strip()
+    if not operation_name:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "operation is required",
+                "error_code": "operate.operation_required",
+            },
+        )
     mode = _normalize_operate_mode(body.mode)
+    idempotency_key = body.idempotency_key or (str(header_idempotency_key or "").strip() or None)
     if body.input is None or not isinstance(body.input, dict):
         raise HTTPException(
             status_code=422,
@@ -946,59 +886,91 @@ def execute_operate_request(
                 "error_code": "operate.invalid_input",
             },
         )
-    tool_input = {**dict(body.input), **selector_patch}
-    workflow_token = str(body.workflow_token or header_workflow_token or "").strip()
+    operation_input = dict(body.input)
     try:
-        result = invoke_tool(definition.name, tool_input, workflow_token=workflow_token)
-    except ToolInvocationError as exc:
-        status = 404 if exc.reason_code == "mcp.tool_not_found" else 400
+        subsystems = _ensure_shared_subsystems(app)
+        if subsystems is None:
+            return (
+                503,
+                {
+                    "ok": False,
+                    "routed_to": "operation_catalog_gateway",
+                    "operation": operation_name,
+                    "error": "shared subsystems unavailable",
+                    "reason_code": "operate.subsystems_unavailable",
+                },
+            )
+        result = execute_operation_from_subsystems(
+            subsystems,
+            operation_name=operation_name,
+            payload=operation_input,
+            idempotency_key_override=idempotency_key,
+            requested_mode=mode,
+        )
+    except OperationCatalogBoundaryError as exc:
         return (
-            status,
+            exc.status_code,
             {
                 "ok": False,
-                "routed_to": "unified_operator_gateway",
+                "routed_to": "operation_catalog_gateway",
                 "operation": operation_name,
-                "tool": definition.name,
-                "error": exc.message,
-                "reason_code": exc.reason_code,
-                **({"details": exc.details} if exc.details else {}),
+                "error": str(exc),
+                "reason_code": "operate.operation_not_found" if exc.status_code == 404 else "operate.catalog_error",
             },
         )
-    if isinstance(result, dict) and result.get("error"):
+    except OperationIdempotencyConflict as exc:
         return (
-            400,
+            409,
             {
                 "ok": False,
-                "routed_to": "unified_operator_gateway",
+                "routed_to": "operation_catalog_gateway",
                 "operation": operation_name,
-                "tool": definition.name,
-                "result": result,
-                "reason_code": str(result.get("reason_code") or "operate.tool_error"),
+                "error": str(exc),
+                "reason_code": "operate.idempotency_conflict",
+                "idempotency_key": exc.idempotency_key,
             },
         )
+    except OperationModeViolation as exc:
+        return (
+            422,
+            {
+                "ok": False,
+                "routed_to": "operation_catalog_gateway",
+                "operation": operation_name,
+                "error": str(exc),
+                "reason_code": "operate.mode_operation_mismatch",
+                "requested_mode": exc.requested_mode,
+                "operation_kind": exc.operation_kind,
+                "posture": exc.posture,
+            },
+        )
+    except ValidationError as exc:
+        return (
+            422,
+            {
+                "ok": False,
+                "routed_to": "operation_catalog_gateway",
+                "operation": operation_name,
+                "error": str(exc),
+                "reason_code": "operate.invalid_input",
+            },
+        )
+    operation_receipt = result.get("operation_receipt") if isinstance(result, dict) else None
+    result_payload = dict(result) if isinstance(result, dict) else {"result": result}
+    if isinstance(result_payload, dict):
+        result_payload.pop("operation_receipt", None)
     return (
         200,
         {
             "ok": True,
-            "routed_to": "unified_operator_gateway",
+            "routed_to": "operation_catalog_gateway",
             "contract_version": 1,
             "operation": operation_name,
-            "tool": definition.name,
             "mode": mode,
-            "selector_field": definition.selector_field,
-            "risk": definition.risk_for_params(tool_input),
-            "idempotency_key": body.idempotency_key,
+            "idempotency_key": idempotency_key,
             "trace": body.trace,
-            "result": result,
-            "operation_receipt": {
-                "operation_name": operation_name,
-                "tool_name": definition.name,
-                "authority_ref": "surfaces.mcp.invocation.invoke_tool",
-                "catalog_ref": "surfaces.mcp.catalog.get_tool_catalog",
-                "posture": "catalog_dispatched",
-                "idempotency_policy": "caller_supplied" if body.idempotency_key else "tool_defined",
-                "execution_status": "completed",
-            },
+            "result": result_payload,
+            "operation_receipt": operation_receipt,
         },
     )
 
@@ -1020,8 +992,8 @@ class WorkflowRunRequest(BaseModel):
     max_tokens: int = 4096
     temperature: float = 0.0
     label: str | None = None
-    workspace_ref: str = Field(default_factory=_default_workspace_ref)
-    runtime_profile_ref: str = Field(default_factory=_default_runtime_profile_ref)
+    workspace_ref: str | None = None
+    runtime_profile_ref: str | None = None
     system_prompt: str | None = None
     context_sections: list[dict[str, str]] | None = None
     max_retries: int = 0
@@ -1122,8 +1094,8 @@ class PublicRunCreateRequest(BaseModel):
     name: str
     workflow_id: str | None = None
     phase: str = "build"
-    workspace_ref: str = Field(default_factory=_default_workspace_ref)
-    runtime_profile_ref: str = Field(default_factory=_default_runtime_profile_ref)
+    workspace_ref: str | None = None
+    runtime_profile_ref: str | None = None
     jobs: list[PublicRunJobRequest]
     force_fresh_run: bool = False
 
@@ -1134,6 +1106,10 @@ class PublicRunCreateRequest(BaseModel):
 
 def _spec_from_request(req: WorkflowRunRequest):
     """Convert a WorkflowRunRequest pydantic model into a WorkflowSpec dataclass."""
+    workspace_ref, runtime_profile_ref = _request_authority_refs(
+        req.workspace_ref,
+        req.runtime_profile_ref,
+    )
     from runtime.workflow import WorkflowSpec
 
     return WorkflowSpec(
@@ -1147,8 +1123,8 @@ def _spec_from_request(req: WorkflowRunRequest):
         max_tokens=req.max_tokens,
         temperature=req.temperature,
         label=req.label,
-        workspace_ref=req.workspace_ref,
-        runtime_profile_ref=req.runtime_profile_ref,
+        workspace_ref=workspace_ref,
+        runtime_profile_ref=runtime_profile_ref,
         system_prompt=req.system_prompt,
         context_sections=req.context_sections,
         max_retries=req.max_retries,
@@ -1567,7 +1543,25 @@ def _serialize_run_job(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _launcher_index_response() -> FileResponse | JSONResponse:
+def _launcher_unreadable_response(path: Path, exc: OSError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "ok": False,
+            "error": "launcher_build_unreadable",
+            "detail": (
+                "Launcher build exists but cannot be read. Check file permissions "
+                "and service resource exhaustion, then restart the launcher service."
+            ),
+            "path": str(path),
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "launch_url": None,
+        },
+    )
+
+
+def _launcher_index_response() -> HTMLResponse | JSONResponse:
     index_path = _APP_DIST_DIR / "index.html"
     if not index_path.is_file():
         return JSONResponse(
@@ -1582,8 +1576,12 @@ def _launcher_index_response() -> FileResponse | JSONResponse:
                 "launch_url": None,
             },
         )
-    return FileResponse(
-        index_path,
+    try:
+        content = index_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _launcher_unreadable_response(index_path, exc)
+    return HTMLResponse(
+        content,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
             "Pragma": "no-cache",
@@ -1591,7 +1589,7 @@ def _launcher_index_response() -> FileResponse | JSONResponse:
     )
 
 
-def _launcher_asset_file_response(filename: str, *, media_type: str) -> FileResponse | JSONResponse:
+def _launcher_asset_file_response(filename: str, *, media_type: str) -> Response | JSONResponse:
     asset_path = _APP_DIST_DIR / filename
     if not asset_path.is_file():
         return JSONResponse(
@@ -1605,8 +1603,12 @@ def _launcher_asset_file_response(filename: str, *, media_type: str) -> FileResp
                 ),
             },
         )
-    return FileResponse(
-        asset_path,
+    try:
+        content = asset_path.read_bytes()
+    except OSError as exc:
+        return _launcher_unreadable_response(asset_path, exc)
+    return Response(
+        content,
         media_type=media_type,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -1785,9 +1787,19 @@ _MOBILE_APP_HTML = """<!doctype html>
       font-size: 13px;
       box-shadow: none;
     }
+    .bubble button {
+      margin-top: 10px;
+      width: 100%;
+    }
+    .meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
     .composer {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       gap: 8px;
       padding: 10px;
       align-items: end;
@@ -1819,6 +1831,7 @@ _MOBILE_APP_HTML = """<!doctype html>
     </main>
     <form id="composer" class="composer">
       <textarea id="prompt" rows="1" placeholder="Ask Praxis"></textarea>
+      <button id="launch" class="secondary" type="button">Launch</button>
       <button id="send" type="submit">Send</button>
     </form>
   </div>
@@ -1835,6 +1848,7 @@ _MOBILE_APP_HTML = """<!doctype html>
       messages: document.getElementById("messages"),
       composer: document.getElementById("composer"),
       prompt: document.getElementById("prompt"),
+      launch: document.getElementById("launch"),
       send: document.getElementById("send")
     };
 
@@ -1842,6 +1856,7 @@ _MOBILE_APP_HTML = """<!doctype html>
     function setBusy(value) {
       state.busy = value;
       el.send.disabled = value;
+      el.launch.disabled = value;
       el.pairButton.disabled = value;
       el.newThread.disabled = value;
     }
@@ -1882,12 +1897,62 @@ _MOBILE_APP_HTML = """<!doctype html>
       }
       if (state.activeAgentId) el.threadSelect.value = state.activeAgentId;
     }
-    function appendBubble(text, kind = "assistant") {
+    function appendBubble(text, kind = "assistant", meta = "") {
       const bubble = document.createElement("div");
       bubble.className = "bubble " + kind;
       bubble.textContent = text || "";
+      if (meta) {
+        const label = document.createElement("div");
+        label.className = "meta";
+        label.textContent = meta;
+        bubble.appendChild(label);
+      }
       el.messages.appendChild(bubble);
       el.messages.scrollTop = el.messages.scrollHeight;
+    }
+    function providerMeta(provider, model) {
+      const left = String(provider || "").trim();
+      const right = String(model || "").trim();
+      return [left, right].filter(Boolean).join(" / ");
+    }
+    function appendApproval(commandId, meta = "") {
+      const bubble = document.createElement("div");
+      bubble.className = "bubble system";
+      bubble.textContent = `Approval required\n${commandId}`;
+      if (meta) {
+        const label = document.createElement("div");
+        label.className = "meta";
+        label.textContent = meta;
+        bubble.appendChild(label);
+      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Approve";
+      button.addEventListener("click", async () => {
+        setBusy(true);
+        button.disabled = true;
+        try {
+          const payload = await approveWorkflowCommand(commandId);
+          const runId = payload.run_id || "";
+          const status = payload.status || payload.command_status || "approved";
+          appendBubble(runId ? `Workflow approved: ${runId}\nStatus: ${status}` : `Workflow approved: ${status}`, "system");
+          if (runId) waitForWorkflow(runId);
+          setStatus("ready");
+        } catch (error) {
+          appendBubble(error.message, "system");
+          setStatus("pair");
+          button.disabled = false;
+        } finally {
+          setBusy(false);
+        }
+      });
+      bubble.appendChild(button);
+      el.messages.appendChild(bubble);
+      el.messages.scrollTop = el.messages.scrollHeight;
+    }
+    function eventMeta(event) {
+      const payload = event && typeof event.payload === "object" ? event.payload : {};
+      return providerMeta(event.provider || payload.provider, event.model || payload.model);
     }
     function renderEvents(events) {
       el.messages.innerHTML = "";
@@ -1899,7 +1964,8 @@ _MOBILE_APP_HTML = """<!doctype html>
         const kind = String(event.event_kind || event.event || "");
         const text = event.text_content || event.text || event.message || "";
         if (!text) continue;
-        appendBubble(text, kind.includes("user") ? "user" : "assistant");
+        const bubbleKind = kind.includes("user") ? "user" : "assistant";
+        appendBubble(text, bubbleKind, bubbleKind === "assistant" ? eventMeta(event) : "");
       }
     }
     async function refreshAgents() {
@@ -1927,6 +1993,49 @@ _MOBILE_APP_HTML = """<!doctype html>
       });
       state.activeAgentId = payload.agent_id;
       await refreshAgents();
+    }
+    async function launchWorkflow(prompt) {
+      const payload = await request("/api/agent-sessions/workflows/launch", {
+        method: "POST",
+        body: JSON.stringify({
+          prompt,
+          agent_id: state.activeAgentId,
+          title: prompt.slice(0, 80)
+        })
+      });
+      const runId = payload.run_id || "";
+      const status = payload.status || payload.command_status || "requested";
+      const meta = providerMeta(payload.launch?.provider, payload.launch?.model);
+      if (payload.approval_required && payload.command_id) {
+        appendApproval(payload.command_id, meta);
+        return payload;
+      }
+      appendBubble(runId ? `Workflow launched: ${runId}\nStatus: ${status}` : `Workflow launch ${status}`, "system", meta);
+      if (runId) waitForWorkflow(runId);
+      return payload;
+    }
+    async function approveWorkflowCommand(commandId) {
+      return request(`/api/agent-sessions/workflows/commands/${encodeURIComponent(commandId)}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ decision: "approve" })
+      });
+    }
+    async function waitForWorkflow(runId) {
+      setStatus("running");
+      const terminal = new Set(["succeeded", "failed", "cancelled"]);
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const payload = await request(`/api/workflow-runs/${encodeURIComponent(runId)}/status`);
+        const status = payload.status || payload.current_state || "running";
+        if (terminal.has(status)) {
+          appendBubble(`Workflow ${status}: ${runId}`, "system");
+          setStatus("ready");
+          return payload;
+        }
+      }
+      appendBubble(`Workflow still running: ${runId}`, "system");
+      setStatus("ready");
+      return null;
     }
     el.pairButton.addEventListener("click", async () => {
       el.pairError.textContent = "";
@@ -1960,6 +2069,22 @@ _MOBILE_APP_HTML = """<!doctype html>
       catch (error) { appendBubble(error.message, "system"); }
       finally { setBusy(false); }
     });
+    el.launch.addEventListener("click", async () => {
+      const prompt = el.prompt.value.trim();
+      if (!prompt) return;
+      el.prompt.value = "";
+      appendBubble(prompt, "user");
+      setBusy(true);
+      try {
+        await launchWorkflow(prompt);
+        setStatus("ready");
+      } catch (error) {
+        appendBubble(error.message, "system");
+        setStatus("pair");
+      } finally {
+        setBusy(false);
+      }
+    });
     el.composer.addEventListener("submit", async (event) => {
       event.preventDefault();
       const prompt = el.prompt.value.trim();
@@ -1974,7 +2099,8 @@ _MOBILE_APP_HTML = """<!doctype html>
             method: "POST",
             body: JSON.stringify({ prompt })
           });
-          appendBubble(payload.reply || "", "assistant");
+          const firstEvent = Array.isArray(payload.turn_events) ? payload.turn_events[0] || {} : {};
+          appendBubble(payload.reply || "", "assistant", providerMeta(payload.provider, firstEvent.model));
         }
         setStatus("ready");
       } catch (error) {
@@ -2875,12 +3001,16 @@ def public_create_run(
 
     phase = str(req.phase or "build").strip() or "build"
     workflow_id = req.workflow_id or f"workflow.api.v1.{_slugify_identifier(req.name, fallback='run')}"
+    workspace_ref, runtime_profile_ref = _request_authority_refs(
+        req.workspace_ref,
+        req.runtime_profile_ref,
+    )
     inline_spec = {
         "name": req.name,
         "workflow_id": workflow_id,
         "phase": phase,
-        "workspace_ref": req.workspace_ref,
-        "runtime_profile_ref": req.runtime_profile_ref,
+        "workspace_ref": workspace_ref,
+        "runtime_profile_ref": runtime_profile_ref,
         "jobs": [
             {
                 "label": job.label,
@@ -3101,6 +3231,94 @@ def public_get_receipt(
 ) -> dict[str, Any]:
     del _auth
     return get_receipt(receipt_id)
+
+
+def _service_lifecycle_subsystems() -> SimpleNamespace:
+    return SimpleNamespace(get_pg_conn=_shared_pg_conn)
+
+
+def _service_lifecycle_http_error(exc: ServiceLifecycleError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={
+            "message": str(exc),
+            "error_code": exc.reason_code,
+            "details": exc.details,
+        },
+    )
+
+
+@app.post("/api/service-lifecycle/targets", tags=["service-lifecycle"])
+def service_lifecycle_register_target(command: RegisterRuntimeTargetCommand) -> dict[str, Any]:
+    try:
+        return handle_register_runtime_target(command, _service_lifecycle_subsystems())
+    except ServiceLifecycleError as exc:
+        raise _service_lifecycle_http_error(exc) from exc
+
+
+@app.get("/api/service-lifecycle/targets", tags=["service-lifecycle"])
+def service_lifecycle_list_targets(
+    substrate_kind: str | None = None,
+    workspace_ref: str | None = None,
+    target_scope: str | None = None,
+    enabled_only: bool = True,
+    limit: int = Query(default=100, ge=1, le=1000),
+) -> dict[str, Any]:
+    command = ListRuntimeTargetsCommand(
+        substrate_kind=substrate_kind,
+        workspace_ref=workspace_ref,
+        target_scope=target_scope,
+        enabled_only=enabled_only,
+        limit=limit,
+    )
+    try:
+        return handle_list_runtime_targets(command, _service_lifecycle_subsystems())
+    except ServiceLifecycleError as exc:
+        raise _service_lifecycle_http_error(exc) from exc
+
+
+@app.post("/api/service-lifecycle/services", tags=["service-lifecycle"])
+def service_lifecycle_register_service(command: RegisterServiceDefinitionCommand) -> dict[str, Any]:
+    try:
+        return handle_register_service_definition(command, _service_lifecycle_subsystems())
+    except ServiceLifecycleError as exc:
+        raise _service_lifecycle_http_error(exc) from exc
+
+
+@app.post("/api/service-lifecycle/desired-state", tags=["service-lifecycle"])
+def service_lifecycle_declare_desired_state(
+    command: DeclareServiceDesiredStateCommand,
+) -> dict[str, Any]:
+    try:
+        return handle_declare_service_desired_state(command, _service_lifecycle_subsystems())
+    except ServiceLifecycleError as exc:
+        raise _service_lifecycle_http_error(exc) from exc
+
+
+@app.post("/api/service-lifecycle/events", tags=["service-lifecycle"])
+def service_lifecycle_record_event(command: RecordServiceLifecycleEventCommand) -> dict[str, Any]:
+    try:
+        return handle_record_service_lifecycle_event(command, _service_lifecycle_subsystems())
+    except ServiceLifecycleError as exc:
+        raise _service_lifecycle_http_error(exc) from exc
+
+
+@app.get(
+    "/api/service-lifecycle/projection/{service_ref}/{runtime_target_ref}",
+    tags=["service-lifecycle"],
+)
+def service_lifecycle_get_projection(
+    service_ref: str,
+    runtime_target_ref: str,
+) -> dict[str, Any]:
+    command = QueryServiceProjectionCommand(
+        service_ref=service_ref,
+        runtime_target_ref=runtime_target_ref,
+    )
+    try:
+        return handle_query_service_projection(command, _service_lifecycle_subsystems())
+    except ServiceLifecycleError as exc:
+        raise _service_lifecycle_http_error(exc) from exc
 
 
 def _public_runtime_catalog_payload() -> dict[str, Any]:
@@ -3739,6 +3957,8 @@ def agent_sessions_index_get() -> dict[str, Any]:
             "/api/agent-sessions/agents/{agent_id}/messages",
             "/api/agent-sessions/agents/{agent_id}/stream",
             "/api/agent-sessions/agents/{agent_id}",
+            "/api/agent-sessions/workflows/launch",
+            "/api/agent-sessions/workflows/commands/{command_id}/approve",
         ],
     }
 
@@ -4165,12 +4385,16 @@ def submit_queue_job(req: QueueSubmitRequest) -> dict[str, Any]:
         agent = f"{_default_workflow_provider_slug()}/{req.spec.model_slug}"
     else:
         agent = f"auto/{task_type}"
+    workspace_ref, runtime_profile_ref = _request_authority_refs(
+        req.spec.workspace_ref,
+        req.spec.runtime_profile_ref,
+    )
     spec = {
         "name": label,
         "workflow_id": f"workflow.api.{label.lower().replace(' ', '.')}",
         "phase": task_type,
-        "workspace_ref": req.spec.workspace_ref,
-        "runtime_profile_ref": req.spec.runtime_profile_ref,
+        "workspace_ref": workspace_ref,
+        "runtime_profile_ref": runtime_profile_ref,
         "jobs": [
             {
                 "label": label,
@@ -4716,11 +4940,13 @@ def get_operate_catalog() -> dict[str, Any]:
 def post_operate(
     body: OperateRequest,
     x_workflow_token: str | None = Header(default=None, alias="X-Workflow-Token"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
     """Call one catalog-backed operator operation through the unified gateway."""
     status_code, payload = execute_operate_request(
         body,
         header_workflow_token=x_workflow_token,
+        header_idempotency_key=idempotency_key,
     )
     return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
 

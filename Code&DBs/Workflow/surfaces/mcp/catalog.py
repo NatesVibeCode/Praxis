@@ -288,6 +288,51 @@ class McpToolDefinition:
         )
 
     @property
+    def action_requirements(self) -> dict[str, dict[str, Any]]:
+        raw = self.input_schema.get("x-action-requirements")
+        if not isinstance(raw, dict):
+            return {}
+        requirements: dict[str, dict[str, Any]] = {}
+        for action, value in raw.items():
+            action_name = _slugify_action(action)
+            if not action_name or not isinstance(value, dict):
+                continue
+            normalized: dict[str, Any] = {}
+            required = value.get("required")
+            if isinstance(required, list):
+                normalized["required"] = [
+                    str(item).strip()
+                    for item in required
+                    if str(item).strip() and str(item).strip() != "action"
+                ]
+            any_of = value.get("anyOf")
+            if isinstance(any_of, list):
+                groups: list[list[str]] = []
+                for group in any_of:
+                    if not isinstance(group, list):
+                        continue
+                    cleaned = [
+                        str(item).strip()
+                        for item in group
+                        if str(item).strip() and str(item).strip() != "action"
+                    ]
+                    if cleaned:
+                        groups.append(cleaned)
+                if groups:
+                    normalized["anyOf"] = groups
+            if normalized:
+                requirements[action_name] = normalized
+        return requirements
+
+    def required_args_for_action(self, action: object | None) -> tuple[str, ...]:
+        action_name = _slugify_action(action)
+        requirements = self.action_requirements.get(action_name, {})
+        raw_required = requirements.get("required")
+        if not isinstance(raw_required, list):
+            return self.required_args
+        return tuple(str(value) for value in raw_required if str(value).strip())
+
+    @property
     def inputs(self) -> tuple[str, ...]:
         return tuple(name for name in self.input_properties if name != "action")
 
@@ -321,13 +366,17 @@ class McpToolDefinition:
             actions = [default_action]
         description = self.description
         inputs = list(self.inputs)
-        required_args = list(self.required_args)
         return [
             {
                 "action": action,
                 "description": description,
                 "inputs": inputs,
-                "requiredArgs": required_args,
+                "requiredArgs": list(self.required_args_for_action(action)),
+                **(
+                    {"requiredAnyOf": self.action_requirements[action]["anyOf"]}
+                    if isinstance(self.action_requirements.get(action, {}).get("anyOf"), list)
+                    else {}
+                ),
                 "risk": self.risk_for_selector(action),
                 "surface": self.cli_surface,
                 "tier": self.cli_tier,

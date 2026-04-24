@@ -633,16 +633,6 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
     route_policy = getattr(TaskTypeRouter(conn), "route_policy", None)
     run_id = str(job.get("run_id") or "").strip()
     job_label = str(job.get("label") or "").strip()
-    persisted_route_plan = _route_plan_from_run_envelope(
-        conn,
-        run_id=run_id,
-        job_label=job_label,
-    )
-    persisted_candidates = persisted_route_plan.get("failover_chain")
-    if isinstance(persisted_candidates, list):
-        persisted_candidates = [str(item).strip() for item in persisted_candidates if str(item).strip()]
-    else:
-        persisted_candidates = []
 
     def _route_score(candidate: str) -> tuple[float, int]:
         meta = route_meta.get(candidate, {})
@@ -679,14 +669,13 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
             if route_policy is not None
             else 0.15
         )
-        candidate_signature_candidates = persisted_candidates or candidates
         jitter = _deterministic_route_jitter(
             run_id=run_id,
             job_label=job_label,
             candidate=candidate,
             candidate_index=candidates.index(candidate),
             route_task_type=route_task_type,
-            route_candidates=candidate_signature_candidates,
+            route_candidates=candidates,
         )
         score = (
             (health * route_health_weight)

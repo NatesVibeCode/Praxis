@@ -19,6 +19,12 @@ from adapters.docker_runner import normalize_command_parts_for_docker
 from registry.provider_execution_registry import build_command, resolve_api_key_env_vars
 from runtime.load_balancer import get_load_balancer
 from runtime.execution_transport import resolve_execution_transport
+from runtime.host_resource_admission import (
+    HostResourceAdmissionError,
+    HostResourceAdmissionUnavailable,
+    HostResourceCapacityError,
+    hold_host_resources_for_sandbox,
+)
 from runtime.sandbox_runtime import SandboxRuntime, derive_sandbox_identity
 from runtime.workflow.mcp_bridge import (
     augment_cli_command_for_workflow_mcp,
@@ -344,6 +350,17 @@ def _provider_slot_acquisition_failure(
             f"for {provider_slug}: {exc}"
         ),
         "error_code": "provider_slot_acquisition_error",
+    }
+
+
+def _host_resource_admission_failure(exc: HostResourceAdmissionError) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": str(exc),
+        "error_code": exc.reason_code,
+        "host_resource_admission": exc.to_dict(),
     }
 
 
@@ -728,28 +745,41 @@ def execute_cli(
             },
         )
 
+        sandbox_metadata = {
+            "provider_slug": provider_slug,
+            "execution_bundle": execution_bundle or {},
+            **({"workspace_overlays": workspace_overlays} if workspace_overlays else {}),
+            **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
+        }
+        resource_claim = None
         try:
-            result = SandboxRuntime().execute_command(
-                provider_name=sandbox_provider,
-                sandbox_session_id=sandbox_session_id,
-                sandbox_group_id=sandbox_group_id,
-                workdir=workdir,
-                command=shlex.join(cmd),
-                stdin_text=stdin_text,
-                env=env,
-                timeout_seconds=timeout,
-                network_policy=network_policy,
-                workspace_materialization=workspace_materialization,
+            with hold_host_resources_for_sandbox(
+                sandbox_provider=sandbox_provider,
                 execution_transport="cli",
-                image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
-                metadata={
-                    "provider_slug": provider_slug,
-                    "execution_bundle": execution_bundle or {},
-                    **({"workspace_overlays": workspace_overlays} if workspace_overlays else {}),
-                    **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
-                },
-                artifact_store=artifact_store,
-            )
+                sandbox_session_id=sandbox_session_id,
+                timeout_seconds=timeout,
+                metadata=sandbox_metadata,
+            ) as resource_claim:
+                result = SandboxRuntime().execute_command(
+                    provider_name=sandbox_provider,
+                    sandbox_session_id=sandbox_session_id,
+                    sandbox_group_id=sandbox_group_id,
+                    workdir=workdir,
+                    command=shlex.join(cmd),
+                    stdin_text=stdin_text,
+                    env=env,
+                    timeout_seconds=timeout,
+                    network_policy=network_policy,
+                    workspace_materialization=workspace_materialization,
+                    execution_transport="cli",
+                    image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
+                    metadata=sandbox_metadata,
+                    artifact_store=artifact_store,
+                )
+        except (HostResourceCapacityError, HostResourceAdmissionUnavailable) as exc:
+            return _host_resource_admission_failure(exc)
+        except HostResourceAdmissionError as exc:
+            return _host_resource_admission_failure(exc)
         except RuntimeError as exc:
             return {
                 "status": "failed",
@@ -768,6 +798,8 @@ def execute_cli(
             }
 
         payload = _result_payload(result, timeout=timeout, parse_json_output=True)
+        if resource_claim is not None:
+            payload["host_resource_admission"] = resource_claim.to_dict()
         if sandbox_profile_ref:
             payload["sandbox_profile_ref"] = sandbox_profile_ref
         if isinstance(sandbox_profile, dict):
@@ -908,29 +940,42 @@ def execute_api(
             if sandbox_profile_ref:
                 payload["sandbox_profile_ref"] = sandbox_profile_ref
             return payload
+        sandbox_metadata = {
+            "provider_slug": provider_slug,
+            "model_slug": model_slug,
+            "execution_bundle": execution_bundle or {},
+            **({"workspace_overlays": decision_overlays} if decision_overlays else {}),
+            **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
+        }
+        resource_claim = None
         try:
-            result = SandboxRuntime().execute_command(
-                provider_name=sandbox_provider,
-                sandbox_session_id=sandbox_session_id,
-                sandbox_group_id=sandbox_group_id,
-                workdir=resolved_workdir,
-                command=command,
-                stdin_text=prompt,
-                env=env,
-                timeout_seconds=timeout,
-                network_policy=network_policy,
-                workspace_materialization=workspace_materialization,
+            with hold_host_resources_for_sandbox(
+                sandbox_provider=sandbox_provider,
                 execution_transport="api",
-                image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
-                metadata={
-                    "provider_slug": provider_slug,
-                    "model_slug": model_slug,
-                    "execution_bundle": execution_bundle or {},
-                    **({"workspace_overlays": decision_overlays} if decision_overlays else {}),
-                    **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
-                },
-                artifact_store=artifact_store,
-            )
+                sandbox_session_id=sandbox_session_id,
+                timeout_seconds=timeout,
+                metadata=sandbox_metadata,
+            ) as resource_claim:
+                result = SandboxRuntime().execute_command(
+                    provider_name=sandbox_provider,
+                    sandbox_session_id=sandbox_session_id,
+                    sandbox_group_id=sandbox_group_id,
+                    workdir=resolved_workdir,
+                    command=command,
+                    stdin_text=prompt,
+                    env=env,
+                    timeout_seconds=timeout,
+                    network_policy=network_policy,
+                    workspace_materialization=workspace_materialization,
+                    execution_transport="api",
+                    image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
+                    metadata=sandbox_metadata,
+                    artifact_store=artifact_store,
+                )
+        except (HostResourceCapacityError, HostResourceAdmissionUnavailable) as exc:
+            return _host_resource_admission_failure(exc)
+        except HostResourceAdmissionError as exc:
+            return _host_resource_admission_failure(exc)
         except RuntimeError as exc:
             return {
                 "status": "failed",
@@ -949,6 +994,8 @@ def execute_api(
             }
 
         payload = _result_payload(result, timeout=timeout, parse_json_output=True)
+        if resource_claim is not None:
+            payload["host_resource_admission"] = resource_claim.to_dict()
         if sandbox_profile_ref:
             payload["sandbox_profile_ref"] = sandbox_profile_ref
         if isinstance(sandbox_profile, dict):

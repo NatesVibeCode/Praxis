@@ -229,3 +229,13 @@ def test_non_durable_bootstrap_only_allowlist_members_remain_in_bucket() -> None
         "the bootstrap_only bucket — remove them from the allowlist or "
         "reclassify them explicitly:\n  - " + "\n  - ".join(sorted(orphans))
     )
+
+
+def test_operation_replay_receipt_index_allows_repeated_read_only_observations() -> None:
+    sql_text = (MIGRATION_ROOT / "212_operation_replay_receipts.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "execution_status = 'completed'" in sql_text
+    assert "operation_kind = 'command'" in sql_text
+    assert "execution_status IN ('completed', 'replayed')" not in sql_text

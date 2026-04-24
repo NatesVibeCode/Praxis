@@ -556,6 +556,43 @@ def resolution_payload(resolution: LauncherResolution) -> dict[str, Any]:
     return {"ok": True, "resolution": resolution.to_dict(), "errors": [], "warnings": []}
 
 
+def _praxis_checkout_root_from_path(path: Path) -> Path | None:
+    current = path.resolve(strict=False)
+    for candidate in (current, *current.parents):
+        if (
+            (candidate / "scripts" / "praxis").is_file()
+            and (candidate / "Code&DBs" / "Workflow").is_dir()
+            and (candidate / "config" / "workspace_layout.json").is_file()
+        ):
+            return candidate.resolve(strict=False)
+    return None
+
+
+def _assert_active_checkout_matches_resolution(
+    resolution: LauncherResolution,
+    *,
+    cwd: Path | None = None,
+) -> None:
+    active_checkout = _praxis_checkout_root_from_path(cwd or Path.cwd())
+    if active_checkout is None:
+        return
+    resolved_repo = resolution.repo_root.resolve(strict=False)
+    if active_checkout == resolved_repo:
+        return
+    raise LauncherAuthorityError(
+        "launcher_active_workspace_mismatch",
+        (
+            "global praxis launcher resolved a different Praxis checkout than "
+            "the current working tree"
+        ),
+        details={
+            "active_checkout": str(active_checkout),
+            "resolved_repo_root": str(resolved_repo),
+            "repair": "run ./scripts/praxis from the active checkout or reconfigure the launcher authority",
+        },
+    )
+
+
 def _redact_url(value: str | None) -> str | None:
     if not value:
         return None
@@ -683,6 +720,7 @@ def launcher_main(argv: list[str] | None = None) -> int:
     try:
         seed = read_launcher_seed_config()
         resolution = resolve_launcher_workspace(seed)
+        _assert_active_checkout_matches_resolution(resolution)
     except LauncherAuthorityError as exc:
         sys.stderr.write(f"praxis: {exc.message}\n")
         sys.stderr.write("repair: run ./scripts/bootstrap or praxis launcher configure\n")
