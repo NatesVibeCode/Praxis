@@ -1687,7 +1687,12 @@ def tool_praxis_launch_plan(params: dict) -> dict:
             )
         }
     has_packets = bool(plan.get("packets"))
-    has_from_source = bool(plan.get("from_bugs") or plan.get("from_roadmap_items"))
+    has_from_source = bool(
+        plan.get("from_bugs")
+        or plan.get("from_roadmap_items")
+        or plan.get("from_ideas")
+        or plan.get("from_friction")
+    )
     if has_packets and has_from_source:
         return {
             "error": (
@@ -1698,7 +1703,8 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     if not has_packets and not has_from_source:
         return {
             "error": (
-                "plan must supply either 'packets', 'from_bugs', or 'from_roadmap_items'"
+                "plan must supply either 'packets', 'from_bugs', "
+                "'from_roadmap_items', 'from_ideas', or 'from_friction'"
             )
         }
 
@@ -2083,6 +2089,27 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                                     "Stage defaults to 'fix' when the roadmap item has a "
                                     "source_bug_id, else 'build'. Completed items are dropped. "
                                     "from_bugs and from_roadmap_items can be combined."
+                                ),
+                            },
+                            "from_ideas": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "Operator idea IDs to materialize into PlanPackets. Each "
+                                    "open idea becomes one build-stage packet; promoted, "
+                                    "rejected, superseded, and archived ideas are dropped — "
+                                    "those have moved to roadmap or bug surfaces. Combines "
+                                    "with other from_* shortcuts."
+                                ),
+                            },
+                            "from_friction": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "friction_event IDs to materialize into fix-stage packets. "
+                                    "Description carries friction_type + source + job_label + "
+                                    "message. No lifecycle filter — events are events. "
+                                    "Combines with other from_* shortcuts."
                                 ),
                             },
                             "packets": {

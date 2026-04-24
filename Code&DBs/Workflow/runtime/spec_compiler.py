@@ -642,6 +642,8 @@ class Plan:
     workdir: str | None = None
     from_bugs: list[str] | None = None
     from_roadmap_items: list[str] | None = None
+    from_ideas: list[str] | None = None
+    from_friction: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -870,6 +872,128 @@ def _plan_packets_from_roadmap_items(
     return plan_packets
 
 
+def _plan_packets_from_ideas(
+    idea_ids: list[str],
+    *,
+    conn: Any,
+) -> list[PlanPacket]:
+    """Materialize PlanPackets from operator_ideas rows (open status only).
+
+    Each open idea becomes one PlanPacket. Description is built from title
+    + summary + owner_ref + decision_ref. Stage defaults to 'build' — ideas
+    are forward work by nature. Non-open ideas (promoted / rejected /
+    superseded / archived) are silently dropped; the roadmap or bug tracker
+    is the right surface for those lifecycles.
+    """
+    if not idea_ids:
+        return []
+    deduped = list({item.strip(): None for item in idea_ids if item and item.strip()})
+    if not deduped:
+        return []
+    placeholders = ", ".join(f"${i+1}" for i in range(len(deduped)))
+    rows = conn.execute(
+        f"SELECT idea_id, title, summary, status, owner_ref, decision_ref "
+        f"FROM operator_ideas WHERE idea_id IN ({placeholders})",
+        *deduped,
+    )
+    ideas = [
+        dict(row) for row in rows or [] if str(dict(row).get("status") or "") == "open"
+    ]
+    if not ideas:
+        return []
+    plan_packets: list[PlanPacket] = []
+    for idea in ideas:
+        idea_id = str(idea["idea_id"])
+        title = str(idea.get("title") or idea_id)
+        summary = str(idea.get("summary") or "").strip()
+        owner = str(idea.get("owner_ref") or "").strip()
+        decision = str(idea.get("decision_ref") or "").strip()
+
+        description_lines = [f"Operator idea: {title}"]
+        if summary:
+            description_lines.append(f"Summary: {summary}")
+        if owner:
+            description_lines.append(f"Owner: {owner}")
+        if decision:
+            description_lines.append(f"Decision ref: {decision}")
+        description = "\n".join(description_lines)
+
+        label_seed = idea_id
+        for prefix in ("operator_idea.", "idea."):
+            if label_seed.startswith(prefix):
+                label_seed = label_seed[len(prefix) :]
+                break
+        label = label_seed[:64]
+
+        plan_packets.append(
+            PlanPacket(
+                description=description,
+                write=["."],
+                stage="build",
+                label=label,
+            )
+        )
+    return plan_packets
+
+
+def _plan_packets_from_friction(
+    event_ids: list[str],
+    *,
+    conn: Any,
+) -> list[PlanPacket]:
+    """Materialize PlanPackets from friction_events rows.
+
+    Each event becomes one PlanPacket describing the friction_type +
+    message + job_label that produced it. Stage defaults to 'fix' because
+    friction is, by definition, a failure signal. No lifecycle filter —
+    friction_events are events, not tracked items.
+    """
+    if not event_ids:
+        return []
+    deduped = list({item.strip(): None for item in event_ids if item and item.strip()})
+    if not deduped:
+        return []
+    placeholders = ", ".join(f"${i+1}" for i in range(len(deduped)))
+    rows = conn.execute(
+        f"SELECT event_id, friction_type, source, job_label, message, timestamp "
+        f"FROM friction_events WHERE event_id IN ({placeholders})",
+        *deduped,
+    )
+    events = [dict(row) for row in rows or []]
+    if not events:
+        return []
+    plan_packets: list[PlanPacket] = []
+    for event in events:
+        event_id = str(event["event_id"])
+        friction_type = str(event.get("friction_type") or "").strip() or "friction"
+        source = str(event.get("source") or "").strip() or "unknown"
+        job_label = str(event.get("job_label") or "").strip() or "unknown"
+        message = str(event.get("message") or "").strip()
+
+        description_lines = [
+            f"Friction event: {friction_type}",
+            f"Source: {source}",
+            f"Job label: {job_label}",
+        ]
+        if message:
+            description_lines.append(f"Message: {message}")
+        description = "\n".join(description_lines)
+
+        # event_id can be long; truncate for a reasonable label.
+        label_seed = event_id.replace(".", "_")
+        label = f"friction_{label_seed[:56]}"
+
+        plan_packets.append(
+            PlanPacket(
+                description=description,
+                write=["."],
+                stage="fix",
+                label=label,
+            )
+        )
+    return plan_packets
+
+
 def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
     if isinstance(plan, Plan):
         return plan
@@ -880,7 +1004,14 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
     explicit_packets_raw = plan.get("packets") or []
     from_bugs_raw = plan.get("from_bugs") or None
     from_roadmap_items_raw = plan.get("from_roadmap_items") or None
-    has_from_source = bool(from_bugs_raw or from_roadmap_items_raw)
+    from_ideas_raw = plan.get("from_ideas") or None
+    from_friction_raw = plan.get("from_friction") or None
+    has_from_source = bool(
+        from_bugs_raw
+        or from_roadmap_items_raw
+        or from_ideas_raw
+        or from_friction_raw
+    )
 
     if explicit_packets_raw and has_from_source:
         raise ValueError(
@@ -891,6 +1022,8 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
     plan_name = str(plan.get("name") or "launch_plan").strip() or "launch_plan"
     from_bugs: list[str] | None = None
     from_roadmap_items: list[str] | None = None
+    from_ideas: list[str] | None = None
+    from_friction: list[str] | None = None
     packets: list[PlanPacket] = []
 
     if has_from_source:
@@ -937,6 +1070,41 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
             )
         packets.extend(roadmap_packets)
 
+    if from_ideas_raw:
+        if not isinstance(from_ideas_raw, list) or not all(
+            isinstance(item, str) for item in from_ideas_raw
+        ):
+            raise ValueError(
+                "plan.from_ideas must be a list of operator_idea ID strings"
+            )
+        from_ideas = list(from_ideas_raw)
+        idea_packets = _plan_packets_from_ideas(from_ideas, conn=conn)
+        if not idea_packets:
+            raise ValueError(
+                f"from_ideas supplied {len(from_ideas)} ID(s) but no packets "
+                "could be materialized — check IDs exist in Praxis.db and "
+                "are still open (promoted/rejected/superseded/archived skipped)"
+            )
+        packets.extend(idea_packets)
+
+    if from_friction_raw:
+        if not isinstance(from_friction_raw, list) or not all(
+            isinstance(item, str) for item in from_friction_raw
+        ):
+            raise ValueError(
+                "plan.from_friction must be a list of friction_event ID strings"
+            )
+        from_friction = list(from_friction_raw)
+        friction_packets = _plan_packets_from_friction(
+            from_friction, conn=conn
+        )
+        if not friction_packets:
+            raise ValueError(
+                f"from_friction supplied {len(from_friction)} ID(s) but no "
+                "packets could be materialized — check IDs exist in Praxis.db"
+            )
+        packets.extend(friction_packets)
+
     if not has_from_source:
         packets = [_coerce_packet(p) for p in explicit_packets_raw]
 
@@ -949,6 +1117,8 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
         workdir=plan.get("workdir"),
         from_bugs=from_bugs,
         from_roadmap_items=from_roadmap_items,
+        from_ideas=from_ideas,
+        from_friction=from_friction,
     )
 
 
@@ -1272,7 +1442,12 @@ def propose_plan(
     # Source-authority-derived packets default write=["."] (workspace root).
     # Warn so the caller can narrow before launch if they have a tighter
     # scope in mind.
-    if plan_obj.from_bugs or plan_obj.from_roadmap_items:
+    if (
+        plan_obj.from_bugs
+        or plan_obj.from_roadmap_items
+        or plan_obj.from_ideas
+        or plan_obj.from_friction
+    ):
         broad_scope_labels = sorted(
             packet["label"]
             for packet in packet_declarations

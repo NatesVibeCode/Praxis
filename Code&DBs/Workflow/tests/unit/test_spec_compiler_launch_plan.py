@@ -388,22 +388,30 @@ class _BugFetchConn:
 
 
 class _MultiSourceConn:
-    """Conn that dispatches bugs and roadmap queries to separate dicts."""
+    """Conn that dispatches bug / roadmap / idea / friction queries by prefix."""
 
     def __init__(
         self,
         *,
         bugs: dict[str, dict[str, object]] | None = None,
         roadmap_items: dict[str, dict[str, object]] | None = None,
+        ideas: dict[str, dict[str, object]] | None = None,
+        friction_events: dict[str, dict[str, object]] | None = None,
     ) -> None:
         self._bugs = bugs or {}
         self._roadmap_items = roadmap_items or {}
+        self._ideas = ideas or {}
+        self._friction = friction_events or {}
 
     def execute(self, query, *params):
         if query.startswith("SELECT bug_id, title"):
             return [self._bugs[bid] for bid in params if bid in self._bugs]
         if query.startswith("SELECT roadmap_item_id"):
             return [self._roadmap_items[rid] for rid in params if rid in self._roadmap_items]
+        if query.startswith("SELECT idea_id"):
+            return [self._ideas[iid] for iid in params if iid in self._ideas]
+        if query.startswith("SELECT event_id, friction_type"):
+            return [self._friction[eid] for eid in params if eid in self._friction]
         raise AssertionError(f"unexpected query: {query!r}")
 
 
@@ -744,6 +752,158 @@ def test_coerce_plan_combines_from_bugs_and_from_roadmap_items(monkeypatch) -> N
     assert len(plan.packets) == 2
     assert plan.packets[0].bug_refs == ["BUG-AUTH-1"]  # bug cluster
     assert plan.packets[1].label == "ship_it"  # roadmap item
+
+
+def test_coerce_plan_with_from_ideas_materializes_open_ideas_only() -> None:
+    conn = _MultiSourceConn(
+        ideas={
+            "operator_idea.ingest_shopify_orders": {
+                "idea_id": "operator_idea.ingest_shopify_orders",
+                "title": "Ingest Shopify orders",
+                "summary": "Pull Shopify orders into the canonical order dataset daily.",
+                "status": "open",
+                "owner_ref": "nate@praxis",
+                "decision_ref": "decision.2026-04-15.data-ingest-scope",
+            },
+            "operator_idea.moon_inbox_digest": {
+                "idea_id": "operator_idea.moon_inbox_digest",
+                "title": "Moon inbox digest",
+                "summary": "Daily digest of Moon notifications.",
+                "status": "open",
+                "owner_ref": None,
+                "decision_ref": "decision.2026-04-20.moon-surfaces",
+            },
+            "operator_idea.old_promoted": {
+                "idea_id": "operator_idea.old_promoted",
+                "title": "Already promoted",
+                "summary": "Moved to roadmap already.",
+                "status": "promoted",
+                "owner_ref": None,
+                "decision_ref": "decision.2026-04-01.whatever",
+            },
+        },
+    )
+
+    plan = _coerce_plan(
+        {
+            "name": "idea_intake",
+            "from_ideas": [
+                "operator_idea.ingest_shopify_orders",
+                "operator_idea.moon_inbox_digest",
+                "operator_idea.old_promoted",
+            ],
+        },
+        conn=conn,
+    )
+
+    assert len(plan.packets) == 2  # promoted idea dropped
+    assert plan.packets[0].stage == "build"
+    assert plan.packets[0].label == "ingest_shopify_orders"
+    assert "Operator idea: Ingest Shopify orders" in plan.packets[0].description
+    assert "Owner: nate@praxis" in plan.packets[0].description
+    assert plan.packets[1].label == "moon_inbox_digest"
+
+
+def test_coerce_plan_with_from_friction_materializes_fix_packets() -> None:
+    conn = _MultiSourceConn(
+        friction_events={
+            "friction.workflow_submit_001": {
+                "event_id": "friction.workflow_submit_001",
+                "friction_type": "submission_required_missing",
+                "source": "workflow.submit",
+                "job_label": "smoke_submit",
+                "message": "Sealed submission payload was not present.",
+                "timestamp": "2026-04-24T09:00:00+00:00",
+            },
+            "friction.catalog_hang_017": {
+                "event_id": "friction.catalog_hang_017",
+                "friction_type": "catalog_timeout",
+                "source": "mcp.catalog",
+                "job_label": "list_tools",
+                "message": "Catalog load exceeded 30s.",
+                "timestamp": "2026-04-24T10:15:00+00:00",
+            },
+        },
+    )
+
+    plan = _coerce_plan(
+        {
+            "name": "friction_burn",
+            "from_friction": [
+                "friction.workflow_submit_001",
+                "friction.catalog_hang_017",
+            ],
+        },
+        conn=conn,
+    )
+
+    assert len(plan.packets) == 2
+    assert all(packet.stage == "fix" for packet in plan.packets)
+    first = plan.packets[0]
+    assert first.label.startswith("friction_")
+    assert "Friction event: submission_required_missing" in first.description
+    assert "Source: workflow.submit" in first.description
+    assert "Sealed submission payload" in first.description
+
+
+def test_coerce_plan_combines_all_four_source_shortcuts(monkeypatch) -> None:
+    import runtime.bug_resolution_program as bug_program_mod
+
+    monkeypatch.setattr(bug_program_mod, "derive_bug_packets", _fake_derive)
+
+    conn = _MultiSourceConn(
+        bugs={"BUG-AUTH-1": {"bug_id": "BUG-AUTH-1", "title": "a", "replay_ready": True}},
+        roadmap_items={
+            "roadmap_item.ship": {
+                "roadmap_item_id": "roadmap_item.ship",
+                "title": "Ship it",
+                "summary": "Launch.",
+                "acceptance_criteria": {"must_have": ["launched"]},
+                "priority": "p1",
+                "lifecycle": "planned",
+                "source_bug_id": None,
+            }
+        },
+        ideas={
+            "operator_idea.something": {
+                "idea_id": "operator_idea.something",
+                "title": "Something",
+                "summary": "An idea.",
+                "status": "open",
+                "owner_ref": None,
+                "decision_ref": "decision.x",
+            }
+        },
+        friction_events={
+            "friction.evt_1": {
+                "event_id": "friction.evt_1",
+                "friction_type": "thing",
+                "source": "system",
+                "job_label": "job",
+                "message": "broke",
+                "timestamp": "2026-04-24T00:00:00+00:00",
+            }
+        },
+    )
+
+    plan = _coerce_plan(
+        {
+            "name": "combined_all",
+            "from_bugs": ["BUG-AUTH-1"],
+            "from_roadmap_items": ["roadmap_item.ship"],
+            "from_ideas": ["operator_idea.something"],
+            "from_friction": ["friction.evt_1"],
+        },
+        conn=conn,
+    )
+
+    # Source order: bugs, roadmap, ideas, friction.
+    labels = [p.label for p in plan.packets]
+    assert len(plan.packets) == 4
+    assert labels[0] == "w0-authority-repair"  # bug cluster
+    assert labels[1] == "ship"  # roadmap
+    assert labels[2] == "something"  # idea
+    assert labels[3].startswith("friction_")
 
 
 def test_propose_plan_from_bugs_warns_on_workspace_root_scope(monkeypatch) -> None:

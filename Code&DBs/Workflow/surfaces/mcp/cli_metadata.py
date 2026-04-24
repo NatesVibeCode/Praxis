@@ -1041,6 +1041,32 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     }
                 },
             ),
+            _example(
+                "Materialize packets from open operator ideas",
+                {
+                    "plan": {
+                        "name": "idea_intake_round",
+                        "why": "Explore open operator ideas as bounded build packets.",
+                        "from_ideas": [
+                            "operator_idea.ingest_shopify_orders",
+                            "operator_idea.moon_inbox_digest",
+                        ],
+                    }
+                },
+            ),
+            _example(
+                "Materialize fix packets from friction events",
+                {
+                    "plan": {
+                        "name": "friction_burn_20260424",
+                        "why": "Close out the friction events logged today.",
+                        "from_friction": [
+                            "friction.workflow_submit_001",
+                            "friction.workflow_submit_002",
+                        ],
+                    }
+                },
+            ),
         ],
     ),
 }
