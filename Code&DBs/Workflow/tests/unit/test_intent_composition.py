@@ -12,8 +12,11 @@ import pytest
 from runtime import spec_compiler
 from runtime.intent_composition import (
     ComposeAndLaunchBlocked,
+    PlanLifecycle,
+    PlanLifecycleEvent,
     compose_and_launch,
     compose_plan_from_intent,
+    get_plan_lifecycle,
     packets_from_steps,
     reorder_packets_by_write_conflicts,
 )

@@ -35,8 +35,11 @@
     .bubble.assistant { align-self: flex-start; background: var(--assistant-bubble); }
     .bubble.system { align-self: stretch; background: var(--bg-raised); color: var(--fg-dim); font-size: 12px; text-align: center; }
     .bubble.error { align-self: stretch; background: #2a1415; border-color: var(--error); color: var(--error); font-size: 13px; }
-    .bubble.plan { align-self: flex-start; background: #1f1a05; border-color: var(--plan); }
+    .bubble.plan { align-self: flex-start; background: #1f1a05; border-color: var(--plan); max-width: 96%; }
     .bubble-meta { font-size: 10px; color: var(--fg-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .plan-actions { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(250, 204, 21, 0.25); flex-wrap: wrap; }
+    .plan-actions button { font-size: 12px; padding: 6px 12px; }
+    .plan-actions button.primary { background: var(--plan); color: #1a1605; border-color: var(--plan); font-weight: 700; }
     .composer { padding: 10px; border-top: 1px solid var(--border); background: var(--bg-raised); display: flex; flex-direction: column; gap: 8px; }
     .composer textarea { background: var(--bg); border: 1px solid var(--border); color: var(--fg); padding: 10px; border-radius: 6px; resize: vertical; min-height: 64px; width: 100%; font-size: 15px; }
     .composer-actions { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
@@ -80,6 +83,20 @@
       { value: 'auto_edits',    label: 'auto edits' },
       { value: 'full_autonomy', label: 'full autonomy' },
     ];
+
+    // Modes that produce a plan for approval (no execution).
+    const PLAN_MODES = new Set(['read_only', 'plan_only']);
+
+    // When a plan is approved, escalate mode so the agent can execute.
+    // read_only → propose_edits (inline prompts for each action)
+    // plan_only → auto_edits    (apply edits automatically, commands still prompt)
+    const PLAN_APPROVAL_ESCALATION = {
+      read_only: 'propose_edits',
+      plan_only: 'auto_edits',
+    };
+
+    const CANNED_APPROVE_PROMPT = 'Approved. Proceed with the plan.';
+    const CANNED_REJECT_PROMPT  = "Don't proceed. Reconsider the approach and propose a new plan.";
 
     const TOKEN_KEY = 'praxis.operator.token';
     const ACTIVE_KEY = 'praxis.operator.active_agent';
