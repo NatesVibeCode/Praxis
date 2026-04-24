@@ -234,7 +234,11 @@
     "226_authority_event_contract_typed_gap_created.sql",
     "227_surface_module_projection_first_wedge.sql",
     "228_surface_module_projections_batch.sql",
-    "229_surface_template_type_lattice.sql"
+    "229_surface_template_type_lattice.sql",
+    "230_anthropic_llm_task_admission_deny.sql",
+    "231_deepseek_economics_cleanup.sql",
+    "232_retire_anthropic_candidates_unauthable_in_workers.sql",
+    "233_operation_catalog_surface_template_register.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5762,6 +5766,20 @@
       {"object_type": "row", "object_name": "authority_projection_contracts.projection_contract.surface.legal_templates"},
       {"object_type": "row", "object_name": "authority_object_registry.projection.surface.legal_templates"},
       {"object_type": "row", "object_name": "data_dictionary_objects.projection.surface.legal_templates"}
+    ],
+    "230_anthropic_llm_task_admission_deny.sql": [
+      {"object_type": "row", "object_name": "provider_transport_admissions.cleanup.legacy_backfill"}
+    ],
+    "231_deepseek_economics_cleanup.sql": [
+      {"object_type": "row", "object_name": "provider_cli_profiles.deepseek.adapter_economics.normalized"}
+    ],
+    "232_retire_anthropic_candidates_unauthable_in_workers.sql": [
+      {"object_type": "row", "object_name": "provider_model_candidates.anthropic.retired"}
+    ],
+    "233_operation_catalog_surface_template_register.sql": [
+      {"object_type": "row", "object_name": "operation_catalog_registry.surface-template-register"},
+      {"object_type": "row", "object_name": "authority_event_contracts.event_contract.template.registered"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.event.template.registered"}
     ]
   },
   "policy_buckets": {
@@ -6000,7 +6018,11 @@
       "226_authority_event_contract_typed_gap_created.sql",
       "227_surface_module_projection_first_wedge.sql",
       "228_surface_module_projections_batch.sql",
-      "229_surface_template_type_lattice.sql"
+      "229_surface_template_type_lattice.sql",
+      "230_anthropic_llm_task_admission_deny.sql",
+      "231_deepseek_economics_cleanup.sql",
+      "232_retire_anthropic_candidates_unauthable_in_workers.sql",
+      "233_operation_catalog_surface_template_register.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
