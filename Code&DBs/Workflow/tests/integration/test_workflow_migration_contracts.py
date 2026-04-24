@@ -104,7 +104,8 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "223_roadmap_lifecycle_retired.sql" in filenames
     assert "224_authority_event_contract_plan_launched.sql" in filenames
     assert "225_bug_lifecycle_data_dictionary_types.sql" in filenames
-    assert filenames[-1] == "225_bug_lifecycle_data_dictionary_types.sql"
+    assert "226_authority_event_contract_typed_gap_created.sql" in filenames
+    assert filenames[-1] == "226_authority_event_contract_typed_gap_created.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:

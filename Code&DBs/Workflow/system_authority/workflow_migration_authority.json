@@ -230,7 +230,8 @@
     "222_runtime_setup_operation_catalog_repair.sql",
     "223_roadmap_lifecycle_retired.sql",
     "224_authority_event_contract_plan_launched.sql",
-    "225_bug_lifecycle_data_dictionary_types.sql"
+    "225_bug_lifecycle_data_dictionary_types.sql",
+    "226_authority_event_contract_typed_gap_created.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5710,6 +5711,12 @@
       {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.resume_patch"},
       {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.resolution_request"},
       {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.resolved_record"}
+    ],
+    "226_authority_event_contract_typed_gap_created.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.typed_gap.created"
+      }
     ]
   },
   "policy_buckets": {
@@ -5944,7 +5951,8 @@
       "222_runtime_setup_operation_catalog_repair.sql",
       "223_roadmap_lifecycle_retired.sql",
       "224_authority_event_contract_plan_launched.sql",
-      "225_bug_lifecycle_data_dictionary_types.sql"
+      "225_bug_lifecycle_data_dictionary_types.sql",
+      "226_authority_event_contract_typed_gap_created.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

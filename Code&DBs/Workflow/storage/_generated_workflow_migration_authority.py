@@ -236,7 +236,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '222_runtime_setup_operation_catalog_repair.sql',
  '223_roadmap_lifecycle_retired.sql',
  '224_authority_event_contract_plan_launched.sql',
- '225_bug_lifecycle_data_dictionary_types.sql')
+ '225_bug_lifecycle_data_dictionary_types.sql',
+ '226_authority_event_contract_typed_gap_created.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -489,7 +490,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '222_runtime_setup_operation_catalog_repair.sql',
  '223_roadmap_lifecycle_retired.sql',
  '224_authority_event_contract_plan_launched.sql',
- '225_bug_lifecycle_data_dictionary_types.sql')
+ '225_bug_lifecycle_data_dictionary_types.sql',
+ '226_authority_event_contract_typed_gap_created.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -721,7 +723,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '222_runtime_setup_operation_catalog_repair.sql',
                '223_roadmap_lifecycle_retired.sql',
                '224_authority_event_contract_plan_launched.sql',
-               '225_bug_lifecycle_data_dictionary_types.sql'),
+               '225_bug_lifecycle_data_dictionary_types.sql',
+               '226_authority_event_contract_typed_gap_created.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -977,6 +980,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '223_roadmap_lifecycle_retired.sql': 'canonical',
  '224_authority_event_contract_plan_launched.sql': 'canonical',
  '225_bug_lifecycle_data_dictionary_types.sql': 'canonical',
+ '226_authority_event_contract_typed_gap_created.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -2939,7 +2943,9 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                                  ('row',
                                                   'data_dictionary_objects.praxis.bug.resolution_request'),
                                                  ('row',
-                                                  'data_dictionary_objects.praxis.bug.resolved_record'))}
+                                                  'data_dictionary_objects.praxis.bug.resolved_record')),
+ '226_authority_event_contract_typed_gap_created.sql': (('row',
+                                                         'authority_event_contracts.event_contract.typed_gap.created'),)}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -4461,7 +4467,9 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
    ('row', 'data_dictionary_objects.praxis.bug.evidence_attachment'),
    ('row', 'data_dictionary_objects.praxis.bug.resume_patch'),
    ('row', 'data_dictionary_objects.praxis.bug.resolution_request'),
-   ('row', 'data_dictionary_objects.praxis.bug.resolved_record'))))
+   ('row', 'data_dictionary_objects.praxis.bug.resolved_record'))),
+ ('226_authority_event_contract_typed_gap_created.sql',
+  (('row', 'authority_event_contracts.event_contract.typed_gap.created'),)))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'100': ('100_adapter_config_authority.sql',
          '100_task_type_profile_scope_defaults.sql',
