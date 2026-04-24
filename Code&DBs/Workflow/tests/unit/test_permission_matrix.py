@@ -91,11 +91,11 @@ def test_codex_matrix_translation(mode: str, expected: tuple[str, ...]) -> None:
 @pytest.mark.parametrize(
     "mode, expected",
     [
-        ("read_only",     ()),
-        ("plan_only",     ()),
-        ("propose_edits", ()),
-        ("auto_edits",    ("--yolo",)),
-        ("full_autonomy", ("--yolo",)),
+        ("read_only",     ("--approval-mode", "plan")),
+        ("plan_only",     ("--approval-mode", "plan")),
+        ("propose_edits", ("--approval-mode", "default")),
+        ("auto_edits",    ("--approval-mode", "auto_edit")),
+        ("full_autonomy", ("--approval-mode", "yolo")),
     ],
 )
 def test_gemini_matrix_translation(mode: str, expected: tuple[str, ...]) -> None:
@@ -190,6 +190,58 @@ def test_codex_builder_falls_back_to_env_default_when_permission_mode_absent(
     assert cmd[cmd.index("--sandbox") + 1] == "read-only"
     # When no matrix override, codex gets --sandbox only (existing behavior).
     assert "--approval-mode" not in cmd
+
+
+# --- Gemini builder + provider acceptance ----------------------------------
+
+
+def test_gemini_builder_uses_matrix_when_permission_mode_supplied() -> None:
+    from surfaces.api.agent_sessions import _build_gemini_command
+
+    cmd = _build_gemini_command("session-gemini", "write a haiku", permission_mode="full_autonomy")
+    assert cmd[0] == "gemini"
+    assert cmd[1] == "-p"
+    assert cmd[2] == "write a haiku"
+    assert "--approval-mode" in cmd
+    assert cmd[cmd.index("--approval-mode") + 1] == "yolo"
+
+
+def test_gemini_builder_without_permission_mode_omits_approval_flag() -> None:
+    from surfaces.api.agent_sessions import _build_gemini_command
+
+    cmd = _build_gemini_command("session-gemini", "hello")
+    assert "--approval-mode" not in cmd
+    assert "-o" in cmd
+    assert cmd[cmd.index("-o") + 1] == "stream-json"
+
+
+def test_gemini_builder_honors_model_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from surfaces.api.agent_sessions import _build_gemini_command
+
+    monkeypatch.setenv("PRAXIS_AGENT_GEMINI_MODEL", "gemini-2.5-pro")
+    cmd = _build_gemini_command("session-gemini", "hi")
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "gemini-2.5-pro"
+
+
+def test_cli_provider_accepts_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
+    from surfaces.api.agent_sessions import _cli_provider
+
+    assert _cli_provider("gemini") == "gemini"
+
+
+def test_cli_provider_rejects_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi import HTTPException
+    from surfaces.api.agent_sessions import _cli_provider
+
+    with pytest.raises(HTTPException) as exc:
+        _cli_provider("llama")
+    assert exc.value.status_code == 400
+    detail = exc.value.detail
+    assert isinstance(detail, dict)
+    assert "claude" in detail["message"]
+    assert "codex" in detail["message"]
+    assert "gemini" in detail["message"]
 
 
 # --- API validation --------------------------------------------------------

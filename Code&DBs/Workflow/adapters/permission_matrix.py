@@ -102,23 +102,20 @@ _CODEX_MATRIX: dict[NormalizedPermissionMode, tuple[str, ...]] = {
 
 
 # Gemini CLI (`gemini`)
-#   Permission granularity is coarser than Claude/Codex: `--yolo` auto-
-#   accepts everything; its absence prompts. Finer-grained modes
-#   (read_only, plan_only, propose_edits) cannot be expressed purely via
-#   flags and must be enforced by:
-#     - read_only:   mount the workspace read-only at the Docker boundary
-#                    and rely on gemini's default prompting to deny writes
-#     - plan_only:   prompt-engineer the assistant to emit a plan, no exec
-#     - propose_edits: default (no --yolo), rely on prompts
-#   auto_edits and full_autonomy collapse to the same flag (--yolo); the
-#   distinction between them is enforced by the sandbox, not by gemini.
+#   --approval-mode values: default | auto_edit | yolo | plan
+#   plan is read-only, produces a plan; default prompts per-action;
+#   auto_edit auto-approves edit tools but prompts for commands; yolo
+#   auto-approves everything. The matrix maps both read_only and
+#   plan_only to `plan` because gemini's CLI exposes one read-only flag.
+#   The distinction between the two lives in how the caller frames the
+#   prompt, not in the flag.
 
 _GEMINI_MATRIX: dict[NormalizedPermissionMode, tuple[str, ...]] = {
-    "read_only":     (),
-    "plan_only":     (),
-    "propose_edits": (),
-    "auto_edits":    ("--yolo",),
-    "full_autonomy": ("--yolo",),
+    "read_only":     ("--approval-mode", "plan"),
+    "plan_only":     ("--approval-mode", "plan"),
+    "propose_edits": ("--approval-mode", "default"),
+    "auto_edits":    ("--approval-mode", "auto_edit"),
+    "full_autonomy": ("--approval-mode", "yolo"),
 }
 
 

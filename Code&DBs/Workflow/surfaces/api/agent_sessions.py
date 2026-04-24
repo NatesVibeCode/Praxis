@@ -1021,11 +1021,11 @@ def _cli_provider(value: str | None = None, env: dict[str, str] | None = None) -
     source = env if env is not None else os.environ
     raw = value if value is not None else source.get(_CLI_PROVIDER_ENV)
     provider = str(raw or _DEFAULT_CLI_PROVIDER).strip().lower()
-    if provider not in {"codex", "claude", "openrouter"}:
+    if provider not in {"codex", "claude", "gemini", "openrouter"}:
         raise HTTPException(
             status_code=400,
             detail={
-                "message": f"unsupported agent provider {provider!r}; use codex, claude, or openrouter",
+                "message": f"unsupported agent provider {provider!r}; use codex, claude, gemini, or openrouter",
                 "error_code": "agent_provider_unsupported",
             },
         )
@@ -1098,6 +1098,48 @@ def _build_codex_command(
     core.append(prompt)
     base.extend(core)
     return base
+
+
+def _gemini_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for the gemini subprocess.
+
+    Preserves `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`,
+    and the OAuth files under `~/.gemini/` that the CLI reads for auth. Drops
+    nothing — gemini auth is looser than the Anthropic-CLI constraint (no
+    CLI-only standing order here).
+    """
+    return dict(env if env is not None else os.environ)
+
+
+def _gemini_model(env: dict[str, str] | None = None) -> str | None:
+    source = env if env is not None else os.environ
+    value = str(source.get("PRAXIS_AGENT_GEMINI_MODEL") or "").strip()
+    return value or None
+
+
+def _build_gemini_command(
+    session_id: str,
+    prompt: str,
+    env: dict[str, str] | None = None,
+    *,
+    permission_mode: NormalizedPermissionMode | None = None,
+) -> list[str]:
+    """Build argv for a single non-interactive gemini turn.
+
+    Gemini CLI uses ``--resume <index>`` for continuity, which is indexed
+    into gemini's own on-disk session store and not a UUID. Multi-turn
+    resume is a follow-up — each turn currently spawns a fresh session.
+    The ``session_id`` argument is accepted for signature parity with
+    :func:`_build_claude_command` and :func:`_build_codex_command`.
+    """
+    del session_id  # reserved for future resume wiring
+    cmd = ["gemini", "-p", prompt, "-o", "stream-json"]
+    model = _gemini_model(env)
+    if model:
+        cmd.extend(["--model", model])
+    if permission_mode is not None:
+        cmd.extend(translate_permission_flags("gemini", permission_mode))
+    return cmd
 
 
 def _thread_id_from_events(events: list[dict[str, Any]], fallback: str) -> str:
@@ -1252,17 +1294,24 @@ async def _run_turn(
         cmd = _build_codex_command(
             session_id, prompt, reply_file, permission_mode=permission_mode
         )
+        spawn_env = _claude_subprocess_env()
+    elif provider_slug == "gemini":
+        cmd = _build_gemini_command(
+            session_id, prompt, permission_mode=permission_mode
+        )
+        spawn_env = _gemini_subprocess_env()
     else:
         cmd = _build_claude_command(
             session_id, prompt, permission_mode=permission_mode
         )
+        spawn_env = _claude_subprocess_env()
     timeout_seconds = _turn_timeout_seconds()
 
     print(f"[agent_sessions] launching {provider_slug} agent={agent_id}", flush=True)
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(_claude_cwd()),
-        env=_claude_subprocess_env(),
+        env=spawn_env,
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
