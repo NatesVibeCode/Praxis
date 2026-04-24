@@ -250,6 +250,83 @@ def test_emit_typed_gaps_for_verification_gaps_skips_non_dict_entries():
     assert emitted == 1
 
 
+def test_emit_typed_gaps_for_compile_errors_unresolved_source_ref():
+    import json
+    from runtime.spec_compiler import UnresolvedSourceRefError
+    from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
+
+    conn = _RecordingConn()
+    err = UnresolvedSourceRefError(["decision.X", "review.Y", "discovery.Z"])
+    emitted = emit_typed_gaps_for_compile_errors(conn, err, source_ref="launch_plan")
+    assert emitted == 3
+    payload_0 = json.loads(conn.events[0][1][3])
+    assert payload_0["gap_kind"] == "source_ref"
+    assert payload_0["missing_type"] == "source_authority_resolver"
+    assert payload_0["source_ref"] == "launch_plan"
+    assert payload_0["context"]["ref"] in {"decision.X", "review.Y", "discovery.Z"}
+
+
+def test_emit_typed_gaps_for_compile_errors_unresolved_stage():
+    import json
+    from runtime.spec_compiler import UnresolvedStageError
+    from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
+
+    conn = _RecordingConn()
+    err = UnresolvedStageError(
+        [
+            {"index": 0, "label": "p0", "stage": "rumble"},
+            {"index": 2, "label": "p2", "stage": "zig"},
+        ]
+    )
+    emitted = emit_typed_gaps_for_compile_errors(conn, err)
+    assert emitted == 2
+    payload_0 = json.loads(conn.events[0][1][3])
+    assert payload_0["gap_kind"] == "stage"
+    assert payload_0["missing_type"] == "stage_template"
+    assert "add_stage_template" in payload_0["legal_repair_actions"]
+    assert payload_0["context"]["packet_index"] == 0
+    assert payload_0["context"]["stage"] == "rumble"
+
+
+def test_emit_typed_gaps_for_compile_errors_unresolved_write_scope():
+    import json
+    from runtime.spec_compiler import UnresolvedWriteScopeError
+    from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
+
+    conn = _RecordingConn()
+    err = UnresolvedWriteScopeError(
+        [{"index": 0, "label": "p0", "description_preview": "do thing"}]
+    )
+    emitted = emit_typed_gaps_for_compile_errors(conn, err)
+    assert emitted == 1
+    payload = json.loads(conn.events[0][1][3])
+    assert payload["gap_kind"] == "write_scope"
+    assert payload["missing_type"] == "write_scope"
+    assert "supply_write" in payload["legal_repair_actions"]
+    assert "add_source_ref" in payload["legal_repair_actions"]
+    assert payload["context"]["description_preview"] == "do thing"
+
+
+def test_emit_typed_gaps_for_compile_errors_unknown_error_type_returns_zero():
+    from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
+
+    conn = _RecordingConn()
+    # Plain ValueError — not an Unresolved* type → return 0, no events.
+    result = emit_typed_gaps_for_compile_errors(conn, ValueError("something else"))
+    assert result == 0
+    assert conn.events == []
+
+
+def test_emit_typed_gaps_for_compile_errors_empty_entries_returns_zero():
+    from runtime.spec_compiler import UnresolvedStageError
+    from runtime.typed_gap_events import emit_typed_gaps_for_compile_errors
+
+    conn = _RecordingConn()
+    err = UnresolvedStageError([])
+    assert emit_typed_gaps_for_compile_errors(conn, err) == 0
+    assert conn.events == []
+
+
 def test_emit_typed_gap_gap_id_format():
     """gap_id is 'typed_gap.' + 16 hex chars."""
     conn = _RecordingConn()

@@ -82,6 +82,107 @@ def emit_typed_gap(
     return gap_id
 
 
+def emit_typed_gaps_for_compile_errors(
+    conn: Any,
+    error: Exception,
+    *,
+    source_ref: str | None = None,
+) -> int:
+    """Promote a spec_compiler Unresolved* error's entries to
+    ``typed_gap.created`` events (one per unresolved entry).
+
+    Dispatches by error type:
+      - ``UnresolvedSourceRefError`` → gap_kind="source_ref", one event
+        per ref; context={"ref": ref_string}; missing_type=
+        "source_authority_resolver"; legal_repair_actions=
+        ["add_resolver_for_prefix"].
+      - ``UnresolvedStageError`` → gap_kind="stage", one event per
+        packet; context={"packet_index", "packet_label", "stage"};
+        missing_type="stage_template"; legal_repair_actions=
+        ["add_stage_template", "use_known_stage"].
+      - ``UnresolvedWriteScopeError`` → gap_kind="write_scope", one
+        event per packet; context={"packet_index", "packet_label",
+        "description_preview"}; missing_type="write_scope";
+        legal_repair_actions=["supply_write", "add_source_ref",
+        "run_scope_resolver"].
+
+    Opt-in: callers with a conn catch the error, call this before
+    re-raising. Errors that don't match a known type silently return 0
+    — forward-compat when new Unresolved* classes are added.
+
+    Returns the count of emitted events. Best-effort on emission.
+    """
+    try:
+        from runtime.spec_compiler import (
+            UnresolvedSourceRefError,
+            UnresolvedStageError,
+            UnresolvedWriteScopeError,
+        )
+    except Exception:
+        return 0
+
+    emitted = 0
+    if isinstance(error, UnresolvedSourceRefError):
+        for ref in error.unresolved_refs or ():
+            gap_id = emit_typed_gap(
+                conn,
+                gap_kind="source_ref",
+                missing_type="source_authority_resolver",
+                reason_code="source_ref.unresolvable_prefix",
+                legal_repair_actions=["add_resolver_for_prefix"],
+                source_ref=source_ref,
+                context={"ref": str(ref)},
+            )
+            if gap_id:
+                emitted += 1
+        return emitted
+    if isinstance(error, UnresolvedStageError):
+        for entry in error.unresolved_stages or ():
+            if not isinstance(entry, dict):
+                continue
+            gap_id = emit_typed_gap(
+                conn,
+                gap_kind="stage",
+                missing_type="stage_template",
+                reason_code="stage.template_missing",
+                legal_repair_actions=["add_stage_template", "use_known_stage"],
+                source_ref=source_ref,
+                context={
+                    "packet_index": entry.get("index"),
+                    "packet_label": entry.get("label"),
+                    "stage": entry.get("stage"),
+                },
+            )
+            if gap_id:
+                emitted += 1
+        return emitted
+    if isinstance(error, UnresolvedWriteScopeError):
+        for entry in error.unresolved_writes or ():
+            if not isinstance(entry, dict):
+                continue
+            gap_id = emit_typed_gap(
+                conn,
+                gap_kind="write_scope",
+                missing_type="write_scope",
+                reason_code="write_scope.empty_no_source_authority",
+                legal_repair_actions=[
+                    "supply_write",
+                    "add_source_ref",
+                    "run_scope_resolver",
+                ],
+                source_ref=source_ref,
+                context={
+                    "packet_index": entry.get("index"),
+                    "packet_label": entry.get("label"),
+                    "description_preview": entry.get("description_preview"),
+                },
+            )
+            if gap_id:
+                emitted += 1
+        return emitted
+    return 0
+
+
 def emit_typed_gaps_for_verification_gaps(
     conn: Any,
     gaps: list[dict[str, Any]] | None,
@@ -130,4 +231,8 @@ def emit_typed_gaps_for_verification_gaps(
     return emitted
 
 
-__all__ = ["emit_typed_gap", "emit_typed_gaps_for_verification_gaps"]
+__all__ = [
+    "emit_typed_gap",
+    "emit_typed_gaps_for_compile_errors",
+    "emit_typed_gaps_for_verification_gaps",
+]
