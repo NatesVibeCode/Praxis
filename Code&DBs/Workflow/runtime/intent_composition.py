@@ -244,6 +244,22 @@ def compose_plan_from_intent(
             proposed,
             warnings=list(proposed.warnings) + type_flow_errors,
         )
+        # Also promote to durable typed_gap.created events — observers
+        # see the type-flow failure at event stream level, not only in
+        # the ProposedPlan warnings list. Best-effort: emission failures
+        # never block the primary compose flow.
+        try:
+            from runtime.typed_gap_events import (
+                emit_typed_gaps_for_type_flow_errors,
+            )
+
+            emit_typed_gaps_for_type_flow_errors(
+                conn,
+                type_flow_errors,
+                source_ref=f"compose_plan_from_intent:{proposed.spec_name}",
+            )
+        except Exception:
+            pass
 
     _best_effort_emit(
         conn,

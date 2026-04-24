@@ -327,6 +327,54 @@ def test_emit_typed_gaps_for_compile_errors_empty_entries_returns_zero():
     assert conn.events == []
 
 
+def test_emit_typed_gaps_for_type_flow_errors_parses_structured_error():
+    import json
+    from runtime.typed_gap_events import emit_typed_gaps_for_type_flow_errors
+
+    conn = _RecordingConn()
+    errors = [
+        "workflow.type_flow.unsatisfied_inputs:node_42:research_findings,evidence_pack",
+    ]
+    emitted = emit_typed_gaps_for_type_flow_errors(
+        conn, errors, source_ref="compose_plan:mine"
+    )
+    assert emitted == 1
+    payload = json.loads(conn.events[0][1][3])
+    assert payload["gap_kind"] == "type_flow"
+    assert payload["missing_type"] == "type_flow_input"
+    assert payload["context"]["node_id"] == "node_42"
+    assert payload["context"]["missing_types"] == [
+        "research_findings",
+        "evidence_pack",
+    ]
+
+
+def test_emit_typed_gaps_for_type_flow_errors_handles_unparseable():
+    """Error strings that don't match the expected prefix still emit,
+    carrying the raw string in context.error — no drop-on-floor."""
+    import json
+    from runtime.typed_gap_events import emit_typed_gaps_for_type_flow_errors
+
+    conn = _RecordingConn()
+    emitted = emit_typed_gaps_for_type_flow_errors(
+        conn, ["some totally unstructured error text"]
+    )
+    assert emitted == 1
+    payload = json.loads(conn.events[0][1][3])
+    assert payload["context"]["error"] == "some totally unstructured error text"
+    # No node_id/missing_types keys populated.
+    assert "node_id" not in payload["context"]
+
+
+def test_emit_typed_gaps_for_type_flow_errors_empty_returns_zero():
+    from runtime.typed_gap_events import emit_typed_gaps_for_type_flow_errors
+
+    conn = _RecordingConn()
+    assert emit_typed_gaps_for_type_flow_errors(conn, []) == 0
+    assert emit_typed_gaps_for_type_flow_errors(conn, None) == 0
+    assert conn.events == []
+
+
 def test_emit_typed_gap_gap_id_format():
     """gap_id is 'typed_gap.' + 16 hex chars."""
     conn = _RecordingConn()

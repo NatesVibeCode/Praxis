@@ -183,6 +183,57 @@ def emit_typed_gaps_for_compile_errors(
     return 0
 
 
+def emit_typed_gaps_for_type_flow_errors(
+    conn: Any,
+    errors: list[str] | None,
+    *,
+    source_ref: str | None = None,
+) -> int:
+    """Promote ``validate_workflow_request_type_flow`` error strings to
+    ``typed_gap.created`` events (one event per error).
+
+    Type-flow errors have the shape
+    ``"workflow.type_flow.unsatisfied_inputs:{node_id}:{missing_types_csv}"``
+    (from :func:`runtime.workflow_type_contracts.validate_workflow_request_type_flow`).
+    Each becomes one event with ``gap_kind="type_flow"`` and the node_id /
+    missing types parsed into the event context. Unparseable error
+    strings still emit with the raw error captured — no drop-on-floor.
+
+    Opt-in with conn: callers (Moon commit handler, compose_plan_from_intent)
+    pass the live Postgres conn and their source_ref ("commit:wf_id" /
+    "compose_plan:{plan_name}"). Callers without a conn skip emission.
+
+    Returns the count of successfully emitted events.
+    """
+    emitted = 0
+    for raw in errors or ():
+        err = str(raw)
+        context: dict[str, Any] = {"error": err}
+        if err.startswith("workflow.type_flow.unsatisfied_inputs:"):
+            parts = err.split(":", 2)
+            if len(parts) == 3:
+                context["node_id"] = parts[1]
+                context["missing_types"] = [
+                    m.strip() for m in parts[2].split(",") if m.strip()
+                ]
+        gap_id = emit_typed_gap(
+            conn,
+            gap_kind="type_flow",
+            missing_type="type_flow_input",
+            reason_code="workflow.type_flow.unsatisfied",
+            legal_repair_actions=[
+                "add_producer_node",
+                "remove_consumer_node",
+                "narrow_consumes_contract",
+            ],
+            source_ref=source_ref,
+            context=context,
+        )
+        if gap_id:
+            emitted += 1
+    return emitted
+
+
 def emit_typed_gaps_for_verification_gaps(
     conn: Any,
     gaps: list[dict[str, Any]] | None,
@@ -234,5 +285,6 @@ def emit_typed_gaps_for_verification_gaps(
 __all__ = [
     "emit_typed_gap",
     "emit_typed_gaps_for_compile_errors",
+    "emit_typed_gaps_for_type_flow_errors",
     "emit_typed_gaps_for_verification_gaps",
 ]

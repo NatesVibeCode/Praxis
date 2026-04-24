@@ -1360,6 +1360,21 @@ def _handle_workflows_post(request: Any, path: str) -> None:
                 return
             type_flow_errors = _validate_type_flow_on_commit(body)
             if type_flow_errors:
+                # Promote the type-flow errors to durable typed_gap.created
+                # events before returning 400 — consumers see them at the
+                # event stream too, not just in this one 400 response.
+                try:
+                    from runtime.typed_gap_events import (
+                        emit_typed_gaps_for_type_flow_errors,
+                    )
+
+                    emit_typed_gaps_for_type_flow_errors(
+                        request.subsystems.get_pg_conn(),
+                        type_flow_errors,
+                        source_ref="moon_commit:new_workflow",
+                    )
+                except Exception:
+                    pass  # best-effort emission, never blocks the 400
                 request._send_json(
                     400,
                     {
@@ -1395,6 +1410,18 @@ def _handle_workflows_post(request: Any, path: str) -> None:
 
         type_flow_errors = _validate_type_flow_on_commit(body)
         if type_flow_errors:
+            try:
+                from runtime.typed_gap_events import (
+                    emit_typed_gaps_for_type_flow_errors,
+                )
+
+                emit_typed_gaps_for_type_flow_errors(
+                    request.subsystems.get_pg_conn(),
+                    type_flow_errors,
+                    source_ref=f"moon_commit:update:{workflow_id}",
+                )
+            except Exception:
+                pass  # best-effort
             request._send_json(
                 400,
                 {
