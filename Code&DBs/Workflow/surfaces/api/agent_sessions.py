@@ -1145,23 +1145,48 @@ def _gemini_model(env: dict[str, str] | None = None) -> str | None:
     return value or None
 
 
+def _gemini_resume_enabled(conn: Any, *, agent_id: str) -> bool:
+    """True if this agent has at least one prior assistant.reply.
+
+    Gemini identifies sessions by a shifting integer index (``-r 5``) or
+    the alias ``-r latest``. We use ``latest`` because it survives other
+    concurrent gemini activity on the same project without breaking our
+    own continuity: once this agent has produced a reply, ``latest``
+    points to the most recently written session — which will be this
+    agent's — for the duration of the next turn.
+    """
+    try:
+        events = list_interactive_agent_events(conn, agent_id=agent_id)
+    except Exception:
+        return False
+    for ev in events:
+        kind = str(ev.get("event_kind") or ev.get("type") or "")
+        if kind == "assistant.reply":
+            return True
+    return False
+
+
 def _build_gemini_command(
     session_id: str,
     prompt: str,
     env: dict[str, str] | None = None,
     *,
     permission_mode: NormalizedPermissionMode | None = None,
+    resume: bool = False,
 ) -> list[str]:
     """Build argv for a single non-interactive gemini turn.
 
-    Gemini CLI uses ``--resume <index>`` for continuity, which is indexed
-    into gemini's own on-disk session store and not a UUID. Multi-turn
-    resume is a follow-up — each turn currently spawns a fresh session.
-    The ``session_id`` argument is accepted for signature parity with
-    :func:`_build_claude_command` and :func:`_build_codex_command`.
+    Gemini's session model uses project-wide indexes (``gemini --list-sessions``,
+    ``gemini -r <index>``). When ``resume`` is true, the builder appends
+    ``-r latest`` so the turn continues whatever gemini session was most
+    recently active for the project. ``session_id`` is accepted for
+    signature parity with :func:`_build_claude_command` and
+    :func:`_build_codex_command` and is otherwise unused.
     """
-    del session_id  # reserved for future resume wiring
+    del session_id
     cmd = ["gemini", "-p", prompt, "-o", "stream-json"]
+    if resume:
+        cmd.extend(["-r", "latest"])
     model = _gemini_model(env)
     if model:
         cmd.extend(["--model", model])
@@ -1324,8 +1349,11 @@ async def _run_turn(
         )
         spawn_env = _claude_subprocess_env()
     elif provider_slug == "gemini":
+        gemini_resume = False
+        if pg_conn is not None:
+            gemini_resume = _gemini_resume_enabled(pg_conn, agent_id=agent_id)
         cmd = _build_gemini_command(
-            session_id, prompt, permission_mode=permission_mode
+            session_id, prompt, permission_mode=permission_mode, resume=gemini_resume
         )
         spawn_env = _gemini_subprocess_env()
     else:

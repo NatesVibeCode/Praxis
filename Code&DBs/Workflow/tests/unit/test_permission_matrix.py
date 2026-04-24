@@ -226,6 +226,66 @@ def test_gemini_builder_honors_model_env(monkeypatch: pytest.MonkeyPatch) -> Non
     assert cmd[cmd.index("--model") + 1] == "gemini-2.5-pro"
 
 
+# --- Gemini session continuity (B.1b) --------------------------------------
+
+
+def test_gemini_builder_fresh_session_omits_resume_flag() -> None:
+    from surfaces.api.agent_sessions import _build_gemini_command
+
+    cmd = _build_gemini_command("session-x", "start", resume=False)
+    assert "-r" not in cmd
+    assert "latest" not in cmd
+
+
+def test_gemini_builder_with_resume_uses_latest() -> None:
+    from surfaces.api.agent_sessions import _build_gemini_command
+
+    cmd = _build_gemini_command("session-x", "next", resume=True)
+    assert "-r" in cmd
+    assert cmd[cmd.index("-r") + 1] == "latest"
+
+
+def test_gemini_resume_enabled_detects_prior_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    from surfaces.api import agent_sessions
+
+    monkeypatch.setattr(
+        agent_sessions,
+        "list_interactive_agent_events",
+        lambda conn, *, agent_id: [
+            {"event_kind": "user.prompt", "text": "hello"},
+            {"event_kind": "assistant.reply", "text": "hi back"},
+        ],
+    )
+    assert agent_sessions._gemini_resume_enabled(object(), agent_id="a") is True
+
+
+def test_gemini_resume_disabled_when_no_prior_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    from surfaces.api import agent_sessions
+
+    # Only user prompts, no assistant replies yet → no resume.
+    monkeypatch.setattr(
+        agent_sessions,
+        "list_interactive_agent_events",
+        lambda conn, *, agent_id: [
+            {"event_kind": "user.prompt", "text": "hi"},
+        ],
+    )
+    assert agent_sessions._gemini_resume_enabled(object(), agent_id="a") is False
+
+
+def test_gemini_resume_disabled_when_events_query_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from surfaces.api import agent_sessions
+
+    def _boom(conn, *, agent_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(agent_sessions, "list_interactive_agent_events", _boom)
+    # Resume helper swallows the exception and defaults to fresh session.
+    assert agent_sessions._gemini_resume_enabled(object(), agent_id="a") is False
+
+
 def test_cli_provider_accepts_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
     from surfaces.api.agent_sessions import _cli_provider
 
