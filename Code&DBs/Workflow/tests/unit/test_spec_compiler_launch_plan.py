@@ -174,8 +174,24 @@ def test_launch_plan_deduplicates_colliding_labels(monkeypatch) -> None:
     assert labels == ["do-it", "do-it__2"]
 
 
+def _install_empty_binding(monkeypatch) -> None:
+    """Stub bind_data_pills to return an empty BoundIntent.
+
+    Most propose_plan tests don't care about binding — they care about the
+    translation + preview path. This stub keeps binding-related warnings
+    out of those tests.
+    """
+    import runtime.intent_binding as intent_binding_mod
+
+    def _fake_bind(intent, *, conn, object_kinds=None):
+        return intent_binding_mod.BoundIntent(intent=intent)
+
+    monkeypatch.setattr(intent_binding_mod, "bind_data_pills", _fake_bind)
+
+
 def test_propose_plan_returns_spec_preview_and_declarations_without_submit(monkeypatch) -> None:
     monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    _install_empty_binding(monkeypatch)
 
     # Preview stub — replicates the preview_workflow_execution payload shape
     # we care about without needing a real Postgres connection.
@@ -235,9 +251,76 @@ def test_propose_plan_returns_spec_preview_and_declarations_without_submit(monke
     assert declaration["declared_stage"] == "build"
     assert declaration["declared_bug_ref"] == "BUG-175EB9F3"
 
+    # Binding runs automatically; with nothing in the description to match,
+    # all buckets stay empty and no binding warnings surface.
+    assert proposed.binding_summary["totals"] == {"bound": 0, "ambiguous": 0, "unbound": 0}
+    assert proposed.binding_summary["unbound_refs"] == []
+    assert proposed.binding_summary["ambiguous_refs"] == []
+
+
+def test_propose_plan_surfaces_unbound_data_pills_as_warnings(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    import runtime.intent_binding as intent_binding_mod
+
+    def _fake_bind(intent, *, conn, object_kinds=None):
+        # Simulate one unbound reference per packet description.
+        return intent_binding_mod.BoundIntent(
+            intent=intent,
+            unbound=[
+                intent_binding_mod.UnboundCandidate(
+                    matched_span="users.first_nm",
+                    object_kind="users",
+                    field_path="first_nm",
+                    reason="field_path_not_in_object",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(intent_binding_mod, "bind_data_pills", _fake_bind)
+
+    import runtime.workflow._admission as admission_mod
+
+    monkeypatch.setattr(
+        admission_mod,
+        "preview_workflow_execution",
+        lambda conn, *, inline_spec, **_kwargs: {"action": "preview", "jobs": [], "warnings": []},
+    )
+
+    plan = {
+        "name": "typo_wave",
+        "packets": [
+            {
+                "description": "copy users.first_nm into the profile",
+                "write": ["profile.py"],
+                "stage": "build",
+                "label": "typo-packet",
+            }
+        ],
+    }
+
+    proposed = propose_plan(plan, conn=_FakeConn(), workdir="/repo")
+
+    summary = proposed.binding_summary
+    assert summary["totals"]["unbound"] == 1
+    assert summary["totals"]["bound"] == 0
+    assert summary["unbound_refs"][0]["label"] == "typo-packet"
+    assert summary["unbound_refs"][0]["matched_span"] == "users.first_nm"
+    assert summary["unbound_refs"][0]["reason"] == "field_path_not_in_object"
+
+    # Warning surfaces the unbound count + affected packet labels so the
+    # caller fixes typos before spending compile time.
+    assert any("unbound data-pill reference" in w for w in proposed.warnings)
+    assert any("typo-packet" in w for w in proposed.warnings)
+
+    # Per-packet data_pills carry the full detail for display.
+    pills = proposed.packet_declarations[0]["data_pills"]
+    assert pills["unbound"][0]["matched_span"] == "users.first_nm"
+
 
 def test_launch_proposed_submits_previously_built_spec(monkeypatch) -> None:
     monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    _install_empty_binding(monkeypatch)
 
     def _fake_preview(conn, *, inline_spec, **_kwargs):
         return {"action": "preview", "jobs": [], "warnings": []}

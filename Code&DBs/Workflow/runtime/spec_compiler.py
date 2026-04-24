@@ -788,7 +788,11 @@ class ProposedPlan:
     Output of ``propose_plan``: the workflow spec the platform will submit
     plus the preview payload (resolved agents, rendered prompts, execution
     bundles, etc.) the caller needs to approve before spending resources.
-    Pass to ``launch_proposed`` to submit, or ignore to cancel.
+    ``packet_declarations`` also carry a ``data_pills`` entry — the output
+    of ``bind_data_pills`` against each packet's description, so the caller
+    sees any typo'd / hallucinated field refs before spending compile time.
+    ``binding_summary`` rolls up the bound/ambiguous/unbound counts across
+    all packets.
     """
 
     spec_dict: dict[str, Any]
@@ -798,6 +802,7 @@ class ProposedPlan:
     spec_name: str
     total_jobs: int
     packet_declarations: list[dict[str, Any]]
+    binding_summary: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -808,6 +813,7 @@ class ProposedPlan:
             "spec_name": self.spec_name,
             "total_jobs": self.total_jobs,
             "packet_declarations": list(self.packet_declarations),
+            "binding_summary": dict(self.binding_summary),
         }
 
 
@@ -846,20 +852,86 @@ def propose_plan(
 
     preview = preview_workflow_execution(conn, inline_spec=spec_dict)
 
-    packet_declarations: list[dict[str, Any]] = [
-        {
-            "label": job["label"],
-            "declared_description": packet.description,
-            "declared_write": list(packet.write),
-            "declared_stage": packet.stage,
-            "declared_label": packet.label,
-            "declared_depends_on": list(packet.depends_on) if packet.depends_on else None,
-            "declared_bug_ref": packet.bug_ref,
-            "declared_agent": packet.agent,
-            "declared_complexity": packet.complexity,
+    binding_totals = {"bound": 0, "ambiguous": 0, "unbound": 0}
+    binding_unbound: list[dict[str, Any]] = []
+    binding_ambiguous: list[dict[str, Any]] = []
+    binding_error: str | None = None
+
+    # Best-effort: if the data-dictionary authority is degraded, skip binding
+    # rather than block the propose step. The whole point of the two-phase
+    # flow is visibility — a degraded dictionary shouldn't hide the preview.
+    try:
+        from runtime.intent_binding import bind_data_pills as _bind_data_pills
+    except Exception as exc:
+        binding_error = f"intent_binding unavailable: {type(exc).__name__}: {exc}"
+        _bind_data_pills = None  # type: ignore[assignment]
+
+    packet_declarations: list[dict[str, Any]] = []
+    for packet, job in zip(plan_obj.packets, spec_dict["jobs"]):
+        data_pills: dict[str, Any] = {
+            "bound": [],
+            "ambiguous": [],
+            "unbound": [],
+            "warnings": [],
         }
-        for packet, job in zip(plan_obj.packets, spec_dict["jobs"])
-    ]
+        if _bind_data_pills is not None and packet.description.strip():
+            try:
+                bound_intent = _bind_data_pills(packet.description, conn=conn)
+                data_pills = bound_intent.to_dict()
+                data_pills.pop("intent", None)
+                binding_totals["bound"] += len(data_pills.get("bound") or [])
+                binding_totals["ambiguous"] += len(data_pills.get("ambiguous") or [])
+                binding_totals["unbound"] += len(data_pills.get("unbound") or [])
+                for entry in data_pills.get("unbound") or []:
+                    binding_unbound.append({"label": job["label"], **entry})
+                for entry in data_pills.get("ambiguous") or []:
+                    binding_ambiguous.append({"label": job["label"], **entry})
+            except Exception as exc:
+                data_pills["warnings"].append(
+                    f"bind_data_pills failed: {type(exc).__name__}: {exc}"
+                )
+        packet_declarations.append(
+            {
+                "label": job["label"],
+                "declared_description": packet.description,
+                "declared_write": list(packet.write),
+                "declared_stage": packet.stage,
+                "declared_label": packet.label,
+                "declared_depends_on": list(packet.depends_on) if packet.depends_on else None,
+                "declared_bug_ref": packet.bug_ref,
+                "declared_agent": packet.agent,
+                "declared_complexity": packet.complexity,
+                "data_pills": data_pills,
+            }
+        )
+
+    binding_summary: dict[str, Any] = {
+        "totals": binding_totals,
+        "unbound_refs": binding_unbound,
+        "ambiguous_refs": binding_ambiguous,
+    }
+    if binding_error:
+        binding_summary["error"] = binding_error
+        warnings_all = [*warnings_all, binding_error]
+    if binding_unbound:
+        labels = sorted({entry["label"] for entry in binding_unbound})
+        warnings_all = [
+            *warnings_all,
+            (
+                f"{len(binding_unbound)} unbound data-pill reference(s) across "
+                f"packet(s) {labels}; fix typos or drop hallucinated fields "
+                f"before launching"
+            ),
+        ]
+    if binding_ambiguous:
+        labels = sorted({entry["label"] for entry in binding_ambiguous})
+        warnings_all = [
+            *warnings_all,
+            (
+                f"{len(binding_ambiguous)} ambiguous data-pill reference(s) "
+                f"across packet(s) {labels}; disambiguate before launching"
+            ),
+        ]
 
     return ProposedPlan(
         spec_dict=spec_dict,
@@ -869,6 +941,7 @@ def propose_plan(
         spec_name=str(spec_dict["name"]),
         total_jobs=len(spec_dict["jobs"]),
         packet_declarations=packet_declarations,
+        binding_summary=binding_summary,
     )
 
 
