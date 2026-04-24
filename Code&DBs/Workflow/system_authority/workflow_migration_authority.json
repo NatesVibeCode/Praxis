@@ -229,7 +229,8 @@
     "221_onboarding_gate_state.sql",
     "222_runtime_setup_operation_catalog_repair.sql",
     "223_roadmap_lifecycle_retired.sql",
-    "224_authority_event_contract_plan_launched.sql"
+    "224_authority_event_contract_plan_launched.sql",
+    "225_bug_lifecycle_data_dictionary_types.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5693,6 +5694,22 @@
         "object_type": "row",
         "object_name": "authority_event_contracts.event_contract.plan.launched"
       }
+    ],
+    "225_bug_lifecycle_data_dictionary_types.sql": [
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.observation"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.record"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.record_list"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.search_query"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.stats"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.packet"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.history"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.replay_run"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.replay_backfill_result"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.replay_ready_list"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.evidence_attachment"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.resume_patch"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.resolution_request"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.praxis.bug.resolved_record"}
     ]
   },
   "policy_buckets": {
@@ -5926,7 +5943,8 @@
       "221_onboarding_gate_state.sql",
       "222_runtime_setup_operation_catalog_repair.sql",
       "223_roadmap_lifecycle_retired.sql",
-      "224_authority_event_contract_plan_launched.sql"
+      "224_authority_event_contract_plan_launched.sql",
+      "225_bug_lifecycle_data_dictionary_types.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
