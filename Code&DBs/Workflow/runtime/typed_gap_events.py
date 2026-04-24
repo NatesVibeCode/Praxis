@@ -82,4 +82,52 @@ def emit_typed_gap(
     return gap_id
 
 
-__all__ = ["emit_typed_gap"]
+def emit_typed_gaps_for_verification_gaps(
+    conn: Any,
+    gaps: list[dict[str, Any]] | None,
+    *,
+    source_ref: str | None = None,
+) -> int:
+    """Promote ``_compute_verification_gaps`` entries to ``typed_gap.created``
+    events.
+
+    Opt-in companion to ``runtime.spec_compiler._compute_verification_gaps``.
+    Callers with a live conn (typically at packet_map assembly time in
+    ``launch_plan`` or ``launch_proposed``) can pass the gap list here to
+    get one ``typed_gap.created`` event per gap. ``source_ref`` (e.g.
+    ``"packet:p1"`` or ``"workflow_run:{run_id}"``) lands on each event
+    so consumers can correlate gaps back to the producing context.
+
+    Verification gaps today have the shape
+    ``{"file", "missing_type", "reason_code"}``. Event gap_kind is
+    ``verifier``. Legal repair actions default to
+    ``["add_verifier_catalog_entry"]`` — Phase 1.5's catalog-backed
+    dispatch is queued; until then, adding a verifier means coding one.
+
+    Returns the count of successfully emitted events. Best-effort: no
+    exceptions propagate.
+    """
+    emitted = 0
+    for gap in gaps or ():
+        if not isinstance(gap, dict):
+            continue
+        file_path = str(gap.get("file") or "")
+        missing_type = str(gap.get("missing_type") or "verifier")
+        reason_code = str(
+            gap.get("reason_code") or "verifier.no_admitted_for_extension"
+        )
+        gap_id = emit_typed_gap(
+            conn,
+            gap_kind="verifier",
+            missing_type=missing_type,
+            reason_code=reason_code,
+            legal_repair_actions=["add_verifier_catalog_entry"],
+            source_ref=source_ref,
+            context={"file": file_path},
+        )
+        if gap_id:
+            emitted += 1
+    return emitted
+
+
+__all__ = ["emit_typed_gap", "emit_typed_gaps_for_verification_gaps"]

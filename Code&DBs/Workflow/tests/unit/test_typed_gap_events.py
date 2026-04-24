@@ -187,6 +187,69 @@ def test_emit_typed_gap_copies_repair_actions_defensively():
     assert payload["legal_repair_actions"] == ["action_one"]
 
 
+def test_emit_typed_gaps_for_verification_gaps_returns_count():
+    from runtime.typed_gap_events import emit_typed_gaps_for_verification_gaps
+
+    conn = _RecordingConn()
+    gaps = [
+        {"file": "a.js", "missing_type": "verifier", "reason_code": "verifier.no_admitted_for_extension"},
+        {"file": "b.sql", "missing_type": "verifier", "reason_code": "verifier.no_admitted_for_extension"},
+    ]
+    emitted = emit_typed_gaps_for_verification_gaps(
+        conn,
+        gaps,
+        source_ref="packet:p1",
+    )
+    assert emitted == 2
+    assert len(conn.events) == 2
+
+
+def test_emit_typed_gaps_for_verification_gaps_empty_returns_zero():
+    from runtime.typed_gap_events import emit_typed_gaps_for_verification_gaps
+
+    conn = _RecordingConn()
+    assert emit_typed_gaps_for_verification_gaps(conn, []) == 0
+    assert emit_typed_gaps_for_verification_gaps(conn, None) == 0
+    assert conn.events == []
+
+
+def test_emit_typed_gaps_for_verification_gaps_payload_carries_file_and_source():
+    from runtime.typed_gap_events import emit_typed_gaps_for_verification_gaps
+
+    conn = _RecordingConn()
+    emit_typed_gaps_for_verification_gaps(
+        conn,
+        [
+            {
+                "file": "view.tsx",
+                "missing_type": "verifier",
+                "reason_code": "verifier.no_admitted_for_extension",
+            }
+        ],
+        source_ref="workflow_run:abc123",
+    )
+    payload = _captured_payload(conn)
+    assert payload["gap_kind"] == "verifier"
+    assert payload["context"]["file"] == "view.tsx"
+    assert payload["source_ref"] == "workflow_run:abc123"
+    assert payload["legal_repair_actions"] == ["add_verifier_catalog_entry"]
+
+
+def test_emit_typed_gaps_for_verification_gaps_skips_non_dict_entries():
+    from runtime.typed_gap_events import emit_typed_gaps_for_verification_gaps
+
+    conn = _RecordingConn()
+    emitted = emit_typed_gaps_for_verification_gaps(
+        conn,
+        [
+            None,  # type: ignore[list-item]
+            "not a dict",  # type: ignore[list-item]
+            {"file": "ok.sql", "missing_type": "verifier", "reason_code": "r"},
+        ],
+    )
+    assert emitted == 1
+
+
 def test_emit_typed_gap_gap_id_format():
     """gap_id is 'typed_gap.' + 16 hex chars."""
     conn = _RecordingConn()
