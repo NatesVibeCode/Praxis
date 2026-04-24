@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent."""
 from __future__ import annotations
 
 import json
@@ -1744,6 +1744,55 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     return payload
 
 
+def tool_praxis_decompose_intent(params: dict) -> dict:
+    """Split prose intent into ordered steps — deterministic, honest scope.
+
+    Layer 2 (Decompose) of the planning stack. Parses explicit step markers
+    from the prose: numbered lists ('1. X\\n2. Y'), bulleted lists
+    ('- X\\n- Y'), or ordered-phrase sequences ('first X, then Y, finally
+    Z'). Returns a DecomposedIntent with one entry per step.
+
+    Fails closed when no explicit markers are found; the caller either
+    rewords the intent with markers, wraps this tool with an LLM extractor
+    that adds markers upstream, or passes allow_single_step=true to accept
+    the whole intent as one step. This is deliberate — free-prose
+    decomposition is real LLM work that should not happen silently.
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str) or not intent.strip():
+        return {
+            "ok": False,
+            "error": "intent must be a non-empty string",
+            "reason_code": "intent.invalid",
+        }
+    allow_single_step = bool(params.get("allow_single_step"))
+    try:
+        from runtime.intent_decomposition import (
+            DecompositionRequiresLLMError,
+            decompose_intent,
+        )
+
+        result = decompose_intent(intent, allow_single_step=allow_single_step)
+    except DecompositionRequiresLLMError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "decomposition.requires_llm",
+        }
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "intent.invalid",
+        }
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="decompose_intent")
+
+    payload = result.to_dict()
+    payload["ok"] = True
+    return payload
+
+
 def tool_praxis_approve_proposed_plan(params: dict) -> dict:
     """Approve a ProposedPlan so launch_approved can submit it.
 
@@ -2167,6 +2216,45 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         ),
                     },
                 },
+            },
+        },
+    ),
+    "praxis_decompose_intent": (
+        tool_praxis_decompose_intent,
+        {
+            "description": (
+                "Layer 2 (Decompose) of the planning stack: split prose intent into ordered "
+                "steps by parsing explicit step markers (numbered lists, bulleted lists, or "
+                "first/then/finally ordering). Deterministic — does NOT do free-prose "
+                "semantic decomposition.\n\n"
+                "USE WHEN: you have a paragraph that already lists the steps explicitly and "
+                "want them split into one record per step so the caller can turn each into "
+                "a PlanPacket.\n\n"
+                "DO NOT USE TO: decompose free prose. If the intent has no explicit markers "
+                "this tool fails with reason_code='decomposition.requires_llm' — reword the "
+                "intent with markers, wrap with an LLM extractor, or pass allow_single_step=true "
+                "to accept the whole intent as one step.\n\n"
+                "EXAMPLE: praxis_decompose_intent(intent='1. Add timezone column\\n2. Backfill "
+                "existing rows with UTC\\n3. Update the profile UI.')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Prose describing the work, with explicit step markers.",
+                    },
+                    "allow_single_step": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "If true, prose without step markers is accepted as a single "
+                            "step instead of raising. Use only when you are confident the "
+                            "intent is one step."
+                        ),
+                    },
+                },
+                "required": ["intent"],
             },
         },
     ),

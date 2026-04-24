@@ -889,6 +889,50 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
+    "praxis_decompose_intent": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="decompose",
+        when_to_use=(
+            "Split prose intent into ordered steps by parsing explicit markers "
+            "(numbered lists, bulleted lists, or first/then/finally ordering). "
+            "Layer 2 (Decompose) of the planning stack — call before turning "
+            "steps into PlanPackets."
+        ),
+        when_not_to_use=(
+            "Do not use it to decompose free prose without markers. Reword the "
+            "intent, wrap with an LLM extractor, or pass allow_single_step=true "
+            "to accept the whole intent as one step."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Decompose a numbered-list intent",
+                {
+                    "intent": (
+                        "1. Add a timezone column to users.\n"
+                        "2. Backfill existing rows with UTC.\n"
+                        "3. Update the profile UI to expose the field."
+                    )
+                },
+            ),
+            _example(
+                "Decompose a first/then/finally intent",
+                {
+                    "intent": (
+                        "First investigate the leak, then patch it, finally verify with a run."
+                    )
+                },
+            ),
+            _example(
+                "Accept a single-step prose intent explicitly",
+                {
+                    "intent": "Make the dashboard faster by reducing API calls on load.",
+                    "allow_single_step": True,
+                },
+            ),
+        ],
+    ),
     "praxis_approve_proposed_plan": _tool(
         surface="workflow",
         tier="stable",
