@@ -49,10 +49,12 @@ const MODULE_PRESETS: ModulePreset[] = [
     category: 'overview',
     icon: '✓',
     config: {
-      endpoint: 'platform-overview',
-      path: 'pass_rate',
+      // Typed CQRS projection read. Anchored by
+      // architecture-policy::surface-catalog::surface-composition-cqrs-direction.
+      // Envelope resolves through authority_projection_contracts →
+      // authority_projection_registry → runtime.surface_projections.pass_rate_reducer.
+      source: { projection_ref: 'projection.surface_module.platform_overview_pass_rate' },
       label: 'Pass Rate',
-      format: 'percent',
     },
   },
   {
@@ -64,8 +66,7 @@ const MODULE_PRESETS: ModulePreset[] = [
     category: 'overview',
     icon: '!',
     config: {
-      endpoint: 'platform-overview',
-      path: 'open_bugs',
+      source: { projection_ref: 'projection.surface_module.platform_overview_open_bugs' },
       label: 'Open Bugs',
       color: 'var(--danger)',
     },
@@ -79,8 +80,7 @@ const MODULE_PRESETS: ModulePreset[] = [
     category: 'overview',
     icon: '#',
     config: {
-      endpoint: 'platform-overview',
-      path: 'total_workflow_runs',
+      source: { projection_ref: 'projection.surface_module.platform_overview_total_runs' },
       label: 'Total Runs',
     },
   },

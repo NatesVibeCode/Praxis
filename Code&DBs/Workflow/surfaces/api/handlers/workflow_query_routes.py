@@ -5,6 +5,7 @@ from __future__ import annotations
 from ._shared import RouteEntry, RouteMatcher, _exact, _prefix, _prefix_suffix
 from . import _query_bugs as _bugs
 from . import _query_handoff as _handoff
+from . import projections as _projections
 from . import workflow_query as _handler
 
 
@@ -86,6 +87,7 @@ QUERY_PUT_ROUTES: list[RouteEntry] = [
 QUERY_GET_ROUTES: list[RouteEntry] = [
     (_prefix_suffix("/api/workflows/", "/build/stream"), _handler._handle_build_stream),
     (_exact("/api/dashboard"), _handler._handle_dashboard_get),
+    *_projections.PROJECTION_GET_ROUTES,
     (_exact("/api/leaderboard"), _handler._handle_leaderboard_get),
     (_exact("/api/runs/recent"), _handler._handle_runs_recent_get),
     (_exact("/api/references"), _handler._handle_references_get),

@@ -9,10 +9,16 @@ function MetricModule({ config }: QuadrantProps) {
   const cfg = (config ?? {}) as {
     endpoint?: string; path?: string; label?: string;
     format?: string; color?: string; value?: string | number;
+    source?: { projection_ref?: string };
   };
 
-  const { data, loading } = useModuleData<unknown>(cfg.endpoint ?? '', {
-    enabled: !!cfg.endpoint,
+  const projectionRef = cfg.source?.projection_ref;
+  const spec = projectionRef
+    ? { source: { projection_ref: projectionRef } }
+    : (cfg.endpoint ?? '');
+  const hasSource = Boolean(projectionRef) || Boolean(cfg.endpoint);
+  const { data, loading } = useModuleData<unknown>(spec, {
+    enabled: hasSource,
   });
 
   if (loading) {
@@ -35,14 +41,21 @@ function MetricModule({ config }: QuadrantProps) {
   }
 
   let raw: unknown = cfg.value;
-  if (cfg.endpoint && data) {
+  let formatHint: string | undefined = cfg.format;
+  if (projectionRef && data && typeof data === 'object' && data !== null) {
+    const output = data as Record<string, unknown>;
+    raw = output.value;
+    if (!formatHint && typeof output.format === 'string') {
+      formatHint = output.format;
+    }
+  } else if (cfg.endpoint && data) {
     if (cfg.path) {
       raw = getPath(data, cfg.path);
     } else if (typeof data === 'object' && data !== null && 'count' in (data as Record<string, unknown>)) {
       raw = (data as Record<string, unknown>).count;
     }
   }
-  const display = formatValue(raw, cfg.format);
+  const display = formatValue(raw, formatHint);
 
   return <MetricCard label={cfg.label} value={display} />;
 }

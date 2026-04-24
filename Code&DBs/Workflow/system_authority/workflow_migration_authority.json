@@ -231,7 +231,9 @@
     "223_roadmap_lifecycle_retired.sql",
     "224_authority_event_contract_plan_launched.sql",
     "225_bug_lifecycle_data_dictionary_types.sql",
-    "226_authority_event_contract_typed_gap_created.sql"
+    "226_authority_event_contract_typed_gap_created.sql",
+    "227_surface_module_projection_first_wedge.sql",
+    "228_surface_module_projections_batch.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5717,6 +5719,34 @@
         "object_type": "row",
         "object_name": "authority_event_contracts.event_contract.typed_gap.created"
       }
+    ],
+    "227_surface_module_projection_first_wedge.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_registry.projection.surface_module.platform_overview_pass_rate"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_contracts.projection_contract.surface_module.platform_overview_pass_rate"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.projection.surface_module.platform_overview_pass_rate"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.projection.surface_module.platform_overview_pass_rate"
+      }
+    ],
+    "228_surface_module_projections_batch.sql": [
+      {"object_type": "row", "object_name": "authority_projection_registry.projection.surface_module.platform_overview_open_bugs"},
+      {"object_type": "row", "object_name": "authority_projection_registry.projection.surface_module.platform_overview_total_runs"},
+      {"object_type": "row", "object_name": "authority_projection_contracts.projection_contract.surface_module.platform_overview_open_bugs"},
+      {"object_type": "row", "object_name": "authority_projection_contracts.projection_contract.surface_module.platform_overview_total_runs"},
+      {"object_type": "row", "object_name": "authority_object_registry.projection.surface_module.platform_overview_open_bugs"},
+      {"object_type": "row", "object_name": "authority_object_registry.projection.surface_module.platform_overview_total_runs"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.projection.surface_module.platform_overview_open_bugs"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.projection.surface_module.platform_overview_total_runs"}
     ]
   },
   "policy_buckets": {
@@ -5952,7 +5982,9 @@
       "223_roadmap_lifecycle_retired.sql",
       "224_authority_event_contract_plan_launched.sql",
       "225_bug_lifecycle_data_dictionary_types.sql",
-      "226_authority_event_contract_typed_gap_created.sql"
+      "226_authority_event_contract_typed_gap_created.sql",
+      "227_surface_module_projection_first_wedge.sql",
+      "228_surface_module_projections_batch.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

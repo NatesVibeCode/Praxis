@@ -3275,6 +3275,10 @@ def agent_sessions_index_get() -> dict[str, Any]:
 async def platform_overview_get(request: Request) -> Response:
     return await _route_to_handler(request)
 
+@app.get("/api/projections/{projection_ref}")
+async def projection_get(request: Request, projection_ref: str) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/workflow-templates")
 async def workflow_templates_get(request: Request) -> Response:
     return await _route_to_handler(request)
