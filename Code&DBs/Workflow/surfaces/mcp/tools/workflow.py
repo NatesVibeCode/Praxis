@@ -1781,6 +1781,7 @@ def tool_praxis_approve_proposed_plan(params: dict) -> dict:
             total_jobs=int(proposed_payload.get("total_jobs") or 0),
             packet_declarations=list(proposed_payload.get("packet_declarations") or []),
             binding_summary=dict(proposed_payload.get("binding_summary") or {}),
+            unresolved_routes=list(proposed_payload.get("unresolved_routes") or []),
         )
         approved = approve_proposed_plan(
             proposed,

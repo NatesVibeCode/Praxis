@@ -1155,6 +1155,7 @@ class ProposedPlan:
     total_jobs: int
     packet_declarations: list[dict[str, Any]]
     binding_summary: dict[str, Any]
+    unresolved_routes: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1166,6 +1167,7 @@ class ProposedPlan:
             "total_jobs": self.total_jobs,
             "packet_declarations": list(self.packet_declarations),
             "binding_summary": dict(self.binding_summary),
+            "unresolved_routes": list(self.unresolved_routes),
         }
 
 
@@ -1305,6 +1307,37 @@ def propose_plan(
             ),
         ]
 
+    # Confidence floor: surface unresolved auto routes so the caller can
+    # decide before approval whether the plan is worth launching. The
+    # resolver has already run inside preview_workflow_execution; we just
+    # roll up jobs whose route_status != "resolved" and isn't explicit.
+    unresolved_routes: list[dict[str, Any]] = []
+    for preview_job in preview.get("jobs") or []:
+        status = str(preview_job.get("route_status") or "").strip()
+        if status not in {"resolved", "explicit", "not_applicable"}:
+            unresolved_routes.append(
+                {
+                    "label": preview_job.get("label"),
+                    "requested_agent": preview_job.get("requested_agent"),
+                    "resolved_agent": preview_job.get("resolved_agent"),
+                    "route_status": status or "unknown",
+                    "route_reason": preview_job.get("route_reason"),
+                }
+            )
+    if unresolved_routes:
+        labels = sorted(
+            {str(entry["label"]) for entry in unresolved_routes if entry.get("label")}
+        )
+        warnings_all = [
+            *warnings_all,
+            (
+                f"{len(unresolved_routes)} job(s) have unresolved agent routes "
+                f"across packet(s) {labels}; launch_approved will still submit, "
+                "but the workflow will fail at dispatch unless routes resolve "
+                "before the run starts"
+            ),
+        ]
+
     return ProposedPlan(
         spec_dict=spec_dict,
         preview=preview,
@@ -1314,6 +1347,7 @@ def propose_plan(
         total_jobs=len(spec_dict["jobs"]),
         packet_declarations=packet_declarations,
         binding_summary=binding_summary,
+        unresolved_routes=unresolved_routes,
     )
 
 

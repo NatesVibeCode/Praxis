@@ -263,6 +263,51 @@ def test_propose_plan_returns_spec_preview_and_declarations_without_submit(monke
     assert proposed.binding_summary["totals"] == {"bound": 0, "ambiguous": 0, "unbound": 0}
     assert proposed.binding_summary["unbound_refs"] == []
     assert proposed.binding_summary["ambiguous_refs"] == []
+    # This preview stub returns route_status=resolved, so no unresolved.
+    assert proposed.unresolved_routes == []
+
+
+def test_propose_plan_surfaces_unresolved_auto_routes_as_warning(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    _install_empty_binding(monkeypatch)
+
+    def _unresolved_preview(conn, *, inline_spec, **_kwargs):
+        return {
+            "action": "preview",
+            "jobs": [
+                {
+                    "label": inline_spec["jobs"][0]["label"],
+                    "requested_agent": "auto/build",
+                    "resolved_agent": None,
+                    "route_status": "unresolved",
+                    "route_reason": "task_type_router could not resolve",
+                }
+            ],
+            "warnings": [],
+        }
+
+    import runtime.workflow._admission as admission_mod
+
+    monkeypatch.setattr(admission_mod, "preview_workflow_execution", _unresolved_preview)
+
+    proposed = propose_plan(
+        {
+            "name": "unresolved_wave",
+            "packets": [
+                {"description": "do a thing", "write": ["x.py"], "stage": "build", "label": "pkt-1"}
+            ],
+        },
+        conn=_FakeConn(),
+        workdir="/repo",
+    )
+
+    assert len(proposed.unresolved_routes) == 1
+    entry = proposed.unresolved_routes[0]
+    assert entry["label"] == "pkt-1"
+    assert entry["route_status"] == "unresolved"
+    assert "task_type_router" in (entry["route_reason"] or "")
+    assert any("unresolved agent routes" in w for w in proposed.warnings)
+    assert any("pkt-1" in w for w in proposed.warnings)
 
 
 def test_propose_plan_surfaces_unbound_data_pills_as_warnings(monkeypatch) -> None:
