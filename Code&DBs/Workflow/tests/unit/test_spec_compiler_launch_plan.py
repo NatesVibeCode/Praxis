@@ -12,6 +12,7 @@ import pytest
 from runtime import spec_compiler
 from runtime.spec_compiler import (
     CompiledSpec,
+    CompilePlanError,
     LaunchReceipt,
     Plan,
     PlanPacket,
@@ -426,6 +427,102 @@ def _fake_derive(**kwargs):
             }
         )
     return derived
+
+
+def test_compile_plan_collects_all_packet_failures_before_raising(monkeypatch) -> None:
+    """Atomic compile_plan: caller sees every failing packet, not just the first."""
+
+    def _failing_on_marked_packets(intent_dict, *, conn):
+        if intent_dict.get("label", "").startswith("bad-"):
+            raise ValueError(f"synthetic failure for {intent_dict['label']}")
+        return (
+            CompiledSpec(
+                prompt=f"PROMPT({intent_dict['description']})",
+                scope_write=list(intent_dict["write"]),
+                capabilities=["cap"],
+                tier="mid",
+                label=intent_dict["label"],
+                task_type=intent_dict["stage"],
+                verify_refs=["v"],
+            ),
+            [],
+        )
+
+    monkeypatch.setattr(spec_compiler, "compile_spec", _failing_on_marked_packets)
+
+    plan = {
+        "name": "mixed",
+        "packets": [
+            {"description": "ok 1", "write": ["a.py"], "stage": "build", "label": "good-1"},
+            {"description": "bad 1", "write": ["b.py"], "stage": "build", "label": "bad-1"},
+            {"description": "ok 2", "write": ["c.py"], "stage": "build", "label": "good-2"},
+            {"description": "bad 2", "write": ["d.py"], "stage": "build", "label": "bad-2"},
+        ],
+    }
+
+    with pytest.raises(CompilePlanError) as exc_info:
+        compile_plan(plan, conn=_FakeConn(), workdir="/repo")
+
+    failures = exc_info.value.failures
+    assert len(failures) == 2
+    labels = {entry["label"] for entry in failures}
+    assert labels == {"bad-1", "bad-2"}
+    # Rendered message lists both packets with their indices.
+    message = str(exc_info.value)
+    assert "2 packet(s) failed" in message
+    assert "packet[1] label='bad-1'" in message
+    assert "packet[3] label='bad-2'" in message
+
+
+def test_compile_plan_deterministic_workflow_id_when_not_supplied(monkeypatch) -> None:
+    """Same plan content → same workflow_id across repeated compiles."""
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    plan = {
+        "name": "idempotent",
+        "packets": [
+            {"description": "thing one", "write": ["x.py"], "stage": "build", "label": "t1"},
+            {"description": "thing two", "write": ["y.py"], "stage": "build", "label": "t2"},
+        ],
+    }
+
+    spec_a, _ = compile_plan(plan, conn=_FakeConn(), workdir="/repo")
+    spec_b, _ = compile_plan(plan, conn=_FakeConn(), workdir="/repo")
+
+    assert spec_a["workflow_id"] == spec_b["workflow_id"]
+    assert spec_a["workflow_id"].startswith("plan.")
+    # No random uuid noise; the 16-char hash is stable.
+    assert len(spec_a["workflow_id"]) == len("plan.") + 16
+
+
+def test_compile_plan_different_plans_get_different_workflow_ids(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    plan_a = {
+        "name": "plan_a",
+        "packets": [{"description": "one", "write": ["x.py"], "stage": "build"}],
+    }
+    plan_b = {
+        "name": "plan_b",  # different name
+        "packets": [{"description": "one", "write": ["x.py"], "stage": "build"}],
+    }
+
+    spec_a, _ = compile_plan(plan_a, conn=_FakeConn(), workdir="/repo")
+    spec_b, _ = compile_plan(plan_b, conn=_FakeConn(), workdir="/repo")
+
+    assert spec_a["workflow_id"] != spec_b["workflow_id"]
+
+
+def test_explicit_workflow_id_wins_over_hash(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    plan = {
+        "name": "override_id",
+        "workflow_id": "caller_chosen_id",
+        "packets": [{"description": "x", "write": ["x.py"], "stage": "build"}],
+    }
+    spec, _ = compile_plan(plan, conn=_FakeConn(), workdir="/repo")
+    assert spec["workflow_id"] == "caller_chosen_id"
 
 
 def test_coerce_plan_with_from_bugs_materializes_clustered_packets(monkeypatch) -> None:

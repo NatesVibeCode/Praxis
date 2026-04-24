@@ -994,6 +994,54 @@ def _packet_to_job(
     return job
 
 
+class CompilePlanError(ValueError):
+    """Raised when one or more packets fail to compile.
+
+    Collects every per-packet failure before raising so the caller sees the
+    full problem set in one pass instead of fix-one-retry-one-retry. The
+    ``failures`` attribute holds a list of ``{index, label, error_type,
+    message}`` dicts; ``str(exc)`` renders a readable multi-packet summary.
+    """
+
+    def __init__(self, failures: list[dict[str, Any]]) -> None:
+        self.failures = failures
+        lines = [f"{len(failures)} packet(s) failed to compile:"]
+        for entry in failures:
+            lines.append(
+                f"  - packet[{entry['index']}] label={entry['label']!r}: "
+                f"{entry['error_type']}: {entry['message']}"
+            )
+        super().__init__("\n".join(lines))
+
+
+def _deterministic_workflow_id(plan_obj: Plan) -> str:
+    """Hash the plan's stable content so the same plan compiles to the same
+    workflow_id. Explicit plan.workflow_id still wins — this only runs when
+    the caller hasn't supplied one.
+    """
+    payload = {
+        "name": plan_obj.name,
+        "why": plan_obj.why,
+        "phase": plan_obj.phase,
+        "packets": [
+            {
+                "description": p.description,
+                "write": list(p.write),
+                "stage": p.stage,
+                "label": p.label,
+                "read": list(p.read) if p.read else None,
+                "depends_on": list(p.depends_on) if p.depends_on else None,
+                "bug_ref": p.bug_ref,
+                "bug_refs": list(p.bug_refs) if p.bug_refs else None,
+                "agent": p.agent,
+                "complexity": p.complexity,
+            }
+            for p in plan_obj.packets
+        ],
+    }
+    return f"plan.{stable_hash(payload)[:16]}"
+
+
 def compile_plan(
     plan: Plan | dict,
     *,
@@ -1004,6 +1052,16 @@ def compile_plan(
 
     Returns (spec_dict, warnings). No submission; this is the pure translation
     step. Use :func:`launch_plan` for the full continuous flow.
+
+    Atomic: if any packet fails to compile, collects every per-packet failure
+    before raising :class:`CompilePlanError`. No partial spec_dict returned.
+    The caller fixes all packets at once instead of fix-one-retry-one.
+
+    Idempotent: when ``plan.workflow_id`` is not supplied, the workflow_id is
+    derived from a stable hash of the plan content. Same plan in → same
+    workflow_id out, so repeated compile_plan calls produce the same spec
+    (submission idempotency then composes through submit_workflow_command's
+    existing idempotency_key).
     """
     plan_obj = _coerce_plan(plan, conn=conn)
     if not plan_obj.packets:
@@ -1013,8 +1071,15 @@ def compile_plan(
     warnings_all: list[str] = []
     jobs: list[dict[str, Any]] = []
     used_labels: set[str] = set()
+    failures: list[dict[str, Any]] = []
 
     for index, packet in enumerate(plan_obj.packets):
+        packet_label = (
+            packet.label
+            or packet.bug_ref
+            or (packet.bug_refs[0] if packet.bug_refs else None)
+            or f"packet_{index}"
+        )
         intent_dict: dict[str, Any] = {
             "description": packet.description,
             "write": list(packet.write),
@@ -1024,9 +1089,21 @@ def compile_plan(
             intent_dict["read"] = list(packet.read)
         if packet.label:
             intent_dict["label"] = packet.label
-        compiled, warnings = compile_spec(intent_dict, conn=conn)
-        prefix = packet.label or packet.bug_ref or f"packet_{index}"
-        warnings_all.extend(f"{prefix}: {w}" for w in warnings)
+
+        try:
+            compiled, warnings = compile_spec(intent_dict, conn=conn)
+        except Exception as exc:
+            failures.append(
+                {
+                    "index": index,
+                    "label": packet_label,
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                }
+            )
+            continue
+
+        warnings_all.extend(f"{packet_label}: {w}" for w in warnings)
         job = _packet_to_job(packet, compiled=compiled, workdir=resolved_workdir, index=index)
         base_label = job["label"]
         label = base_label
@@ -1039,7 +1116,10 @@ def compile_plan(
         used_labels.add(label)
         jobs.append(job)
 
-    resolved_workflow_id = plan_obj.workflow_id or f"plan.{uuid.uuid4().hex[:12]}"
+    if failures:
+        raise CompilePlanError(failures)
+
+    resolved_workflow_id = plan_obj.workflow_id or _deterministic_workflow_id(plan_obj)
     spec_dict: dict[str, Any] = {
         "name": plan_obj.name,
         "workflow_id": resolved_workflow_id,
