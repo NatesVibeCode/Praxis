@@ -1991,7 +1991,7 @@ class BugTracker:
                 idx += 1
             elif open_only:
                 clauses.append(
-                    f"status NOT IN ({bug_status_sql_in_literal(alias_style='both')})"
+                    f"NOT ({bug_status_sql_in_literal('resolved_with_legacy')})"
                 )
             if parsed_severity is not None:
                 clauses.append(f"severity = ${idx}")

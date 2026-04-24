@@ -486,6 +486,24 @@ class TestSearch:
 
         assert [item.bug_id for item in results] == [bug.bug_id]
 
+    def test_search_exact_bug_id_open_only_uses_resolved_predicate(self):
+        class _Conn:
+            query = ""
+            params = ()
+
+            def fetchrow(self, query: str, *params):
+                self.query = query
+                self.params = params
+                return None
+
+        conn = _Conn()
+        results = BugTracker(conn).search("bug-abcdef12", open_only=True)
+
+        assert results == []
+        assert "NOT (UPPER(status) IN (" in conn.query
+        assert "status NOT IN (UPPER(status)" not in conn.query
+        assert conn.params == ("BUG-ABCDEF12",)
+
 
 # ── stats ──────────────────────────────────────────────────────────────
 
