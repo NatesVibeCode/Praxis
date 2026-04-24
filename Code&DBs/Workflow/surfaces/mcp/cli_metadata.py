@@ -889,6 +889,27 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
+    "praxis_plan_lifecycle": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="plan-history",
+        when_to_use=(
+            "Read every plan.* event for one workflow_id in chronological "
+            "order — composed, approved, launched, or blocked. The Q-side "
+            "read of the planning stack's CQRS pattern."
+        ),
+        when_not_to_use=(
+            "Do not use it for workflow_run status; that's a separate "
+            "query surfaced by praxis_workflow status/stream actions."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Inspect the lifecycle of a composed plan",
+                {"workflow_id": "plan.deadbeef12345678"},
+            ),
+        ],
+    ),
     "praxis_compose_and_launch": _tool(
         surface="workflow",
         tier="stable",
