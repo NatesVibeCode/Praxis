@@ -208,12 +208,21 @@ def _classify_rate_limit(
             severity="high",
         )
 
-    if failure_code in ("route.unhealthy", "circuit.open"):
+    if failure_code == "provider.capacity":
         return FailureClassification(
             category=FailureCategory.RATE_LIMIT,
             is_retryable=True,
             is_transient=True,
-            recommended_action="Retry with --tier auto to fail over to an alternate provider.",
+            recommended_action="Provider is at capacity. Retry with --tier auto to fail over to an alternate provider.",
+            severity="high",
+        )
+
+    if failure_code in ("route.unhealthy", "circuit.open"):
+        return FailureClassification(
+            category=FailureCategory.PROVIDER_ERROR,
+            is_retryable=True,
+            is_transient=True,
+            recommended_action="Route health is degraded. Retry with --tier auto or inspect provider route health.",
             severity="high",
         )
 

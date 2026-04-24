@@ -857,10 +857,13 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "  --category S       Filing category: SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER\n"
             "  --limit N          Max results (default 25)\n"
             "  --all              Include resolved bugs (default: open only)\n"
+            "  --open-only        Limit list output to open bugs; accepted for agent-friendly parity\n"
             "  --body TEXT        Alias for --description on filing and duplicate checks\n"
             "\n"
             "  Examples:\n"
             "    workflow bugs list --severity P1\n"
+            "    workflow bugs list --open-only --json\n"
+            "    workflow bugs history BUG-1234\n"
             "    workflow bugs duplicate_check --title 'routing timeout' --body 'worker hangs during dispatch'\n"
             "    workflow bugs duplicate_check 'routing timeout'\n"
             "    workflow bugs search routing\n"
@@ -888,6 +891,16 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
         i = 1
         if action in {"search", "duplicate_check"} and i < len(args) and not args[i].startswith("-"):
             search_query = args[i]
+            i += 1
+        elif action in {
+            "history",
+            "packet",
+            "replay",
+            "attach_evidence",
+            "patch_resume",
+            "resolve",
+        } and i < len(args) and not args[i].startswith("-"):
+            params["bug_id"] = args[i]
             i += 1
 
     def _require_value(flag: str) -> str | None:
@@ -921,6 +934,10 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             continue
         if token == "--all":
             open_only = False
+            i += 1
+            continue
+        if token == "--open-only":
+            open_only = True
             i += 1
             continue
         if token == "--json":

@@ -23,6 +23,7 @@ _spec.loader.exec_module(_mod)
 import runtime.queue_admission as queue_admission
 
 DiskSpaceProbe = _mod.DiskSpaceProbe
+DiskUsageProbe = _mod.DiskUsageProbe
 FileExistsProbe = _mod.FileExistsProbe
 HealthProbe = _mod.HealthProbe
 HealthStatus = _mod.HealthStatus
@@ -32,8 +33,10 @@ PreflightResult = _mod.PreflightResult
 PreflightRunner = _mod.PreflightRunner
 QueueAdmissionGate = _mod.QueueAdmissionGate
 QueueDepthProbe = _mod.QueueDepthProbe
+SchedulerProbe = _mod.SchedulerProbe
 WaveHealth = _mod.WaveHealth
 WaveHealthMonitor = _mod.WaveHealthMonitor
+build_platform_probes = _mod.build_platform_probes
 queue_admission_check = _mod.queue_admission_check
 
 
@@ -161,6 +164,27 @@ class _FakeAsyncpg:
         return _FakeAsyncConnection(self._row)
 
 
+class _FakeSchedulerAsyncConnection:
+    def __init__(self, value):
+        self._value = value
+        self.queries: list[str] = []
+
+    async def fetchval(self, query):
+        self.queries.append(query)
+        return self._value
+
+    async def close(self):
+        return None
+
+
+class _FakeSchedulerAsyncpg:
+    def __init__(self, value):
+        self.connection = _FakeSchedulerAsyncConnection(value)
+
+    async def connect(self, _url):
+        return self.connection
+
+
 class TestQueueDepthProbe:
     def test_reports_ok_below_warning_threshold(self):
         probe = QueueDepthProbe(
@@ -213,6 +237,36 @@ class TestQueueDepthProbe:
         assert result.status == "critical"
         assert result.details["total_queued"] == 10
         assert result.details["utilization_pct"] == 100.0
+
+
+class TestSchedulerProbe:
+    def test_reads_scheduler_tick_from_system_events(self):
+        last_tick = datetime.now(timezone.utc)
+        probe = SchedulerProbe(
+            database_url="postgresql://example/db",
+            window_minutes=15,
+        )
+        fake_asyncpg = _FakeSchedulerAsyncpg(last_tick)
+
+        with patch.object(_mod, "_asyncpg_module", return_value=fake_asyncpg):
+            result = probe.check()
+
+        assert result.passed is True
+        assert result.status == "ok"
+        assert result.details["source"] == "system_events"
+        assert result.details["last_tick"] == last_tick.isoformat()
+        assert "event_type = 'scheduler.tick'" in fake_asyncpg.connection.queries[0]
+        assert "schedule.fired" not in fake_asyncpg.connection.queries[0]
+
+    def test_platform_probes_only_include_disk_usage_when_receipts_dir_is_explicit(self, tmp_path):
+        default_probes = build_platform_probes(database_url="postgresql://example/db")
+        explicit_probes = build_platform_probes(
+            database_url="postgresql://example/db",
+            receipts_dir=tmp_path,
+        )
+
+        assert not any(isinstance(probe, DiskUsageProbe) for probe in default_probes)
+        assert any(isinstance(probe, DiskUsageProbe) for probe in explicit_probes)
 
 
 # ---- QueueAdmissionGate ---------------------------------------------------

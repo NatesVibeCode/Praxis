@@ -123,6 +123,8 @@ def _search_operator_decisions(
             f"operator decision recall failed: {type(exc).__name__}: {exc}"
         ) from exc
     rows = results.get("operator_decisions")
+    if rows is None:
+        rows = results.get("results")
     if not isinstance(rows, list):
         raise RecallAuthorityError("operator decision recall returned a non-list payload")
 

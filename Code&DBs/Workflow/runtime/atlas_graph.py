@@ -220,6 +220,50 @@ def fetch_area_relations(conn: SyncPostgresConnection) -> list[dict[str, Any]]:
     ]
 
 
+def fetch_data_dictionary_objects(conn: SyncPostgresConnection) -> list[dict[str, Any]]:
+    return [
+        dict(r)
+        for r in conn.fetch(
+            """
+            SELECT object_kind, label, category, summary, origin_ref
+              FROM data_dictionary_objects
+             ORDER BY object_kind
+            """
+        )
+    ]
+
+
+def fetch_data_dictionary_lineage(conn: SyncPostgresConnection) -> list[dict[str, Any]]:
+    return [
+        dict(r)
+        for r in conn.fetch(
+            """
+            SELECT src_object_kind, src_field_path, dst_object_kind, dst_field_path,
+                   edge_kind, effective_source, confidence
+              FROM data_dictionary_lineage_effective
+             WHERE src_field_path = ''
+               AND dst_field_path = ''
+            """
+        )
+    ]
+
+
+def fetch_surface_catalog_items(conn: SyncPostgresConnection) -> list[dict[str, Any]]:
+    return [
+        dict(r)
+        for r in conn.fetch(
+            """
+            SELECT catalog_item_id, surface_name, label, family, status, drop_kind,
+                   action_value, gate_family, description, truth_category,
+                   surface_tier, binding_revision, decision_ref
+              FROM surface_catalog_registry
+             WHERE enabled = true
+             ORDER BY surface_name, display_order, catalog_item_id
+            """
+        )
+    ]
+
+
 def fetch_tools() -> list[dict[str, Any]]:
     try:
         from surfaces.mcp.catalog import get_tool_catalog
@@ -389,6 +433,9 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
     capabilities = fetch_capabilities(conn)
     areas = fetch_functional_areas(conn)
     area_relations = fetch_area_relations(conn)
+    data_dictionary_objects = fetch_data_dictionary_objects(conn)
+    data_dictionary_lineage = fetch_data_dictionary_lineage(conn)
+    surface_catalog_items = fetch_surface_catalog_items(conn)
     entity_ids = {e["id"] for e in entities}
     edges = fetch_edges(conn, entity_ids)
 
@@ -442,24 +489,37 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
         )
         node_ids.add(area_id)
 
-    def add_node(node_id: str, label: str, etype: str, preview: str, source: str) -> None:
+    def add_node(
+        node_id: str,
+        label: str,
+        etype: str,
+        preview: str,
+        source: str,
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         if node_id in node_ids:
             return
-        area = node_area.get(node_id) or infer_schema_area(node_id, label, etype, preview, source)
-        color = AREA_COLORS.get(area, UNOWNED_COLOR) if area else UNOWNED_COLOR
-        nodes.append(
-            {
-                "data": {
-                    "id": node_id,
-                    "label": label,
-                    "type": etype,
-                    "area": area or "",
-                    "preview": preview,
-                    "source": source,
-                    "color": color,
-                }
-            }
+        explicit_area = str((extra or {}).get("area") or "").strip()
+        area = (
+            node_area.get(node_id)
+            or explicit_area
+            or infer_schema_area(node_id, label, etype, preview, source)
         )
+        color = AREA_COLORS.get(area, UNOWNED_COLOR) if area else UNOWNED_COLOR
+        data = {
+            "id": node_id,
+            "label": label,
+            "type": etype,
+            "area": area or "",
+            "preview": preview,
+            "source": source,
+            "authority_source": source,
+            "color": color,
+        }
+        if extra:
+            data.update(extra)
+        nodes.append({"data": data})
         node_ids.add(node_id)
 
     for entity in entities:
@@ -479,6 +539,59 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
             "capability",
             f"{capability['capability_kind']} | {capability['route']} | {capability['summary']}",
             "capability_catalog",
+        )
+
+    for dictionary_object in data_dictionary_objects:
+        object_kind = str(dictionary_object["object_kind"])
+        category = str(dictionary_object["category"] or "object")
+        raw_label = str(dictionary_object["label"] or "").strip()
+        label = raw_label or object_kind.split(":", 1)[-1]
+        origin_ref = dictionary_object.get("origin_ref")
+        origin_preview = json.dumps(origin_ref, sort_keys=True) if origin_ref else ""
+        summary = str(dictionary_object["summary"] or "").strip()
+        preview = summary or origin_preview
+        add_node(
+            object_kind,
+            label[:96],
+            category,
+            preview[:300],
+            "data_dictionary_objects",
+            extra={
+                "object_kind": object_kind,
+                "category": category,
+                "definition_summary": summary,
+                "authority_source": "data_dictionary_objects",
+            },
+        )
+
+    for surface_item in surface_catalog_items:
+        item_id = str(surface_item["catalog_item_id"])
+        surface_name = str(surface_item["surface_name"] or "surface")
+        action_value = surface_item.get("action_value")
+        gate_family = surface_item.get("gate_family")
+        route_ref = str(action_value or gate_family or "")
+        preview_parts = [
+            str(surface_item["description"] or "").strip(),
+            f"truth={surface_item['truth_category']}",
+            f"tier={surface_item['surface_tier']}",
+            f"route={route_ref}" if route_ref else "",
+        ]
+        add_node(
+            f"surface_catalog::{item_id}",
+            f"{surface_name}: {surface_item['label']}"[:96],
+            "surface_catalog_item",
+            " | ".join(part for part in preview_parts if part)[:300],
+            "surface_catalog_registry",
+            extra={
+                "area": surface_name if surface_name in AREA_COLORS else "moon",
+                "authority_source": "surface_catalog_registry",
+                "object_kind": f"surface_catalog:{item_id}",
+                "category": str(surface_item["drop_kind"]),
+                "surface_name": surface_name,
+                "route_ref": route_ref,
+                "binding_revision": str(surface_item["binding_revision"]),
+                "decision_ref": str(surface_item["decision_ref"]),
+            },
         )
 
     for tool in tools:
@@ -506,6 +619,46 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
                     "target": edge["target_id"],
                     "label": relation,
                     "weight": float(edge["weight"] or 1.0),
+                }
+            }
+        )
+
+    for lineage in data_dictionary_lineage:
+        source = str(lineage["src_object_kind"])
+        target = str(lineage["dst_object_kind"])
+        if source not in node_ids or target not in node_ids:
+            continue
+        relation = str(lineage["edge_kind"])
+        edge_rows.append(
+            {
+                "data": {
+                    "id": f"{source}|{relation}|{target}",
+                    "source": source,
+                    "target": target,
+                    "label": relation,
+                    "weight": float(lineage["confidence"] or 1.0),
+                    "authority_source": "data_dictionary_lineage_effective",
+                    "relation_source": str(lineage["effective_source"] or ""),
+                }
+            }
+        )
+
+    for surface_item in surface_catalog_items:
+        item_id = str(surface_item["catalog_item_id"])
+        surface_name = str(surface_item["surface_name"] or "moon")
+        source = f"surface_catalog::{item_id}"
+        target = f"area::{surface_name if surface_name in AREA_COLORS else 'moon'}"
+        if source not in node_ids or target not in node_ids:
+            continue
+        edge_rows.append(
+            {
+                "data": {
+                    "id": f"{source}|belongs_to_surface|{target}",
+                    "source": source,
+                    "target": target,
+                    "label": "belongs_to_surface",
+                    "weight": 1.0,
+                    "authority_source": "surface_catalog_registry",
                 }
             }
         )
@@ -646,4 +799,163 @@ def build_atlas_payload(*, database_url: str | None = None) -> dict[str, Any]:
             "freshness": freshness,
         },
         "warnings": warnings,
+    }
+
+
+def _node_text(data: dict[str, Any]) -> str:
+    return " ".join(
+        str(data.get(key) or "")
+        for key in (
+            "id",
+            "label",
+            "type",
+            "area",
+            "preview",
+            "source",
+            "authority_source",
+            "object_kind",
+            "category",
+            "definition_summary",
+            "surface_name",
+            "route_ref",
+            "decision_ref",
+        )
+    ).lower()
+
+
+def _node_summary(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": data.get("id"),
+        "label": data.get("label") or data.get("id"),
+        "kind": data.get("object_kind") or data.get("category") or data.get("type"),
+        "area": data.get("area") or None,
+        "authority_source": data.get("authority_source") or data.get("source") or None,
+        "summary": data.get("definition_summary") or data.get("preview") or "",
+        "route_ref": data.get("route_ref") or None,
+        "decision_ref": data.get("decision_ref") or None,
+    }
+
+
+def build_ui_experience_graph(
+    payload: dict[str, Any],
+    *,
+    focus: str | None = None,
+    surface_name: str | None = None,
+    limit: int = 80,
+) -> dict[str, Any]:
+    """Project Atlas into an LLM-sized UI experience graph.
+
+    Atlas remains the spatial graph payload. This projection is for agents:
+    bounded, relationship-first, and explicit about which DB authority owns a
+    screen, control, or schema object.
+    """
+
+    max_items = max(1, min(int(limit or 80), 250))
+    query = str(focus or "").strip().lower()
+    surface_filter = str(surface_name or "").strip().lower()
+    raw_nodes = payload.get("nodes") if isinstance(payload, dict) else []
+    raw_edges = payload.get("edges") if isinstance(payload, dict) else []
+    nodes: dict[str, dict[str, Any]] = {}
+    for node in raw_nodes if isinstance(raw_nodes, list) else []:
+        data = node.get("data") if isinstance(node, dict) else None
+        if isinstance(data, dict) and data.get("id"):
+            nodes[str(data["id"])] = data
+
+    def node_matches(data: dict[str, Any]) -> bool:
+        if data.get("is_area"):
+            return False
+        if surface_filter and str(data.get("surface_name") or data.get("area") or "").lower() != surface_filter:
+            return False
+        return not query or query in _node_text(data)
+
+    matching_ids = {node_id for node_id, data in nodes.items() if node_matches(data)}
+    relationships: list[dict[str, Any]] = []
+    related_ids: set[str] = set(matching_ids)
+    for edge in raw_edges if isinstance(raw_edges, list) else []:
+        data = edge.get("data") if isinstance(edge, dict) else None
+        if not isinstance(data, dict) or data.get("is_aggregate"):
+            continue
+        source_id = str(data.get("source") or "")
+        target_id = str(data.get("target") or "")
+        source = nodes.get(source_id)
+        target = nodes.get(target_id)
+        if not source or not target:
+            continue
+        edge_text = " ".join(
+            str(data.get(key) or "")
+            for key in ("id", "label", "authority_source", "relation_source")
+        ).lower()
+        edge_matches = bool(query and query in edge_text)
+        if matching_ids and source_id not in matching_ids and target_id not in matching_ids and not edge_matches:
+            continue
+        if not matching_ids and query and not edge_matches:
+            continue
+        related_ids.update((source_id, target_id))
+        relationships.append(
+            {
+                "source": _node_summary(source),
+                "relation": data.get("label") or "related",
+                "target": _node_summary(target),
+                "authority_source": data.get("authority_source") or data.get("relation_source") or "memory_edges",
+                "relation_source": data.get("relation_source") or None,
+                "weight": data.get("weight"),
+            }
+        )
+
+    surface_controls = [
+        _node_summary(data)
+        for data in nodes.values()
+        if str(data.get("type") or "") == "surface_catalog_item"
+        and (not surface_filter or str(data.get("surface_name") or "").lower() == surface_filter)
+        and (not query or query in _node_text(data) or str(data.get("id") or "") in related_ids)
+    ]
+    authority_objects = [
+        _node_summary(data)
+        for node_id, data in nodes.items()
+        if node_id in related_ids
+        and str(data.get("authority_source") or "") == "data_dictionary_objects"
+    ]
+    experience_nodes = [
+        _node_summary(data)
+        for node_id, data in nodes.items()
+        if node_id in related_ids
+        and str(data.get("authority_source") or "") != "data_dictionary_objects"
+        and not data.get("is_area")
+    ]
+
+    return {
+        "view": "ui_experience_graph",
+        "consumer": "llm",
+        "source_authority": "Praxis.db via Atlas read model",
+        "filters": {
+            "focus": focus,
+            "surface_name": surface_name,
+            "limit": max_items,
+        },
+        "counts": {
+            "atlas_nodes": len(nodes),
+            "atlas_edges": len(raw_edges) if isinstance(raw_edges, list) else 0,
+            "matched_nodes": len(matching_ids),
+            "related_nodes": len(related_ids),
+            "relationships": len(relationships),
+            "surface_controls": len(surface_controls),
+            "authority_objects": len(authority_objects),
+        },
+        "surfaces": sorted(
+            {
+                str(data.get("surface_name") or data.get("area") or "")
+                for data in nodes.values()
+                if str(data.get("type") or "") == "surface_catalog_item"
+            }
+            - {""}
+        ),
+        "surface_controls": surface_controls[:max_items],
+        "experience_nodes": experience_nodes[:max_items],
+        "authority_objects": authority_objects[:max_items],
+        "relationships": relationships[:max_items],
+        "agent_guidance": [
+            "Use surface_catalog_registry rows as the authority for Moon controls and gate visibility.",
+            "Use data_dictionary_objects and data_dictionary_lineage_effective for object and relationship semantics.",
+            "Treat React/CSS files as renderers of this authority, not as the source of truth.",
+        ],
     }

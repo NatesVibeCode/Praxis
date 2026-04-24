@@ -161,8 +161,10 @@ def test_provider_slot_acquisition_failure_has_structured_shape():
     assert out["status"] == "failed"
     assert out["exit_code"] == 1
     assert out["error_code"] == "provider_slot_acquisition_error"
-    # The distinction: route.unhealthy is the capacity code — must NOT be reused
+    # The distinction: route health, provider capacity, and slot acquisition
+    # have separate failure codes.
     assert out["error_code"] != "route.unhealthy"
+    assert out["error_code"] != "provider.capacity"
     assert "anthropic" in out["stderr"]
     assert "admission DB unreachable" in out["stderr"]
 
@@ -237,11 +239,11 @@ def test_execute_api_returns_structured_failure_on_load_balancer_down(monkeypatc
     assert "anthropic" in result["stderr"]
 
 
-def test_capacity_path_still_uses_route_unhealthy(monkeypatch):
+def test_capacity_path_uses_provider_capacity(monkeypatch):
     """Regression guard: ordinary capacity pressure (the load balancer
     IS healthy but says 'no slot right now') must continue returning
-    ``route.unhealthy`` — not the new ``provider_slot_acquisition_error``.
-    Conflating the two would lose the distinction the fix introduced."""
+    ``provider.capacity`` — not route-health or slot-acquisition failures.
+    Conflating those would lose the distinction the fix introduced."""
     healthy_but_full = _HealthyLoadBalancer(granted=False)
     monkeypatch.setattr(eb, "get_load_balancer", lambda: healthy_but_full)
 
@@ -251,7 +253,8 @@ def test_capacity_path_still_uses_route_unhealthy(monkeypatch):
         workdir="/tmp",
     )
     assert result["status"] == "failed"
-    assert result["error_code"] == "route.unhealthy"
+    assert result["error_code"] == "provider.capacity"
+    assert result["error_code"] != "route.unhealthy"
     assert result["error_code"] != "provider_slot_acquisition_error"
 
 

@@ -6,7 +6,6 @@ import asyncio
 import concurrent.futures
 import enum
 import http.client
-import json
 import os
 import shutil
 import socket
@@ -35,6 +34,13 @@ _DEFAULT_API_HOST = "127.0.0.1"
 _DEFAULT_API_PORT = 8420
 _DEFAULT_CONNECT_TIMEOUT = 5.0
 _DEFAULT_API_TIMEOUT = 2.0
+_SCHEDULE_HEARTBEAT_QUERY = """
+    SELECT created_at
+      FROM system_events
+     WHERE event_type = 'scheduler.tick'
+     ORDER BY created_at DESC
+     LIMIT 1
+"""
 
 
 class HealthStatus(enum.Enum):
@@ -605,9 +611,15 @@ class QueueDepthProbe(HealthProbe):
 class SchedulerProbe(HealthProbe):
     """Checks whether the scheduler has ticked recently."""
 
-    def __init__(self, state_file: str | Path | None = None, window_minutes: int = 15) -> None:
+    def __init__(
+        self,
+        state_file: str | Path | None = None,
+        window_minutes: int = 15,
+        database_url: str | None = None,
+    ) -> None:
         self._state_file = state_file
         self._window_minutes = window_minutes
+        self._database_url = database_url
 
     @property
     def name(self) -> str:
@@ -616,36 +628,44 @@ class SchedulerProbe(HealthProbe):
     def check(self) -> PreflightCheck:
         started_at = _utcnow()
         started_monotonic = time.monotonic()
-        state_file = Path(self._state_file) if self._state_file else _PROJECT_ROOT / "scheduler_state.json"
-        if not state_file.exists():
+        database_url = _resolve_database_url(self._database_url)
+        if not database_url:
             return _build_check(
                 name=self.name,
                 passed=False,
-                message=f"scheduler_state.json not found: {state_file}",
+                message="WORKFLOW_DATABASE_URL not configured for scheduler heartbeat",
                 started_at=started_at,
                 started_monotonic=started_monotonic,
                 status="failed",
                 duration_ms=None,
             )
 
-        try:
-            with state_file.open("r", encoding="utf-8") as fh:
-                state = json.load(fh)
+        async def _get_last_tick() -> Any:
+            asyncpg = _asyncpg_module()
+            conn = await asyncio.wait_for(asyncpg.connect(database_url), timeout=_DEFAULT_CONNECT_TIMEOUT)
+            try:
+                return await asyncio.wait_for(conn.fetchval(_SCHEDULE_HEARTBEAT_QUERY), timeout=_DEFAULT_CONNECT_TIMEOUT)
+            finally:
+                await conn.close()
 
-            if "last_tick" not in state:
+        try:
+            last_tick = _run_async(_get_last_tick())
+            if last_tick is None:
                 return _build_check(
                     name=self.name,
                     passed=False,
-                    message="scheduler_state.json missing 'last_tick' field",
+                    message="No scheduler.tick events found in system_events",
                     started_at=started_at,
                     started_monotonic=started_monotonic,
                     status="failed",
+                    details={"source": "system_events"},
                     duration_ms=None,
                 )
-
-            last_tick = datetime.fromisoformat(state["last_tick"])
+            if isinstance(last_tick, str):
+                last_tick = datetime.fromisoformat(last_tick)
             if last_tick.tzinfo is None:
                 last_tick = last_tick.replace(tzinfo=timezone.utc)
+
             age_minutes = (started_at - last_tick).total_seconds() / 60.0
             if age_minutes > self._window_minutes:
                 passed = False
@@ -662,13 +682,18 @@ class SchedulerProbe(HealthProbe):
                 started_at=started_at,
                 started_monotonic=started_monotonic,
                 status=status,
-                details={"age_minutes": round(age_minutes, 2), "window_minutes": self._window_minutes},
+                details={
+                    "age_minutes": round(age_minutes, 2),
+                    "window_minutes": self._window_minutes,
+                    "source": "system_events",
+                    "last_tick": last_tick.isoformat(),
+                },
             )
         except Exception as exc:
             return _build_check(
                 name=self.name,
                 passed=False,
-                message=f"Failed to read scheduler_state.json: {exc}",
+                message=f"Failed to check scheduler heartbeat: {exc}",
                 started_at=started_at,
                 started_monotonic=started_monotonic,
                 status="failed",
@@ -785,17 +810,17 @@ class DiskUsageProbe(HealthProbe):
 
     def __init__(
         self,
-        path: str | Path | None = None,
+        path: str | Path,
         warn_percent: float = 80.0,
         fail_percent: float = 95.0,
     ) -> None:
-        self._path = Path(path) if path else _PROJECT_ROOT / "receipts"
+        self._path = Path(path)
         self._warn_percent = warn_percent
         self._fail_percent = fail_percent
 
     @property
     def name(self) -> str:
-        return "disk_space"
+        return f"disk_usage:{self._path}"
 
     def check(self) -> PreflightCheck:
         started_at = _utcnow()
@@ -830,7 +855,7 @@ class DiskUsageProbe(HealthProbe):
                 )
             elif used_percent > self._warn_percent:
                 passed = False
-                status = "failed"
+                status = "degraded"
                 message = (
                     f"Disk {used_percent:.1f}% full (>{self._warn_percent}%), "
                     f"receipts: {receipts_mb:.1f} MB"
@@ -965,14 +990,20 @@ def build_platform_probes(
     fail_percent: float = 95.0,
 ) -> list[HealthProbe]:
     """Build the platform health probe set."""
-    return [
+    probes: list[HealthProbe] = [
         PostgresConnectivityProbe(database_url=database_url),
         WorkflowWorkerProbe(database_url=database_url, window_minutes=queue_window_minutes),
         QueueDepthProbe(database_url=database_url),
-        SchedulerProbe(state_file=scheduler_state_file, window_minutes=scheduler_window_minutes),
+        SchedulerProbe(
+            state_file=scheduler_state_file,
+            window_minutes=scheduler_window_minutes,
+            database_url=database_url,
+        ),
         ApiLivenessProbe(host=api_host, port=api_port),
-        DiskUsageProbe(path=receipts_dir, warn_percent=warn_percent, fail_percent=fail_percent),
     ]
+    if receipts_dir is not None:
+        probes.append(DiskUsageProbe(path=receipts_dir, warn_percent=warn_percent, fail_percent=fail_percent))
+    return probes
 
 
 async def health_check(

@@ -512,8 +512,12 @@
     padding: 14px 12px 20px;
   }
 
-  .moon-compose,
-  .moon-compose__examples {
+  .moon-center--empty .moon-start {
+    top: 14px;
+    width: calc(100% - 16px);
+  }
+
+  .moon-compose {
     width: 100%;
     max-width: 100%;
   }

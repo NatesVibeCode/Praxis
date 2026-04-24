@@ -502,8 +502,9 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
     if fast_orient:
         from types import SimpleNamespace
+        from surfaces.mcp.catalog import get_tool_catalog
 
-        tool_count = 0
+        tool_count = len(get_tool_catalog())
         query_tool = SimpleNamespace(name="praxis_query", cli_entrypoint="workflow query")
         health_tool = SimpleNamespace(name="praxis_health", cli_entrypoint="workflow health")
         discover_tool = SimpleNamespace(name="praxis_discover", cli_entrypoint="workflow discover")

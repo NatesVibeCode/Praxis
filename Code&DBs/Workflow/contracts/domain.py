@@ -542,11 +542,11 @@ def validate_workflow_request(request: WorkflowRequest) -> WorkflowValidationRes
         normalized_request = normalize_workflow_request(request)
         nodes = normalized_request.nodes
         edges = normalized_request.edges
-    except WorkflowContractError:
+    except WorkflowContractError as exc:
         return _invalid_result(
             request=request,
             reason_code="request.graph_invalid",
-            errors=("request.graph_invalid",),
+            errors=("request.graph_invalid", str(exc)),
         )
     except (AttributeError, TypeError, ValueError):
         return _invalid_result(

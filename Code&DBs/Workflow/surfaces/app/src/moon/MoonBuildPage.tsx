@@ -29,6 +29,11 @@ import { MenuPanel, type MenuSection } from '../menu';
 import { getCatalogSurfacePolicy, getCatalogTruth } from './actionTruth';
 import { scaffoldMoonPrimitiveNode } from './moonPrimitives';
 import {
+  buildAuthorityCompileProse,
+  summarizeComposeAuthority,
+  type MoonComposeAuthoritySummary,
+} from './moonComposeAuthority';
+import {
   getMoonAppendPosition,
   getMoonCanvasDimensions,
   getMoonNodeAnchorRect,
@@ -46,12 +51,6 @@ import {
   type UiActionUndoDescriptor,
 } from '../control/uiActionLedger';
 import './moon-build.css';
-
-const EXAMPLE_PROMPTS = [
-  'Research competitor pricing, classify by tier, draft a comparison report, notify the team on Slack',
-  'Every morning, pull open tickets from Linear, summarize blockers, post to #standup',
-  'When a new lead arrives, enrich from public data, score fit, route to the right account exec',
-];
 
 interface Props {
   workflowId: string | null;
@@ -190,6 +189,14 @@ const DEFAULT_BRANCH_CONDITION = {
   op: 'equals',
   value: true,
 } as const;
+
+const INITIAL_COMPOSE_AUTHORITY: MoonComposeAuthoritySummary = {
+  status: 'loading',
+  buildControlCount: null,
+  atlasFreshness: null,
+  sourceAuthority: null,
+  warning: null,
+};
 
 function isTriggerRoute(route?: string): boolean {
   return route === TRIGGER_MANUAL_ROUTE || route === TRIGGER_SCHEDULE_ROUTE || route === TRIGGER_WEBHOOK_ROUTE;
@@ -391,6 +398,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const [catalog, setCatalog] = useState<CatalogItem[]>(getCatalog());
   const [moonGlowProfile, setMoonGlowProfile] = useState<MoonGlowProfile>(readMoonGlowProfile);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [composeAuthority, setComposeAuthority] = useState<MoonComposeAuthoritySummary>(INITIAL_COMPOSE_AUTHORITY);
   /**
    * Which node has its branch-family picker open. A node-scoped picker is the
    * single affordance for adding a new outgoing edge from an existing step
@@ -424,6 +432,48 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     loadCatalog().then((items) => {
       if (!cancelled) setCatalog(items);
     });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function readJson(url: string, init?: RequestInit): Promise<unknown | null> {
+      const response = await fetch(url, init);
+      if (!response.ok) return null;
+      return response.json().catch(() => null);
+    }
+
+    async function readUiExperienceGraph(): Promise<unknown | null> {
+      const operated = await readJson('/api/operate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operation: 'operator.ui_experience_graph',
+          input: { surface_name: 'build', limit: 80 },
+        }),
+      });
+      if (operated) return operated;
+      return readJson('/api/operator/ui/experience-graph?surface_name=build&limit=80');
+    }
+
+    async function loadComposeAuthority() {
+      const [uiGraph, atlasGraph] = await Promise.allSettled([
+        readUiExperienceGraph(),
+        readJson('/api/atlas/graph'),
+      ]);
+      if (cancelled) return;
+
+      setComposeAuthority(summarizeComposeAuthority(
+        uiGraph.status === 'fulfilled' ? uiGraph.value : null,
+        atlasGraph.status === 'fulfilled' ? atlasGraph.value : null,
+      ));
+    }
+
+    void loadComposeAuthority();
+
     return () => {
       cancelled = true;
     };
@@ -1060,10 +1110,12 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     if (!state.compileProse.trim()) return;
     dispatch({ type: 'COMPILE_START' });
     try {
-      const prefix = state.selectedTrigger
-        ? `Starting with a ${state.selectedTrigger.label} trigger: `
-        : '';
-      const result = await compileDefinition(prefix + state.compileProse.trim(), {
+      const compileProse = buildAuthorityCompileProse({
+        prose: state.compileProse,
+        triggerLabel: state.selectedTrigger?.label,
+        summary: composeAuthority,
+      });
+      const result = await compileDefinition(compileProse, {
         workflowId,
       });
       // Patch first node with trigger route if trigger was selected
@@ -1089,7 +1141,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     } catch (e: any) {
       dispatch({ type: 'COMPILE_ERROR', error: e.message || 'Compilation failed' });
     }
-  }, [onWorkflowCreated, setPayload, state.compileProse, state.selectedTrigger, workflowId]);
+  }, [composeAuthority, onWorkflowCreated, setPayload, state.compileProse, state.selectedTrigger, workflowId]);
 
   const handleTriggerSelect = useCallback((item: CatalogItem) => {
     const trigger = {
@@ -1731,7 +1783,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                   <div className="moon-compose moon-compose--intro" style={{ marginTop: 32 }}>
                     <div className="moon-compose__title">Describe the workflow</div>
                     <div className="moon-compose__hint">
-                      Free text is enough. The builder will infer the graph shape, then you can tighten it up in the canvas.
+                      Name the outcome, the authority it should trust, and the proof that should exist after release.
                     </div>
                     <textarea
                       value={state.compileProse}
@@ -1768,18 +1820,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       </div>
                     )}
                     <div className="moon-compose__shortcut">Press Ctrl/Cmd+Enter to build.</div>
-                    <div className="moon-compose__examples" aria-label="Example prompts">
-                      {EXAMPLE_PROMPTS.map((prompt) => (
-                        <button
-                          key={prompt}
-                          type="button"
-                          className="moon-compose__chip"
-                          onClick={() => dispatch({ type: 'SET_PROSE', prose: prompt })}
-                        >
-                          {prompt}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 )}
               </div>

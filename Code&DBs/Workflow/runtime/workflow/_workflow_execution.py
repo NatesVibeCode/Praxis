@@ -115,8 +115,8 @@ def execute_workflow_request(
                 if not acquired:
                     return None, context.failure_result(
                         run_id=intake_outcome.run_id,
-                        reason_code="route.unhealthy",
-                        failure_code="route.unhealthy",
+                        reason_code="provider.capacity",
+                        failure_code="provider.capacity",
                         outputs={"error": f"Provider at capacity: {context.provider_slug}"},
                     )
                 from .execution_backends import provider_slot_bypass
@@ -178,8 +178,8 @@ def execute_admitted_workflow_request(
                 if not acquired:
                     return None, context.failure_result(
                         run_id=intake_outcome.run_id,
-                        reason_code="route.unhealthy",
-                        failure_code="route.unhealthy",
+                        reason_code="provider.capacity",
+                        failure_code="provider.capacity",
                         outputs={"error": f"Provider at capacity: {context.provider_slug}"},
                     )
                 from .execution_backends import provider_slot_bypass

@@ -35,6 +35,40 @@ class _Conn:
         return []
 
 
+def test_run_scheduler_tick_emits_scheduler_tick_without_due_jobs(tmp_path):
+    state = scheduler.SchedulerState(state_path=str(tmp_path / "scheduler_state.json"))
+    config = scheduler.SchedulerConfig(jobs=(), config_path=str(tmp_path / "scheduler.json"))
+    now = datetime(2026, 4, 9, 11, 59, tzinfo=timezone.utc)
+    event_conn = _Conn()
+
+    results = scheduler.run_scheduler_tick(
+        config,
+        state=state,
+        now=now,
+        event_conn=event_conn,
+    )
+
+    assert results == []
+    tick_calls = [
+        args
+        for query, args in event_conn.calls
+        if "INSERT INTO system_events" in query and args and args[0] == "scheduler.tick"
+    ]
+    assert len(tick_calls) == 1
+    payload = json.loads(tick_calls[0][3])
+    assert payload == {
+        "config_path": str(tmp_path / "scheduler.json"),
+        "job_count": 0,
+        "enabled_job_count": 0,
+        "dry_run": False,
+        "ticked_at": now.isoformat(),
+    }
+    assert not any(
+        "INSERT INTO system_events" in query and args and args[0] == "schedule.fired"
+        for query, args in event_conn.calls
+    )
+
+
 def test_run_scheduler_tick_emits_schedule_fired_event(tmp_path, monkeypatch):
     spec_path = tmp_path / "daily-report.json"
     spec_path.write_text("{\"prompt\": \"do work\"}\n", encoding="utf-8")

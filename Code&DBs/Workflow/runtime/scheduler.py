@@ -268,6 +268,28 @@ def _emit_schedule_fired_event(
     )
 
 
+def _emit_scheduler_tick_event(
+    conn: Any,
+    *,
+    config: SchedulerConfig,
+    now: datetime,
+    dry_run: bool,
+) -> None:
+    emit_system_event(
+        conn,
+        event_type="scheduler.tick",
+        source_id=str(config.config_path or "scheduler"),
+        source_type="scheduler",
+        payload={
+            "config_path": config.config_path,
+            "job_count": len(config.jobs),
+            "enabled_job_count": sum(1 for job in config.jobs if job.enabled),
+            "dry_run": dry_run,
+            "ticked_at": now.isoformat(),
+        },
+    )
+
+
 def _resolve_schedule_event_conn(event_conn: Any | None) -> Any | None:
     if event_conn is not None:
         return event_conn
@@ -310,7 +332,17 @@ def run_scheduler_tick(
 
     results: list[dict[str, Any]] = []
 
-    schedule_event_conn = event_conn
+    schedule_event_conn = _resolve_schedule_event_conn(event_conn)
+    if schedule_event_conn is not None:
+        try:
+            _emit_scheduler_tick_event(
+                schedule_event_conn,
+                config=config,
+                now=now,
+                dry_run=dry_run,
+            )
+        except Exception:
+            logger.debug("scheduler.tick emission unavailable", exc_info=True)
 
     for job in config.jobs:
         last_run = state.get_last_run(job.name)
@@ -341,9 +373,6 @@ def run_scheduler_tick(
             })
             state.record_run(job.name, now)
             continue
-
-        if schedule_event_conn is None:
-            schedule_event_conn = _resolve_schedule_event_conn(None)
 
         if schedule_event_conn is not None:
             _emit_schedule_fired_event(

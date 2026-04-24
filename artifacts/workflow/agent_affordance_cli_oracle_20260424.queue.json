@@ -1,0 +1,17 @@
+{
+  "name": "Agent Affordance CLI Oracle Scout",
+  "phase": "build",
+  "outcome_goal": "Identify the smallest durable changes that make Praxis CLI/tool failures self-correcting for LLM operators.",
+  "jobs": [
+    {
+      "label": "cursor_cli_error_surface_scout",
+      "agent": "cursor/composer-2",
+      "prompt": "Goal: make Praxis easier for LLMs to operate correctly by improving command/tool failure hints without creating a new authority layer.\n\nRead only what you need:\n- Code&DBs/Workflow/surfaces/cli/main.py\n- Code&DBs/Workflow/surfaces/cli/friction.py\n- Code&DBs/Workflow/surfaces/mcp/cli_metadata.py\n- Code&DBs/Workflow/surfaces/cli/commands/tools.py\n- Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py\n- Code&DBs/Workflow/tests/unit/test_cli_tools_surface.py\n\nTask:\n1. Identify the smallest patch that turns common unknown-command/unknown-argument failures into actionable agent hints.\n2. Reuse existing command index and CLI tool metadata authority; do not invent a parallel docs table.\n3. Call out which tests should be added or updated.\n4. Do not edit files unless the fix is obviously narrow and safe. If you edit, keep the write set to main.py and tests only.\n\nReturn: changed files if any, or a concise implementation recommendation with exact file/function anchors."
+    },
+    {
+      "label": "mini_friction_pattern_scout",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Goal: improve LLM operator quality by reducing repeated CLI/tool-shape mistakes.\n\nUse the existing Praxis surfaces. Inspect recent friction patterns and CLI metadata, then produce a short ranked list of the highest-value command hints/examples to add first.\n\nRelevant commands:\n- praxis workflow tools call praxis_friction --input-json '{}'\n- praxis workflow tools list\n- praxis workflow commands --json\n\nFocus on failures like wrong --json flags, wrong bugs/history invocation shape, wrong run-status arguments, and agents using non-existent workflow front doors.\n\nDo not modify code. Return: top 8 hint rules, the failure pattern each addresses, and the existing authority surface each hint should point to."
+    }
+  ]
+}

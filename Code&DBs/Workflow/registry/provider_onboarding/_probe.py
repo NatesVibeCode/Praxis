@@ -444,8 +444,6 @@ def _requested_or_overridden_models(spec: ProviderOnboardingSpec) -> tuple[str, 
     ordered = list(spec.requested_models)
     for model in spec.models:
         ordered.append(model.model_slug)
-    if spec.default_model:
-        ordered.insert(0, spec.default_model)
     return _normalize_unique(ordered)
 
 
@@ -642,6 +640,8 @@ def _probe_models(
         selected_model_slugs = tuple(
             model_slug for model_slug in requested_or_overridden if model_slug in discovered_models
         )
+    elif spec.default_model and spec.default_model in discovered_models:
+        selected_model_slugs = (spec.default_model,)
 
     if missing_requested:
         return (

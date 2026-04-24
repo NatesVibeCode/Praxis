@@ -6,6 +6,8 @@ from typing import Any
 
 from ..subsystems import _subs
 
+_OPERATOR_READ_LIMIT_MAX = 500
+
 
 def _parse_iso_datetime(value: object, *, field_name: str) -> datetime:
     if not isinstance(value, str) or not value.strip():
@@ -30,6 +32,40 @@ def _structured_runtime_error(exc: Exception, *, operation_name: str) -> dict[st
     if isinstance(details, dict) and details:
         payload["details"] = details
     return payload
+
+
+def _structured_input_error(exc: Exception, *, operation_name: str) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": str(exc),
+        "error_code": f"{operation_name}.invalid_input",
+        "operation_name": operation_name,
+    }
+
+
+def _bounded_limit(
+    params: dict[str, Any],
+    *,
+    default: int,
+    maximum: int = _OPERATOR_READ_LIMIT_MAX,
+) -> int:
+    raw = params.get("limit", default)
+    if raw is None or raw == "":
+        raw = default
+    if isinstance(raw, bool):
+        raise ValueError("limit must be a positive integer")
+    if isinstance(raw, int):
+        limit = raw
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text or not text.lstrip("-").isdigit():
+            raise ValueError("limit must be a positive integer")
+        limit = int(text)
+    else:
+        raise ValueError("limit must be a positive integer")
+    if limit <= 0:
+        raise ValueError("limit must be greater than zero")
+    return min(limit, maximum)
 
 
 def _execute_catalog_tool(*, operation_name: str, payload: dict[str, Any]) -> dict:
@@ -105,10 +141,15 @@ def tool_praxis_metrics_reset(params: dict) -> dict:
 def tool_praxis_bug_replay_provenance_backfill(params: dict) -> dict:
     """Backfill replay provenance from authoritative bug and receipt state."""
 
+    operation_name = "operator.bug_replay_provenance_backfill"
+    try:
+        limit = _bounded_limit(params, default=50)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
     return _execute_catalog_tool(
-        operation_name="operator.bug_replay_provenance_backfill",
+        operation_name=operation_name,
         payload={
-            "limit": params.get("limit"),
+            "limit": limit,
             "open_only": bool(
                 params.get("open_only", _bug_query_default_open_only_backlog())
             ),
@@ -143,11 +184,16 @@ def tool_praxis_semantic_bridges_backfill(params: dict) -> dict:
 def tool_praxis_semantic_projection_refresh(params: dict) -> dict:
     """Refresh the semantic projection through explicit operator maintenance authority."""
 
+    operation_name = "operator.semantic_projection_refresh"
     as_of = params.get("as_of")
+    try:
+        limit = _bounded_limit(params, default=100)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
     return _execute_catalog_tool(
-        operation_name="operator.semantic_projection_refresh",
+        operation_name=operation_name,
         payload={
-            "limit": params.get("limit", 100),
+            "limit": limit,
             "as_of": (
                 _parse_iso_datetime(as_of, field_name="as_of")
                 if as_of is not None
@@ -200,6 +246,19 @@ def tool_praxis_graph_projection(params: dict) -> dict:
     )
 
 
+def tool_praxis_ui_experience_graph(params: dict) -> dict:
+    """Read the LLM-facing app experience graph."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.ui_experience_graph",
+        payload={
+            "focus": params.get("focus"),
+            "surface_name": params.get("surface_name"),
+            "limit": params.get("limit", 80),
+        },
+    )
+
+
 def tool_praxis_run_lineage(params: dict) -> dict:
     """Read one run-scoped lineage view."""
 
@@ -212,10 +271,15 @@ def tool_praxis_run_lineage(params: dict) -> dict:
 def tool_praxis_issue_backlog(params: dict) -> dict:
     """Read the canonical operator issue backlog."""
 
+    operation_name = "operator.issue_backlog"
+    try:
+        limit = _bounded_limit(params, default=50)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
     return _execute_catalog_tool(
-        operation_name="operator.issue_backlog",
+        operation_name=operation_name,
         payload={
-            "limit": int(params.get("limit", 50) or 50),
+            "limit": limit,
             "open_only": bool(
                 params.get("open_only", _bug_query_default_open_only_backlog())
             ),
@@ -227,9 +291,14 @@ def tool_praxis_issue_backlog(params: dict) -> dict:
 def tool_praxis_operator_ideas(params: dict) -> dict:
     """Record, resolve, promote, or list pre-commitment operator ideas."""
 
+    operation_name = "operator.ideas"
+    try:
+        limit = _bounded_limit(params, default=50)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
     return execute_operation_from_subsystems(
         _subs,
-        operation_name="operator.ideas",
+        operation_name=operation_name,
         payload={
             "action": params.get("action", "list"),
             "idea_id": params.get("idea_id"),
@@ -253,7 +322,7 @@ def tool_praxis_operator_ideas(params: dict) -> dict:
             "open_only": bool(
                 params.get("open_only", _bug_query_default_open_only_backlog())
             ),
-            "limit": int(params.get("limit", 50) or 50),
+            "limit": limit,
         },
     )
 
@@ -261,10 +330,15 @@ def tool_praxis_operator_ideas(params: dict) -> dict:
 def tool_praxis_replay_ready_bugs(params: dict) -> dict:
     """Read the replay-ready bug backlog."""
 
+    operation_name = "operator.replay_ready_bugs"
+    try:
+        limit = _bounded_limit(params, default=50)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
     return _execute_catalog_tool(
-        operation_name="operator.replay_ready_bugs",
+        operation_name=operation_name,
         payload={
-            "limit": int(params.get("limit", 50) or 50),
+            "limit": limit,
         },
     )
 
@@ -272,13 +346,30 @@ def tool_praxis_replay_ready_bugs(params: dict) -> dict:
 def tool_praxis_operator_write(params: dict) -> dict:
     """Preview, validate, or commit roadmap rows through the shared operator-write gate."""
 
+    operation_name = "operator.roadmap_write"
+    action = str(params.get("action") or "").strip() or "preview"
+    title = str(params.get("title") or "").strip()
+    intent_brief = str(params.get("intent_brief") or "").strip()
+    if not action:
+        return _structured_input_error(
+            ValueError("action is required and cannot be empty"), operation_name=operation_name
+        )
+    if not title:
+        return _structured_input_error(
+            ValueError("title is required and cannot be empty"), operation_name=operation_name
+        )
+    if not intent_brief:
+        return _structured_input_error(
+            ValueError("intent_brief is required and cannot be empty"), operation_name=operation_name
+        )
+
     return execute_operation_from_subsystems(
         _subs,
-        operation_name="operator.roadmap_write",
+        operation_name=operation_name,
         payload={
-            "action": params.get("action", "preview"),
-            "title": params.get("title", ""),
-            "intent_brief": params.get("intent_brief", ""),
+            "action": action,
+            "title": title,
+            "intent_brief": intent_brief,
             "template": params.get("template", "single_capability"),
             "priority": params.get("priority", "p2"),
             "parent_roadmap_item_id": params.get("parent_roadmap_item_id"),
@@ -306,10 +397,15 @@ def tool_praxis_operator_decisions(params: dict) -> dict:
 
     action = str(params.get("action") or "list").strip().lower()
     if action == "list":
+        operation_name = "operator.decision_list"
         as_of = params.get("as_of")
+        try:
+            limit = _bounded_limit(params, default=100)
+        except ValueError as exc:
+            return _structured_input_error(exc, operation_name=operation_name)
         return execute_operation_from_subsystems(
             _subs,
-            operation_name="operator.decision_list",
+            operation_name=operation_name,
             payload={
                 "decision_kind": params.get("decision_kind"),
                 "decision_scope_kind": params.get("decision_scope_kind"),
@@ -319,7 +415,7 @@ def tool_praxis_operator_decisions(params: dict) -> dict:
                     if as_of is not None
                     else None
                 ),
-                "limit": int(params.get("limit", 100) or 100),
+                "limit": limit,
             },
         )
     if action != "record":
@@ -399,10 +495,15 @@ def tool_praxis_semantic_assertions(params: dict) -> dict:
 
     action = str(params.get("action") or "list").strip().lower()
     if action == "list":
+        operation_name = "semantic_assertions.list"
         as_of = params.get("as_of")
+        try:
+            limit = _bounded_limit(params, default=100)
+        except ValueError as exc:
+            return _structured_input_error(exc, operation_name=operation_name)
         return execute_operation_from_subsystems(
             _subs,
-            operation_name="semantic_assertions.list",
+            operation_name=operation_name,
             payload={
                 "predicate_slug": params.get("predicate_slug"),
                 "subject_kind": params.get("subject_kind"),
@@ -417,7 +518,7 @@ def tool_praxis_semantic_assertions(params: dict) -> dict:
                     if as_of is not None
                     else None
                 ),
-                "limit": int(params.get("limit", 100) or 100),
+                "limit": limit,
             },
         )
     if action == "register_predicate":
@@ -625,12 +726,18 @@ def tool_praxis_operator_roadmap_view(params: dict) -> dict:
     if not root_roadmap_item_id:
         return {"error": "failed to resolve a default roadmap root"}
 
+    operation_name = "operator.roadmap_tree"
+    try:
+        semantic_neighbor_limit = _bounded_limit(params, default=5, maximum=200)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+
     return execute_operation_from_subsystems(
         _subs,
-        operation_name="operator.roadmap_tree",
+        operation_name=operation_name,
         payload={
             "root_roadmap_item_id": root_roadmap_item_id,
-            "semantic_neighbor_limit": int(params.get("semantic_neighbor_limit", 5) or 5),
+            "semantic_neighbor_limit": semantic_neighbor_limit,
         },
     )
 
@@ -978,6 +1085,40 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "risks": {"default": "read"},
                 "examples": [
                     {"title": "Read operator graph projection", "input": {"as_of": "2026-04-16T20:05:00+00:00"}},
+                ],
+            },
+        },
+    ),
+    "praxis_ui_experience_graph": (
+        tool_praxis_ui_experience_graph,
+        {
+            "description": "Read the LLM-facing Praxis app experience graph: surfaces, controls, authority sources, relationships, and source-file anchors.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional text filter such as moon, dashboard, run, chat, gate, release, or navigation.",
+                    },
+                    "surface_name": {
+                        "type": "string",
+                        "description": "Optional exact surface id/name such as build, dashboard, chat, manifests, atlas, or moon.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum items per section, capped at 250.",
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Inspect the app UI experience before changing React, CSS, or surface catalog behavior.",
+                "when_not_to_use": "Do not use it for run-scoped execution topology or raw knowledge-graph traversal.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read Moon UI graph", "input": {"surface_name": "build"}},
+                    {"title": "Find release controls", "input": {"focus": "release", "limit": 40}},
                 ],
             },
         },

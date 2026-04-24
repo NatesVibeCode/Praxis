@@ -119,8 +119,8 @@ def test_execute_workflow_request_returns_capacity_failure(monkeypatch):
 
     assert execution_result is None
     assert load_balancer.providers == ["anthropic"]
-    assert failure.reason_code == "route.unhealthy"
-    assert failure.failure_code == "route.unhealthy"
+    assert failure.reason_code == "provider.capacity"
+    assert failure.failure_code == "provider.capacity"
     assert failure.outputs == {"error": "Provider at capacity: anthropic"}
 
 

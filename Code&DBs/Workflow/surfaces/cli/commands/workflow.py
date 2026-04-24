@@ -835,8 +835,10 @@ def _status_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow status` — print recent workflow summary as JSON."""
 
     if args and args[0] in {"-h", "--help"}:
-        stdout.write("usage: workflow status\n")
+        stdout.write("usage: workflow status [--json]\n")
         return 0
+    if args == ["--json"]:
+        args = []
     if args:
         stdout.write(
             "error: workflow status does not support arguments; "
@@ -853,18 +855,95 @@ def _status_command(args: list[str], *, stdout: TextIO) -> int:
     return 0
 
 
+def _compact_status_mapping(mapping: object, keys: tuple[str, ...]) -> dict[str, object]:
+    if not isinstance(mapping, dict):
+        return {}
+    return {key: mapping[key] for key in keys if mapping.get(key) is not None}
+
+
+def _run_status_summary_payload(payload: dict[str, object]) -> dict[str, object]:
+    """Project verbose workflow status into the fields agents need first."""
+
+    jobs = payload.get("jobs") if isinstance(payload.get("jobs"), list) else []
+    compact_jobs: list[dict[str, object]] = []
+    job_status_counts: dict[str, int] = {}
+    for raw_job in jobs:
+        if not isinstance(raw_job, dict):
+            continue
+        status = str(raw_job.get("status") or "unknown")
+        job_status_counts[status] = job_status_counts.get(status, 0) + 1
+        compact_jobs.append(
+            _compact_status_mapping(
+                raw_job,
+                (
+                    "job_label",
+                    "label",
+                    "status",
+                    "agent_slug",
+                    "attempt",
+                    "error_code",
+                    "reason_code",
+                    "heartbeat_age_seconds",
+                ),
+            )
+        )
+
+    health = payload.get("health")
+    compact_health = _compact_status_mapping(
+        health,
+        (
+            "state",
+            "likely_failed",
+            "elapsed_seconds",
+            "completed_jobs",
+            "running_or_claimed",
+            "terminal_jobs",
+            "non_retryable_failed_jobs",
+        ),
+    )
+    if isinstance(health, dict) and isinstance(health.get("signals"), list):
+        compact_health["signals"] = [
+            _compact_status_mapping(
+                signal,
+                ("type", "severity", "message", "node_id", "failure_code", "hint", "jobs"),
+            )
+            for signal in health["signals"]
+            if isinstance(signal, dict)
+        ]
+
+    recovery = payload.get("recovery")
+    compact_recovery = _compact_status_mapping(recovery, ("mode", "reason"))
+    if isinstance(recovery, dict) and isinstance(recovery.get("recommended_tool"), dict):
+        compact_recovery["recommended_tool"] = _compact_status_mapping(
+            recovery["recommended_tool"],
+            ("name", "arguments"),
+        )
+
+    return {
+        "run_id": payload.get("run_id"),
+        "status": payload.get("status"),
+        "spec_name": payload.get("spec_name"),
+        "total_jobs": len(compact_jobs),
+        "job_status_counts": job_status_counts,
+        "health": compact_health,
+        "recovery": compact_recovery,
+        "jobs": compact_jobs,
+    }
+
+
 def _run_status_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow run-status <run_id>` with optional idle recovery."""
 
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow run-status <run_id> [--kill-if-idle] [--idle-threshold-seconds N]\n"
+            "usage: workflow run-status <run_id> [--kill-if-idle] [--idle-threshold-seconds N] [--json] [--summary]\n"
         )
         return 2
 
     run_id = args[0].strip()
     kill_if_idle = False
     idle_threshold_seconds: int | None = None
+    summary = False
     i = 1
     while i < len(args):
         if args[i] == "--kill-if-idle":
@@ -877,6 +956,11 @@ def _run_status_command(args: list[str], *, stdout: TextIO) -> int:
                 stdout.write(f"error: idle threshold must be an integer, got: {args[i + 1]}\n")
                 return 2
             i += 2
+        elif args[i] == "--json":
+            i += 1
+        elif args[i] in {"--summary", "--compact"}:
+            summary = True
+            i += 1
         else:
             stdout.write(f"unknown argument: {args[i]}\n")
             return 2
@@ -888,6 +972,8 @@ def _run_status_command(args: list[str], *, stdout: TextIO) -> int:
         params["idle_threshold_seconds"] = idle_threshold_seconds
 
     payload = _workflow_tool(params)
+    if summary:
+        payload = _run_status_summary_payload(payload)
     print_json(stdout, payload)
     return 0 if not payload.get("error") and payload.get("status") != "not_found" else 1
 

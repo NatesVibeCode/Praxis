@@ -217,7 +217,10 @@
     "209_empty_thin_sandbox_runtime_targets.sql",
     "210_javascript_vitest_verifier.sql",
     "211_interactive_agent_session_authority.sql",
-    "212_operation_replay_receipts.sql"
+    "212_operation_replay_receipts.sql",
+    "213_ui_experience_graph_operator_tool.sql",
+    "214_cursor_api_composer_default.sql",
+    "215_roadmap_tree_query_non_idempotent.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5538,6 +5541,36 @@
         "object_type": "index",
         "object_name": "authority_operation_receipts_idempotency_success_idx"
       }
+    ],
+    "213_ui_experience_graph_operator_tool.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.ui_experience_graph"
+      }
+    ],
+    "214_cursor_api_composer_default.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_cli_profiles.cursor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "model_profiles.model_profile.provider-onboarding.cursor.composer-2"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_model_candidates.candidate.cursor.composer-2"
+      },
+      {
+        "object_type": "row",
+        "object_name": "model_profile_candidate_bindings.binding.provider-onboarding.cursor.composer-2"
+      }
+    ],
+    "215_roadmap_tree_query_non_idempotent.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator-roadmap-tree"
+      }
     ]
   },
   "policy_buckets": {
@@ -5759,7 +5792,10 @@
       "209_empty_thin_sandbox_runtime_targets.sql",
       "210_javascript_vitest_verifier.sql",
       "211_interactive_agent_session_authority.sql",
-      "212_operation_replay_receipts.sql"
+      "212_operation_replay_receipts.sql",
+      "213_ui_experience_graph_operator_tool.sql",
+      "214_cursor_api_composer_default.sql",
+      "215_roadmap_tree_query_non_idempotent.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

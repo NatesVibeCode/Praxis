@@ -554,9 +554,36 @@ class PostgresSemanticAssertionRepository:
         *,
         as_of: datetime,
     ) -> int:
-        await self._conn.execute("DELETE FROM semantic_current_assertions")
-        rows = await self._conn.fetch(
+        row = await self._conn.fetchrow(
             """
+            WITH current_assertions AS (
+                SELECT DISTINCT ON (semantic_assertion_id)
+                    semantic_assertion_id,
+                    predicate_slug,
+                    assertion_status,
+                    subject_kind,
+                    subject_ref,
+                    object_kind,
+                    object_ref,
+                    qualifiers_json,
+                    source_kind,
+                    source_ref,
+                    evidence_ref,
+                    bound_decision_id,
+                    valid_from,
+                    valid_to,
+                    created_at,
+                    updated_at
+                FROM semantic_assertions
+                WHERE valid_from <= $1
+                  AND (valid_to IS NULL OR valid_to > $1)
+                ORDER BY
+                    semantic_assertion_id,
+                    updated_at DESC,
+                    valid_from DESC,
+                    created_at DESC
+            ),
+            upserted AS (
             INSERT INTO semantic_current_assertions (
                 semantic_assertion_id,
                 predicate_slug,
@@ -592,14 +619,42 @@ class PostgresSemanticAssertionRepository:
                 valid_to,
                 created_at,
                 updated_at
-            FROM semantic_assertions
-            WHERE valid_from <= $1
-              AND (valid_to IS NULL OR valid_to > $1)
+            FROM current_assertions
+            ON CONFLICT (semantic_assertion_id) DO UPDATE SET
+                predicate_slug = EXCLUDED.predicate_slug,
+                assertion_status = EXCLUDED.assertion_status,
+                subject_kind = EXCLUDED.subject_kind,
+                subject_ref = EXCLUDED.subject_ref,
+                object_kind = EXCLUDED.object_kind,
+                object_ref = EXCLUDED.object_ref,
+                qualifiers_json = EXCLUDED.qualifiers_json,
+                source_kind = EXCLUDED.source_kind,
+                source_ref = EXCLUDED.source_ref,
+                evidence_ref = EXCLUDED.evidence_ref,
+                bound_decision_id = EXCLUDED.bound_decision_id,
+                valid_from = EXCLUDED.valid_from,
+                valid_to = EXCLUDED.valid_to,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at
             RETURNING semantic_assertion_id
+            ),
+            pruned AS (
+                DELETE FROM semantic_current_assertions current_assertion
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM current_assertions
+                    WHERE current_assertions.semantic_assertion_id =
+                        current_assertion.semantic_assertion_id
+                )
+                RETURNING semantic_assertion_id
+            )
+            SELECT COUNT(*)::integer AS row_count
+            FROM upserted
             """,
             as_of,
         )
-        return len(rows)
+        assert row is not None
+        return int(row["row_count"])
 
 
 __all__ = [

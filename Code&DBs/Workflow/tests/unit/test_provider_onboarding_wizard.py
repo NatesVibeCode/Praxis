@@ -432,6 +432,9 @@ def test_provider_onboarding_resolve_spec_infers_single_declared_api_transport(m
         lambda provider_slug: ProviderCLIProfile(
             provider_slug="cursor",
             binary="cursor-api",
+            output_format="text",
+            output_envelope_key="text",
+            default_timeout=900,
             default_model="auto",
             api_endpoint="https://api.cursor.com/v0/agents",
             api_protocol_family="cursor_background_agent",
@@ -448,6 +451,10 @@ def test_provider_onboarding_resolve_spec_infers_single_declared_api_transport(m
     )
 
     assert resolved.selected_transport == "api"
+    assert resolved.binary_name == "cursor-api"
+    assert resolved.output_format == "text"
+    assert resolved.output_envelope_key == "text"
+    assert resolved.default_timeout == 900
     assert sorted(template.transports) == ["api"]
     assert transport_template.transport == "api"
     assert authority_step.details["supported_transports"] == ["api"]
@@ -494,6 +501,13 @@ def test_post_onboarding_sync_updates_native_runtime_allowed_models(monkeypatch)
 
         def execute(self, query: str, *params: object):
             self.calls.append((query, params))
+            if "FROM provider_model_candidates" in query:
+                return [
+                    {
+                        "task_affinities": '{"primary":["build"],"secondary":["review"],"avoid":[]}',
+                        "route_tier": "high",
+                    }
+                ]
             if "FROM registry_native_runtime_profile_authority" in query:
                 return [{"runtime_profile_ref": "praxis", "allowed_models": '["gpt-5.4"]'}]
             return []
@@ -518,6 +532,8 @@ def test_post_onboarding_sync_updates_native_runtime_allowed_models(monkeypatch)
     assert result["native_runtime_profiles"] is True
     assert result["updated_runtime_profile_refs"] == ["praxis"]
     assert result["added_to_allowed_models"] == ["gpt-5.4-mini"]
+    assert result["cap_columns"][0]["caps"]["cap_build_med"] is True
+    assert result["cap_columns"][0]["caps"]["cap_review"] is True
     assert any(
         "UPDATE registry_native_runtime_profile_authority" in query
         for query, _ in fake_sync_conn.calls
@@ -1059,6 +1075,86 @@ def test_discover_api_models_lists_cursor_background_agent_models(monkeypatch) -
         "o3",
         "claude-4-opus-thinking",
     )
+
+
+def test_probe_models_treats_missing_default_as_preference_for_explicit_model(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        provider_onboarding_probe,
+        "_discover_api_models",
+        lambda spec, *, env, transport_details: ("composer-2", "gpt-5.4-high"),
+    )
+
+    spec = provider_onboarding.ProviderOnboardingSpec(
+        provider_slug="cursor",
+        selected_transport="api",
+        default_model="auto",
+        requested_models=("composer-2",),
+        api_endpoint="https://api.cursor.com/v0/agents",
+        api_protocol_family="cursor_background_agent",
+        api_key_env_vars=("CURSOR_API_KEY",),
+    )
+    transport_template = provider_onboarding.ProviderTransportAuthorityTemplate(
+        transport="api",
+        supported=True,
+        api_endpoint="https://api.cursor.com/v0/agents",
+        api_protocol_family="cursor_background_agent",
+        api_key_env_vars=("CURSOR_API_KEY",),
+        default_model="auto",
+        discovery_strategy="cursor_models_list",
+        prompt_probe_strategy="api_model_discovery_auth_probe",
+    )
+
+    result, models = provider_onboarding_probe._probe_models(
+        spec,
+        transport_template,
+        env={"CURSOR_API_KEY": "cursor-test-key"},
+        transport_details={"discovery_strategy": "cursor_models_list"},
+    )
+
+    assert result.status == "succeeded"
+    assert result.details["selected_models"] == ["composer-2"]
+    assert result.details["default_model"] == "composer-2"
+    assert [model.model_slug for model in models] == ["composer-2"]
+
+
+def test_probe_models_keeps_available_default_as_selection_hint(monkeypatch) -> None:
+    monkeypatch.setattr(
+        provider_onboarding_probe,
+        "_discover_api_models",
+        lambda spec, *, env, transport_details: ("composer-2", "gpt-5.4-high"),
+    )
+
+    spec = provider_onboarding.ProviderOnboardingSpec(
+        provider_slug="cursor",
+        selected_transport="api",
+        default_model="composer-2",
+        api_endpoint="https://api.cursor.com/v0/agents",
+        api_protocol_family="cursor_background_agent",
+        api_key_env_vars=("CURSOR_API_KEY",),
+    )
+    transport_template = provider_onboarding.ProviderTransportAuthorityTemplate(
+        transport="api",
+        supported=True,
+        api_endpoint="https://api.cursor.com/v0/agents",
+        api_protocol_family="cursor_background_agent",
+        api_key_env_vars=("CURSOR_API_KEY",),
+        default_model="composer-2",
+        discovery_strategy="cursor_models_list",
+        prompt_probe_strategy="api_model_discovery_auth_probe",
+    )
+
+    result, models = provider_onboarding_probe._probe_models(
+        spec,
+        transport_template,
+        env={"CURSOR_API_KEY": "cursor-test-key"},
+        transport_details={"discovery_strategy": "cursor_models_list"},
+    )
+
+    assert result.status == "succeeded"
+    assert result.details["selected_models"] == ["composer-2"]
+    assert [model.model_slug for model in models] == ["composer-2"]
 
 
 def test_probe_capacity_succeeds_for_cursor_background_agent_auth_probe() -> None:

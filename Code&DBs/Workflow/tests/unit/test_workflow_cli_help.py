@@ -130,6 +130,46 @@ def test_bugs_subcommand_help_after_action_is_success() -> None:
     assert "usage: workflow bugs" in stdout.getvalue()
 
 
+def test_bugs_history_accepts_positional_bug_id(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"ok": True, "bug_id": params["bug_id"]}
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._bugs_command(["history", "BUG-1234"], stdout=stdout)
+
+    assert rc == 0
+    assert captured == {
+        "tool_name": "praxis_bugs",
+        "params": {"bug_id": "BUG-1234", "action": "history", "limit": 25},
+    }
+
+
+def test_bugs_list_accepts_open_only_alias(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"bugs": [], "count": 0, "returned_count": 0}
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._bugs_command(["list", "--open-only", "--json"], stdout=stdout)
+
+    assert rc == 0
+    assert captured == {
+        "tool_name": "praxis_bugs",
+        "params": {"open_only": True, "action": "list", "limit": 25},
+    }
+
+
 def test_bugs_duplicate_check_accepts_body_context(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

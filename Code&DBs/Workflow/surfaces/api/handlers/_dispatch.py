@@ -26,10 +26,12 @@ def _dispatch_standard_post(
     route_map: RouteRegistry,
     *,
     record_api_route_usage: Callable[..., None],
+    required_body_paths: set[str] | frozenset[str] | None = None,
 ) -> bool:
     handler = route_map.get(path)
     if handler is None:
         return False
+    body_required = path in (required_body_paths or set())
 
     try:
         body = _read_json_body(request)
@@ -41,6 +43,20 @@ def _dispatch_standard_post(
                 path=path,
                 method="POST",
                 status_code=400,
+                response_payload=payload,
+                headers=request.headers,
+            )
+            return True
+
+        if body_required and body == {}:
+            payload = {"error": "Request body is required and must be a non-empty JSON object"}
+            request._send_json(400, payload)
+            record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
                 response_payload=payload,
                 headers=request.headers,
             )

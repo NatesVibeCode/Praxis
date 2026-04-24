@@ -98,6 +98,17 @@ class CronScheduler:
 
     def tick(self) -> int:
         fired = 0
+        now = _utc_now()
+        try:
+            emit_system_event(
+                self._conn,
+                event_type="scheduler.tick",
+                source_id="workflow_triggers",
+                source_type="cron_scheduler",
+                payload={"ticked_at": now.isoformat()},
+            )
+        except Exception:
+            logger.debug("scheduler.tick emission unavailable", exc_info=True)
         try:
             triggers = self._conn.execute(
                 "SELECT id, workflow_id, cron_expression, last_fired_at "
@@ -106,7 +117,6 @@ class CronScheduler:
                 "  AND cron_expression IS NOT NULL "
                 "  AND enabled = TRUE"
             )
-            now = _utc_now()
             for trigger in triggers or []:
                 try:
                     trigger_id = trigger["id"]

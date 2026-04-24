@@ -60,20 +60,58 @@ def _normalize_roots(roots: Sequence[str] | None) -> tuple[str, ...]:
         return DEFAULT_SCAN_ROOTS
     normalized: list[str] = []
     for root in roots:
-        text = str(root or "").strip().strip("/")
-        if text:
-            normalized.append(text)
+        text = str(root or "").strip().replace("\\", "/").strip("/")
+        if not text:
+            continue
+        candidate = Path(text)
+        if candidate.is_absolute():
+            continue
+        if ".." in candidate.parts:
+            continue
+        normalized_text = candidate.as_posix().strip("/")
+        if normalized_text:
+            normalized.append(normalized_text)
     return tuple(normalized) or DEFAULT_SCAN_ROOTS
 
 
+def _normalize_filter_prefix(prefix: str | None, repo_root: Path) -> str:
+    return _normalize_relative_path(str(prefix or ""), repo_root).strip("/")
+
+
+def _is_inside_repo(normalized: str, repo_root: Path) -> bool:
+    if not normalized:
+        return False
+    candidate = Path(normalized)
+    if candidate.is_absolute():
+        try:
+            candidate = candidate.resolve().relative_to(repo_root.resolve())
+        except ValueError:
+            return False
+    return ".." not in Path(candidate).parts
+
+
 def _normalize_relative_path(path: str | Path, repo_root: Path) -> str:
-    candidate = Path(path)
+    candidate = Path(str(path).strip().replace("\\", "/"))
+    if not str(candidate):
+        return ""
     if candidate.is_absolute():
         try:
             return candidate.resolve().relative_to(repo_root.resolve()).as_posix()
         except ValueError:
-            return candidate.as_posix()
-    return candidate.as_posix().lstrip("./")
+            return ""
+        except OSError:
+            return ""
+    normalized = candidate.as_posix().lstrip("./")
+    if not normalized or normalized == "." or ".." in Path(normalized).parts:
+        return ""
+    return normalized
+
+
+def _safe_candidate_path(path: str | Path, repo_root: Path) -> str | None:
+    normalized = _normalize_relative_path(path, repo_root)
+    if not normalized or normalized.startswith("/") or not _is_inside_repo(normalized, repo_root):
+        return None
+    return normalized
 
 
 def _is_test_path(path: str | Path) -> bool:
@@ -136,7 +174,9 @@ def _ordered_unique_paths(paths: Iterable[Any], repo_root: Path) -> tuple[str, .
         text = str(raw or "").strip()
         if not text:
             continue
-        normalized = _normalize_relative_path(text, repo_root)
+        normalized = _safe_candidate_path(text, repo_root)
+        if normalized is None:
+            continue
         if not normalized or _is_test_path(normalized) or normalized in seen:
             continue
         seen.add(normalized)
@@ -214,14 +254,14 @@ def build_code_hotspots(
 ) -> dict[str, Any]:
     repo_root_path = Path(repo_root).resolve()
     normalized_roots = _normalize_roots(roots)
-    normalized_prefix = str(path_prefix or "").strip().strip("/")
+    normalized_prefix = _normalize_filter_prefix(path_prefix, repo_root_path)
     sources: dict[str, dict[str, Any]] = {}
 
     health_by_path: dict[str, Any] = {}
     static_errors: list[str] = []
     for root in normalized_roots:
         root_path = repo_root_path / root
-        if not root_path.exists():
+        if not root_path.exists() or not root_path.is_dir():
             continue
         try:
             modules = HealthMapper().analyze_directory(str(root_path))

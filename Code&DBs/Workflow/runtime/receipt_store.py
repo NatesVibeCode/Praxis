@@ -317,6 +317,8 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
     failure_category = _receipt_failure_category(payload)
     source_kind = _source_slug(payload)
     label = str(payload.get("job_label") or payload.get("label") or payload.get("node_id") or "").strip()
+    node_id = str(payload.get("node_id") or label).strip()
+    identity = node_id or "unknown"
     run_id = str(payload.get("run_id") or "").strip()
     receipt_id = str(payload.get("receipt_id") or "").strip()
 
@@ -331,7 +333,7 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
         FrictionLedger(conn).record(
             friction_type=friction_type,
             source=source_kind,
-            job_label=label or "receipt",
+            job_label=identity,
             message=f"{failure_category or classification.category.value}: {failure_code}",
         )
     except Exception as error:
@@ -346,8 +348,8 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
     try:
         signature = build_failure_signature(
             failure_code=failure_code,
-            job_label=label or None,
-            node_id=str(payload.get("node_id") or "").strip() or None,
+            job_label=identity if identity != "unknown" else None,
+            node_id=node_id or None,
             failure_category=failure_category or None,
             agent=str(payload.get("agent") or "").strip() or None,
             provider_slug=str(payload.get("provider_slug") or "").strip() or None,
@@ -358,7 +360,7 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
         signature_tags = (
             "auto-filed",
             f"failure_code:{_normalize_tag_value(failure_code)}",
-            f"job_label:{_normalize_tag_value(label or 'unknown')}",
+            f"job_label:{_normalize_tag_value(identity)}",
             f"failure_category:{_normalize_tag_value(failure_category or 'unknown')}",
             f"provider:{_normalize_tag_value(str(payload.get('provider_slug') or 'unknown'))}",
             f"model:{_normalize_tag_value(str(payload.get('model_slug') or 'unknown'))}",
@@ -367,7 +369,7 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
         dedupe_tags = (
             "auto-filed",
             f"failure_code:{_normalize_tag_value(failure_code)}",
-            f"job_label:{_normalize_tag_value(label or 'unknown')}",
+            f"job_label:{_normalize_tag_value(identity)}",
         )
         existing = tracker.list_bugs(open_only=True, tags=dedupe_tags, limit=1)
         failure_count = int(
@@ -376,11 +378,11 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
                 SELECT COUNT(*) AS total
                 FROM receipts
                 WHERE lower(status) IN ('failed', 'error')
-                  AND COALESCE(failure_code, '') = $1
+                AND COALESCE(failure_code, '') = $1
                   AND COALESCE(node_id, '') = $2
                 """,
                 failure_code,
-                label,
+                node_id,
             )
             or 0
         )
@@ -392,7 +394,7 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
                 category=BugCategory.RUNTIME,
                 description=(
                     f"Failure code '{failure_code}' occurred {failure_count} times"
-                    f" for node '{label or 'unknown'}' in persisted receipts."
+                    f" for node '{identity}' in persisted receipts."
                 ),
                 filed_by="receipt_store",
                 source_kind="receipt_store",

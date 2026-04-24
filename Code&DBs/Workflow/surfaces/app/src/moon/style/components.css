@@ -691,8 +691,9 @@
 
 /* ---- Nucleus + compose (start state) ---- */
 .moon-start {
-  width: min(760px, calc(100vw - 56px));
+  width: min(760px, 100%);
   max-width: 760px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -700,6 +701,14 @@
   overflow-y: auto;
   max-height: 100%;
   padding: 28px 8px 40px;
+}
+.moon-center--empty .moon-start {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  width: min(760px, calc(100% - 32px));
+  margin-inline: 0;
+  transform: translateX(-50%);
 }
 .moon-nucleus {
   display: flex;
@@ -813,6 +822,7 @@
 .moon-compose {
   width: min(var(--moon-compose-width), 100%);
   max-width: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -905,35 +915,6 @@
   color: var(--moon-fg-muted);
   text-align: left;
 }
-.moon-compose__examples {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: min(var(--moon-compose-width), 100%);
-  max-width: 100%;
-  margin-inline: auto;
-}
-.moon-compose__chip {
-  padding: 13px 16px;
-  border-radius: 18px;
-  border: 1px solid var(--moon-white-a10);
-  background: var(--moon-white-a025);
-  color: var(--moon-white-a85);
-  font-size: var(--moon-font-size-sm);
-  line-height: 1.5;
-  text-align: left;
-  cursor: pointer;
-  box-shadow: var(--moon-glow-black-soft);
-  transition: border-color var(--moon-motion-node), color var(--moon-motion-node), background var(--moon-motion-node), transform var(--moon-motion-node);
-}
-.moon-compose__chip:hover {
-  border-color: var(--moon-accent);
-  color: var(--moon-accent);
-  background: var(--moon-accent-a08);
-  box-shadow: var(--moon-glow-accent-soft);
-  transform: translateY(-1px);
-}
-
 .moon-node-advanced {
   display: grid;
   gap: 10px;
@@ -3174,13 +3155,6 @@ button.moon-release__dispatch-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-button.moon-compose__chip {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 13px 16px;
 }
 
 button.moon-compose__btn {

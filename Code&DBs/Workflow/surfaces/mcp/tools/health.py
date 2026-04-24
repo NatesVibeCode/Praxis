@@ -1,12 +1,14 @@
 """Tools: praxis_health."""
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from runtime.engineering_observability import build_trend_observability
 from runtime.dependency_contract import dependency_truth_report
 from runtime.context_cache import get_context_cache
 from runtime.missing_detector import build_content_health_report
+from runtime.system_events import emit_system_event
 from runtime.workflow import get_route_outcomes
 from registry.config_registry import get_config as get_registry_config
 from registry.provider_execution_registry import registry_health as provider_registry_health
@@ -295,6 +297,41 @@ def _reload_runtime_modules(requested: list[str] | None) -> dict:
     }
 
 
+def _emit_reload_audit_event(scope: str, result: dict[str, Any], modules: list[str] | None = None) -> bool:
+    """Persist a durable record of reload intent and mutations."""
+    try:
+        conn = _subs.get_pg_conn()
+    except Exception:
+        return False
+    runtime_modules = result.get("runtime_modules")
+    if not isinstance(runtime_modules, dict):
+        runtime_modules = {}
+    payload = {
+        "scope": scope,
+        "result_count": int(result.get("count") or 0),
+        "process_id": os.getpid(),
+        "cache_reloaded": list(result.get("reloaded") or []),
+        "cache_failed": list(result.get("failed") or []),
+        "requested_modules": modules or [],
+        "runtime_modules": runtime_modules,
+        "runtime_modules_reloaded": list(runtime_modules.get("reloaded") or []),
+        "runtime_modules_failed": list(runtime_modules.get("failed") or []),
+        "runtime_modules_rejected": list(runtime_modules.get("rejected") or []),
+        "allowlist_prefixes": list(_RUNTIME_RELOAD_ALLOWLIST_PREFIXES),
+    }
+    try:
+        emit_system_event(
+            conn,
+            event_type="runtime.reload",
+            source_id="mcp_tool",
+            source_type="runtime_admin",
+            payload=payload,
+        )
+    except Exception:
+        return False
+    return True
+
+
 def tool_praxis_reload(params: dict) -> dict:
     """Clear in-process caches and optionally importlib.reload runtime modules.
 
@@ -356,6 +393,7 @@ def tool_praxis_reload(params: dict) -> dict:
     result: dict[str, Any] = {"reloaded": cleared, "count": len(cleared), "scope": scope}
     if scope in {"runtime_modules", "all"}:
         result["runtime_modules"] = _reload_runtime_modules(modules_param)
+    result["audit"] = {"system_event_recorded": _emit_reload_audit_event(scope=scope, result=result, modules=modules_param)}
     return result
 
 

@@ -359,6 +359,7 @@ def test_fast_orient_still_projects_database_binding(monkeypatch) -> None:
     )
 
     assert result["native_instance"] == {"status": "skipped", "reason": "orient_fast_path"}
+    assert result["cli_surface"]["tool_count"] == len(get_tool_catalog())
     runtime_binding = result["primitive_contracts"]["runtime_binding"]
     assert runtime_binding["database"]["authority_source"] == "repo_env:/repo/.env"
     assert runtime_binding["database"]["redacted_url"] == (

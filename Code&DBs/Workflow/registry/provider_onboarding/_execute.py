@@ -127,6 +127,13 @@ def _post_onboarding_sync(
         if not rows:
             continue
         affinities = rows[0].get("task_affinities") or {}
+        if isinstance(affinities, str):
+            try:
+                affinities = json.loads(affinities)
+            except json.JSONDecodeError:
+                affinities = {}
+        if not isinstance(affinities, Mapping):
+            affinities = {}
         route_tier = rows[0].get("route_tier") or "medium"
 
         primary = set(affinities.get("primary") or [])

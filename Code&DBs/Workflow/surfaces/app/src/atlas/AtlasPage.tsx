@@ -20,6 +20,15 @@ interface AtlasElementData {
   degree?: number;
   size?: number;
   weight?: number;
+  authority_source?: string;
+  relation_source?: string;
+  object_kind?: string;
+  category?: string;
+  definition_summary?: string;
+  surface_name?: string;
+  route_ref?: string;
+  binding_revision?: string;
+  decision_ref?: string;
   is_area?: boolean;
   is_aggregate?: boolean;
 }
@@ -72,6 +81,13 @@ interface AtlasPayload {
 }
 
 type LabelMode = 'auto' | 'always' | 'off';
+type AtlasViewMode = 'graph' | 'table';
+
+interface AtlasTableRow {
+  edge: AtlasElementData;
+  source: AtlasElementData;
+  target: AtlasElementData;
+}
 
 const ATLAS_EASING = 'ease-in-out-cubic';
 const ATLAS_GRAPH_TIMEOUT_MS = 15_000;
@@ -220,6 +236,38 @@ function toElementDefinitions(payload: AtlasPayload): ElementDefinition[] {
   ] as ElementDefinition[];
 }
 
+function atlasNodeMatchesFilters(
+  data: AtlasElementData,
+  areas: Set<string>,
+  types: Set<string>,
+  query: string,
+) {
+  if (data.is_area) return false;
+  const areaOk = areas.has(data.area || '(unowned)');
+  const typeOk = types.has(data.type || 'unknown');
+  const haystack = [
+    data.label,
+    data.id,
+    data.type,
+    data.area,
+    data.source,
+    data.authority_source,
+    data.object_kind,
+    data.definition_summary,
+    data.route_ref,
+  ].filter(Boolean).join(' ').toLowerCase();
+  const searchOk = !query || haystack.includes(query);
+  return areaOk && typeOk && searchOk;
+}
+
+function nodeAuthorityLabel(data: AtlasElementData) {
+  return data.authority_source || data.source || 'unknown';
+}
+
+function nodeKindLabel(data: AtlasElementData) {
+  return data.object_kind || data.category || data.type || 'unknown';
+}
+
 function useAtlasGraph() {
   const [payload, setPayload] = useState<AtlasPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -287,10 +335,19 @@ export function AtlasPage() {
   const [activeRelations, setActiveRelations] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [labelMode, setLabelMode] = useState<LabelMode>('auto');
+  const [viewMode, setViewMode] = useState<AtlasViewMode>('graph');
   const [selectedNode, setSelectedNode] = useState<AtlasElementData | null>(null);
   const [selectedNeighbors, setSelectedNeighbors] = useState<AtlasElementData[]>([]);
   const [renderIssue, setRenderIssue] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+
+  const nodeById = useMemo(() => {
+    const index = new Map<string, AtlasElementData>();
+    payload?.nodes.forEach((node) => {
+      index.set(node.data.id, node.data);
+    });
+    return index;
+  }, [payload]);
 
   const areaCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -321,9 +378,62 @@ export function AtlasPage() {
     return counts;
   }, [payload]);
 
+  const tableRows = useMemo<AtlasTableRow[]>(() => {
+    if (!payload) return [];
+    const query = search.toLowerCase().trim();
+    return payload.edges
+      .filter((edge) => !edge.data.is_aggregate)
+      .map((edge) => {
+        const source = nodeById.get(edge.data.source || '');
+        const target = nodeById.get(edge.data.target || '');
+        if (!source || !target) return null;
+        const relation = edge.data.label || '';
+        if (relation && !activeRelations.has(relation)) return null;
+        const sourceInScope = atlasNodeMatchesFilters(source, activeAreas, activeTypes, '');
+        const targetInScope = atlasNodeMatchesFilters(target, activeAreas, activeTypes, '');
+        if (!sourceInScope && !targetInScope) return null;
+        const sourceMatches = atlasNodeMatchesFilters(source, activeAreas, activeTypes, query);
+        const targetMatches = atlasNodeMatchesFilters(target, activeAreas, activeTypes, query);
+        const edgeMatches = !query || [
+          relation,
+          edge.data.id,
+          edge.data.authority_source,
+          edge.data.relation_source,
+        ].filter(Boolean).join(' ').toLowerCase().includes(query);
+        if (!sourceMatches && !targetMatches && !edgeMatches) return null;
+        return { edge: edge.data, source, target };
+      })
+      .filter((row): row is AtlasTableRow => Boolean(row))
+      .sort((a, b) => {
+        const sourceDelta = (a.source.label || a.source.id).localeCompare(b.source.label || b.source.id);
+        if (sourceDelta !== 0) return sourceDelta;
+        return (a.target.label || a.target.id).localeCompare(b.target.label || b.target.id);
+      });
+  }, [activeAreas, activeRelations, activeTypes, nodeById, payload, search]);
+
   const areaColor = useCallback((area: string) => {
     return payload?.areas.find((item) => item.slug === area)?.color || '#4a5068';
   }, [payload]);
+
+  const selectNodeById = useCallback((nodeId: string, zoom = 1.55) => {
+    const data = nodeById.get(nodeId);
+    if (!data || data.is_area) return;
+    const neighbors = payload?.edges
+      .filter((edge) => !edge.data.is_aggregate && (edge.data.source === nodeId || edge.data.target === nodeId))
+      .map((edge) => nodeById.get(edge.data.source === nodeId ? edge.data.target || '' : edge.data.source || ''))
+      .filter((neighbor): neighbor is AtlasElementData => Boolean(neighbor && !neighbor.is_area)) || [];
+    const cy = cyRef.current;
+    if (cy) {
+      const node = cy.getElementById(nodeId);
+      if (node.length) {
+        cy.$(':selected').unselect();
+        node.select();
+        cy.animate({ center: { eles: node }, zoom }, { duration: 300 });
+      }
+    }
+    setSelectedNode(data);
+    setSelectedNeighbors(neighbors);
+  }, [nodeById, payload]);
 
   const fitVisibleGraph = useCallback((padding = 70) => {
     const cy = cyRef.current;
@@ -858,6 +968,20 @@ export function AtlasPage() {
         </div>
         <div className="atlas-page__hint">{modeHint}</div>
         <div className="atlas-page__toolbar" aria-label="Atlas graph controls">
+          <button
+            type="button"
+            className={viewMode === 'graph' ? 'atlas-page__toolbar-active' : ''}
+            onClick={() => setViewMode('graph')}
+          >
+            Graph
+          </button>
+          <button
+            type="button"
+            className={viewMode === 'table' ? 'atlas-page__toolbar-active' : ''}
+            onClick={() => setViewMode('table')}
+          >
+            Table
+          </button>
           <button type="button" onClick={() => syncExpandedAreas(new Set(payload.areas.map((area) => area.slug)))}>
             Expand all
           </button>
@@ -938,7 +1062,75 @@ export function AtlasPage() {
         </section>
       </aside>
 
-      <div className="atlas-page__graph" ref={graphRef} />
+      <main className="atlas-page__workspace" aria-label="Atlas workspace">
+        <div
+          className={`atlas-page__graph${viewMode === 'graph' ? '' : ' atlas-page__graph--hidden'}`}
+          ref={graphRef}
+          aria-hidden={viewMode !== 'graph'}
+        />
+        <div
+          className={`atlas-page__table${viewMode === 'table' ? '' : ' atlas-page__table--hidden'}`}
+          aria-hidden={viewMode !== 'table'}
+        >
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Source</th>
+                <th scope="col">Relation</th>
+                <th scope="col">Target</th>
+                <th scope="col">Kind</th>
+                <th scope="col">Authority</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.map((row) => {
+                const selected = selectedNode?.id === row.source.id || selectedNode?.id === row.target.id;
+                return (
+                  <tr
+                    key={row.edge.id}
+                    className={selected ? 'atlas-page__table-row--selected' : ''}
+                    onClick={() => selectNodeById(row.source.id)}
+                  >
+                    <td>
+                      <button type="button" onClick={(event) => {
+                        event.stopPropagation();
+                        selectNodeById(row.source.id);
+                      }}>
+                        {row.source.label || row.source.id}
+                      </button>
+                      <span>{row.source.id}</span>
+                    </td>
+                    <td>
+                      <strong>{row.edge.label || 'related'}</strong>
+                      <span>{row.edge.relation_source || row.edge.authority_source || 'canonical'}</span>
+                    </td>
+                    <td>
+                      <button type="button" onClick={(event) => {
+                        event.stopPropagation();
+                        selectNodeById(row.target.id);
+                      }}>
+                        {row.target.label || row.target.id}
+                      </button>
+                      <span>{row.target.id}</span>
+                    </td>
+                    <td>
+                      <strong>{nodeKindLabel(row.source)}</strong>
+                      <span>{nodeKindLabel(row.target)}</span>
+                    </td>
+                    <td>
+                      <strong>{nodeAuthorityLabel(row.source)}</strong>
+                      <span>{nodeAuthorityLabel(row.target)}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {tableRows.length === 0 && (
+            <div className="atlas-page__table-empty">No relationships match the current filters.</div>
+          )}
+        </div>
+      </main>
 
       <aside className="atlas-page__detail" aria-label="Atlas detail">
         {selectedNode ? (
@@ -949,8 +1141,30 @@ export function AtlasPage() {
               {selectedNode.type && <span className="atlas-page__tag">{selectedNode.type}</span>}
             </div>
             <div className="atlas-page__source">
-              {selectedNode.id}{selectedNode.source ? ` | ${selectedNode.source}` : ''}
+              {selectedNode.id}{selectedNode.authority_source || selectedNode.source ? ` | ${nodeAuthorityLabel(selectedNode)}` : ''}
             </div>
+            {(selectedNode.object_kind || selectedNode.route_ref || selectedNode.decision_ref) && (
+              <dl className="atlas-page__facts">
+                {selectedNode.object_kind && (
+                  <>
+                    <dt>Object</dt>
+                    <dd>{selectedNode.object_kind}</dd>
+                  </>
+                )}
+                {selectedNode.route_ref && (
+                  <>
+                    <dt>Route</dt>
+                    <dd>{selectedNode.route_ref}</dd>
+                  </>
+                )}
+                {selectedNode.decision_ref && (
+                  <>
+                    <dt>Decision</dt>
+                    <dd>{selectedNode.decision_ref}</dd>
+                  </>
+                )}
+              </dl>
+            )}
             {selectedNode.preview && <pre>{selectedNode.preview}</pre>}
             {selectedNeighbors.length > 0 && (
               <div className="atlas-page__neighbors">

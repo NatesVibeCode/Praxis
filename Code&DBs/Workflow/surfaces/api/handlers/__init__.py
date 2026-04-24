@@ -196,6 +196,18 @@ PUT_ROUTE_HANDLERS = _LazyRouteList("put")
 QUERY_ROUTES = _LazyRouteMap("query_routes")
 ROUTES = _LazyRouteMap("routes")
 RUN_ROUTES = _LazyRouteMap("run_routes")
+POST_ROUTES_REQUIRING_BODY = frozenset(
+    {
+        "/api/operator/roadmap-write",
+        "/api/operator/native-primary-cutover-gate",
+        "/api/operator/work-item-closeout",
+        "/api/operator/provider-onboarding",
+        "/api/operator/decision",
+        "/api/operator/architecture-policy",
+        "/api/operator/functional-area",
+        "/api/operator/object-relation",
+    }
+)
 
 
 def handle_post_request(request: Any, path: str) -> bool:
@@ -204,6 +216,7 @@ def handle_post_request(request: Any, path: str) -> bool:
         path,
         ROUTES,
         record_api_route_usage=_record_api_route_usage,
+        required_body_paths=POST_ROUTES_REQUIRING_BODY,
     )
 
 

@@ -19,6 +19,7 @@ from runtime.semantic_assertions import (
     normalize_semantic_assertion_record,
     semantic_assertion_id,
 )
+from storage.postgres.semantic_assertion_repository import PostgresSemanticAssertionRepository
 
 
 def test_hidden_authority_keys_are_rejected_in_qualifiers() -> None:
@@ -138,3 +139,32 @@ def test_query_semantic_assertions_handler_uses_frontdoor(monkeypatch) -> None:
     assert captured["predicate_slug"] == "grouped_in"
     assert captured["source_kind"] == "operator"
     assert captured["limit"] == 25
+
+
+def test_projection_rebuild_reconciles_current_rows_without_destructive_delete() -> None:
+    class _FakeConn:
+        def __init__(self) -> None:
+            self.executed: list[str] = []
+            self.fetchrow_query = ""
+            self.fetchrow_args: tuple[object, ...] = ()
+
+        async def execute(self, query: str, *args: object) -> str:
+            self.executed.append(query)
+            return "DELETE 0"
+
+        async def fetchrow(self, query: str, *args: object):
+            self.fetchrow_query = query
+            self.fetchrow_args = args
+            return {"row_count": 2}
+
+    as_of = datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc)
+    conn = _FakeConn()
+    repository = PostgresSemanticAssertionRepository(conn)  # type: ignore[arg-type]
+
+    row_count = asyncio.run(repository.rebuild_current_assertions(as_of=as_of))
+
+    assert row_count == 2
+    assert conn.executed == []
+    assert conn.fetchrow_args == (as_of,)
+    assert "ON CONFLICT (semantic_assertion_id) DO UPDATE" in conn.fetchrow_query
+    assert "pruned AS" in conn.fetchrow_query

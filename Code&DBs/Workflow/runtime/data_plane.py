@@ -14,7 +14,11 @@ import re
 import uuid
 from typing import Any
 
-from contracts.data_contracts import data_job_digest, normalize_data_job
+from contracts.data_contracts import (
+    SUPPORTED_DATA_OPERATIONS,
+    data_job_digest,
+    normalize_data_job,
+)
 from core.data_ops import (
     aggregate_records,
     apply_plan_records,
@@ -698,6 +702,11 @@ def execute_data_job(
 
     started_at = datetime.now(timezone.utc)
     job = normalize_data_job(payload, default_operation=default_operation)
+    if job["operation"] not in SUPPORTED_DATA_OPERATIONS:
+        raise DataRuntimeBoundaryError(
+            "data.operation.unsupported",
+            f"unsupported data operation: {job['operation']}",
+        )
     workspace = _resolve_workspace_root(job, workspace_root=workspace_root)
     source_records: list[dict[str, Any]] = []
     source_authority: dict[str, Any] | None = None

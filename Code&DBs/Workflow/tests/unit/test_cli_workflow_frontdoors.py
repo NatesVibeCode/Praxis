@@ -69,6 +69,145 @@ def test_run_status_frontdoor_supports_idle_recovery(monkeypatch: pytest.MonkeyP
     assert payload["status"] == "running"
 
 
+def test_run_status_frontdoor_accepts_json_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_workflow_tool(params: dict[str, object]):
+        captured.update(params)
+        return {"run_id": "workflow_123", "status": "running"}
+
+    monkeypatch.setattr(workflow_commands, "_workflow_tool", _fake_workflow_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(["run-status", "workflow_123", "--json"], stdout=stdout) == 0
+
+    assert captured == {"action": "status", "run_id": "workflow_123"}
+    payload = json.loads(stdout.getvalue())
+    assert payload["run_id"] == "workflow_123"
+
+
+def test_run_status_frontdoor_summary_projects_agent_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_workflow_tool(params: dict[str, object]):
+        captured.update(params)
+        return {
+            "run_id": "workflow_123",
+            "status": "failed",
+            "spec_name": "Agent Affordance CLI Oracle Scout",
+            "packet_inspection": {"large": "payload"},
+            "health": {
+                "state": "critical",
+                "likely_failed": True,
+                "elapsed_seconds": 944.8,
+                "completed_jobs": 2,
+                "running_or_claimed": 0,
+                "terminal_jobs": 2,
+                "resource_telemetry": {"heartbeat_freshness": "fresh"},
+                "signals": [
+                    {
+                        "type": "first_failed_node",
+                        "severity": "high",
+                        "message": "worker failed",
+                        "node_id": "scout",
+                        "failure_code": "worker_exception",
+                        "hint": "inspect this node",
+                    }
+                ],
+            },
+            "recovery": {
+                "mode": "inspect",
+                "reason": "Inspect before retrying.",
+                "recommended_tool": {
+                    "name": "praxis_workflow",
+                    "arguments": {"action": "inspect", "run_id": "workflow_123"},
+                    "extra": "not needed",
+                },
+            },
+            "jobs": [
+                {
+                    "job_label": "cursor_cli_error_surface_scout",
+                    "status": "failed",
+                    "agent_slug": "cursor/composer-2",
+                    "attempt": 3,
+                    "error_code": "sandbox_error",
+                    "reason_code": "worker_exception",
+                    "workspace": {"too": "large"},
+                },
+                {
+                    "job_label": "mini_friction_pattern_scout",
+                    "status": "failed",
+                    "agent_slug": "openai/gpt-5.4-mini",
+                    "attempt": 3,
+                    "error_code": "sandbox_error",
+                    "reason_code": "worker_exception",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(workflow_commands, "_workflow_tool", _fake_workflow_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(["run-status", "workflow_123", "--summary"], stdout=stdout) == 0
+
+    assert captured == {"action": "status", "run_id": "workflow_123"}
+    payload = json.loads(stdout.getvalue())
+    assert payload == {
+        "run_id": "workflow_123",
+        "status": "failed",
+        "spec_name": "Agent Affordance CLI Oracle Scout",
+        "total_jobs": 2,
+        "job_status_counts": {"failed": 2},
+        "health": {
+            "state": "critical",
+            "likely_failed": True,
+            "elapsed_seconds": 944.8,
+            "completed_jobs": 2,
+            "running_or_claimed": 0,
+            "terminal_jobs": 2,
+            "signals": [
+                {
+                    "type": "first_failed_node",
+                    "severity": "high",
+                    "message": "worker failed",
+                    "node_id": "scout",
+                    "failure_code": "worker_exception",
+                    "hint": "inspect this node",
+                }
+            ],
+        },
+        "recovery": {
+            "mode": "inspect",
+            "reason": "Inspect before retrying.",
+            "recommended_tool": {
+                "name": "praxis_workflow",
+                "arguments": {"action": "inspect", "run_id": "workflow_123"},
+            },
+        },
+        "jobs": [
+            {
+                "job_label": "cursor_cli_error_surface_scout",
+                "status": "failed",
+                "agent_slug": "cursor/composer-2",
+                "attempt": 3,
+                "error_code": "sandbox_error",
+                "reason_code": "worker_exception",
+            },
+            {
+                "job_label": "mini_friction_pattern_scout",
+                "status": "failed",
+                "agent_slug": "openai/gpt-5.4-mini",
+                "attempt": 3,
+                "error_code": "sandbox_error",
+                "reason_code": "worker_exception",
+            },
+        ],
+    }
+    assert "packet_inspection" not in payload
+
+
 def test_inspect_job_frontdoor_accepts_optional_label(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -1753,6 +1892,7 @@ def test_failed_cli_command_records_friction(monkeypatch: pytest.MonkeyPatch) ->
     assert captured["args"] == ["status", "--since-hours", "24000"]
     assert captured["exit_code"] == 2
     assert "workflow status does not support arguments" in str(captured["output_text"])
+    assert "Agent hint:" in str(captured["output_text"])
     assert captured["output_truncated"] is False
 
 
@@ -1778,7 +1918,7 @@ def test_status_help_is_success() -> None:
     stdout = StringIO()
 
     assert workflow_cli_main(["status", "--help"], stdout=stdout) == 0
-    assert stdout.getvalue() == "usage: workflow status\n"
+    assert stdout.getvalue() == "usage: workflow status [--json]\n"
 
 
 def test_verify_platform_returns_typed_db_authority_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1818,6 +1958,7 @@ def test_legacy_defs_and_workflows_aliases_fail_fast_with_rename_hint() -> None:
         == 2
     )
     assert "unknown command: workflows" in stdout.getvalue()
+    assert "Agent hint: `workflow workflows` is not a front door" in stdout.getvalue()
 
 
 def test_manifest_frontdoor_supports_generate_and_save_as(

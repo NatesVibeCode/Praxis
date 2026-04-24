@@ -108,6 +108,8 @@ def test_tools_list_json_can_attach_interpretive_context(monkeypatch: pytest.Mon
             "description": "Primary query surface for operator questions.",
             "when_to_use": "Ask questions about repo state, receipts, and derived workflow context.",
             "when_not_to_use": "Do not use it for direct tool execution or HTTP route browsing.",
+            "example_input": {},
+            "example_call": "workflow tools call praxis_query_test --input-json '{}'",
             "interpretive_context": {"authority_mode": "interpretive"},
         }
     ]
@@ -153,6 +155,7 @@ def test_tools_root_shows_quickstart() -> None:
     assert "workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]" in rendered
     assert "workflow tools help <tool|alias>" in rendered
     assert "list/search JSON include when_to_use and when_not_to_use guidance for each tool." in rendered
+    assert "example_call" in rendered
     assert "search results are relevance-ranked" in rendered.lower()
     assert "unique prefix" in rendered.lower()
     assert "workflow mcp" in rendered
@@ -426,6 +429,18 @@ def test_tools_describe_surfaces_cli_metadata() -> None:
     assert "describe_command: workflow tools describe praxis_query" in rendered
     assert "workflow_token_required: no" in rendered
     assert '"question"' in rendered
+    assert "example_call:" in rendered
+    assert "workflow tools call praxis_query" in rendered
+
+
+def test_tools_describe_json_includes_copy_ready_example_call() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "describe", "query", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["example_call"].startswith("workflow tools call praxis_query --input-json ")
+    assert payload["example_input"] == {"question": "what is failing right now?"}
 
 
 def test_tools_describe_json_includes_interpretive_context(
@@ -576,6 +591,7 @@ def test_tools_search_supports_filter_only_browsing() -> None:
     assert payload
     assert all(row["surface"] == "query" for row in payload)
     assert all("entrypoint" in row for row in payload)
+    assert all("example_call" in row for row in payload)
     assert any(row["entrypoint"] == "workflow query" for row in payload)
 
 
@@ -597,6 +613,34 @@ def test_tools_call_requires_yes_for_write_or_dispatch() -> None:
     rendered = stdout.getvalue()
     assert "risk: write" in rendered
     assert "confirmation required" in rendered
+
+
+def test_tools_call_missing_required_input_prints_example_call() -> None:
+    stdout = StringIO()
+
+    rc = workflow_cli_main(["tools", "call", "query"], stdout=stdout)
+
+    assert rc == 2
+    rendered = stdout.getvalue()
+    assert "missing required input: question" in rendered
+    assert "tool: praxis_query" in rendered
+    assert "required_args: question" in rendered
+    assert "describe: workflow tools describe praxis_query" in rendered
+    assert "example_call:" in rendered
+    assert "workflow tools call praxis_query --input-json" in rendered
+    assert '"question"' in rendered
+
+
+def test_tools_call_input_errors_print_example_call() -> None:
+    stdout = StringIO()
+
+    rc = workflow_cli_main(["tools", "call", "query", "--input-json"], stdout=stdout)
+
+    assert rc == 2
+    rendered = stdout.getvalue()
+    assert "--input-json requires a value" in rendered
+    assert "example_call:" in rendered
+    assert "workflow tools call praxis_query --input-json" in rendered
 
 
 def test_tools_call_accepts_unique_prefix(monkeypatch: pytest.MonkeyPatch) -> None:

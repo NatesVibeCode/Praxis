@@ -165,6 +165,32 @@ class QueryOperatorGraphProjection(BaseModel):
     as_of: datetime | None = None
 
 
+class QueryUiExperienceGraph(BaseModel):
+    focus: str | None = None
+    surface_name: str | None = None
+    limit: int = 80
+
+    @field_validator("focus", "surface_name", mode="before")
+    @classmethod
+    def _normalize_optional_text(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("focus and surface_name must be strings when provided")
+        text = value.strip()
+        return text or None
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _normalize_limit(cls, value: object) -> int:
+        if value in (None, ""):
+            return 80
+        try:
+            return max(1, min(int(value), 250))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be an integer") from exc
+
+
 class QueryRunScopedOperatorView(BaseModel):
     run_id: str
 
@@ -393,6 +419,27 @@ async def handle_query_operator_graph_projection(
     }
 
 
+def handle_query_ui_experience_graph(
+    query: QueryUiExperienceGraph,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from runtime.ui_experience_graph import build_ui_experience_graph
+
+    return {
+        "view": "ui_experience_graph",
+        "requires": {
+            "runtime": "sync_postgres",
+            "driver": "postgres",
+        },
+        "payload": build_ui_experience_graph(
+            subsystems.get_pg_conn(),
+            focus=query.focus,
+            surface_name=query.surface_name,
+            limit=query.limit,
+        ),
+    }
+
+
 async def _load_run_scoped_view(
     *,
     query: QueryRunScopedOperatorView,
@@ -543,7 +590,9 @@ __all__ = [
     "QueryOperatorStatusSnapshot",
     "QueryReplayReadyBugs",
     "QueryRunScopedOperatorView",
+    "QueryUiExperienceGraph",
     "handle_query_operator_graph_projection",
+    "handle_query_ui_experience_graph",
     "handle_query_operator_issue_backlog",
     "handle_query_operator_status_snapshot",
     "handle_query_replay_ready_bugs",

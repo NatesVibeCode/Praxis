@@ -26,25 +26,31 @@ fi
 workflow_python_bin() {
   local candidate
   local probe
-  if [ -n "${PYTHON_BIN:-}" ] && command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
-    printf '%s\n' "${PYTHON_BIN}"
-    return 0
+  if [ -n "${PYTHON_BIN:-}" ]; then
+    candidate="${PYTHON_BIN}"
+    if command -v "${candidate}" >/dev/null 2>&1; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+    printf 'warning: ignoring unusable PYTHON_BIN=%s\n' "${candidate}" >&2
   fi
   candidate="${workflow_env_repo_root}/.venv/bin/python"
   if [ -x "${candidate}" ]; then
     probe="$("${candidate}" -c 'import sys; print(sys.version_info[0])' 2>/dev/null || true)"
-  else
-    probe=""
+    if [ "${probe}" = "3" ]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
   fi
-  if [ "${probe}" = "3" ]; then
-    printf '%s\n' "${candidate}"
-    return 0
-  fi
-  command -v python3.14 >/dev/null 2>&1 && { command -v python3.14; return 0; }
-  command -v python3.13 >/dev/null 2>&1 && { command -v python3.13; return 0; }
-  command -v python3 >/dev/null 2>&1 && { command -v python3; return 0; }
+  for candidate in python3.14 python3.13 python3; do
+    if command -v "${candidate}" >/dev/null 2>&1; then
+      command -v "${candidate}"
+      return 0
+    fi
+  done
   return 1
 }
+
 
 workflow_repo_workflow_root() {
   local python_bin

@@ -145,3 +145,90 @@ def test_infer_schema_area_maps_known_table_markers() -> None:
         "",
         "schema",
     ) == "authority"
+
+
+def test_build_graph_projects_surface_catalog_and_dictionary_lineage(monkeypatch) -> None:
+    monkeypatch.setattr(atlas_graph, "_connect", lambda database_url=None: object())
+    monkeypatch.setattr(atlas_graph, "fetch_entities", lambda conn: [])
+    monkeypatch.setattr(atlas_graph, "fetch_capabilities", lambda conn: [])
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_functional_areas",
+        lambda conn: [
+            {"area_slug": "moon", "title": "Moon", "summary": "Builder surface"},
+            {"area_slug": "authority", "title": "Authority", "summary": "Control tables"},
+        ],
+    )
+    monkeypatch.setattr(atlas_graph, "fetch_area_relations", lambda conn: [])
+    monkeypatch.setattr(atlas_graph, "fetch_edges", lambda conn, known_ids: [])
+    monkeypatch.setattr(atlas_graph, "fetch_tools", lambda: [])
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_data_dictionary_objects",
+        lambda conn: [
+            {
+                "object_kind": "table:surface_catalog_registry",
+                "label": "surface_catalog_registry",
+                "category": "table",
+                "summary": "Canonical Moon primitive registry",
+                "origin_ref": {"source": "schema_projector"},
+            },
+            {
+                "object_kind": "table:operator_decisions",
+                "label": "operator_decisions",
+                "category": "table",
+                "summary": "Decision authority",
+                "origin_ref": {"source": "schema_projector"},
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_data_dictionary_lineage",
+        lambda conn: [
+            {
+                "src_object_kind": "table:surface_catalog_registry",
+                "src_field_path": "",
+                "dst_object_kind": "table:operator_decisions",
+                "dst_field_path": "",
+                "edge_kind": "references",
+                "effective_source": "auto",
+                "confidence": 1.0,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_surface_catalog_items",
+        lambda conn: [
+            {
+                "catalog_item_id": "trigger-manual",
+                "surface_name": "moon",
+                "label": "Manual",
+                "family": "trigger",
+                "status": "ready",
+                "drop_kind": "node",
+                "action_value": "trigger",
+                "gate_family": None,
+                "description": "User-initiated run",
+                "truth_category": "runtime",
+                "surface_tier": "primary",
+                "binding_revision": "binding.surface_catalog_registry.moon.bootstrap.20260415",
+                "decision_ref": "decision.surface_catalog_registry.moon.bootstrap.20260415",
+            }
+        ],
+    )
+
+    graph = atlas_graph.build_graph()
+    nodes = {node["data"]["id"]: node["data"] for node in graph["nodes"]}
+    edges = {edge["data"]["id"]: edge["data"] for edge in graph["edges"]}
+
+    assert nodes["surface_catalog::trigger-manual"]["area"] == "moon"
+    assert nodes["surface_catalog::trigger-manual"]["authority_source"] == "surface_catalog_registry"
+    assert nodes["table:surface_catalog_registry"]["authority_source"] == "data_dictionary_objects"
+    assert nodes["table:operator_decisions"]["area"] == "authority"
+    assert (
+        edges["table:surface_catalog_registry|references|table:operator_decisions"]["authority_source"]
+        == "data_dictionary_lineage_effective"
+    )
+    assert "surface_catalog::trigger-manual|belongs_to_surface|area::moon" in edges

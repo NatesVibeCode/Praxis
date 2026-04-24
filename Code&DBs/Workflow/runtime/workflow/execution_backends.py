@@ -325,7 +325,7 @@ def _provider_capacity_failure(provider_slug: str) -> dict[str, Any]:
         "exit_code": 1,
         "stdout": "",
         "stderr": f"Provider at capacity: {provider_slug}",
-        "error_code": "route.unhealthy",
+        "error_code": "provider.capacity",
     }
 
 

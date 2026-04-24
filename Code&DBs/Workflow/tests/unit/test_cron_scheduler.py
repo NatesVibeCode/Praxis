@@ -86,6 +86,12 @@ def test_tick_fires_due_schedule_trigger():
     fired = cron_scheduler.CronScheduler(conn).tick()
 
     assert fired == 1
+    tick_calls = [
+        args
+        for query, args in conn.calls
+        if "INSERT INTO system_events" in query and args and args[0] == "scheduler.tick"
+    ]
+    assert len(tick_calls) == 1
     insert_calls = [
         args
         for query, args in conn.calls
@@ -122,7 +128,14 @@ def test_tick_skips_not_due_schedule_trigger():
         cron_scheduler._utc_now = original_utc_now
 
     assert fired == 0
-    assert not any("INSERT INTO system_events" in query for query, _ in conn.calls)
+    assert any(
+        "INSERT INTO system_events" in query and args and args[0] == "scheduler.tick"
+        for query, args in conn.calls
+    )
+    assert not any(
+        "INSERT INTO system_events" in query and args and args[0] == "schedule.fired"
+        for query, args in conn.calls
+    )
 
 
 def test_tick_fires_when_never_fired():

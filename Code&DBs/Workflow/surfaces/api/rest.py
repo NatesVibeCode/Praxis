@@ -5036,8 +5036,18 @@ def launcher_service_worker() -> Any:
 
 @app.get("/app/{path:path}", response_model=None)
 def launcher_app_path(path: str = "") -> Any:
-    del path
-    return _launcher_index_response()
+    tail = path.rstrip("/")
+    if not tail or "." not in Path(tail).name:
+        return _launcher_index_response()
+    return JSONResponse(
+        status_code=404,
+        content={
+            "ok": False,
+            "error": "launcher_asset_not_found",
+            "detail": "Unknown launcher asset path",
+            "path": f"/app/{path}",
+        },
+    )
 
 
 def _apply_route_visibility_policy(target_app: FastAPI | None = None) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from typing import Any, TextIO
 
 from runtime.interpretive_context import (
@@ -306,6 +307,7 @@ def _tools_quickstart_text() -> str:
             f"Catalog size: {len(definitions)} tools",
             "Tip: run `workflow tools list --json` for machine-readable discovery.",
             "Tip: list/search JSON include when_to_use and when_not_to_use guidance for each tool.",
+            "Tip: list/search/describe JSON include example_call, a copy-ready catalog-backed invocation.",
             "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
             "Tip: add `--exact` when you already know the alias, tool name, or entrypoint.",
             "Tip: if a search returns no matches, the CLI prints broadening hints instead of leaving you at zero.",
@@ -334,7 +336,31 @@ def _tool_catalog_brief_payload(definition: McpToolDefinition) -> dict[str, obje
         "description": definition.description,
         "when_to_use": definition.cli_when_to_use,
         "when_not_to_use": definition.cli_when_not_to_use,
+        "example_input": definition.example_input(),
+        "example_call": _tool_example_call(definition),
     }
+
+
+def _tool_example_call(definition: McpToolDefinition) -> str:
+    input_payload = json.dumps(
+        definition.example_input(),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    command = [
+        "workflow",
+        "tools",
+        "call",
+        definition.name,
+        "--input-json",
+        input_payload,
+    ]
+    if definition.requires_workflow_token:
+        command.extend(["--workflow-token", "<workflow-token>"])
+    if any(risk in {"write", "launch", "launch/read", "launch/read/write", "read/write"} for risk in definition.risk_levels):
+        command.append("--yes")
+    return " ".join(shlex.quote(part) for part in command)
 
 
 def _tools_command(args: list[str], *, stdout: TextIO) -> int:
@@ -623,6 +649,7 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
         "requires_workflow_token": definition.requires_workflow_token,
         "examples": list(definition.cli_examples),
         "example_input": definition.example_input(),
+        "example_call": _tool_example_call(definition),
     }
     interpretive_context = _tool_interpretive_context(definition)
     if interpretive_context:
@@ -655,6 +682,8 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
     stdout.write(f"workflow_token_required: {'yes' if definition.requires_workflow_token else 'no'}\n")
     stdout.write("example_input:\n")
     stdout.write(json.dumps(definition.example_input(), indent=2, default=str) + "\n")
+    stdout.write("example_call:\n")
+    stdout.write(_tool_example_call(definition) + "\n")
     stdout.write("input_schema:\n")
     stdout.write(json.dumps(definition.input_schema, indent=2, default=str) + "\n")
     if interpretive_context:
@@ -682,19 +711,34 @@ def _tools_call_command(args: list[str], *, stdout: TextIO) -> int:
     if definition is None:
         return _render_tool_lookup_failure(tool_name, candidates, stdout=stdout)
 
+    def _call_guidance(reason: str) -> int:
+        stdout.write(reason + "\n")
+        stdout.write(f"tool: {definition.name}\n")
+        stdout.write(f"required_args: {', '.join(definition.required_args) or '(none)'}\n")
+        stdout.write(f"describe: {definition.cli_describe_command}\n")
+        stdout.write("example_call:\n")
+        stdout.write(_tool_example_call(definition) + "\n")
+        return 2
+
     input_json = None
     input_file = None
     workflow_token = ""
     confirmed = False
     i = 0
     while i < len(remainder):
-        if remainder[i] == "--input-json" and i + 1 < len(remainder):
+        if remainder[i] == "--input-json":
+            if i + 1 >= len(remainder):
+                return _call_guidance("--input-json requires a value")
             input_json = remainder[i + 1]
             i += 2
-        elif remainder[i] == "--input-file" and i + 1 < len(remainder):
+        elif remainder[i] == "--input-file":
+            if i + 1 >= len(remainder):
+                return _call_guidance("--input-file requires a value")
             input_file = remainder[i + 1]
             i += 2
-        elif remainder[i] == "--workflow-token" and i + 1 < len(remainder):
+        elif remainder[i] == "--workflow-token":
+            if i + 1 >= len(remainder):
+                return _call_guidance("--workflow-token requires a value")
             workflow_token = remainder[i + 1]
             i += 2
         elif remainder[i] == "--yes":
@@ -707,28 +751,32 @@ def _tools_call_command(args: list[str], *, stdout: TextIO) -> int:
             return 2
 
     if input_json is not None and input_file is not None:
-        stdout.write("pass only one of --input-json or --input-file\n")
-        return 2
+        return _call_guidance("pass only one of --input-json or --input-file")
 
     try:
         params: dict[str, Any]
         if input_json is not None:
             parsed = json.loads(input_json)
             if not isinstance(parsed, dict):
-                stdout.write("--input-json must decode to a JSON object\n")
-                return 2
+                return _call_guidance("--input-json must decode to a JSON object")
             params = parsed
         elif input_file is not None:
             params = load_json_file(input_file)
         else:
             params = {}
     except (ValueError, OSError, json.JSONDecodeError) as exc:
-        stdout.write(f"invalid tool input: {exc}\n")
-        return 2
+        return _call_guidance(f"invalid tool input: {exc}")
+
+    missing_required: list[str] = []
+    for field in definition.required_args:
+        value = params.get(field)
+        if field not in params or value is None or value == "":
+            missing_required.append(field)
+    if missing_required:
+        return _call_guidance(f"missing required input: {', '.join(missing_required)}")
 
     if definition.requires_workflow_token and not workflow_token:
-        stdout.write(f"workflow token required for {definition.name}\n")
-        return 2
+        return _call_guidance(f"workflow token required for {definition.name}")
     confirmation_result = require_confirmation(
         definition,
         params,

@@ -896,6 +896,9 @@ def main(
             stdout=tracking_stdout,
         )
     if exit_code != 0:
+        hint = _agent_failure_hint(args, tracking_stdout.captured_output())
+        if hint:
+            tracking_stdout.write(hint)
         output_text = tracking_stdout.captured_output()
         stderr_text = tracking_stderr.captured_output()
         if stderr_text:
@@ -908,6 +911,61 @@ def main(
             env=env,
         )
     return exit_code
+
+
+def _agent_failure_hint(args: Sequence[str], output_text: str) -> str:
+    """Return a small correction hint for common LLM-facing CLI mistakes."""
+
+    if not args or "Agent hint:" in output_text:
+        return ""
+
+    normalized = _normalize_command_text(output_text)
+    command = args[0]
+    if "unknown command:" in normalized:
+        if command == "workflows":
+            return (
+                "\nAgent hint: `workflow workflows` is not a front door. "
+                "Use `workflow run <spec.json>`, `workflow preview <spec.json>`, "
+                "or `workflow tools call praxis_workflow --input-json '{...}'`.\n"
+            )
+        suggestions = _command_suggestions(command, _help_topic_candidates(), limit=1)
+        if suggestions:
+            return (
+                "\nAgent hint: inspect the command contract with "
+                f"`workflow help {suggestions[0]}` or list all commands with `workflow commands --json`.\n"
+            )
+        return "\nAgent hint: list machine-readable commands with `workflow commands --json`.\n"
+
+    if "unknown argument:" in normalized or "does not support arguments" in normalized:
+        if command == "bugs":
+            return (
+                "\nAgent hint: bug actions are catalog-backed. Use `workflow help bugs` for CLI shape, "
+                "`workflow bugs history BUG-ID` for one bug, or "
+                "`workflow tools describe praxis_bugs` for the JSON contract.\n"
+            )
+        if command in {"tools", "mcp"}:
+            return (
+                "\nAgent hint: inspect tool syntax with `workflow help tools`; "
+                "use `workflow tools describe <tool>` before guessing fields.\n"
+            )
+        if command in {"run-status", "status", "diagnose"}:
+            return (
+                "\nAgent hint: run inspection is split by purpose: "
+                "`workflow run-status <run_id>` for health, `workflow inspect <run_id>` for timeline, "
+                "and `workflow diagnose <run_id>` for failure analysis.\n"
+            )
+        return (
+            "\nAgent hint: this command rejected the shape you supplied. "
+            f"Run `workflow help {command}` or `workflow commands --json` before retrying.\n"
+        )
+
+    if "requires a value" in normalized:
+        return (
+            "\nAgent hint: a flag is missing its value. "
+            f"Run `workflow help {command}` for the exact required argument shape.\n"
+        )
+
+    return ""
 
 
 def _main_impl(

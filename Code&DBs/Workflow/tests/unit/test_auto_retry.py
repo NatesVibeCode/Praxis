@@ -115,6 +115,20 @@ class TestClassification:
         assert c.category == OrchestratorFailureCategory.RATE_LIMIT
         assert c.is_retryable is True
 
+    def test_provider_capacity_is_rate_limit_but_route_unhealthy_is_provider_error(self):
+        capacity = failure_classifier.classify_failure("provider.capacity")
+        route_health = failure_classifier.classify_failure("route.unhealthy")
+
+        assert capacity.category == OrchestratorFailureCategory.RATE_LIMIT
+        assert capacity.is_retryable is True
+        assert capacity.is_transient is True
+        assert "capacity" in capacity.recommended_action.lower()
+
+        assert route_health.category == OrchestratorFailureCategory.PROVIDER_ERROR
+        assert route_health.is_retryable is True
+        assert route_health.is_transient is True
+        assert "route health" in route_health.recommended_action.lower()
+
     def test_cli_unexpected_argument_is_input_error_not_provider_error(self):
         c = failure_classifier.classify_failure(
             "cli_adapter.nonzero_exit",

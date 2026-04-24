@@ -14,8 +14,10 @@ reason_code, so nothing silently half-reloads.
 
 from __future__ import annotations
 
+import json
 import sys
 
+from surfaces.mcp.tools import health as health_tools
 from surfaces.mcp.tools.health import (
     _RUNTIME_RELOAD_ALLOWLIST_PREFIXES,
     _module_is_reload_allowed,
@@ -152,6 +154,39 @@ def test_scope_all_clears_caches_and_reloads_modules_in_one_call():
     # Runtime section present.
     assert "runtime_modules" in result
     assert "runtime.workflow_spec" in result["runtime_modules"]["reloaded"]
+
+
+class _AuditConn:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def execute(self, query: str, *args):
+        self.calls.append((query, args))
+
+
+def test_reload_audit_records_runtime_module_result(monkeypatch):
+    import runtime.workflow_spec  # noqa: F401
+
+    conn = _AuditConn()
+    monkeypatch.setattr(health_tools._subs, "get_pg_conn", lambda: conn)
+
+    result = tool_praxis_reload(
+        {"scope": "runtime_modules", "modules": ["runtime.workflow_spec"]}
+    )
+
+    assert result["audit"]["system_event_recorded"] is True
+    audit_calls = [
+        args
+        for query, args in conn.calls
+        if "INSERT INTO system_events" in query and args and args[0] == "runtime.reload"
+    ]
+    assert len(audit_calls) == 1
+    payload = json.loads(audit_calls[0][3])
+    assert payload["requested_modules"] == ["runtime.workflow_spec"]
+    assert "runtime.workflow_spec" in payload["runtime_modules_reloaded"]
+    assert payload["runtime_modules_failed"] == []
+    assert payload["runtime_modules"]["count"] == 1
+    assert isinstance(payload["process_id"], int)
 
 
 def test_allowlist_prefixes_exposed_as_module_level_constant():
