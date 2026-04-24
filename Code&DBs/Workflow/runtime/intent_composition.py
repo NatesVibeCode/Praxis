@@ -21,7 +21,7 @@ shim).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from runtime.intent_decomposition import (
@@ -63,6 +63,61 @@ def _best_effort_emit(
         )
     except Exception:
         pass
+
+
+def _adapt_plan_jobs_to_type_flow_request(spec_dict: dict[str, Any]) -> dict[str, Any]:
+    """Convert a jobs-based spec_dict into a ``{nodes, edges}`` request that
+    ``validate_workflow_request_type_flow`` can evaluate.
+
+    Each job is a node (``node_id``=label, ``route``=task_type). Each
+    ``depends_on`` entry on a job becomes a ``from_node_id`` → ``to_node_id``
+    edge. The adapter does not add types or rewrite routes; it surfaces
+    what the compiler already produced so the validator can walk it.
+    """
+    jobs = list(spec_dict.get("jobs") or [])
+    nodes: list[dict[str, str]] = [
+        {
+            "node_id": str(job.get("label") or ""),
+            "route": str(job.get("task_type") or ""),
+        }
+        for job in jobs
+    ]
+    edges: list[dict[str, str]] = []
+    for job in jobs:
+        to_id = str(job.get("label") or "")
+        if not to_id:
+            continue
+        for dep in job.get("depends_on") or ():
+            from_id = str(dep).strip()
+            if from_id and to_id:
+                edges.append({"from_node_id": from_id, "to_node_id": to_id})
+    return {"nodes": nodes, "edges": edges}
+
+
+def _validate_composed_plan_type_flow(proposed: ProposedPlan) -> list[str]:
+    """Run the type-flow validator against a ProposedPlan's spec_dict.
+
+    Returns the raw error list from
+    ``runtime.workflow_type_contracts.validate_workflow_request_type_flow``
+    (empty when flow is satisfied). Honors architecture-policy::platform-
+    architecture::fail-closed-at-compile-no-silent-defaults: ``compose_plan_
+    from_intent`` folds the errors into the ProposedPlan's warnings list
+    so callers see them before approving or launching the plan. The
+    Moon commit path independently rejects at save time (Phase 1.2.a).
+
+    Degraded substrate (type_contracts module unavailable) returns [] —
+    the compose path must not block on optional validation infrastructure.
+    """
+    try:
+        from runtime.workflow_type_contracts import (
+            validate_workflow_request_type_flow,
+        )
+    except Exception:
+        return []
+    request = _adapt_plan_jobs_to_type_flow_request(proposed.spec_dict)
+    if not request["nodes"]:
+        return []
+    return list(validate_workflow_request_type_flow(request) or [])
 
 
 def packets_from_steps(
@@ -178,6 +233,18 @@ def compose_plan_from_intent(
 
     proposed = propose_plan(plan_dict, conn=conn, workdir=workdir)
 
+    # Type-flow validation per architecture-policy::platform-architecture::
+    # fail-closed-at-compile-no-silent-defaults. Errors surface in warnings
+    # (visible, not silent). Moon commitDefinition independently rejects at
+    # the save boundary via Phase 1.2.a — this layer exposes the failure at
+    # preview/propose time so callers don't approve a plan that can't save.
+    type_flow_errors = _validate_composed_plan_type_flow(proposed)
+    if type_flow_errors:
+        proposed = replace(
+            proposed,
+            warnings=list(proposed.warnings) + type_flow_errors,
+        )
+
     _best_effort_emit(
         conn,
         event_type="plan.composed",
@@ -191,6 +258,7 @@ def compose_plan_from_intent(
             "unbound_pill_count": len(
                 (proposed.binding_summary or {}).get("unbound_refs") or []
             ),
+            "type_flow_error_count": len(type_flow_errors),
         },
     )
     return proposed
