@@ -522,7 +522,7 @@ def compose_and_launch(
     receipt = launch_approved(
         approved,
         conn=conn,
-        requested_by_kind="compose_and_launch",
+        requested_by_kind="workflow",
     )
     _best_effort_emit(
         conn,

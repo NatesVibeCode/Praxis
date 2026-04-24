@@ -247,8 +247,13 @@ def test_compose_and_launch_happy_path(monkeypatch) -> None:
     assert isinstance(receipt, LaunchReceipt)
     assert receipt.run_id == "workflow_composed_abc"
     assert receipt.spec_name == "tz_rollout"
-    # Audit trail distinguishes end-to-end pipeline from plain launch_approved.
-    assert captured["kwargs"]["requested_by_kind"] == "compose_and_launch"
+    # The kind is "workflow" — one of the auto-execute-allowlisted kinds in
+    # control_commands._LOCAL_AUTO_EXECUTE_REQUESTER_KINDS. The fact that this
+    # came from compose_and_launch is preserved in dispatch_reason and
+    # requested_by_ref, not requested_by_kind. Without an allowlisted kind,
+    # the command sits in REQUESTED state and submit silently returns
+    # status='approval_required' with no run_id.
+    assert captured["kwargs"]["requested_by_kind"] == "workflow"
     # approved_by threads into requested_by_ref for the audit trail.
     assert captured["kwargs"]["requested_by_ref"] == "ci@praxis"
 

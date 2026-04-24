@@ -2149,11 +2149,64 @@ class ApprovalHashMismatchError(ValueError):
     """
 
 
+class LaunchSubmitFailedError(RuntimeError):
+    """Raised when submit_workflow_command did not produce a runnable workflow run.
+
+    The CQRS bus accepted the command row but the dispatch path returned a
+    failed/approval_required status (or empty run_id). Returning a
+    LaunchReceipt with ``run_id=""`` would silently lie to the caller —
+    every wrapper above would then have no signal that nothing executed.
+    Fail-closed instead.
+
+    ``submit_result`` carries the raw payload from
+    :func:`render_workflow_submit_response` so callers can surface
+    error_code / error_detail / command_id for the operator.
+    """
+
+    def __init__(self, submit_result: dict[str, Any], *, spec_name: str) -> None:
+        self.submit_result = dict(submit_result)
+        self.spec_name = spec_name
+        self.status = str(submit_result.get("status") or "unknown")
+        self.error_code = str(
+            submit_result.get("error_code")
+            or "control.command.workflow_submit_missing_run_id"
+        )
+        self.error_detail = str(
+            submit_result.get("error_detail")
+            or submit_result.get("error")
+            or "workflow submit command did not produce a workflow run"
+        )
+        super().__init__(
+            f"launch of {spec_name!r} failed at submit: status={self.status} "
+            f"error_code={self.error_code} detail={self.error_detail}"
+        )
+
+
+def _ensure_run_id_or_raise(
+    submit_result: dict[str, Any], *, spec_name: str
+) -> str:
+    """Return a non-empty run_id from a submit_result, or raise LaunchSubmitFailedError.
+
+    The CQRS submit path returns ``status='failed'`` / ``'approval_required'``
+    with no run_id when dispatch can't materialize a workflow run. Coercing
+    that to an empty string and constructing a LaunchReceipt anyway means
+    the caller has no signal that nothing executed. This helper centralizes
+    the fail-closed behavior for every launch_* function.
+    """
+    status = str(submit_result.get("status") or "")
+    run_id_value = submit_result.get("run_id")
+    if status in {"failed", "approval_required"} or not (
+        isinstance(run_id_value, str) and run_id_value.strip()
+    ):
+        raise LaunchSubmitFailedError(submit_result, spec_name=spec_name)
+    return run_id_value
+
+
 def launch_approved(
     approved: ApprovedPlan,
     *,
     conn: Any,
-    requested_by_kind: str = "launch_approved",
+    requested_by_kind: str = "workflow",
     requested_by_ref: str | None = None,
 ) -> LaunchReceipt:
     """Submit an :class:`ApprovedPlan` — strictly typed launch path.
@@ -2188,7 +2241,7 @@ def launch_proposed(
     proposed: ProposedPlan,
     *,
     conn: Any,
-    requested_by_kind: str = "launch_plan",
+    requested_by_kind: str = "workflow",
     requested_by_ref: str | None = None,
 ) -> LaunchReceipt:
     """Submit a ``ProposedPlan`` previously built by ``propose_plan``.
@@ -2207,11 +2260,11 @@ def launch_proposed(
         total_jobs=proposed.total_jobs,
         dispatch_reason=f"launch_proposed:{proposed.spec_name}",
     )
+    run_id = _ensure_run_id_or_raise(submit_result, spec_name=proposed.spec_name)
 
     packet_map: list[dict[str, Any]] = [
         _build_packet_map_entry(job=job) for job in proposed.spec_dict["jobs"]
     ]
-    run_id = str(submit_result.get("run_id") or "")
     warnings = list(proposed.warnings)
     event_error = _emit_plan_launched_event(
         conn,
@@ -2241,7 +2294,7 @@ def launch_plan(
     *,
     conn: Any,
     workdir: str | None = None,
-    requested_by_kind: str = "launch_plan",
+    requested_by_kind: str = "workflow",
     requested_by_ref: str | None = None,
 ) -> LaunchReceipt:
     """Translate a packet list into a workflow spec and submit it in one call.
@@ -2280,12 +2333,12 @@ def launch_plan(
         total_jobs=len(spec_dict["jobs"]),
         dispatch_reason=f"launch_plan:{plan_obj.name}",
     )
+    run_id = _ensure_run_id_or_raise(submit_result, spec_name=plan_obj.name)
 
     packet_map: list[dict[str, Any]] = [
         _build_packet_map_entry(packet=packet, job=job)
         for packet, job in zip(plan_obj.packets, spec_dict["jobs"])
     ]
-    run_id = str(submit_result.get("run_id") or "")
     event_error = _emit_plan_launched_event(
         conn,
         run_id=run_id,

@@ -158,7 +158,11 @@ def test_launch_plan_routes_through_command_bus(monkeypatch) -> None:
     assert entry["verification_gaps"] == []
 
     command_kwargs = captured["kwargs"]
-    assert command_kwargs["requested_by_kind"] == "launch_plan"
+    # Kind must be in control_commands._LOCAL_AUTO_EXECUTE_REQUESTER_KINDS or
+    # the submit command stays in REQUESTED state forever (no run_id, silent
+    # 'approval_required' status). The specific caller is preserved via
+    # dispatch_reason, not kind.
+    assert command_kwargs["requested_by_kind"] == "workflow"
     assert command_kwargs["requested_by_ref"] == "bug_burn_wave_0"
     assert command_kwargs["spec_name"] == "bug_burn_wave_0"
     assert command_kwargs["total_jobs"] == 1
@@ -1241,7 +1245,9 @@ def test_launch_approved_submits_on_matching_hash(monkeypatch) -> None:
     receipt = launch_approved(approved, conn=_FakeConn())
 
     assert receipt.run_id == "workflow_approved_001"
-    assert captured["kwargs"]["requested_by_kind"] == "launch_approved"
+    # See comment in test_launch_plan_routes_through_command_bus: kind must
+    # be in the auto-execute allowlist or submit hangs in REQUESTED state.
+    assert captured["kwargs"]["requested_by_kind"] == "workflow"
     # requested_by_ref defaults to approved_by for audit trail.
     assert captured["kwargs"]["requested_by_ref"] == "nate@praxis"
 

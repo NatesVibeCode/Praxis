@@ -42,6 +42,63 @@ _REF_PATTERN = re.compile(
 )
 
 
+# File extensions whose `name.ext` shape collides with the data-pill ref
+# pattern. Filtered out at extract time so prose like "edit catalog.py" or
+# "see system_events.py" doesn't auto-bind as object_kind.field_path. If the
+# caller genuinely means a data field, they can use a different name.
+_FILE_EXT_BLOCKLIST: frozenset[str] = frozenset(
+    {
+        # Python / config
+        "py", "pyi", "pyc", "pyx", "pyd",
+        "ini", "cfg", "toml", "yaml", "yml", "json", "json5",
+        "env", "lock",
+        # Web / app
+        "js", "jsx", "ts", "tsx", "mjs", "cjs",
+        "html", "htm", "css", "scss", "sass", "less",
+        "vue", "svelte",
+        # Docs / data
+        "md", "mdx", "rst", "txt", "csv", "tsv", "log",
+        "xml", "proto", "graphql", "gql",
+        # Build / shell
+        "sh", "bash", "zsh", "fish", "ps1", "bat",
+        "make", "mk", "cmake", "dockerfile",
+        # Other languages / compiled
+        "go", "rs", "java", "kt", "swift",
+        "c", "cc", "cpp", "h", "hpp",
+        "rb", "php", "pl", "lua", "sql",
+        # Binary / artifacts
+        "png", "jpg", "jpeg", "gif", "svg", "ico", "webp",
+        "pdf", "zip", "tar", "gz", "bz2", "tgz",
+        "wasm", "bin", "out",
+    }
+)
+
+
+def _looks_like_filename(matched_span: str, field_path: str, intent: str, span_start: int) -> bool:
+    """Return True if the match is a filename or path segment, not a data ref.
+
+    Two checks: (1) the field_path is a single known file extension, or
+    (2) the matched span is adjacent to a path separator in the surrounding
+    text. Either signal means this is a path mention, not a column reference.
+    """
+    if "." not in field_path:
+        leaf = field_path
+    else:
+        # Multi-part path like ``foo.tar.gz``: check the last segment.
+        leaf = field_path.rsplit(".", 1)[-1]
+    if leaf in _FILE_EXT_BLOCKLIST:
+        return True
+    # Path-separator context: ``a/b/foo.py`` or ``/foo/bar.json`` — even if
+    # the extension isn't blocklisted, a leading or trailing slash means
+    # this is filesystem prose.
+    span_end = span_start + len(matched_span)
+    char_before = intent[span_start - 1] if span_start > 0 else ""
+    char_after = intent[span_end] if span_end < len(intent) else ""
+    if char_before in {"/", "\\"} or char_after in {"/", "\\"}:
+        return True
+    return False
+
+
 @dataclass(frozen=True)
 class BoundPill:
     """One data-pill reference that resolved to a real dictionary row."""
@@ -152,6 +209,8 @@ def _extract_candidate_refs(intent: str) -> list[tuple[str, str, str]]:
     for match in _REF_PATTERN.finditer(intent):
         object_kind = match.group(1).lower()
         field_path = match.group(2).lower()
+        if _looks_like_filename(match.group(0), field_path, intent, match.start()):
+            continue
         key = (object_kind, field_path)
         if key in seen:
             continue

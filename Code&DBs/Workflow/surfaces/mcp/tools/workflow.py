@@ -36,6 +36,24 @@ _IDLE_PROGRESS_SECONDS = 900
 _RUN_ACTIVITY_LOOKBACK_SECONDS = 1800
 _POLL_INTERVAL_MIN_SECONDS = 1.0
 _POLL_INTERVAL_MAX_SECONDS = 12.0
+_WORKFLOW_TOOL_ACTIONS = frozenset(
+    {
+        "run",
+        "spawn",
+        "wait",
+        "status",
+        "chain",
+        "inspect",
+        "claim",
+        "acknowledge",
+        "cancel",
+        "notifications",
+        "retry",
+        "repair",
+        "list",
+        "preview",
+    }
+)
 
 
 def _workflow_spec_mod():
@@ -91,6 +109,20 @@ def _run_state_from_value(value: Any) -> RunState:
     if text.startswith("RunState."):
         text = text.split(".", 1)[1].lower()
     return RunState(text)
+
+
+def _parse_workflow_action(value: Any) -> str:
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise ValueError("action must be a non-empty string")
+    action = value.strip().lower()
+    if not action:
+        raise ValueError("action must be a non-empty string")
+    if action not in _WORKFLOW_TOOL_ACTIONS:
+        raise ValueError(
+            "action must be one of: run, spawn, preview, status, inspect, "
+            "claim, acknowledge, cancel, list, notifications, retry, repair, or chain"
+        )
+    return action
 
 
 def _deserialize_claimable_work(payload: dict[str, Any]) -> WorkflowClaimableWork:
@@ -1116,7 +1148,10 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
     per-job progress and snapshot status. Poll action='status' for richer
     diagnostics while the workflow proceeds.
     """
-    action = params.get("action", "run")
+    try:
+        action = _parse_workflow_action(params.get("action", "run"))
+    except ValueError as exc:
+        return {"error": str(exc)}
 
     if action == "wait":
         return {
@@ -1438,7 +1473,7 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
     if not spec_path:
         return {"error": "spec_path is required"}
 
-    if action not in {"run", "spawn", "claim", "acknowledge"}:
+    if action not in {"run", "spawn"}:
         return {
             "error": (
                 f"Unsupported action='{action}'. Expected one of: "
@@ -1638,6 +1673,7 @@ def tool_praxis_launch_plan(params: dict) -> dict:
             from runtime.spec_compiler import (
                 ApprovalHashMismatchError,
                 ApprovedPlan,
+                LaunchSubmitFailedError,
                 ProposedPlan,
                 launch_approved,
             )
@@ -1666,6 +1702,17 @@ def tool_praxis_launch_plan(params: dict) -> dict:
                 "ok": False,
                 "error": str(exc),
                 "reason_code": "approval.hash_mismatch",
+            }
+        except LaunchSubmitFailedError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "reason_code": "launch.submit_failed",
+                "submit_status": exc.status,
+                "submit_error_code": exc.error_code,
+                "submit_error_detail": exc.error_detail,
+                "spec_name": exc.spec_name,
+                "submit_result": exc.submit_result,
             }
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "reason_code": "approval.invalid"}
@@ -1730,9 +1777,20 @@ def tool_praxis_launch_plan(params: dict) -> dict:
             payload["mode"] = "preview"
             return payload
 
-        from runtime.spec_compiler import launch_plan
+        from runtime.spec_compiler import LaunchSubmitFailedError, launch_plan
 
         receipt = launch_plan(plan, conn=pg_conn, workdir=workdir)
+    except LaunchSubmitFailedError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "launch.submit_failed",
+            "submit_status": exc.status,
+            "submit_error_code": exc.error_code,
+            "submit_error_detail": exc.error_detail,
+            "spec_name": exc.spec_name,
+            "submit_result": exc.submit_result,
+        }
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "reason_code": "plan.invalid"}
     except Exception as exc:
@@ -1837,7 +1895,10 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
             compose_and_launch,
         )
         from runtime.intent_decomposition import DecompositionRequiresLLMError
-        from runtime.spec_compiler import ApprovalHashMismatchError
+        from runtime.spec_compiler import (
+            ApprovalHashMismatchError,
+            LaunchSubmitFailedError,
+        )
 
         receipt = compose_and_launch(
             intent,
@@ -1873,6 +1934,17 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
             "ok": False,
             "error": str(exc),
             "reason_code": "approval.hash_mismatch",
+        }
+    except LaunchSubmitFailedError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "launch.submit_failed",
+            "submit_status": exc.status,
+            "submit_error_code": exc.error_code,
+            "submit_error_detail": exc.error_detail,
+            "spec_name": exc.spec_name,
+            "submit_result": exc.submit_result,
         }
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "reason_code": "compose.invalid"}
