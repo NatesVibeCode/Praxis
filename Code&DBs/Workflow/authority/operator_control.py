@@ -176,6 +176,10 @@ _OPERATOR_DECISION_SCOPE_POLICIES: dict[str, OperatorDecisionScopePolicy] = {
         scope_mode="required",
         allowed_scope_kinds=("dataset_promotion",),
     ),
+    "delivery_plan": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=("authority_domain",),
+    ),
 }
 
 

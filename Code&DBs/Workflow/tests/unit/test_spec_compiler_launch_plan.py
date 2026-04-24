@@ -140,15 +140,22 @@ def test_launch_plan_routes_through_command_bus(monkeypatch) -> None:
     assert receipt.run_id == "workflow_abc123"
     assert receipt.spec_name == "bug_burn_wave_0"
     assert receipt.total_jobs == 1
-    assert receipt.packet_map == [
-        {
-            "label": "bug-authority",
-            "bug_ref": "BUG-175EB9F3",
-            "bug_refs": None,
-            "agent": "auto/build",
-            "stage": "build",
-        }
-    ]
+    # Legacy fields preserved, enriched per Phase 1.1.c (expected-envelope-
+    # vs-actual-truth-separation policy): inferred_stage, resolved_agent,
+    # capabilities, write_envelope, expected_gates, verification_gaps.
+    assert len(receipt.packet_map) == 1
+    entry = receipt.packet_map[0]
+    assert entry["label"] == "bug-authority"
+    assert entry["bug_ref"] == "BUG-175EB9F3"
+    assert entry["bug_refs"] is None
+    assert entry["agent"] == "auto/build"
+    assert entry["stage"] == "build"
+    assert entry["inferred_stage"] == "build"
+    assert entry["resolved_agent"] == "auto/build"
+    assert entry["capabilities"] == ["capability.code.python"]
+    assert entry["write_envelope"] == ["Code&DBs/Workflow/runtime/bugs.py"]
+    assert entry["expected_gates"] == ["verify.bug-authority"]
+    assert entry["verification_gaps"] == []
 
     command_kwargs = captured["kwargs"]
     assert command_kwargs["requested_by_kind"] == "launch_plan"

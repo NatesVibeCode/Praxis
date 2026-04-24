@@ -227,7 +227,8 @@
     "219_custom_integration_builder_launch_action.sql",
     "220_archive_mobile_v1.sql",
     "221_onboarding_gate_state.sql",
-    "222_runtime_setup_operation_catalog_repair.sql"
+    "222_runtime_setup_operation_catalog_repair.sql",
+    "223_roadmap_lifecycle_retired.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5679,6 +5680,12 @@
         "object_type": "row",
         "object_name": "authority_event_contracts.event_contract.runtime_setup_apply_requested"
       }
+    ],
+    "223_roadmap_lifecycle_retired.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "roadmap_items.roadmap_items_lifecycle_check"
+      }
     ]
   },
   "policy_buckets": {
@@ -5910,7 +5917,8 @@
       "219_custom_integration_builder_launch_action.sql",
       "220_archive_mobile_v1.sql",
       "221_onboarding_gate_state.sql",
-      "222_runtime_setup_operation_catalog_repair.sql"
+      "222_runtime_setup_operation_catalog_repair.sql",
+      "223_roadmap_lifecycle_retired.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

@@ -9,6 +9,21 @@ Orient with:
 - `praxis workflow query "status"`
 - `POST /orient` when only HTTP is available
 
+## Product thesis — LLM-first infrastructure powered by a trust compiler
+
+Praxis is **LLM-first infrastructure**. LLMs are smart; they mostly make
+mistakes because the environment gives them incomplete context, too many
+ambiguous choices, hidden state, and weak proof. The **trust compiler** is the
+engine: it compiles the right context, legal actions, typed state, tools,
+data pills, gates, receipts, and recovery paths **at the moment of action**,
+so the right choice is the easiest choice.
+
+Not "a better workflow builder." Not only "trust compiler for messy work."
+The LLM is the operator; humans supervise via Moon / chat / roadmap / bugs
+surfaces that are lenses over the same DB-backed graph.
+
+Standing-order row: `product_architecture / llm-first-infrastructure-trust-compiler-engine`.
+
 ## Vision — One graph, many lenses
 
 Praxis is an **agent substrate**, not a workflow builder. One graph lives in
@@ -37,6 +52,32 @@ layer between a surface and the graph is a regression.
 
 Standing-order row: `platform_architecture / one-graph-many-lenses`
 (`operator_decisions`). Surface it via `praxis_orient`.
+
+## Active program — Public Beta Ramp
+
+Master plan filed as `decision.2026-04-24.public-beta-ramp-master-plan`
+(`decision_kind=delivery_plan`). Five phases over ~10 weeks. **Phase 1.1
+currently active: LLM-first Launch Compiler lunchbox** — description-only
+`PlanPacket` → `source_refs: []` resolve → data-dictionary compile-time
+binding → atomic `compile_plan` → typed gaps (no silent fallbacks) → derived
+`packet_map` (inferred_stage, resolved_agent, capabilities, write_envelope,
+expected_gates, verification_gaps) → `plan.launched` conceptual event.
+Filed as `roadmap_item.praxis.public.beta.ramp.llm.first.infrastructure.wedge.phase.1.1.launch.compiler`
+(phase_order 33.1).
+
+**Phase 1.7 — Roadmap authoring template fix** (partially delivered 2026-04-24):
+`delivery_plan` scope policy registered, `praxis_operator_write` gains
+`roadmap_item_id` + `phase_order` + `lifecycle=retired` via migration 223.
+Claims the 5 auto-generated template children (contracts, validation_gate,
+frontdoors, derived_views, proof) as subtree 33.2.1–33.2.5. Closes
+BUG-BAC9B36F. Remaining: preview-first re-parent validation, `praxis_operator_closeout`
+branch for authoring cleanup vs proof-backed closeout.
+
+Before resuming any Praxis work, check:
+- `praxis workflow query "public beta ramp master plan"`
+- `praxis_operator_decisions(action="list", decision_kind="delivery_plan")`
+- `praxis_orient` for standing orders (11 architecture policies bind this
+  program)
 
 ## Database
 

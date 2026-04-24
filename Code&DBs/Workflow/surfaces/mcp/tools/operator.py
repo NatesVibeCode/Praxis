@@ -350,17 +350,25 @@ def tool_praxis_operator_write(params: dict) -> dict:
     action = str(params.get("action") or "").strip() or "preview"
     title = str(params.get("title") or "").strip()
     intent_brief = str(params.get("intent_brief") or "").strip()
+    roadmap_item_id = str(params.get("roadmap_item_id") or "").strip() or None
+    phase_order = str(params.get("phase_order") or "").strip() or None
     if not action:
         return _structured_input_error(
             ValueError("action is required and cannot be empty"), operation_name=operation_name
         )
-    if not title:
+    if not title and roadmap_item_id is None:
         return _structured_input_error(
-            ValueError("title is required and cannot be empty"), operation_name=operation_name
+            ValueError(
+                "title is required unless roadmap_item_id is provided for update"
+            ),
+            operation_name=operation_name,
         )
-    if not intent_brief:
+    if not intent_brief and roadmap_item_id is None:
         return _structured_input_error(
-            ValueError("intent_brief is required and cannot be empty"), operation_name=operation_name
+            ValueError(
+                "intent_brief is required unless roadmap_item_id is provided for update"
+            ),
+            operation_name=operation_name,
         )
 
     return execute_operation_from_subsystems(
@@ -368,8 +376,8 @@ def tool_praxis_operator_write(params: dict) -> dict:
         operation_name=operation_name,
         payload={
             "action": action,
-            "title": title,
-            "intent_brief": intent_brief,
+            "title": title or None,
+            "intent_brief": intent_brief or None,
             "template": params.get("template", "single_capability"),
             "priority": params.get("priority", "p2"),
             "parent_roadmap_item_id": params.get("parent_roadmap_item_id"),
@@ -388,6 +396,8 @@ def tool_praxis_operator_write(params: dict) -> dict:
             "reference_doc": params.get("reference_doc"),
             "outcome_gate": params.get("outcome_gate"),
             "proof_kind": params.get("proof_kind"),
+            "roadmap_item_id": roadmap_item_id,
+            "phase_order": phase_order,
         },
     )
 
@@ -1376,8 +1386,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "lifecycle": {
                         "type": "string",
-                        "enum": ["planned", "claimed", "completed"],
-                        "description": "Roadmap commitment lifecycle. Use praxis_operator_ideas for pre-commitment ideas.",
+                        "enum": ["planned", "claimed", "completed", "retired"],
+                        "description": (
+                            "Roadmap commitment lifecycle. Use praxis_operator_ideas for pre-commitment ideas. "
+                            "Set to 'retired' (with roadmap_item_id) to mark a misfiled/superseded row without "
+                            "proof-backed closeout."
+                        ),
                     },
                     "tier": {"type": "string"},
                     "phase_ready": {"type": "boolean"},
@@ -1394,8 +1408,26 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "decided operator_decision row, not source_bug + validates_fix proof."
                         ),
                     },
+                    "roadmap_item_id": {
+                        "type": "string",
+                        "description": (
+                            "Target an existing roadmap row for update/retire/re-parent. When "
+                            "provided, the tool runs in update mode: existing values are preserved "
+                            "unless overridden, template children are NOT regenerated, and slug/title/"
+                            "intent_brief become optional. Combine with parent_roadmap_item_id to "
+                            "re-parent, with lifecycle='retired' to retire, or with phase_order to "
+                            "reorder under siblings."
+                        ),
+                    },
+                    "phase_order": {
+                        "type": "string",
+                        "description": (
+                            "Explicit phase_order override (e.g. '33.1'). When omitted, phase_order "
+                            "is auto-assigned from sibling insertion order."
+                        ),
+                    },
                 },
-                "required": ["title", "intent_brief"],
+                "required": [],
             },
         },
     ),

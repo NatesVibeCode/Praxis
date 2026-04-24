@@ -117,7 +117,8 @@ _OPERATOR_IDEA_STATUSES = frozenset(
 _OPERATOR_IDEA_RESOLUTION_STATUSES = frozenset({"rejected", "superseded", "archived"})
 _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
 _ROADMAP_STATUSES = frozenset({"active", "completed", "done"})
-_ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed"})
+_ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed", "retired"})
+_ROADMAP_RETIRED_LIFECYCLE = "retired"
 _ROADMAP_PRIORITIES = frozenset({"p1", "p2"})
 _CIRCUIT_BREAKER_OVERRIDE_STATES = frozenset({"open", "closed", "reset"})
 _FUNCTIONAL_AREA_STATUSES = frozenset(SUPPORTED_FUNCTIONAL_AREA_STATUSES)
@@ -3392,8 +3393,8 @@ class OperatorControlFrontdoor:
         conn: _Connection,
         *,
         action: str,
-        title: str,
-        intent_brief: str,
+        title: str | None,
+        intent_brief: str | None,
         template: str,
         priority: str,
         parent_roadmap_item_id: str | None,
@@ -3412,50 +3413,127 @@ class OperatorControlFrontdoor:
         reference_doc: str | None,
         outcome_gate: str | None,
         proof_kind: str | None,
+        roadmap_item_id: str | None = None,
+        phase_order: str | None = None,
     ) -> dict[str, Any]:
         now = _now()
         normalized_action = _normalize_roadmap_action(action)
-        normalized_title = _require_text(title, field_name="title")
-        normalized_intent_brief = _require_text(
-            intent_brief,
-            field_name="intent_brief",
+        normalized_target_id = _optional_text(
+            roadmap_item_id,
+            field_name="roadmap_item_id",
         )
+        update_mode = normalized_target_id is not None
+        existing_row: Mapping[str, Any] | None = None
+        auto_fixes: list[str] = []
+        warnings: list[str] = []
+        blocking_errors: list[str] = []
+
+        if update_mode:
+            existing_row = await self._fetch_roadmap_item(
+                conn,
+                roadmap_item_id=normalized_target_id,
+            )
+            if existing_row is None:
+                blocking_errors.append(
+                    f"roadmap item not found for update: {normalized_target_id}"
+                )
+
+        existing_acceptance: Mapping[str, Any] = {}
+        if existing_row is not None and isinstance(
+            existing_row.get("acceptance_criteria"), Mapping
+        ):
+            existing_acceptance = existing_row["acceptance_criteria"]
+
+        normalized_title = (
+            _optional_text(title, field_name="title")
+            or (str(existing_row.get("title")) if existing_row is not None else None)
+        )
+        if not normalized_title:
+            blocking_errors.append("title is required")
+            normalized_title = "__placeholder__"
+        normalized_intent_brief = (
+            _optional_text(intent_brief, field_name="intent_brief")
+            or (str(existing_row.get("summary")) if existing_row is not None else None)
+        )
+        if not normalized_intent_brief:
+            blocking_errors.append("intent_brief is required")
+            normalized_intent_brief = "__placeholder__"
         normalized_template = _require_roadmap_template(template)
-        normalized_priority = _normalize_roadmap_priority(priority)
+        normalized_priority = (
+            _normalize_roadmap_priority(priority)
+            if priority != "p2" or existing_row is None
+            else _normalize_roadmap_priority(
+                existing_row.get("priority") or priority
+            )
+        )
         normalized_parent = _optional_text(
             parent_roadmap_item_id,
             field_name="parent_roadmap_item_id",
         )
+        if normalized_parent is None and existing_row is not None:
+            existing_parent = existing_row.get("parent_roadmap_item_id")
+            if existing_parent:
+                normalized_parent = str(existing_parent)
         normalized_source_bug_id = _optional_text(
             source_bug_id,
             field_name="source_bug_id",
         )
+        if normalized_source_bug_id is None and existing_row is not None:
+            existing_source_bug = existing_row.get("source_bug_id")
+            if existing_source_bug:
+                normalized_source_bug_id = str(existing_source_bug)
         normalized_source_idea_id = _optional_text(
             source_idea_id,
             field_name="source_idea_id",
         )
+        if normalized_source_idea_id is None and existing_row is not None:
+            existing_source_idea = existing_row.get("source_idea_id")
+            if existing_source_idea:
+                normalized_source_idea_id = str(existing_source_idea)
         normalized_registry_paths = _normalize_registry_paths(registry_paths)
-        normalized_status = _normalize_roadmap_status(status)
-        normalized_lifecycle = _normalize_roadmap_lifecycle(lifecycle)
+        if (
+            not normalized_registry_paths
+            and existing_row is not None
+            and existing_row.get("registry_paths")
+        ):
+            normalized_registry_paths = _normalize_registry_paths(
+                existing_row.get("registry_paths")
+            )
+        normalized_status = (
+            _normalize_roadmap_status(status)
+            if status is not None
+            else _normalize_roadmap_status(
+                existing_row.get("status") if existing_row is not None else None
+            )
+        )
+        normalized_lifecycle = (
+            _normalize_roadmap_lifecycle(lifecycle)
+            if lifecycle is not None
+            else _normalize_roadmap_lifecycle(
+                existing_row.get("lifecycle") if existing_row is not None else None
+            )
+        )
         normalized_depends_on = tuple(
             dependency
             for dependency in depends_on
             if dependency != normalized_parent
         )
-        auto_fixes: list[str] = []
-        warnings: list[str] = []
-        blocking_errors: list[str] = []
 
         parent_row: Mapping[str, Any] | None = None
         if normalized_parent is not None:
-            parent_row = await self._fetch_roadmap_item(
-                conn,
-                roadmap_item_id=normalized_parent,
-            )
-            if parent_row is None:
+            if normalized_parent == normalized_target_id:
                 blocking_errors.append(
-                    f"parent roadmap item not found: {normalized_parent}"
+                    "roadmap item cannot be its own parent"
                 )
+            else:
+                parent_row = await self._fetch_roadmap_item(
+                    conn,
+                    roadmap_item_id=normalized_parent,
+                )
+                if parent_row is None:
+                    blocking_errors.append(
+                        f"parent roadmap item not found: {normalized_parent}"
+                    )
 
         if normalized_source_bug_id is not None and not await self._bug_exists(
             conn,
@@ -3477,7 +3555,13 @@ class OperatorControlFrontdoor:
                 blocking_errors.append(f"dependency roadmap item not found: {dependency}")
 
         normalized_slug = _optional_text(slug, field_name="slug")
-        if normalized_slug is None:
+        if update_mode:
+            if normalized_slug is not None:
+                auto_fixes.append(
+                    "slug ignored in update mode; roadmap_item_id drives identity"
+                )
+            normalized_slug = _slugify_roadmap_text(normalized_title)
+        elif normalized_slug is None:
             normalized_slug = _slugify_roadmap_text(normalized_title)
             auto_fixes.append(f"slug generated from title: {normalized_slug}")
         else:
@@ -3489,7 +3573,11 @@ class OperatorControlFrontdoor:
             normalized_slug = _slugify_roadmap_text(normalized_slug)
 
         normalized_item_kind = _normalize_roadmap_item_kind(
-            item_kind,
+            (
+                item_kind
+                if item_kind is not None or existing_row is None
+                else existing_row.get("item_kind")
+            ),
             template=normalized_template,
         )
         if normalized_status in {_ROADMAP_COMPLETED_STATUS, "done"} and lifecycle is None:
@@ -3501,6 +3589,12 @@ class OperatorControlFrontdoor:
         ):
             normalized_status = _ROADMAP_COMPLETED_STATUS
             auto_fixes.append("status aligned to completed lifecycle: completed")
+        if normalized_lifecycle == _ROADMAP_RETIRED_LIFECYCLE and normalized_status not in {
+            _ROADMAP_COMPLETED_STATUS,
+            "done",
+        }:
+            normalized_status = _ROADMAP_COMPLETED_STATUS
+            auto_fixes.append("status aligned to retired lifecycle: completed")
         if normalized_lifecycle == "idea":
             blocking_errors.append(
                 "roadmap lifecycle 'idea' is retired for new roadmap writes; "
@@ -3514,8 +3608,15 @@ class OperatorControlFrontdoor:
             and isinstance(parent_row.get("acceptance_criteria"), Mapping)
             else {}
         )
+        existing_tier = (
+            str(existing_acceptance.get("tier")).strip()
+            if isinstance(existing_acceptance.get("tier"), str)
+            and str(existing_acceptance.get("tier")).strip()
+            else None
+        )
         normalized_tier = (
             _optional_text(tier, field_name="tier")
+            or existing_tier
             or (
                 str(parent_acceptance.get("tier")).strip()
                 if isinstance(parent_acceptance.get("tier"), str)
@@ -3526,10 +3627,22 @@ class OperatorControlFrontdoor:
         normalized_phase_ready = (
             bool(phase_ready)
             if phase_ready is not None
-            else bool(parent_acceptance.get("phase_ready", False))
+            else bool(
+                existing_acceptance.get(
+                    "phase_ready",
+                    parent_acceptance.get("phase_ready", False),
+                )
+            )
+        )
+        existing_approval_tag = (
+            str(existing_acceptance.get("approval_tag")).strip()
+            if isinstance(existing_acceptance.get("approval_tag"), str)
+            and str(existing_acceptance.get("approval_tag")).strip()
+            else None
         )
         normalized_approval_tag = (
             _optional_text(approval_tag, field_name="approval_tag")
+            or existing_approval_tag
             or (
                 str(parent_acceptance.get("approval_tag")).strip()
                 if isinstance(parent_acceptance.get("approval_tag"), str)
@@ -3537,21 +3650,42 @@ class OperatorControlFrontdoor:
                 else _default_approval_tag(now)
             )
         )
-        if approval_tag is None:
+        if approval_tag is None and existing_approval_tag is None:
             auto_fixes.append(f"approval_tag generated: {normalized_approval_tag}")
+        existing_reference_doc = (
+            str(existing_acceptance.get("reference_doc")).strip()
+            if isinstance(existing_acceptance.get("reference_doc"), str)
+            and str(existing_acceptance.get("reference_doc")).strip()
+            else None
+        )
         normalized_reference_doc = _optional_text(
             reference_doc,
             field_name="reference_doc",
+        ) or existing_reference_doc
+        existing_outcome_gate = (
+            str(existing_acceptance.get("outcome_gate")).strip()
+            if isinstance(existing_acceptance.get("outcome_gate"), str)
+            and str(existing_acceptance.get("outcome_gate")).strip()
+            else None
         )
         normalized_outcome_gate = (
             _optional_text(outcome_gate, field_name="outcome_gate")
+            or existing_outcome_gate
             or normalized_intent_brief
+        )
+        existing_decision_ref = (
+            str(existing_row.get("decision_ref")).strip()
+            if existing_row is not None
+            and isinstance(existing_row.get("decision_ref"), str)
+            and str(existing_row.get("decision_ref")).strip()
+            else None
         )
         normalized_decision_ref = (
             _optional_text(decision_ref, field_name="decision_ref")
+            or existing_decision_ref
             or _default_decision_ref(normalized_slug.replace(".", "-"), now)
         )
-        if decision_ref is None:
+        if decision_ref is None and existing_decision_ref is None:
             auto_fixes.append(f"decision_ref generated: {normalized_decision_ref}")
 
         normalized_proof_kind = _optional_text(proof_kind, field_name="proof_kind")
@@ -3568,23 +3702,55 @@ class OperatorControlFrontdoor:
                     "only valid for capability rows)"
                 )
 
-        root_roadmap_item_id = (
-            f"{normalized_parent}.{normalized_slug}"
-            if normalized_parent is not None
-            else f"roadmap_item.{normalized_slug}"
-        )
-        root_roadmap_key = _roadmap_key_from_item_id(root_roadmap_item_id)
+        if update_mode and normalized_target_id is not None:
+            root_roadmap_item_id = normalized_target_id
+            root_roadmap_key = (
+                str(existing_row.get("roadmap_key"))
+                if existing_row is not None and existing_row.get("roadmap_key")
+                else _roadmap_key_from_item_id(root_roadmap_item_id)
+            )
+        else:
+            root_roadmap_item_id = (
+                f"{normalized_parent}.{normalized_slug}"
+                if normalized_parent is not None
+                else f"roadmap_item.{normalized_slug}"
+            )
+            root_roadmap_key = _roadmap_key_from_item_id(root_roadmap_item_id)
         if root_roadmap_item_id in normalized_depends_on:
             blocking_errors.append(
                 f"roadmap item cannot depend on itself: {root_roadmap_item_id}"
             )
 
-        sibling_phase_orders = await self._roadmap_sibling_phase_orders(
-            conn,
-            parent_roadmap_item_id=normalized_parent,
+        normalized_phase_order_override = _optional_text(
+            phase_order,
+            field_name="phase_order",
         )
-        root_phase_order = _next_phase_order(sibling_phase_orders)
-        auto_fixes.append(f"phase_order assigned: {root_phase_order}")
+        if normalized_phase_order_override is not None and _parse_phase_order(
+            normalized_phase_order_override
+        ) is None:
+            blocking_errors.append(
+                f"phase_order must be a dotted numeric string like '33.1': {normalized_phase_order_override}"
+            )
+            normalized_phase_order_override = None
+
+        existing_phase_order = (
+            str(existing_acceptance.get("phase_order")).strip()
+            if isinstance(existing_acceptance.get("phase_order"), str)
+            and str(existing_acceptance.get("phase_order")).strip()
+            else None
+        )
+        if normalized_phase_order_override is not None:
+            root_phase_order = normalized_phase_order_override
+            auto_fixes.append(f"phase_order overridden: {root_phase_order}")
+        elif update_mode and existing_phase_order is not None:
+            root_phase_order = existing_phase_order
+        else:
+            sibling_phase_orders = await self._roadmap_sibling_phase_orders(
+                conn,
+                parent_roadmap_item_id=normalized_parent,
+            )
+            root_phase_order = _next_phase_order(sibling_phase_orders)
+            auto_fixes.append(f"phase_order assigned: {root_phase_order}")
 
         root_acceptance = _acceptance_payload(
             tier=normalized_tier,
@@ -3597,6 +3763,14 @@ class OperatorControlFrontdoor:
             proof_kind=normalized_proof_kind,
         )
 
+        existing_created_at = (
+            existing_row.get("created_at") if existing_row is not None else None
+        )
+        effective_created_at = (
+            existing_created_at
+            if update_mode and isinstance(existing_created_at, datetime)
+            else now
+        )
         root_item = _roadmap_item_payload(
             roadmap_item_id=root_roadmap_item_id,
             roadmap_key=root_roadmap_key,
@@ -3612,7 +3786,7 @@ class OperatorControlFrontdoor:
             summary=normalized_intent_brief,
             acceptance_criteria=root_acceptance,
             decision_ref=normalized_decision_ref,
-            created_at=now,
+            created_at=effective_created_at,
             updated_at=now,
         )
 
@@ -3636,7 +3810,9 @@ class OperatorControlFrontdoor:
             )
 
         previous_item_id = root_roadmap_item_id
-        template_children = _ROADMAP_TEMPLATE_CHILDREN[normalized_template]
+        template_children = (
+            () if update_mode else _ROADMAP_TEMPLATE_CHILDREN[normalized_template]
+        )
         for index, child in enumerate(template_children, start=1):
             child_item_id = f"{root_roadmap_item_id}.{child.suffix}"
             child_phase_order = f"{root_phase_order}.{index}"
@@ -3727,8 +3903,8 @@ class OperatorControlFrontdoor:
         *,
         env: Mapping[str, str] | None,
         action: str,
-        title: str,
-        intent_brief: str,
+        title: str | None,
+        intent_brief: str | None,
         template: str = "single_capability",
         priority: str = "p2",
         parent_roadmap_item_id: str | None = None,
@@ -3747,6 +3923,8 @@ class OperatorControlFrontdoor:
         reference_doc: str | None = None,
         outcome_gate: str | None = None,
         proof_kind: str | None = None,
+        roadmap_item_id: str | None = None,
+        phase_order: str | None = None,
     ) -> dict[str, Any]:
         conn = await self.connect_database(env)
         try:
@@ -3773,6 +3951,8 @@ class OperatorControlFrontdoor:
                 reference_doc=reference_doc,
                 outcome_gate=outcome_gate,
                 proof_kind=proof_kind,
+                roadmap_item_id=roadmap_item_id,
+                phase_order=phase_order,
             )
             if preview["blocking_errors"] or preview["action"] != "commit":
                 preview["committed"] = False
@@ -4876,8 +5056,8 @@ class OperatorControlFrontdoor:
         self,
         *,
         action: str = "preview",
-        title: str,
-        intent_brief: str,
+        title: str | None = None,
+        intent_brief: str | None = None,
         template: str = "single_capability",
         priority: str = "p2",
         parent_roadmap_item_id: str | None = None,
@@ -4896,6 +5076,8 @@ class OperatorControlFrontdoor:
         reference_doc: str | None = None,
         outcome_gate: str | None = None,
         proof_kind: str | None = None,
+        roadmap_item_id: str | None = None,
+        phase_order: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         return await self._roadmap_write(
@@ -4921,6 +5103,8 @@ class OperatorControlFrontdoor:
             reference_doc=reference_doc,
             outcome_gate=outcome_gate,
             proof_kind=proof_kind,
+            roadmap_item_id=roadmap_item_id,
+            phase_order=phase_order,
         )
 
     async def reconcile_work_item_closeout_async(
@@ -5592,8 +5776,8 @@ class OperatorControlFrontdoor:
         self,
         *,
         action: str = "preview",
-        title: str,
-        intent_brief: str,
+        title: str | None = None,
+        intent_brief: str | None = None,
         template: str = "single_capability",
         priority: str = "p2",
         parent_roadmap_item_id: str | None = None,
@@ -5612,6 +5796,8 @@ class OperatorControlFrontdoor:
         reference_doc: str | None = None,
         outcome_gate: str | None = None,
         proof_kind: str | None = None,
+        roadmap_item_id: str | None = None,
+        phase_order: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         return _run_async(
@@ -5637,6 +5823,8 @@ class OperatorControlFrontdoor:
                 reference_doc=reference_doc,
                 outcome_gate=outcome_gate,
                 proof_kind=proof_kind,
+                roadmap_item_id=roadmap_item_id,
+                phase_order=phase_order,
                 env=env,
             ),
             message=(

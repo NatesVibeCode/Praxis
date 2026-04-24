@@ -233,7 +233,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '219_custom_integration_builder_launch_action.sql',
  '220_archive_mobile_v1.sql',
  '221_onboarding_gate_state.sql',
- '222_runtime_setup_operation_catalog_repair.sql')
+ '222_runtime_setup_operation_catalog_repair.sql',
+ '223_roadmap_lifecycle_retired.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -483,7 +484,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '219_custom_integration_builder_launch_action.sql',
  '220_archive_mobile_v1.sql',
  '221_onboarding_gate_state.sql',
- '222_runtime_setup_operation_catalog_repair.sql')
+ '222_runtime_setup_operation_catalog_repair.sql',
+ '223_roadmap_lifecycle_retired.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -712,7 +714,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '219_custom_integration_builder_launch_action.sql',
                '220_archive_mobile_v1.sql',
                '221_onboarding_gate_state.sql',
-               '222_runtime_setup_operation_catalog_repair.sql'),
+               '222_runtime_setup_operation_catalog_repair.sql',
+               '223_roadmap_lifecycle_retired.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -965,6 +968,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '220_archive_mobile_v1.sql': 'canonical',
  '221_onboarding_gate_state.sql': 'canonical',
  '222_runtime_setup_operation_catalog_repair.sql': 'canonical',
+ '223_roadmap_lifecycle_retired.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -2895,7 +2899,9 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                                     ('row',
                                                      'authority_object_registry.operation.runtime.setup.apply'),
                                                     ('row',
-                                                     'authority_event_contracts.event_contract.runtime_setup_apply_requested'))}
+                                                     'authority_event_contracts.event_contract.runtime_setup_apply_requested')),
+ '223_roadmap_lifecycle_retired.sql': (('constraint',
+                                        'roadmap_items.roadmap_items_lifecycle_check'),)}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -4398,7 +4404,9 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
    ('row', 'authority_object_registry.operation.runtime.setup.doctor'),
    ('row', 'authority_object_registry.operation.runtime.setup.plan'),
    ('row', 'authority_object_registry.operation.runtime.setup.apply'),
-   ('row', 'authority_event_contracts.event_contract.runtime_setup_apply_requested'))))
+   ('row', 'authority_event_contracts.event_contract.runtime_setup_apply_requested'))),
+ ('223_roadmap_lifecycle_retired.sql',
+  (('constraint', 'roadmap_items.roadmap_items_lifecycle_check'),)))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'100': ('100_adapter_config_authority.sql',
          '100_task_type_profile_scope_defaults.sql',

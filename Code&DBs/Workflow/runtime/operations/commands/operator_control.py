@@ -8,8 +8,8 @@ from pydantic import BaseModel
 
 class RoadmapWriteCommand(BaseModel):
     action: str = "preview"
-    title: str
-    intent_brief: str
+    title: str | None = None
+    intent_brief: str | None = None
     template: str = "single_capability"
     priority: str = "p2"
     parent_roadmap_item_id: str | None = None
@@ -28,6 +28,8 @@ class RoadmapWriteCommand(BaseModel):
     reference_doc: str | None = None
     outcome_gate: str | None = None
     proof_kind: str | None = None
+    roadmap_item_id: str | None = None
+    phase_order: str | None = None
 
 
 class WorkItemCloseoutCommand(BaseModel):
@@ -183,6 +185,8 @@ def handle_operator_roadmap_write(
         reference_doc=command.reference_doc,
         outcome_gate=command.outcome_gate,
         proof_kind=command.proof_kind,
+        roadmap_item_id=command.roadmap_item_id,
+        phase_order=command.phase_order,
         env=_resolved_env(subsystems),
     )
 

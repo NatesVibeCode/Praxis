@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
@@ -234,33 +234,77 @@ def _verify_ref_name(verification_ref: str, file_path: str) -> str:
     return f"verify_ref.{ref_slug}.{path_slug}.{digest}"
 
 
+def _file_has_admitted_verifier(file_path: str) -> bool:
+    """Return ``True`` if the file has an admitted verifier today.
+
+    Currently only Python files (.py) have admitted verifiers via
+    :func:`_generate_verify_refs`. Non-Python extensions silent-zero — the
+    Python-only ladder Phase 1.5 is queued to replace with catalog-backed
+    dispatch OR post-run write_set derivation. This predicate is the single
+    source of truth for both the generator (``_generate_verify_refs``) and
+    the gap surfacer (``_compute_verification_gaps``), so widening the
+    admitted set is a one-edit change.
+    """
+    return bool(file_path) and file_path.endswith(".py")
+
+
+def _compute_verification_gaps(write_scope: list[str]) -> list[dict[str, str]]:
+    """Surface files in write_scope with no admitted verifier.
+
+    Per architecture-policy::platform-architecture::fail-closed-at-compile-
+    no-silent-defaults plus expected-envelope-vs-actual-truth-separation,
+    the launch compiler must name verification gaps explicitly in the
+    packet_map rather than letting the Python-only ladder silently produce
+    zero verifiers for JS / TS / SQL / MD / other write-scope files.
+
+    Phase 1.5 drives this list toward empty by extending
+    :func:`_file_has_admitted_verifier`'s admitted set (catalog-backed) or
+    moving verification to post-run write_set reconciliation.
+    """
+    gaps: list[dict[str, str]] = []
+    for file_path in write_scope:
+        if not file_path or not file_path.strip():
+            # Blank / whitespace-only entries are invalid input, not gaps —
+            # match the silent-drop behavior of ``_generate_verify_refs``.
+            continue
+        if _file_has_admitted_verifier(file_path):
+            continue
+        gaps.append(
+            {
+                "file": file_path,
+                "missing_type": "verifier",
+                "reason_code": "verifier.no_admitted_for_extension",
+            }
+        )
+    return gaps
+
+
 def _generate_verify_refs(write_scope: list[str]) -> list[dict[str, Any]]:
     """Generate DB-backed verification ref rows from write scope."""
     refs: list[dict[str, Any]] = []
 
     for file_path in write_scope:
-        if not file_path:
+        if not _file_has_admitted_verifier(file_path):
             continue
 
-        if file_path.endswith(".py"):
-            verification_ref = "verification.python.py_compile"
-            label = f"Compile {file_path}"
-            if "test" in file_path.lower():
-                verification_ref = "verification.python.pytest_file"
-                label = f"Pytest {file_path}"
-            verify_ref = _verify_ref_name(verification_ref, file_path)
-            refs.append(
-                {
-                    "verify_ref": verify_ref,
-                    "verification_ref": verification_ref,
-                    "label": label,
-                    "description": f"Verify Python file {file_path}",
-                    "inputs": {"path": file_path},
-                    "enabled": True,
-                    "binding_revision": f"binding.{verify_ref}",
-                    "decision_ref": "decision.verify_refs.bootstrap.20260408",
-                }
-            )
+        verification_ref = "verification.python.py_compile"
+        label = f"Compile {file_path}"
+        if "test" in file_path.lower():
+            verification_ref = "verification.python.pytest_file"
+            label = f"Pytest {file_path}"
+        verify_ref = _verify_ref_name(verification_ref, file_path)
+        refs.append(
+            {
+                "verify_ref": verify_ref,
+                "verification_ref": verification_ref,
+                "label": label,
+                "description": f"Verify Python file {file_path}",
+                "inputs": {"path": file_path},
+                "enabled": True,
+                "binding_revision": f"binding.{verify_ref}",
+                "decision_ref": "decision.verify_refs.bootstrap.20260408",
+            }
+        )
 
     return refs
 
@@ -597,9 +641,13 @@ def compile_prompt_launch_spec(
 class PlanPacket:
     """One unit of work in a plan.
 
-    description/write/stage match Intent; everything else is derivable or
-    optional wiring (label auto-generated, agent defaults to auto/<stage>,
-    verify_refs computed from write scope).
+    ``description`` is the only required field per architecture-policy::
+    platform-architecture::source-refs-plural-canonical-shape (caller tax
+    3→1). ``write`` defaults to an empty list: source-authority resolvers
+    (``_plan_packets_from_bugs`` etc.) populate it from authority metadata;
+    explicit packets with empty write are surfaced as UnresolvedWriteScopeError
+    at ``compile_plan`` time per fail-closed-at-compile-no-silent-defaults.
+    ``stage`` defaults to "build" and is validated against _STAGE_TEMPLATES.
 
     ``bug_ref`` holds the primary bug this packet resolves (singular).
     ``bug_refs`` holds the full list when the packet resolves a cluster of
@@ -608,7 +656,7 @@ class PlanPacket:
     """
 
     description: str
-    write: list[str]
+    write: list[str] = field(default_factory=list)
     stage: str = "build"
     label: str | None = None
     read: list[str] | None = None
@@ -623,15 +671,26 @@ class PlanPacket:
 class Plan:
     """A named batch of packets, submitted as one workflow_run.
 
-    Callers can either hand-write packets OR supply a source-authority
-    shortcut and let the plan materialize packets from authority:
+    Callers either hand-write ``packets`` or supply ``source_refs`` with ref
+    IDs that dispatch by prefix to the right source authority:
 
-      - ``from_bugs``: list of bug IDs. Bugs fetched + clustered through
-        ``runtime.bug_resolution_program.derive_bug_packets``; each cluster
-        becomes one PlanPacket with wave-dependency wiring preserved.
+      - ``BUG-*`` → ``derive_bug_packets`` via ``_plan_packets_from_bugs``
+      - ``roadmap_item.*`` → ``_plan_packets_from_roadmap_items``
+      - ``idea.*`` / ``operator_idea.*`` → ``_plan_packets_from_ideas``
+      - ``friction.*`` / ``friction_event.*`` → ``_plan_packets_from_friction``
 
-    Explicit ``packets`` always win — if both ``packets`` and a ``from_*``
-    shortcut are set, the shortcut is rejected as an ambiguity error.
+    Unresolvable prefixes raise :class:`UnresolvedSourceRefError` (becomes a
+    typed gap in Phase 1.5 per architecture-policy::platform-architecture::
+    fail-closed-at-compile-no-silent-defaults).
+
+    Legacy ``from_bugs`` / ``from_roadmap_items`` / ``from_ideas`` /
+    ``from_friction`` fields are accepted as deprecated aliases; they merge
+    into ``source_refs`` at coerce time per architecture-policy::platform-
+    architecture::source-refs-plural-canonical-shape. Canonical internal
+    shape is ``source_refs: []``.
+
+    Explicit ``packets`` always win — if both ``packets`` and any source-ref
+    input are set, ``_coerce_plan`` raises an ambiguity error.
     """
 
     name: str
@@ -640,6 +699,7 @@ class Plan:
     why: str | None = None
     phase: str = "build"
     workdir: str | None = None
+    source_refs: list[str] | None = None
     from_bugs: list[str] | None = None
     from_roadmap_items: list[str] | None = None
     from_ideas: list[str] | None = None
@@ -687,6 +747,189 @@ def _coerce_packet(value: Any) -> PlanPacket:
         agent=value.get("agent"),
         complexity=value.get("complexity"),
     )
+
+
+def _emit_plan_launched_event(
+    conn: Any,
+    *,
+    run_id: str,
+    workflow_id: str,
+    spec_name: str,
+    total_jobs: int,
+    packet_labels: list[str],
+    source_refs: list[str] | None = None,
+) -> str | None:
+    """Emit the ``plan.launched`` conceptual event after a successful launch.
+
+    Writes to ``public.system_events`` via the canonical
+    :func:`runtime.system_events.emit_system_event` helper. Per architecture-
+    policy::platform-architecture::expected-envelope-vs-actual-truth-
+    separation, this event marks the pre-run envelope crossing into
+    runtime — downstream projections (future Phase 2/3) wire it into Moon
+    observability and the agent operating packet's "what changed recently"
+    question.
+
+    Best-effort: emission failures are returned as an error string rather
+    than raised, so a successful submit_workflow_command is not rolled back
+    by a degraded system_events write path. Caller should fold the returned
+    error (if any) into the receipt's ``warnings`` list.
+
+    Returns ``None`` on success; a warning-formatted error string on failure.
+
+    Formal ``authority_event_contracts`` registration is queued for a
+    follow-up CQRS-consistency packet. Until then, consumers subscribe via
+    the freeform ``system_events`` stream.
+    """
+    try:
+        from runtime.system_events import emit_system_event
+    except Exception as exc:
+        return f"plan.launched event emission skipped: system_events unavailable ({type(exc).__name__}: {exc})"
+    try:
+        emit_system_event(
+            conn,
+            event_type="plan.launched",
+            source_id=run_id or workflow_id,
+            source_type="launch_plan",
+            payload={
+                "run_id": run_id,
+                "workflow_id": workflow_id,
+                "spec_name": spec_name,
+                "total_jobs": total_jobs,
+                "source_refs": list(source_refs or []),
+                "packet_labels": list(packet_labels),
+            },
+        )
+    except Exception as exc:
+        return f"plan.launched event emission failed: {type(exc).__name__}: {exc}"
+    return None
+
+
+def _bind_packet_data_pills(
+    description: str,
+    *,
+    conn: Any,
+) -> dict[str, Any]:
+    """Extract and validate ``object.field`` data pills from a packet
+    description via :func:`runtime.intent_binding.bind_data_pills`.
+
+    Shared entry point for ``compile_plan`` (attaches pills to the job dict
+    so ``_build_packet_map_entry`` can surface them on the receipt) and
+    ``propose_plan`` (surfaces pills in ``packet_declarations``). Honors
+    architecture-policy::platform-architecture::data-pill-primitive-family
+    — data pills are atomic field references against
+    ``data_dictionary_entries``; ambiguous and unbound pills appear in the
+    returned structure so callers can promote them to typed gaps.
+
+    Returns a normalized dict with keys ``bound``, ``ambiguous``,
+    ``unbound``, ``warnings``. Empty descriptions and module-import
+    failures (data-dictionary substrate degraded) return warnings rather
+    than raising — the launch compiler must not block on degraded binding
+    substrate. Per-call exceptions are caught and folded into the warnings
+    list for the same reason.
+    """
+    result: dict[str, Any] = {
+        "bound": [],
+        "ambiguous": [],
+        "unbound": [],
+        "warnings": [],
+    }
+    text = (description or "").strip()
+    if not text:
+        return result
+    try:
+        from runtime.intent_binding import bind_data_pills as _bind
+    except Exception as exc:
+        result["warnings"].append(
+            f"intent_binding unavailable: {type(exc).__name__}: {exc}"
+        )
+        return result
+    try:
+        bound_intent = _bind(text, conn=conn)
+    except Exception as exc:
+        result["warnings"].append(
+            f"bind_data_pills failed: {type(exc).__name__}: {exc}"
+        )
+        return result
+    pills = bound_intent.to_dict()
+    pills.pop("intent", None)
+    result["bound"] = list(pills.get("bound") or [])
+    result["ambiguous"] = list(pills.get("ambiguous") or [])
+    result["unbound"] = list(pills.get("unbound") or [])
+    inner_warnings = list(pills.get("warnings") or [])
+    if inner_warnings:
+        result["warnings"].extend(inner_warnings)
+    return result
+
+
+def _build_packet_map_entry(
+    *,
+    job: dict[str, Any],
+    packet: PlanPacket | None = None,
+) -> dict[str, Any]:
+    """Shape one :attr:`LaunchReceipt.packet_map` entry with legacy + derived
+    fields.
+
+    Legacy fields (``label``, ``bug_ref``, ``bug_refs``, ``agent``, ``stage``)
+    preserved for consumer back-compat. Derived fields added per architecture-
+    policy::platform-architecture::expected-envelope-vs-actual-truth-separation
+    (all pre-run envelope; post-run truth lands in a separate receipt field
+    when Phase 3 writes actual_write_set back):
+
+    - ``inferred_stage`` — stage the compiler locked in (``job['task_type']``
+      or ``packet.stage``). Diverges from ``stage`` when stage inference
+      lands in a future phase.
+    - ``resolved_agent`` — agent string after compile. May still contain the
+      ``auto/{stage}`` placeholder until dispatch-time resolution; distinct
+      field so post-run reconciliation can overwrite without clobbering the
+      legacy ``agent``.
+    - ``capabilities`` — capability_slug list the catalog bound to this
+      packet (from ``CompiledSpec.capabilities``).
+    - ``write_envelope`` — pre-run allowed scope (declared ``packet.write``).
+    - ``expected_gates`` — verify_ref IDs the compiler expects to run.
+    - ``verification_gaps`` — files in ``write_envelope`` with no admitted
+      verifier. Names the Python-only ladder's silent-zero behavior
+      explicitly; Phase 1.5 drives this list toward empty.
+
+    ``packet`` is optional so ``launch_proposed`` (which only has
+    ``spec_dict['jobs']``, not the original packets) can still build
+    enriched entries using the job-level mirrors.
+    """
+    write_envelope = list(
+        packet.write if packet is not None else (job.get("write_scope") or [])
+    )
+    declared_stage = (
+        packet.stage if packet is not None else str(job.get("task_type") or "")
+    )
+    bug_ref = packet.bug_ref if packet is not None else job.get("bug_ref")
+    bug_refs: list[str] | None
+    if packet is not None:
+        bug_refs = list(packet.bug_refs) if packet.bug_refs else None
+    else:
+        raw = job.get("bug_refs")
+        bug_refs = list(raw) if isinstance(raw, list) else None
+    agent = job["agent"]
+    return {
+        # Legacy fields (stable consumer contract):
+        "label": job["label"],
+        "bug_ref": bug_ref,
+        "bug_refs": bug_refs,
+        "agent": agent,
+        "stage": declared_stage,
+        # Derived fields (pre-run envelope):
+        "inferred_stage": str(job.get("task_type") or declared_stage),
+        "resolved_agent": agent,
+        "capabilities": list(job.get("capabilities") or []),
+        "write_envelope": write_envelope,
+        "expected_gates": list(job.get("verify_refs") or []),
+        "verification_gaps": _compute_verification_gaps(write_envelope),
+        # Data pills (Phase 1.1.f) — atomic object.field refs extracted from
+        # packet.description against data_dictionary_entries. Surfaced even
+        # when zero bound so consumers can iterate unconditionally.
+        "data_pills": dict(
+            job.get("data_pills")
+            or {"bound": [], "ambiguous": [], "unbound": [], "warnings": []}
+        ),
+    }
 
 
 def _plan_packets_from_bugs(
@@ -994,6 +1237,151 @@ def _plan_packets_from_friction(
     return plan_packets
 
 
+# Prefix-to-kind dispatch for source_refs resolution. Checked in order; first
+# matching prefix wins. Kinds map to the per-authority resolvers invoked by
+# _plan_packets_from_source_refs. New resolvers (decision., review.,
+# discovery.) land in Phase 1.2's built-not-wired compiler wiring sweep.
+_SOURCE_REF_DISPATCH: tuple[tuple[str, str], ...] = (
+    ("BUG-", "bug"),
+    ("bug-", "bug"),
+    ("roadmap_item.", "roadmap_item"),
+    ("operator_idea.", "idea"),
+    ("idea.", "idea"),
+    ("friction_event.", "friction"),
+    ("friction.", "friction"),
+)
+
+
+class UnresolvedSourceRefError(ValueError):
+    """Raised when one or more source_refs have no admitted resolver.
+
+    Per architecture-policy::platform-architecture::fail-closed-at-compile-
+    no-silent-defaults, unresolvable refs must not silently pass through.
+    Phase 1.5 converts this exception into a typed_gap row with
+    ``missing_type='source_authority_resolver'`` and
+    ``legal_repair_actions=['add_resolver_for_prefix']``; until then it
+    surfaces as this typed exception with the full ref list preserved on
+    ``unresolved_refs`` so callers can build the repair packet themselves.
+    """
+
+    def __init__(self, unresolved_refs: list[str]) -> None:
+        self.unresolved_refs = list(unresolved_refs)
+        known_prefixes = sorted({prefix for prefix, _ in _SOURCE_REF_DISPATCH})
+        preview = ", ".join(repr(r) for r in unresolved_refs[:5])
+        if len(unresolved_refs) > 5:
+            preview += ", ..."
+        super().__init__(
+            f"{len(unresolved_refs)} source_ref(s) have no admitted resolver: "
+            f"{preview}. Known prefixes: {', '.join(known_prefixes)}. "
+            "(decision., review., discovery. resolvers are queued in Phase "
+            "1.2 built-not-wired sweep.)"
+        )
+
+
+def _classify_source_ref(ref: str) -> str | None:
+    """Return the source-authority kind for a ref, or ``None`` if its prefix
+    has no admitted resolver.
+    """
+    for prefix, kind in _SOURCE_REF_DISPATCH:
+        if ref.startswith(prefix):
+            return kind
+    return None
+
+
+def _plan_packets_from_source_refs(
+    refs: list[str],
+    *,
+    conn: Any,
+    program_id: str,
+) -> list[PlanPacket]:
+    """Polymorphic resolver: group refs by prefix, call the per-kind source-
+    authority resolver, concatenate materialized PlanPackets.
+
+    Canonical entry point per architecture-policy::platform-architecture::
+    source-refs-plural-canonical-shape. Legacy ``from_bugs`` /
+    ``from_roadmap_items`` / ``from_ideas`` / ``from_friction`` on
+    :class:`Plan` are deprecated aliases; ``_coerce_plan`` merges them into
+    ``source_refs`` before calling this function.
+
+    Unresolvable prefixes raise :class:`UnresolvedSourceRefError` with ALL
+    offending refs collected (not just the first), matching the atomic-
+    failure shape of :class:`CompilePlanError`. Per-kind resolvers that
+    materialize 0 packets for N refs raise :class:`ValueError` with the
+    kind-specific diagnostic the legacy path used.
+    """
+    if not refs:
+        return []
+
+    by_kind: dict[str, list[str]] = {}
+    unresolved: list[str] = []
+    for raw in refs:
+        if not isinstance(raw, str):
+            continue
+        ref = raw.strip()
+        if not ref:
+            continue
+        kind = _classify_source_ref(ref)
+        if kind is None:
+            unresolved.append(ref)
+            continue
+        by_kind.setdefault(kind, []).append(ref)
+
+    if unresolved:
+        raise UnresolvedSourceRefError(unresolved)
+
+    packets: list[PlanPacket] = []
+
+    bug_refs = by_kind.get("bug")
+    if bug_refs:
+        bug_packets = _plan_packets_from_bugs(
+            bug_refs, conn=conn, program_id=program_id
+        )
+        if not bug_packets:
+            raise ValueError(
+                f"source_refs supplied {len(bug_refs)} bug ID(s) but no packets "
+                "could be materialized — check bug IDs exist in Praxis.db"
+            )
+        packets.extend(bug_packets)
+
+    roadmap_refs = by_kind.get("roadmap_item")
+    if roadmap_refs:
+        roadmap_packets = _plan_packets_from_roadmap_items(
+            roadmap_refs, conn=conn
+        )
+        if not roadmap_packets:
+            raise ValueError(
+                f"source_refs supplied {len(roadmap_refs)} roadmap_item ID(s) "
+                "but no packets could be materialized — check IDs exist in "
+                "Praxis.db and are not already completed"
+            )
+        packets.extend(roadmap_packets)
+
+    idea_refs = by_kind.get("idea")
+    if idea_refs:
+        idea_packets = _plan_packets_from_ideas(idea_refs, conn=conn)
+        if not idea_packets:
+            raise ValueError(
+                f"source_refs supplied {len(idea_refs)} idea ID(s) but no packets "
+                "could be materialized — check IDs exist in Praxis.db and are "
+                "still open (promoted/rejected/superseded/archived skipped)"
+            )
+        packets.extend(idea_packets)
+
+    friction_refs = by_kind.get("friction")
+    if friction_refs:
+        friction_packets = _plan_packets_from_friction(
+            friction_refs, conn=conn
+        )
+        if not friction_packets:
+            raise ValueError(
+                f"source_refs supplied {len(friction_refs)} friction_event ID(s) "
+                "but no packets could be materialized — check IDs exist in Praxis.db"
+            )
+        packets.extend(friction_packets)
+
+    return packets
+
+
 def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
     if isinstance(plan, Plan):
         return plan
@@ -1001,111 +1389,57 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
         raise ValueError(
             f"plan must be a Plan or dict, got {type(plan).__name__}"
         )
+
     explicit_packets_raw = plan.get("packets") or []
+    source_refs_raw = plan.get("source_refs") or None
     from_bugs_raw = plan.get("from_bugs") or None
     from_roadmap_items_raw = plan.get("from_roadmap_items") or None
     from_ideas_raw = plan.get("from_ideas") or None
     from_friction_raw = plan.get("from_friction") or None
-    has_from_source = bool(
-        from_bugs_raw
-        or from_roadmap_items_raw
-        or from_ideas_raw
-        or from_friction_raw
-    )
 
-    if explicit_packets_raw and has_from_source:
+    # Merge legacy from_* aliases into the canonical source_refs list.
+    merged_source_refs: list[str] = []
+    for raw, field_name in (
+        (source_refs_raw, "source_refs"),
+        (from_bugs_raw, "from_bugs"),
+        (from_roadmap_items_raw, "from_roadmap_items"),
+        (from_ideas_raw, "from_ideas"),
+        (from_friction_raw, "from_friction"),
+    ):
+        if raw is None:
+            continue
+        if not isinstance(raw, list) or not all(
+            isinstance(item, str) for item in raw
+        ):
+            raise ValueError(
+                f"plan.{field_name} must be a list of ref ID strings"
+            )
+        merged_source_refs.extend(raw)
+
+    has_source_refs = bool(merged_source_refs)
+
+    if explicit_packets_raw and has_source_refs:
         raise ValueError(
-            "plan accepts either explicit 'packets' OR 'from_*' shortcuts, "
-            "not both — remove one to resolve the ambiguity"
+            "plan accepts either explicit 'packets' OR source_refs (including "
+            "legacy from_* aliases), not both — remove one to resolve the "
+            "ambiguity"
         )
 
     plan_name = str(plan.get("name") or "launch_plan").strip() or "launch_plan"
-    from_bugs: list[str] | None = None
-    from_roadmap_items: list[str] | None = None
-    from_ideas: list[str] | None = None
-    from_friction: list[str] | None = None
     packets: list[PlanPacket] = []
 
-    if has_from_source:
+    if has_source_refs:
         if conn is None:
             raise ValueError(
-                "plan from_* shortcuts require a live Postgres conn to "
-                "materialize packets; pass conn=... to compile_plan / "
-                "propose_plan / launch_plan"
+                "plan source_refs (or legacy from_* aliases) require a live "
+                "Postgres conn to materialize packets; pass conn=... to "
+                "compile_plan / propose_plan / launch_plan"
             )
-
-    if from_bugs_raw:
-        if not isinstance(from_bugs_raw, list) or not all(
-            isinstance(item, str) for item in from_bugs_raw
-        ):
-            raise ValueError("plan.from_bugs must be a list of bug ID strings")
-        from_bugs = list(from_bugs_raw)
         program_id = str(plan.get("program_id") or f"plan.{plan_name}").strip()
-        bug_packets = _plan_packets_from_bugs(
-            from_bugs, conn=conn, program_id=program_id
+        packets = _plan_packets_from_source_refs(
+            merged_source_refs, conn=conn, program_id=program_id
         )
-        if not bug_packets:
-            raise ValueError(
-                f"from_bugs supplied {len(from_bugs)} bug ID(s) but no packets "
-                "could be materialized — check bug IDs exist in Praxis.db"
-            )
-        packets.extend(bug_packets)
-
-    if from_roadmap_items_raw:
-        if not isinstance(from_roadmap_items_raw, list) or not all(
-            isinstance(item, str) for item in from_roadmap_items_raw
-        ):
-            raise ValueError(
-                "plan.from_roadmap_items must be a list of roadmap_item ID strings"
-            )
-        from_roadmap_items = list(from_roadmap_items_raw)
-        roadmap_packets = _plan_packets_from_roadmap_items(
-            from_roadmap_items, conn=conn
-        )
-        if not roadmap_packets:
-            raise ValueError(
-                f"from_roadmap_items supplied {len(from_roadmap_items)} ID(s) "
-                "but no packets could be materialized — check IDs exist in "
-                "Praxis.db and are not already completed"
-            )
-        packets.extend(roadmap_packets)
-
-    if from_ideas_raw:
-        if not isinstance(from_ideas_raw, list) or not all(
-            isinstance(item, str) for item in from_ideas_raw
-        ):
-            raise ValueError(
-                "plan.from_ideas must be a list of operator_idea ID strings"
-            )
-        from_ideas = list(from_ideas_raw)
-        idea_packets = _plan_packets_from_ideas(from_ideas, conn=conn)
-        if not idea_packets:
-            raise ValueError(
-                f"from_ideas supplied {len(from_ideas)} ID(s) but no packets "
-                "could be materialized — check IDs exist in Praxis.db and "
-                "are still open (promoted/rejected/superseded/archived skipped)"
-            )
-        packets.extend(idea_packets)
-
-    if from_friction_raw:
-        if not isinstance(from_friction_raw, list) or not all(
-            isinstance(item, str) for item in from_friction_raw
-        ):
-            raise ValueError(
-                "plan.from_friction must be a list of friction_event ID strings"
-            )
-        from_friction = list(from_friction_raw)
-        friction_packets = _plan_packets_from_friction(
-            from_friction, conn=conn
-        )
-        if not friction_packets:
-            raise ValueError(
-                f"from_friction supplied {len(from_friction)} ID(s) but no "
-                "packets could be materialized — check IDs exist in Praxis.db"
-            )
-        packets.extend(friction_packets)
-
-    if not has_from_source:
+    else:
         packets = [_coerce_packet(p) for p in explicit_packets_raw]
 
     return Plan(
@@ -1115,10 +1449,11 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
         why=plan.get("why"),
         phase=str(plan.get("phase") or "build"),
         workdir=plan.get("workdir"),
-        from_bugs=from_bugs,
-        from_roadmap_items=from_roadmap_items,
-        from_ideas=from_ideas,
-        from_friction=from_friction,
+        source_refs=list(merged_source_refs) if has_source_refs else None,
+        from_bugs=list(from_bugs_raw) if from_bugs_raw else None,
+        from_roadmap_items=list(from_roadmap_items_raw) if from_roadmap_items_raw else None,
+        from_ideas=list(from_ideas_raw) if from_ideas_raw else None,
+        from_friction=list(from_friction_raw) if from_friction_raw else None,
     )
 
 
@@ -1234,6 +1569,85 @@ class CompilePlanError(ValueError):
         super().__init__("\n".join(lines))
 
 
+class UnresolvedWriteScopeError(ValueError):
+    """Raised when one or more packets have empty write scope at compile.
+
+    Per architecture-policy::platform-architecture::fail-closed-at-compile-
+    no-silent-defaults, explicit packets without a ``write`` list cannot
+    silently pass through to dispatch as workspace-wide ``["."]``. Source-
+    authority-resolved packets (bugs, roadmap, ideas, friction) get their
+    write scope populated by the resolver from authority metadata — if you
+    supplied description-only prose without a source_ref and without
+    write, the compiler cannot infer the file set and names the gap
+    explicitly.
+
+    Phase 1.5 converts this into a typed_gap row with
+    ``missing_type='write_scope'`` and
+    ``legal_repair_actions=['supply_write', 'add_source_ref', 'run_scope_resolver']``.
+    The ``unresolved_writes`` attribute is a list of
+    ``{index, label, description_preview}`` dicts so callers can construct
+    the repair packet themselves.
+    """
+
+    def __init__(self, unresolved_writes: list[dict[str, Any]]) -> None:
+        self.unresolved_writes = list(unresolved_writes)
+        lines = [
+            f"{len(unresolved_writes)} packet(s) have empty write scope "
+            f"(no file list declared and no source authority to infer from):"
+        ]
+        for entry in unresolved_writes:
+            lines.append(
+                f"  - packet[{entry['index']}] label={entry['label']!r} "
+                f"description={entry['description_preview']!r}"
+            )
+        lines.append(
+            "Repair paths: (1) add explicit write=[...] to the packet, "
+            "(2) supply source_refs=['BUG-X' | 'roadmap_item.Y' | ...] "
+            "so the resolver derives write from authority, (3) call the "
+            "scope_resolver before launching. (typed_gap conversion queued "
+            "in Phase 1.5.)"
+        )
+        super().__init__("\n".join(lines))
+
+
+class UnresolvedStageError(ValueError):
+    """Raised when one or more packet stages have no admitted template.
+
+    Per architecture-policy::platform-architecture::fail-closed-at-compile-
+    no-silent-defaults, an unknown packet.stage cannot pass through to
+    ``_packet_to_job`` with a fake ``auto/{stage}`` route string that later
+    fails at ``_generate_prompt`` as a raw ``KeyError``. This error surfaces
+    the problem atomically at compile — all unresolved stages collected
+    before raise, so the caller fixes the full set in one pass.
+
+    Phase 1.5 converts this into a typed_gap row with
+    ``missing_type='stage_template'`` and
+    ``legal_repair_actions=['add_stage_template', 'use_known_stage']``; for
+    now the structured exception carries ``unresolved_stages`` as a list of
+    ``{index, label, stage}`` dicts so callers can construct the repair
+    packet themselves.
+    """
+
+    def __init__(self, unresolved_stages: list[dict[str, Any]]) -> None:
+        self.unresolved_stages = list(unresolved_stages)
+        known = sorted(_STAGE_TEMPLATES.keys())
+        lines = [
+            f"{len(unresolved_stages)} packet(s) have unresolved stages "
+            f"(no template admitted in _STAGE_TEMPLATES):"
+        ]
+        for entry in unresolved_stages:
+            lines.append(
+                f"  - packet[{entry['index']}] label={entry['label']!r} "
+                f"stage={entry['stage']!r}"
+            )
+        lines.append(
+            f"Known stages: {', '.join(known)}. Add a template for a new "
+            "stage, or use a known one. (typed_gap conversion queued in "
+            "Phase 1.5 per fail-closed-at-compile-no-silent-defaults.)"
+        )
+        super().__init__("\n".join(lines))
+
+
 def _deterministic_workflow_id(plan_obj: Plan) -> str:
     """Hash the plan's stable content so the same plan compiles to the same
     workflow_id. Explicit plan.workflow_id still wins — this only runs when
@@ -1292,6 +1706,8 @@ def compile_plan(
     jobs: list[dict[str, Any]] = []
     used_labels: set[str] = set()
     failures: list[dict[str, Any]] = []
+    unresolved_stages: list[dict[str, Any]] = []
+    unresolved_writes: list[dict[str, Any]] = []
 
     for index, packet in enumerate(plan_obj.packets):
         packet_label = (
@@ -1300,6 +1716,32 @@ def compile_plan(
             or (packet.bug_refs[0] if packet.bug_refs else None)
             or f"packet_{index}"
         )
+        # Pre-validate write scope per architecture-policy::platform-
+        # architecture::fail-closed-at-compile-no-silent-defaults. An empty
+        # write list means the packet has no declared output target AND no
+        # source-authority resolver populated one; silently defaulting to
+        # workspace-root would break the fail-closed contract.
+        if not packet.write:
+            unresolved_writes.append(
+                {
+                    "index": index,
+                    "label": packet_label,
+                    "description_preview": (packet.description or "")[:80],
+                }
+            )
+            continue
+        # Pre-validate stage admission. An unknown stage would otherwise
+        # pass through to ``_packet_to_job`` as a fake ``auto/{stage}``
+        # agent and raise a raw ``KeyError`` inside ``_generate_prompt``.
+        if packet.stage not in _STAGE_TEMPLATES:
+            unresolved_stages.append(
+                {
+                    "index": index,
+                    "label": packet_label,
+                    "stage": packet.stage,
+                }
+            )
+            continue
         intent_dict: dict[str, Any] = {
             "description": packet.description,
             "write": list(packet.write),
@@ -1325,6 +1767,11 @@ def compile_plan(
 
         warnings_all.extend(f"{packet_label}: {w}" for w in warnings)
         job = _packet_to_job(packet, compiled=compiled, workdir=resolved_workdir, index=index)
+        # Bind data pills per architecture-policy::platform-architecture::
+        # data-pill-primitive-family — compile-time extraction of
+        # object.field refs from prose so the packet_map surfaces
+        # bound / ambiguous / unbound pills alongside capabilities + gates.
+        job["data_pills"] = _bind_packet_data_pills(packet.description, conn=conn)
         base_label = job["label"]
         label = base_label
         suffix = 1
@@ -1336,6 +1783,15 @@ def compile_plan(
         used_labels.add(label)
         jobs.append(job)
 
+    # Priority order: write scope is most fundamental (packet has no output
+    # target at all); stage is the next gate (vocabulary match); other
+    # compile failures follow. Fixing them in this order minimizes retry
+    # cycles — each raise surfaces the earliest blocker atomically across
+    # all packets.
+    if unresolved_writes:
+        raise UnresolvedWriteScopeError(unresolved_writes)
+    if unresolved_stages:
+        raise UnresolvedStageError(unresolved_stages)
     if failures:
         raise CompilePlanError(failures)
 
@@ -1430,39 +1886,26 @@ def propose_plan(
     binding_ambiguous: list[dict[str, Any]] = []
     binding_error: str | None = None
 
-    # Best-effort: if the data-dictionary authority is degraded, skip binding
-    # rather than block the propose step. The whole point of the two-phase
-    # flow is visibility — a degraded dictionary shouldn't hide the preview.
-    try:
-        from runtime.intent_binding import bind_data_pills as _bind_data_pills
-    except Exception as exc:
-        binding_error = f"intent_binding unavailable: {type(exc).__name__}: {exc}"
-        _bind_data_pills = None  # type: ignore[assignment]
-
     packet_declarations: list[dict[str, Any]] = []
     for packet, job in zip(plan_obj.packets, spec_dict["jobs"]):
-        data_pills: dict[str, Any] = {
-            "bound": [],
-            "ambiguous": [],
-            "unbound": [],
-            "warnings": [],
-        }
-        if _bind_data_pills is not None and packet.description.strip():
-            try:
-                bound_intent = _bind_data_pills(packet.description, conn=conn)
-                data_pills = bound_intent.to_dict()
-                data_pills.pop("intent", None)
-                binding_totals["bound"] += len(data_pills.get("bound") or [])
-                binding_totals["ambiguous"] += len(data_pills.get("ambiguous") or [])
-                binding_totals["unbound"] += len(data_pills.get("unbound") or [])
-                for entry in data_pills.get("unbound") or []:
-                    binding_unbound.append({"label": job["label"], **entry})
-                for entry in data_pills.get("ambiguous") or []:
-                    binding_ambiguous.append({"label": job["label"], **entry})
-            except Exception as exc:
-                data_pills["warnings"].append(
-                    f"bind_data_pills failed: {type(exc).__name__}: {exc}"
-                )
+        # compile_plan already bound data pills via _bind_packet_data_pills
+        # and attached them to the job dict; reuse rather than re-binding
+        # (DRY per data-pill-primitive-family policy — one helper, one
+        # source of truth for binding results).
+        data_pills = dict(
+            job.get("data_pills")
+            or {"bound": [], "ambiguous": [], "unbound": [], "warnings": []}
+        )
+        binding_totals["bound"] += len(data_pills.get("bound") or [])
+        binding_totals["ambiguous"] += len(data_pills.get("ambiguous") or [])
+        binding_totals["unbound"] += len(data_pills.get("unbound") or [])
+        for entry in data_pills.get("unbound") or []:
+            binding_unbound.append({"label": job["label"], **entry})
+        for entry in data_pills.get("ambiguous") or []:
+            binding_ambiguous.append({"label": job["label"], **entry})
+        for warn in data_pills.get("warnings") or []:
+            if binding_error is None and str(warn).startswith("intent_binding unavailable"):
+                binding_error = str(warn)
         # Add resolved bound pills to the job's prompt so the agent sees the
         # typed fields it's expected to work with, not just the free-prose
         # description. Non-destructive — appends after the Context block
@@ -1509,9 +1952,12 @@ def propose_plan(
 
     # Source-authority-derived packets default write=["."] (workspace root).
     # Warn so the caller can narrow before launch if they have a tighter
-    # scope in mind.
+    # scope in mind. ``source_refs`` is canonical; legacy ``from_*`` fields
+    # are checked for belt-and-suspenders backwards compat when a Plan is
+    # constructed directly (not via _coerce_plan).
     if (
-        plan_obj.from_bugs
+        plan_obj.source_refs
+        or plan_obj.from_bugs
         or plan_obj.from_roadmap_items
         or plan_obj.from_ideas
         or plan_obj.from_friction
@@ -1729,21 +2175,30 @@ def launch_proposed(
     )
 
     packet_map: list[dict[str, Any]] = [
-        {
-            "label": job.get("label"),
-            "bug_ref": job.get("bug_ref"),
-            "agent": job.get("agent"),
-            "stage": job.get("task_type"),
-        }
-        for job in proposed.spec_dict["jobs"]
+        _build_packet_map_entry(job=job) for job in proposed.spec_dict["jobs"]
     ]
+    run_id = str(submit_result.get("run_id") or "")
+    warnings = list(proposed.warnings)
+    event_error = _emit_plan_launched_event(
+        conn,
+        run_id=run_id,
+        workflow_id=proposed.workflow_id,
+        spec_name=proposed.spec_name,
+        total_jobs=int(submit_result.get("total_jobs") or proposed.total_jobs),
+        packet_labels=[
+            str(job.get("label") or "") for job in proposed.spec_dict["jobs"]
+        ],
+        source_refs=None,  # launch_proposed doesn't retain the original plan_obj
+    )
+    if event_error:
+        warnings.append(event_error)
     return LaunchReceipt(
-        run_id=str(submit_result.get("run_id") or ""),
+        run_id=run_id,
         spec_name=proposed.spec_name,
         workflow_id=proposed.workflow_id,
         total_jobs=int(submit_result.get("total_jobs") or proposed.total_jobs),
         packet_map=packet_map,
-        warnings=proposed.warnings,
+        warnings=warnings,
     )
 
 
@@ -1793,17 +2248,23 @@ def launch_plan(
     )
 
     packet_map: list[dict[str, Any]] = [
-        {
-            "label": job["label"],
-            "bug_ref": packet.bug_ref,
-            "bug_refs": list(packet.bug_refs) if packet.bug_refs else None,
-            "agent": job["agent"],
-            "stage": packet.stage,
-        }
+        _build_packet_map_entry(packet=packet, job=job)
         for packet, job in zip(plan_obj.packets, spec_dict["jobs"])
     ]
+    run_id = str(submit_result.get("run_id") or "")
+    event_error = _emit_plan_launched_event(
+        conn,
+        run_id=run_id,
+        workflow_id=str(spec_dict["workflow_id"]),
+        spec_name=plan_obj.name,
+        total_jobs=int(submit_result.get("total_jobs") or len(spec_dict["jobs"])),
+        packet_labels=[str(job.get("label") or "") for job in spec_dict["jobs"]],
+        source_refs=list(plan_obj.source_refs or []),
+    )
+    if event_error:
+        warnings_all = [*warnings_all, event_error]
     return LaunchReceipt(
-        run_id=str(submit_result.get("run_id") or ""),
+        run_id=run_id,
         spec_name=plan_obj.name,
         workflow_id=str(spec_dict["workflow_id"]),
         total_jobs=int(submit_result.get("total_jobs") or len(spec_dict["jobs"])),
