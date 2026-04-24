@@ -52,7 +52,11 @@
     .agents-bar .chip { white-space: nowrap; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--fg-dim); background: var(--bg-raised); cursor: pointer; }
     .agents-bar .chip.active { color: var(--accent); border-color: var(--accent); }
     .agents-bar .chip.new { color: var(--accent); }
-    .status-strip { padding: 4px 12px; font-size: 11px; color: var(--fg-dim); border-bottom: 1px solid var(--border); background: var(--bg); }
+    .status-strip { padding: 4px 12px; font-size: 11px; color: var(--fg-dim); border-bottom: 1px solid var(--border); background: var(--bg); display: flex; align-items: center; gap: 6px; }
+    .status-strip.live { color: var(--accent); }
+    .status-strip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-dim); flex: 0 0 auto; }
+    .status-strip.live .dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
     @media (min-width: 720px) {
       .bubble { max-width: 72ch; }
       .composer { padding: 14px 16px; }
@@ -131,6 +135,49 @@
     async function sendMessage(token, id, body)       { return api(token, 'POST', `/api/agent-sessions/agents/${id}/messages`, body); }
     async function getMessages(token, id)             { return api(token, 'GET',  `/api/agent-sessions/agents/${id}/messages`); }
 
+    // Stream turn events via fetch-based SSE.
+    //
+    // Browser EventSource can't carry Authorization headers, so the stream
+    // opens as a plain fetch with text/event-stream response; we parse the
+    // `data: ...\n\n` framing ourselves. onEvent is called for every parsed
+    // JSON event payload. The signal aborts the underlying fetch.
+    async function streamTurnEvents(token, id, onEvent, signal) {
+      const res = await fetch(`/api/agent-sessions/agents/${id}/stream`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'text/event-stream' },
+        signal,
+      });
+      if (!res.ok || !res.body) {
+        const err = new Error(`stream failed: HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let sep;
+          while ((sep = buffer.indexOf('\n\n')) >= 0) {
+            const frame = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+            const lines = frame.split('\n');
+            const dataLines = lines
+              .filter((l) => l.startsWith('data:'))
+              .map((l) => l.slice(5).replace(/^\s/, ''));
+            if (!dataLines.length) continue;
+            const raw = dataLines.join('\n');
+            try { onEvent(JSON.parse(raw)); }
+            catch { /* ignore malformed frame */ }
+          }
+        }
+      } finally {
+        try { reader.releaseLock(); } catch { /* ignore */ }
+      }
+    }
+
     // --- Components --------------------------------------------------------
 
     function TokenGate({ onReady }) {
@@ -144,7 +191,7 @@
       return html`
         <div class="gate-screen">
           <h1>Praxis Operator Console</h1>
-          <p>Paste your PRAXIS_API_TOKEN. Stored locally; never sent anywhere but the API.</p>
+          <p>Watch and steer your agents from the road. Paste your PRAXIS_API_TOKEN — stored locally, sent only to the API.</p>
           <input type="password" value=${value} onInput=${(e) => setValue(e.target.value)} placeholder="PRAXIS_API_TOKEN" autofocus />
           <button class="primary" onClick=${submit}>Unlock</button>
         </div>
@@ -198,6 +245,7 @@
       const [bubbles, setBubbles]       = useState([]);
       const [draft, setDraft]           = useState('');
       const [busy, setBusy]             = useState(false);
+      const [streaming, setStreaming]   = useState(false);
       const [status, setStatus]         = useState('');
       const bottomRef = useRef(null);
 
@@ -263,27 +311,62 @@
         if (!prompt || busy) return;
         if (!activeId) { await newAgent(); if (!activeId) return; }
         setBusy(true);
-        setStatus('sending…');
+        setStreaming(true);
+        setStatus('steering…');
         setBubbles((prev) => [...prev, { role: 'user', text: prompt, permission_mode: turnMode }]);
         setTimeout(scrollToBottom, 0);
+
+        // Stream-first: open the event stream BEFORE firing POST so we see
+        // the agent's work as it happens, not in a lump at the end.
+        const streamCtrl = new AbortController();
+        let streamedAny = false;
+
+        const streamPromise = streamTurnEvents(token, activeId, (ev) => {
+          const bubbles = turnEventBubbles([ev], turnMode);
+          if (bubbles.length) {
+            streamedAny = true;
+            setBubbles((prev) => [...prev, ...bubbles]);
+            setTimeout(scrollToBottom, 0);
+          }
+          setStatus('agent is working…');
+        }, streamCtrl.signal).catch((err) => {
+          if (err && err.name !== 'AbortError') {
+            console.warn('[console] stream error:', err.message);
+          }
+        });
+
+        let postResult = null;
+        let postError = null;
         try {
-          const res = await sendMessage(token, activeId, { prompt, permission_mode: turnMode });
-          const replies = turnEventBubbles(res.turn_events, turnMode);
-          if (!replies.length && res.reply) replies.push({ role: 'assistant', text: res.reply, permission_mode: turnMode });
-          setBubbles((prev) => [...prev, ...replies]);
-          setStatus('');
+          postResult = await sendMessage(token, activeId, { prompt, permission_mode: turnMode });
         } catch (err) {
+          postError = err;
+        } finally {
+          streamCtrl.abort();
+          try { await streamPromise; } catch { /* already handled */ }
+          setStreaming(false);
+        }
+
+        if (postError) {
           setBubbles((prev) => [...prev, {
             role: 'error',
-            text: err.message,
-            meta: (err.detail && err.detail.error_code) || 'error',
+            text: postError.message,
+            meta: (postError.detail && postError.detail.error_code) || 'error',
             permission_mode: turnMode,
           }]);
-          setStatus('');
-        } finally {
-          setBusy(false);
-          setTimeout(scrollToBottom, 0);
+        } else if (!streamedAny && postResult) {
+          // Stream delivered nothing (maybe it never connected). Fall back
+          // to the POST response's turn_events so the user still sees the reply.
+          const replies = turnEventBubbles(postResult.turn_events, turnMode);
+          if (!replies.length && postResult.reply) {
+            replies.push({ role: 'assistant', text: postResult.reply, permission_mode: turnMode });
+          }
+          setBubbles((prev) => [...prev, ...replies]);
         }
+
+        setStatus('');
+        setBusy(false);
+        setTimeout(scrollToBottom, 0);
       }, [activeId, busy, token, scrollToBottom]);
 
       const send = async () => {
@@ -336,13 +419,15 @@
           })}
           <div class="chip new" onClick=${newAgent}>+ new</div>
         </div>
-        <div class="status-strip">
-          ${activeAgent ? `${activeAgent.agent_slug || activeAgent.provider || ''} · ${activeAgent.status || ''}` : 'no agent selected'}
-          ${status ? ` · ${status}` : ''}
+        <div class=${`status-strip${streaming ? ' live' : ''}`}>
+          <span class="dot"></span>
+          ${activeAgent ? `${activeAgent.agent_slug || activeAgent.provider || ''} · ${activeAgent.status || ''}` : 'no agent'}
+          ${status ? html`<span>· ${status}</span>` : null}
+          ${streaming ? html`<span>· watching</span>` : null}
         </div>
         <div class="turns" ref=${bottomRef}>
           ${bubbles.length === 0
-            ? html`<${Bubble} role="system">${activeId ? 'Type a prompt below. Cmd/Ctrl+Enter to send.' : 'Pick or create an agent.'}<//>`
+            ? html`<${Bubble} role="system">${activeId ? 'Agent idle. Prompt it to wake it up. Cmd/Ctrl+Enter sends.' : 'Pick an agent to watch, or start a new one.'}<//>`
             : bubbles.map((b, i) => {
                 // A bubble is a plan when the turn that produced it ran in a
                 // plan-producing mode (plan_only / read_only). For assistant
@@ -375,7 +460,7 @@
             value=${draft}
             onInput=${(e) => setDraft(e.target.value)}
             onKeyDown=${onKeyDown}
-            placeholder=${activeId ? "Message the agent. Cmd/Ctrl+Enter sends." : "Describe what to build. A new agent will be created on send."}
+            placeholder=${activeId ? "Steer the agent. Cmd/Ctrl+Enter sends." : "What should the agent start working on? A new agent will be created on send."}
             disabled=${busy}
           />
           <div class="composer-actions">

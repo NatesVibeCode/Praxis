@@ -505,3 +505,54 @@ def test_console_html_renders_plan_approval_ui(monkeypatch: pytest.MonkeyPatch) 
     # Canned prompts must be present so the UX is deterministic.
     assert "CANNED_APPROVE_PROMPT" in body
     assert "CANNED_REJECT_PROMPT" in body
+
+
+# --- Console HTML live-streaming markers (B.6) -----------------------------
+
+
+def test_console_html_streams_turn_events_live(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+    from surfaces.api import rest
+
+    monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
+    with TestClient(rest.app) as client:
+        response = client.get("/console")
+    body = response.text
+
+    # Fetch-based SSE reader function must be present.
+    assert "async function streamTurnEvents" in body
+    # It must target the agent_sessions stream endpoint.
+    assert "/api/agent-sessions/agents/${id}/stream" in body
+    # It must parse SSE `data:` frames (not use EventSource).
+    assert "text/event-stream" in body
+    assert "getReader()" in body
+    # The client must carry the bearer token on the stream (browser
+    # EventSource can't, which is why we use fetch).
+    assert "'Authorization': `Bearer ${token}`" in body
+    # Stream must be abortable so the client can stop it when a turn ends.
+    assert "AbortController" in body
+    # Live-streaming indicator CSS + React state must ship together.
+    assert "setStreaming" in body
+    assert ".status-strip.live" in body
+    assert "@keyframes pulse" in body
+
+
+def test_console_html_language_reflects_watching_and_steering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi.testclient import TestClient
+    from surfaces.api import rest
+
+    monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
+    with TestClient(rest.app) as client:
+        response = client.get("/console")
+    body = response.text
+
+    # The console is for watching + steering agents, not for chatting with an assistant.
+    assert "Watch and steer" in body
+    assert "Steer the agent" in body
+    assert "Agent idle" in body
+    assert "Pick an agent to watch" in body
+    # The old builder-shaped copy must not ship anymore.
+    assert "Message the agent" not in body
+    assert "Type a prompt below. Cmd/Ctrl+Enter to send." not in body
