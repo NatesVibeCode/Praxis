@@ -170,12 +170,22 @@ def _score_template(pg: Any, template: dict[str, Any], pill_refs: list[str]) -> 
     }
 
 
-def _compile_bundle(template: dict[str, Any], bound_slots: list[dict[str, Any]]) -> dict[str, Any]:
+def _compile_bundle(
+    template: dict[str, Any],
+    bound_slots: list[dict[str, Any]],
+    *,
+    intent_ref: str | None = None,
+    pill_refs: list[str] | None = None,
+) -> dict[str, Any]:
     """Compile a PraxisSurfaceBundleV4 from a template + bound slots.
 
     The template's ``render_hint`` metadata names which module renders each
-    slot. For the first wedge we default to the markdown module and show
-    each pill's ref + its has_field edges as the rendered content.
+    slot. For the first wedge we default to the markdown module for data
+    slots and emit an Approve/Reject button-row on the action_rail cells
+    when the template declares ``render_hint.action_rail_module='button-row'``.
+    Action-rail buttons POST through /api/surface/action carrying the
+    typed context (action_ref, intent_ref, template_ref, pill_refs) so
+    the click lands as an authority_operation_receipts row.
     """
     render_hint = template["metadata"].get("render_hint", {}) or {}
     slot_order = template["metadata"].get("slot_order") or [bs["slot_name"] for bs in bound_slots]
@@ -195,6 +205,24 @@ def _compile_bundle(template: dict[str, Any], bound_slots: list[dict[str, Any]])
             "module": module_id,
             "span": span,
             "config": _render_config_for_slot(bs, module_id),
+        }
+
+    # Synthesize action_rail quadrant when the template declares an action-rail
+    # module. This slot is not backed by a ``consumes`` edge (it consumes an
+    # operation, not a pill type) so the scorer skips it — the compiler
+    # materializes the button-row here from render_hint + typed context.
+    action_rail_module = render_hint.get("action_rail_module")
+    if "action_rail" in slot_order and action_rail_module:
+        anchor = slot_to_anchor.get("action_rail", "C1")
+        span = slot_to_span.get("action_rail", "4x1")
+        quadrants[anchor] = {
+            "module": action_rail_module,
+            "span": span,
+            "config": _render_config_for_action_rail(
+                template_ref=template["template_ref"],
+                intent_ref=intent_ref,
+                pill_refs=pill_refs or [],
+            ),
         }
 
     manifest = {
@@ -240,14 +268,46 @@ def _render_config_for_slot(bound_slot: dict[str, Any], module_id: str) -> dict[
                 "wedge-1 placeholder proving binding + shape compilation."
             ),
         }
-    if module_id == "button-row":
-        return {
-            "buttons": [
-                {"label": "Approve", "intent": "invoice_approval.approve"},
-                {"label": "Reject", "intent": "invoice_approval.reject"},
-            ],
-        }
     return {}
+
+
+def _render_config_for_action_rail(
+    *,
+    template_ref: str,
+    intent_ref: str | None,
+    pill_refs: list[str],
+) -> dict[str, Any]:
+    """Compile a ButtonRowModule config that POSTs typed context to the
+    surface action endpoint. Matches ButtonRowModule's ActionConfig shape:
+    label, variant, endpoint, body.
+    """
+    context = {
+        "intent_ref": intent_ref,
+        "template_ref": template_ref,
+        "pill_refs": pill_refs,
+    }
+    # Derive a domain action prefix from the intent when available so the
+    # receipt's action_ref remains typed (e.g. "intent.invoice_approval"
+    # becomes "invoice_approval.approve").
+    domain = (intent_ref or "intent.surface").split(".", 1)[-1] if intent_ref else "surface"
+    approve_ref = f"{domain}.approve"
+    reject_ref = f"{domain}.reject"
+    return {
+        "actions": [
+            {
+                "label": "Approve",
+                "variant": "primary",
+                "endpoint": "/api/surface/action",
+                "body": {**context, "action_ref": approve_ref, "caller_ref": "surface.compose.button_row"},
+            },
+            {
+                "label": "Reject",
+                "variant": "danger",
+                "endpoint": "/api/surface/action",
+                "body": {**context, "action_ref": reject_ref, "caller_ref": "surface.compose.button_row"},
+            },
+        ],
+    }
 
 
 def _typed_gap_for_no_match(intent_ref: str, pill_refs: list[str], candidates: list[str]) -> dict[str, Any]:
@@ -378,5 +438,10 @@ def legal_templates_reducer(
 
     winner = legal_scored[0]
     result["winner"] = winner["template_ref"]
-    result["compiled_bundle"] = _compile_bundle(winner["template"], winner["bound_slots"])
+    result["compiled_bundle"] = _compile_bundle(
+        winner["template"],
+        winner["bound_slots"],
+        intent_ref=intent_ref,
+        pill_refs=pill_refs,
+    )
     return result

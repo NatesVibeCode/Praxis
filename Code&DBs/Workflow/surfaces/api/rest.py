@@ -3279,6 +3279,10 @@ async def platform_overview_get(request: Request) -> Response:
 async def projection_get(request: Request, projection_ref: str) -> Response:
     return await _route_to_handler(request)
 
+@app.post("/api/surface/action")
+async def surface_action_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/workflow-templates")
 async def workflow_templates_get(request: Request) -> Response:
     return await _route_to_handler(request)

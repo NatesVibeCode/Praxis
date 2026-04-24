@@ -6,6 +6,7 @@ interface ActionConfig {
   label: string;
   variant?: 'primary' | 'danger' | 'default';
   endpoint?: string;
+  body?: Record<string, unknown>;
   worldWrite?: { path: string; value: any };
   createObject?: { typeId: string; defaults?: Record<string, unknown> };
 }
@@ -53,7 +54,15 @@ export const ButtonRowModule: React.FC<QuadrantProps> = ({ config: rawConfig }) 
     if (action.endpoint) {
       setLoadingAction(index);
       try {
-        await fetch(action.endpoint, { method: 'POST' });
+        const init: RequestInit = { method: 'POST' };
+        if (action.body !== undefined) {
+          init.headers = { 'Content-Type': 'application/json' };
+          init.body = JSON.stringify(action.body);
+        }
+        const res = await fetch(action.endpoint, init);
+        if (!res.ok) {
+          console.error(`Action POST ${action.endpoint} failed: ${res.status} ${res.statusText}`);
+        }
       } catch (err) {
         console.error('Action error:', err);
       } finally {
