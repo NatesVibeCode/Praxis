@@ -889,6 +889,32 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
+    "praxis_project_plan_budget": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="project-budget",
+        when_to_use=(
+            "Estimate token budgets for a ProposedPlan before approving. Honest "
+            "projection — prompt tokens are char-based, output tokens are a "
+            "per-stage upper bound, no USD cost."
+        ),
+        when_not_to_use=(
+            "Do not use it to enforce a hard budget cap silently. Projection is "
+            "for the caller to read and decide."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Project budget for a compose-plan output",
+                {
+                    "proposed": {
+                        "spec_dict": {"name": "...", "jobs": []},
+                        "preview": {},
+                    }
+                },
+            )
+        ],
+    ),
     "praxis_compose_plan": _tool(
         surface="workflow",
         tier="stable",

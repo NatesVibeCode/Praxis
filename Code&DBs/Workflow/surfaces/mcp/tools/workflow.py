@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_project_plan_budget."""
 from __future__ import annotations
 
 import json
@@ -1744,6 +1744,55 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     return payload
 
 
+def tool_praxis_project_plan_budget(params: dict) -> dict:
+    """Project token budgets for a ProposedPlan before launch.
+
+    Honest estimate, not an oracle. Prompt tokens are char-based
+    (len / 4, a standard rough approximation). Output tokens default to
+    a conservative per-stage upper bound. No USD cost — real cost depends
+    on the resolved model's price card at run time.
+    """
+    proposed_payload = params.get("proposed")
+    if not isinstance(proposed_payload, dict):
+        return {
+            "ok": False,
+            "error": (
+                "proposed must be a ProposedPlan dict from "
+                "praxis_launch_plan(preview_only=true) or praxis_compose_plan"
+            ),
+            "reason_code": "proposed.invalid",
+        }
+
+    try:
+        from runtime.plan_budget import project_plan_budget
+        from runtime.spec_compiler import ProposedPlan
+
+        proposed = ProposedPlan(
+            spec_dict=dict(proposed_payload.get("spec_dict") or {}),
+            preview=dict(proposed_payload.get("preview") or {}),
+            warnings=list(proposed_payload.get("warnings") or []),
+            workflow_id=str(proposed_payload.get("workflow_id") or ""),
+            spec_name=str(proposed_payload.get("spec_name") or ""),
+            total_jobs=int(proposed_payload.get("total_jobs") or 0),
+            packet_declarations=list(proposed_payload.get("packet_declarations") or []),
+            binding_summary=dict(proposed_payload.get("binding_summary") or {}),
+            unresolved_routes=list(proposed_payload.get("unresolved_routes") or []),
+        )
+        output_tokens_by_label = params.get("output_tokens_by_label")
+        output_tokens_by_stage = params.get("output_tokens_by_stage")
+        projection = project_plan_budget(
+            proposed,
+            output_tokens_by_label=output_tokens_by_label if isinstance(output_tokens_by_label, dict) else None,
+            output_tokens_by_stage=output_tokens_by_stage if isinstance(output_tokens_by_stage, dict) else None,
+        )
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="project_plan_budget")
+
+    payload = projection.to_dict()
+    payload["ok"] = True
+    return payload
+
+
 def tool_praxis_compose_plan(params: dict) -> dict:
     """Chain Layer 2 → Layer 1 → Layer 5 in one call.
 
@@ -2277,6 +2326,50 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         ),
                     },
                 },
+            },
+        },
+    ),
+    "praxis_project_plan_budget": (
+        tool_praxis_project_plan_budget,
+        {
+            "description": (
+                "Estimate prompt + output token budgets for every job in a ProposedPlan. "
+                "Honest: prompt tokens are char-based (len / 4), output tokens are a "
+                "conservative per-stage estimate. No USD cost — real cost depends on the "
+                "resolved model at run time, which is the right place to surface it.\n\n"
+                "USE WHEN: budget is a gating concern and the caller wants to see an "
+                "order-of-magnitude total before approving.\n\n"
+                "DO NOT USE TO: enforce a hard budget cap silently. This is a projection for "
+                "the caller to read and decide; launch still submits unless the caller refuses "
+                "to approve.\n\n"
+                "EXAMPLE: praxis_project_plan_budget(proposed={...ProposedPlan dict...})"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "proposed": {
+                        "type": "object",
+                        "description": (
+                            "ProposedPlan payload from praxis_launch_plan(preview_only=true) "
+                            "or praxis_compose_plan."
+                        ),
+                    },
+                    "output_tokens_by_label": {
+                        "type": "object",
+                        "description": (
+                            "Optional per-packet output-token override keyed by job label. "
+                            "Wins over the stage-based estimate."
+                        ),
+                    },
+                    "output_tokens_by_stage": {
+                        "type": "object",
+                        "description": (
+                            "Optional per-stage output-token override keyed by stage name "
+                            "(build/fix/review/test/research). Merges on top of built-in defaults."
+                        ),
+                    },
+                },
+                "required": ["proposed"],
             },
         },
     ),
