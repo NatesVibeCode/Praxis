@@ -15,8 +15,11 @@ from runtime.spec_compiler import (
     LaunchReceipt,
     Plan,
     PlanPacket,
+    ProposedPlan,
     compile_plan,
     launch_plan,
+    launch_proposed,
+    propose_plan,
 )
 
 
@@ -169,3 +172,111 @@ def test_launch_plan_deduplicates_colliding_labels(monkeypatch) -> None:
     spec_dict, _ = compile_plan(plan, conn=_FakeConn(), workdir="/repo")
     labels = [job["label"] for job in spec_dict["jobs"]]
     assert labels == ["do-it", "do-it__2"]
+
+
+def test_propose_plan_returns_spec_preview_and_declarations_without_submit(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    # Preview stub — replicates the preview_workflow_execution payload shape
+    # we care about without needing a real Postgres connection.
+    def _fake_preview(conn, *, inline_spec, **_kwargs):
+        return {
+            "action": "preview",
+            "jobs": [
+                {
+                    "label": job["label"],
+                    "resolved_agent": "openai/gpt-5.4-mini",
+                    "route_status": "resolved",
+                }
+                for job in inline_spec["jobs"]
+            ],
+            "warnings": [],
+        }
+
+    import runtime.workflow._admission as admission_mod
+
+    monkeypatch.setattr(admission_mod, "preview_workflow_execution", _fake_preview)
+
+    # Submit must NOT be called in preview mode. If it is, the test fails.
+    def _forbid_submit(*_args, **_kwargs):
+        raise AssertionError("submit_workflow_command should not run in preview")
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
+
+    plan = {
+        "name": "preview_wave",
+        "packets": [
+            {
+                "description": "fix bug evidence authority",
+                "write": ["Code&DBs/Workflow/runtime/bugs.py"],
+                "stage": "build",
+                "label": "bug-authority",
+                "bug_ref": "BUG-175EB9F3",
+            }
+        ],
+    }
+
+    proposed = propose_plan(plan, conn=_FakeConn(), workdir="/repo")
+
+    assert isinstance(proposed, ProposedPlan)
+    assert proposed.spec_name == "preview_wave"
+    assert proposed.total_jobs == 1
+    assert proposed.spec_dict["jobs"][0]["label"] == "bug-authority"
+    assert proposed.preview["jobs"][0]["resolved_agent"] == "openai/gpt-5.4-mini"
+
+    # packet_declarations expose what the caller declared so Moon / CLI
+    # can render declared-vs-derived side by side.
+    declaration = proposed.packet_declarations[0]
+    assert declaration["label"] == "bug-authority"
+    assert declaration["declared_description"] == "fix bug evidence authority"
+    assert declaration["declared_write"] == ["Code&DBs/Workflow/runtime/bugs.py"]
+    assert declaration["declared_stage"] == "build"
+    assert declaration["declared_bug_ref"] == "BUG-175EB9F3"
+
+
+def test_launch_proposed_submits_previously_built_spec(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    def _fake_preview(conn, *, inline_spec, **_kwargs):
+        return {"action": "preview", "jobs": [], "warnings": []}
+
+    import runtime.workflow._admission as admission_mod
+
+    monkeypatch.setattr(admission_mod, "preview_workflow_execution", _fake_preview)
+
+    proposed = propose_plan(
+        {
+            "name": "two_phase",
+            "packets": [
+                {"description": "do a thing", "write": ["x.py"], "stage": "build", "label": "thing-1"},
+            ],
+        },
+        conn=_FakeConn(),
+        workdir="/repo",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_submit_command(conn, **kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "run_id": "workflow_def456",
+            "status": "queued",
+            "total_jobs": kwargs["total_jobs"],
+            "spec_name": kwargs["spec_name"],
+        }
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _fake_submit_command)
+
+    receipt = launch_proposed(proposed, conn=_FakeConn())
+
+    assert isinstance(receipt, LaunchReceipt)
+    assert receipt.run_id == "workflow_def456"
+    assert receipt.spec_name == "two_phase"
+    assert receipt.total_jobs == 1
+    assert captured["kwargs"]["dispatch_reason"] == "launch_proposed:two_phase"
+    assert captured["kwargs"]["inline_spec"] is proposed.spec_dict

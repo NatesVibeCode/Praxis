@@ -72,7 +72,15 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         examples=[
             _example("List open P1 bugs", {"action": "list", "status": "OPEN", "severity": "P1"}),
             _example("Search open routing bugs", {"action": "search", "title": "routing", "status": "OPEN"}),
-            _example("File a new bug", {"action": "file", "title": "Runner hangs after retry", "severity": "P1"}),
+            _example(
+                "File a new bug",
+                {
+                    "action": "file",
+                    "title": "Runner hangs after retry",
+                    "severity": "P1",
+                    "discovered_in_receipt_id": "receipt-123",
+                },
+            ),
             _example(
                 "Save investigation handoff on a bug",
                 {
@@ -886,16 +894,19 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         tier="stable",
         recommended_alias="launch-plan",
         when_to_use=(
-            "Launch a plan (one or more packet intents) as a single workflow_run. "
-            "Replaces the write-JSON-then-validate-then-submit loop. Routes through "
-            "the control-command bus (CQRS) so every surface lands on the same "
-            "durable record."
+            "Translate an already-planned packet list into a workflow spec and "
+            "submit it (or preview first with preview_only=true). This is the "
+            "layer-5 translation primitive — caller still owns upstream planning "
+            "(extract data pills, decompose prose, reorder by data-flow, author "
+            "per-step prompts)."
         ),
         when_not_to_use=(
             "Do not use it to launch a pre-existing .queue.json spec from disk — "
-            "use praxis_workflow action=run for that path."
+            "use praxis_workflow action=run for that path. Do not expect it to do "
+            "the planning itself (decompose prose, pick fields, reorder steps, "
+            "write real prompts) — those layers live with the caller today."
         ),
-        risks={"default": "write"},
+        risks={"default": "write", "actions": {"preview": "read", "submit": "write"}},
         examples=[
             _example(
                 "Launch a one-packet plan",

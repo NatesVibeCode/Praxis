@@ -781,6 +781,140 @@ def compile_plan(
     return spec_dict, warnings_all
 
 
+@dataclass(frozen=True)
+class ProposedPlan:
+    """Translated plan with preview, before any submission.
+
+    Output of ``propose_plan``: the workflow spec the platform will submit
+    plus the preview payload (resolved agents, rendered prompts, execution
+    bundles, etc.) the caller needs to approve before spending resources.
+    Pass to ``launch_proposed`` to submit, or ignore to cancel.
+    """
+
+    spec_dict: dict[str, Any]
+    preview: dict[str, Any]
+    warnings: list[str]
+    workflow_id: str
+    spec_name: str
+    total_jobs: int
+    packet_declarations: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "spec_dict": dict(self.spec_dict),
+            "preview": dict(self.preview),
+            "warnings": list(self.warnings),
+            "workflow_id": self.workflow_id,
+            "spec_name": self.spec_name,
+            "total_jobs": self.total_jobs,
+            "packet_declarations": list(self.packet_declarations),
+        }
+
+
+def propose_plan(
+    plan: Plan | dict,
+    *,
+    conn: Any,
+    workdir: str | None = None,
+) -> ProposedPlan:
+    """Translate + preview a plan without submitting.
+
+    HONEST SCOPE: this covers the translation + per-step authoring that
+    the platform can do deterministically (prompt from stage template,
+    model routing via ``TaskTypeRouter``, failover via ``RoutePlan``,
+    verify_refs for declared write scope). It does NOT cover the upstream
+    planning layers the caller still owns:
+
+    - Layer 1 (Bind): extracting data pills (fields/objects) from prose
+      intent and validating them against schema/capability authority.
+    - Layer 2 (Decompose): splitting prose intent into distinct executable
+      steps.
+    - Layer 3 (Re-order): reordering steps by data-flow topology (which
+      step's output feeds which step's input).
+    - Most of layer 4 (Author): writing the actual step prompt. The stage
+      template is a shim, not a real authoring pass.
+
+    Use this instead of ``launch_plan`` when the caller (user or LLM) must
+    inspect the translated spec and approve before resources spend. The
+    returned ``ProposedPlan`` contains everything needed to either run
+    ``launch_proposed`` or discard.
+    """
+    spec_dict, warnings_all = compile_plan(plan, conn=conn, workdir=workdir)
+    plan_obj = _coerce_plan(plan)
+
+    from runtime.workflow._admission import preview_workflow_execution
+
+    preview = preview_workflow_execution(conn, inline_spec=spec_dict)
+
+    packet_declarations: list[dict[str, Any]] = [
+        {
+            "label": job["label"],
+            "declared_description": packet.description,
+            "declared_write": list(packet.write),
+            "declared_stage": packet.stage,
+            "declared_label": packet.label,
+            "declared_depends_on": list(packet.depends_on) if packet.depends_on else None,
+            "declared_bug_ref": packet.bug_ref,
+            "declared_agent": packet.agent,
+            "declared_complexity": packet.complexity,
+        }
+        for packet, job in zip(plan_obj.packets, spec_dict["jobs"])
+    ]
+
+    return ProposedPlan(
+        spec_dict=spec_dict,
+        preview=preview,
+        warnings=warnings_all,
+        workflow_id=str(spec_dict["workflow_id"]),
+        spec_name=str(spec_dict["name"]),
+        total_jobs=len(spec_dict["jobs"]),
+        packet_declarations=packet_declarations,
+    )
+
+
+def launch_proposed(
+    proposed: ProposedPlan,
+    *,
+    conn: Any,
+    requested_by_kind: str = "launch_plan",
+    requested_by_ref: str | None = None,
+) -> LaunchReceipt:
+    """Submit a ``ProposedPlan`` previously built by ``propose_plan``.
+
+    Two-phase alternative to ``launch_plan``: propose → inspect → launch.
+    Use when the caller must approve the translated spec before it runs.
+    """
+    from runtime.control_commands import submit_workflow_command
+
+    submit_result = submit_workflow_command(
+        conn,
+        requested_by_kind=requested_by_kind,
+        requested_by_ref=requested_by_ref or proposed.spec_name,
+        inline_spec=proposed.spec_dict,
+        spec_name=proposed.spec_name,
+        total_jobs=proposed.total_jobs,
+        dispatch_reason=f"launch_proposed:{proposed.spec_name}",
+    )
+
+    packet_map: list[dict[str, Any]] = [
+        {
+            "label": job.get("label"),
+            "bug_ref": job.get("bug_ref"),
+            "agent": job.get("agent"),
+            "stage": job.get("task_type"),
+        }
+        for job in proposed.spec_dict["jobs"]
+    ]
+    return LaunchReceipt(
+        run_id=str(submit_result.get("run_id") or ""),
+        spec_name=proposed.spec_name,
+        workflow_id=proposed.workflow_id,
+        total_jobs=int(submit_result.get("total_jobs") or proposed.total_jobs),
+        packet_map=packet_map,
+        warnings=proposed.warnings,
+    )
+
+
 def launch_plan(
     plan: Plan | dict,
     *,
@@ -789,15 +923,27 @@ def launch_plan(
     requested_by_kind: str = "launch_plan",
     requested_by_ref: str | None = None,
 ) -> LaunchReceipt:
-    """Compile + submit a plan in one call via the control-command bus.
+    """Translate a packet list into a workflow spec and submit it in one call.
 
-    The continuous path from intent to a running workflow_run. Callers give
-    minimal packet intents (what + where + stage); this function compiles
-    each packet through the capability catalog, translates into the workflow
-    spec shape, and submits through ``submit_workflow_command`` — the same
-    CQRS surface used by CLI/API/MCP/mobile for workflow.submit. No JSON
-    files, no intermediate validate-then-regenerate loop, and every launch
-    is captured as a durable control command for audit and replay.
+    HONEST SCOPE — this is the layer-5 translation primitive, not a planner.
+    It owns:
+
+    - Per-packet prompt rendering from the stage template (partial layer 4)
+    - Model routing via ``TaskTypeRouter`` (layer 5)
+    - Failover chain via ``RoutePlan`` (layer 6)
+    - Submission through the ``submit_workflow_command`` CQRS bus (layer 7)
+
+    It does NOT own:
+
+    - Layer 1 (Bind): extracting + validating data pills
+    - Layer 2 (Decompose): prose → discrete steps
+    - Layer 3 (Re-order): data-flow-aware step ordering
+    - Most of layer 4 (Author): real per-step prompt authoring
+
+    Those planning layers are the caller's responsibility (user or LLM).
+    If you need to see what will actually run before spend, use
+    ``propose_plan`` for the translate-and-preview pair, then
+    ``launch_proposed`` to submit only if the proposal is approved.
     """
     spec_dict, warnings_all = compile_plan(plan, conn=conn, workdir=workdir)
     plan_obj = _coerce_plan(plan)

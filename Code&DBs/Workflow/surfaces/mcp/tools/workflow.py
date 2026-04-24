@@ -1601,14 +1601,22 @@ def tool_praxis_workflow_validate(params: dict) -> dict:
 
 
 def tool_praxis_launch_plan(params: dict) -> dict:
-    """Compile a plan dict into a workflow spec and submit it in one call.
+    """Translate a packet list into a workflow spec and submit it — or preview first.
 
-    The continuous plan-to-launch path. Caller provides packets (each with
-    description + write + stage); this tool runs compile_spec per packet,
-    assembles the multi-job workflow spec, and submits through the canonical
-    inline admission path. No spec-JSON writing, no separate validate step,
-    no regenerate loops. Returns a LaunchReceipt with run_id and per-packet
-    mapping (including bug_ref linkage for closeout).
+    This is the layer-5 translation primitive, not a planner. Caller (user or
+    LLM) owns layers 1-4: extracting data pills, decomposing prose intent into
+    steps, reordering by data-flow topology, authoring per-step prompts. This
+    tool translates the already-planned packet list and submits through the
+    CQRS bus.
+
+    Modes:
+    - preview_only=false (default): translate + submit in one call; returns
+      a LaunchReceipt with run_id.
+    - preview_only=true: translate + preview only; returns a ProposedPlan
+      payload with the spec_dict, preview (resolved agents + rendered
+      prompts + execution bundles), and packet_declarations showing what
+      the caller declared vs what the platform derived. No submission.
+      Use to inspect before approving the run.
     """
     plan = params.get("plan")
     if not isinstance(plan, dict):
@@ -1617,6 +1625,7 @@ def tool_praxis_launch_plan(params: dict) -> dict:
         return {"error": "plan.packets must have at least one packet"}
 
     workdir = params.get("workdir")
+    preview_only = bool(params.get("preview_only"))
 
     try:
         pg_conn = _subs.get_pg_conn()
@@ -1628,6 +1637,15 @@ def tool_praxis_launch_plan(params: dict) -> dict:
         }
 
     try:
+        if preview_only:
+            from runtime.spec_compiler import propose_plan
+
+            proposed = propose_plan(plan, conn=pg_conn, workdir=workdir)
+            payload = proposed.to_dict()
+            payload["ok"] = True
+            payload["mode"] = "preview"
+            return payload
+
         from runtime.spec_compiler import launch_plan
 
         receipt = launch_plan(plan, conn=pg_conn, workdir=workdir)
@@ -1638,6 +1656,7 @@ def tool_praxis_launch_plan(params: dict) -> dict:
 
     payload = receipt.to_dict()
     payload["ok"] = True
+    payload["mode"] = "submitted"
     return payload
 
 
@@ -1808,22 +1827,32 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_launch_plan,
         {
             "description": (
-                "Compile a plan (list of packets) into a workflow spec and launch it in one call. "
-                "This is the continuous plan-to-run path: caller provides minimal packet intents "
-                "(description + write scope + stage); this tool runs compile_spec per packet, "
-                "assembles a multi-job workflow spec, and submits through the canonical inline "
-                "admission path. No JSON files, no separate validate step, no regenerate loop.\n\n"
-                "USE WHEN: you have a plan (one or more packets) to execute as a single workflow_run. "
-                "Each packet is minimal — describe what to do (description), where it writes "
-                "(write: list of paths), and the stage (build/fix/review/test/research). Optional "
-                "per-packet fields: label, read, depends_on (labels to wait for), bug_ref (links the "
-                "packet to a tracked bug for closeout), complexity ('low' triggers prefer_cost routing).\n\n"
-                "USE INSTEAD OF: hand-writing queue.json files + praxis_workflow_validate + "
-                "praxis_workflow action=run. That three-step path is the loop this tool replaces.\n\n"
-                "EXAMPLE: praxis_launch_plan(plan={\"name\": \"bug_wave_0\", \"packets\": ["
+                "Translate a packet list into a workflow spec and submit it — or preview first. "
+                "This is the layer-5 translation primitive, not a planner. Caller (user or LLM) "
+                "owns upstream planning: (1) extract data pills from intent, (2) decompose prose "
+                "into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool "
+                "translates the already-planned packet list through the capability catalog and "
+                "submits through the CQRS bus.\n\n"
+                "MODES:\n"
+                "  - preview_only=false (default): translate + submit in one call; returns "
+                "LaunchReceipt with run_id.\n"
+                "  - preview_only=true: translate + preview only; returns ProposedPlan with the "
+                "spec_dict, a preview payload (resolved agents, rendered prompts, execution "
+                "bundles), and packet_declarations showing what the caller declared vs what the "
+                "platform derived. No submission.\n\n"
+                "USE WHEN: you have a packet list (each with description + write + stage) to run "
+                "as a single workflow_run. Optional per-packet fields: label, read, depends_on, "
+                "bug_ref, complexity ('low' triggers prefer_cost routing).\n\n"
+                "DO NOT USE TO: do the planning itself. This tool will not extract fields from "
+                "prose, will not split a paragraph into steps, will not reorder by data-flow, and "
+                "will not author real prompts beyond the stage template shim. If you need those, "
+                "you (the caller) do them before calling this tool.\n\n"
+                "EXAMPLE (submit): praxis_launch_plan(plan={\"name\": \"bug_wave_0\", \"packets\": ["
                 "{\"description\": \"fix bug evidence authority\", "
                 "\"write\": [\"Code&DBs/Workflow/runtime/bugs.py\"], "
-                "\"stage\": \"build\", \"bug_ref\": \"BUG-175EB9F3\"}]})"
+                "\"stage\": \"build\", \"bug_ref\": \"BUG-175EB9F3\"}]})\n\n"
+                "EXAMPLE (preview first): praxis_launch_plan(preview_only=true, plan={...}) → "
+                "inspect ProposedPlan → praxis_launch_plan(plan={...}) to submit."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1870,6 +1899,15 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "workdir": {
                         "type": "string",
                         "description": "Optional override for the workflow's workdir.",
+                    },
+                    "preview_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "If true, translate the plan and return a ProposedPlan (spec_dict + "
+                            "preview + packet_declarations) without submitting. Use to inspect "
+                            "what will actually run before committing to resources."
+                        ),
                     },
                 },
                 "required": ["plan"],
