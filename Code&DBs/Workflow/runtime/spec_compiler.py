@@ -1788,10 +1788,44 @@ def compile_plan(
     # compile failures follow. Fixing them in this order minimizes retry
     # cycles — each raise surfaces the earliest blocker atomically across
     # all packets.
+    #
+    # Before raising, emit typed_gap.created events for structured gap
+    # errors so observers (Moon, operator console, projections) see the
+    # failure at event-stream level — not just as an exception string.
+    # Opt-in via conn: if no conn, skip emission (unit-test paths stay
+    # cheap). Per architecture-policy::platform-architecture::conceptual-
+    # events-register-through-operation-catalog-registry + fail-closed-
+    # at-compile-no-silent-defaults.
     if unresolved_writes:
-        raise UnresolvedWriteScopeError(unresolved_writes)
+        err_write = UnresolvedWriteScopeError(unresolved_writes)
+        if conn is not None:
+            try:
+                from runtime.typed_gap_events import (
+                    emit_typed_gaps_for_compile_errors,
+                )
+
+                emit_typed_gaps_for_compile_errors(
+                    conn, err_write, source_ref=f"compile_plan:{plan_obj.name}"
+                )
+            except Exception:
+                # Best-effort — never let a degraded event bus block the
+                # raise of the underlying error.
+                pass
+        raise err_write
     if unresolved_stages:
-        raise UnresolvedStageError(unresolved_stages)
+        err_stage = UnresolvedStageError(unresolved_stages)
+        if conn is not None:
+            try:
+                from runtime.typed_gap_events import (
+                    emit_typed_gaps_for_compile_errors,
+                )
+
+                emit_typed_gaps_for_compile_errors(
+                    conn, err_stage, source_ref=f"compile_plan:{plan_obj.name}"
+                )
+            except Exception:
+                pass
+        raise err_stage
     if failures:
         raise CompilePlanError(failures)
 

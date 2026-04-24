@@ -230,3 +230,80 @@ def test_non_empty_write_passes_pre_validation():
         pytest.fail("non-empty write should not raise UnresolvedWriteScopeError")
     except Exception:
         pass  # other failures are acceptable
+
+
+# ---------------------------------------------------------------------------
+# compile_plan emits typed_gap.created events at error raise (Phase 1.6 wiring)
+# ---------------------------------------------------------------------------
+
+
+class _EventRecordingConn:
+    """Stub conn that captures every execute() call — used to verify
+    compile_plan emits system_events before raising."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, tuple]] = []
+
+    def execute(self, sql: str, *args):
+        self.events.append((sql, args))
+        return []
+
+
+def _system_event_inserts(conn: _EventRecordingConn) -> list[tuple[str, tuple]]:
+    return [
+        (sql, args) for (sql, args) in conn.events
+        if "INSERT INTO system_events" in sql
+    ]
+
+
+def test_compile_plan_emits_typed_gap_events_for_write_scope_errors():
+    conn = _EventRecordingConn()
+    plan = Plan(
+        name="emit_test",
+        packets=[
+            PlanPacket(description="a", write=[], stage="build"),
+            PlanPacket(description="b", write=[], stage="build"),
+        ],
+    )
+    with pytest.raises(UnresolvedWriteScopeError):
+        compile_plan(plan, conn=conn)
+    inserts = _system_event_inserts(conn)
+    assert len(inserts) == 2  # one event per unresolved write entry
+    for sql, args in inserts:
+        assert args[0] == "typed_gap.created"
+        assert args[2] == "typed_gap"  # source_type
+
+
+def test_compile_plan_emits_typed_gap_events_for_stage_errors():
+    conn = _EventRecordingConn()
+    plan = Plan(
+        name="emit_test",
+        packets=[
+            PlanPacket(description="a", write=["a.py"], stage="mystery"),
+            PlanPacket(description="b", write=["b.py"], stage="rumble"),
+        ],
+    )
+    with pytest.raises(UnresolvedStageError):
+        compile_plan(plan, conn=conn)
+    inserts = _system_event_inserts(conn)
+    assert len(inserts) == 2
+    for sql, args in inserts:
+        assert args[0] == "typed_gap.created"
+
+
+def test_compile_plan_emission_is_best_effort_even_if_events_fail(monkeypatch):
+    """If the emit helper raises (e.g., degraded system_events), compile_plan
+    still raises the original error — emission is never a blocker."""
+    import runtime.typed_gap_events as tge
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("simulated outage")
+
+    monkeypatch.setattr(tge, "emit_typed_gaps_for_compile_errors", broken)
+
+    plan = Plan(
+        name="emit_test",
+        packets=[PlanPacket(description="x", write=[], stage="build")],
+    )
+    with pytest.raises(UnresolvedWriteScopeError):
+        compile_plan(plan, conn=_EventRecordingConn())
