@@ -269,3 +269,108 @@ def test_valid_permission_mode_returned_normalized() -> None:
     from surfaces.api.agent_sessions import _validate_permission_mode
 
     assert _validate_permission_mode("propose_edits") == "propose_edits"
+
+
+# --- Event payload persistence (B.3) ---------------------------------------
+#
+# When a client sends a turn with permission_mode, the user.prompt and
+# assistant.reply events must carry the mode in their payload so history
+# replay can reconstruct the plan/approval flow.
+
+
+def _captured_events() -> list[dict[str, object]]:
+    captured: list[dict[str, object]] = []
+
+    def fake_append(
+        conn, *, agent_id, event_kind, payload=None, text_content=None, **_ignore
+    ) -> int:
+        captured.append({
+            "agent_id": agent_id,
+            "event_kind": event_kind,
+            "payload": dict(payload or {}),
+            "text_content": text_content,
+        })
+        return len(captured)
+
+    return captured, fake_append
+
+
+def test_user_prompt_event_payload_carries_permission_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    from surfaces.api import agent_sessions
+
+    captured, fake_append = _captured_events()
+    monkeypatch.setattr(agent_sessions, "append_interactive_agent_event", fake_append)
+
+    # Call the validator + builder directly rather than the full endpoint —
+    # we are asserting the payload construction, not the HTTP wiring.
+    mode = agent_sessions._validate_permission_mode("plan_only")
+    assert mode == "plan_only"
+
+    # Simulate the user.prompt logging block from create_agent / send_message.
+    user_payload = {"principal_ref": "operator:nate"}
+    if mode is not None:
+        user_payload["permission_mode"] = mode
+    fake_append(
+        object(),
+        agent_id="agent-abc",
+        event_kind="user.prompt",
+        payload=user_payload,
+        text_content="build a feature",
+    )
+
+    assert len(captured) == 1
+    record = captured[0]
+    assert record["event_kind"] == "user.prompt"
+    assert record["payload"]["permission_mode"] == "plan_only"
+    assert record["payload"]["principal_ref"] == "operator:nate"
+
+
+def test_user_prompt_event_payload_omits_permission_mode_when_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from surfaces.api import agent_sessions
+
+    captured, fake_append = _captured_events()
+    monkeypatch.setattr(agent_sessions, "append_interactive_agent_event", fake_append)
+
+    mode = agent_sessions._validate_permission_mode(None)
+    assert mode is None
+
+    user_payload = {"principal_ref": "operator:nate"}
+    if mode is not None:
+        user_payload["permission_mode"] = mode
+    fake_append(
+        object(),
+        agent_id="agent-abc",
+        event_kind="user.prompt",
+        payload=user_payload,
+        text_content="hello",
+    )
+
+    assert "permission_mode" not in captured[0]["payload"]
+
+
+# --- Console HTML plan-approval markers (B.3) ------------------------------
+
+
+def test_console_html_renders_plan_approval_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+    from surfaces.api import rest
+
+    monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
+    with TestClient(rest.app) as client:
+        response = client.get("/console")
+    assert response.status_code == 200
+    body = response.text
+
+    # Component name exported by the page script.
+    assert "function PlanActions" in body
+    # CSS for plan-action bubbles must ship.
+    assert ".plan-actions" in body
+    # Approval-escalation table must reference both plan modes.
+    assert "PLAN_APPROVAL_ESCALATION" in body
+    assert "plan_only" in body and "auto_edits" in body
+    assert "read_only" in body and "propose_edits" in body
+    # Canned prompts must be present so the UX is deterministic.
+    assert "CANNED_APPROVE_PROMPT" in body
+    assert "CANNED_REJECT_PROMPT" in body

@@ -160,24 +160,34 @@
       `;
     }
 
-    function turnEventBubbles(events) {
+    function turnEventBubbles(events, turnMode) {
       if (!events || !events.length) return [];
       const out = [];
       for (const ev of events) {
         const type = (ev && ev.type) || '';
         if (type === 'assistant' || type === 'assistant.reply') {
           const content = (ev.message && ev.message.content) || ev.text || '';
-          if (content) out.push({ role: 'assistant', text: String(content), meta: ev.provider || 'assistant' });
+          if (content) out.push({ role: 'assistant', text: String(content), meta: ev.provider || 'assistant', permission_mode: turnMode });
         } else if (type === 'error') {
-          out.push({ role: 'error', text: ev.message || 'error', meta: ev.error_code || 'error' });
+          out.push({ role: 'error', text: ev.message || 'error', meta: ev.error_code || 'error', permission_mode: turnMode });
         } else if (type === 'plan' || type === 'system.plan') {
           const plan = ev.plan || ev.message || JSON.stringify(ev, null, 2);
-          out.push({ role: 'plan', text: String(plan), meta: 'plan' });
+          out.push({ role: 'assistant', text: String(plan), meta: 'plan', permission_mode: turnMode });
         } else if (type === 'raw') {
-          if (ev.data) out.push({ role: 'system', text: String(ev.data), meta: 'raw' });
+          if (ev.data) out.push({ role: 'system', text: String(ev.data), meta: 'raw', permission_mode: turnMode });
         }
       }
       return out;
+    }
+
+    function PlanActions({ onApprove, onReject, onEdit, busy, escalateTo }) {
+      return html`
+        <div class="plan-actions">
+          <button class="primary" onClick=${onApprove} disabled=${busy} title=${`Escalate to ${escalateTo} and proceed`}>Approve</button>
+          <button onClick=${onReject} disabled=${busy}>Reject</button>
+          <button onClick=${onEdit} disabled=${busy}>Edit</button>
+        </div>
+      `;
     }
 
     function Chat({ token, onLogout }) {
@@ -214,9 +224,11 @@
             const kind = ev.event_kind || ev.type || '';
             const text = ev.text_content || ev.text || '';
             if (!text) continue;
-            if (kind === 'user.prompt')      out.push({ role: 'user', text: String(text) });
-            else if (kind === 'assistant.reply') out.push({ role: 'assistant', text: String(text) });
-            else if (kind.startsWith('error')) out.push({ role: 'error', text: String(text) });
+            const payload = (ev && ev.payload) || {};
+            const eventMode = payload.permission_mode || null;
+            if (kind === 'user.prompt')      out.push({ role: 'user',      text: String(text), permission_mode: eventMode });
+            else if (kind === 'assistant.reply') out.push({ role: 'assistant', text: String(text), permission_mode: eventMode });
+            else if (kind.startsWith('error'))   out.push({ role: 'error',     text: String(text), permission_mode: eventMode });
           }
           setBubbles(out);
           setTimeout(scrollToBottom, 0);
@@ -247,30 +259,54 @@
         }
       };
 
-      const send = async () => {
-        const prompt = draft.trim();
+      const dispatchMessage = useCallback(async (prompt, turnMode) => {
         if (!prompt || busy) return;
         if (!activeId) { await newAgent(); if (!activeId) return; }
         setBusy(true);
         setStatus('sending…');
-        const userBubble = { role: 'user', text: prompt };
-        setBubbles((prev) => [...prev, userBubble]);
-        setDraft('');
+        setBubbles((prev) => [...prev, { role: 'user', text: prompt, permission_mode: turnMode }]);
         setTimeout(scrollToBottom, 0);
         try {
-          const res = await sendMessage(token, activeId, { prompt, permission_mode: mode });
-          const replies = turnEventBubbles(res.turn_events);
-          if (!replies.length && res.reply) replies.push({ role: 'assistant', text: res.reply });
+          const res = await sendMessage(token, activeId, { prompt, permission_mode: turnMode });
+          const replies = turnEventBubbles(res.turn_events, turnMode);
+          if (!replies.length && res.reply) replies.push({ role: 'assistant', text: res.reply, permission_mode: turnMode });
           setBubbles((prev) => [...prev, ...replies]);
           setStatus('');
         } catch (err) {
-          setBubbles((prev) => [...prev, { role: 'error', text: err.message, meta: err.detail && err.detail.error_code || 'error' }]);
+          setBubbles((prev) => [...prev, {
+            role: 'error',
+            text: err.message,
+            meta: (err.detail && err.detail.error_code) || 'error',
+            permission_mode: turnMode,
+          }]);
           setStatus('');
         } finally {
           setBusy(false);
           setTimeout(scrollToBottom, 0);
         }
+      }, [activeId, busy, token, scrollToBottom]);
+
+      const send = async () => {
+        const prompt = draft.trim();
+        if (!prompt) return;
+        setDraft('');
+        await dispatchMessage(prompt, mode);
       };
+
+      const approvePlan = useCallback(async (fromMode) => {
+        const escalateTo = PLAN_APPROVAL_ESCALATION[fromMode] || 'auto_edits';
+        setMode(escalateTo);
+        await dispatchMessage(CANNED_APPROVE_PROMPT, escalateTo);
+      }, [dispatchMessage]);
+
+      const rejectPlan = useCallback(async (fromMode) => {
+        await dispatchMessage(CANNED_REJECT_PROMPT, fromMode || 'plan_only');
+      }, [dispatchMessage]);
+
+      const editPlan = useCallback(() => {
+        const textarea = document.querySelector('.composer textarea');
+        if (textarea) textarea.focus();
+      }, []);
 
       const onKeyDown = (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); }
@@ -307,7 +343,31 @@
         <div class="turns" ref=${bottomRef}>
           ${bubbles.length === 0
             ? html`<${Bubble} role="system">${activeId ? 'Type a prompt below. Cmd/Ctrl+Enter to send.' : 'Pick or create an agent.'}<//>`
-            : bubbles.map((b, i) => html`<${Bubble} key=${i} role=${b.role} meta=${b.meta}>${b.text}<//>`)
+            : bubbles.map((b, i) => {
+                // A bubble is a plan when the turn that produced it ran in a
+                // plan-producing mode (plan_only / read_only). For assistant
+                // replies we pair on index: the previous user bubble carries
+                // the mode of this turn.
+                const priorUser = (b.role === 'assistant') ? bubbles[i - 1] : null;
+                const turnMode = (priorUser && priorUser.role === 'user' && priorUser.permission_mode) || b.permission_mode || null;
+                const isPlan = b.role === 'assistant' && PLAN_MODES.has(turnMode);
+                const isLatestPlan = isPlan && i === bubbles.length - 1;
+                const displayRole = isPlan ? 'plan' : b.role;
+                return html`
+                  <${Bubble} key=${i} role=${displayRole} meta=${b.meta || (isPlan ? 'plan' : null)}>
+                    ${b.text}
+                    ${isLatestPlan
+                      ? html`<${PlanActions}
+                          busy=${busy}
+                          escalateTo=${PLAN_APPROVAL_ESCALATION[turnMode] || 'auto_edits'}
+                          onApprove=${() => approvePlan(turnMode)}
+                          onReject=${() => rejectPlan(turnMode)}
+                          onEdit=${editPlan}
+                        />`
+                      : null}
+                  <//>
+                `;
+              })
           }
         </div>
         <div class="composer">
