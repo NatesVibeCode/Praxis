@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills."""
 from __future__ import annotations
 
 import json
@@ -1660,6 +1660,55 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     return payload
 
 
+def tool_praxis_bind_data_pills(params: dict) -> dict:
+    """Extract and validate data-pill references from prose intent.
+
+    Layer 1 (Bind) of the planning stack: takes prose, returns the
+    ``object.field`` references that resolve to real rows in the data
+    dictionary authority. Deterministic (no LLM). Honest about scope —
+    only finds explicit ``object.field`` spans. Loose-prose binding
+    ("user's first name") is not attempted; wrap with an LLM extractor if
+    that path is needed.
+
+    Returns a BoundIntent payload with three splits the caller confirms
+    before decomposing intent into packets:
+      - bound: pills that resolved to a real field (with type + provenance)
+      - ambiguous: pills that matched multiple rows (caller disambiguates)
+      - unbound: pills that looked like refs but did not resolve (caller
+        fixes typos or drops hallucinated fields)
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str):
+        return {"ok": False, "error": "intent must be a string", "reason_code": "intent.invalid"}
+    object_kinds = params.get("object_kinds")
+    if object_kinds is not None and not isinstance(object_kinds, list):
+        return {
+            "ok": False,
+            "error": "object_kinds must be a list of strings when provided",
+            "reason_code": "object_kinds.invalid",
+        }
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    try:
+        from runtime.intent_binding import bind_data_pills
+
+        result = bind_data_pills(intent, conn=pg_conn, object_kinds=object_kinds)
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="bind_data_pills")
+
+    payload = result.to_dict()
+    payload["ok"] = True
+    return payload
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_workflow": (
         tool_praxis_workflow,
@@ -1911,6 +1960,46 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                 },
                 "required": ["plan"],
+            },
+        },
+    ),
+    "praxis_bind_data_pills": (
+        tool_praxis_bind_data_pills,
+        {
+            "description": (
+                "Layer 1 (Bind) of the planning stack: extract and validate "
+                "``object.field`` data-pill references from prose intent against the "
+                "data dictionary authority. Deterministic — matches explicit "
+                "``snake_case.field_path`` spans in the prose; does not infer loose "
+                "references like \"the user's name.\" Returns bound / ambiguous / "
+                "unbound splits the caller confirms before decomposing intent into "
+                "packets.\n\n"
+                "USE WHEN: you have prose intent and want to confirm every field ref "
+                "you're about to build packets around actually exists in authority.\n\n"
+                "DO NOT USE TO: infer missing references. If the prose only says \"fix "
+                "the user's name,\" this tool returns nothing bound — that's honest; "
+                "the caller needs to decide which field is meant and write it "
+                "explicitly.\n\n"
+                "EXAMPLE: praxis_bind_data_pills(intent='Update users.first_name "
+                "whenever users.email changes.')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Prose describing what the caller wants done.",
+                    },
+                    "object_kinds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional allowlist of object kinds. References outside this "
+                            "list resolve as unbound with reason='object_kind_not_allowlisted'."
+                        ),
+                    },
+                },
+                "required": ["intent"],
             },
         },
     ),

@@ -889,6 +889,36 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
+    "praxis_bind_data_pills": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="bind-pills",
+        when_to_use=(
+            "Extract and validate object.field data-pill references from prose intent "
+            "against the data dictionary authority. Layer 1 (Bind) of the planning stack "
+            "— call BEFORE decomposing intent into packets so every field ref is known "
+            "to exist."
+        ),
+        when_not_to_use=(
+            "Do not use it to infer missing references. This tool matches explicit "
+            "object.field spans only; loose prose like \"the user's name\" returns no "
+            "bound pills, and that's honest."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Bind pills in an update-user intent",
+                {"intent": "Update users.first_name whenever users.email changes."},
+            ),
+            _example(
+                "Restrict binding to a workspace allowlist",
+                {
+                    "intent": "Look at users.email and orders.total_cents.",
+                    "object_kinds": ["users"],
+                },
+            ),
+        ],
+    ),
     "praxis_launch_plan": _tool(
         surface="workflow",
         tier="stable",
