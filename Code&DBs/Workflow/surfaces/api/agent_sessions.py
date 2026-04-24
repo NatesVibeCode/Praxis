@@ -31,6 +31,7 @@ from adapters.permission_matrix import (
     ALLOWED_PERMISSION_MODES,
     NormalizedPermissionMode,
     PermissionMatrixError,
+    is_permission_step_up,
     translate_permission_flags,
 )
 
@@ -502,6 +503,33 @@ def append_interactive_agent_event(
     if not rows:
         return None
     return int(rows[0]["event_id"])
+
+
+def _most_recent_permission_mode(conn: Any, *, agent_id: str) -> str | None:
+    """Return the permission_mode from the most recent event that recorded one.
+
+    Scans the last 20 events for this agent — more than enough for any
+    practical turn depth — and returns the first payload-embedded
+    permission_mode it finds. None when the agent has no prior mode.
+    """
+    rows = conn.execute(
+        """
+        SELECT payload_json
+        FROM agent_session_events
+        WHERE session_id = $1
+        ORDER BY event_id DESC
+        LIMIT 20
+        """,
+        agent_id,
+    )
+    for row in rows:
+        data = dict(row)
+        payload = _decode_json(data.get("payload_json"))
+        if isinstance(payload, dict):
+            mode = payload.get("permission_mode")
+            if isinstance(mode, str) and mode:
+                return mode
+    return None
 
 
 def list_interactive_agent_events(conn: Any, *, agent_id: str) -> list[dict[str, Any]]:
@@ -1507,6 +1535,19 @@ async def create_agent(
     exit_code: int | None = None
     if body.prompt:
         validated_mode = _validate_permission_mode(body.permission_mode)
+        if validated_mode is not None:
+            prior_mode = _most_recent_permission_mode(pg_conn, agent_id=agent_id)
+            if is_permission_step_up(prior_mode, validated_mode):
+                append_interactive_agent_event(
+                    pg_conn,
+                    agent_id=agent_id,
+                    event_kind="permission.step_up",
+                    payload={
+                        "principal_ref": _auth["principal_ref"],
+                        "from_mode": prior_mode,
+                        "to_mode": validated_mode,
+                    },
+                )
         user_payload: dict[str, Any] = {"principal_ref": _auth["principal_ref"]}
         if validated_mode is not None:
             user_payload["permission_mode"] = validated_mode
@@ -1583,6 +1624,19 @@ async def send_message(
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
     _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.message")
     validated_mode = _validate_permission_mode(body.permission_mode)
+    if validated_mode is not None:
+        prior_mode = _most_recent_permission_mode(pg_conn, agent_id=agent_id)
+        if is_permission_step_up(prior_mode, validated_mode):
+            append_interactive_agent_event(
+                pg_conn,
+                agent_id=agent_id,
+                event_kind="permission.step_up",
+                payload={
+                    "principal_ref": _auth["principal_ref"],
+                    "from_mode": prior_mode,
+                    "to_mode": validated_mode,
+                },
+            )
     user_payload: dict[str, Any] = {"principal_ref": _auth["principal_ref"]}
     if validated_mode is not None:
         user_payload["permission_mode"] = validated_mode

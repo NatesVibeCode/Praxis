@@ -12,8 +12,10 @@ import pytest
 from adapters.permission_matrix import (
     ALLOWED_PERMISSION_MODES,
     DEFAULT_PERMISSION_MODE,
+    PERMISSION_MODE_RANK,
     PermissionMatrixError,
     SUPPORTED_CLI_PROVIDERS,
+    is_permission_step_up,
     translate_permission_flags,
 )
 
@@ -348,6 +350,135 @@ def test_user_prompt_event_payload_omits_permission_mode_when_none(
     )
 
     assert "permission_mode" not in captured[0]["payload"]
+
+
+# --- Console HTML plan-approval markers (B.3) ------------------------------
+
+
+# --- Step-up detection + audit event (B.3b) --------------------------------
+
+
+def test_permission_rank_strictly_orders_five_modes() -> None:
+    ranks = [PERMISSION_MODE_RANK[m] for m in ALLOWED_PERMISSION_MODES]
+    assert ranks == sorted(ranks)  # least-to-most
+    assert len(set(ranks)) == len(ranks)  # no ties
+
+
+@pytest.mark.parametrize(
+    "from_mode, to_mode, expected",
+    [
+        ("read_only",     "plan_only",     True),
+        ("plan_only",     "auto_edits",    True),
+        ("propose_edits", "full_autonomy", True),
+        # equal is not a step-up
+        ("propose_edits", "propose_edits", False),
+        # step-down is not a step-up
+        ("full_autonomy", "propose_edits", False),
+        ("auto_edits",    "plan_only",     False),
+        # unknown modes never count
+        (None,            "propose_edits", False),
+        ("propose_edits", None,            False),
+        ("bogus",         "full_autonomy", False),
+        ("read_only",     "bogus",         False),
+    ],
+)
+def test_is_permission_step_up(from_mode, to_mode, expected) -> None:
+    assert is_permission_step_up(from_mode, to_mode) is expected
+
+
+def test_step_up_event_emitted_when_mode_escalates(monkeypatch: pytest.MonkeyPatch) -> None:
+    from surfaces.api import agent_sessions
+
+    captured: list[dict[str, object]] = []
+
+    def fake_append(conn, *, agent_id, event_kind, payload=None, text_content=None, **_ignore):
+        captured.append({
+            "event_kind": event_kind,
+            "payload": dict(payload or {}),
+            "text_content": text_content,
+        })
+        return len(captured)
+
+    # Stub the most-recent-mode lookup to simulate prior plan_only turn.
+    monkeypatch.setattr(agent_sessions, "append_interactive_agent_event", fake_append)
+    monkeypatch.setattr(
+        agent_sessions,
+        "_most_recent_permission_mode",
+        lambda conn, *, agent_id: "plan_only",
+    )
+
+    # Simulate the step-up emission block (same shape as create_agent / send_message).
+    validated_mode = agent_sessions._validate_permission_mode("auto_edits")
+    principal = "operator:nate"
+    prior_mode = agent_sessions._most_recent_permission_mode(object(), agent_id="a")
+    if agent_sessions.is_permission_step_up(prior_mode, validated_mode):
+        fake_append(
+            object(),
+            agent_id="a",
+            event_kind="permission.step_up",
+            payload={
+                "principal_ref": principal,
+                "from_mode": prior_mode,
+                "to_mode": validated_mode,
+            },
+        )
+
+    assert len(captured) == 1
+    record = captured[0]
+    assert record["event_kind"] == "permission.step_up"
+    assert record["payload"] == {
+        "principal_ref": "operator:nate",
+        "from_mode": "plan_only",
+        "to_mode": "auto_edits",
+    }
+
+
+def test_step_up_event_NOT_emitted_when_mode_stays_or_drops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from surfaces.api import agent_sessions
+
+    captured: list[dict[str, object]] = []
+
+    def fake_append(conn, *, agent_id, event_kind, payload=None, text_content=None, **_ignore):
+        captured.append({"event_kind": event_kind})
+        return len(captured)
+
+    monkeypatch.setattr(agent_sessions, "append_interactive_agent_event", fake_append)
+
+    # Prior auto_edits; new propose_edits → step-down, no event.
+    monkeypatch.setattr(
+        agent_sessions,
+        "_most_recent_permission_mode",
+        lambda conn, *, agent_id: "auto_edits",
+    )
+    validated = agent_sessions._validate_permission_mode("propose_edits")
+    prior = agent_sessions._most_recent_permission_mode(object(), agent_id="a")
+    if agent_sessions.is_permission_step_up(prior, validated):
+        fake_append(object(), agent_id="a", event_kind="permission.step_up")
+
+    assert captured == []
+
+
+def test_step_up_event_NOT_emitted_on_first_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No prior mode (fresh agent) → no step-up even when starting at full_autonomy.
+    from surfaces.api import agent_sessions
+
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        agent_sessions,
+        "append_interactive_agent_event",
+        lambda *a, **k: captured.append(k.get("event_kind")) or 1,
+    )
+    monkeypatch.setattr(
+        agent_sessions,
+        "_most_recent_permission_mode",
+        lambda conn, *, agent_id: None,
+    )
+
+    validated = agent_sessions._validate_permission_mode("full_autonomy")
+    prior = agent_sessions._most_recent_permission_mode(object(), agent_id="a")
+    assert not agent_sessions.is_permission_step_up(prior, validated)
 
 
 # --- Console HTML plan-approval markers (B.3) ------------------------------

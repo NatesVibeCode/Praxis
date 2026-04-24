@@ -31,8 +31,10 @@ __all__ = [
     "ALLOWED_PERMISSION_MODES",
     "DEFAULT_PERMISSION_MODE",
     "NormalizedPermissionMode",
+    "PERMISSION_MODE_RANK",
     "PermissionMatrixError",
     "SUPPORTED_CLI_PROVIDERS",
+    "is_permission_step_up",
     "translate_permission_flags",
 ]
 
@@ -56,6 +58,17 @@ ALLOWED_PERMISSION_MODES: tuple[NormalizedPermissionMode, ...] = (
 
 
 DEFAULT_PERMISSION_MODE: NormalizedPermissionMode = "propose_edits"
+
+
+# Strict ordinal ranking of permission modes. Used for step-up detection:
+# a transition is a step-up iff RANK[to] > RANK[from].
+PERMISSION_MODE_RANK: dict[NormalizedPermissionMode, int] = {
+    "read_only":     0,
+    "plan_only":     1,
+    "propose_edits": 2,
+    "auto_edits":    3,
+    "full_autonomy": 4,
+}
 
 
 SUPPORTED_CLI_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "gemini"})
@@ -124,6 +137,26 @@ _MATRIX: dict[str, dict[NormalizedPermissionMode, tuple[str, ...]]] = {
     "codex":  _CODEX_MATRIX,
     "gemini": _GEMINI_MATRIX,
 }
+
+
+def is_permission_step_up(
+    from_mode: NormalizedPermissionMode | str | None,
+    to_mode: NormalizedPermissionMode | str | None,
+) -> bool:
+    """True iff ``to_mode`` is strictly more privileged than ``from_mode``.
+
+    Returns False when either mode is unknown, when they are equal, or when
+    ``to_mode`` is less privileged (a step-down). Unknown modes never count
+    as step-ups — they are silently ignored so an audit stream cannot be
+    poisoned by typo'd modes.
+    """
+    if from_mode is None or to_mode is None:
+        return False
+    from_rank = PERMISSION_MODE_RANK.get(from_mode)  # type: ignore[arg-type]
+    to_rank = PERMISSION_MODE_RANK.get(to_mode)  # type: ignore[arg-type]
+    if from_rank is None or to_rank is None:
+        return False
+    return to_rank > from_rank
 
 
 def translate_permission_flags(
