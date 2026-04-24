@@ -3,22 +3,21 @@ from __future__ import annotations
 
 from typing import Any
 
+from surfaces.placeholder_ids import is_demo_placeholder, placeholder_error
+
 from ..subsystems import _subs
 
 
-_PLACEHOLDER_SANDBOX_IDS = frozenset({"sandbox_abc123"})
-
-
-def _resolve_sandbox_id(store, params: dict) -> tuple[str, str | None]:
+def _resolve_sandbox_id(params: dict) -> tuple[str, dict | None]:
     requested = str(params.get("sandbox_id", "") or "").strip()
-    if requested and requested not in _PLACEHOLDER_SANDBOX_IDS:
-        return requested, None
-    sandbox_id = store.latest_sandbox_id()
-    if not sandbox_id:
-        return "", "sandbox_id is required and no sandbox artifacts were found"
-    if requested in _PLACEHOLDER_SANDBOX_IDS:
-        return sandbox_id, f"{requested} is a placeholder; using latest sandbox {sandbox_id}"
-    return sandbox_id, f"sandbox_id omitted; using latest sandbox {sandbox_id}"
+    if is_demo_placeholder("sandbox_id", requested):
+        return "", placeholder_error("sandbox_id", requested)
+    if not requested:
+        return "", {
+            "error": "sandbox_id is required for list",
+            "reason_code": "sandbox_id.required",
+        }
+    return requested, None
 
 
 def tool_praxis_artifacts(params: dict) -> dict:
@@ -33,15 +32,12 @@ def tool_praxis_artifacts(params: dict) -> dict:
         return s
 
     if action == "list":
-        sandbox_id, note = _resolve_sandbox_id(store, params)
+        sandbox_id, error_payload = _resolve_sandbox_id(params)
         if not sandbox_id:
-            return {"error": note or "sandbox_id is required for list"}
+            return error_payload or {"error": "sandbox_id is required for list"}
         items = store.list_by_sandbox(sandbox_id)
         if not items:
-            payload = {"sandbox_id": sandbox_id, "count": 0, "message": f"No artifacts for sandbox {sandbox_id}."}
-            if note:
-                payload["note"] = note
-            return payload
+            return {"sandbox_id": sandbox_id, "count": 0, "message": f"No artifacts for sandbox {sandbox_id}."}
         payload = {
             "sandbox_id": sandbox_id,
             "count": len(items),
@@ -56,8 +52,6 @@ def tool_praxis_artifacts(params: dict) -> dict:
                 for a in items
             ],
         }
-        if note:
-            payload["note"] = note
         return payload
 
     if action == "search":
@@ -101,8 +95,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "or compare two versions of an artifact.\n\n"
                 "EXAMPLES:\n"
                 "  Overall stats:     praxis_artifacts(action='stats')\n"
-                "  List latest run:   praxis_artifacts(action='list')\n"
-                "  List by sandbox:   praxis_artifacts(action='list', sandbox_id='sandbox_abc123')\n"
+                "  List by sandbox:   praxis_artifacts(action='list', sandbox_id='sandbox_20260423_001')\n"
                 "  Search outputs:    praxis_artifacts(action='search', query='migration schema')\n"
                 "  Compare versions:  praxis_artifacts(action='diff', artifact_id_a='art_1', artifact_id_b='art_2')"
             ),
@@ -114,7 +107,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": "Operation: 'stats', 'list', 'search', or 'diff'.",
                         "enum": ["stats", "list", "search", "diff"],
                     },
-                    "sandbox_id": {"type": "string", "description": "Sandbox ID (for list)."},
+                    "sandbox_id": {"type": "string", "description": "Sandbox ID (required for list)."},
                     "query": {"type": "string", "description": "Search query (for search)."},
                     "artifact_id_a": {"type": "string", "description": "First artifact ID (for diff)."},
                     "artifact_id_b": {"type": "string", "description": "Second artifact ID (for diff)."},

@@ -1,5 +1,12 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { compileDefinition, refineDefinition, commitDefinition, createWorkflow, suggestNextSteps } from '../shared/buildController';
+import {
+  compileDefinition,
+  refineDefinition,
+  commitDefinition,
+  createWorkflow,
+  progressiveBuildStep,
+  suggestNextSteps,
+} from '../shared/buildController';
 import type { BuildPayload } from '../shared/types';
 import { loadCatalogEnvelope, refreshCatalogEnvelope, getCatalogEnvelope, FAMILY_LABELS } from './catalog';
 import type { CatalogEnvelope, CatalogItem, CatalogFamily } from './catalog';
@@ -149,6 +156,13 @@ export function MoonActionDock({
   const hasDefinition = !!(payload?.definition && Object.keys(payload.definition).length > 0);
   const hasGraphSteps = !!payload?.build_graph?.nodes?.some(node => (node.route || '').trim().length > 0);
   const buildState = payload?.build_state || 'draft';
+  const progressiveBuild = payload?.progressive_build;
+  const progressiveSource = prose.trim()
+    || progressiveBuild?.source_prose?.trim()
+    || (typeof payload?.definition?.source_prose === 'string' ? payload.definition.source_prose.trim() : '');
+  const progressiveUnit = progressiveBuild?.last_unit;
+  const progressiveChecks = progressiveBuild?.checks ?? [];
+  const progressiveCompletion = progressiveBuild?.completion;
 
   const adoptBuildPayload = useCallback((nextPayload: BuildPayload) => {
     const workflow = nextPayload.workflow
@@ -180,6 +194,39 @@ export function MoonActionDock({
       setLoading(false);
     }
   }, [adoptBuildPayload, payload, prose]);
+
+  const handleProgressiveStep = useCallback(async () => {
+    if (!progressiveSource) return;
+    setLoading(true);
+    setAction('progressive');
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await progressiveBuildStep(progressiveSource, {
+        workflowId: payload?.workflow?.id ?? workflowId,
+        title: payload?.workflow?.name,
+        buildGraph: payload?.build_graph ?? null,
+      });
+      adoptBuildPayload(result);
+      const createdWorkflowId = result.workflow?.id;
+      if (createdWorkflowId && createdWorkflowId !== workflowId) onWorkflowCreated?.(createdWorkflowId);
+      const unitTitle = result.progressive_build?.last_unit?.title || 'unit';
+      setSuccess(`Accepted ${unitTitle}`);
+      setProse('');
+    } catch (e: any) {
+      setError(e.message || 'Progressive build failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    adoptBuildPayload,
+    onWorkflowCreated,
+    payload?.build_graph,
+    payload?.workflow?.id,
+    payload?.workflow?.name,
+    progressiveSource,
+    workflowId,
+  ]);
 
   const handleCompile = useCallback(async () => {
     if (!prose.trim()) return;
@@ -265,24 +312,72 @@ export function MoonActionDock({
       <div className="moon-dock__sep" />
 
       <div className="moon-dock__section-label">
-        {hasDefinition ? 'Refine the definition' : 'Describe the workflow'}
+        {hasDefinition ? 'Add the next checked unit' : 'Describe the workflow'}
       </div>
       <textarea
         className="moon-dock-form__input moon-action__textarea"
         value={prose}
         onChange={e => setProse(e.target.value)}
-        placeholder={hasDefinition ? 'Add detail or change direction...' : 'Describe the workflow...'}
+        placeholder={hasDefinition ? 'Add detail, or keep using the original intent...' : 'Describe the workflow...'}
         rows={2}
         disabled={loading}
       />
-      <div className="moon-dock-form__row">
+
+      <div className="moon-action__compiler-loop">
+        <div className="moon-action__compiler-head">
+          <div>
+            <div className="moon-dock__section-label">Compiler loop</div>
+            <div className="moon-action__surface-note">One accepted unit per pass · draft only until saved</div>
+          </div>
+          <span className="moon-action__compiler-count">
+            {progressiveCompletion?.accepted ?? 0}/{progressiveCompletion?.planned ?? 0}
+          </span>
+        </div>
+        {progressiveUnit ? (
+          <div className="moon-action__unit-card">
+            <div className="moon-action__unit-topline">
+              <span>{progressiveUnit.title || progressiveUnit.node_id}</span>
+              <span>{progressiveUnit.route || 'route pending'}</span>
+            </div>
+            {progressiveUnit.summary && (
+              <div className="moon-action__unit-summary">{progressiveUnit.summary}</div>
+            )}
+            <div className="moon-action__unit-meta">
+              <span>{progressiveUnit.gate_label || 'compiler accepted'}</span>
+              <span>{progressiveUnit.outputs?.length ? progressiveUnit.outputs.join(', ') : 'no outputs yet'}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="moon-action__unit-empty">
+            The next pass adds one node, one release gate, and a compiler receipt.
+          </div>
+        )}
+        {progressiveChecks.length > 0 && (
+          <div className="moon-action__check-list">
+            {progressiveChecks.map(check => (
+              <div key={check.id} className={`moon-action__check moon-action__check--${check.state}`}>
+                <span className="moon-action__check-state">{check.state}</span>
+                <span className="moon-action__check-copy">
+                  <span>{check.label}</span>
+                  {check.detail && <span>{check.detail}</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="moon-dock-form__row moon-action__build-actions">
+        <button className="moon-dock-form__btn" onClick={handleProgressiveStep} disabled={loading || !progressiveSource}>
+          {loading && action === 'progressive' ? 'Checking...' : hasDefinition ? 'Add checked unit' : 'Start checked build'}
+        </button>
         {hasDefinition ? (
-          <button className="moon-dock-form__btn" onClick={handleRefine} disabled={loading || !prose.trim()}>
-            {loading && action === 'refine' ? 'Refining...' : 'Refine'}
+          <button className="moon-dock-form__btn moon-dock-form__btn--secondary" onClick={handleRefine} disabled={loading || !prose.trim()}>
+            {loading && action === 'refine' ? 'Resolving...' : 'Resolve all'}
           </button>
         ) : (
-          <button className="moon-dock-form__btn" onClick={handleCompile} disabled={loading || !prose.trim()}>
-            {loading && action === 'compile' ? 'Compiling...' : 'Compile'}
+          <button className="moon-dock-form__btn moon-dock-form__btn--secondary" onClick={handleCompile} disabled={loading || !prose.trim()}>
+            {loading && action === 'compile' ? 'Resolving...' : 'Resolve all'}
           </button>
         )}
       </div>

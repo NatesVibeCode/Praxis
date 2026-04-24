@@ -7,8 +7,8 @@ from runtime.primitive_contracts import bug_query_default_open_only_list
 from surfaces.api.handlers import _bug_surface_contract as _bug_contract
 
 from ..runtime_context import get_current_workflow_mcp_context
-from ..subsystems import _subs
 from ..helpers import _bug_to_dict, _serialize
+from ..subsystems import _subs
 
 _DESC_TRUNCATE = 200
 

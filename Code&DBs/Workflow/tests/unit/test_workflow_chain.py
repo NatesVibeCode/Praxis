@@ -218,6 +218,68 @@ def test_spec_rows_use_runtime_workflow_id_and_queue_id(monkeypatch, tmp_path: P
     ]
 
 
+def test_submit_workflow_chain_uses_validated_specs_for_rows(monkeypatch, tmp_path: Path) -> None:
+    spec_path = tmp_path / "spec_a.json"
+    _write_spec(spec_path, name="Spec A")
+    coordination = tmp_path / "chain.json"
+    coordination.write_text(
+        json.dumps(
+            {
+                "program": "phase_one_chain",
+                "validate_order": ["spec_a.json"],
+                "waves": [{"wave_id": "wave_a", "specs": ["spec_a.json"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    spec = SimpleNamespace(
+        name="Spec A",
+        workflow_id="workflow.spec_a",
+        jobs=[{"label": "a"}],
+        _raw={"queue_id": "queue-alpha"},
+    )
+    load_calls: list[str] = []
+
+    def _load_once(_cls, path: str):
+        load_calls.append(path)
+        return spec
+
+    class _SubmitConn:
+        def __init__(self) -> None:
+            self.queries: list[tuple[str, tuple]] = []
+
+        def execute(self, query: str, *args):
+            self.queries.append((query, args))
+            return []
+
+    monkeypatch.setattr(workflow_chain, "bootstrap_workflow_chain_schema", lambda _conn: None)
+    monkeypatch.setattr(workflow_chain, "advance_workflow_chains", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(workflow_chain, "emit_system_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "runtime.workflow_spec.WorkflowSpec.load",
+        classmethod(_load_once),
+    )
+    monkeypatch.setattr(
+        "runtime.workflow_validation.validate_workflow_spec",
+        lambda _spec, pg_conn: {"valid": True},
+    )
+    monkeypatch.setattr(
+        "runtime.workflow._shared._workflow_id_for_spec",
+        lambda _spec: "workflow.spec_a.runtime",
+    )
+
+    workflow_chain.submit_workflow_chain(
+        _SubmitConn(),
+        coordination_path=str(coordination),
+        repo_root=str(tmp_path),
+        requested_by_kind="test",
+        requested_by_ref="test.case",
+        chain_id="workflow_chain_test",
+    )
+
+    assert load_calls == [str(spec_path)]
+
+
 def test_get_workflow_chain_status_preserves_full_depends_on_list(monkeypatch) -> None:
     class _FakeConn:
         def execute(self, query: str, *args):

@@ -9,6 +9,9 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
+from runtime.wave_orchestrator import WaveOrchestrator
 from surfaces.api.handlers import workflow_run
 
 
@@ -408,6 +411,37 @@ def test_workflow_spawn_post_uses_spawn_command_bus_helper() -> None:
     status, payload = request.sent
     assert status == 200
     assert payload["run_id"] == "dispatch_spawn_002"
+
+
+def test_workflow_wave_next_requires_explicit_wave_id() -> None:
+    orch = WaveOrchestrator("orch-api")
+    orch.add_wave("wave-live", [{"label": "build"}])
+    orch.start_wave("wave-live")
+    subs = SimpleNamespace(get_wave_orchestrator=lambda: orch)
+
+    with pytest.raises(workflow_run._ClientError, match="wave_id is required"):
+        workflow_run._handle_wave(subs, {"action": "next"})
+
+
+def test_workflow_wave_rejects_demo_placeholder() -> None:
+    orch = WaveOrchestrator("orch-api")
+    orch.add_wave("wave-live", [{"label": "build"}])
+    orch.start_wave("wave-live")
+    subs = SimpleNamespace(get_wave_orchestrator=lambda: orch)
+
+    with pytest.raises(workflow_run._ClientError, match="example placeholder"):
+        workflow_run._handle_wave(subs, {"action": "next", "wave_id": "wave_abc123"})
+
+
+def test_workflow_wave_next_accepts_explicit_wave_id() -> None:
+    orch = WaveOrchestrator("orch-api")
+    orch.add_wave("wave-live", [{"label": "build"}])
+    orch.start_wave("wave-live")
+    subs = SimpleNamespace(get_wave_orchestrator=lambda: orch)
+
+    result = workflow_run._handle_wave(subs, {"action": "next", "wave_id": "wave-live"})
+
+    assert result == {"wave_id": "wave-live", "runnable_jobs": ["build"]}
 
 
 def test_spawn_workflow_via_service_bus_uses_control_command_request(monkeypatch) -> None:

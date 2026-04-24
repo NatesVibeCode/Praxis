@@ -41,6 +41,13 @@ def _embedding_service() -> EmbeddingService:
     return EmbeddingService(authority=resolve_embedding_runtime_authority())
 
 
+def _client_http_base_url(*, host: str, port: int) -> str:
+    display_host = host.strip()
+    if display_host in {"0.0.0.0", "::", "[::]"}:
+        display_host = "localhost"
+    return f"http://{display_host}:{port}"
+
+
 def _materialize_app():
     from fastapi import FastAPI
 
@@ -98,9 +105,11 @@ def start_server(host: str = "0.0.0.0", port: int = 8421) -> None:
     except ImportError as exc:  # pragma: no cover - dependency contract should prevent this
         raise RuntimeError("uvicorn is required: pip install uvicorn") from exc
 
-    print(f"Starting Praxis semantic backend on http://{host}:{port}")
+    client_base_url = _client_http_base_url(host=host, port=port)
+    print(f"Starting Praxis semantic backend on {client_base_url}")
+    print(f"  Bind: http://{host}:{port}")
     print(f"Dependency contract: {report['manifest_path']}")
-    print(f"  Health: http://localhost:{port}/health")
+    print(f"  Health: {client_base_url}/health")
     print("Press Ctrl+C to stop.\n")
     uvicorn.run(app, host=host, port=port, log_level="info")
 

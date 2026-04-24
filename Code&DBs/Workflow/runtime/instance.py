@@ -348,15 +348,28 @@ def _fallback_native_instance(
     )
 
 
-def native_instance_contract(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Return the resolved repo-local native workflow instance contract."""
+def native_instance_contract(
+    env: Mapping[str, str] | None = None,
+    *,
+    allow_authority_fallback: bool = False,
+) -> dict[str, str]:
+    """Return the resolved repo-local native workflow instance contract.
+
+    Postgres-backed runtime profile authority is the default proof path.  A
+    repo-local fallback is available only for explicitly degraded setup/status
+    surfaces, and the returned payload says so.
+    """
 
     try:
         return resolve_native_instance(env=env).to_contract()
     except NativeInstanceResolutionError as exc:
-        if exc.reason_code != "native_instance.authority_unavailable":
+        if exc.reason_code != "native_instance.authority_unavailable" or not allow_authority_fallback:
             raise
-        return _fallback_native_instance(env=env).to_contract()
+        contract = _fallback_native_instance(env=env).to_contract()
+        contract["authority_state"] = "degraded"
+        contract["authority_reason_code"] = exc.reason_code
+        contract["authority_error"] = str(exc)
+        return contract
 
 
 __all__ = [

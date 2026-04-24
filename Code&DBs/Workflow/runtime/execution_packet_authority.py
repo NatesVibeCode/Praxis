@@ -71,6 +71,79 @@ def _dedupe_strings(values: Sequence[str]) -> list[str]:
     return ordered
 
 
+def resolve_execution_packet_revisions(
+    *,
+    raw_snapshot: dict[str, Any],
+    spec: Any,
+    workflow_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    """Resolve packet revisions once and stamp their provenance.
+
+    Queue and chain runs may need deterministic synthetic revisions for
+    diagnostic packet rows, but that provenance must remain explicit so they
+    are never mistaken for compile-index-backed revisions.
+    """
+
+    definition_revision = str(raw_snapshot.get("definition_revision") or "").strip()
+    plan_revision = str(raw_snapshot.get("plan_revision") or "").strip()
+    had_definition_revision = bool(definition_revision)
+    had_plan_revision = bool(plan_revision)
+
+    spec_jobs = raw_snapshot.get("jobs")
+    if not isinstance(spec_jobs, list):
+        spec_jobs = [dict(j) for j in getattr(spec, "jobs", ()) or ()]
+    canonicalized_jobs = []
+    for job in spec_jobs:
+        if not isinstance(job, Mapping):
+            continue
+        canonicalized_jobs.append(
+            {k: _json_clone(v) for k, v in job.items() if k not in {"_route_plan"}}
+        )
+    spec_fingerprint = {
+        "workflow_id": workflow_id,
+        "name": raw_snapshot.get("name") or getattr(spec, "name", ""),
+        "task_type": raw_snapshot.get("task_type") or getattr(spec, "task_type", ""),
+        "jobs": canonicalized_jobs,
+    }
+
+    from runtime.compile_reuse import stable_hash
+
+    synthetic_fields: list[str] = []
+    if not definition_revision:
+        definition_revision = f"def_{stable_hash(spec_fingerprint)[:16]}"
+        synthetic_fields.append("definition_revision")
+    if not plan_revision:
+        plan_revision = f"plan_{stable_hash({'definition_revision': definition_revision, 'fingerprint': spec_fingerprint})[:16]}"
+        synthetic_fields.append("plan_revision")
+
+    if had_definition_revision and had_plan_revision:
+        provenance_kind = "compiled"
+    elif synthetic_fields and (had_definition_revision or had_plan_revision):
+        provenance_kind = "partial_synthetic"
+    else:
+        provenance_kind = "synthetic"
+
+    authority = {
+        "kind": "execution_packet_revision_authority",
+        "provenance_kind": provenance_kind,
+        "definition_revision": definition_revision,
+        "plan_revision": plan_revision,
+        "synthetic_fields": synthetic_fields,
+        "reason_code": (
+            "packet.revision.compiled"
+            if provenance_kind == "compiled"
+            else "packet.revision.synthetic_fallback"
+        ),
+        "workflow_id": str(workflow_id or "").strip(),
+        "run_id": str(run_id or "").strip(),
+    }
+    raw_snapshot["definition_revision"] = definition_revision
+    raw_snapshot["plan_revision"] = plan_revision
+    raw_snapshot["packet_revision_authority"] = authority
+    return authority
+
+
 def build_execution_packet_lineage_payload(
     packet: Mapping[str, Any],
     *,
@@ -84,6 +157,9 @@ def build_execution_packet_lineage_payload(
         "workflow_id": str(packet.get("workflow_id") or "").strip(),
         "spec_name": str(packet.get("spec_name") or "").strip(),
         "source_kind": str(packet.get("source_kind") or "").strip(),
+        "packet_revision_authority": _json_mapping(
+            _json_clone(packet.get("packet_revision_authority"))
+        ),
         "authority_refs": list(_json_sequence(packet.get("authority_refs"))),
         "model_messages": _mapping_list(_json_clone(packet.get("model_messages"))),
         "reference_bindings": _mapping_list(_json_clone(packet.get("reference_bindings"))),
@@ -194,6 +270,9 @@ def inspect_execution_packets(
             "authority_refs": list(_json_sequence(current_packet.get("authority_refs"))),
             "verify_refs": _dedupe_strings(_string_list(current_packet.get("verify_refs"))),
             "packet_provenance": _json_clone(current_packet_provenance),
+            "packet_revision_authority": _json_mapping(
+                current_packet.get("packet_revision_authority")
+            ),
         }
     else:
         spec_snapshot = _json_mapping(execution.get("spec_snapshot"))
@@ -222,6 +301,9 @@ def inspect_execution_packets(
             "authority_refs": [ref for ref in (definition_revision, plan_revision) if ref],
             "verify_refs": _dedupe_strings(_string_list(spec_snapshot.get("verify_refs"))),
             "packet_provenance": request_envelope_provenance,
+            "packet_revision_authority": _json_mapping(
+                spec_snapshot.get("packet_revision_authority")
+            ),
         }
 
     actual = {
@@ -234,6 +316,9 @@ def inspect_execution_packets(
         "authority_refs": list(_json_sequence(current_packet.get("authority_refs"))),
         "verify_refs": _dedupe_strings(_string_list(current_packet.get("verify_refs"))),
         "packet_provenance": _json_clone(current_packet_provenance),
+        "packet_revision_authority": _json_mapping(
+            current_packet.get("packet_revision_authority")
+        ),
     }
     differences = _packet_differences(expected=expected, actual=actual)
     drift_status = "aligned" if not differences else "drifted"
@@ -353,6 +438,7 @@ def _packet_differences(
         "authority_refs",
         "verify_refs",
         "packet_provenance",
+        "packet_revision_authority",
     ):
         expected_value = _json_clone(expected.get(field_name))
         actual_value = _json_clone(actual.get(field_name))
@@ -373,4 +459,5 @@ __all__ = [
     "inspect_execution_packets",
     "packet_inspection_from_row",
     "rebuild_workflow_run_packet_inspection",
+    "resolve_execution_packet_revisions",
 ]

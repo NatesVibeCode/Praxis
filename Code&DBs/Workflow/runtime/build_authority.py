@@ -427,6 +427,57 @@ def _collect_issues(
             }
         )
 
+    phases = execution_setup.get("phases") if isinstance(execution_setup.get("phases"), list) else []
+    if phases:
+        phase_by_step_id = {
+            _as_text(phase.get("step_id")): phase
+            for phase in phases
+            if isinstance(phase, dict) and _as_text(phase.get("step_id"))
+        }
+        for step in ordered_steps:
+            step_id = _as_text(step.get("id"))
+            if not step_id:
+                continue
+            phase = phase_by_step_id.get(step_id)
+            route = _as_text(phase.get("agent_route") or phase.get("resolved_agent_slug")) if phase else ""
+            if not route:
+                issues.append(
+                    {
+                        "issue_id": f"issue:missing-route:{step_id}",
+                        "kind": "missing_route",
+                        "node_id": step_id,
+                        "binding_id": None,
+                        "label": "Choose how this step runs",
+                        "summary": "This step has no executable route yet, so the workflow cannot be hardened or run.",
+                        "severity": "blocking",
+                        "gate_rule": {"required_field": "execution_setup.phases.agent_route"},
+                    }
+                )
+                continue
+            if route == "@workflow/invoke":
+                integration_args = phase.get("integration_args") if isinstance(phase.get("integration_args"), dict) else {}
+                target_workflow_id = (
+                    _as_text(integration_args.get("target_workflow_id"))
+                    or _as_text(integration_args.get("workflow_id"))
+                )
+                if not target_workflow_id:
+                    issues.append(
+                        {
+                            "issue_id": f"issue:missing-workflow-target:{step_id}",
+                            "kind": "missing_workflow_target",
+                            "node_id": step_id,
+                            "binding_id": None,
+                            "label": "Choose a workflow to invoke",
+                            "summary": "This step is set to invoke another workflow, but no target workflow is selected.",
+                            "severity": "blocking",
+                            "gate_rule": {
+                                "route": route,
+                                "required_field": "integration_args.target_workflow_id",
+                            },
+                        }
+                    )
+                    continue
+
     for snapshot in import_snapshots:
         freshness = _snapshot_freshness(snapshot)
         if not freshness or freshness.get("state") != "stale" or not _as_text(snapshot.get("node_id")):

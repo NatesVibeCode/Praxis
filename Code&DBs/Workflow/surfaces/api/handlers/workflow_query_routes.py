@@ -60,6 +60,7 @@ QUERY_POST_ROUTES: list[RouteEntry] = [
         _handler._handle_documents_post,
     ),
     (_exact("/api/files"), _handler._handle_files_post),
+    (_workflow_build_path, _handler._handle_workflow_build_post),
     (
         lambda candidate: candidate in {
             "/api/objects",

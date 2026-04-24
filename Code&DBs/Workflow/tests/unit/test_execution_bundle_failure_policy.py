@@ -2,9 +2,26 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from adapters.deterministic import DeterministicTaskRequest
+from adapters.task_profiles import TaskProfile
 from runtime._helpers import _fail
 from runtime.workflow.execution_bundle import _completion_contract, build_execution_bundle
+
+
+@pytest.fixture(autouse=True)
+def _task_profile_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "runtime.workflow.execution_bundle.resolve_profile",
+        lambda task_type: TaskProfile(
+            task_type=task_type,
+            allowed_tools=("Read", "Write"),
+            default_tier="mid",
+            file_attach=False,
+            system_prompt_hint=f"{task_type} profile",
+        ),
+    )
 
 
 def test_architecture_jobs_do_not_auto_require_submission() -> None:

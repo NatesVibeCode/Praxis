@@ -11,7 +11,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from adapters.task_profiles import infer_task_type, merge_allowed_tools, try_resolve_profile
+from adapters.task_profiles import infer_task_type, merge_allowed_tools, resolve_profile
 from surfaces.mcp.catalog import canonical_tool_name, get_tool_catalog
 from .decision_context import render_decision_pack
 from .artifact_contracts import (
@@ -379,7 +379,7 @@ def build_execution_bundle(
         or (
             "approved_execution"
             if require_manifest_authority or manifest_mcp_tools or manifest_allowed_tools
-            else infer_task_type(prompt, label=job_label)
+            else infer_task_type(prompt, label=job_label, require_authority=True)
         )
     )
     normalized_capabilities = _dedupe_strings(_string_list(capabilities))
@@ -404,7 +404,7 @@ def build_execution_bundle(
         if mutation_requires_submission and not str(result_kind or "").strip()
         else result_kind
     )
-    profile = try_resolve_profile(_profile_task_type(normalized_task_type))
+    profile = resolve_profile(_profile_task_type(normalized_task_type))
     normalized_allowed_tools = (
         manifest_allowed_tools
         if manifest_allowed_tools
@@ -412,7 +412,7 @@ def build_execution_bundle(
             [
                 canonical_tool_name(tool)
                 for tool in merge_allowed_tools(
-                    profile.allowed_tools if profile is not None else (),
+                    profile.allowed_tools,
                     _string_list(allowed_tools),
                 )
             ]

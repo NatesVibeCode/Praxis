@@ -7,8 +7,9 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 import hashlib
 import os
+import socket
 import threading as _threading
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 
@@ -17,7 +18,11 @@ from storage.migrations import workflow_compile_authority_readiness_tables
 
 WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 WORKFLOW_POOL_ACQUIRE_TIMEOUT_ENV = "WORKFLOW_POOL_ACQUIRE_TIMEOUT_S"
+HOST_SHELL_DATABASE_HOST_ENV = "PRAXIS_HOST_SHELL_DATABASE_HOST"
+DISABLE_HOST_DOCKER_INTERNAL_REWRITE_ENV = "PRAXIS_DISABLE_HOST_DOCKER_INTERNAL_REWRITE"
 _POSTGRES_SCHEMES = ("postgresql://", "postgres://")
+_HOST_DOCKER_INTERNAL = "host.docker.internal"
+_DEFAULT_HOST_SHELL_DATABASE_HOST = "localhost"
 _DEFAULT_POOL_ACQUIRE_TIMEOUT_S = 5.0
 
 _workflow_pool: asyncpg.Pool | None = None
@@ -75,6 +80,60 @@ def _pool_acquire_timeout_s() -> float:
     except (TypeError, ValueError):
         return _DEFAULT_POOL_ACQUIRE_TIMEOUT_S
     return timeout if timeout > 0 else _DEFAULT_POOL_ACQUIRE_TIMEOUT_S
+
+
+def _truthy_env(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _running_inside_container(env: Mapping[str, str] | None = None) -> bool:
+    source = env if env is not None else os.environ
+    if str(source.get("container") or "").strip():
+        return True
+    return os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
+
+
+def _hostname_resolves(hostname: str) -> bool:
+    try:
+        socket.getaddrinfo(hostname, None)
+    except OSError:
+        return False
+    return True
+
+
+def _replace_database_url_hostname(database_url: str, replacement_host: str) -> str:
+    parsed = urlsplit(database_url)
+    userinfo, separator, hostport = parsed.netloc.rpartition("@")
+    if not hostport.lower().startswith(_HOST_DOCKER_INTERNAL):
+        return database_url
+    updated_hostport = replacement_host + hostport[len(_HOST_DOCKER_INTERNAL) :]
+    updated_netloc = f"{userinfo}{separator}{updated_hostport}" if separator else updated_hostport
+    return urlunsplit((parsed.scheme, updated_netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def _normalize_host_shell_database_url(
+    database_url: str,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    parsed = urlsplit(database_url)
+    hostname = (parsed.hostname or "").lower()
+    if hostname != _HOST_DOCKER_INTERNAL:
+        return database_url
+    source = env if env is not None else os.environ
+    if _truthy_env(source.get(DISABLE_HOST_DOCKER_INTERNAL_REWRITE_ENV)):
+        return database_url
+    if _running_inside_container(source):
+        return database_url
+    if _hostname_resolves(_HOST_DOCKER_INTERNAL):
+        return database_url
+    replacement_host = (
+        str(source.get(HOST_SHELL_DATABASE_HOST_ENV) or "").strip()
+        or _DEFAULT_HOST_SHELL_DATABASE_HOST
+    )
+    if not replacement_host or replacement_host.lower() == _HOST_DOCKER_INTERNAL:
+        return database_url
+    return _replace_database_url_hostname(database_url, replacement_host)
 
 
 def _pool_acquire_timeout_error(
@@ -157,7 +216,7 @@ def resolve_workflow_database_url(
             },
         )
 
-    return database_url
+    return _normalize_host_shell_database_url(database_url, env=source)
 
 
 def resolve_workflow_authority_cache_key(

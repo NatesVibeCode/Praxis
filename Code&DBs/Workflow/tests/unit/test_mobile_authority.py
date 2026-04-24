@@ -98,6 +98,16 @@ class _BootstrapExchangeConn:
                     "revoked_at": self.revoked_at,
                 }
             ]
+        if "INSERT INTO device_enrollments" in sql:
+            return [
+                {
+                    "device_id": args[0],
+                    "principal_ref": args[1],
+                    "device_label": args[4],
+                    "enrolled_at": args[5],
+                    "last_asserted_at": args[5],
+                }
+            ]
         if "INSERT INTO mobile_sessions" in sql:
             return [
                 {
@@ -341,6 +351,7 @@ def test_bootstrap_exchange_hashes_consumes_token_and_creates_session() -> None:
     assert exchange["session_token_secret"] == "session-secret"
     assert conn.consumed_session_id == exchange["session"]["session_id"]
     assert any("WHERE token_hash = $1" in statement for statement in conn.statements)
+    assert any("INSERT INTO device_enrollments" in statement for statement in conn.statements)
     assert any("UPDATE mobile_bootstrap_tokens" in statement for statement in conn.statements)
 
 

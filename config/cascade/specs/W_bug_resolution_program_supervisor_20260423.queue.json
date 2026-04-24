@@ -1,0 +1,102 @@
+{
+  "name": "Bug Resolution Program Supervisor",
+  "workflow_id": "bug_resolution_program_supervisor_20260423",
+  "queue_id": "bug_resolution_program_supervisor_20260423",
+  "phase": "W",
+  "outcome_goal": "Freeze the current bug backlog into one coordination artifact, review the authority blockers, materialize bounded packet specs, and open wave tracking for the bug-resolution program.",
+  "anti_requirements": [
+    "Do NOT treat new bugs after kickoff as part of this frozen program unless they are regressions caused by the program itself.",
+    "Do NOT resolve FIXED without validates_fix evidence.",
+    "Do NOT move bug authority into ad hoc SQL or sidecar spreadsheets.",
+    "Do NOT launch more than five concurrent execution lanes from the materialized packets."
+  ],
+  "target_repo": ".",
+  "workdir": ".",
+  "jobs": [
+    {
+      "label": "freeze_bug_backlog",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.bug_resolution_program_supervisor.freeze_bug_backlog"
+      ],
+      "description": "Capture the kickoff bug snapshot and lane mapping from the live bug surfaces.",
+      "outcome_goal": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json exists and records either a frozen snapshot or a precise authority blocker state.",
+      "prompt": "From the repo root supplied by the runtime workdir, run:\n\n```bash\npython3 scripts/bug_resolution_program.py freeze --program-id bug_resolution_program_20260423 --output Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json\n```\n\nIf the resulting coordination file has `coordination_state != \"frozen\"`, do not pretend the program is ready. Write `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE0_BLOCKED_20260423.md` explaining which authority probes failed and why the backlog could not be frozen yet.\n\nDo not edit runtime code in this job.",
+      "read": [
+        "scripts/bug_resolution_program.py",
+        "Code&DBs/Workflow/runtime/bug_resolution_program.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE0_BLOCKED_20260423.md"
+      ],
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json"
+    },
+    {
+      "label": "review_wave_zero_gate",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "freeze_bug_backlog"
+      ],
+      "description": "Review the coordination file and spell out the exact Wave 0 authority exit gate.",
+      "outcome_goal": "A short review artifact names the blocking bugs, exact gate checks, and what must pass before broad packet execution begins.",
+      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json`.\n\nWrite `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE0_GATE_20260423.md` with:\n1. Current coordination state\n2. Authority probes and pass/fail result\n3. Wave 0 packets or blocking bugs\n4. Exact exit gate for moving to Wave 1\n5. Residual risks if the team skips authority repair\n\nKeep it grounded in the coordination file; do not invent backlog details that are not in the artifact.",
+      "read": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json"
+      ],
+      "write": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE0_GATE_20260423.md"
+      ],
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE0_GATE_20260423.md"
+    },
+    {
+      "label": "materialize_packet_specs",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.bug_resolution_program_supervisor.materialize_packet_specs"
+      ],
+      "depends_on": [
+        "freeze_bug_backlog"
+      ],
+      "description": "Render bounded packet specs from the frozen coordination file.",
+      "outcome_goal": "One `.queue.json` file exists per packet under Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/ when the coordination file is frozen.",
+      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json` first.\n\nIf `coordination_state == \"frozen\"`, run:\n\n```bash\npython3 scripts/bug_resolution_program.py materialize-packets --coordination Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json --template Code&DBs/Workflow/artifacts/workflow/bug_resolution_program_packet_template_20260423.queue.json --output-dir Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets\n```\n\nIf the coordination file is blocked instead of frozen, write `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/PACKET_MATERIALIZATION_BLOCKED_20260423.md` explaining why packet generation was intentionally skipped.\n\nDo not hand-author packet specs that disagree with the coordination file.",
+      "read": [
+        "scripts/bug_resolution_program.py",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program_packet_template_20260423.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json"
+      ],
+      "write": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/PACKET_MATERIALIZATION_BLOCKED_20260423.md"
+      ],
+      "verify_command": "test -d Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets || test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/PACKET_MATERIALIZATION_BLOCKED_20260423.md"
+    },
+    {
+      "label": "open_wave_tracking",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.bug_resolution_program_supervisor.open_wave_tracking"
+      ],
+      "depends_on": [
+        "materialize_packet_specs",
+        "review_wave_zero_gate"
+      ],
+      "description": "Open the first wave tracker for the bug-resolution program and record the handoff state.",
+      "outcome_goal": "A wave tracking artifact records whether Wave 0 was opened, which packet specs exist, and what remains blocked for later waves.",
+      "prompt": "Read:\n- `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json`\n- `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE0_GATE_20260423.md`\n\nIf the coordination file is frozen, start Wave 0 tracking:\n\n```bash\npython3 scripts/bug_resolution_program.py open-wave --wave-id bug_resolution_program_20260423.wave_0_authority_repair --coordination Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json\n```\n\nThen write `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE_TRACKING_20260423.md` with:\n1. Whether Wave 0 tracking was opened\n2. Packet specs available by wave\n3. Exact dependency line for Waves 1-3\n4. The command operators should run next\n\nIf the coordination file is blocked, record that clearly instead of claiming the wave was opened.",
+      "read": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260423.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE0_GATE_20260423.md"
+      ],
+      "write": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE_TRACKING_20260423.md"
+      ],
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/WAVE_TRACKING_20260423.md"
+    }
+  ]
+}

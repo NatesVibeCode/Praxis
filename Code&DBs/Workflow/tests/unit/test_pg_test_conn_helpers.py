@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 
 import _pg_test_conn as pg_test_conn
 import pytest
@@ -11,6 +12,8 @@ import storage.postgres.connection as pg_connection
 import runtime._workflow_database as runtime_db
 from storage.postgres.validators import PostgresConfigurationError
 
+_EXPLICIT_TEST_DATABASE_URL = "postgresql://tester@example.invalid:5432/praxis_test"
+
 
 def test_resolve_test_env_uses_canonical_test_database_even_when_runtime_env_is_set(
     monkeypatch,
@@ -19,12 +22,12 @@ def test_resolve_test_env_uses_canonical_test_database_even_when_runtime_env_is_
     monkeypatch.setattr(
         pg_test_conn,
         "ensure_test_database_ready",
-        lambda: "postgresql://postgres@localhost:5432/praxis_test",
+        lambda: _EXPLICIT_TEST_DATABASE_URL,
     )
 
     env = pg_test_conn._resolve_test_env()
 
-    assert env["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis_test"
+    assert env["WORKFLOW_DATABASE_URL"] == _EXPLICIT_TEST_DATABASE_URL
     assert "PATH" in env
 
 
@@ -35,12 +38,12 @@ def test_resolve_test_env_bootstraps_default_database_when_runtime_override_miss
     monkeypatch.setattr(
         pg_test_conn,
         "ensure_test_database_ready",
-        lambda: "postgresql://postgres@localhost:5432/praxis_test",
+        lambda: _EXPLICIT_TEST_DATABASE_URL,
     )
 
     env = pg_test_conn._resolve_test_env()
 
-    assert env["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis_test"
+    assert env["WORKFLOW_DATABASE_URL"] == _EXPLICIT_TEST_DATABASE_URL
 
 
 def test_resolve_test_env_bootstraps_default_database_when_runtime_override_blank(
@@ -50,12 +53,12 @@ def test_resolve_test_env_bootstraps_default_database_when_runtime_override_blan
     monkeypatch.setattr(
         pg_test_conn,
         "ensure_test_database_ready",
-        lambda: "postgresql://postgres@localhost:5432/praxis_test",
+        lambda: _EXPLICIT_TEST_DATABASE_URL,
     )
 
     env = pg_test_conn._resolve_test_env()
 
-    assert env["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis_test"
+    assert env["WORKFLOW_DATABASE_URL"] == _EXPLICIT_TEST_DATABASE_URL
 
 
 def test_default_test_database_url_derives_from_runtime_authority(
@@ -74,13 +77,17 @@ def test_default_test_database_url_derives_from_runtime_authority(
     )
 
 
-def test_default_test_database_url_falls_back_when_runtime_authority_blank(
+def test_default_test_database_url_fails_closed_when_runtime_authority_blank(
     monkeypatch,
 ) -> None:
     monkeypatch.delenv("WORKFLOW_TEST_DATABASE_URL", raising=False)
     monkeypatch.setattr(runtime_db, "resolve_runtime_database_url", lambda required=True: None)
 
-    assert pg_test_conn._default_test_database_url() == "postgresql://postgres@localhost:5432/praxis_test"
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        pg_test_conn._default_test_database_url()
+
+    assert exc_info.value.reason_code == "postgres.config_missing"
+    assert "WORKFLOW_TEST_DATABASE_URL" in str(exc_info.value)
 
 
 def test_default_test_database_url_honors_explicit_test_authority(
@@ -139,6 +146,22 @@ def test_skip_for_unavailable_authority_treats_permission_error_as_skip() -> Non
         )
 
 
+def test_skip_for_unavailable_authority_treats_dns_failure_as_skip() -> None:
+    with pytest.raises(pytest.skip.Exception, match="postgres.authority_unavailable"):
+        pg_test_conn._skip_for_unavailable_authority(
+            socket.gaierror(8, "nodename nor servname provided")
+        )
+
+
+def test_skip_for_unavailable_authority_treats_create_database_privilege_as_skip() -> None:
+    with pytest.raises(pytest.skip.Exception, match="postgres.insufficient_privilege"):
+        pg_test_conn._skip_for_unavailable_authority(
+            pg_test_conn.asyncpg.InsufficientPrivilegeError(
+                "permission denied to create database"
+            )
+        )
+
+
 def test_get_test_conn_rebuilds_wrapper_when_cached_pool_is_closed(monkeypatch) -> None:
     class _FakePool:
         def __init__(self, closed: bool) -> None:
@@ -154,6 +177,7 @@ def test_get_test_conn_rebuilds_wrapper_when_cached_pool_is_closed(monkeypatch) 
     stale = _FakeSyncConn(_FakePool(closed=True))
     pg_test_conn._conn = stale
 
+    monkeypatch.setattr(pg_test_conn, "ensure_test_database_ready", lambda: _EXPLICIT_TEST_DATABASE_URL)
     monkeypatch.setattr(pg_connection, "get_workflow_pool", lambda env=None: _FakePool(closed=False))
     monkeypatch.setattr(storage_postgres, "SyncPostgresConnection", _FakeSyncConn)
 
@@ -176,6 +200,7 @@ def test_get_pool_reopens_closed_cached_pool(monkeypatch) -> None:
     fresh_pool = _FakePool(closed=False)
     pg_test_conn._pool = closed_pool
 
+    monkeypatch.setattr(pg_test_conn, "ensure_test_database_ready", lambda: _EXPLICIT_TEST_DATABASE_URL)
     monkeypatch.setattr(pg_connection, "get_workflow_pool", lambda env=None: fresh_pool)
 
     try:

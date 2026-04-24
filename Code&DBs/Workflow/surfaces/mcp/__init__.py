@@ -1,4 +1,9 @@
 """MCP workflow server package."""
-from .server import main as start_server
+
+
+def start_server(*args, **kwargs):
+    from .server import main
+
+    return main(*args, **kwargs)
 
 __all__ = ["start_server"]

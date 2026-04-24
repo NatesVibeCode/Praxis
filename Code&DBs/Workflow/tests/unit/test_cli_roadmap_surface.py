@@ -43,6 +43,38 @@ def test_roadmap_view_routes_to_read_model_tool(monkeypatch: pytest.MonkeyPatch)
     }
 
 
+def test_roadmap_view_accepts_json_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"ok": True}
+
+    monkeypatch.setattr(roadmap_commands, "run_cli_tool", _fake_run_cli_tool)
+    stdout = StringIO()
+
+    assert (
+        workflow_cli_main(
+            [
+                "roadmap",
+                "view",
+                "--root",
+                "roadmap_item.provision.explicit.db.backed.test.authority",
+                "--json",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured["tool_name"] == "praxis_operator_roadmap_view"
+    assert captured["params"] == {
+        "root_roadmap_item_id": "roadmap_item.provision.explicit.db.backed.test.authority",
+    }
+    assert json.loads(stdout.getvalue()) == {"ok": True}
+
+
 def test_roadmap_write_commit_routes_to_command_tool(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -128,6 +160,43 @@ def test_roadmap_write_forwards_proof_kind(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert captured["tool_name"] == "praxis_operator_write"
     assert captured["params"]["proof_kind"] == "capability_delivered_by_decision_filing"
+
+
+def test_roadmap_write_accepts_json_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"ok": True, "action": params.get("action")}
+
+    monkeypatch.setattr(roadmap_commands, "run_cli_tool", _fake_run_cli_tool)
+    stdout = StringIO()
+
+    assert (
+        workflow_cli_main(
+            [
+                "roadmap",
+                "write",
+                "preview",
+                "--title",
+                "Command index help audit",
+                "--intent-brief",
+                "Add regression coverage for advertised command help paths",
+                "--json",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured["tool_name"] == "praxis_operator_write"
+    assert captured["params"] == {
+        "action": "preview",
+        "title": "Command index help audit",
+        "intent_brief": "Add regression coverage for advertised command help paths",
+    }
+    assert json.loads(stdout.getvalue())["action"] == "preview"
 
 
 def test_roadmap_closeout_preview_routes_to_command_tool(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -425,26 +425,52 @@ def _preflight_workdir_drift(spec) -> list[dict[str, Any]]:
             })
             return ()
 
-    def _check_path(label: str | None, field: str, value: str) -> None:
-        path = (value or "").strip()
-        if not path or not os.path.isabs(path):
-            return
-        if os.path.exists(path):
-            return
-        # Path does not exist at the current vantage — suggest the translation
-        # if the path looks like a known host-mount sibling.
-        suggestion: str | None = None
-        path_obj = Path(path)
-        for prefix in _authority_workspace_roots():
+    def _is_host_specific_user_path(path: Path) -> bool:
+        parts = path.parts
+        return (
+            len(parts) >= 3
+            and (
+                parts[0:2] == ("/", "Users")
+                or parts[0:3] == ("/", "Volumes", "Users")
+                or parts[0:2] == ("/", "home")
+            )
+        )
+
+    def _suggest_container_path(path_obj: Path, roots: tuple[Path, ...]) -> str | None:
+        for prefix in roots:
             try:
                 rel = path_obj.relative_to(prefix)
             except ValueError:
                 continue
             if rel == Path("."):
-                suggestion = str(container_workspace_root())
-            else:
-                suggestion = str(container_workspace_root() / rel)
-                break
+                return str(container_workspace_root())
+            return str(container_workspace_root() / rel)
+        return None
+
+    def _check_path(label: str | None, field: str, value: str) -> None:
+        path = (value or "").strip()
+        if not path or not os.path.isabs(path):
+            return
+        path_obj = Path(path)
+        authority_roots = _authority_workspace_roots()
+        suggestion = _suggest_container_path(path_obj, authority_roots)
+        if _is_host_specific_user_path(path_obj) and authority_roots and suggestion is None:
+            warnings.append({
+                "kind": "workspace_path_outside_authority",
+                "severity": "warning",
+                "label": label,
+                "message": (
+                    f"{field}={path!r} is a host-specific absolute path outside "
+                    "the active workspace authority. Prefer a repo-relative path, "
+                    "the runtime materialized workdir, or PRAXIS_HOST_WORKSPACE_ROOT "
+                    "instead of baking a user-local checkout path into the spec."
+                ),
+            })
+            return
+        if os.path.exists(path):
+            return
+        # Path does not exist at the current vantage — suggest the translation
+        # if the path looks like a known host-mount sibling.
         message = (
             f"{field}={path!r} does not exist in the current process filesystem; "
             "this usually means the spec was authored on the host but is being "
@@ -461,8 +487,10 @@ def _preflight_workdir_drift(spec) -> list[dict[str, Any]]:
             "message": message,
         })
 
-    top_workdir = str(getattr(spec, "workdir", "") or (getattr(spec, "_raw", {}) or {}).get("workdir") or "")
+    raw = getattr(spec, "_raw", {}) or {}
+    top_workdir = str(getattr(spec, "workdir", "") or raw.get("workdir") or "")
     _check_path(None, "workdir", top_workdir)
+    _check_path(None, "target_repo", str(raw.get("target_repo") or ""))
 
     for job in getattr(spec, "jobs", ()) or ():
         job_workdir = str(job.get("workdir") or "")

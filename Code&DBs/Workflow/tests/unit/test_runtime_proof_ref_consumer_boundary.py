@@ -4,8 +4,9 @@ Consumers of proof-ref shapes in the ``runtime/`` and ``surfaces/`` trees
 must route through the authority:
 
   * ``runtime.bug_evidence`` — defines ``EVIDENCE_ROLE_OBSERVED_IN``,
-    ``EVIDENCE_ROLE_ATTEMPTED_FIX``, ``EVIDENCE_ROLE_VALIDATES_FIX`` (and
-    the ``ALLOWED_EVIDENCE_ROLES`` / ``ALLOWED_EVIDENCE_KINDS`` sets).
+    ``EVIDENCE_ROLE_ATTEMPTED_FIX``, ``EVIDENCE_ROLE_VALIDATES_FIX``,
+    ``EVIDENCE_ROLE_DISCOVERED_BY`` (and the ``ALLOWED_EVIDENCE_ROLES`` /
+    ``ALLOWED_EVIDENCE_KINDS`` sets).
   * ``runtime.primitive_contracts.build_proof_ref_contract`` — projects
     the proof-ref primitive (allowed ref kinds, evidence kinds, and
     evidence roles) from the authority for /orient consumers.
@@ -46,7 +47,7 @@ _PROOF_REF_AUTHORITY_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 
-_EVIDENCE_ROLE_VALUES = r"(?:observed_in|attempted_fix|validates_fix)"
+_EVIDENCE_ROLE_VALUES = r"(?:observed_in|attempted_fix|validates_fix|discovered_by)"
 
 
 # Forbidden patterns target code-level constructs where a raw evidence
@@ -99,7 +100,8 @@ def test_no_raw_evidence_role_literals(scanned_root: Path) -> None:
     assert not offenders, (
         "Raw evidence_role literals detected — route through "
         "runtime.bug_evidence.EVIDENCE_ROLE_VALIDATES_FIX / "
-        "EVIDENCE_ROLE_OBSERVED_IN / EVIDENCE_ROLE_ATTEMPTED_FIX:\n  - "
+        "EVIDENCE_ROLE_OBSERVED_IN / EVIDENCE_ROLE_ATTEMPTED_FIX / "
+        "EVIDENCE_ROLE_DISCOVERED_BY:\n  - "
         + "\n  - ".join(offenders)
     )
 
@@ -118,6 +120,7 @@ def test_bug_evidence_exports_canonical_role_constants() -> None:
     from runtime.bug_evidence import (
         ALLOWED_EVIDENCE_ROLES,
         EVIDENCE_ROLE_ATTEMPTED_FIX,
+        EVIDENCE_ROLE_DISCOVERED_BY,
         EVIDENCE_ROLE_OBSERVED_IN,
         EVIDENCE_ROLE_VALIDATES_FIX,
     )
@@ -125,11 +128,13 @@ def test_bug_evidence_exports_canonical_role_constants() -> None:
     assert EVIDENCE_ROLE_OBSERVED_IN == "observed_in"
     assert EVIDENCE_ROLE_ATTEMPTED_FIX == "attempted_fix"
     assert EVIDENCE_ROLE_VALIDATES_FIX == "validates_fix"
+    assert EVIDENCE_ROLE_DISCOVERED_BY == "discovered_by"
     assert ALLOWED_EVIDENCE_ROLES == frozenset(
         {
             EVIDENCE_ROLE_OBSERVED_IN,
             EVIDENCE_ROLE_ATTEMPTED_FIX,
             EVIDENCE_ROLE_VALIDATES_FIX,
+            EVIDENCE_ROLE_DISCOVERED_BY,
         }
     )
 

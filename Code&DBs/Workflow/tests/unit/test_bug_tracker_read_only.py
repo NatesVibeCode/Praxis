@@ -15,6 +15,7 @@ _spec.loader.exec_module(_mod)
 
 BugCategory = _mod.BugCategory
 BugSeverity = _mod.BugSeverity
+BugStatus = _mod.BugStatus
 BugTracker = _mod.BugTracker
 
 from surfaces.api.handlers import _bug_surface_contract as bug_contract
@@ -207,6 +208,72 @@ def test_duplicate_check_uses_fast_title_like_list_path() -> None:
             "limit": 3,
         }
     ]
+
+
+def test_duplicate_check_accepts_description_context() -> None:
+    class _Bug:
+        bug_id = "BUG-DUPE"
+        title = "Runtime validation failed"
+
+    class _Tracker:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def list_bugs(self, **kwargs):
+            self.calls.append(kwargs)
+            return [_Bug()]
+
+    tracker = _Tracker()
+
+    payload = bug_contract.duplicate_check_payload(
+        bt=tracker,
+        bt_mod=_mod,
+        body={"description": "runtime validation failed after DB authority lookup"},
+        serialize_bug=lambda bug: {"bug_id": bug.bug_id, "title": bug.title},
+    )
+
+    assert payload["bugs"] == [{"bug_id": "BUG-DUPE", "title": "Runtime validation failed"}]
+    assert payload["query"]["title_like"] == "runtime validation failed after DB authority lookup"
+    assert payload["query"]["description"] == "runtime validation failed after DB authority lookup"
+    assert tracker.calls[0]["title_like"] == "runtime validation failed after DB authority lookup"
+
+
+def test_bug_tracker_search_exact_bug_id_uses_direct_lookup() -> None:
+    class _Conn:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def fetchrow(self, query: str, *params: object):
+            self.calls.append((query, params))
+            return {
+                "bug_id": "BUG-1234ABCD",
+                "bug_key": "bug_1234abcd",
+                "title": "Exact id target",
+                "severity": "P2",
+                "status": "OPEN",
+                "priority": "P2",
+                "category": "RUNTIME",
+                "description": "Exact bug id search should not fall through to FTS.",
+                "summary": "Exact bug id search should not fall through to FTS.",
+                "filed_at": "2026-04-23T00:00:00+00:00",
+                "created_at": "2026-04-23T00:00:00+00:00",
+                "updated_at": "2026-04-23T00:00:00+00:00",
+                "resolved_at": None,
+                "filed_by": "test",
+                "tags": "",
+            }
+
+        def execute(self, *_args, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("exact bug id search must not use ranked search")
+
+    conn = _Conn()
+    tracker = BugTracker(conn=conn)
+
+    results = tracker.search("bug-1234abcd", status=BugStatus.OPEN)
+
+    assert [bug.bug_id for bug in results] == ["BUG-1234ABCD"]
+    assert "bug_id = $1" in conn.calls[0][0]
+    assert conn.calls[0][1][:2] == ("BUG-1234ABCD", "OPEN")
 
 
 def test_mcp_bug_tool_returns_structured_error_when_bug_authority_unavailable(

@@ -4,6 +4,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from runtime.bug_evidence import (
+    EVIDENCE_KIND_GOVERNANCE_SCAN,
+    EVIDENCE_ROLE_DISCOVERED_BY,
+)
+
+from .bug_evidence_repository import PostgresBugEvidenceRepository
+
 
 def insert_scan(
     conn: Any,
@@ -107,23 +114,17 @@ def link_bug_to_scan(
     *,
     bug_id: str,
     scan_id: str,
-    role: str = "discovered_by",
-) -> None:
+    role: str = EVIDENCE_ROLE_DISCOVERED_BY,
+) -> dict[str, Any] | None:
     """Add a bug_evidence_links row pointing the bug at the scan that found it."""
-    import uuid
-
-    conn.execute(
-        """
-        INSERT INTO bug_evidence_links
-            (bug_evidence_link_id, bug_id, evidence_kind, evidence_ref,
-             evidence_role, created_at, created_by)
-        VALUES ($1, $2, 'governance_scan', $3, $4, now(),
-                'governance_compliance_heartbeat')
-        ON CONFLICT (bug_id, evidence_kind, evidence_ref, evidence_role)
-        DO NOTHING
-        """,
-        f"BEL-{uuid.uuid4().hex[:12]}",
-        bug_id, scan_id, role,
+    if fetch_scan_by_id(conn, scan_id) is None:
+        raise ValueError(f"unknown governance_scan reference: {scan_id}")
+    return PostgresBugEvidenceRepository(conn).upsert_bug_evidence_link(
+        bug_id=bug_id,
+        evidence_kind=EVIDENCE_KIND_GOVERNANCE_SCAN,
+        evidence_ref=scan_id,
+        evidence_role=role,
+        created_by="governance_compliance_heartbeat",
     )
 
 

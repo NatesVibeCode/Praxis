@@ -1,0 +1,252 @@
+{
+  "mode": "bounded_bug_resolution",
+  "program": "bug_resolution_program_20260423",
+  "validate_order": [
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-cluster-authority-bug-system.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-bug-evidence-authority.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-db-authority.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-secret-authority.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-atlas-missing-graph-table.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-native-cutover-can.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-orbstack-migration-can.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-test-sh-validate-reports.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-agent-skills.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-wiring-audit.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-tag-audit-contract.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-tag-contract-drift.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-tag-cqrs.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-data-dictionary-stewardship-projector-explici.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-dictionary-describe-crashes.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-direct-internal-imports.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-existing-workflow-receipts.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-hosted-app-has.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-mcp-operator.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-mcp-workflow.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-capability-endpoint.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-cors.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-handler-catchall-path.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-observability-roots.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-queue-cancel-job-id.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-request-body-size.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-workflow-run-request.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moon-interaction-lacks.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moon-interactions-lack.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-interaction-coverage.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-accepts-full.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-commit-succeeds.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-repo-env-contains.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-roadmap-tree-view.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-roadmap-write-commit.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-search-resolve-exact.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-security-review-2026-04-22-cors-rest-api.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-stable-roadmap-write.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-workflow-query-routes.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-workflow-records-surface.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-workflow-status-reports.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-duplicate-check-cli-rejects.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-frontend-npm-test.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-contracts-domain.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-dispatch-dispatch-standard-p.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-rejects-roadmap.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-python-dependency-audit.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-top-level-artifacts-tmp.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-workflow-object-list.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-hygiene-2026-04-22-worker-concurrency.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-cluster-setup-deploy.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-dep-audit-python-anthropic.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-tag-dep-audit.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-contract-drift-runtime-build-planning-contr.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-launcher-app-returns.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-manual-migration-promotion.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-praxis-ingest-accepts-conversation.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-praxis-query-routes.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-security-review-2026-04-22-dev-mount-praxis.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-nested-workflow-subcommand.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-app-wiring-frontend-title-cost-summary-tab.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-app-wiring-frontend-tag-deployment.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-app-wiring-frontend-title-missing-workflow-spec.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-2-execute-workflow-runtime-failure-code-sandbox-error.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-2-execute-workflow-runtime-failure-code-workflow-submission-required-missing.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-2-execute-workflow-runtime-failure-code-workflow-timeout.queue.json"
+  ],
+  "waves": [
+    {
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-cluster-authority-bug-system.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-bug-evidence-authority.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-db-authority.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-secret-authority.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-atlas-missing-graph-table.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_001"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_001"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-native-cutover-can.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-orbstack-migration-can.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-test-sh-validate-reports.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-agent-skills.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-hygiene-2026-04-22-wiring-audit.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_002"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_002"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-tag-audit-contract.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-tag-contract-drift.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-tag-cqrs.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-data-dictionary-stewardship-projector-explici.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-dictionary-describe-crashes.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_003"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_003"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-direct-internal-imports.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-existing-workflow-receipts.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-hosted-app-has.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-mcp-operator.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-mcp-workflow.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_004"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_004"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-capability-endpoint.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-cors.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-handler-catchall-path.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-observability-roots.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-queue-cancel-job-id.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_005"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_005"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-request-body-size.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-rest-workflow-run-request.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moon-interaction-lacks.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moon-interactions-lack.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-dock-authority.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_006"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_006"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-moonbuildpage-interaction-coverage.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-accepts-full.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-commit-succeeds.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-repo-env-contains.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-roadmap-tree-view.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_007"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_007"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-roadmap-write-commit.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-search-resolve-exact.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-security-review-2026-04-22-cors-rest-api.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-stable-roadmap-write.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-workflow-query-routes.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_008"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_008"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-workflow-records-surface.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-workflow-status-reports.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-duplicate-check-cli-rejects.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-frontend-npm-test.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-contracts-domain.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_009"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_009"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-input-validation-dispatch-dispatch-standard-p.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-operator-write-rejects-roadmap.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-python-dependency-audit.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-top-level-artifacts-tmp.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-0-authority-repair-authority-bug-system-title-workflow-object-list.queue.json"
+      ],
+      "wave_id": "wave_0_authority_repair_batch_010"
+    },
+    {
+      "depends_on": [
+        "wave_0_authority_repair_batch_010"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-hygiene-2026-04-22-worker-concurrency.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-cluster-setup-deploy.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-dep-audit-python-anthropic.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-tag-dep-audit.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-contract-drift-runtime-build-planning-contr.queue.json"
+      ],
+      "wave_id": "wave_1_evidence_normalization_batch_001"
+    },
+    {
+      "depends_on": [
+        "wave_1_evidence_normalization_batch_001"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-launcher-app-returns.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-manual-migration-promotion.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-praxis-ingest-accepts-conversation.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-praxis-query-routes.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-security-review-2026-04-22-dev-mount-praxis.queue.json"
+      ],
+      "wave_id": "wave_1_evidence_normalization_batch_002"
+    },
+    {
+      "depends_on": [
+        "wave_1_evidence_normalization_batch_002"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-nested-workflow-subcommand.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-app-wiring-frontend-title-cost-summary-tab.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-app-wiring-frontend-tag-deployment.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-app-wiring-frontend-title-missing-workflow-spec.queue.json"
+      ],
+      "wave_id": "wave_1_evidence_normalization_batch_003"
+    },
+    {
+      "depends_on": [
+        "wave_1_evidence_normalization_batch_003"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-2-execute-workflow-runtime-failure-code-sandbox-error.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-2-execute-workflow-runtime-failure-code-workflow-submission-required-missing.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-2-execute-workflow-runtime-failure-code-workflow-timeout.queue.json"
+      ],
+      "wave_id": "wave_2_execute_batch_001"
+    }
+  ],
+  "why": "Durable execution chain for the frozen bug-resolution program. Packets are batched at max_parallel=5."
+}

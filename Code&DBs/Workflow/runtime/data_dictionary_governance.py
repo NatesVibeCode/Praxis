@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from runtime.bug_evidence import EVIDENCE_ROLE_DISCOVERED_BY
 from runtime.bug_tracker import BugCategory, BugSeverity, BugTracker
 from runtime.primitive_contracts import bug_open_status_values
 
@@ -458,6 +459,8 @@ def _maybe_record_scan(
     Failure here is non-fatal: audit loss must not crash governance. We
     tuck the scan_id into `summary_out` when the write succeeds.
     """
+    recording_errors: list[dict[str, str]] = []
+    summary_out["scan_recording_status"] = "complete"
     try:
         from storage.postgres.data_dictionary_governance_scans_repository import (
             insert_scan, link_bug_to_scan,
@@ -487,13 +490,22 @@ def _maybe_record_scan(
             try:
                 link_bug_to_scan(
                     conn, bug_id=bug_id, scan_id=scan["scan_id"],
-                    role="discovered_by",
+                    role=EVIDENCE_ROLE_DISCOVERED_BY,
                 )
-            except Exception:
-                pass
-    except Exception:
-        # Audit is best-effort.
-        pass
+            except Exception as exc:
+                recording_errors.append({
+                    "scope": "bug_evidence_link",
+                    "bug_id": str(bug_id),
+                    "error": str(exc),
+                })
+    except Exception as exc:
+        recording_errors.append({
+            "scope": "governance_scan",
+            "error": str(exc),
+        })
+    if recording_errors:
+        summary_out["scan_recording_status"] = "degraded"
+        summary_out["scan_recording_errors"] = recording_errors
 
 
 # ---------------------------------------------------------------------------

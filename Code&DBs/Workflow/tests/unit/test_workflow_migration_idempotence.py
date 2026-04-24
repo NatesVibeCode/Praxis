@@ -47,6 +47,16 @@ def test_mobile_sessions_migration_adds_bootstrap_session_and_budget_ledgers() -
     assert "CREATE TABLE IF NOT EXISTS mobile_session_budget_events" in sql
 
 
+def test_interactive_agent_session_migration_extends_agent_sessions_authority() -> None:
+    sql = _migration_sql("211_interactive_agent_session_authority.sql")
+
+    assert "ADD COLUMN IF NOT EXISTS session_kind" in sql
+    assert "ADD COLUMN IF NOT EXISTS external_session_id" in sql
+    assert "CREATE TABLE IF NOT EXISTS agent_session_events" in sql
+    assert "REFERENCES agent_sessions (session_id)" in sql
+    assert "idx_agent_session_events_session_created" in sql
+
+
 def test_cqrs_authority_kernel_deduplicates_authority_domain_seed_rows() -> None:
     sql = _migration_sql("200_cqrs_authority_kernel.sql")
 

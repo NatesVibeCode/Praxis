@@ -96,6 +96,11 @@ def test_praxis_setup_doctor_reports_empty_thin_contract() -> None:
     assert payload["package_contract"]["authority_model"] == (
         "one_repo_many_client_surfaces_one_db_authority"
     )
+    assert payload["native_instance"]["praxis_instance_name"] == "praxis"
+    assert payload["native_instance"]["praxis_runtime_profile"] == "praxis"
+    assert payload["native_instance_checks_ok"] is True
+    assert payload["native_instance_checks"]["instance_name_is_praxis"] is True
+    assert payload["native_instance_checks"]["runtime_profile_is_praxis"] is True
     component_names = {
         component["name"]
         for component in payload["package_contract"]["components"]

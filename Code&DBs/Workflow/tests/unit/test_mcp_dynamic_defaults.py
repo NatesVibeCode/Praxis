@@ -16,10 +16,8 @@ from surfaces.mcp.tools import wave as wave_tools
 
 
 class _FakeArtifactStore:
-    def latest_sandbox_id(self) -> str | None:
-        return "sandbox-live"
-
     def list_by_sandbox(self, sandbox_id: str):
+        assert sandbox_id == "sandbox-live"
         return [
             SimpleNamespace(
                 artifact_id="art-1",
@@ -31,7 +29,7 @@ class _FakeArtifactStore:
         ]
 
 
-def test_praxis_artifacts_list_defaults_to_latest_sandbox(monkeypatch) -> None:
+def test_praxis_artifacts_list_requires_explicit_sandbox_id(monkeypatch) -> None:
     monkeypatch.setattr(
         artifacts_tools,
         "_subs",
@@ -40,12 +38,42 @@ def test_praxis_artifacts_list_defaults_to_latest_sandbox(monkeypatch) -> None:
 
     payload = artifacts_tools.tool_praxis_artifacts({"action": "list"})
 
+    assert payload["reason_code"] == "sandbox_id.required"
+    assert "sandbox_id is required" in payload["error"]
+
+
+def test_praxis_artifacts_list_rejects_demo_placeholder(monkeypatch) -> None:
+    monkeypatch.setattr(
+        artifacts_tools,
+        "_subs",
+        SimpleNamespace(get_artifact_store=lambda: _FakeArtifactStore()),
+    )
+
+    payload = artifacts_tools.tool_praxis_artifacts(
+        {"action": "list", "sandbox_id": "sandbox_abc123"}
+    )
+
+    assert payload["reason_code"] == "sandbox_id.placeholder_not_allowed"
+    assert payload["sandbox_id"] == "sandbox_abc123"
+
+
+def test_praxis_artifacts_list_accepts_explicit_sandbox_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        artifacts_tools,
+        "_subs",
+        SimpleNamespace(get_artifact_store=lambda: _FakeArtifactStore()),
+    )
+
+    payload = artifacts_tools.tool_praxis_artifacts(
+        {"action": "list", "sandbox_id": "sandbox-live"}
+    )
+
     assert payload["sandbox_id"] == "sandbox-live"
     assert payload["count"] == 1
-    assert "using latest sandbox sandbox-live" in payload["note"]
+    assert "note" not in payload
 
 
-def test_praxis_wave_next_defaults_to_current_wave(monkeypatch) -> None:
+def test_praxis_wave_next_requires_explicit_wave_id(monkeypatch) -> None:
     orch = WaveOrchestrator("orch-defaults")
     orch.add_wave("wave-live", [{"label": "build"}, {"label": "test", "depends_on": ["build"]}])
     orch.start_wave("wave-live")
@@ -58,6 +86,40 @@ def test_praxis_wave_next_defaults_to_current_wave(monkeypatch) -> None:
 
     payload = wave_tools.tool_praxis_wave({"action": "next"})
 
+    assert payload["reason_code"] == "wave_id.required"
+    assert "wave_id is required" in payload["error"]
+
+
+def test_praxis_wave_next_rejects_demo_placeholder(monkeypatch) -> None:
+    orch = WaveOrchestrator("orch-defaults")
+    orch.add_wave("wave-live", [{"label": "build"}, {"label": "test", "depends_on": ["build"]}])
+    orch.start_wave("wave-live")
+
+    monkeypatch.setattr(
+        wave_tools,
+        "_subs",
+        SimpleNamespace(get_wave_orchestrator=lambda: orch),
+    )
+
+    payload = wave_tools.tool_praxis_wave({"action": "next", "wave_id": "wave_abc123"})
+
+    assert payload["reason_code"] == "wave_id.placeholder_not_allowed"
+    assert payload["wave_id"] == "wave_abc123"
+
+
+def test_praxis_wave_next_accepts_explicit_wave_id(monkeypatch) -> None:
+    orch = WaveOrchestrator("orch-defaults")
+    orch.add_wave("wave-live", [{"label": "build"}, {"label": "test", "depends_on": ["build"]}])
+    orch.start_wave("wave-live")
+
+    monkeypatch.setattr(
+        wave_tools,
+        "_subs",
+        SimpleNamespace(get_wave_orchestrator=lambda: orch),
+    )
+
+    payload = wave_tools.tool_praxis_wave({"action": "next", "wave_id": "wave-live"})
+
     assert payload["wave_id"] == "wave-live"
     assert payload["runnable_jobs"] == ["build"]
-    assert "wave_id omitted; using wave-live" == payload["note"]
+    assert "note" not in payload

@@ -30,6 +30,7 @@ SET current_state = $2,
     failure_code = $4,
     receipt_id = COALESCE($5, receipt_id)
 WHERE run_node_id = $1
+  AND ($6::text IS NULL OR current_state = $6)
 RETURNING run_node_id
 """
 
@@ -50,6 +51,7 @@ SET current_state = 'failed',
     failure_code = $2,
     receipt_id = COALESCE($3, receipt_id)
 WHERE run_node_id = $1
+  AND ($4::text IS NULL OR current_state = $4)
 RETURNING run_node_id
 """
 
@@ -95,6 +97,7 @@ class PostgresRunNodeStateRepository:
         output_payload: Mapping[str, Any] | None = None,
         failure_code: str | None = None,
         receipt_id: str | None = None,
+        expected_current_state: str | None = None,
     ) -> bool:
         rows = self._conn.execute(
             _MARK_TERMINAL_RUN_NODE_QUERY,
@@ -103,6 +106,11 @@ class PostgresRunNodeStateRepository:
             _encode_jsonb(dict(output_payload or {}), field_name="output_payload"),
             _normalize_failure_code(failure_code),
             _require_text(receipt_id, field_name="receipt_id") if receipt_id else None,
+            (
+                _require_text(expected_current_state, field_name="expected_current_state")
+                if expected_current_state
+                else None
+            ),
         )
         return bool(rows)
 
@@ -127,6 +135,7 @@ class PostgresRunNodeStateRepository:
         run_node_id: str,
         failure_code: str,
         receipt_id: str | None = None,
+        expected_current_state: str | None = None,
     ) -> bool:
         rows = self._conn.execute(
             _MARK_FAILED_RUN_NODE_QUERY,
@@ -136,5 +145,10 @@ class PostgresRunNodeStateRepository:
                 field_name="failure_code",
             ),
             _require_text(receipt_id, field_name="receipt_id") if receipt_id else None,
+            (
+                _require_text(expected_current_state, field_name="expected_current_state")
+                if expected_current_state
+                else None
+            ),
         )
         return bool(rows)

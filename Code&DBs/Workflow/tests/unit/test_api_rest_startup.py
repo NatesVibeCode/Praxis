@@ -18,6 +18,7 @@ if str(_WORKFLOW_ROOT) not in sys.path:
 import surfaces.api.rest as rest
 from surfaces.api import handlers as api_handlers
 from surfaces.api.handlers import _query_bugs
+from surfaces.api.handlers import _surface_usage as surface_usage_mod
 from surfaces.api.handlers import workflow_query
 
 
@@ -144,7 +145,19 @@ def test_launcher_resolve_endpoint_returns_workspace_authority(monkeypatch) -> N
 
 
 def test_agent_sessions_surface_is_mounted(monkeypatch, tmp_path) -> None:
+    class _FakeAgentSessionConn:
+        def execute(self, sql: str, *args):
+            if "FROM agent_sessions" in sql and "ORDER BY last_activity_at" in sql:
+                return []
+            return []
+
     monkeypatch.setattr(rest.agent_sessions_app, "AGENTS_DIR", tmp_path / "agents")
+    monkeypatch.setattr(
+        rest.agent_sessions_app.app.state,
+        "pg_conn_factory",
+        lambda: _FakeAgentSessionConn(),
+        raising=False,
+    )
     monkeypatch.setenv("PRAXIS_API_TOKEN", "session-token")
 
     with TestClient(rest.app) as client:
@@ -168,6 +181,81 @@ def test_agent_sessions_cwd_is_repo_relative_by_default(monkeypatch, tmp_path) -
 
     monkeypatch.setenv("PRAXIS_REPO_ROOT", str(tmp_path))
     assert rest.agent_sessions_app._claude_cwd() == tmp_path.resolve()
+
+
+def test_launcher_serves_pwa_manifest_and_service_worker(monkeypatch, tmp_path) -> None:
+    (tmp_path / "manifest.webmanifest").write_text('{"name":"Praxis"}', encoding="utf-8")
+    (tmp_path / "sw.js").write_text("self.skipWaiting();", encoding="utf-8")
+    monkeypatch.setattr(rest, "_APP_DIST_DIR", tmp_path)
+
+    with TestClient(rest.app) as client:
+        manifest_response = client.get("/app/manifest.webmanifest")
+        sw_response = client.get("/sw.js")
+
+    assert manifest_response.status_code == 200
+    assert manifest_response.headers["content-type"].startswith("application/manifest+json")
+    assert manifest_response.json()["name"] == "Praxis"
+    assert sw_response.status_code == 200
+    assert "self.skipWaiting" in sw_response.text
+
+
+def test_mobile_app_routes_are_inline_and_installable() -> None:
+    with TestClient(rest.app) as client:
+        app_response = client.get("/mobile")
+        manifest_response = client.get("/mobile/manifest.webmanifest")
+        sw_response = client.get("/mobile/sw.js")
+
+    assert app_response.status_code == 200
+    assert app_response.headers["content-type"].startswith("text/html")
+    assert "Praxis" in app_response.text
+    assert "/api/agent-sessions/agents" in app_response.text
+    assert manifest_response.status_code == 200
+    assert manifest_response.headers["content-type"].startswith("application/manifest+json")
+    assert manifest_response.json()["start_url"] == "/mobile"
+    assert sw_response.status_code == 200
+    assert "praxis-mobile" in sw_response.text
+
+
+def test_mobile_bootstrap_issue_is_host_only_and_db_backed(monkeypatch) -> None:
+    class _FakeConn:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def execute(self, sql: str, *args: object):
+            self.calls.append((sql, args))
+            if "INSERT INTO mobile_bootstrap_tokens" in sql:
+                return [
+                    {
+                        "token_id": "00000000-0000-4000-8000-000000000010",
+                        "principal_ref": args[0],
+                        "token_hash": args[1],
+                        "issued_at": datetime(2026, 4, 23, tzinfo=timezone.utc),
+                        "expires_at": datetime(2026, 4, 23, 0, 10, tzinfo=timezone.utc),
+                    }
+                ]
+            return []
+
+    fake_conn = _FakeConn()
+    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: fake_conn)
+
+    with TestClient(rest.app, client=("127.0.0.1", 50000)) as client:
+        response = client.post(
+            "/api/mobile/bootstrap-token",
+            json={"principal_ref": "operator:nate", "ttl_s": 300},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pairing_code"]
+    assert payload["principal_ref"] == "operator:nate"
+    assert fake_conn.calls
+    assert "sha256:" in str(fake_conn.calls[0][1][1])
+
+    with TestClient(rest.app, client=("192.0.2.10", 50000)) as client:
+        denied = client.post("/api/mobile/bootstrap-token")
+
+    assert denied.status_code == 403
+    assert denied.json()["error_code"] == "mobile.bootstrap_issue_host_only"
 
 
 def test_launcher_recover_endpoint_returns_structured_payload(monkeypatch) -> None:
@@ -342,6 +430,8 @@ def test_query_route_is_gone_from_rest_surface(monkeypatch) -> None:
 
 
 def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> None:
+    surface_usage_mod._reset_surface_usage_recorder_health_for_tests()
+
     class _FakeRepo:
         def __init__(self, conn) -> None:
             assert conn == "surface-usage-pg"
@@ -472,6 +562,9 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["authority_ready"] is True
+    assert payload["observability_state"] == "ready"
+    assert payload["recorder_health"]["authority_ready"] is True
     assert payload["filters"] == {"entrypoint": "/api/workflows", "event_limit": 5}
     assert payload["totals"] == {
         "entry_count": 1,
@@ -486,6 +579,97 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
     assert payload["recent_events"][0]["request_id"] == "req-123"
     assert payload["query_routing_quality"][0]["total_result_count"] == 12
     assert payload["builder_funnels"]["full_path_count"] == 1
+
+
+def test_surface_usage_metrics_endpoint_reports_db_authority_failure(monkeypatch) -> None:
+    surface_usage_mod._reset_surface_usage_recorder_health_for_tests()
+
+    class _FailingRepo:
+        def __init__(self, _conn) -> None:
+            pass
+
+        def list_usage_rollup(self, **_kwargs):
+            raise RuntimeError("surface usage db offline")
+
+    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: "surface-usage-pg")
+    monkeypatch.setattr(rest, "PostgresWorkflowSurfaceUsageRepository", _FailingRepo)
+
+    with TestClient(rest.app) as client:
+        response = client.get("/api/metrics/surface-usage")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["authority_ready"] is False
+    assert payload["observability_state"] == "degraded"
+    assert payload["reason_code"] == "surface_usage.authority_unavailable"
+    assert payload["error"] == "RuntimeError: surface usage db offline"
+    assert payload["totals"]["invocation_count"] == 0
+    assert payload["entries"] == []
+
+
+def test_reviews_endpoint_reports_authority_failure(monkeypatch) -> None:
+    import runtime.review_tracker as review_tracker_mod
+
+    def _fail_tracker():
+        raise RuntimeError("review db unavailable")
+
+    monkeypatch.setattr(review_tracker_mod, "get_review_tracker", _fail_tracker)
+
+    payload = rest.get_reviews()
+
+    assert payload["authority_ready"] is False
+    assert payload["observability_state"] == "degraded"
+    assert payload["reason_code"] == "review_tracker.authority_unavailable"
+    assert payload["error"] == "RuntimeError: review db unavailable"
+    assert payload["authors"] == []
+    assert payload["total_reviews"] == 0
+
+
+def test_costs_endpoint_reports_authority_failure(monkeypatch) -> None:
+    import runtime.cost_tracker as cost_tracker_mod
+
+    class _FailingCostTracker:
+        def summary(self):
+            return {
+                "record_count": 0,
+                "total_cost_usd": 0.0,
+                "by_provider": {},
+                "authority_ready": False,
+                "observability_state": "degraded",
+                "reason_code": "cost_tracker.authority_unavailable",
+                "error": "RuntimeError: cost db unavailable",
+            }
+
+    monkeypatch.setattr(cost_tracker_mod, "get_cost_tracker", lambda: _FailingCostTracker())
+
+    payload = rest.get_costs()
+
+    assert payload["authority_ready"] is False
+    assert payload["observability_state"] == "degraded"
+    assert payload["reason_code"] == "cost_tracker.authority_unavailable"
+    assert payload["error"] == "RuntimeError: cost db unavailable"
+    assert payload["record_count"] == 0
+    assert payload["total_cost_usd"] == 0.0
+
+
+def test_trust_endpoint_rebuilds_from_receipt_authority(monkeypatch) -> None:
+    import runtime.trust_scoring as trust_scoring_mod
+
+    class _FakeScorer:
+        def __init__(self) -> None:
+            self.rebuilt = False
+
+        def compute_from_receipts(self) -> None:
+            self.rebuilt = True
+
+        def all_scores(self):
+            assert self.rebuilt is True
+            return []
+
+    scorer = _FakeScorer()
+    monkeypatch.setattr(trust_scoring_mod, "get_trust_scorer", lambda: scorer)
+
+    assert rest.get_trust() == []
 
 
 def test_launcher_app_serves_index_from_dist(monkeypatch, tmp_path: Path) -> None:

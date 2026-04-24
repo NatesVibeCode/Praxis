@@ -13,6 +13,7 @@ from runtime.instance import (
     native_instance_contract,
     resolve_native_instance,
 )
+from storage.postgres import PostgresConfigurationError
 
 
 def _native_profile(**overrides):
@@ -92,16 +93,53 @@ def test_native_instance_resolves_contract_from_db_authority(monkeypatch) -> Non
     assert instance.runtime_profiles_config.endswith("/config/runtime_profiles.json")
 
 
-def test_native_instance_contract_falls_back_to_repo_local_defaults_without_db_authority() -> None:
+def test_native_instance_contract_requires_db_authority_by_default(monkeypatch) -> None:
+    monkeypatch.setattr(
+        native_instance,
+        "ensure_postgres_available",
+        lambda env=None: (_ for _ in ()).throw(
+            PostgresConfigurationError(
+                "postgres.configuration_missing",
+                "missing test authority",
+            )
+        ),
+    )
+
+    with pytest.raises(NativeInstanceResolutionError) as exc_info:
+        native_instance_contract(
+            env={
+                PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(Path(__file__).resolve().parents[4] / "config" / "runtime_profiles.json"),
+                PRAXIS_RUNTIME_PROFILE_ENV: "praxis",
+            }
+        )
+
+    assert exc_info.value.reason_code == "native_instance.authority_unavailable"
+
+
+def test_native_instance_contract_explicit_degraded_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        native_instance,
+        "ensure_postgres_available",
+        lambda env=None: (_ for _ in ()).throw(
+            PostgresConfigurationError(
+                "postgres.configuration_missing",
+                "missing test authority",
+            )
+        ),
+    )
+
     contract = native_instance_contract(
         env={
             PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(Path(__file__).resolve().parents[4] / "config" / "runtime_profiles.json"),
             PRAXIS_RUNTIME_PROFILE_ENV: "praxis",
-        }
+        },
+        allow_authority_fallback=True,
     )
 
     assert contract["praxis_runtime_profile"] == "praxis"
     assert contract["praxis_instance_name"] == "praxis"
+    assert contract["authority_state"] == "degraded"
+    assert contract["authority_reason_code"] == "native_instance.authority_unavailable"
     assert contract["runtime_profiles_config"].endswith("/config/runtime_profiles.json")
     assert contract["repo_root"].endswith("/Praxis")
     assert contract["workdir"].endswith("/Praxis")

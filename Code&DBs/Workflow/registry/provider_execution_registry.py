@@ -145,6 +145,10 @@ _load_timestamp: float | None = None
 # BUG-F8283CC1: parse errors observed during the last load. Surfaces in
 # registry_health so partial-load degradation is visible rather than hidden.
 _load_skipped_rows: tuple[str, ...] = ()
+# BUG-867CA639: auxiliary authority tables also participate in dispatch.
+# Their load failures must degrade registry health instead of being erased as
+# empty optional config.
+_load_auxiliary_errors: tuple[str, ...] = ()
 _LOAD_TIMEOUT_ENV = "PRAXIS_PROVIDER_REGISTRY_LOAD_TIMEOUT"
 _DEFAULT_LOAD_TIMEOUT = 30
 _DB_LOADED = False
@@ -195,20 +199,29 @@ def _require_database_url() -> str:
         ) from exc
 
 
-def _record_load_failure(error: str, *, log_level: str, message: str) -> None:
+def _record_load_failure(
+    error: str,
+    *,
+    log_level: str,
+    message: str,
+    emit_log: bool = True,
+) -> None:
     global _load_status, _load_error, _load_timestamp, _DB_LOADED, _load_skipped_rows
+    global _load_auxiliary_errors
 
     _clear_registry_state()
-    if log_level == "error":
-        logger.error(message)
-    elif log_level == "warning":
-        logger.warning(message)
-    else:
-        logger.info(message)
+    if emit_log:
+        if log_level == "error":
+            logger.error(message)
+        elif log_level == "warning":
+            logger.warning(message)
+        else:
+            logger.info(message)
     _load_status = RegistryLoadStatus.LOAD_FAILED
     _load_error = error
     _load_timestamp = time.monotonic()
     _load_skipped_rows = ()
+    _load_auxiliary_errors = ()
     _DB_LOADED = True
 
 
@@ -295,7 +308,9 @@ def _run_async(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-async def _fetch_from_db(db_url: str) -> tuple[list[Any], list[Any], list[Any]]:
+async def _fetch_from_db(
+    db_url: str,
+) -> tuple[list[Any], list[Any], list[Any], list[str]]:
     """Fetch all registry tables in a single connection."""
 
     conn = await _asyncpg.connect(db_url)
@@ -354,12 +369,15 @@ async def _fetch_from_db(db_url: str) -> tuple[list[Any], list[Any], list[Any]]:
             ORDER BY profile.provider_slug ASC
             """
         )
+        auxiliary_errors: list[str] = []
         try:
             config_rows = await conn.fetch(
                 "SELECT config_key, config_value FROM adapter_config"
             )
         except Exception as exc:
+            message = f"adapter_config: {type(exc).__name__}: {exc}"
             logger.warning("provider execution registry: adapter_config load failed: %s", exc)
+            auxiliary_errors.append(message)
             config_rows = []
         try:
             failure_rows = await conn.fetch(
@@ -367,9 +385,14 @@ async def _fetch_from_db(db_url: str) -> tuple[list[Any], list[Any], list[Any]]:
                 "FROM adapter_failure_mappings"
             )
         except Exception as exc:
-            logger.warning("provider execution registry: adapter_failure_mappings load failed: %s", exc)
+            message = f"adapter_failure_mappings: {type(exc).__name__}: {exc}"
+            logger.warning(
+                "provider execution registry: adapter_failure_mappings load failed: %s",
+                exc,
+            )
+            auxiliary_errors.append(message)
             failure_rows = []
-        return provider_rows, config_rows, failure_rows
+        return provider_rows, config_rows, failure_rows, auxiliary_errors
     finally:
         await conn.close()
 
@@ -475,6 +498,7 @@ def _load_from_db() -> None:
     """Load provider CLI profiles from Postgres."""
 
     global _DB_LOADED, _load_status, _load_error, _load_timestamp, _load_skipped_rows
+    global _load_auxiliary_errors
     if _DB_LOADED:
         return
 
@@ -490,6 +514,7 @@ def _load_from_db() -> None:
                     "provider execution registry: asyncpg unavailable; "
                     "DB authority cannot be loaded"
                 ),
+                emit_log=False,
             )
             return
 
@@ -500,16 +525,20 @@ def _load_from_db() -> None:
                 str(exc),
                 log_level="warning",
                 message=f"provider execution registry: {exc}; DB authority cannot be loaded",
+                emit_log=False,
             )
             return
 
         try:
-            rows, config_rows, failure_rows = _run_async(_fetch_from_db(db_url))
+            rows, config_rows, failure_rows, auxiliary_errors = _run_async(
+                _fetch_from_db(db_url)
+            )
         except ProviderRegistryLoadTimeout as exc:
             _record_load_failure(
                 str(exc),
                 log_level="error",
                 message=f"provider execution registry: {exc}; DB authority cannot be loaded",
+                emit_log=False,
             )
             return
         except Exception as exc:
@@ -520,6 +549,7 @@ def _load_from_db() -> None:
                     "provider execution registry: DB fetch failed "
                     f"({type(exc).__name__}: {exc}); DB authority cannot be loaded"
                 ),
+                emit_log=False,
             )
             return
 
@@ -531,6 +561,7 @@ def _load_from_db() -> None:
                     "provider execution registry: no active provider_cli_profiles in DB "
                     "so no provider authority is available"
                 ),
+                emit_log=False,
             )
             return
 
@@ -606,20 +637,25 @@ def _load_from_db() -> None:
         _load_adapter_config(config_rows)
         _load_failure_mappings(failure_rows)
 
-        # BUG-F8283CC1: A partial load — one or more DB rows skipped due to
-        # parse errors — must not surface as the clean "loaded_from_db"
-        # authoritative state. The successfully-parsed providers stay
-        # installed so routing keeps working, but the health surface reports
-        # the degraded status so operators see which rows are missing
-        # instead of assuming the registry is complete.
-        if parse_errors:
+        # BUG-F8283CC1 / BUG-867CA639: partial authority includes skipped
+        # provider rows and failed auxiliary tables. The successfully parsed
+        # providers stay installed so routing keeps working, but health must
+        # report degraded authority until every dispatch input loaded.
+        if parse_errors or auxiliary_errors:
             _load_status = RegistryLoadStatus.LOADED_FROM_DB_PARTIAL
-            _load_error = f"{len(parse_errors)} row(s) skipped"
+            error_parts: list[str] = []
+            if parse_errors:
+                error_parts.append(f"{len(parse_errors)} row(s) skipped")
+            if auxiliary_errors:
+                error_parts.append(f"{len(auxiliary_errors)} auxiliary table(s) failed")
+            _load_error = "; ".join(error_parts)
             _load_skipped_rows = tuple(parse_errors)
+            _load_auxiliary_errors = tuple(auxiliary_errors)
         else:
             _load_status = RegistryLoadStatus.LOADED_FROM_DB
             _load_error = None
             _load_skipped_rows = ()
+            _load_auxiliary_errors = ()
         _load_timestamp = time.monotonic()
         _DB_LOADED = True
 
@@ -632,7 +668,16 @@ def _load_from_db() -> None:
                 len(parse_errors),
                 "; ".join(parse_errors),
             )
-        else:
+        if auxiliary_errors:
+            logger.warning(
+                "provider execution registry: loaded %d provider(s) from DB with "
+                "%d auxiliary authority failure(s) — partial load, authority "
+                "incomplete (%s). Closes BUG-867CA639.",
+                len(loaded_registry),
+                len(auxiliary_errors),
+                "; ".join(auxiliary_errors),
+            )
+        if not parse_errors and not auxiliary_errors:
             logger.info(
                 "provider execution registry: loaded %d provider(s) from DB",
                 len(loaded_registry),
@@ -643,12 +688,14 @@ def reload_from_db() -> None:
     """Force a fresh read of provider_cli_profiles on the next lookup."""
 
     global _DB_LOADED, _load_status, _load_error, _load_timestamp, _load_skipped_rows
+    global _load_auxiliary_errors
     with _DB_LOAD_LOCK:
         _DB_LOADED = False
         _load_status = RegistryLoadStatus.UNLOADED
         _load_error = None
         _load_timestamp = None
         _load_skipped_rows = ()
+        _load_auxiliary_errors = ()
     _load_from_db()
 
 
@@ -678,6 +725,7 @@ def registry_health() -> dict[str, Any]:
         "authority_available": authority_available,
         "authority_complete": authority_complete,
         "skipped_rows": list(_load_skipped_rows),
+        "auxiliary_errors": list(_load_auxiliary_errors),
         "authority_source": "provider_cli_profiles" if authority_available else None,
         "fallback_active": False,
     }

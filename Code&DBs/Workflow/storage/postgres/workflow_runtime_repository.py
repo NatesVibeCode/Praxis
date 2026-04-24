@@ -643,6 +643,40 @@ def load_workflow_record(
     return None if row is None else dict(row)
 
 
+def list_workflow_records(
+    conn: Any,
+    *,
+    never_run: bool = False,
+    include_templates: bool = True,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List saved workflow records from the canonical workflow table."""
+
+    bounded_limit = max(0, min(int(limit), 500))
+    if bounded_limit == 0:
+        return []
+
+    predicates: list[str] = []
+    params: list[Any] = []
+    if never_run:
+        predicates.append("COALESCE(invocation_count, 0) = 0")
+        predicates.append("last_invoked_at IS NULL")
+    if not include_templates:
+        predicates.append("COALESCE(is_template, FALSE) = FALSE")
+
+    where_clause = f"WHERE {' AND '.join(predicates)}" if predicates else ""
+    params.append(bounded_limit)
+    rows = conn.execute(
+        f"""SELECT *
+            FROM public.workflows
+            {where_clause}
+            ORDER BY updated_at DESC, name ASC, id ASC
+            LIMIT ${len(params)}""",
+        *params,
+    )
+    return [dict(row) for row in (rows or [])]
+
+
 def workflow_exists(
     conn: Any,
     *,
@@ -1276,6 +1310,7 @@ __all__ = [
     "decide_authority_checkpoint",
     "list_control_manifest_head_records",
     "list_control_manifest_history_records",
+    "list_workflow_records",
     "load_app_manifest_record",
     "load_control_manifest_head_record",
     "load_workflow_record",

@@ -23,6 +23,7 @@ def test_handle_mutate_workflow_build_uses_runtime_build_moment() -> None:
         "planning_notes": ["ready"],
         "intent_brief": {"goal": "Do the thing"},
         "execution_manifest": {"execution_manifest_ref": "execution_manifest:wf_build:def_001:1"},
+        "progressive_build": {"mode": "one_unit_at_a_time"},
         "undo_receipt": {"receipt_id": "receipt-123"},
         "mutation_event_id": 77,
     }
@@ -52,6 +53,7 @@ def test_handle_mutate_workflow_build_uses_runtime_build_moment() -> None:
         planning_notes=runtime_result["planning_notes"],
         intent_brief=runtime_result["intent_brief"],
         execution_manifest=runtime_result["execution_manifest"],
+        progressive_build=runtime_result["progressive_build"],
         undo_receipt=runtime_result["undo_receipt"],
         mutation_event_id=runtime_result["mutation_event_id"],
     )

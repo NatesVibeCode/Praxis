@@ -3,11 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from surfaces.placeholder_ids import is_demo_placeholder, placeholder_error
+
 from ..subsystems import _subs
 from ..helpers import _serialize
-
-
-_PLACEHOLDER_WAVE_IDS = frozenset({"wave_abc123"})
 
 
 def _parse_start_jobs(jobs_spec: str) -> list[dict]:
@@ -42,17 +41,16 @@ def _parse_start_jobs(jobs_spec: str) -> list[dict]:
     return jobs
 
 
-def _resolve_wave_id(orch, params: dict, *, action: str) -> tuple[str, str | None]:
+def _resolve_wave_id(params: dict, *, action: str) -> tuple[str, dict | None]:
     requested = str(params.get("wave_id", "") or "").strip()
-    if requested and requested not in _PLACEHOLDER_WAVE_IDS:
-        return requested, None
-    try:
-        resolved = orch.resolve_default_wave_id(action=action)
-    except KeyError:
-        return "", "wave_id is required because there is no single obvious default wave"
-    if requested in _PLACEHOLDER_WAVE_IDS:
-        return resolved, f"{requested} is a placeholder; using {resolved} instead"
-    return resolved, f"wave_id omitted; using {resolved}"
+    if is_demo_placeholder("wave_id", requested):
+        return "", placeholder_error("wave_id", requested)
+    if not requested:
+        return "", {
+            "error": f"wave_id is required for {action}",
+            "reason_code": "wave_id.required",
+        }
+    return requested, None
 
 
 def tool_praxis_wave(params: dict) -> dict:
@@ -87,9 +85,9 @@ def tool_praxis_wave(params: dict) -> dict:
         }
 
     if action == "start":
-        wave_id, note = _resolve_wave_id(orch, params, action=action)
+        wave_id, error_payload = _resolve_wave_id(params, action=action)
         if not wave_id:
-            return {"error": note or "wave_id is required for start"}
+            return error_payload or {"error": "wave_id is required for start"}
         # BUG-B9325BED: if the wave isn't defined yet, auto-define it from the
         # jobs= grammar instead of raising KeyError. This implements
         # architecture-policy::wave-orchestration::start-accepts-jobs-string.
@@ -123,39 +121,29 @@ def tool_praxis_wave(params: dict) -> dict:
                 "status": ws.status.value,
                 "started": True,
             }
-            if defined_note and note:
-                payload["note"] = f"{defined_note}; {note}"
-            elif defined_note:
+            if defined_note:
                 payload["note"] = defined_note
-            elif note:
-                payload["note"] = note
             return payload
         except RuntimeError as e:
             return {"error": str(e)}
 
     if action == "next":
-        wave_id, note = _resolve_wave_id(orch, params, action=action)
+        wave_id, error_payload = _resolve_wave_id(params, action=action)
         if not wave_id:
-            return {"error": note or "wave_id is required for next"}
+            return error_payload or {"error": "wave_id is required for next"}
         try:
             runnable = orch.next_runnable_jobs(wave_id)
-            payload = {"wave_id": wave_id, "runnable_jobs": runnable}
-            if note:
-                payload["note"] = note
-            return payload
+            return {"wave_id": wave_id, "runnable_jobs": runnable}
         except KeyError:
             return {"error": f"Wave {wave_id} not found"}
 
     if action == "record":
-        wave_id, note = _resolve_wave_id(orch, params, action=action)
+        wave_id, error_payload = _resolve_wave_id(params, action=action)
         jobs_str = params.get("jobs", "")
         if not wave_id or not jobs_str:
-            return {
-                "error": (
-                    note
-                    or "wave_id and jobs (format: 'label:pass,label2:fail') are required for record"
-                )
-            }
+            if error_payload:
+                return error_payload
+            return {"error": "wave_id and jobs (format: 'label:pass,label2:fail') are required for record"}
         results = []
         for entry in jobs_str.split(","):
             entry = entry.strip()
@@ -165,10 +153,7 @@ def tool_praxis_wave(params: dict) -> dict:
             succeeded = outcome.strip().lower() in ("pass", "true", "succeeded", "ok", "1")
             orch.record_job_result(wave_id, label.strip(), succeeded)
             results.append({"job_label": label.strip(), "succeeded": succeeded})
-        payload = {"wave_id": wave_id, "recorded": results}
-        if note:
-            payload["note"] = note
-        return payload
+        return {"wave_id": wave_id, "recorded": results}
 
     return {"error": f"Unknown wave action: {action}"}
 
@@ -186,8 +171,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  1. praxis_wave(action='observe')                                          — see current wave state\n"
                 "  2. praxis_wave(action='start', wave_id='wave_1', jobs='a,b,c|a')          — auto-define + begin a new wave\n"
                 "     (jobs grammar for start: comma-separated labels; 'b|a' means b depends on a)\n"
-                "  3. praxis_wave(action='next')                                             — get jobs ready on the current/only wave\n"
-                "  4. praxis_wave(action='record', jobs='build:pass,test:fail')              — record results on the current/only wave\n\n"
+                "  3. praxis_wave(action='next', wave_id='wave_1')                            — get jobs ready on a wave\n"
+                "  4. praxis_wave(action='record', wave_id='wave_1', jobs='build:pass')       — record results on a wave\n\n"
                 "DO NOT USE: for simple flat workflow launches (use praxis_workflow). Waves are for complex "
                 "multi-step pipelines with explicit dependency tracking."
             ),
@@ -199,7 +184,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": "Operation: observe, start, next, record.",
                         "enum": ["observe", "start", "next", "record"],
                     },
-                    "wave_id": {"type": "string", "description": "Wave identifier (for start/next/record)."},
+                    "wave_id": {"type": "string", "description": "Wave identifier (required for start/next/record)."},
                     "jobs": {
                         "type": "string",
                         "description": (

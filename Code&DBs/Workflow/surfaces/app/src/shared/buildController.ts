@@ -117,6 +117,21 @@ export async function refineDefinition(
   });
 }
 
+export async function progressiveBuildStep(
+  prose: string,
+  opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title' | 'buildGraph'>,
+): Promise<BuildPayload> {
+  const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, {
+    definition: {},
+    buildGraph: opts?.buildGraph,
+  });
+  return postBuildMutation(workflowId, 'progressive', {
+    prose,
+    title: opts?.title,
+    build_graph: opts?.buildGraph,
+  });
+}
+
 export async function commitDefinition(
   workflowId: string,
   opts?: BuildDefinitionRequest,

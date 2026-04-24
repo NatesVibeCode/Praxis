@@ -12,7 +12,7 @@ interface Props {
   onClose: () => void;
   onSelect: (nodeId: string, value: string) => void;
   catalog: CatalogItem[];
-  onStartCatalogDrag: (event: React.PointerEvent, item: CatalogItem) => void;
+  onStartCatalogDrag?: (event: React.PointerEvent, item: CatalogItem) => void;
 }
 
 const NODE_FAMILIES = ['trigger', 'gather', 'think', 'act'] as const;
@@ -30,7 +30,7 @@ export function MoonPopout({
   onClose,
   onSelect,
   catalog,
-  onStartCatalogDrag,
+  onStartCatalogDrag: _onStartCatalogDrag,
 }: Props) {
   const nodeActions = useMemo(
     () => catalog
@@ -62,7 +62,6 @@ export function MoonPopout({
       selected: node.route === item.actionValue,
       meta,
       icon: <MoonGlyph type={item.icon} size={14} color={node.route === item.actionValue ? 'currentColor' : '#F4F6F8'} />,
-      onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => onStartCatalogDrag(event, item),
       onSelect: () => {
         if (item.actionValue) onSelect(node.id, item.actionValue);
       },
@@ -89,7 +88,7 @@ export function MoonPopout({
       ...primarySections,
       ...(legacyItems.length > 0 ? [{ id: 'legacy', title: 'Hidden / legacy', items: legacyItems }] : []),
     ];
-  }, [node.id, node.route, nodeActions, onSelect, onStartCatalogDrag]);
+  }, [node.id, node.route, nodeActions, onSelect]);
 
   return (
     <MenuPanel

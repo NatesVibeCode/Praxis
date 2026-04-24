@@ -467,11 +467,11 @@ export function AppShell() {
     const createItems = [
       {
         id: 'create:builder',
-        label: 'Blank Builder',
-        description: 'Start with an empty workflow graph and wire the steps directly.',
-        keywords: ['builder', 'workflow', 'moon', 'new', 'blank'],
+        label: 'New Workflow',
+        description: 'Describe what you want first, then refine the generated graph.',
+        keywords: ['builder', 'workflow', 'moon', 'new', 'blank', 'describe', 'compose'],
         shortcut: 'Ctrl+N',
-        onSelect: () => openBuild({ workflowId: null, intent: null, seed: null, view: 'moon' }),
+        onSelect: () => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' }),
       },
       ...seedBundles.map((seed) => ({
         id: `seed:${seed.id}`,
@@ -507,7 +507,7 @@ export function AppShell() {
           onEditWorkflow={(id: string) => openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' })}
           onEditModel={(id: string) => openEditModel(id)}
           onViewRun={(runId: string) => openRunDetail(runId)}
-          onNewWorkflow={() => openBuild({ workflowId: null, intent: null, seed: null, view: 'moon' })}
+          onNewWorkflow={() => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' })}
           onChat={() => setChatOpen(true)}
           onDescribe={() => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' })}
           onOpenCosts={() => activateTab('costs')}
@@ -529,7 +529,7 @@ export function AppShell() {
           onEditWorkflow={(wfId) => openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon' })}
           onViewRun={(runId) => openRunDetail(runId)}
           onDraftStateChange={handleBuildDraftStateChange}
-          initialMode={state.buildIntent === '__compose__' ? 'compose' : undefined}
+          initialMode={state.buildIntent === '__compose__' || (!state.buildWorkflowId && !state.moonRunId) ? 'compose' : undefined}
         />
       );
     }

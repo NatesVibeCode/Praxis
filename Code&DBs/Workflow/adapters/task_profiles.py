@@ -216,7 +216,11 @@ def reload_profiles_from_db() -> None:
 
 
 def try_resolve_profile(task_type: str) -> TaskProfile | None:
-    """Attempt DB-backed profile resolution without requiring authority."""
+    """Preview/bootstrap-only profile lookup.
+
+    Execution-bound callers must use ``resolve_profile`` so missing DB-backed
+    task-profile authority cannot silently collapse into generic behavior.
+    """
     _load_profiles_from_db(required=False)
     if _DB_TASK_PROFILES is None:
         return None
@@ -248,13 +252,22 @@ def resolve_profile(task_type: str) -> TaskProfile:
     )
 
 
-def infer_task_type(prompt: str, *, label: str | None = None) -> str:
+def infer_task_type(
+    prompt: str,
+    *,
+    label: str | None = None,
+    require_authority: bool = False,
+) -> str:
     """Infer task type from prompt text and optional label.
 
-    Uses keyword matching against the task_type_keyword_rules registry.
-    Falls back to "general" when no keywords match.
+    Uses keyword matching against the task_type_keyword_rules registry. Falls
+    back to "general" when authority is present but no keywords match.
     """
-    _load_profiles_from_db(required=False)
+    _load_profiles_from_db(required=require_authority)
+    if require_authority and _DB_TASK_TYPE_KEYWORDS is None:
+        raise TaskProfileAuthorityError(
+            "task_profiles keyword authority unavailable for execution-bound inference"
+        )
     combined = " ".join(filter(None, [label or "", prompt])).lower()
     keyword_rules = _DB_TASK_TYPE_KEYWORDS or []
 

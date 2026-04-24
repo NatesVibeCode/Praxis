@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +34,26 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 _PRE_RELOAD_WORKFLOW_SPEC_ERROR = globals().get("WorkflowSpecError")
 _PRE_RELOAD_WORKFLOW_SPEC = globals().get("WorkflowSpec")
+
+_HISTORICAL_SPEC_OVERRIDE_ENV = "PRAXIS_ALLOW_HISTORICAL_QUEUE_SPEC"
+_RETIRED_AUTHORITY_MARKERS: tuple[tuple[str, str], ...] = (
+    (
+        "postgresql://nate@127.0.0.1:5432/dag_workflow",
+        "retired localhost dag_workflow database authority",
+    ),
+    (
+        "postgresql://localhost:5432/praxis",
+        "retired localhost Praxis.db authority",
+    ),
+    (
+        "/Users/nate/Praxis",
+        "operator-local /Users/nate/Praxis workspace authority",
+    ),
+    (
+        "/Volumes/Users/natha/Documents/Builds/Praxis",
+        "operator-local absolute workspace authority",
+    ),
+)
 
 # ---------------------------------------------------------------------------
 # New authoring format field sets
@@ -132,7 +153,7 @@ class WorkflowSpec:
 
     @classmethod
     def _load_new_format(cls, raw: dict[str, Any]) -> "WorkflowSpec":
-        from adapters.task_profiles import try_resolve_profile
+        from adapters.task_profiles import TaskProfileAuthorityError, resolve_profile
         from runtime.prompt_generation import generate_job_prompt
 
         normalized = dict(raw)
@@ -147,7 +168,13 @@ class WorkflowSpec:
         anti_requirements = _as_string_list(normalized.get("anti_requirements"))
         verify_refs = _as_string_list(normalized.get("verify_refs"))
 
-        profile = try_resolve_profile(task_type)
+        try:
+            profile = resolve_profile(task_type)
+        except TaskProfileAuthorityError as exc:
+            raise WorkflowSpecError(
+                "new-format workflow specs require DB-backed task profile authority; "
+                f"{exc}"
+            ) from exc
 
         # --- build job list ---
         if "jobs" in normalized:
@@ -172,7 +199,16 @@ class WorkflowSpec:
         for index, job in enumerate(jobs):
             # Inherit task_type from spec unless overridden
             job_task_type = str(job.get("task_type") or task_type).strip()
-            job_profile = try_resolve_profile(job_task_type) if job_task_type != task_type else profile
+            if job_task_type != task_type:
+                try:
+                    job_profile = resolve_profile(job_task_type)
+                except TaskProfileAuthorityError as exc:
+                    raise WorkflowSpecError(
+                        "new-format workflow job requires DB-backed task profile authority; "
+                        f"{exc}"
+                    ) from exc
+            else:
+                job_profile = profile
 
             # Contract inheritance: full replace, not merge.
             # If task_type overridden without contract override, try profile defaults first.
@@ -686,6 +722,55 @@ def _validate_spec_path(path: str) -> Path:
     return file_path
 
 
+def _unsafe_psql_instruction(text: str) -> bool:
+    lowered = text.lower()
+    if "psql" not in lowered:
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "postgresql://",
+            "$workflow_database_url",
+            " update ",
+            "\nupdate ",
+            " insert ",
+            "\ninsert ",
+            " delete ",
+            "\ndelete ",
+        )
+    )
+
+
+def _historical_authority_issues(text: str) -> list[str]:
+    issues = [
+        reason
+        for marker, reason in _RETIRED_AUTHORITY_MARKERS
+        if marker in text
+    ]
+    if _unsafe_psql_instruction(text):
+        issues.append("direct psql/SQL repair instruction in queue spec")
+    return issues
+
+
+def _validate_spec_file_authority(path: Path, display_path: str, text: str) -> None:
+    if os.environ.get(_HISTORICAL_SPEC_OVERRIDE_ENV) == "1":
+        return
+
+    issues = _historical_authority_issues(text)
+    if not issues:
+        return
+
+    formatted = "\n  - ".join(issues)
+    raise WorkflowSpecError(
+        "Spec file carries historical or retired operator authority and "
+        f"cannot be executed as a live workflow: {display_path}\n"
+        f"  - {formatted}\n"
+        "Use DB-backed workflow authority or regenerate a clean repo-relative "
+        f"spec. Set {_HISTORICAL_SPEC_OVERRIDE_ENV}=1 only for explicit "
+        "historical evidence inspection."
+    )
+
+
 _KNOWN_ADAPTER_TYPES = {"cli_llm", "llm_task", "deterministic_task"}
 _SPEC_FIELD_NAMES = {
     "prompt",
@@ -1130,9 +1215,10 @@ def load_raw(path: str) -> dict[str, Any]:
     from any cwd.
     """
 
-    file_path = _resolve_spec_path(path)
-    with file_path.open("r", encoding="utf-8") as handle:
-        loaded = json.load(handle)
+    file_path = _validate_spec_path(path)
+    text = file_path.read_text(encoding="utf-8")
+    _validate_spec_file_authority(file_path, path, text)
+    loaded = json.loads(text)
     if not isinstance(loaded, dict):
         raise ValueError(f"Spec file must contain a JSON object: {path}")
     return loaded

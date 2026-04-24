@@ -1,6 +1,7 @@
 """Tools: praxis_receipts, praxis_constraints, praxis_friction."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..runtime_context import get_current_workflow_mcp_context
@@ -181,6 +182,31 @@ def tool_praxis_friction(params: dict) -> dict:
             ],
         }
 
+    if action == "patterns":
+        limit = params.get("limit", 20)
+        scan_limit = params.get("scan_limit", 500)
+        source = params.get("source") or None
+        include_test = params.get("include_test", False)
+        promotion_threshold = params.get("promotion_threshold", 3)
+        since_hours = params.get("since_hours")
+        since = None
+        if since_hours is not None:
+            since = datetime.now(timezone.utc) - timedelta(hours=float(since_hours))
+        patterns = ledger.patterns(
+            source=source,
+            since=since,
+            limit=limit,
+            scan_limit=scan_limit,
+            include_test=include_test,
+            promotion_threshold=promotion_threshold,
+        )
+        if not patterns:
+            return {"count": 0, "message": "No friction patterns found."}
+        return {
+            "count": len(patterns),
+            "patterns": [pattern.to_json() for pattern in patterns],
+        }
+
     return {"error": f"Unknown friction action: {action}"}
 
 
@@ -261,6 +287,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "EXAMPLES:\n"
                 "  Overview stats:     praxis_friction(action='stats')\n"
                 "  Recent events:      praxis_friction(action='list', limit=10)\n"
+                "  Repeated failures:  praxis_friction(action='patterns', source='cli.workflow')\n"
                 "  From one source:    praxis_friction(action='list', source='governance')"
             ),
             "inputSchema": {
@@ -268,11 +295,14 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "Operation: 'stats' or 'list'.",
-                        "enum": ["stats", "list"],
+                        "description": "Operation: 'stats', 'list', or 'patterns'.",
+                        "enum": ["stats", "list", "patterns"],
                     },
-                    "source": {"type": "string", "description": "Filter by source (for list)."},
-                    "limit": {"type": "integer", "description": "Max events to return.", "default": 20},
+                    "source": {"type": "string", "description": "Filter by source (for list/patterns)."},
+                    "limit": {"type": "integer", "description": "Max events or patterns to return.", "default": 20},
+                    "scan_limit": {"type": "integer", "description": "Max recent events to scan for pattern grouping.", "default": 500},
+                    "since_hours": {"type": "number", "description": "Only include events from the last N hours."},
+                    "promotion_threshold": {"type": "integer", "description": "Pattern count that marks promotion_candidate=true.", "default": 3},
                     "include_test": {"type": "boolean", "description": "Include test friction events (excluded by default).", "default": False},
                 },
                 "required": ["action"],

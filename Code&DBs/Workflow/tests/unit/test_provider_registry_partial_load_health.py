@@ -86,9 +86,14 @@ def _broken_row(provider_slug: str) -> dict[str, object]:
     return row
 
 
-def _install_fake_db(monkeypatch, rows: list[dict[str, object]]) -> None:
+def _install_fake_db(
+    monkeypatch,
+    rows: list[dict[str, object]],
+    *,
+    auxiliary_errors: list[str] | None = None,
+) -> None:
     async def _fake_fetch(_db_url: str):
-        return rows, [], []
+        return rows, [], [], list(auxiliary_errors or [])
 
     monkeypatch.setattr(provider_registry_mod, "_ASYNCPG_AVAILABLE", True)
     monkeypatch.setattr(
@@ -109,6 +114,7 @@ def _registry_state_guard():
         "_load_error": provider_registry_mod._load_error,
         "_load_timestamp": provider_registry_mod._load_timestamp,
         "_load_skipped_rows": provider_registry_mod._load_skipped_rows,
+        "_load_auxiliary_errors": provider_registry_mod._load_auxiliary_errors,
     }
     try:
         yield
@@ -128,6 +134,7 @@ def _registry_state_guard():
         provider_registry_mod._load_error = snapshot["_load_error"]
         provider_registry_mod._load_timestamp = snapshot["_load_timestamp"]
         provider_registry_mod._load_skipped_rows = snapshot["_load_skipped_rows"]
+        provider_registry_mod._load_auxiliary_errors = snapshot["_load_auxiliary_errors"]
 
 
 def test_clean_load_reports_authoritative_complete_status(
@@ -232,3 +239,27 @@ def test_partial_load_warning_names_bug_and_skipped_slug(
     assert "BUG-F8283CC1" in joined
     assert "contoso" in joined
     assert "partial load" in joined.lower()
+
+
+def test_auxiliary_table_failure_reports_degraded_authority(
+    monkeypatch, _registry_state_guard
+) -> None:
+    rows = [_clean_row(provider_slug="acme", binary_name="acme-cli")]
+    _install_fake_db(
+        monkeypatch,
+        rows,
+        auxiliary_errors=["adapter_failure_mappings: RuntimeError: table offline"],
+    )
+
+    provider_registry_mod.reload_from_db()
+    health = provider_registry_mod.registry_health()
+
+    assert health["status"] == "loaded_from_db_partial"
+    assert health["authority_available"] is True
+    assert health["authority_complete"] is False
+    assert health["provider_count"] == 1
+    assert health["skipped_rows"] == []
+    assert health["auxiliary_errors"] == [
+        "adapter_failure_mappings: RuntimeError: table offline"
+    ]
+    assert "1 auxiliary table(s) failed" in (health["error"] or "")

@@ -10,7 +10,6 @@ from typing import Any, TextIO
 
 from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from runtime.workspace_paths import repo_root as workspace_repo_root
-from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import (
     get_definition,
     print_json,
@@ -44,6 +43,8 @@ _SQL_CONTEXT_RE = re.compile(
 def _get_conn():
     global _cli_pg_conn
     if _cli_pg_conn is None:
+        from surfaces.cli._db import cli_sync_conn
+
         _cli_pg_conn = cli_sync_conn()
     return _cli_pg_conn
 
@@ -382,16 +383,17 @@ def _trust_command(args: list[str], *, stdout: TextIO) -> int:
                 i += 2
             else:
                 i += 1
-            try:
-                scorer.compute_from_receipts()
-            except Exception as exc:
-                stdout.write(f"error: failed to compute from receipts: {exc}\n")
-                return 1
         elif args[i] in {"--json"}:
             i += 1
         else:
             stdout.write(f"unknown argument: {args[i]}\n")
             return 2
+
+    try:
+        scorer.compute_from_receipts()
+    except Exception as exc:
+        stdout.write(f"error: failed to compute from receipts: {exc}\n")
+        return 1
 
     scores = scorer.all_scores()
     if "--json" in args:
@@ -830,7 +832,7 @@ def _query_command(args: list[str], *, stdout: TextIO) -> int:
 def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow bugs [list|search <query>|duplicate_check <query>|stats] ...`."""
 
-    if args and args[0] in {"-h", "--help"}:
+    def _write_bugs_usage() -> None:
         stdout.write(
             "usage: workflow bugs "
             "[list|search <query>|duplicate_check <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve] "
@@ -852,18 +854,24 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "\n"
             "  --status S         Filter: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
             "  --severity S       Filter: P0, P1, P2, P3\n"
+            "  --category S       Filing category: SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER\n"
             "  --limit N          Max results (default 25)\n"
             "  --all              Include resolved bugs (default: open only)\n"
+            "  --body TEXT        Alias for --description on filing and duplicate checks\n"
             "\n"
             "  Examples:\n"
             "    workflow bugs list --severity P1\n"
+            "    workflow bugs duplicate_check --title 'routing timeout' --body 'worker hangs during dispatch'\n"
             "    workflow bugs duplicate_check 'routing timeout'\n"
             "    workflow bugs search routing\n"
             "    workflow bugs search timeout --status OPEN --limit 5\n"
             "    workflow bugs stats\n"
             "    workflow bugs resolve --bug-id BUG-1234 --status FIXED --verifier-ref verifier.job.python.pytest_file --inputs-json '{\"path\":\"Code&DBs/Workflow/tests/unit/test_bug.py\"}'\n"
         )
-        return 2
+
+    if args and args[0] in {"-h", "--help", "help"}:
+        _write_bugs_usage()
+        return 0
 
     action = "list"
     search_query = ""
@@ -933,6 +941,12 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             if value is None:
                 return 2
             params["title"] = value
+            continue
+        if token == "--body":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["description"] = value
             continue
         if token == "--description":
             value = _require_value(token)
@@ -1072,6 +1086,9 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
                 return 2
             params["receipt_limit"] = int(value)
             continue
+        if token in {"-h", "--help", "help"}:
+            _write_bugs_usage()
+            return 0
         if token == "--include-replay-state":
             params["include_replay_state"] = True
             i += 1
@@ -1088,7 +1105,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     if action == "search":
         params["title"] = search_query
     if action == "duplicate_check":
-        params["title_like"] = search_query
+        params["title_like"] = search_query or str(params.get("title") or "")
     if status_filter:
         params["status"] = status_filter
     if severity_filter:

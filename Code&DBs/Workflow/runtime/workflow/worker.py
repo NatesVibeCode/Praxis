@@ -48,6 +48,7 @@ class RunNodeStateRepository(Protocol):
         output_payload: Mapping[str, Any] | None = None,
         failure_code: str | None = None,
         receipt_id: str | None = None,
+        expected_current_state: str | None = None,
     ) -> bool: ...
     def mark_awaiting_human(
         self,
@@ -62,6 +63,7 @@ class RunNodeStateRepository(Protocol):
         run_node_id: str,
         failure_code: str,
         receipt_id: str | None = None,
+        expected_current_state: str | None = None,
     ) -> bool: ...
 
 
@@ -245,6 +247,7 @@ class WorkflowWorker:
                 output_payload=result.get("outputs", {}),
                 failure_code=result.get("failure_code", "") or "",
                 receipt_id=receipt_id,
+                expected_current_state="running",
             )
 
             release_downstream(self._conn, run_id, node_id)
@@ -274,6 +277,7 @@ class WorkflowWorker:
                 run_node_id=run_node_id,
                 failure_code=failure_code,
                 receipt_id=receipt_id,
+                expected_current_state="running",
             )
             raise
 

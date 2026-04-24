@@ -26,6 +26,27 @@ class _ClientError(Exception):
     """Raised for 400-level request errors."""
 
 
+_DEMO_PLACEHOLDER_IDS_BY_FIELD: dict[str, frozenset[str]] = {
+    "entity_id": frozenset({"entity_abc123"}),
+    "sandbox_id": frozenset({"sandbox_abc123"}),
+    "wave_id": frozenset({"wave_abc123"}),
+}
+
+
+def is_demo_placeholder(field_name: str, value: object) -> bool:
+    """Return True when *value* is a known non-live example ID."""
+    raw = str(value or "").strip()
+    return raw in _DEMO_PLACEHOLDER_IDS_BY_FIELD.get(field_name, frozenset())
+
+
+def placeholder_error_message(field_name: str, value: object) -> str:
+    raw = str(value or "").strip()
+    return (
+        f"{field_name} '{raw}' is an example placeholder and cannot be used "
+        "as a live resource selector"
+    )
+
+
 def _serialize(obj: Any) -> Any:
     """Convert dataclass / datetime / enum / tuple to JSON-safe form."""
     if obj is None:

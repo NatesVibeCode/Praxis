@@ -1,0 +1,42 @@
+{
+  "name": "workflow_unrun_records_fix_20260423",
+  "workflow_id": "workflow_unrun_records_fix_20260423",
+  "phase": "fix",
+  "outcome_goal": "Fix workflow never-run inspection, workflow record read access, status history fallback, dictionary not-found typing, and object help discoverability.",
+  "bug_ids": [
+    "BUG-DF5E0FC0",
+    "BUG-B2E29C21",
+    "BUG-B9F45329",
+    "BUG-518D5B06",
+    "BUG-7D5DB032",
+    "BUG-933C53E3",
+    "BUG-8B980429",
+    "BUG-10F3EE55",
+    "BUG-56E81AF4"
+  ],
+  "verify_refs": [
+    "python3 -m pytest Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py::test_handle_query_routes_never_run_workflows_to_workflow_records Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py::test_dictionary_describe_missing_object_returns_not_found_packet Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py::test_object_list_help_is_available_after_subcommand Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py::test_records_frontdoor_supports_list_get_and_never_run Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py::test_records_frontdoor_returns_typed_db_authority_error Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py::test_status_frontdoor_rejects_unsupported_since_hours Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py::test_verify_platform_returns_typed_db_authority_error Code&DBs/Workflow/tests/unit/test_provider_execution_registry_fallback.py::test_db_authority_unavailable_is_health_state_not_stderr_noise Code&DBs/Workflow/tests/unit/test_workflow_runtime_repository_rename.py::test_list_workflow_records_filters_never_run_and_bounds_limit Code&DBs/Workflow/tests/unit/test_workflow_status.py::test_workflow_status_falls_back_to_workflow_runs_when_metrics_are_empty",
+    "./scripts/test.sh check-affected artifacts/tmp/workflow_unrun_records_fix_20260423.queue.json",
+    "./scripts/test.sh validate artifacts/tmp/workflow_unrun_records_fix_20260423.queue.json"
+  ],
+  "jobs": [
+    {
+      "label": "fix_workflow_unrun_records_status",
+      "write_scope": [
+        "Code&DBs/Workflow/registry/provider_execution_registry.py",
+        "Code&DBs/Workflow/storage/postgres/workflow_runtime_repository.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_query_core.py",
+        "Code&DBs/Workflow/runtime/workflow_status.py",
+        "Code&DBs/Workflow/surfaces/cli/commands/authority.py",
+        "Code&DBs/Workflow/surfaces/cli/commands/workflow.py",
+        "Code&DBs/Workflow/surfaces/cli/main.py",
+        "Code&DBs/Workflow/tests/unit/test_provider_execution_registry_fallback.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py",
+        "Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_runtime_repository_rename.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_status.py"
+      ],
+      "prompt": "Repair the workflow operator surfaces so never-run workflow questions and record reads route to public.workflows, status history falls back to public.workflow_runs, dictionary missing objects return typed not-found packets, and object/record help is discoverable."
+    }
+  ]
+}

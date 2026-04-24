@@ -13,11 +13,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from storage.postgres import PostgresConfigurationError
-
-from ._boot import bootstrap_pg_conn, create_pg_conn, ensure_workflow_on_path, sync_registries
 from ._lifecycle import LifecycleManager
-from ._workflow_database import workflow_database_env_for_repo
+
+
+def _is_postgres_configuration_error(exc: Exception) -> bool:
+    from storage.postgres import PostgresConfigurationError
+
+    return isinstance(exc, PostgresConfigurationError)
+
+
+def _workflow_database_env_for_repo(repo_root: Path) -> dict[str, str]:
+    from ._workflow_database import workflow_database_env_for_repo
+
+    return workflow_database_env_for_repo(repo_root)
 
 
 class _BaseSubsystems:
@@ -66,6 +74,7 @@ class _BaseSubsystems:
         self._boot_done = False
         self._registry_sync_succeeded: list[str] = []
         self._registry_sync_skipped: list[str] = []
+        self._registry_sync_failures: list[dict[str, str]] = []
         self._registry_sync_done = False
         self._startup_wiring_done = False
 
@@ -76,6 +85,8 @@ class _BaseSubsystems:
         os.makedirs(self.receipts_dir, exist_ok=True)
 
     def _ensure_workflow_root_on_path(self) -> None:
+        from ._boot import ensure_workflow_on_path
+
         ensure_workflow_on_path(self._workflow_root)
 
     def _artifact_dir(self, name: str) -> str:
@@ -84,7 +95,7 @@ class _BaseSubsystems:
         return str(path)
 
     def _postgres_env(self) -> dict[str, str]:
-        return workflow_database_env_for_repo(self._repo_root)
+        return _workflow_database_env_for_repo(self._repo_root)
 
     def _handle_reference_catalog_sync_error(self, exc: Exception) -> None:
         del exc
@@ -97,7 +108,7 @@ class _BaseSubsystems:
             self._logger.debug("startup wiring skipped under sandbox constraints: %s", exc)
             return
         if (
-            isinstance(exc, PostgresConfigurationError)
+            _is_postgres_configuration_error(exc)
             and exc.reason_code == "postgres.authority_unavailable"
         ):
             self._logger.debug("startup wiring skipped under sandbox constraints: %s", exc)
@@ -123,26 +134,40 @@ class _BaseSubsystems:
         except Exception as exc:
             self._handle_startup_wiring_error(exc)
 
-    def _sync_registries_once(self) -> tuple[list[str], list[str]]:
+    def _sync_registries_once(self) -> tuple[list[str], list[dict[str, str]]]:
         if self._registry_sync_done:
-            return (list(self._registry_sync_succeeded), list(self._registry_sync_skipped))
-        succeeded, skipped = sync_registries(self.get_pg_conn())
+            return (list(self._registry_sync_succeeded), list(self._registry_sync_failures))
+        from ._boot import sync_registries
+
+        succeeded, failures = sync_registries(self.get_pg_conn())
         self._registry_sync_done = True
         self._registry_sync_succeeded = list(succeeded)
-        self._registry_sync_skipped = list(skipped)
-        if skipped:
+        self._registry_sync_failures = [dict(failure) for failure in failures]
+        self._registry_sync_skipped = [
+            failure.get("component", "unknown") for failure in self._registry_sync_failures
+        ]
+        if failures:
+            skipped = [failure.get("component", "unknown") for failure in failures]
             skipped_list = ", ".join(skipped)
+            failure_details = "; ".join(
+                f"{failure.get('component', 'unknown')}: "
+                f"{failure.get('exception_type', 'Exception')}: "
+                f"{failure.get('message', '')}"
+                for failure in failures
+            )
             if succeeded:
                 self._logger.warning(
-                    "startup registry sync completed with skipped steps: %s",
+                    "startup registry sync completed with skipped steps: %s (%s)",
                     skipped_list,
+                    failure_details,
                 )
             else:
                 self._logger.warning(
-                    "startup registry sync skipped all steps: %s",
+                    "startup registry sync skipped all steps: %s (%s)",
                     skipped_list,
+                    failure_details,
                 )
-        return (list(succeeded), list(skipped))
+        return (list(succeeded), [dict(failure) for failure in failures])
 
     def boot(self) -> dict[str, Any]:
         """Run explicit startup work once for long-lived surfaces."""
@@ -153,23 +178,28 @@ class _BaseSubsystems:
                 "registry_sync": {
                     "succeeded": list(self._registry_sync_succeeded),
                     "skipped": list(self._registry_sync_skipped),
+                    "failures": [dict(failure) for failure in self._registry_sync_failures],
                 },
                 "heartbeat_started": self._lifecycle.started,
             }
         self._ensure_workflow_root_on_path()
+        from ._boot import bootstrap_pg_conn
+
         self._pg_conn = bootstrap_pg_conn(
             repo_root=self._repo_root,
             workflow_root=self._workflow_root,
             env=self._postgres_env(),
         )
-        succeeded, skipped = self._sync_registries_once()
+        succeeded, failures = self._sync_registries_once()
         self._maybe_startup_wiring()
         self._boot_done = True
+        skipped = [failure.get("component", "unknown") for failure in failures]
         return {
             "booted": True,
             "registry_sync": {
                 "succeeded": list(succeeded),
                 "skipped": list(skipped),
+                "failures": [dict(failure) for failure in failures],
             },
             "heartbeat_started": self._lifecycle.started,
         }
@@ -189,6 +219,8 @@ class _BaseSubsystems:
     def get_pg_conn(self):
         if self._pg_conn is None:
             self._ensure_workflow_root_on_path()
+            from ._boot import create_pg_conn
+
             self._pg_conn = create_pg_conn(
                 repo_root=self._repo_root,
                 workflow_root=self._workflow_root,

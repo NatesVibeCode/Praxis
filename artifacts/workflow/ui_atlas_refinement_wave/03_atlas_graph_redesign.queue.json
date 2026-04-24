@@ -1,0 +1,111 @@
+{
+  "name": "Atlas Graph Redesign",
+  "workflow_id": "ui_atlas_refinement_atlas_graph_redesign",
+  "phase": "execute",
+  "outcome_goal": "Atlas becomes a stable, professional, high-density knowledge graph and structured graph-table interface backed by authoritative definition/object hierarchy data.",
+  "anti_requirements": [
+    "Do not create a parallel graph authority outside existing API/CQRS/data-dictionary surfaces.",
+    "Do not keep exploding force-graph behavior.",
+    "Do not use a decorative one-hue palette or purely atmospheric styling.",
+    "Do not hand-roll a new persistence model for Atlas nodes."
+  ],
+  "jobs": [
+    {
+      "label": "discover_atlas_authority",
+      "agent": "auto/review",
+      "prompt": "Inspect Atlas UI components, graph data API routes, operator graph/query surfaces, data dictionary/object hierarchy sources, and existing table/list patterns. Identify the authoritative read model Atlas should consume.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src",
+        "Code&DBs/Workflow/surfaces/api",
+        "Code&DBs/Workflow/runtime",
+        "Code&DBs/Workflow/observability"
+      ],
+      "write_scope": []
+    },
+    {
+      "label": "stabilize_atlas_graph_layout",
+      "agent": "auto/build",
+      "depends_on": ["discover_atlas_authority"],
+      "prompt": "Replace unstable/exploding graph behavior with deterministic, bounded layout defaults. Dragging should pin or anchor nodes predictably. Simulation must settle quickly and remain inspectable at high density.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "verify_refs": [
+        "atlas-physics-stable",
+        "atlas-drag-anchor-stable"
+      ]
+    },
+    {
+      "label": "apply_atlas_industrial_visual_system",
+      "agent": "auto/build",
+      "depends_on": ["stabilize_atlas_graph_layout"],
+      "prompt": "Apply a professional industrial graph aesthetic: dense labels, restrained contrast, object-type encoding, clear selection states, and no decorative glow/orb palette. Keep text legible and non-overlapping.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "verify_refs": [
+        "atlas-industrial-aesthetic",
+        "atlas-high-density-legibility"
+      ]
+    },
+    {
+      "label": "integrate_data_dictionary_hierarchy",
+      "agent": "auto/build",
+      "depends_on": ["discover_atlas_authority"],
+      "prompt": "Map Atlas nodes to the authoritative definition/object hierarchy exposed by existing data dictionary or operator graph surfaces. Display object kind, authority source, definition summary, and parent/child relationship when available.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src",
+        "Code&DBs/Workflow/surfaces/api",
+        "Code&DBs/Workflow/runtime"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "verify_refs": [
+        "atlas-data-dictionary-node-mapping",
+        "atlas-object-hierarchy-display"
+      ]
+    },
+    {
+      "label": "add_atlas_hybrid_table_view",
+      "agent": "auto/build",
+      "depends_on": ["integrate_data_dictionary_hierarchy"],
+      "prompt": "Add a toggle between spatial graph and graph-based table view. Table view must support structured relational management: source node, relation, target node, object kind, authority source, and selection sync with graph.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "verify_refs": [
+        "atlas-graph-table-toggle",
+        "atlas-table-selection-sync"
+      ]
+    },
+    {
+      "label": "test_atlas_redesign",
+      "agent": "auto/test",
+      "depends_on": [
+        "apply_atlas_industrial_visual_system",
+        "add_atlas_hybrid_table_view"
+      ],
+      "prompt": "Add tests for stable layout inputs, node hierarchy fields, graph/table toggle, row selection sync, and no exploding physics regression. Include a Playwright or component-render smoke if Atlas currently has visual test infrastructure.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src"
+      ],
+      "verify_refs": [
+        "npm-test-atlas",
+        "atlas-visual-smoke"
+      ]
+    }
+  ]
+}

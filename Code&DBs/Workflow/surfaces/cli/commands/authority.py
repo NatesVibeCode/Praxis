@@ -462,6 +462,44 @@ def _data_dictionary_command(args: list[str], *, stdout: TextIO) -> int:
         print_json(stdout, {"error": str(exc)})
         return 1
 
+    if action == "describe":
+        if isinstance(payload, dict) and payload.get("error"):
+            if as_json:
+                print_json(
+                    stdout,
+                    {
+                        "action": "describe",
+                        "status": "not_found" if payload.get("status_code") == 404 else "error",
+                        "reason_code": "data_dictionary.object_not_found"
+                        if payload.get("status_code") == 404
+                        else "data_dictionary.error",
+                        "object_kind": object_kind,
+                        **payload,
+                    },
+                )
+            else:
+                stdout.write(
+                    f"data dictionary describe failed for {object_kind}: "
+                    f"{payload.get('error')}\n"
+                )
+            return 1
+        obj = payload.get("object") if isinstance(payload, dict) else {}
+        if not isinstance(obj, dict):
+            if as_json:
+                print_json(
+                    stdout,
+                    {
+                        "action": "describe",
+                        "status": "not_found",
+                        "reason_code": "data_dictionary.object_not_found",
+                        "object_kind": object_kind,
+                        "fields": [],
+                    },
+                )
+            else:
+                stdout.write(f"data dictionary object not found: {object_kind}\n")
+            return 1
+
     if as_json:
         print_json(stdout, payload)
         return 0
@@ -1071,9 +1109,15 @@ def _object_help_text() -> str:
 
 
 def _object_command(args: list[str], *, stdout: TextIO) -> int:
-    if not args or args[0] in {"-h", "--help"}:
+    if not args:
         stdout.write(_object_help_text() + "\n")
         return 2
+    if args[0] in {"-h", "--help"}:
+        stdout.write(_object_help_text() + "\n")
+        return 0
+    if any(token in {"-h", "--help"} for token in args[1:]):
+        stdout.write(_object_help_text() + "\n")
+        return 0
     action = args[0]
     as_json = False
     confirmed = False

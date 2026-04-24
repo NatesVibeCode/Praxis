@@ -466,6 +466,26 @@ class TestSearch:
         assert any(bug.bug_id == open_bug.bug_id for bug in high_results)
         assert all(bug.severity == BugSeverity.P1 for bug in high_results)
 
+    def test_search_exact_bug_id_returns_matching_bug_first(self, tracker: BugTracker):
+        bug, _ = tracker.file_bug(
+            "Exact id lookup target",
+            BugSeverity.P2,
+            BugCategory.RUNTIME,
+            "Search should short-circuit exact bug ids before semantic ranking.",
+            "alice",
+        )
+        tracker.file_bug(
+            "Neighbor with similar text",
+            BugSeverity.P2,
+            BugCategory.RUNTIME,
+            f"Mentions {bug.bug_id} but should not outrank the exact row.",
+            "bob",
+        )
+
+        results = tracker.search(bug.bug_id.lower())
+
+        assert [item.bug_id for item in results] == [bug.bug_id]
+
 
 # ── stats ──────────────────────────────────────────────────────────────
 

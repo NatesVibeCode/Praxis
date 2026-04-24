@@ -8,6 +8,7 @@ from memory.multimodal_ingest import (
 from memory.bridge_queries import StoryComposer
 from typing import Any
 from surfaces._recall import _readable_name, search_recall_results
+from surfaces.placeholder_ids import is_demo_placeholder, placeholder_error
 
 from ..subsystems import _subs
 from ..helpers import _serialize
@@ -154,13 +155,10 @@ def tool_praxis_graph(params: dict) -> dict:
 
     try:
         kg = _subs.get_knowledge_graph()
-        resolution_note = None
         if not entity_id:
-            entity_id = _resolve_default_entity_id(kg)
-            resolution_note = "entity_id omitted; showing the latest available entity instead"
-        elif entity_id == "entity_abc123":
-            entity_id = _resolve_default_entity_id(kg)
-            resolution_note = "entity_abc123 is a placeholder; showing the latest available entity instead"
+            return {"error": "entity_id is required", "reason_code": "entity_id.required"}
+        if is_demo_placeholder("entity_id", entity_id):
+            return placeholder_error("entity_id", entity_id)
         elif _resolve_entity(kg, entity_id) is None:
             return {"entity_id": entity_id, "error": "entity_id was not found"}
 
@@ -209,8 +207,6 @@ def tool_praxis_graph(params: dict) -> dict:
                 "enrichment_included": include_enrichment,
             },
         }
-        if resolution_note:
-            result["note"] = resolution_note
         if isinstance(raw.get("direct"), dict) and raw["direct"]:
             result["direct_dependencies"] = _resolve(raw["direct"])
         if isinstance(raw.get("indirect"), dict) and raw["indirect"]:
@@ -230,9 +226,9 @@ def tool_praxis_story(params: dict) -> dict:
     try:
         kg = _subs.get_knowledge_graph()
         if not entity_id:
-            entity_id = _resolve_default_entity_id(kg)
-        elif entity_id == "entity_abc123":
-            entity_id = _resolve_default_entity_id(kg)
+            return {"error": "entity_id is required", "reason_code": "entity_id.required"}
+        if is_demo_placeholder("entity_id", entity_id):
+            return placeholder_error("entity_id", entity_id)
         elif _resolve_entity(kg, entity_id) is None:
             return {"entity_id": entity_id, "error": "entity_id was not found"}
 
@@ -293,24 +289,6 @@ def _resolve_entity(kg, entity_id: str):
         if entity is not None:
             return entity
     return None
-
-
-def _resolve_default_entity_id(kg) -> str:
-    rows = _subs.get_pg_conn().execute(
-        """
-        SELECT id
-          FROM memory_entities
-         WHERE archived = false
-         ORDER BY updated_at DESC, created_at DESC
-         LIMIT 1
-        """
-    )
-    if not rows:
-        raise RuntimeError("entity_id is required and no knowledge-graph entities were found")
-    entity_id = str(rows[0].get("id") or "").strip()
-    if not entity_id:
-        raise RuntimeError("failed to resolve a default knowledge-graph entity id")
-    return entity_id
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
@@ -401,10 +379,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Explore connections from one knowledge-graph entity. Shows what an entity depends on, "
                 "what depends on it, and the blast radius of changes.\n\n"
-                "USE WHEN: you already know the target entity_id from praxis_recall, or you want a quick "
-                "look at the latest available entity without hunting for an id first.\n\n"
+                "USE WHEN: you already know the target entity_id from praxis_recall.\n\n"
                 "EXAMPLES:\n"
-                "  praxis_graph(depth=1)\n"
                 "  praxis_graph(entity_id='module:task_assembler', depth=2)\n\n"
                 "DO NOT USE: for broad knowledge search or discovery; use praxis_recall first when you "
                 "need ranked candidates."
@@ -436,8 +412,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 ),
                 "risks": {"default": "read"},
                 "examples": [
-                    {"title": "Compose a story for the latest entity", "input": {}},
-                    {"title": "Compose a story for one entity", "input": {"entity_id": "entity_abc123", "max_lines": 4}},
+                    {"title": "Compose a story for one entity", "input": {"entity_id": "module:task_assembler", "max_lines": 4}},
                 ],
             },
             "inputSchema": {
@@ -445,7 +420,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "entity_id": {
                         "type": "string",
-                        "description": "Entity ID to narrate. Defaults to the latest available knowledge-graph entity.",
+                        "description": "Entity ID to narrate.",
                     },
                     "max_lines": {
                         "type": "integer",

@@ -146,14 +146,10 @@ describe('MoonBuildPage dock authority', () => {
     moonBuildPageDockMocks.loadCatalog.mockImplementation(() => new Promise(() => undefined));
   });
 
-  test('opening the detail dock closes the node popout and keeps it closed while the dock is open', () => {
+  test('single click opens the detail dock and does not open the node popout', () => {
     render(<MoonBuildPage workflowId="wf-123" />);
 
     fireEvent.click(screen.getByText('Webhook'));
-
-    expect(screen.getByTestId('node-popout')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open Detail dock' }));
 
     expect(screen.getByTestId('node-detail')).toBeInTheDocument();
     expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
@@ -163,10 +159,19 @@ describe('MoonBuildPage dock authority', () => {
     expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
   });
 
+  test('double clicking a node opens the node popout', () => {
+    render(<MoonBuildPage workflowId="wf-123" />);
+
+    fireEvent.doubleClick(screen.getByText('Webhook'));
+
+    expect(screen.getByTestId('node-popout')).toBeInTheDocument();
+  });
+
   test('opening release closes the node popout and keeps it closed while release is open', () => {
     render(<MoonBuildPage workflowId="wf-123" />);
 
     fireEvent.click(screen.getByText('Webhook'));
+    fireEvent.doubleClick(screen.getByText('Webhook'));
 
     expect(screen.getByTestId('node-popout')).toBeInTheDocument();
 

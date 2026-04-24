@@ -410,6 +410,35 @@ def test_workdir_drift_quiet_when_path_exists(tmp_path) -> None:
     assert _preflight_workdir_drift(spec) == []
 
 
+def test_workdir_drift_warns_on_host_path_outside_workspace_authority(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "runtime.workflow_validation.authority_workspace_roots",
+        lambda: (tmp_path / "current-checkout",),
+    )
+    spec = _FakeSpec(raw={"workdir": "/Users/nate/Praxis"})
+
+    warnings = _preflight_workdir_drift(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "workspace_path_outside_authority"
+    assert warnings[0]["severity"] == "warning"
+    assert "PRAXIS_HOST_WORKSPACE_ROOT" in warnings[0]["message"]
+
+
+def test_workdir_drift_checks_target_repo_authority(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "runtime.workflow_validation.authority_workspace_roots",
+        lambda: (tmp_path / "current-checkout",),
+    )
+    spec = _FakeSpec(raw={"target_repo": "/Volumes/Users/natha/Documents/Builds/Praxis"})
+
+    warnings = _preflight_workdir_drift(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "workspace_path_outside_authority"
+    assert "target_repo" in warnings[0]["message"]
+
+
 def test_workdir_drift_quiet_when_relative_path() -> None:
     # Relative paths are resolved at submission time by the surface layer;
     # the preflight intentionally does not speculate about them.

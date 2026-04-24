@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
+import storage.postgres as postgres_mod
+import surfaces.api.handlers._surface_usage as surface_usage_mod
 from surfaces.api.handlers._surface_usage import record_api_route_usage
 from storage.postgres.workflow_surface_usage_repository import (
     PostgresWorkflowSurfaceUsageRepository,
@@ -191,6 +193,8 @@ def test_surface_usage_repository_records_event_and_daily_rollup() -> None:
 
 
 def test_record_api_route_usage_tracks_orient_frontdoor() -> None:
+    surface_usage_mod._reset_surface_usage_recorder_health_for_tests()
+
     class _FakeSubsystems:
         def __init__(self, conn: _FakeConn) -> None:
             self._conn = conn
@@ -214,6 +218,79 @@ def test_record_api_route_usage_tracks_orient_frontdoor() -> None:
     assert event_args[4] == "/orient"
     assert event_args[8] == "ok"
     assert daily_sql.startswith("INSERT INTO workflow_surface_usage_daily (")
+
+
+def test_record_api_route_usage_reports_recorder_failure(monkeypatch) -> None:
+    surface_usage_mod._reset_surface_usage_recorder_health_for_tests()
+
+    class _FailingRepo:
+        def __init__(self, _conn) -> None:
+            pass
+
+        def record_event(self, **_kwargs) -> None:
+            raise RuntimeError("surface usage table unavailable")
+
+    class _FakeSubsystems:
+        def __init__(self) -> None:
+            self.conn = _FakeConn()
+
+        def get_pg_conn(self) -> object:
+            return self.conn
+
+    monkeypatch.setattr(postgres_mod, "PostgresWorkflowSurfaceUsageRepository", _FailingRepo)
+
+    subsystems = _FakeSubsystems()
+    record_api_route_usage(
+        subsystems,
+        path="/orient",
+        method="POST",
+        status_code=200,
+        response_payload={"kind": "orient_authority_envelope"},
+    )
+
+    health = surface_usage_mod.surface_usage_recorder_health()
+    assert health["authority_ready"] is False
+    assert health["observability_state"] == "degraded"
+    assert health["dropped_event_count"] == 1
+    assert health["durable_event_count"] == 1
+    assert health["durable_error_count"] == 0
+    assert health["backup_authority_ready"] is True
+    assert health["last_entrypoint"] == "/orient"
+    assert health["last_surface_kind"] == "api"
+    assert health["last_error"] == "RuntimeError: surface usage table unavailable"
+    assert health["last_friction_event_id"]
+    assert health["last_durable_error"] is None
+    assert any(
+        call[0].startswith("INSERT INTO friction_events")
+        for call in subsystems.conn.calls
+    )
+    surface_usage_mod._reset_surface_usage_recorder_health_for_tests()
+
+
+def test_record_api_route_usage_reports_unbacked_recorder_failure_without_connection() -> None:
+    surface_usage_mod._reset_surface_usage_recorder_health_for_tests()
+
+    record_api_route_usage(
+        None,
+        path="/orient",
+        method="POST",
+        status_code=200,
+        response_payload={"kind": "orient_authority_envelope"},
+    )
+
+    health = surface_usage_mod.surface_usage_recorder_health()
+    assert health["authority_ready"] is False
+    assert health["observability_state"] == "degraded"
+    assert health["dropped_event_count"] == 1
+    assert health["durable_event_count"] == 0
+    assert health["durable_error_count"] == 1
+    assert health["backup_authority_ready"] is False
+    assert health["last_entrypoint"] == "/orient"
+    assert health["last_surface_kind"] == "api"
+    assert health["last_error"] == "RuntimeError: surface usage postgres connection unavailable"
+    assert health["last_friction_event_id"] is None
+    assert health["last_durable_error"] == "surface usage failure had no Postgres connection for friction ledger"
+    surface_usage_mod._reset_surface_usage_recorder_health_for_tests()
 
 
 def test_surface_usage_repository_lists_rollup_daily_events_and_summaries() -> None:

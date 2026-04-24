@@ -15,10 +15,28 @@ from surfaces.api.handlers import workflow_query_routes
 from surfaces.api.handlers import workflow_run
 
 
+class _FakeTransaction:
+    def __init__(self, conn: "_FakeAuthorityConn") -> None:
+        self.conn = conn
+
+    def __enter__(self) -> "_FakeAuthorityConn":
+        self.conn.transaction_enters += 1
+        return self.conn
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if exc_type is None:
+            self.conn.transaction_commits += 1
+        else:
+            self.conn.transaction_rollbacks += 1
+
+
 class _FakeAuthorityConn:
     def __init__(self) -> None:
         self.receipts: dict[str, dict] = {}
         self.events: dict[str, dict] = {}
+        self.transaction_enters = 0
+        self.transaction_commits = 0
+        self.transaction_rollbacks = 0
 
     def fetchrow(self, query, *args):
         if "FROM authority_operation_receipts" in query:
@@ -33,24 +51,27 @@ class _FakeAuthorityConn:
             receipt_id = args[0]
             self.receipts[receipt_id] = {
                 "receipt_id": receipt_id,
-                "operation_name": args[1],
-                "operation_kind": args[2],
-                "authority_ref": args[3],
+                "operation_ref": args[1],
+                "operation_name": args[2],
+                "operation_kind": args[3],
                 "authority_domain_ref": args[4],
-                "storage_target_ref": args[5],
-                "caller_ref": args[6],
-                "idempotency_key": args[7],
-                "idempotency_policy": args[8],
-                "status": args[9],
-                "input_hash": args[10],
-                "output_hash": args[11],
-                "event_ids": args[12],
-                "error": args[13],
-                "handler_module": args[14],
-                "handler_qualname": args[15],
-                "latency_ms": args[16],
-                "result_payload": args[17],
-                "metadata": args[18],
+                "authority_ref": args[5],
+                "projection_ref": args[6],
+                "storage_target_ref": args[7],
+                "input_hash": args[8],
+                "output_hash": args[9],
+                "idempotency_key": args[10],
+                "caller_ref": args[11],
+                "execution_status": args[12],
+                "result_status": args[13],
+                "error_code": args[14],
+                "error_detail": args[15],
+                "event_ids": args[16],
+                "projection_freshness": args[17],
+                "result_payload": args[18],
+                "duration_ms": args[19],
+                "binding_revision": args[20],
+                "decision_ref": args[21],
             }
             return "INSERT 0 1"
         if "INSERT INTO authority_events" in query:
@@ -64,6 +85,9 @@ class _FakeAuthorityConn:
                 self.receipts[receipt_id]["event_ids"] = event_ids
             return "UPDATE 1"
         return "OK"
+
+    def transaction(self) -> _FakeTransaction:
+        return _FakeTransaction(self)
 
 
 def _fake_shared_subsystems():

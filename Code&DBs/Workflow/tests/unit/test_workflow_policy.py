@@ -7,6 +7,7 @@ from runtime.workflow._workflow_policy import (
     apply_workflow_preflight,
     run_workflow_with_retry,
 )
+from runtime.result_cache import CacheKey
 from runtime.workflow._workflow_execution import WorkflowExecutionContext
 from runtime.workflow.orchestrator import WorkflowResult, WorkflowSpec
 
@@ -138,6 +139,95 @@ def test_apply_workflow_preflight_returns_cached_result_with_marker(monkeypatch)
     assert cache.keys == ["cache me"]
     assert result.run_id == "cached_run"
     assert result.outputs == {"value": 7, "cache_hit": True}
+
+
+def test_result_cache_key_includes_execution_authority_inputs():
+    base = WorkflowSpec(
+        prompt="same prompt",
+        provider_slug="anthropic",
+        model_slug="claude-test",
+        system_prompt="same system",
+        use_cache=True,
+    )
+    base_key = CacheKey.compute(base)
+
+    variants = [
+        WorkflowSpec(
+            prompt=base.prompt,
+            provider_slug=base.provider_slug,
+            model_slug=base.model_slug,
+            system_prompt=base.system_prompt,
+            workspace_ref="workspace:other",
+            use_cache=True,
+        ),
+        WorkflowSpec(
+            prompt=base.prompt,
+            provider_slug=base.provider_slug,
+            model_slug=base.model_slug,
+            system_prompt=base.system_prompt,
+            runtime_profile_ref="runtime:other",
+            use_cache=True,
+        ),
+        WorkflowSpec(
+            prompt=base.prompt,
+            provider_slug=base.provider_slug,
+            model_slug=base.model_slug,
+            system_prompt=base.system_prompt,
+            allowed_tools=["praxis_submit", "praxis_bugs"],
+            use_cache=True,
+        ),
+        WorkflowSpec(
+            prompt=base.prompt,
+            provider_slug=base.provider_slug,
+            model_slug=base.model_slug,
+            system_prompt=base.system_prompt,
+            output_schema={"type": "object", "required": ["answer"]},
+            use_cache=True,
+        ),
+        WorkflowSpec(
+            prompt=base.prompt,
+            provider_slug=base.provider_slug,
+            model_slug=base.model_slug,
+            system_prompt=base.system_prompt,
+            task_type="architecture_review",
+            use_cache=True,
+        ),
+        WorkflowSpec(
+            prompt=base.prompt,
+            provider_slug=base.provider_slug,
+            model_slug=base.model_slug,
+            system_prompt=base.system_prompt,
+            scope_write=["runtime/result_cache.py"],
+            use_cache=True,
+        ),
+    ]
+
+    assert all(CacheKey.compute(variant) != base_key for variant in variants)
+
+
+def test_result_cache_key_is_stable_for_equivalent_structured_specs():
+    left = WorkflowSpec(
+        prompt="same prompt",
+        provider_slug="anthropic",
+        model_slug="claude-test",
+        use_cache=True,
+        output_schema={"required": ["answer"], "type": "object"},
+        context_sections=[
+            {"title": "Facts", "body": "Use the durable authority."},
+        ],
+    )
+    right = WorkflowSpec(
+        prompt="same prompt",
+        provider_slug="anthropic",
+        model_slug="claude-test",
+        use_cache=True,
+        output_schema={"type": "object", "required": ["answer"]},
+        context_sections=[
+            {"body": "Use the durable authority.", "title": "Facts"},
+        ],
+    )
+
+    assert CacheKey.compute(left) == CacheKey.compute(right)
 
 
 def test_workflow_with_retry_retries_then_escalates_and_records(monkeypatch):

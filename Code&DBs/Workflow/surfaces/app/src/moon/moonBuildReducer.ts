@@ -115,7 +115,7 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
         activeNodeId: action.nextUnresolvedId,
         selectedNodeId: action.nextUnresolvedId,
         selectedEdgeId: null,
-        popoutOpen: action.nextUnresolvedId !== null && state.openDock === null && !state.releaseOpen,
+        popoutOpen: false,
         advanceQueued: false,
       };
     case 'OPEN_DOCK':

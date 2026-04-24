@@ -291,4 +291,100 @@ describe('MoonBuildPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Request timed out after 45s');
   });
+
+  test('deletes selected nodes on Delete/Backspace and removes incident edges', async () => {
+    moonBuildPageMocks.payload = {
+      definition: {},
+      build_graph: {
+        nodes: [
+          {
+            node_id: 'node-1',
+            kind: 'step',
+            title: 'Start',
+            route: 'trigger/manual',
+            status: 'ready',
+          },
+          {
+            node_id: 'node-2',
+            kind: 'step',
+            title: 'Next',
+            route: '',
+          },
+        ],
+        edges: [
+          {
+            edge_id: 'edge-1-2',
+            kind: 'sequence',
+            from_node_id: 'node-1',
+            to_node_id: 'node-2',
+          },
+        ],
+      },
+    };
+
+    render(<MoonBuildPage workflowId={null} />);
+
+    fireEvent.click(screen.getByText('Start'));
+    fireEvent.keyDown(window, { key: 'Delete' });
+
+    await waitFor(() => {
+      expect(moonBuildPageMocks.setPayload).toHaveBeenCalled();
+    });
+
+    const calls = moonBuildPageMocks.setPayload.mock.calls;
+    const nextPayload = calls[calls.length - 1]?.[0] as BuildPayload;
+    expect(nextPayload.build_graph?.nodes).toHaveLength(1);
+    expect(nextPayload.build_graph?.nodes?.[0]).toMatchObject({ node_id: 'node-2' });
+    expect(nextPayload.build_graph?.edges).toHaveLength(0);
+  });
+
+  test('supports pointer-centered wheel zoom and drag-to-pan on empty canvas', async () => {
+    moonBuildPageMocks.payload = {
+      definition: {},
+      build_graph: {
+        nodes: [
+          {
+            node_id: 'node-1',
+            kind: 'step',
+            title: 'Start',
+            route: 'trigger/manual',
+            status: 'ready',
+          },
+          {
+            node_id: 'node-2',
+            kind: 'step',
+            title: 'Next',
+            route: '',
+          },
+        ],
+        edges: [
+          {
+            edge_id: 'edge-1-2',
+            kind: 'sequence',
+            from_node_id: 'node-1',
+            to_node_id: 'node-2',
+          },
+        ],
+      },
+    };
+
+    render(<MoonBuildPage workflowId={null} />);
+
+    const graph = screen.getByLabelText('Workflow build graph');
+    const baseline = graph.getAttribute('style') || '';
+
+    fireEvent(graph, new MouseEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0, button: 0 }));
+    fireEvent(graph, new MouseEvent('pointermove', { bubbles: true, clientX: 25, clientY: 17, button: 0 }));
+    fireEvent(graph, new MouseEvent('pointerup', { bubbles: true, clientX: 25, clientY: 17, button: 0 }));
+
+    await waitFor(() => {
+      expect(graph).not.toHaveAttribute('style', baseline);
+      expect(graph.getAttribute('style') || '').toContain('translate(25px, 17px)');
+    });
+
+    fireEvent.wheel(graph, { deltaY: -120, clientX: 0, clientY: 0 });
+    await waitFor(() => {
+      expect(graph.getAttribute('style')).toMatch(/scale\([1-9]/);
+    });
+  });
 });

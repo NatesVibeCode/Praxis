@@ -76,6 +76,32 @@ def test_praxis_graph_can_opt_into_enrichment(monkeypatch) -> None:
     }
 
 
+def test_praxis_graph_requires_explicit_entity_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        knowledge._subs,
+        "get_knowledge_graph",
+        lambda: _FakeKnowledgeGraph([]),
+    )
+
+    result = knowledge.tool_praxis_graph({"depth": 1})
+
+    assert result["reason_code"] == "entity_id.required"
+    assert "entity_id is required" in result["error"]
+
+
+def test_praxis_graph_rejects_demo_placeholder(monkeypatch) -> None:
+    monkeypatch.setattr(
+        knowledge._subs,
+        "get_knowledge_graph",
+        lambda: _FakeKnowledgeGraph([]),
+    )
+
+    result = knowledge.tool_praxis_graph({"entity_id": "entity_abc123"})
+
+    assert result["reason_code"] == "entity_id.placeholder_not_allowed"
+    assert result["entity_id"] == "entity_abc123"
+
+
 def test_praxis_story_returns_readable_story_lines(monkeypatch) -> None:
     class _FakeEntity:
         def __init__(self, name: str) -> None:
@@ -113,7 +139,6 @@ def test_praxis_story_returns_readable_story_lines(monkeypatch) -> None:
         "_resolve_entity",
         lambda _kg, entity_id: _FakeEntity("Root Entity") if entity_id == "root-1" else _FakeEntity("Dependency Entity"),
     )
-    monkeypatch.setattr(knowledge, "_resolve_default_entity_id", lambda _kg: "root-1")
 
     result = knowledge.tool_praxis_story({"entity_id": "root-1", "max_lines": 3})
 
@@ -129,3 +154,29 @@ def test_praxis_story_returns_readable_story_lines(monkeypatch) -> None:
             "strength": 0.9,
         }
     ]
+
+
+def test_praxis_story_requires_explicit_entity_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        knowledge._subs,
+        "get_knowledge_graph",
+        lambda: _FakeKnowledgeGraph([]),
+    )
+
+    result = knowledge.tool_praxis_story({"max_lines": 3})
+
+    assert result["reason_code"] == "entity_id.required"
+    assert "entity_id is required" in result["error"]
+
+
+def test_praxis_story_rejects_demo_placeholder(monkeypatch) -> None:
+    monkeypatch.setattr(
+        knowledge._subs,
+        "get_knowledge_graph",
+        lambda: _FakeKnowledgeGraph([]),
+    )
+
+    result = knowledge.tool_praxis_story({"entity_id": "entity_abc123"})
+
+    assert result["reason_code"] == "entity_id.placeholder_not_allowed"
+    assert result["entity_id"] == "entity_abc123"

@@ -1,10 +1,11 @@
 #!/bin/bash
 # praxis-agent — talk to the local agent_sessions service.
-# Requires: curl, jq. Base URL: http://127.0.0.1:8421.
+# Requires: curl, jq. Base URL defaults from PRAXIS_AGENT_URL or the
+# agent-session bind authority env vars.
 
 set -euo pipefail
 
-BASE="${PRAXIS_AGENT_URL:-http://127.0.0.1:8421}"
+BASE="${PRAXIS_AGENT_URL:-http://${PRAXIS_AGENT_SESSIONS_HOST:-127.0.0.1}:${PRAXIS_AGENT_SESSIONS_PORT:-8421}}"
 
 usage() {
   cat <<'EOF'
@@ -24,7 +25,9 @@ praxis-agent — control the local Claude agent-session service
       Show all agents with last activity and running status.
 
 Environment:
-  PRAXIS_AGENT_URL   override base URL (default http://127.0.0.1:8421)
+  PRAXIS_AGENT_URL   override base URL
+  PRAXIS_AGENT_SESSIONS_HOST  override service bind host
+  PRAXIS_AGENT_SESSIONS_PORT  override service bind port
 EOF
 }
 

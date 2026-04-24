@@ -122,6 +122,18 @@ function DockToggleButton({
 
 type GatePodTone = 'empty' | 'core' | 'later' | 'legacy';
 
+const MOON_MIN_SCALE = 0.5;
+const MOON_MAX_SCALE = 2.5;
+
+function clampScale(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(MOON_MIN_SCALE, Math.min(MOON_MAX_SCALE, value));
+}
+
+function finiteCoordinate(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
+
 function gatePodTone(edge: OrbitEdge, item?: CatalogItem | null): GatePodTone {
   if (!edge.gateFamily) return 'empty';
   const policy = item ? getCatalogSurfacePolicy(item) : null;
@@ -319,6 +331,44 @@ function shouldKeepEdgeMenusOpen(target: EventTarget | null): boolean {
   );
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  return Boolean(
+    target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target instanceof HTMLSelectElement
+    || target instanceof HTMLButtonElement
+    || (target instanceof HTMLElement && target.isContentEditable),
+  );
+}
+
+function buildDeletionTargetSummary(
+  nodeId: string | null,
+  edgeId: string | null,
+  graph: NonNullable<BuildPayload['build_graph']>,
+): { nodeName: string; target: UiActionTarget; reason: string } | null {
+  if (nodeId) {
+    const node = graph.nodes?.find((item) => item.node_id === nodeId);
+    if (!node) return null;
+    return {
+      nodeName: nodeDisplayName(node),
+      target: nodeTarget(node) || { kind: 'node', id: nodeId, label: nodeDisplayName(node) },
+      reason: `Remove ${nodeDisplayName(node)} from the workflow graph.`,
+    };
+  }
+  if (edgeId) {
+    const edge = graph.edges?.find((item) => item.edge_id === edgeId);
+    if (!edge) return null;
+    const fromNode = (graph.nodes || []).find((node) => node.node_id === edge.from_node_id);
+    const toNode = (graph.nodes || []).find((node) => node.node_id === edge.to_node_id);
+    return {
+      nodeName: `${nodeDisplayName(fromNode)} -> ${nodeDisplayName(toNode)}`,
+      target: edgeTarget(edge, graph) || { kind: 'edge', id: edgeId, label: `${nodeDisplayName(fromNode)} -> ${nodeDisplayName(toNode)}` },
+      reason: `Remove the connection ${nodeDisplayName(fromNode)} -> ${nodeDisplayName(toNode)}.`,
+    };
+  }
+  return null;
+}
+
 export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, onEditWorkflow, onViewRun, onDraftStateChange, initialMode }: Props) {
   const { payload, loading, error, mutate, reload, setPayload } = useBuildPayload(workflowId);
   const [state, dispatch] = useReducer(moonBuildReducer, {
@@ -328,6 +378,16 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const centerRef = useRef<HTMLDivElement>(null);
   const triggerAnchorRef = useRef<HTMLDivElement>(null);
   const pinnedSelectionRef = useRef<string | null>(null);
+  const panStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    offsetX: number;
+    offsetY: number;
+    active: boolean;
+  } | null>(null);
+  const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
+  const [canvasScale, setCanvasScale] = useState(1);
   const [catalog, setCatalog] = useState<CatalogItem[]>(getCatalog());
   const [moonGlowProfile, setMoonGlowProfile] = useState<MoonGlowProfile>(readMoonGlowProfile);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -1133,6 +1193,145 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     }
   }, [catalog, handleApplyGate]);
 
+  const handleDeleteSelection = useCallback(async () => {
+    if (state.viewMode === 'run' || !payload?.build_graph) return;
+    const graph = payload.build_graph;
+    const selectedNodeId = state.selectedNodeId;
+    const selectedEdgeId = state.selectedEdgeId;
+    const summary = buildDeletionTargetSummary(selectedNodeId, selectedEdgeId, graph);
+    if (!summary) return;
+
+    const previousOpenDock = state.openDock;
+    const previousActiveNodeId = state.activeNodeId;
+
+    const nextNodes = [...(graph.nodes || [])];
+    const nextEdges = [...(graph.edges || [])];
+
+    if (selectedNodeId) {
+      const idx = nextNodes.findIndex((node) => node.node_id === selectedNodeId);
+      if (idx < 0) return;
+      nextNodes.splice(idx, 1);
+      for (let i = nextEdges.length - 1; i >= 0; i -= 1) {
+        const edge = nextEdges[i];
+        if (edge.from_node_id === selectedNodeId || edge.to_node_id === selectedNodeId) {
+          nextEdges.splice(i, 1);
+        }
+      }
+    } else if (selectedEdgeId) {
+      const idx = nextEdges.findIndex((edge) => edge.edge_id === selectedEdgeId);
+      if (idx < 0) return;
+      nextEdges.splice(idx, 1);
+    }
+
+    await commitMoonGraphAction({
+      label: selectedNodeId ? 'Delete node' : 'Delete connection',
+      reason: summary.reason,
+      outcome: `Removed ${summary.nodeName}.`,
+      target: summary.target,
+      changeSummary: selectedNodeId ? ['Remove node', summary.nodeName] : ['Remove connection', summary.nodeName],
+      nextPayload: {
+        ...payload,
+        build_graph: {
+          ...graph,
+          nodes: nextNodes,
+          edges: nextEdges,
+        },
+      },
+      afterApply: () => {
+        dispatch({ type: 'SELECT_NODE', nodeId: null });
+        dispatch({ type: 'SELECT_EDGE', edgeId: null });
+        dispatch({ type: 'CLOSE_DOCK' });
+        if (previousActiveNodeId && previousActiveNodeId === selectedNodeId) {
+          dispatch({ type: 'SET_ACTIVE', nodeId: null });
+        }
+      },
+      afterUndo: () => {
+        if (selectedNodeId) {
+          dispatch({ type: 'SELECT_NODE', nodeId: selectedNodeId });
+        }
+        if (selectedEdgeId) {
+          dispatch({ type: 'SELECT_EDGE', edgeId: selectedEdgeId });
+          dispatch({ type: 'OPEN_DOCK', dock: 'context' });
+        }
+        if (!selectedNodeId && previousOpenDock) {
+          dispatch({ type: 'OPEN_DOCK', dock: previousOpenDock });
+        }
+      },
+    });
+  }, [commitMoonGraphAction, payload, state.activeNodeId, state.openDock, state.selectedEdgeId, state.selectedNodeId, state.viewMode]);
+
+  const handleDeleteKeyboard = useCallback((event: KeyboardEvent) => {
+    if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+    if (state.viewMode === 'run' || !state.selectedNodeId && !state.selectedEdgeId) return;
+    if (isEditableTarget(event.target)) return;
+    event.preventDefault();
+    void handleDeleteSelection();
+  }, [handleDeleteSelection, state.selectedEdgeId, state.selectedNodeId, state.viewMode]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleDeleteKeyboard);
+    return () => {
+      window.removeEventListener('keydown', handleDeleteKeyboard);
+    };
+  }, [handleDeleteKeyboard]);
+
+  const handleCanvasWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (state.viewMode === 'run') return;
+    event.preventDefault();
+
+    const containerRect = centerRef.current?.getBoundingClientRect();
+    if (!containerRect) return;
+
+    const localX = finiteCoordinate(event.clientX) - containerRect.left;
+    const localY = finiteCoordinate(event.clientY) - containerRect.top;
+    const nextScale = clampScale(canvasScale * Math.exp(-event.deltaY * 0.001));
+    if (nextScale === canvasScale) return;
+
+    const worldX = (localX - canvasOffset.x) / canvasScale;
+    const worldY = (localY - canvasOffset.y) / canvasScale;
+    const nextOffsetX = localX - worldX * nextScale;
+    const nextOffsetY = localY - worldY * nextScale;
+
+    setCanvasScale(nextScale);
+    setCanvasOffset({ x: nextOffsetX, y: nextOffsetY });
+  }, [canvasOffset.x, canvasOffset.y, canvasScale, state.viewMode]);
+
+  const handleCanvasPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (state.viewMode === 'run') return;
+    const pointerButton = typeof event.button === 'number' ? event.button : 0;
+    if (pointerButton !== 0 || event.target !== event.currentTarget) return;
+    if (isEditableTarget(event.target)) return;
+    panStateRef.current = {
+      pointerId: event.pointerId,
+      startX: finiteCoordinate(event.clientX),
+      startY: finiteCoordinate(event.clientY),
+      offsetX: canvasOffset.x,
+      offsetY: canvasOffset.y,
+      active: true,
+    };
+    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  }, [canvasOffset.x, canvasOffset.y, state.viewMode]);
+
+  const handleCanvasPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const state = panStateRef.current;
+    if (!state || !state.active || state.pointerId !== event.pointerId) return;
+    const nextOffsetX = state.offsetX + (finiteCoordinate(event.clientX) - state.startX);
+    const nextOffsetY = state.offsetY + (finiteCoordinate(event.clientY) - state.startY);
+    setCanvasOffset({ x: nextOffsetX, y: nextOffsetY });
+  }, []);
+
+  const finishCanvasPan = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!panStateRef.current || panStateRef.current.pointerId !== event.pointerId) return;
+    panStateRef.current.active = false;
+    (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
+  }, []);
+
+  useEffect(() => {
+    if (state.viewMode === 'build') return;
+    if (!panStateRef.current?.active) return;
+    panStateRef.current.active = false;
+  }, [state.viewMode]);
+
   // Click fallback: if a catalog item is staged, clicking a node applies it.
   // In run-view mode, clicking a node selects the run job for the detail dock
   // (no catalog/build mutations apply).
@@ -1148,8 +1347,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       applyCatalogToNode(catalogId, nodeId);
       return;
     }
-    // Unresolved nodes need the action-picker popout; SELECT_NODE suppresses it
-    // while a dock is open, so close the stale context dock first.
     const clicked = viewModel.nodes.find(n => n.id === nodeId);
     const isUnresolved = !!clicked && !(clicked.route || '').trim();
     if (isUnresolved && state.openDock !== null) {
@@ -1157,10 +1354,22 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     }
     if (isSelected && nodeId !== state.activeNodeId) {
       dispatch({ type: 'SELECT_NODE', nodeId: null });
-    } else {
-      dispatch({ type: 'SELECT_NODE', nodeId });
+      return;
     }
+
+    dispatch({ type: 'SELECT_NODE', nodeId });
+    dispatch({ type: 'OPEN_DOCK', dock: 'context' });
   }, [state.viewMode, state.pendingCatalogId, state.activeNodeId, state.openDock, applyCatalogToNode, viewModel.nodes]);
+
+  const handleNodeDoubleClick = useCallback((nodeId: string) => {
+    if (state.viewMode === 'run') {
+      dispatch({ type: 'SELECT_RUN_JOB', jobId: nodeId });
+      return;
+    }
+
+    dispatch({ type: 'SELECT_NODE', nodeId });
+    dispatch({ type: 'OPEN_POPOUT' });
+  }, [state.viewMode]);
 
   const appendNode = useCallback(async (label?: string) => {
     if (!payload?.build_graph) return;
@@ -1584,7 +1793,15 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                   ...getMoonCanvasDimensions(viewModel.layout),
                   margin: '0 auto',
                   minHeight: MOON_LAYOUT.minGraphHeight,
+                  transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasScale})`,
+                  transformOrigin: '0 0',
+                  touchAction: 'none',
                 }}
+                onWheel={handleCanvasWheel}
+                onPointerDown={handleCanvasPointerDown}
+                onPointerMove={handleCanvasPointerMove}
+                onPointerUp={finishCanvasPan}
+                onPointerCancel={finishCanvasPan}
                 onClick={(e) => {
                   // Focus-lineage deselect: clicking the bare canvas
                   // background restores the rest state. Nodes and edge
@@ -1753,6 +1970,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                         data-multiplicity={multiplicityAttr || undefined}
                         data-in-lineage={node.inLineage || undefined}
                         onClick={() => handleNodeClick(node.id, isSelected)}
+                        onDoubleClick={() => handleNodeDoubleClick(node.id)}
                         onKeyDown={(event) => {
                           if (event.key !== 'Enter' && event.key !== ' ') return;
                           event.preventDefault();

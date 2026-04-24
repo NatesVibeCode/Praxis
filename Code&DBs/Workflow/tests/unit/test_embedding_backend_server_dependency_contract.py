@@ -56,3 +56,12 @@ def test_start_server_checks_dependency_contract_before_launch(monkeypatch) -> N
         "port": 8421,
         "log_level": "info",
     }
+
+
+def test_client_http_base_url_normalizes_wildcard_hosts() -> None:
+    assert embedding_backend_server._client_http_base_url(host="127.0.0.1", port=8421) == (
+        "http://127.0.0.1:8421"
+    )
+    assert embedding_backend_server._client_http_base_url(host="0.0.0.0", port=8421) == (
+        "http://localhost:8421"
+    )

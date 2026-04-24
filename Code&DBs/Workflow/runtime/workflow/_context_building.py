@@ -23,10 +23,9 @@ from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
 from runtime.receipt_store import proof_metrics
 from runtime.scope_resolver import resolve_scope
 from runtime.execution_packet_authority import (
-    build_execution_packet_lineage_payload,
-    finalize_execution_packet,
     inspect_execution_packets,
     packet_inspection_from_row,
+    resolve_execution_packet_revisions,
 )
 from runtime.workspace_paths import container_workspace_root
 from runtime.failure_projection import project_failure_classification
@@ -77,7 +76,6 @@ __all__ = [
     "_capture_submission_baseline_if_required",
     "_verification_artifact_refs",
     "_build_execution_packet",
-    "_execution_packet_lineage_payload",
     "_workflow_row_reuse_authority",
     "_terminal_failure_classification",
     "_extract_verification_paths",
@@ -1111,42 +1109,21 @@ def _ensure_execution_packet_revisions(
     Side effect: stamps the resolved revisions onto ``raw_snapshot`` so
     downstream reads stay consistent.
     """
-    definition_revision = str(raw_snapshot.get("definition_revision") or "").strip()
-    plan_revision = str(raw_snapshot.get("plan_revision") or "").strip()
-    if definition_revision and plan_revision:
-        return definition_revision, plan_revision
-
-    from runtime.compile_reuse import stable_hash
-
-    spec_jobs = raw_snapshot.get("jobs")
-    if not isinstance(spec_jobs, list):
-        spec_jobs = [dict(j) for j in getattr(spec, "jobs", ()) or ()]
-    canonicalized_jobs = []
-    for job in spec_jobs:
-        if not isinstance(job, dict):
-            continue
-        canonicalized_jobs.append(
-            {k: v for k, v in job.items() if k not in {"_route_plan"}}
-        )
-    spec_fingerprint = {
-        "workflow_id": workflow_id,
-        "name": raw_snapshot.get("name") or getattr(spec, "name", ""),
-        "task_type": raw_snapshot.get("task_type") or getattr(spec, "task_type", ""),
-        "jobs": canonicalized_jobs,
-    }
-    if not definition_revision:
-        definition_revision = f"def_{stable_hash(spec_fingerprint)[:16]}"
-    if not plan_revision:
-        plan_revision = f"plan_{stable_hash({'definition_revision': definition_revision, 'fingerprint': spec_fingerprint})[:16]}"
-    raw_snapshot["definition_revision"] = definition_revision
-    raw_snapshot["plan_revision"] = plan_revision
-    logger.info(
-        "Synthesized execution-packet revisions for run %s: definition=%s plan=%s (BUG-D384AB69 fallback)",
-        run_id,
-        definition_revision,
-        plan_revision,
+    resolved = resolve_execution_packet_revisions(
+        raw_snapshot=raw_snapshot,
+        spec=spec,
+        workflow_id=workflow_id,
+        run_id=run_id,
     )
-    return definition_revision, plan_revision
+    if resolved["provenance_kind"] != "compiled":
+        logger.info(
+            "Resolved execution-packet revisions for run %s via %s authority: definition=%s plan=%s",
+            run_id,
+            resolved["provenance_kind"],
+            resolved["definition_revision"],
+            resolved["plan_revision"],
+        )
+    return str(resolved["definition_revision"]), str(resolved["plan_revision"])
 
 
 def _build_execution_packet(
@@ -1282,6 +1259,9 @@ def _build_execution_packet(
     packet_payload: dict[str, object] = {
         "definition_revision": definition_revision,
         "plan_revision": plan_revision,
+        "packet_revision_authority": json.loads(
+            json.dumps(raw_snapshot.get("packet_revision_authority") or {}, default=str)
+        ),
         "packet_version": 1,
         "workflow_id": workflow_id,
         "run_id": run_id,
@@ -1337,138 +1317,15 @@ def _build_execution_packet(
     }
     compile_provenance["input_fingerprint"] = canonical_hash(compile_input_payload)
     packet_payload["compile_provenance"] = compile_provenance
-    lineage_payload = _execution_packet_lineage_payload(
-        definition_revision=definition_revision,
-        plan_revision=plan_revision,
-        workflow_id=workflow_id,
-        spec_name=str(spec.name),
-        source_kind=str(packet_payload["source_kind"]),
-        model_messages=list(packet_payload["model_messages"]),
-        reference_bindings=list(packet_payload["reference_bindings"]),
-        capability_bindings=list(packet_payload["capability_bindings"]),
-        verify_refs=list(packet_payload["verify_refs"]),
-        file_inputs=dict(lineage_file_inputs),
-        provenance=provenance,
-        packet_payload=packet_payload,
-    )
     artifact_store = CompileArtifactStore(conn)
-    input_fingerprint = str(
-        lineage_payload.get("compile_provenance", {}).get("input_fingerprint")
-        if isinstance(lineage_payload.get("compile_provenance"), dict)
-        else ""
-    ).strip()
     try:
-        reusable_lineage = artifact_store.load_reusable_artifact(
-            artifact_kind="packet_lineage",
-            input_fingerprint=input_fingerprint,
+        return artifact_store.persist_execution_packet_with_reuse(
+            packet=packet_payload,
+            authority_refs=[definition_revision, plan_revision],
+            parent_artifact_ref=plan_revision,
         )
     except CompileArtifactError as exc:
         raise RuntimeError(f"workflow packet lineage reuse failed closed: {exc}") from exc
-    if reusable_lineage is not None:
-        lineage_payload = json.loads(json.dumps(reusable_lineage.payload, default=str))
-        reuse_metadata = {
-            "decision": "reused",
-            "reason_code": "packet.compile.exact_input_match",
-            "artifact_ref": reusable_lineage.artifact_ref,
-            "revision_ref": reusable_lineage.revision_ref,
-            "content_hash": reusable_lineage.content_hash,
-            "decision_ref": reusable_lineage.decision_ref,
-        }
-    else:
-        artifact_store.record_packet_lineage(
-            packet=lineage_payload,
-            authority_refs=[definition_revision, plan_revision],
-            decision_ref=str(lineage_payload["decision_ref"]),
-            parent_artifact_ref=plan_revision,
-            input_fingerprint=input_fingerprint,
-        )
-        reuse_metadata = {
-            "decision": "compiled",
-            "reason_code": "packet.compile.miss",
-            "artifact_ref": str(lineage_payload["packet_revision"]),
-            "revision_ref": str(lineage_payload["packet_revision"]),
-            "content_hash": str(lineage_payload["packet_hash"]),
-            "decision_ref": str(lineage_payload["decision_ref"]),
-        }
-    return finalize_execution_packet(
-        packet_payload,
-        lineage_payload=lineage_payload,
-        reuse_metadata=reuse_metadata,
-    )
-
-
-def _execution_packet_lineage_payload(
-    *,
-    definition_revision: str,
-    plan_revision: str,
-    workflow_id: str,
-    spec_name: str,
-    source_kind: str,
-    model_messages: list[dict[str, object]],
-    reference_bindings: list[dict[str, object]],
-    capability_bindings: list[dict[str, object]],
-    verify_refs: list[str],
-    file_inputs: dict[str, object],
-    provenance: dict[str, object],
-    packet_payload: dict[str, object] | None = None,
-) -> dict[str, object]:
-    from runtime.idempotency import canonical_hash
-
-    if packet_payload is None:
-        stable_authority_inputs = {
-            "workflow_definition": provenance.get("definition_row"),
-            "workflow_plan": provenance.get("compiled_spec_row"),
-            "workflow_row": _workflow_row_reuse_authority(provenance.get("workflow_row")),
-            "source_authority": provenance.get("authority_inputs")
-            if isinstance(provenance.get("authority_inputs"), dict)
-            else {},
-        }
-        packet_payload = {
-            "definition_revision": definition_revision,
-            "plan_revision": plan_revision,
-            "packet_version": 1,
-            "workflow_id": workflow_id,
-            "spec_name": spec_name,
-            "source_kind": source_kind,
-            "authority_refs": [definition_revision, plan_revision],
-            "model_messages": json.loads(json.dumps(model_messages, default=str)),
-            "reference_bindings": json.loads(json.dumps(reference_bindings, default=str)),
-            "capability_bindings": json.loads(json.dumps(capability_bindings, default=str)),
-            "verify_refs": json.loads(json.dumps(verify_refs, default=str)),
-            "file_inputs": json.loads(json.dumps(file_inputs, default=str)),
-            "compile_provenance": {
-                "artifact_kind": "packet_lineage",
-                "input_fingerprint": canonical_hash(
-                    {
-                        "artifact_kind": "packet_lineage",
-                        "surface_revision": "workflow_runtime.packet_submit",
-                        "definition_revision": definition_revision,
-                        "plan_revision": plan_revision,
-                        "workflow_id": workflow_id,
-                        "spec_name": spec_name,
-                        "source_kind": source_kind,
-                        "model_messages": model_messages,
-                        "reference_bindings": reference_bindings,
-                        "capability_bindings": capability_bindings,
-                        "verify_refs": verify_refs,
-                        "file_inputs": file_inputs,
-                        "authority_inputs": stable_authority_inputs,
-                    }
-                ),
-                "surface_revision": "workflow_runtime.packet_submit",
-                "definition_revision": definition_revision,
-                "plan_revision": plan_revision,
-                "workflow_id": workflow_id,
-                "spec_name": spec_name,
-                "source_kind": source_kind,
-                "file_inputs": json.loads(json.dumps(file_inputs, default=str)),
-                "authority_inputs": json.loads(json.dumps(stable_authority_inputs, default=str)),
-            },
-        }
-    return build_execution_packet_lineage_payload(
-        packet_payload,
-        parent_artifact_ref=plan_revision,
-    )
 
 
 def _workflow_row_reuse_authority(value: object) -> dict[str, object]:

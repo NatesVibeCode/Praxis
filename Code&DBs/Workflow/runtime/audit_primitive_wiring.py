@@ -150,6 +150,43 @@ _HOST_ENV_HINTS = {
     "server":   "PRAXIS_API_HOST",
     "cli":      "PRAXIS_API_HOST",
 }
+_EXECUTABLE_HARD_PATH_SURFACES = frozenset({"source", "cli_surface"})
+
+
+def _review_only_hard_path(finding: Finding, pattern_name: str, reason: str) -> PlannedAction:
+    return PlannedAction(
+        pattern_name=pattern_name,
+        action_kind="operator_review",
+        subject=finding.subject,
+        args={
+            "finding_kind": finding.finding_kind,
+            "classification": finding.details.get("classification"),
+            "surface": finding.details.get("surface"),
+            "reason": reason,
+        },
+        description=(
+            f"Review {finding.finding_kind} at {finding.subject}; "
+            f"{reason}"
+        ),
+        confidence=0.0,
+        autorun_ok=False,
+    )
+
+
+def _hard_path_can_plan_code_edit(finding: Finding) -> tuple[bool, str]:
+    classification = str(finding.details.get("classification") or "")
+    surface = str(finding.details.get("surface") or "")
+    if classification != "live_authority_bug":
+        return False, (
+            f"classification {classification or 'unknown'} is evidence or "
+            "derived output, not live executable authority"
+        )
+    if surface not in _EXECUTABLE_HARD_PATH_SURFACES:
+        return False, (
+            f"surface {surface or 'unknown'} needs a source-specific fix, "
+            "not a generic regex replacement"
+        )
+    return True, ""
 
 
 def _guess_host_env_var(subject: str, evidence: str) -> str:
@@ -161,6 +198,9 @@ def _guess_host_env_var(subject: str, evidence: str) -> str:
 
 
 def _plan_host_env_var(finding: Finding) -> PlannedAction | None:
+    can_plan, reason = _hard_path_can_plan_code_edit(finding)
+    if not can_plan:
+        return _review_only_hard_path(finding, "use_env_var_for_host", reason)
     env_var = _guess_host_env_var(finding.subject, finding.evidence)
     match_str = str(finding.details.get("match") or "localhost")
     return PlannedAction(
@@ -183,6 +223,9 @@ def _plan_host_env_var(finding: Finding) -> PlannedAction | None:
 
 
 def _plan_port_env_var(finding: Finding) -> PlannedAction | None:
+    can_plan, reason = _hard_path_can_plan_code_edit(finding)
+    if not can_plan:
+        return _review_only_hard_path(finding, "use_env_var_for_port", reason)
     port = str(finding.details.get("port") or "5432")
     # Env var name derived from well-known ports.
     var_map = {
@@ -216,6 +259,9 @@ def _plan_port_env_var(finding: Finding) -> PlannedAction | None:
 
 
 def _plan_path_relative(finding: Finding) -> PlannedAction | None:
+    can_plan, reason = _hard_path_can_plan_code_edit(finding)
+    if not can_plan:
+        return _review_only_hard_path(finding, "use_path_relative", reason)
     return PlannedAction(
         pattern_name="use_path_relative",
         action_kind="regex_replace",

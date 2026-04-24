@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 
-from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
-from surfaces.mcp.invocation import ToolInvocationError, invoke_tool
+if TYPE_CHECKING:
+    from surfaces.mcp.catalog import McpToolDefinition
 
 
 def print_json(stdout: TextIO, payload: Any) -> None:
@@ -27,6 +27,8 @@ def run_cli_tool(
     *,
     workflow_token: str = "",
 ) -> tuple[int, dict[str, Any]]:
+    from surfaces.mcp.invocation import ToolInvocationError, invoke_tool
+
     try:
         result = invoke_tool(tool_name, params or {}, workflow_token=workflow_token)
     except ToolInvocationError as exc:
@@ -294,6 +296,8 @@ def require_confirmation(
 
 
 def get_definition(tool_name: str) -> McpToolDefinition | None:
+    from surfaces.mcp.catalog import get_tool_catalog
+
     catalog = get_tool_catalog()
     definition = catalog.get(tool_name)
     if definition is not None:

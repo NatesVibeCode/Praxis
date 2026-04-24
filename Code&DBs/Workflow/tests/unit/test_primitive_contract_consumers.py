@@ -139,6 +139,7 @@ def test_runtime_binding_contract_redacts_dsn() -> None:
     # The configured flag and env_ref must be named authorities, not constants.
     assert database["env_ref"] == "WORKFLOW_DATABASE_URL"
     assert binding["http_endpoints"]["api_base_url"] == "http://127.0.0.1:9001"
+    assert binding["http_endpoints"]["workflow_api_base_url"] == "http://127.0.0.1:9001"
 
 
 def test_resolve_runtime_http_endpoints_projects_from_contract() -> None:
@@ -147,6 +148,7 @@ def test_resolve_runtime_http_endpoints_projects_from_contract() -> None:
         native_instance={},
     )
     assert endpoints["api_base_url"] == "http://api.test:8001"
+    assert endpoints["workflow_api_base_url"] == "http://api.test:8001"
     assert endpoints["launch_url"] == "http://api.test:8001/app"
     assert endpoints["api_docs_url"] == "http://api.test:8001/docs"
 

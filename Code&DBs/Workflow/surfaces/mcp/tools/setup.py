@@ -28,11 +28,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         {
             "description": (
                 "Runtime-target setup authority for Praxis. Reports the active runtime_target_ref, "
-                "substrate kind, API authority, DB authority, workspace authority, provider-family "
-                "thin sandbox image contract, and the single empty_thin_sandbox_default pass/fail. "
-                "USE WHEN: moving Praxis between machines, adopting an existing runtime, repointing "
-                "the package at a DB, or checking that model sandboxes are empty/thin. Operations "
-                "belong to API/MCP; CLI and website are clients. SSH is build/deploy transport only."
+                "substrate kind, API authority, DB authority, native_instance contract, workspace "
+                "authority, provider-family thin sandbox image contract, and the "
+                "empty_thin_sandbox_default pass/fail. USE WHEN: moving Praxis between machines, "
+                "adopting an existing runtime, repointing the package at a DB, or checking that the "
+                "CLI, MCP, and API are bound to the same repo-local instance. Operations belong to "
+                "API/MCP; CLI and website are clients. SSH is build/deploy transport only."
             ),
             "inputSchema": {
                 "type": "object",
@@ -55,7 +56,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "recommended_alias": None,
                 "when_to_use": (
                     "Inspect or plan runtime-target setup through the same authority as "
-                    "`praxis setup doctor|plan|apply`."
+                    "`praxis setup doctor|plan|apply`, including the native_instance contract."
                 ),
                 "when_not_to_use": "Do not use as a workflow launch/status tool.",
                 "risks": {

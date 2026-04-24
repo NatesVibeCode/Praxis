@@ -308,9 +308,15 @@ def duplicate_check_payload(
     parse_severity: BugParser = parse_bug_severity,
     parse_category: BugParser = parse_bug_category,
 ) -> dict[str, Any]:
-    title_like = str(body.get("title_like") or body.get("title") or "").strip()
+    title_like = str(
+        body.get("title_like")
+        or body.get("title")
+        or body.get("description")
+        or body.get("body")
+        or ""
+    ).strip()
     if not title_like:
-        raise ValueError("title or title_like is required for duplicate_check")
+        raise ValueError("title, title_like, description, or body is required for duplicate_check")
     limit = max(1, int(body.get("limit", default_limit) or default_limit))
     bugs = bt.list_bugs(
         status=parse_status(bt_mod, body.get("status")),
@@ -332,6 +338,7 @@ def duplicate_check_payload(
         "returned_count": len(bug_dicts),
         "query": {
             "title_like": title_like,
+            "description": str(body.get("description") or body.get("body") or "").strip() or None,
             "open_only": bool(body.get("open_only", True)),
             "limit": limit,
         },

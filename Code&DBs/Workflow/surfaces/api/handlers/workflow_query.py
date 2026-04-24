@@ -1487,6 +1487,7 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
                 planning_notes=result["planning_notes"],
                 intent_brief=result.get("intent_brief"),
                 execution_manifest=result.get("execution_manifest"),
+                progressive_build=result.get("progressive_build"),
                 undo_receipt=result.get("undo_receipt"),
                 mutation_event_id=result.get("mutation_event_id"),
             ),

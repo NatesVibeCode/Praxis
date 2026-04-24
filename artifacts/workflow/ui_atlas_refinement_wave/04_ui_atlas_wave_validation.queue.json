@@ -1,0 +1,66 @@
+{
+  "name": "UI Atlas Wave Validation",
+  "workflow_id": "ui_atlas_refinement_validation",
+  "phase": "verify",
+  "outcome_goal": "Validate Moon and Atlas UI repairs together without mixing unrelated runtime/package work into the commit.",
+  "anti_requirements": [
+    "Do not stage unrelated dirty files.",
+    "Do not commit if app tests or build fail.",
+    "Do not skip manual smoke for the known bad run graph."
+  ],
+  "jobs": [
+    {
+      "label": "run_app_unit_tests",
+      "agent": "auto/test",
+      "prompt": "Run the focused app test suite for Moon, Atlas, and shell registry. Capture failing tests with file-level cause.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app"
+      ],
+      "write_scope": [],
+      "verify_refs": [
+        "npm-test-focused-ui"
+      ]
+    },
+    {
+      "label": "run_app_build",
+      "agent": "auto/test",
+      "depends_on": ["run_app_unit_tests"],
+      "prompt": "Run the app build/type gate. Report any TypeScript, lint, or bundle failures.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app"
+      ],
+      "write_scope": [],
+      "verify_refs": [
+        "npm-run-build"
+      ]
+    },
+    {
+      "label": "manual_smoke_known_bad_runs",
+      "agent": "auto/review",
+      "depends_on": ["run_app_build"],
+      "prompt": "Smoke the known bad Moon run views and Atlas graph view. Confirm all nodes are visible, gates appear on edges, data-entry contracts populate, single/double-click behavior works, Cost Summary is absent from primary nav, and Atlas graph/table view is stable.",
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app"
+      ],
+      "write_scope": [],
+      "verify_refs": [
+        "manual-smoke-workflow-695d92519221",
+        "manual-smoke-workflow-5683ccc8f49c",
+        "manual-smoke-atlas-graph-table"
+      ]
+    },
+    {
+      "label": "prepare_ui_commit",
+      "agent": "auto/review",
+      "depends_on": ["manual_smoke_known_bad_runs"],
+      "prompt": "Review git status and produce the exact file list for the UI/Atlas commit. Exclude unrelated runtime/package/structured-document/infra changes.",
+      "read_scope": [
+        "."
+      ],
+      "write_scope": [],
+      "verify_refs": [
+        "git-status-ui-only"
+      ]
+    }
+  ]
+}

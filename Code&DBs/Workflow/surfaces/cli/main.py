@@ -16,77 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, TextIO
 
-from observability.read_models import (
-    GraphLineageReadModel,
-    GraphTopologyReadModel,
-    InspectionReadModel,
-    ReplayReadModel,
-)
-
-from .commands.admin import _compile_command, _github_command, _parse_pr_spec
-from .commands.authority import (
-    _authority_memory_command,
-    _catalog_command,
-    _data_dictionary_command,
-    _object_command,
-    _object_field_command,
-    _object_type_command,
-    _reconcile_command,
-    _registry_command,
-    _reload_command,
-    _schema_command,
-)
-from .commands.files import _files_command
-from .commands.handoff import _handoff_command
-from .commands.data import _data_command
-from .commands.heartbeat import _heartbeat_command
-from .commands.maintenance import _maintenance_command
-from .commands.operate import (
-    _api_command,
-    _cache_command,
-    _capabilities_command,
-    _circuits_command,
-    _config_command,
-    _dashboard_command,
-    _events_command,
-    _integrations_command,
-    _health_command,
-    _health_map_command,
-    _metrics_command,
-    _notifications_command,
-    _orient_command,
-    _params_command,
-    _slots_command,
-    _supervisor_command,
-)
-from .commands.query import (
-    _architecture_command,
-    _artifacts_command,
-    _decompose_command,
-    _bugs_command,
-    _costs_command,
-    _discover_command,
-    _fitness_command,
-    _leaderboard_command,
-    _query_command,
-    _research_command,
-    _recall_command,
-    _receipts_command,
-    _reviews_command,
-    _risk_command,
-    _scope_command,
-    _trends_command,
-    _trust_command,
-)
-from .commands.roadmap import _roadmap_command
-from .commands.setup import _setup_command
-from .commands.tools import _tools_command, _tools_quickstart_text
-from .render import (
-    render_graph_lineage,
-    render_graph_topology,
-    render_inspection,
-    render_replay,
-)
+from .friction import TrackingStdout, record_cli_command_failure
 
 __all__ = [
     "GraphLineageCommand",
@@ -144,8 +74,8 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
         "description": "Spawn a child workflow with explicit parent lineage",
     },
     {"command": "workflow validate <spec.json>", "description": "Validate a spec without running"},
-    {"command": "workflow records <create|update|rename>", "description": "Persist canonical workflow records"},
-    {"command": "workflow status [--since-hours N]", "description": "Show recent workflow status"},
+    {"command": "workflow records <list|get|create|update|rename>", "description": "Read and persist canonical workflow records"},
+    {"command": "workflow status", "description": "Show recent workflow status"},
     {"command": "workflow run-status <run_id>", "description": "Inspect one run and explain idle recovery options"},
     {"command": "workflow active", "description": "Show active workflow runs"},
     {"command": "workflow stream <run_id>", "description": "Stream one workflow run"},
@@ -155,7 +85,9 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {"command": "workflow work <claim|acknowledge>", "description": "Claim or acknowledge worker work"},
     {"command": "workflow tools [list|search|describe|call|help]", "description": "Discover and call catalog-backed MCP tools"},
     {"command": "workflow orient", "description": "Return the canonical /orient authority envelope"},
-    {"command": "workflow setup <doctor|plan|apply>", "description": "Runtime-target setup client for API/MCP authority"},
+    {"command": "workflow instances [check] [--json]", "description": "Compare runtime setup targets vs discovered API/MCP/DB instances"},
+    {"command": "workflow authority [--json] [--check] [--instance]", "description": "Compare CLI, MCP, and API authority targets"},
+    {"command": "workflow setup <doctor|plan|apply>", "description": "Runtime-target setup client for API/MCP authority and native instance contract"},
     {"command": "workflow integrations", "description": "Scoped route discovery for /api/integrations"},
     {"command": "workflow api integrations", "description": "Scoped route discovery for /api/integrations"},
     {"command": "workflow api data-dictionary", "description": "Scoped route discovery for /api/data-dictionary"},
@@ -204,6 +136,10 @@ _COMMAND_INDEX_TIPS: list[str] = [
     "run `workflow integrations` for the integration API route scope",
     "run `workflow api integrations` or `workflow api data-dictionary` for scoped route discovery",
     "run `workflow integration` for integration management",
+    "run `workflow instances` for resolved API/MCP/DB instance mapping",
+    "run `workflow instances check` to fail fast on authority mapping drift",
+    "run `workflow authority --check` to verify CLI, MCP, and API authority alignment",
+    "run `workflow authority --instance` to print resolved native instance details before running CQRS surfaces",
     "run `workflow help tools` or `workflow mcp` for catalog-backed tool discovery",
 ]
 
@@ -303,6 +239,57 @@ def _build_default_observability_service(
 
 
 os.environ.setdefault("PRAXIS_DISABLE_STARTUP_WIRING", "1")
+
+
+def _module_command_handler(module_name: str, command_name: str):
+    command_module = importlib.import_module(module_name, __package__)
+    return getattr(command_module, command_name)
+
+
+def _lazy_args_command(module_name: str, command_name: str) -> ArgsCommandHandler:
+    def _handler(args: list[str], *, stdout: TextIO) -> int:
+        return _module_command_handler(module_name, command_name)(args, stdout=stdout)
+
+    return _handler
+
+
+def _lazy_stdout_command(module_name: str, command_name: str) -> StdoutCommandHandler:
+    def _handler(*, stdout: TextIO) -> int:
+        return _module_command_handler(module_name, command_name)(stdout=stdout)
+
+    return _handler
+
+
+def _lazy_prefixed_args_command(
+    module_name: str,
+    command_name: str,
+    prefix: Sequence[str],
+) -> ArgsCommandHandler:
+    def _handler(args: list[str], *, stdout: TextIO) -> int:
+        return _module_command_handler(module_name, command_name)(
+            [*prefix, *args],
+            stdout=stdout,
+        )
+
+    return _handler
+
+
+def _compile_command(args: list[str], *, stdout: TextIO) -> int:
+    return _module_command_handler(".commands.admin", "_compile_command")(
+        args,
+        stdout=stdout,
+    )
+
+
+def _github_command(args: list[str], *, stdout: TextIO) -> int:
+    return _module_command_handler(".commands.admin", "_github_command")(
+        args,
+        stdout=stdout,
+    )
+
+
+def _parse_pr_spec(spec_str: str) -> tuple[str, str, int]:
+    return _module_command_handler(".commands.admin", "_parse_pr_spec")(spec_str)
 
 
 def _workflow_command_handler(command_name: str):
@@ -429,75 +416,78 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "spawn": _lazy_workflow_args_command("_spawn_command"),
         "dry-run": _lazy_workflow_args_command("_dry_run_command"),
         "chain": _lazy_workflow_args_command("_chain_command"),
-        "query": _query_command,
-        "research": _research_command,
-        "decompose": _decompose_command,
-        "data": _data_command,
-        "files": _files_command,
-        "handoff": _handoff_command,
-        "schema": _schema_command,
-        "registry": _registry_command,
-        "object-type": _object_type_command,
-        "object-field": _object_field_command,
-        "object": _object_command,
-        "catalog": _catalog_command,
-        "reload": _reload_command,
-        "reconcile": _reconcile_command,
-        "architecture": _architecture_command,
-        "bugs": _bugs_command,
-        "recall": _recall_command,
-        "discover": _discover_command,
-        "artifacts": _artifacts_command,
-        "health": _health_command,
-        "orient": _orient_command,
-        "heartbeat": _heartbeat_command,
-        "receipts": _receipts_command,
+        "query": _lazy_args_command(".commands.query", "_query_command"),
+        "research": _lazy_args_command(".commands.query", "_research_command"),
+        "decompose": _lazy_args_command(".commands.query", "_decompose_command"),
+        "data": _lazy_args_command(".commands.data", "_data_command"),
+        "files": _lazy_args_command(".commands.files", "_files_command"),
+        "handoff": _lazy_args_command(".commands.handoff", "_handoff_command"),
+        "schema": _lazy_args_command(".commands.authority", "_schema_command"),
+        "registry": _lazy_args_command(".commands.authority", "_registry_command"),
+        "object-type": _lazy_args_command(".commands.authority", "_object_type_command"),
+        "object-field": _lazy_args_command(".commands.authority", "_object_field_command"),
+        "object": _lazy_args_command(".commands.authority", "_object_command"),
+        "catalog": _lazy_args_command(".commands.authority", "_catalog_command"),
+        "reload": _lazy_args_command(".commands.authority", "_reload_command"),
+        "reconcile": _lazy_args_command(".commands.authority", "_reconcile_command"),
+        "architecture": _lazy_args_command(".commands.query", "_architecture_command"),
+        "bugs": _lazy_args_command(".commands.query", "_bugs_command"),
+        "recall": _lazy_args_command(".commands.query", "_recall_command"),
+        "discover": _lazy_args_command(".commands.query", "_discover_command"),
+        "artifacts": _lazy_args_command(".commands.query", "_artifacts_command"),
+        "health": _lazy_args_command(".commands.operate", "_health_command"),
+        "authority": _lazy_args_command(".commands.operate", "_authority_command"),
+        "orient": _lazy_args_command(".commands.operate", "_orient_command"),
+        "heartbeat": _lazy_args_command(".commands.heartbeat", "_heartbeat_command"),
+        "receipts": _lazy_args_command(".commands.query", "_receipts_command"),
         "diagnose": _lazy_workflow_args_command("_diagnose_command"),
         "inspect-job": _lazy_workflow_args_command("_inspect_job_command"),
         "authority-index": _lazy_workflow_args_command("_authority_index_command"),
-        "leaderboard": _leaderboard_command,
+        "leaderboard": _lazy_args_command(".commands.query", "_leaderboard_command"),
         "manifest": _lazy_workflow_args_command("_manifest_command"),
-        "trust": _trust_command,
-        "fitness": _fitness_command,
-        "trends": _trends_command,
+        "trust": _lazy_args_command(".commands.query", "_trust_command"),
+        "fitness": _lazy_args_command(".commands.query", "_fitness_command"),
+        "trends": _lazy_args_command(".commands.query", "_trends_command"),
         "verify": _lazy_workflow_args_command("_verify_command"),
         "verify-platform": _lazy_workflow_args_command("_verify_platform_command"),
         "pipeline": _lazy_workflow_args_command("_pipeline_command"),
         "proof": _lazy_workflow_args_command("_proof_command"),
         "heal": _lazy_workflow_args_command("_heal_command"),
         "run-status": _lazy_workflow_args_command("_run_status_command"),
+        "status": _lazy_workflow_args_command("_status_command"),
         "scheduler": _lazy_workflow_args_command("_scheduler_command"),
         "loop": _lazy_workflow_args_command("_loop_command"),
         "debate": _lazy_workflow_args_command("_debate_command"),
         "runs": _lazy_workflow_args_command("_runs_command"),
         "retry": _lazy_workflow_args_command("_retry_command"),
         "cancel": _lazy_workflow_args_command("_cancel_command"),
-        "circuits": _circuits_command,
-        "params": _params_command,
-        "notifications": _notifications_command,
-        "config": _config_command,
-        "dashboard": _dashboard_command,
+        "circuits": _lazy_args_command(".commands.operate", "_circuits_command"),
+        "params": _lazy_args_command(".commands.operate", "_params_command"),
+        "notifications": _lazy_args_command(".commands.operate", "_notifications_command"),
+        "config": _lazy_args_command(".commands.operate", "_config_command"),
+        "dashboard": _lazy_args_command(".commands.operate", "_dashboard_command"),
         "queue": _lazy_workflow_args_command("_queue_command"),
-        "capabilities": _capabilities_command,
-        "scope": _scope_command,
-        "risk": _risk_command,
-        "events": _events_command,
-        "cache": _cache_command,
-        "health-map": _health_map_command,
-        "reviews": _reviews_command,
+        "capabilities": _lazy_args_command(".commands.operate", "_capabilities_command"),
+        "scope": _lazy_args_command(".commands.query", "_scope_command"),
+        "risk": _lazy_args_command(".commands.query", "_risk_command"),
+        "events": _lazy_args_command(".commands.operate", "_events_command"),
+        "cache": _lazy_args_command(".commands.operate", "_cache_command"),
+        "health-map": _lazy_args_command(".commands.operate", "_health_map_command"),
+        "reviews": _lazy_args_command(".commands.query", "_reviews_command"),
         "compile": _compile_command,
-        "metrics": _metrics_command,
+        "metrics": _lazy_args_command(".commands.operate", "_metrics_command"),
         "github": _github_command,
-        "api": _api_command,
-        "routes": lambda args, *, stdout: _api_command(["routes", *args], stdout=stdout),
-        "integrations": lambda args, *, stdout: _api_command(["integrations", *args], stdout=stdout),
-        "integration": _integrations_command,
-        "maintenance": _maintenance_command,
-        "supervisor": _supervisor_command,
-        "setup": _setup_command,
-        "tools": _tools_command,
-        "dictionary": _data_dictionary_command,
-        "authority-memory": _authority_memory_command,
+        "api": _lazy_args_command(".commands.operate", "_api_command"),
+        "routes": _lazy_prefixed_args_command(".commands.operate", "_api_command", ["routes"]),
+        "integrations": _lazy_prefixed_args_command(".commands.operate", "_api_command", ["integrations"]),
+        "integration": _lazy_args_command(".commands.operate", "_integrations_command"),
+        "maintenance": _lazy_args_command(".commands.maintenance", "_maintenance_command"),
+        "supervisor": _lazy_args_command(".commands.operate", "_supervisor_command"),
+        "setup": _lazy_args_command(".commands.setup", "_setup_command"),
+        "tools": _lazy_args_command(".commands.tools", "_tools_command"),
+        "dictionary": _lazy_args_command(".commands.authority", "_data_dictionary_command"),
+        "authority-memory": _lazy_args_command(".commands.authority", "_authority_memory_command"),
+        "instances": _lazy_args_command(".commands.operate", "_instances_command"),
         "generate": _generate_command,
         "validate": _validate_command,
         "stream": _stream_command,
@@ -506,15 +496,14 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "records": _lazy_workflow_args_command("_records_command"),
         "repair": _lazy_workflow_args_command("_repair_command"),
         "work": _lazy_workflow_args_command("_work_command"),
-        "roadmap": _roadmap_command,
+        "roadmap": _lazy_args_command(".commands.roadmap", "_roadmap_command"),
         "commands": lambda args, *, stdout: _commands_index_command(args, stdout=stdout),
     }
     return _ARG_COMMANDS
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
-    "status": _lazy_workflow_stdout_command("_status_command"),
-    "costs": _costs_command,
-    "slots": _slots_command,
+    "costs": _lazy_stdout_command(".commands.query", "_costs_command"),
+    "slots": _lazy_stdout_command(".commands.operate", "_slots_command"),
     "active": _lazy_workflow_stdout_command("_active_command"),
 }
 
@@ -572,10 +561,8 @@ def _native_operator_help_text() -> str:
 def _api_help_text() -> str:
     from io import StringIO
 
-    from .commands.operate import _api_command
-
     buffer = StringIO()
-    _api_command(["--help"], stdout=buffer)
+    _module_command_handler(".commands.operate", "_api_command")(["--help"], stdout=buffer)
     return buffer.getvalue().rstrip()
 
 
@@ -586,7 +573,7 @@ def _mcp_help_text() -> str:
             "",
             "Alias for workflow tools discovery.",
             "",
-            _tools_quickstart_text(),
+            _module_command_handler(".commands.tools", "_tools_quickstart_text")(),
         ]
     )
 
@@ -645,6 +632,8 @@ def _help_text() -> str:
             "  workflow help mcp",
             "  workflow routes",
             "  workflow orient",
+            "  workflow instances [check] [--json]",
+            "  workflow authority [--json] [--check] [--instance]",
             "  workflow api help",
             "  workflow integrations",
             "  workflow integration list",
@@ -664,6 +653,8 @@ def _help_text() -> str:
             "  workflow decompose 'build real-time notifications'",
             "  workflow data profile artifacts/data/users.csv",
             "  workflow authority-index",
+            "  workflow instances [check] [--json]",
+            "  workflow authority [--json] [--check] [--instance]",
             "  workflow maintenance backfill-failure-categories --yes",
             "  workflow files list --scope instance",
             "  workflow handoff latest --artifact-kind packet_lineage --revision-ref <ref>",
@@ -681,6 +672,8 @@ def _help_text() -> str:
             "  workflow tools [list|search|describe|call|help]",
             "  workflow dictionary <list|describe|set-override|clear-override|reproject>",
             "  workflow authority-memory refresh",
+            "  workflow authority [--json] [--check] [--instance]",
+            "  workflow instances [check] [--json]",
             "  workflow maintenance <backfill-failure-categories|help>",
             "  workflow integration [list|describe|health|test|call|create|secret|reload|help]",
             "  workflow data <action>",
@@ -695,7 +688,7 @@ def _help_text() -> str:
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
             "  workflow setup|orient|health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|integrations|data-dictionary|--host|--port]|routes|supervisor|capabilities|work",
             "  workflow setup <doctor|plan|apply>",
-            "                                                  Runtime-target setup client for API/MCP authority",
+            "                                                  Runtime-target setup client for API/MCP authority and native instance contract",
             "  workflow integrations",
             "                                                  Scoped route discovery for /api/integrations",
             "  workflow integration",
@@ -763,7 +756,7 @@ def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
 
     if topic in _STDOUT_COMMANDS:
         usage = {
-            "status": "usage: workflow status [--since-hours N]",
+            "status": "usage: workflow status",
             "active": "usage: workflow active",
             "costs": "usage: workflow costs",
             "slots": "usage: workflow slots",
@@ -849,17 +842,25 @@ def _dispatch(
     if isinstance(command, InspectCommand):
         if not _has_callable(service, "inspect_run"):
             raise RuntimeError("cli frontdoor requires an inspect service")
+        from .render import render_inspection
+
         return render_inspection(service.inspect_run(run_id=command.run_id))
     if isinstance(command, ReplayCommand):
         if not _has_callable(service, "replay_run"):
             raise RuntimeError("cli frontdoor requires a replay service")
+        from .render import render_replay
+
         return render_replay(service.replay_run(run_id=command.run_id))
     if isinstance(command, GraphTopologyCommand):
         if not _has_callable(service, "graph_topology_run"):
             raise RuntimeError("cli frontdoor requires a graph topology service")
+        from .render import render_graph_topology
+
         return render_graph_topology(service.graph_topology_run(run_id=command.run_id))
     if not _has_callable(service, "graph_lineage_run"):
         raise RuntimeError("cli frontdoor requires a graph lineage service")
+    from .render import render_graph_lineage
+
     return render_graph_lineage(service.graph_lineage_run(run_id=command.run_id))
 
 
@@ -880,11 +881,44 @@ def main(
 
     stdout = sys.stdout if stdout is None else stdout
     args = _normalize_namespace_tokens(sys.argv[1:] if argv is None else argv)
+    tracking_stdout = TrackingStdout(stdout)
+    exit_code = _main_impl(
+        args,
+        inspect_replay_service=inspect_replay_service,
+        runtime_orchestrator=runtime_orchestrator,
+        graph_service=graph_service,
+        observability_service=observability_service,
+        env=env,
+        stdout=tracking_stdout,
+    )
+    if exit_code != 0:
+        record_cli_command_failure(
+            args=args,
+            exit_code=exit_code,
+            output_text=tracking_stdout.captured_output(),
+            output_truncated=tracking_stdout.truncated,
+            env=env,
+        )
+    return exit_code
+
+
+def _main_impl(
+    args: Sequence[str],
+    *,
+    inspect_replay_service: InspectReplayService | None = None,
+    runtime_orchestrator: InspectReplayService | None = None,
+    graph_service: GraphSurfaceService | None = None,
+    observability_service: GraphSurfaceService | None = None,
+    env: Mapping[str, str] | None = None,
+    stdout: TextIO,
+) -> int:
     if not args or args[0] in {"-h", "--help", "help"}:
-        if len(args) >= 2 and args[0] == "help":
+        if len(args) >= 2 and args[0] == "help" and args[1] not in {"-h", "--help"}:
             return _help_topic_text(args[1], stdout=stdout)
         stdout.write(_help_text() + "\n")
         return 0
+    if len(args) == 2 and args[1] in {"-h", "--help"} and args[0] in _known_root_commands():
+        return _help_topic_text(args[0], stdout=stdout)
     if args and args[0] == "native-operator":
         from . import native_operator
 
@@ -895,7 +929,7 @@ def main(
     if args[0] not in _known_root_commands():
         if args[0] == "defs":
             stdout.write(
-                "workflow defs has been removed; use workflow records create|update|rename instead\n"
+                "workflow defs has been removed; use workflow records list|get|create|update|rename instead\n"
             )
             stdout.write(f"{_usage()}\n")
             return 2

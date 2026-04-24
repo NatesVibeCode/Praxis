@@ -9,18 +9,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
-from storage.postgres import PostgresWorkflowSurfaceUsageRepository
-from runtime.workflow.mcp_session import (
-    WorkflowMcpSessionError,
-    verify_workflow_mcp_session_token,
-)
-
 from .catalog import canonical_tool_name, get_tool_catalog, resolve_tool_entry
-from .runtime_context import (
-    get_current_workflow_mcp_context,
-    workflow_mcp_request_context,
-)
-from .subsystems import _subs
 
 _EMBEDDING_PREWARM_TOOLS = frozenset(
     {
@@ -31,6 +20,12 @@ _EMBEDDING_PREWARM_TOOLS = frozenset(
         "praxis_research",
     }
 )
+
+
+def _subsystems():
+    from .subsystems import _subs
+
+    return _subs
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +85,11 @@ def invoke_tool(
     try:
         allowed = normalize_allowed_tool_names(allowed_tool_names)
         if token_text:
+            from runtime.workflow.mcp_session import (
+                WorkflowMcpSessionError,
+                verify_workflow_mcp_session_token,
+            )
+
             try:
                 claims = verify_workflow_mcp_session_token(token_text)
             except WorkflowMcpSessionError as exc:
@@ -119,6 +119,8 @@ def invoke_tool(
             )
 
         if definition.requires_workflow_token and not token_text:
+            from .runtime_context import get_current_workflow_mcp_context
+
             active_context = get_current_workflow_mcp_context()
             if active_context is None:
                 raise ToolInvocationError(
@@ -167,6 +169,8 @@ def invoke_tool(
 def _context_manager_for_claims(claims: dict[str, Any] | None):
     if not claims:
         return nullcontext()
+    from .runtime_context import workflow_mcp_request_context
+
     return workflow_mcp_request_context(
         run_id=str(claims.get("run_id") or "").strip() or None,
         workflow_id=str(claims.get("workflow_id") or "").strip() or None,
@@ -219,8 +223,12 @@ def _record_tool_usage(
         view = str(result_payload.get("view") or "").strip()
         if view:
             metadata["view"] = view
+    usage_conn = None
     try:
-        PostgresWorkflowSurfaceUsageRepository(_subs.get_pg_conn()).record_event(
+        from storage.postgres import PostgresWorkflowSurfaceUsageRepository
+
+        usage_conn = _subsystems().get_pg_conn()
+        PostgresWorkflowSurfaceUsageRepository(usage_conn).record_event(
             surface_kind="mcp",
             transport_kind="mcp",
             entrypoint_kind="tool",
@@ -239,7 +247,15 @@ def _record_tool_usage(
             result_count=result_count,
             metadata=metadata,
         )
-    except Exception:
+    except Exception as exc:
+        from surfaces.api.handlers._surface_usage import record_surface_usage_failure
+
+        record_surface_usage_failure(
+            surface_kind="mcp",
+            entrypoint_name=canonical_name,
+            error=exc,
+            conn=usage_conn,
+        )
         return
 
 
@@ -316,7 +332,7 @@ def _call_handler(
 
     call_kwargs: dict[str, Any] = {}
     if "_subsystems" in parameters or accepts_var_kw:
-        call_kwargs["_subsystems"] = _subs
+        call_kwargs["_subsystems"] = _subsystems()
     if "_session_token" in parameters or accepts_var_kw:
         call_kwargs["_session_token"] = workflow_token
     if "_progress_emitter" in parameters or accepts_var_kw:

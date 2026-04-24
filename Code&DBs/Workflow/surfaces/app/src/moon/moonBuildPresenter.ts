@@ -315,6 +315,11 @@ function isNodeDecided(node: BuildNode): boolean {
 
 function nodeNeedsBadge(node: BuildNode, payload: BuildPayload): boolean {
   if (!isNodeDecided(node)) return false;
+  const nodeIssueIds = new Set(node.issue_ids || []);
+  if (nodeIssueIds.size > 0) return true;
+  if ((payload.build_issues || []).some(issue => issue.node_id === node.node_id || (issue.issue_id && nodeIssueIds.has(issue.issue_id)))) {
+    return true;
+  }
   // Badge if missing attachments or has unresolved bindings
   const attachments = (payload.authority_attachments || []).filter(a => a.node_id === node.node_id);
   if (attachments.length === 0) return true;
@@ -324,12 +329,8 @@ function nodeNeedsBadge(node: BuildNode, payload: BuildPayload): boolean {
   return false;
 }
 
-function nodeHasIssuesOrBlockers(node: BuildNode, payload: BuildPayload): boolean {
+function nodeHasBlockers(node: BuildNode, payload: BuildPayload): boolean {
   const nodeIssueIds = new Set(node.issue_ids || []);
-  if (nodeIssueIds.size > 0) return true;
-  if ((payload.build_issues || []).some(issue => issue.node_id === node.node_id || (issue.issue_id && nodeIssueIds.has(issue.issue_id)))) {
-    return true;
-  }
   if ((payload.build_blockers || []).some(issue => issue.node_id === node.node_id || (issue.issue_id && nodeIssueIds.has(issue.issue_id)))) {
     return true;
   }
@@ -339,7 +340,7 @@ function nodeHasIssuesOrBlockers(node: BuildNode, payload: BuildPayload): boolea
 function nodeToRingState(node: BuildNode, payload: BuildPayload, activeId: string | null): RingState {
   const status = (node.status || '').toLowerCase();
   const decided = isNodeDecided(node);
-  const blocked = status === 'blocked' || status === 'error' || nodeHasIssuesOrBlockers(node, payload);
+  const blocked = status === 'blocked' || status === 'error' || nodeHasBlockers(node, payload);
   if (blocked) return 'blocked';
   if (!decided && (status === 'draft' || status === 'pending')) return 'projected';
   if (!decided) {
@@ -697,9 +698,22 @@ export function presentBuild(
   }
 
   // Release
-  const buildState = (payload.build_state || 'draft').toLowerCase();
+  const projectionState = typeof payload.projection_status?.state === 'string'
+    ? payload.projection_status.state.toLowerCase()
+    : '';
+  const buildState = (projectionState || payload.build_state || 'draft').toLowerCase();
   const readiness: ReleaseStatus['readiness'] = buildState === 'ready' ? 'ready' : buildState === 'blocked' ? 'blocked' : 'draft';
-  const blockers = (payload.build_blockers || []).map(b => ({
+  const blockerSource = [
+    ...(payload.build_blockers || []),
+    ...issues.filter(issue => (issue.severity || '').toLowerCase() === 'blocking'),
+  ];
+  const blockerSeen = new Set<string>();
+  const blockers = blockerSource.filter((b) => {
+    const key = b.issue_id || `${b.node_id || ''}:${b.kind || ''}:${b.label || b.summary || ''}`;
+    if (blockerSeen.has(key)) return false;
+    blockerSeen.add(key);
+    return true;
+  }).map(b => ({
     message: b.summary || b.label || 'Unknown blocker',
     severity: b.severity || 'blocking',
     nodeIds: b.node_id ? [b.node_id] : [],

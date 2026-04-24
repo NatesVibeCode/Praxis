@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 _mod_path = Path(__file__).resolve().parents[2] / "surfaces" / "cli" / "workflow_runner.py"
@@ -86,3 +87,30 @@ def test_workflow_runner_dry_run_delegates_to_runtime_authority(monkeypatch) -> 
     assert notifications[0]["reason_code"] == "workflow_runner.batch_complete"
     assert notifications[0]["run_id"] == "workflow_run:test"
     assert notifications[0]["blocked"] == 1
+
+
+def test_workflow_runner_api_execution_does_not_retry_locally(monkeypatch) -> None:
+    """Retry authority belongs to durable workflow job transitions."""
+    calls = 0
+
+    def _fail_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("rate limit")
+
+    monkeypatch.setattr(_mod, "execute_api_in_sandbox", _fail_once)
+    runner = _mod.WorkflowRunner.__new__(_mod.WorkflowRunner)
+    runner._repo_root = Path(__file__).resolve().parents[3]
+
+    result = runner._execute_api_job(
+        label="api_job",
+        agent_slug="openai/gpt-5.4",
+        agent_config=SimpleNamespace(),
+        prompt="hello",
+        timeout=30,
+    )
+
+    assert calls == 1
+    assert result.status == "failed"
+    assert result.retry_count == 0
+    assert "RuntimeError: rate limit" in result.stderr

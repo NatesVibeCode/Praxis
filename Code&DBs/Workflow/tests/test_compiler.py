@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
@@ -13,17 +13,69 @@ WORKFLOW_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_ROOT))
 
-from _pg_test_conn import ensure_test_database_ready
-
-os.environ.setdefault("WORKFLOW_DATABASE_URL", ensure_test_database_ready())
-
 import runtime.compiler as compiler_module
 from runtime.compiler import compile_prose
 
 
+def _compile_index_snapshot() -> compiler_module.CompileIndexSnapshot:
+    now = datetime(2026, 4, 23, 0, 0, tzinfo=timezone.utc)
+    repo_root = str(WORKFLOW_ROOT.parents[1])
+    source_counts = {
+        "reference_catalog": 1,
+        "integration_registry": 1,
+        "object_types": 1,
+        "compiler_route_hints": 1,
+        "capability_catalog": 1,
+    }
+    return compiler_module.CompileIndexSnapshot(
+        schema_version=1,
+        compile_index_ref="compile_index.compiler.smoke_test",
+        compile_surface_revision="compile_surface.compiler.smoke_test",
+        compile_surface_name="compiler",
+        repo_root=repo_root,
+        repo_fingerprint="compiler-smoke-test-authority",
+        repo_info={"repo_root": repo_root, "repo_fingerprint": "compiler-smoke-test-authority"},
+        surface_manifest={"surface_revision": "compiler-smoke-test"},
+        source_fingerprints={key: f"{key}.fingerprint" for key in source_counts},
+        source_counts=source_counts,
+        decision_ref="decision.compiler.smoke_test",
+        refresh_count=1,
+        refreshed_at=now,
+        stale_after_at=now,
+        freshness_state="fresh",
+        freshness_reason=None,
+        reference_catalog=(
+            {
+                "slug": "@gmail/inbox",
+                "ref_type": "integration",
+                "display_name": "Gmail Inbox",
+                "resolved_id": "gmail",
+                "resolved_table": "integration_registry",
+            },
+        ),
+        integration_registry=(
+            {
+                "id": "gmail",
+                "name": "Gmail",
+                "provider": "google",
+                "auth_status": "connected",
+                "capabilities": [{"action": "search", "description": "Search inbox"}],
+            },
+        ),
+        object_types=(
+            {"type_id": "invoice", "name": "Invoice", "description": "Invoice status"},
+        ),
+        compiler_route_hints=(("review", "auto/review"),),
+        capability_catalog=(
+            {"slug": "capability.gmail.search", "summary": "Search Gmail inboxes"},
+        ),
+        payload={"authority": "compile_index.smoke_test"},
+    )
+
+
 @pytest.fixture(autouse=True)
 def _stub_external_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the smoke test bounded when DB or planner infrastructure is unavailable."""
+    """Keep external services bounded while preserving compile-index authority shape."""
 
     class _FakeConn:
         def execute(self, *_args, **_kwargs):
@@ -51,9 +103,7 @@ def _stub_external_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         compiler_module,
         "_load_compile_index_snapshot_with_auto_refresh",
-        lambda *_args, **_kwargs: compiler_module._fallback_compile_index_snapshot(
-            reason="compiler smoke test",
-        ),
+        lambda *_args, **_kwargs: _compile_index_snapshot(),
     )
     monkeypatch.setattr(
         compiler_module,
@@ -68,6 +118,9 @@ def _assert_compiler_shape(result: dict) -> None:
     assert isinstance(result, dict), f"Expected dict, got {type(result)}"
     assert "definition" in result, f"Missing definition: {result.keys()}"
     assert "unresolved" in result, f"Missing unresolved: {result.keys()}"
+    if result["compile_index"] is not None:
+        assert result["compile_index"]["freshness_state"] == "fresh"
+        assert result["compile_index"]["compile_index_ref"] != "compile_index:fallback"
     assert result["error"] is None or isinstance(
         result["error"], str
     ), f"Unexpected error type: {type(result.get('error'))}"

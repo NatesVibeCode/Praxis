@@ -618,6 +618,16 @@ def _build_graph_execution_packet(
     packet_payload: dict[str, object] = {
         "definition_revision": definition_revision,
         "plan_revision": plan_revision,
+        "packet_revision_authority": {
+            "kind": "execution_packet_revision_authority",
+            "provenance_kind": "compiled",
+            "definition_revision": definition_revision,
+            "plan_revision": plan_revision,
+            "synthetic_fields": [],
+            "reason_code": "packet.revision.compiled",
+            "workflow_id": request.workflow_id,
+            "run_id": request.request_id,
+        },
         "packet_version": 1,
         "workflow_id": request.workflow_id,
         "run_id": request.request_id,
@@ -1747,12 +1757,6 @@ def _do_submit_workflow(
                 "input_fingerprint",
                 str(compile_provenance.get("input_fingerprint") or "").strip(),
             )
-        CompileArtifactStore(conn).record_execution_packet(
-            packet=execution_packet,
-            authority_refs=[execution_packet["definition_revision"], execution_packet["plan_revision"]],
-            decision_ref=str(execution_packet["decision_ref"]),
-            parent_artifact_ref=str(execution_packet["parent_artifact_ref"]),
-        )
 
     persisted_job_labels = {label for _, label, _ in job_rows}
     if persisted_job_labels:

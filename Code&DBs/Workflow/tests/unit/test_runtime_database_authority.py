@@ -7,6 +7,7 @@ import pytest
 from runtime._workflow_database import (
     resolve_runtime_database_url,
 )
+import storage.postgres.connection as pg_connection
 from storage.postgres.validators import PostgresConfigurationError
 
 
@@ -28,6 +29,36 @@ def test_resolve_runtime_database_url_uses_repo_env_when_process_authority_missi
     )
 
     assert resolve_runtime_database_url(repo_root=tmp_path) == "postgresql://repo.test/workflow"
+
+
+def test_resolve_runtime_database_url_normalizes_container_host_alias_for_host_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pg_connection, "_running_inside_container", lambda env=None: False)
+    monkeypatch.setattr(pg_connection, "_hostname_resolves", lambda hostname: False)
+
+    assert (
+        resolve_runtime_database_url(
+            "postgresql://user:pass@host.docker.internal:5432/praxis?sslmode=disable",
+            repo_root=Path("/tmp"),
+        )
+        == "postgresql://user:pass@localhost:5432/praxis?sslmode=disable"
+    )
+
+
+def test_resolve_runtime_database_url_preserves_container_host_alias_inside_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pg_connection, "_running_inside_container", lambda env=None: True)
+    monkeypatch.setattr(pg_connection, "_hostname_resolves", lambda hostname: False)
+
+    assert (
+        resolve_runtime_database_url(
+            "postgresql://host.docker.internal:5432/praxis",
+            repo_root=Path("/tmp"),
+        )
+        == "postgresql://host.docker.internal:5432/praxis"
+    )
 
 
 def test_resolve_runtime_database_url_does_not_discover_launchd_authority(

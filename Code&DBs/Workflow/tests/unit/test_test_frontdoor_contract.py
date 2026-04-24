@@ -21,7 +21,7 @@ def _load_test_frontdoor(monkeypatch: pytest.MonkeyPatch):
     return module
 
 
-def test_validate_payload_downgrades_structured_authority_error_to_warning(
+def test_validate_payload_treats_structured_authority_error_as_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     frontdoor = _load_test_frontdoor(monkeypatch)
@@ -46,8 +46,10 @@ def test_validate_payload_downgrades_structured_authority_error_to_warning(
 
     payload = frontdoor._validate_payload(["config/cascade/specs/demo.queue.json"])
 
-    assert payload["ok"] is True
-    assert payload["errors"] == []
+    assert payload["ok"] is False
+    assert payload["errors"] == [
+        "workflow validation failed: agent resolution was blocked by the sandbox permission surface"
+    ]
     assert payload["warnings"] == [
         "workflow spec parsed, but agent resolution was blocked by the sandbox permission surface"
     ]

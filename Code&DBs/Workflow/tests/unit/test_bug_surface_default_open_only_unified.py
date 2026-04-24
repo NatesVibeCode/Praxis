@@ -52,6 +52,7 @@ from runtime.primitive_contracts import (
     bug_query_default_open_only_backlog,
     bug_query_default_open_only_list,
 )
+from surfaces.mcp.catalog import get_tool_catalog
 from surfaces.mcp.tools.bugs import TOOLS as BUG_TOOLS
 from surfaces.mcp.tools.operator import TOOLS as OPERATOR_TOOLS
 
@@ -112,6 +113,16 @@ def test_praxis_replay_provenance_backfill_open_only_default() -> None:
     assert _open_only_default(
         OPERATOR_TOOLS, "praxis_bug_replay_provenance_backfill"
     ) == bug_query_default_open_only_backlog()
+
+
+def test_catalog_resolves_operator_bug_default_wrapper() -> None:
+    """Catalog loading must fold operator-local primitive wrappers too."""
+    catalog = get_tool_catalog()
+    schema = catalog["praxis_bug_replay_provenance_backfill"].input_schema
+
+    assert schema["properties"]["open_only"]["default"] == (
+        bug_query_default_open_only_backlog()
+    )
 
 
 # -- 4. the two primitives disagree on purpose ---------------------------

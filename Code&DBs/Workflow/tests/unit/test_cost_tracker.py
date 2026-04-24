@@ -50,7 +50,12 @@ def test_record_cost_skips_when_connection_unavailable() -> None:
     tracker = cost_tracker_mod.CostTracker(conn_factory=lambda: (_ for _ in ()).throw(RuntimeError("db offline")))
 
     assert tracker.record_cost(_Result()) is None
-    assert tracker.summary()["record_count"] == 0
+    summary = tracker.summary()
+    assert summary["record_count"] == 0
+    assert summary["authority_ready"] is False
+    assert summary["observability_state"] == "degraded"
+    assert summary["reason_code"] == "cost_tracker.authority_unavailable"
+    assert summary["error"] == "RuntimeError: db offline"
 
 
 def test_record_cost_connects_on_demand() -> None:
@@ -69,3 +74,4 @@ def test_record_cost_connects_on_demand() -> None:
     assert record.run_id == "run-1"
     assert calls == ["connect"]
     assert len(conn.calls) == 1
+    assert tracker.summary()["authority_ready"] is True

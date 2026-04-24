@@ -138,7 +138,7 @@ def test_commands_index_mentions_routes_alias() -> None:
     assert "workflow authority-index" in rendered
     assert "workflow dictionary <list|describe|set-override|clear-override|reproject>" in rendered
     assert "workflow authority-memory refresh" in rendered
-    assert "workflow records <create|update|rename>" in rendered
+    assert "workflow records <list|get|create|update|rename>" in rendered
     assert "workflow defs <create|update>" not in rendered
 
 
@@ -150,6 +150,37 @@ def test_integration_help_subcommand_is_discoverable() -> None:
     assert "usage: workflow integration [list|describe|health|test|call|create|secret|reload|help] [args]" in rendered
     assert "workflow integration help" in rendered
     assert "workflow integration call <integration_id> <integration_action>" in rendered
+
+
+def test_dictionary_describe_missing_object_returns_not_found_packet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        authority_commands,
+        "tool_praxis_data_dictionary",
+        lambda _params: {
+            "error": "data dictionary: unknown object_kind 'workflow_records'",
+            "status_code": 404,
+        },
+    )
+
+    stdout = StringIO()
+    assert workflow_cli_main(["dictionary", "describe", "workflow_records", "--json"], stdout=stdout) == 1
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["status"] == "not_found"
+    assert payload["reason_code"] == "data_dictionary.object_not_found"
+    assert payload["object_kind"] == "workflow_records"
+
+
+def test_object_list_help_is_available_after_subcommand() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["object", "list", "--help"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "usage: workflow object <list|get|upsert|delete>" in rendered
+    assert "workflow object list --type-id TYPE" in rendered
 
 
 def test_authority_memory_refresh_frontdoor_uses_projection_refresher(
@@ -1322,6 +1353,186 @@ def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest
     assert renamed["workflow"]["name"] == "Runtime Regression Probe v2"
 
 
+def test_records_frontdoor_supports_list_get_and_never_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_query_mod = SimpleNamespace(
+        _workflow_to_dict=lambda row, include_definition=False: {
+            "id": row["id"],
+            "name": row["name"],
+            "has_spec": row.get("compiled_spec") is not None,
+            "invocation_count": row.get("invocation_count", 0),
+            "definition": row.get("definition") if include_definition else None,
+        },
+    )
+    conn = object()
+    monkeypatch.setattr(workflow_commands, "_workflow_subsystems", lambda: _FakeSubsystems(conn))
+    monkeypatch.setattr(workflow_commands, "_workflow_query_mod", lambda: fake_query_mod)
+
+    import storage.postgres.workflow_runtime_repository as workflow_repo
+
+    captured: dict[str, object] = {}
+
+    def _list_records(_conn, *, never_run=False, limit=100, **_kwargs):
+        captured["conn"] = _conn
+        captured["never_run"] = never_run
+        captured["limit"] = limit
+        return [
+            {
+                "id": "wf_draft",
+                "name": "Draft Flow",
+                "definition": {"type": "pipeline"},
+                "compiled_spec": None,
+                "invocation_count": 0,
+            }
+        ]
+
+    monkeypatch.setattr(workflow_repo, "list_workflow_records", _list_records)
+    monkeypatch.setattr(
+        workflow_repo,
+        "load_workflow_record",
+        lambda _conn, *, workflow_id: {
+            "id": workflow_id,
+            "name": "Draft Flow",
+            "definition": {"type": "pipeline"},
+            "compiled_spec": None,
+            "invocation_count": 0,
+        },
+    )
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            ["records", "list", "--never-run", "--limit", "5", "--json"],
+            stdout=stdout,
+        )
+        == 0
+    )
+    listed = json.loads(stdout.getvalue())
+    assert listed["count"] == 1
+    assert listed["filters"]["never_run"] is True
+    assert listed["workflows"][0]["id"] == "wf_draft"
+    assert captured == {"conn": conn, "never_run": True, "limit": 5}
+
+    stdout = StringIO()
+    assert workflow_cli_main(["records", "get", "wf_draft", "--include-definition"], stdout=stdout) == 0
+    fetched = json.loads(stdout.getvalue())
+    assert fetched["workflow"]["id"] == "wf_draft"
+    assert fetched["workflow"]["definition"] == {"type": "pipeline"}
+
+
+def test_records_frontdoor_returns_typed_db_authority_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _DbUnavailable(Exception):
+        pass
+
+    _DbUnavailable.__name__ = "PostgresConfigurationError"
+
+    class _UnavailableSubsystems:
+        def get_pg_conn(self):
+            raise _DbUnavailable("db down")
+
+    fake_query_mod = SimpleNamespace(_workflow_to_dict=lambda row, include_definition=False: row)
+    monkeypatch.setattr(workflow_commands, "_workflow_query_mod", lambda: fake_query_mod)
+    monkeypatch.setattr(workflow_commands, "_workflow_subsystems", _UnavailableSubsystems)
+
+    stdout = StringIO()
+    assert workflow_cli_main(["records", "list", "--never-run"], stdout=stdout) == 1
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["status"] == "error"
+    assert payload["reason_code"] == "workflow_records.db_authority_unavailable"
+    assert payload["source_authority"] == "public.workflows"
+
+
+def test_records_nested_help_is_success() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["records", "list", "--help"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "usage: workflow records list" in rendered
+    assert "[--json]" in rendered
+
+
+def test_status_frontdoor_rejects_unsupported_since_hours() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["status", "--since-hours", "24000"], stdout=stdout) == 2
+
+    rendered = stdout.getvalue()
+    assert "workflow status does not support arguments" in rendered
+    assert "time-window filtering is not implemented" in rendered
+    assert "--since-hours" not in str(legacy_workflow_cli.__doc__)
+
+
+def test_failed_cli_command_records_friction(monkeypatch: pytest.MonkeyPatch) -> None:
+    workflow_main_module = importlib.import_module("surfaces.cli.main")
+    captured: dict[str, object] = {}
+
+    def _fake_record_cli_command_failure(**kwargs: object) -> bool:
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        workflow_main_module,
+        "record_cli_command_failure",
+        _fake_record_cli_command_failure,
+    )
+
+    stdout = StringIO()
+    assert workflow_cli_main(["status", "--since-hours", "24000"], stdout=stdout) == 2
+
+    assert captured["args"] == ["status", "--since-hours", "24000"]
+    assert captured["exit_code"] == 2
+    assert "workflow status does not support arguments" in str(captured["output_text"])
+    assert captured["output_truncated"] is False
+
+
+def test_successful_cli_command_does_not_record_friction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_main_module = importlib.import_module("surfaces.cli.main")
+
+    def _unexpected_record_cli_command_failure(**_kwargs: object) -> bool:
+        raise AssertionError("successful commands should not record CLI friction")
+
+    monkeypatch.setattr(
+        workflow_main_module,
+        "record_cli_command_failure",
+        _unexpected_record_cli_command_failure,
+    )
+
+    stdout = StringIO()
+    assert workflow_cli_main(["status", "--help"], stdout=stdout) == 0
+
+
+def test_status_help_is_success() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["status", "--help"], stdout=stdout) == 0
+    assert stdout.getvalue() == "usage: workflow status\n"
+
+
+def test_verify_platform_returns_typed_db_authority_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _DbUnavailable(Exception):
+        pass
+
+    _DbUnavailable.__name__ = "PostgresConfigurationError"
+
+    import runtime.verifier_authority as verifier_authority
+
+    monkeypatch.setattr(
+        verifier_authority,
+        "registry_snapshot",
+        lambda: (_ for _ in ()).throw(_DbUnavailable("db down")),
+    )
+
+    stdout = StringIO()
+    assert workflow_cli_main(["verify-platform"], stdout=stdout) == 1
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["status"] == "error"
+    assert payload["reason_code"] == "verifier.db_authority_unavailable"
+    assert payload["source_authority"] == "verifier_registry"
+
+
 def test_legacy_defs_and_workflows_aliases_fail_fast_with_rename_hint() -> None:
     stdout = StringIO()
     assert (
@@ -2101,7 +2312,7 @@ def test_chain_frontdoor_legacy_mode_still_requires_two_specs(
 def test_chain_frontdoor_help_mentions_coordination_and_legacy_modes() -> None:
     stdout = StringIO()
     exit_code = workflow_cli_main(["chain", "--help"], stdout=stdout)
-    assert exit_code == 2  # argparse convention for help
+    assert exit_code == 0
     out = stdout.getvalue()
     assert "coordination.json" in out.lower() or "coordination-program" in out.lower()
     assert "spec1.json" in out  # legacy mode still documented

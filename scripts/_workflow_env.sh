@@ -101,6 +101,25 @@ PY
 }
 
 workflow_load_repo_env() {
+  if [ -z "${WORKFLOW_DATABASE_URL:-}" ] && [ -f "${workflow_env_repo_root}/.env" ]; then
+    local repo_database_url
+    repo_database_url="$(
+      awk -F= '/^WORKFLOW_DATABASE_URL=/ {sub(/^[^=]*=/, ""); gsub(/^["'\'']|["'\'']$/, ""); print; exit}' \
+        "${workflow_env_repo_root}/.env"
+    )"
+    if [ -n "${repo_database_url}" ]; then
+      WORKFLOW_DATABASE_URL="${repo_database_url}"
+      WORKFLOW_DATABASE_AUTHORITY_SOURCE="repo_env:${workflow_env_repo_root}/.env"
+      export WORKFLOW_DATABASE_URL
+      export WORKFLOW_DATABASE_AUTHORITY_SOURCE
+      if [ -z "${PRAXIS_WORKSPACE_BASE_PATH:-}" ]; then
+        PRAXIS_WORKSPACE_BASE_PATH="${workflow_env_repo_root}"
+        export PRAXIS_WORKSPACE_BASE_PATH
+      fi
+      return 0
+    fi
+  fi
+
   local resolved
   resolved="$(workflow_resolve_database_env_json)" || return 1
 
@@ -147,5 +166,10 @@ PY
     if [ -n "${PRAXIS_WORKSPACE_BASE_PATH}" ]; then
       export PRAXIS_WORKSPACE_BASE_PATH
     fi
+  fi
+
+  if [ -z "${PRAXIS_WORKSPACE_BASE_PATH:-}" ]; then
+    PRAXIS_WORKSPACE_BASE_PATH="${workflow_env_repo_root}"
+    export PRAXIS_WORKSPACE_BASE_PATH
   fi
 }

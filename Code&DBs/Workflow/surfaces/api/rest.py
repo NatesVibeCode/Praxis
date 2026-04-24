@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,7 +35,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Security
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -58,7 +59,10 @@ from surfaces.mcp.catalog import McpToolDefinition, canonical_tool_name, get_too
 from surfaces.mcp.invocation import ToolInvocationError, invoke_tool
 from storage.postgres import PostgresWorkflowSurfaceUsageRepository
 from .handlers._subsystems import _Subsystems
-from .handlers._surface_usage import record_api_route_usage as _record_api_route_usage
+from .handlers._surface_usage import (
+    record_api_route_usage as _record_api_route_usage,
+    surface_usage_recorder_health,
+)
 from .handlers import (
     handle_delete_request,
     handle_get_request,
@@ -1307,6 +1311,9 @@ def _shared_pg_conn():
     return subsystems.get_pg_conn()
 
 
+agent_sessions_app.app.state.pg_conn_factory = _shared_pg_conn
+
+
 async def _route_to_handler(request: Request) -> Response:
     """Dispatch a request through the unified handler system.
 
@@ -1581,6 +1588,459 @@ def _launcher_index_response() -> FileResponse | JSONResponse:
             "Cache-Control": "no-store, no-cache, must-revalidate",
             "Pragma": "no-cache",
         },
+    )
+
+
+def _launcher_asset_file_response(filename: str, *, media_type: str) -> FileResponse | JSONResponse:
+    asset_path = _APP_DIST_DIR / filename
+    if not asset_path.is_file():
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ok": False,
+                "error": "launcher_build_missing",
+                "detail": (
+                    "Launcher build missing. Rebuild Code&DBs/Workflow/surfaces/app "
+                    "with `npm run build`."
+                ),
+            },
+        )
+    return FileResponse(
+        asset_path,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+_MOBILE_APP_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <link rel="manifest" href="/mobile/manifest.webmanifest">
+  <title>Praxis Mobile</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f4ed;
+      --ink: #111827;
+      --muted: #667085;
+      --line: #d7d2c8;
+      --panel: #fffdf8;
+      --accent: #0f766e;
+      --accent-ink: #ffffff;
+      --danger: #b42318;
+      --shadow: 0 10px 26px rgba(17, 24, 39, .10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101418;
+        --ink: #f5f7fa;
+        --muted: #a6b0bc;
+        --line: #303843;
+        --panel: #171d23;
+        --accent: #2dd4bf;
+        --accent-ink: #06201c;
+        --danger: #ff8a80;
+        --shadow: 0 12px 28px rgba(0, 0, 0, .28);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    button, input, textarea { font: inherit; }
+    .shell {
+      min-height: 100dvh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+      gap: 12px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 44px;
+    }
+    h1 {
+      font-size: 20px;
+      line-height: 1.1;
+      margin: 0;
+      letter-spacing: 0;
+    }
+    .status {
+      min-width: 96px;
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--panel) 80%, transparent);
+      white-space: nowrap;
+    }
+    main {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 12px;
+      min-height: 0;
+    }
+    .pair, .composer, .threadbar {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .pair {
+      display: none;
+      padding: 14px;
+      gap: 10px;
+    }
+    .pair[data-visible="true"] { display: grid; }
+    .pair label, .field-label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--ink);
+      padding: 12px;
+      min-height: 44px;
+    }
+    textarea {
+      resize: none;
+      max-height: 38dvh;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      min-height: 44px;
+      padding: 0 14px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 700;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+    button:disabled {
+      opacity: .55;
+    }
+    .threadbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 10px;
+      align-items: center;
+    }
+    select {
+      min-width: 0;
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--ink);
+      padding: 0 10px;
+    }
+    .messages {
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 2px 0;
+    }
+    .bubble {
+      max-width: 92%;
+      border-radius: 8px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .bubble.user {
+      align-self: flex-end;
+      background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+    }
+    .bubble.system {
+      align-self: center;
+      color: var(--muted);
+      font-size: 13px;
+      box-shadow: none;
+    }
+    .composer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 10px;
+      align-items: end;
+    }
+    .error { color: var(--danger); }
+    @media (min-width: 760px) {
+      .shell { max-width: 760px; margin: 0 auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <h1>Praxis</h1>
+      <span id="status" class="status">offline</span>
+    </header>
+    <main>
+      <section id="pair" class="pair" data-visible="false">
+        <label for="pairCode">Pairing code</label>
+        <input id="pairCode" autocomplete="one-time-code" inputmode="text" placeholder="Paste code">
+        <button id="pairButton">Pair</button>
+        <div id="pairError" class="error" aria-live="polite"></div>
+      </section>
+      <section class="threadbar">
+        <select id="threadSelect" aria-label="Thread"></select>
+        <button id="newThread" class="secondary" title="New thread">New</button>
+      </section>
+      <section id="messages" class="messages" aria-live="polite"></section>
+    </main>
+    <form id="composer" class="composer">
+      <textarea id="prompt" rows="1" placeholder="Ask Praxis"></textarea>
+      <button id="send" type="submit">Send</button>
+    </form>
+  </div>
+  <script>
+    const state = { agents: [], activeAgentId: null, busy: false };
+    const el = {
+      status: document.getElementById("status"),
+      pair: document.getElementById("pair"),
+      pairCode: document.getElementById("pairCode"),
+      pairButton: document.getElementById("pairButton"),
+      pairError: document.getElementById("pairError"),
+      threadSelect: document.getElementById("threadSelect"),
+      newThread: document.getElementById("newThread"),
+      messages: document.getElementById("messages"),
+      composer: document.getElementById("composer"),
+      prompt: document.getElementById("prompt"),
+      send: document.getElementById("send")
+    };
+
+    function setStatus(text) { el.status.textContent = text; }
+    function setBusy(value) {
+      state.busy = value;
+      el.send.disabled = value;
+      el.pairButton.disabled = value;
+      el.newThread.disabled = value;
+    }
+    function deviceId() {
+      let id = localStorage.getItem("praxis.mobile.deviceId");
+      if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem("praxis.mobile.deviceId", id);
+      }
+      return id;
+    }
+    async function request(path, options = {}) {
+      const response = await fetch(path, {
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options
+      });
+      if (response.status === 401 || response.status === 503) {
+        el.pair.dataset.visible = "true";
+      }
+      if (!response.ok) {
+        let detail = response.statusText;
+        try {
+          const payload = await response.json();
+          detail = payload.message || payload.error || payload.detail?.message || payload.detail?.error_code || detail;
+        } catch {}
+        throw new Error(detail);
+      }
+      return response.json();
+    }
+    function renderThreads() {
+      el.threadSelect.innerHTML = "";
+      for (const agent of state.agents) {
+        const option = document.createElement("option");
+        option.value = agent.agent_id || agent.session_id;
+        option.textContent = agent.display_title || agent.title || "Praxis thread";
+        el.threadSelect.appendChild(option);
+      }
+      if (state.activeAgentId) el.threadSelect.value = state.activeAgentId;
+    }
+    function appendBubble(text, kind = "assistant") {
+      const bubble = document.createElement("div");
+      bubble.className = "bubble " + kind;
+      bubble.textContent = text || "";
+      el.messages.appendChild(bubble);
+      el.messages.scrollTop = el.messages.scrollHeight;
+    }
+    function renderEvents(events) {
+      el.messages.innerHTML = "";
+      if (!events.length) {
+        appendBubble("Ready.", "system");
+        return;
+      }
+      for (const event of events) {
+        const kind = String(event.event_kind || event.event || "");
+        const text = event.text_content || event.text || event.message || "";
+        if (!text) continue;
+        appendBubble(text, kind.includes("user") ? "user" : "assistant");
+      }
+    }
+    async function refreshAgents() {
+      setStatus("syncing");
+      const agents = await request("/api/agent-sessions/agents");
+      state.agents = agents;
+      if (!state.activeAgentId && agents.length) {
+        state.activeAgentId = agents[0].agent_id || agents[0].session_id;
+      }
+      renderThreads();
+      if (state.activeAgentId) await loadMessages(state.activeAgentId);
+      else renderEvents([]);
+      el.pair.dataset.visible = "false";
+      setStatus("ready");
+    }
+    async function loadMessages(agentId) {
+      state.activeAgentId = agentId;
+      const payload = await request(`/api/agent-sessions/agents/${agentId}/messages`);
+      renderEvents(payload.events || []);
+    }
+    async function createThread(initialPrompt = "") {
+      const payload = await request("/api/agent-sessions/agents", {
+        method: "POST",
+        body: JSON.stringify({ title: "Road thread", prompt: initialPrompt || null })
+      });
+      state.activeAgentId = payload.agent_id;
+      await refreshAgents();
+    }
+    el.pairButton.addEventListener("click", async () => {
+      el.pairError.textContent = "";
+      const code = el.pairCode.value.trim();
+      if (!code) return;
+      setBusy(true);
+      try {
+        await request("/api/auth/bootstrap/exchange", {
+          method: "POST",
+          body: JSON.stringify({ bootstrap_token: code, device_id: deviceId(), ttl_s: 86400, budget_limit: 100 })
+        });
+        el.pairCode.value = "";
+        await refreshAgents();
+      } catch (error) {
+        el.pairError.textContent = error.message;
+        setStatus("pair");
+      } finally {
+        setBusy(false);
+      }
+    });
+    el.newThread.addEventListener("click", async () => {
+      setBusy(true);
+      try { await createThread(""); }
+      catch (error) { appendBubble(error.message, "system"); setStatus("pair"); }
+      finally { setBusy(false); }
+    });
+    el.threadSelect.addEventListener("change", async () => {
+      if (!el.threadSelect.value) return;
+      setBusy(true);
+      try { await loadMessages(el.threadSelect.value); }
+      catch (error) { appendBubble(error.message, "system"); }
+      finally { setBusy(false); }
+    });
+    el.composer.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const prompt = el.prompt.value.trim();
+      if (!prompt) return;
+      el.prompt.value = "";
+      appendBubble(prompt, "user");
+      setBusy(true);
+      try {
+        if (!state.activeAgentId) await createThread(prompt);
+        else {
+          const payload = await request(`/api/agent-sessions/agents/${state.activeAgentId}/messages`, {
+            method: "POST",
+            body: JSON.stringify({ prompt })
+          });
+          appendBubble(payload.reply || "", "assistant");
+        }
+        setStatus("ready");
+      } catch (error) {
+        appendBubble(error.message, "system");
+        setStatus("pair");
+      } finally {
+        setBusy(false);
+      }
+    });
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/mobile/sw.js").catch(() => {});
+    }
+    refreshAgents().catch(() => { el.pair.dataset.visible = "true"; renderEvents([]); setStatus("pair"); });
+  </script>
+</body>
+</html>
+"""
+
+
+_MOBILE_SW_JS = """const CACHE = "praxis-mobile-v1";
+self.addEventListener("install", event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(["/mobile"])));
+  self.skipWaiting();
+});
+self.addEventListener("activate", event => {
+  event.waitUntil(self.clients.claim());
+});
+self.addEventListener("fetch", event => {
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith("/api/")) return;
+  if (url.pathname === "/mobile" || url.pathname === "/mobile/") {
+    event.respondWith(fetch(event.request).catch(() => caches.match("/mobile")));
+  }
+});
+"""
+
+
+def _mobile_manifest_payload() -> dict[str, Any]:
+    return {
+        "name": "Praxis Mobile",
+        "short_name": "Praxis",
+        "start_url": "/mobile",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#f7f4ed",
+        "theme_color": "#111827",
+        "icons": [
+            {
+                "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='34' fill='%23111827'/%3E%3Cpath d='M48 126 96 38l48 88h-26l-22-44-22 44H48Z' fill='%232dd4bf'/%3E%3Cpath d='M66 146h60' stroke='%23f7f4ed' stroke-width='16' stroke-linecap='round'/%3E%3C/svg%3E",
+                "sizes": "192x192",
+                "type": "image/svg+xml",
+                "purpose": "any maskable",
+            }
+        ],
+    }
+
+
+def _is_loopback_request(request: Request) -> bool:
+    client_host = (request.client.host if request.client else "") or ""
+    request_host = str(request.headers.get("host") or "").split(":", 1)[0].strip().lower()
+    return (
+        client_host == "testclient"
+        or client_host == "::1"
+        or client_host.startswith("127.")
+        or request_host in {"localhost", "[::1]", "::1"}
+        or request_host.startswith("127.")
     )
 
 
@@ -2676,7 +3136,7 @@ def public_get_catalog(
 
 @app.get("/api/costs")
 def get_costs() -> dict[str, Any]:
-    """Return the cost summary from the in-memory cost tracker."""
+    """Return the cost summary from the Postgres-backed cost tracker."""
     from runtime.cost_tracker import get_cost_tracker
 
     return get_cost_tracker().summary()
@@ -2695,6 +3155,10 @@ async def workflows_get(request: Request) -> Response:
 
 @app.post("/api/workflows")
 async def workflows_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/workflows/{rest_of_path:path}")
+async def workflows_path_post(request: Request, rest_of_path: str) -> Response:
     return await _route_to_handler(request)
 
 @app.get("/api/workflows/{rest_of_path:path}")
@@ -3396,6 +3860,11 @@ class MobileApprovalRatifyRequest(BaseModel):
     assertion_expires_at: datetime
 
 
+class MobileBootstrapIssueRequest(BaseModel):
+    principal_ref: str = Field(default="operator:nate", min_length=1)
+    ttl_s: int = Field(default=600, ge=30, le=3600)
+
+
 class MobileBootstrapExchangeRequest(BaseModel):
     bootstrap_token: str = Field(min_length=1)
     device_id: str = Field(min_length=1)
@@ -3406,6 +3875,44 @@ class MobileBootstrapExchangeRequest(BaseModel):
 class MobileDeviceRevokeRequest(BaseModel):
     revoked_by: str = Field(min_length=1)
     revoke_reason: str = Field(min_length=1)
+
+
+@app.post("/api/mobile/bootstrap-token", tags=["mobile"])
+def issue_mobile_bootstrap_token(
+    request: Request,
+    body: MobileBootstrapIssueRequest | None = None,
+) -> JSONResponse:
+    """Issue a short-lived phone pairing code from the host-only control plane."""
+    if not _is_loopback_request(request):
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error_code": "mobile.bootstrap_issue_host_only",
+                "message": "pairing codes can only be issued from the host",
+            },
+            headers=no_store_headers(),
+        )
+
+    from runtime.capability.sessions import issue_bootstrap_token
+
+    resolved_body = body or MobileBootstrapIssueRequest()
+    token_secret = secrets.token_urlsafe(18)
+    token = issue_bootstrap_token(
+        _shared_pg_conn(),
+        principal_ref=resolved_body.principal_ref,
+        token_secret=token_secret,
+        ttl_s=resolved_body.ttl_s,
+    )
+    return JSONResponse(
+        status_code=200,
+        content={
+            "pairing_code": token_secret,
+            "token_id": str(token.get("token_id")),
+            "principal_ref": token.get("principal_ref"),
+            "expires_at": jsonable_encoder(token.get("expires_at")),
+        },
+        headers=no_store_headers(),
+    )
 
 
 @app.post("/auth/bootstrap/exchange", tags=["mobile"])
@@ -3512,6 +4019,7 @@ def get_trust() -> list[dict[str, Any]]:
     from runtime.trust_scoring import get_trust_scorer
 
     scorer = get_trust_scorer()
+    scorer.compute_from_receipts()
     scores = scorer.all_scores()
     return [
         {
@@ -3536,11 +4044,20 @@ def get_reviews() -> dict[str, Any]:
         tracker = get_review_tracker()
         authors = tracker.author_summary()
         return {
+            "authority_ready": True,
+            "observability_state": "ready",
             "authors": authors,
             "total_reviews": sum(a.get("total_reviews", 0) for a in authors),
         }
-    except Exception:
-        return {"authors": [], "total_reviews": 0}
+    except Exception as exc:
+        return {
+            "authority_ready": False,
+            "observability_state": "degraded",
+            "reason_code": "review_tracker.authority_unavailable",
+            "error": f"{type(exc).__name__}: {exc}",
+            "authors": [],
+            "total_reviews": 0,
+        }
 
 
 @app.get("/api/fitness")
@@ -3798,41 +4315,63 @@ def get_surface_usage_metrics(
 ) -> dict[str, Any]:
     """Return durable frontdoor surface-usage counters for the last N days."""
 
-    repo = PostgresWorkflowSurfaceUsageRepository(_shared_pg_conn())
-    entries = [
-        _serialize_surface_usage_row(row)
-        for row in repo.list_usage_rollup(days=days, entrypoint_name=entrypoint)
-    ]
-    daily = [
-        _serialize_surface_usage_row(row)
-        for row in repo.list_usage_daily(days=days, entrypoint_name=entrypoint)
-    ]
-    recent_events = [
-        _serialize_surface_usage_event_row(row)
-        for row in repo.list_usage_events(
-            days=days,
-            entrypoint_name=entrypoint,
-            limit=event_limit,
-        )
-    ]
-    query_routing_quality = [
-        {
-            "entrypoint_name": row.get("entrypoint_name"),
-            "caller_kind": row.get("caller_kind"),
-            "routed_to": row.get("routed_to") or None,
-            "result_state": row.get("result_state"),
-            "reason_code": row.get("reason_code") or None,
-            "invocation_count": int(row.get("invocation_count") or 0),
-            "success_count": int(row.get("success_count") or 0),
-            "average_query_chars": float(row.get("average_query_chars") or 0.0),
-            "total_result_count": int(row.get("total_result_count") or 0),
-        }
-        for row in repo.summarize_query_routing(days=days)
-    ]
-    builder_funnels = repo.summarize_builder_funnels(days=days)
+    recorder_health = surface_usage_recorder_health()
+    authority_ready = True
+    authority_error: str | None = None
+    try:
+        repo = PostgresWorkflowSurfaceUsageRepository(_shared_pg_conn())
+        entries = [
+            _serialize_surface_usage_row(row)
+            for row in repo.list_usage_rollup(days=days, entrypoint_name=entrypoint)
+        ]
+        daily = [
+            _serialize_surface_usage_row(row)
+            for row in repo.list_usage_daily(days=days, entrypoint_name=entrypoint)
+        ]
+        recent_events = [
+            _serialize_surface_usage_event_row(row)
+            for row in repo.list_usage_events(
+                days=days,
+                entrypoint_name=entrypoint,
+                limit=event_limit,
+            )
+        ]
+        query_routing_quality = [
+            {
+                "entrypoint_name": row.get("entrypoint_name"),
+                "caller_kind": row.get("caller_kind"),
+                "routed_to": row.get("routed_to") or None,
+                "result_state": row.get("result_state"),
+                "reason_code": row.get("reason_code") or None,
+                "invocation_count": int(row.get("invocation_count") or 0),
+                "success_count": int(row.get("success_count") or 0),
+                "average_query_chars": float(row.get("average_query_chars") or 0.0),
+                "total_result_count": int(row.get("total_result_count") or 0),
+            }
+            for row in repo.summarize_query_routing(days=days)
+        ]
+        builder_funnels = repo.summarize_builder_funnels(days=days)
+    except Exception as exc:
+        authority_ready = False
+        authority_error = f"{type(exc).__name__}: {exc}"
+        entries = []
+        daily = []
+        recent_events = []
+        query_routing_quality = []
+        builder_funnels = {}
+    observability_state = (
+        "ready"
+        if authority_ready and recorder_health.get("authority_ready") is True
+        else "degraded"
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "days": days,
+        "authority_ready": authority_ready,
+        "observability_state": observability_state,
+        "reason_code": None if authority_ready else "surface_usage.authority_unavailable",
+        "error": authority_error,
+        "recorder_health": recorder_health,
         "filters": {
             key: value
             for key, value in {
@@ -4203,6 +4742,47 @@ async def catalog_review_decisions_post(request: Request) -> Response:
 def root_redirect() -> Response:
     return RedirectResponse(url="/app")
 
+
+@app.get("/mobile", response_model=None)
+def mobile_app_root() -> HTMLResponse:
+    return HTMLResponse(
+        _MOBILE_APP_HTML,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/mobile/", response_model=None)
+def mobile_app_root_slash() -> HTMLResponse:
+    return mobile_app_root()
+
+
+@app.get("/mobile/manifest.webmanifest", response_model=None)
+def mobile_manifest() -> JSONResponse:
+    return JSONResponse(
+        _mobile_manifest_payload(),
+        media_type="application/manifest+json",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/mobile/sw.js", response_model=None)
+def mobile_service_worker() -> Response:
+    return Response(
+        _MOBILE_SW_JS,
+        media_type="text/javascript",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 @app.get("/app", response_model=None)
 def launcher_app_root() -> Any:
     return _launcher_index_response()
@@ -4211,6 +4791,21 @@ def launcher_app_root() -> Any:
 @app.get("/app/", response_model=None)
 def launcher_app_root_slash() -> Any:
     return _launcher_index_response()
+
+
+@app.get("/manifest.webmanifest", response_model=None)
+@app.get("/app/manifest.webmanifest", response_model=None)
+def launcher_manifest() -> Any:
+    return _launcher_asset_file_response(
+        "manifest.webmanifest",
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/sw.js", response_model=None)
+@app.get("/app/sw.js", response_model=None)
+def launcher_service_worker() -> Any:
+    return _launcher_asset_file_response("sw.js", media_type="text/javascript")
 
 
 @app.get("/app/{path:path}", response_model=None)

@@ -38,6 +38,8 @@ from ._shared import (
     _query_params,
     _read_json_body,
     _serialize,
+    is_demo_placeholder,
+    placeholder_error_message,
 )
 from surfaces._workflow_database import workflow_database_url_for_repo
 
@@ -52,6 +54,13 @@ def _internal_error_payload(exc: Exception) -> dict[str, str]:
     return {
         "error": f"{type(exc).__name__}: {exc}",
         "error_code": "internal_error",
+    }
+
+
+def _retired_model_runtime_payload() -> dict[str, str]:
+    return {
+        "error": "model-card run creation is retired; submit through /api/workflow-runs or /api/workflows/run",
+        "error_code": "model_runtime.retired",
     }
 
 
@@ -396,15 +405,10 @@ def _handle_wave(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
     if action == "start":
         wave_id = str(body.get("wave_id", "") or "").strip()
-        if wave_id == "wave_abc123":
-            wave_id = ""
+        if is_demo_placeholder("wave_id", wave_id):
+            raise _ClientError(placeholder_error_message("wave_id", wave_id))
         if not wave_id:
-            try:
-                wave_id = orch.resolve_default_wave_id(action=action)
-            except KeyError:
-                wave_id = ""
-        if not wave_id:
-            raise _ClientError("wave_id is required for start because no default wave is available")
+            raise _ClientError("wave_id is required for start")
         try:
             wave_state = orch.start_wave(wave_id)
             return {
@@ -417,15 +421,10 @@ def _handle_wave(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
     if action == "next":
         wave_id = str(body.get("wave_id", "") or "").strip()
-        if wave_id == "wave_abc123":
-            wave_id = ""
+        if is_demo_placeholder("wave_id", wave_id):
+            raise _ClientError(placeholder_error_message("wave_id", wave_id))
         if not wave_id:
-            try:
-                wave_id = orch.resolve_default_wave_id(action=action)
-            except KeyError:
-                wave_id = ""
-        if not wave_id:
-            raise _ClientError("wave_id is required for next because no default wave is available")
+            raise _ClientError("wave_id is required for next")
         try:
             runnable = orch.next_runnable_jobs(wave_id)
             return {"wave_id": wave_id, "runnable_jobs": runnable}
@@ -434,13 +433,8 @@ def _handle_wave(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
     if action == "record":
         wave_id = str(body.get("wave_id", "") or "").strip()
-        if wave_id == "wave_abc123":
-            wave_id = ""
-        if not wave_id:
-            try:
-                wave_id = orch.resolve_default_wave_id(action=action)
-            except KeyError:
-                wave_id = ""
+        if is_demo_placeholder("wave_id", wave_id):
+            raise _ClientError(placeholder_error_message("wave_id", wave_id))
         jobs_str = body.get("jobs", "")
         if not wave_id or not jobs_str:
             raise _ClientError(
@@ -654,26 +648,11 @@ def _handle_models_run_post(request: Any, path: str) -> None:
         return
 
     try:
-        pg = request.subsystems.get_pg_conn()
-
         if path == "/api/models/run":
-            model = body.get("model")
-            if not isinstance(model, dict):
-                request._send_json(400, {"error": "model is required"})
-                return
-
-            from runtime.model_executor import start_model_run
-
-            result = start_model_run(pg, model)
-            request._send_json(
-                200,
-                {
-                    "run_id": result["run_id"],
-                    "total_cards": result["total_cards"],
-                    "ready_cards": result["ready_cards"],
-                },
-            )
+            request._send_json(410, _retired_model_runtime_payload())
             return
+
+        pg = request.subsystems.get_pg_conn()
 
         parts = [part for part in path.split("/") if part]
         if (

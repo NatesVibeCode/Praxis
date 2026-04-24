@@ -5,8 +5,13 @@
 set -euo pipefail
 
 REPO="${PRAXIS_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-PORT=8421
-BASE="http://127.0.0.1:$PORT"
+HOST="${PRAXIS_AGENT_SESSIONS_HOST:-127.0.0.1}"
+PORT="${PRAXIS_AGENT_SESSIONS_PORT:-8421}"
+case "$HOST" in
+  0.0.0.0|::|[::]) CHECK_HOST=127.0.0.1 ;;
+  *) CHECK_HOST="$HOST" ;;
+esac
+BASE="http://$CHECK_HOST:$PORT"
 LOG="$REPO/artifacts/agent_sessions_smoke_$(date -u +%Y%m%d).log"
 STARTED_PID=""
 PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"

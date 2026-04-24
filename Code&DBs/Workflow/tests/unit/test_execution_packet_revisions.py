@@ -45,6 +45,8 @@ def test_revisions_present_returned_unchanged():
     # Snapshot untouched — caller-supplied values preserved exactly.
     assert raw_snapshot["definition_revision"] == "def_explicit_from_graph"
     assert raw_snapshot["plan_revision"] == "plan_explicit_from_graph"
+    assert raw_snapshot["packet_revision_authority"]["provenance_kind"] == "compiled"
+    assert raw_snapshot["packet_revision_authority"]["synthetic_fields"] == []
 
 
 def test_both_missing_synthesizes_deterministic_fallbacks():
@@ -68,6 +70,16 @@ def test_both_missing_synthesizes_deterministic_fallbacks():
     # Side effect: snapshot stamped for downstream readers.
     assert raw_snapshot["definition_revision"] == def_rev
     assert raw_snapshot["plan_revision"] == plan_rev
+    assert raw_snapshot["packet_revision_authority"] == {
+        "kind": "execution_packet_revision_authority",
+        "provenance_kind": "synthetic",
+        "definition_revision": def_rev,
+        "plan_revision": plan_rev,
+        "synthetic_fields": ["definition_revision", "plan_revision"],
+        "reason_code": "packet.revision.synthetic_fallback",
+        "workflow_id": "wf-chain",
+        "run_id": "run-chain",
+    }
 
 
 def test_synthesis_is_deterministic_across_calls():
@@ -155,6 +167,8 @@ def test_partial_presence_preserves_given_synthesizes_missing():
     assert plan_rev.startswith("plan_")
     assert raw_snapshot["definition_revision"] == "def_explicit"
     assert raw_snapshot["plan_revision"] == plan_rev
+    assert raw_snapshot["packet_revision_authority"]["provenance_kind"] == "partial_synthetic"
+    assert raw_snapshot["packet_revision_authority"]["synthetic_fields"] == ["plan_revision"]
 
 
 def test_route_plan_stripped_from_canonicalized_jobs():
