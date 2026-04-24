@@ -14,8 +14,10 @@ from runtime.intent_binding import (
     AmbiguousCandidate,
     BoundIntent,
     BoundPill,
+    ProposedPillScaffold,
     UnboundCandidate,
     bind_data_pills,
+    commit_proposed_pill,
 )
 
 
@@ -111,6 +113,154 @@ def test_bind_data_pills_marks_missing_field_as_unbound(monkeypatch) -> None:
     assert result.unbound[0].reason == "field_path_not_in_object"
     assert result.unbound[0].object_kind == "users"
     assert result.unbound[0].field_path == "favorite_color"
+    # Field-missing-on-known-object gets a scaffold — caller can fill + commit
+    # to create the field instead of treating it as a typo.
+    scaffold = result.unbound[0].proposed_pill
+    assert isinstance(scaffold, ProposedPillScaffold)
+    assert scaffold.object_kind == "users"
+    assert scaffold.field_path == "favorite_color"
+    assert "description" in scaffold.required_to_fill
+    assert "field_kind" in scaffold.required_to_fill  # no hint from the name
+
+
+def test_unknown_object_kind_does_not_produce_scaffold(monkeypatch) -> None:
+    _install_dictionary(monkeypatch, {})
+
+    result = bind_data_pills("Inspect aliens.planet for science.", conn=_StubConn())
+
+    assert len(result.unbound) == 1
+    assert result.unbound[0].reason == "object_kind_not_found"
+    # Can't propose a new field on an unknown object — scaffold stays None.
+    assert result.unbound[0].proposed_pill is None
+
+
+def test_allowlist_rejection_does_not_produce_scaffold(monkeypatch) -> None:
+    _install_dictionary(
+        monkeypatch,
+        {"orders": [{"field_path": "total_cents", "field_kind": "number", "source": "auto"}]},
+    )
+
+    result = bind_data_pills(
+        "Inspect orders.total_cents for audit.",
+        conn=_StubConn(),
+        object_kinds=["users"],
+    )
+
+    assert len(result.unbound) == 1
+    assert result.unbound[0].reason == "object_kind_not_allowlisted"
+    # Allowlist rejection means caller explicitly scoped binding — don't
+    # offer to mutate authority outside that scope.
+    assert result.unbound[0].proposed_pill is None
+
+
+def test_scaffold_infers_field_kind_hint_from_name(monkeypatch) -> None:
+    _install_dictionary(
+        monkeypatch,
+        {"users": [{"field_path": "email", "field_kind": "text", "source": "auto"}]},
+    )
+
+    cases = {
+        "users.created_at": "datetime",
+        "users.is_admin": "boolean",
+        "users.login_count": "number",
+        "users.preferences_json": "json",
+        "users.friend_ids": "array",
+        "users.primary_org_id": "reference",
+        "users.signup_on": "date",
+    }
+    for intent, expected_hint in cases.items():
+        result = bind_data_pills(f"Read {intent} from the dictionary.", conn=_StubConn())
+        assert len(result.unbound) == 1, f"expected one unbound for {intent}"
+        scaffold = result.unbound[0].proposed_pill
+        assert scaffold is not None, f"expected scaffold for {intent}"
+        assert scaffold.field_kind_hint == expected_hint, (
+            f"expected {expected_hint} hint for {intent}, got {scaffold.field_kind_hint}"
+        )
+        # If we inferred a hint, field_kind is not required from the caller.
+        assert "field_kind" not in scaffold.required_to_fill
+
+
+def test_commit_proposed_pill_writes_through_set_operator_override(monkeypatch) -> None:
+    scaffold = ProposedPillScaffold(
+        object_kind="users",
+        field_path="preferred_timezone",
+        field_kind_hint=None,
+        required_to_fill=["description", "field_kind"],
+        rationale="test",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_set_override(conn, **kwargs):
+        captured["conn"] = conn
+        captured["kwargs"] = kwargs
+        return {
+            "object_kind": kwargs["object_kind"],
+            "field_path": kwargs["field_path"],
+            "entry": {"field_kind": kwargs["field_kind"]},
+        }
+
+    monkeypatch.setattr(intent_binding, "set_operator_override", _fake_set_override)
+
+    receipt = commit_proposed_pill(
+        scaffold,
+        conn=_StubConn(),
+        description="User's preferred IANA timezone, e.g. America/Los_Angeles",
+        field_kind="text",
+    )
+
+    assert receipt["object_kind"] == "users"
+    assert receipt["field_path"] == "preferred_timezone"
+    kwargs = captured["kwargs"]
+    assert kwargs["field_kind"] == "text"
+    assert kwargs["description"].startswith("User's preferred IANA")
+
+
+def test_commit_proposed_pill_requires_description(monkeypatch) -> None:
+    scaffold = ProposedPillScaffold(
+        object_kind="users",
+        field_path="created_at",
+        field_kind_hint="datetime",
+        required_to_fill=["description"],
+        rationale="test",
+    )
+
+    with pytest.raises(ValueError, match="description is required"):
+        commit_proposed_pill(scaffold, conn=_StubConn(), description="   ")
+
+
+def test_commit_proposed_pill_requires_field_kind_when_no_hint(monkeypatch) -> None:
+    scaffold = ProposedPillScaffold(
+        object_kind="users",
+        field_path="mystery_field",
+        field_kind_hint=None,
+        required_to_fill=["description", "field_kind"],
+        rationale="test",
+    )
+
+    with pytest.raises(ValueError, match="field_kind is required"):
+        commit_proposed_pill(scaffold, conn=_StubConn(), description="some desc")
+
+
+def test_commit_proposed_pill_uses_hint_when_field_kind_missing(monkeypatch) -> None:
+    scaffold = ProposedPillScaffold(
+        object_kind="users",
+        field_path="last_login_at",
+        field_kind_hint="datetime",
+        required_to_fill=["description"],
+        rationale="test",
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_set_override(conn, **kwargs):
+        captured["kwargs"] = kwargs
+        return {"object_kind": kwargs["object_kind"], "field_path": kwargs["field_path"], "entry": {}}
+
+    monkeypatch.setattr(intent_binding, "set_operator_override", _fake_set_override)
+
+    commit_proposed_pill(scaffold, conn=_StubConn(), description="Last login timestamp")
+    assert captured["kwargs"]["field_kind"] == "datetime"
 
 
 def test_bind_data_pills_flags_ambiguous_duplicates(monkeypatch) -> None:

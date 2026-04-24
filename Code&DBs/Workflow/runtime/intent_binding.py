@@ -30,7 +30,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from runtime.data_dictionary import describe_object, list_object_kinds
+from runtime.data_dictionary import describe_object, list_object_kinds, set_operator_override
 
 
 # ``snake_case.snake_case`` (and optional trailing ``.snake_case`` nesting for
@@ -69,18 +69,50 @@ class AmbiguousCandidate:
 
 
 @dataclass(frozen=True)
+class ProposedPillScaffold:
+    """Scaffold for a field the caller intends to create.
+
+    Populated on :class:`UnboundCandidate` when the object_kind exists in
+    authority but the field_path does not — i.e. the reference could be a
+    genuine new field, not just a typo. The caller fills in ``field_kind``
+    and ``description`` and passes the scaffold to :func:`commit_proposed_pill`
+    to actually write the row through the data dictionary authority.
+
+    The scaffold itself is read-only. No authority mutation happens until
+    commit is called with explicit intent.
+    """
+
+    object_kind: str
+    field_path: str
+    field_kind_hint: str | None  # heuristic guess based on name ('datetime', 'number', etc.)
+    required_to_fill: list[str]  # fields the caller must supply at commit time
+    rationale: str  # why this scaffold was proposed
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class UnboundCandidate:
     """A reference that looked like a data pill but did not resolve.
 
-    ``reason`` tells the caller why: the object_kind wasn't known, or the
-    object exists but the field_path isn't in it. Caller fixes typos or
-    drops hallucinated references before composing packets.
+    ``reason`` tells the caller why: the object_kind wasn't known, the
+    object exists but the field_path isn't in it, or the object_kind fell
+    outside an allowlist.
+
+    When the object_kind exists and the field_path just isn't there yet,
+    ``proposed_pill`` holds a scaffold the caller can fill + commit to
+    create the field. That distinguishes "typo" (caller fixes intent) from
+    "new field I'm about to add" (caller commits scaffold). For unknown
+    object_kinds and allowlist rejections, ``proposed_pill`` stays None —
+    we don't offer to create fields on objects the authority doesn't know.
     """
 
     matched_span: str
     object_kind: str | None
     field_path: str | None
     reason: str
+    proposed_pill: ProposedPillScaffold | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -136,6 +168,90 @@ def _lookup_object_fields(conn: Any, object_kind: str) -> list[dict[str, Any]] |
         return None
     fields = description.get("fields") or []
     return [dict(row) for row in fields]
+
+
+# Deterministic field_kind hints from the field name. Confident patterns only —
+# anything not matched falls through to None so the caller fills explicitly.
+# The allowed kinds come from runtime.data_dictionary._ALLOWED_FIELD_KINDS:
+# text, number, boolean, enum, json, date, datetime, reference, array, object.
+def _infer_field_kind_hint(field_path: str) -> str | None:
+    path = field_path.lower().strip()
+    if not path:
+        return None
+    leaf = path.rsplit(".", 1)[-1]
+    if leaf.startswith(("is_", "has_", "should_", "can_")) or leaf.endswith("_flag"):
+        return "boolean"
+    if leaf.endswith(("_at", "_time", "_timestamp")):
+        return "datetime"
+    if leaf.endswith("_on") or leaf.endswith("_date"):
+        return "date"
+    if leaf.endswith(("_count", "_total", "_size", "_index", "_seq", "_n")):
+        return "number"
+    if leaf.endswith(("_json", "_payload", "_metadata")):
+        return "json"
+    if leaf.endswith(("_ids", "_refs", "_list", "_items", "_tags")):
+        return "array"
+    if leaf.endswith(("_id", "_ref", "_kind")):
+        return "reference"
+    return None
+
+
+def _scaffold_for_missing_field(object_kind: str, field_path: str) -> ProposedPillScaffold:
+    hint = _infer_field_kind_hint(field_path)
+    required = ["description"]
+    if hint is None:
+        required.append("field_kind")
+    return ProposedPillScaffold(
+        object_kind=object_kind,
+        field_path=field_path,
+        field_kind_hint=hint,
+        required_to_fill=required,
+        rationale=(
+            f"object_kind {object_kind!r} is known to authority but field_path "
+            f"{field_path!r} is not — caller may commit this scaffold to create "
+            "the field instead of treating the reference as a typo"
+        ),
+    )
+
+
+def commit_proposed_pill(
+    scaffold: ProposedPillScaffold,
+    *,
+    conn: Any,
+    description: str,
+    field_kind: str | None = None,
+    label: str | None = None,
+    display_order: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write a proposed pill to the data dictionary authority.
+
+    Explicit action — never called from binding. Caller is expected to
+    fill every entry in ``scaffold.required_to_fill`` before invoking.
+    Wraps :func:`runtime.data_dictionary.set_operator_override` so the
+    row is inserted at the operator layer (winning over projected rows).
+
+    Returns the dictionary authority's receipt: the upserted entry row.
+    """
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("description is required to commit a proposed pill")
+    chosen_kind = (field_kind or scaffold.field_kind_hint or "").strip()
+    if not chosen_kind:
+        raise ValueError(
+            "field_kind is required: no hint was inferred from the field name, "
+            "caller must supply one of text/number/boolean/enum/json/date/"
+            "datetime/reference/array/object"
+        )
+    return set_operator_override(
+        conn,
+        object_kind=scaffold.object_kind,
+        field_path=scaffold.field_path,
+        field_kind=chosen_kind,
+        label=label,
+        description=description.strip(),
+        display_order=display_order,
+        metadata=metadata,
+    )
 
 
 def bind_data_pills(
@@ -217,6 +333,7 @@ def bind_data_pills(
                     object_kind=object_kind,
                     field_path=field_path,
                     reason="field_path_not_in_object",
+                    proposed_pill=_scaffold_for_missing_field(object_kind, field_path),
                 )
             )
             continue
@@ -265,6 +382,8 @@ __all__ = [
     "AmbiguousCandidate",
     "BoundIntent",
     "BoundPill",
+    "ProposedPillScaffold",
     "UnboundCandidate",
     "bind_data_pills",
+    "commit_proposed_pill",
 ]
