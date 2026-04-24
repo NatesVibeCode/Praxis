@@ -27,6 +27,7 @@ _BLOCK_CATALOG = _WORKFLOW_ROOT / "runtime" / "block_catalog.py"
 
 _SANDBOX_RUNTIME_ALLOWED_PREFIXES: frozenset[str] = frozenset({
     "runtime.docker_image_authority",
+    "runtime.workspace_paths",
     "runtime.workflow.execution_policy",
 })
 

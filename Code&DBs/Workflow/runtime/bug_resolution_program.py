@@ -552,6 +552,8 @@ def build_coordination_payload(
     replay_ready_result: Mapping[str, Any],
     generated_at: str | None = None,
 ) -> dict[str, Any]:
+    from runtime.primitive_contracts import bug_resolved_status_values
+
     captured_at = generated_at or utc_now_iso()
     payload: dict[str, Any] = {
         "program_id": program_id,
@@ -564,7 +566,7 @@ def build_coordination_payload(
         "max_parallel_lanes": 5,
         "packet_contract": {
             "required_fields": list(PACKET_REQUIRED_FIELDS),
-            "terminal_statuses": ["FIXED", "WONT_FIX", "DEFERRED"],
+            "terminal_statuses": list(bug_resolved_status_values()),
             "fix_requires_validation_evidence": True,
         },
         "authority_checks": {

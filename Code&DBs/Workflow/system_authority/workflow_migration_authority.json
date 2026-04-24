@@ -225,7 +225,9 @@
     "217_ui_shell_route_registry.sql",
     "218_ui_feature_flow_registry.sql",
     "219_custom_integration_builder_launch_action.sql",
-    "221_onboarding_gate_state.sql"
+    "220_archive_mobile_v1.sql",
+    "221_onboarding_gate_state.sql",
+    "222_runtime_setup_operation_catalog_repair.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -4891,23 +4893,7 @@
     "185_mobile_capability_ledger.sql": [
       {
         "object_type": "table",
-        "object_name": "device_enrollments"
-      },
-      {
-        "object_type": "table",
         "object_name": "capability_grants"
-      },
-      {
-        "object_type": "table",
-        "object_name": "approval_requests"
-      },
-      {
-        "object_type": "index",
-        "object_name": "device_enrollments_principal_active_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "device_enrollments_credential_id_idx"
       },
       {
         "object_type": "index",
@@ -4924,22 +4910,6 @@
       {
         "object_type": "index",
         "object_name": "capability_grants_approval_request_id_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "approval_requests_pending_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "approval_requests_plan_envelope_hash_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "approval_requests_principal_status_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "approval_requests_grant_ref_idx"
       }
     ],
     "186_gate_evaluations_grant_coverage.sql": [
@@ -4952,54 +4922,8 @@
         "object_name": "gate_evaluations_plan_envelope_hash_decided_at_idx"
       }
     ],
-    "187_webauthn_challenges.sql": [
-      {
-        "object_type": "table",
-        "object_name": "webauthn_challenges"
-      },
-      {
-        "object_type": "index",
-        "object_name": "webauthn_challenges_expiry_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "webauthn_challenges_kind_expiry_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "webauthn_challenges_device_active_idx"
-      }
-    ],
-    "188_mobile_sessions.sql": [
-      {
-        "object_type": "table",
-        "object_name": "mobile_bootstrap_tokens"
-      },
-      {
-        "object_type": "index",
-        "object_name": "mobile_bootstrap_tokens_principal_active_idx"
-      },
-      {
-        "object_type": "table",
-        "object_name": "mobile_sessions"
-      },
-      {
-        "object_type": "index",
-        "object_name": "mobile_sessions_principal_active_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "mobile_sessions_device_active_idx"
-      },
-      {
-        "object_type": "table",
-        "object_name": "mobile_session_budget_events"
-      },
-      {
-        "object_type": "index",
-        "object_name": "mobile_session_budget_events_session_idx"
-      }
-    ],
+    "187_webauthn_challenges.sql": [],
+    "188_mobile_sessions.sql": [],
     "189_oversight_instrumentation.sql": [
       {
         "object_type": "table",
@@ -5488,7 +5412,56 @@
         "object_name": "operation_catalog_registry.structured_documents.record_context_selection"
       }
     ],
-    "209_empty_thin_sandbox_runtime_targets.sql": [],
+    "209_empty_thin_sandbox_runtime_targets.sql": [
+      {
+        "object_type": "row",
+        "object_name": "registry_sandbox_profile_authority.sandbox_profile.praxis.default"
+      },
+      {
+        "object_type": "row",
+        "object_name": "registry_sandbox_profile_authority.sandbox_profile.praxis.legacy_copy_debug"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.runtime.setup.doctor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.runtime.setup.plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.runtime.setup.apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.runtime.setup.doctor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.runtime.setup.plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.runtime.setup.apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.runtime.setup.doctor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.runtime.setup.plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.runtime.setup.apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.operator_decision.architecture_policy.workflow_execution.empty_thin_sandbox_default"
+      }
+    ],
     "210_javascript_vitest_verifier.sql": [
       {
         "object_type": "row",
@@ -5611,7 +5584,42 @@
         "object_name": "ui_feature_flow_registry_surface_order_idx"
       }
     ],
-    "219_custom_integration_builder_launch_action.sql": [],
+    "219_custom_integration_builder_launch_action.sql": [
+      {
+        "object_type": "row",
+        "object_name": "ui_surface_action_registry.build.custom-integration-builder"
+      },
+      {
+        "object_type": "row",
+        "object_name": "ui_feature_flow_registry.custom-integration-builder"
+      }
+    ],
+    "220_archive_mobile_v1.sql": [
+      {
+        "object_type": "absent_table",
+        "object_name": "mobile_session_budget_events"
+      },
+      {
+        "object_type": "absent_table",
+        "object_name": "mobile_sessions"
+      },
+      {
+        "object_type": "absent_table",
+        "object_name": "mobile_bootstrap_tokens"
+      },
+      {
+        "object_type": "absent_table",
+        "object_name": "webauthn_challenges"
+      },
+      {
+        "object_type": "absent_table",
+        "object_name": "approval_requests"
+      },
+      {
+        "object_type": "absent_table",
+        "object_name": "device_enrollments"
+      }
+    ],
     "221_onboarding_gate_state.sql": [
       {
         "object_type": "table",
@@ -5628,6 +5636,48 @@
       {
         "object_type": "index",
         "object_name": "onboarding_gate_state_apply_ref_idx"
+      }
+    ],
+    "222_runtime_setup_operation_catalog_repair.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.runtime.setup.doctor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.runtime.setup.plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.runtime.setup.apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.runtime.setup.doctor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.runtime.setup.plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.runtime.setup.apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.runtime.setup.doctor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.runtime.setup.plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.runtime.setup.apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.runtime_setup_apply_requested"
       }
     ]
   },
@@ -5858,7 +5908,9 @@
       "217_ui_shell_route_registry.sql",
       "218_ui_feature_flow_registry.sql",
       "219_custom_integration_builder_launch_action.sql",
-      "221_onboarding_gate_state.sql"
+      "220_archive_mobile_v1.sql",
+      "221_onboarding_gate_state.sql",
+      "222_runtime_setup_operation_catalog_repair.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

@@ -17,6 +17,19 @@ def test_cqrs_suggest_next(monkeypatch: Any) -> None:
     via the CQRS Command Bus.
     """
     class MockConn:
+        def transaction(self):
+            class _Tx:
+                def __enter__(_self):
+                    return self
+
+                def __exit__(_self, exc_type, exc, tb):
+                    return False
+
+            return _Tx()
+
+        def fetchrow(self, *args, **kwargs):
+            return None
+
         def execute(self, *args, **kwargs):
             return []
 
@@ -117,3 +130,69 @@ def test_cqrs_suggest_next(monkeypatch: Any) -> None:
         likely_titles2 = [cap["title"] for cap in data2["likely_next_steps"]]
         # GitHub issue matches the notify/review heuristics
         assert "Create GitHub Issue" in likely_titles2
+
+
+def test_suggest_next_filters_by_accumulated_type_contract(monkeypatch: Any) -> None:
+    from runtime import capability_catalog
+    from runtime.operations.commands.suggest_next import (
+        SuggestNextNodesCommand,
+        handle_suggest_next_nodes,
+    )
+
+    class MockSubsystems:
+        def get_pg_conn(self):
+            return object()
+
+    mock_catalog = [
+        {
+            "capability_ref": "cap-bug-provenance",
+            "capability_kind": "task",
+            "capability_slug": "bug/replay-provenance",
+            "title": "Backfill replay provenance",
+            "route": "praxis_bug_replay_provenance_backfill",
+            "consumes": ["ReplayReadyBugSet"],
+            "produces": ["BugEvidencePack"],
+        },
+        {
+            "capability_ref": "cap-receipts",
+            "capability_kind": "task",
+            "capability_slug": "receipts/search",
+            "title": "Search receipts",
+            "route": "praxis_receipts",
+            "consumes": ["BugEvidencePack"],
+            "produces": ["ReceiptSet"],
+        },
+    ]
+    monkeypatch.setattr(capability_catalog, "load_capability_catalog", lambda conn: mock_catalog)
+
+    result = handle_suggest_next_nodes(
+        SuggestNextNodesCommand(
+            workflow_id="wf_bug_lifecycle",
+            body={
+                "node_id": "replay-ready",
+                "build_graph": {
+                    "nodes": [
+                        {
+                            "node_id": "replay-ready",
+                            "title": "Read replay-ready bugs",
+                            "outputs": ["ReplayReadyBugSet"],
+                        }
+                    ],
+                    "edges": [],
+                },
+            },
+        ),
+        MockSubsystems(),
+    )
+
+    assert result["status"] == "success"
+    assert result["type_context"]["available_types"] == ["replay_ready_bug_set"]
+    assert [cap["capability_ref"] for cap in result["likely_next_steps"]] == [
+        "cap-bug-provenance"
+    ]
+    assert [cap["capability_ref"] for cap in result["blocked_next_steps"]] == [
+        "cap-receipts"
+    ]
+    assert result["blocked_next_steps"][0]["type_satisfaction"]["missing"] == [
+        "bug_evidence_pack"
+    ]

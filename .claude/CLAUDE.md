@@ -9,6 +9,35 @@ Orient with:
 - `praxis workflow query "status"`
 - `POST /orient` when only HTTP is available
 
+## Vision — One graph, many lenses
+
+Praxis is an **agent substrate**, not a workflow builder. One graph lives in
+Praxis.db (nodes, edges, gates, typed by data-dictionary `consumes` / `produces`).
+Every surface is a lens on that same graph:
+
+- **Moon canvas** — live render of graph rows
+- **Executor** — interpreter walking the rows
+- **CLI / MCP / HTTP** — alternate lenses on the same rows
+- **NL authoring** — grammar that mutates rows
+- **"Spec"** — export format, not source of truth
+- **"Run"** — same graph with status + cursor overlay
+
+Composition is **prescriptive**: at any state, the graph narrows to the 3–5
+tools whose `consumes` type matches what the accumulator has. LLM planning
+collapses from 100-tool search to a graph walk. Moon steering shows only
+legal next steps.
+
+The user (Nate) does not code. **Agents build and mutate the graph; the user
+steers** — approves gates, edits a misbehaving node — they do not assemble
+nodes from a palette. Moon is the control room, not an IDE.
+
+When "edit in Moon" and "next run's behavior" are the same DB write, the shim
+between UI and runtime is dead. Any feature that reintroduces a translation
+layer between a surface and the graph is a regression.
+
+Standing-order row: `platform_architecture / one-graph-many-lenses`
+(`operator_decisions`). Surface it via `praxis_orient`.
+
 ## Database
 
 Single Postgres database: resolve it through workflow authority, never a baked localhost DSN.

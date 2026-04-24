@@ -1,6 +1,6 @@
 """End-to-end smoke test for the LLM task adapter.
 
-Calls a real LLM API if OPENAI_API_KEY is set. Skipped otherwise.
+Calls a real LLM API when a configured chat provider exposes a credential env var.
 """
 
 from __future__ import annotations
@@ -45,6 +45,22 @@ def _supported_chat_llm_provider() -> str:
     pytest.skip("provider execution registry exposes no chat-protocol llm_task provider")
 
 
+def _supported_live_chat_llm_provider() -> tuple[str, str]:
+    for provider_slug in registered_providers():
+        if not supports_adapter(provider_slug, "llm_task"):
+            continue
+        if resolve_api_protocol_family(provider_slug) not in _LLM_CLIENT_PROTOCOL_FAMILIES:
+            continue
+        for env_var in resolve_api_key_env_vars(provider_slug):
+            value = os.environ.get(env_var)
+            if value:
+                return provider_slug, env_var
+    pytest.skip(
+        "no chat-protocol llm_task provider with a configured API credential env var "
+        "available"
+    )
+
+
 def _credential_env_for_provider(provider_slug: str) -> dict[str, str]:
     env_vars = resolve_api_key_env_vars(provider_slug)
     if not env_vars:
@@ -68,7 +84,7 @@ def test_credential_resolver_rejects_cli_only_anthropic_api_key() -> None:
             "secret.runtime.anthropic",
             env={"ANTHROPIC_API_KEY": "sk-ant-test"},
         )
-    assert exc_info.value.reason_code == "credential.provider_unknown"
+    assert exc_info.value.reason_code == "credential.direct_anthropic_api_forbidden"
 
 
 def test_credential_resolver_fails_on_missing_env_var() -> None:
@@ -100,7 +116,7 @@ def test_llm_adapter_fails_closed_without_prompt() -> None:
 
 def test_llm_adapter_fails_closed_without_credentials(monkeypatch) -> None:
     adapter = LLMTaskAdapter(credential_env={})
-    provider_slug = _supported_llm_task_provider()
+    provider_slug = "openai"
     monkeypatch.setattr(credentials_mod, "resolve_secret", lambda *_args, **_kwargs: None)
     request = DeterministicTaskRequest(
         node_id="node_0",
@@ -116,7 +132,7 @@ def test_llm_adapter_fails_closed_without_credentials(monkeypatch) -> None:
 
 
 def test_llm_adapter_maps_http_errors_to_adapter_contract(monkeypatch) -> None:
-    provider_slug = _supported_chat_llm_provider()
+    provider_slug = "openai"
     adapter = LLMTaskAdapter(credential_env=_credential_env_for_provider(provider_slug))
     request = DeterministicTaskRequest(
         node_id="node_0",
@@ -246,17 +262,15 @@ def test_cli_adapter_resolves_provider_from_legacy_cli_hint() -> None:
         )
 
 
-@pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY required for live LLM smoke test",
-)
 def test_llm_adapter_calls_real_api() -> None:
-    adapter = LLMTaskAdapter()
+    provider_slug, env_var = _supported_live_chat_llm_provider()
+    adapter = LLMTaskAdapter(credential_env={env_var: os.environ[env_var]})
     request = DeterministicTaskRequest(
         node_id="node_0",
         task_name="smoke",
         input_payload={
             "prompt": "Respond with exactly the word 'hello' and nothing else.",
+            "provider_slug": provider_slug,
             "max_tokens": 16,
         },
         expected_outputs={},

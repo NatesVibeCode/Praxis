@@ -161,7 +161,7 @@ def test_tools_root_shows_quickstart() -> None:
     assert "workflow mcp" in rendered
     assert "each subcommand also accepts --help" in rendered
     assert "Common direct entrypoints:" in rendered
-    assert "workflow diagnose" in rendered
+    assert "workflow tools describe" in rendered
 
 
 def test_tools_describe_daily_heartbeat_smoke() -> None:

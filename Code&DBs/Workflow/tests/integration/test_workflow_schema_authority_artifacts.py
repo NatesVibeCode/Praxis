@@ -46,6 +46,55 @@ def test_generated_readiness_sequence_matches_manifest_and_expected_objects() ->
     assert dict(WORKFLOW_SCHEMA_READINESS_SEQUENCE) == WORKFLOW_MIGRATION_EXPECTED_OBJECTS
 
 
+def test_mobile_v1_archive_updates_final_schema_expectations() -> None:
+    assert "220_archive_mobile_v1.sql" in WORKFLOW_MIGRATION_SEQUENCE
+    assert WORKFLOW_MIGRATION_EXPECTED_OBJECTS["220_archive_mobile_v1.sql"] == (
+        ("absent_table", "mobile_session_budget_events"),
+        ("absent_table", "mobile_sessions"),
+        ("absent_table", "mobile_bootstrap_tokens"),
+        ("absent_table", "webauthn_challenges"),
+        ("absent_table", "approval_requests"),
+        ("absent_table", "device_enrollments"),
+    )
+    assert WORKFLOW_MIGRATION_EXPECTED_OBJECTS["187_webauthn_challenges.sql"] == ()
+    assert WORKFLOW_MIGRATION_EXPECTED_OBJECTS["188_mobile_sessions.sql"] == ()
+
+    capability_objects = {
+        object_name
+        for object_type, object_name in WORKFLOW_MIGRATION_EXPECTED_OBJECTS[
+            "185_mobile_capability_ledger.sql"
+        ]
+        if object_type == "table"
+    }
+    assert capability_objects == {"capability_grants"}
+
+
+def test_row_expected_objects_are_inspectable_by_schema_readiness() -> None:
+    from storage.postgres.schema import _ROW_EXPECTATION_KEY_COLUMNS
+
+    row_tables = {
+        object_name.partition(".")[0]
+        for objects in WORKFLOW_MIGRATION_EXPECTED_OBJECTS.values()
+        for object_type, object_name in objects
+        if object_type == "row"
+    }
+
+    assert row_tables <= set(_ROW_EXPECTATION_KEY_COLUMNS)
+
+
+def test_new_non_archive_migrations_do_not_hide_empty_readiness_contracts() -> None:
+    empty_readiness = {
+        filename
+        for filename, objects in WORKFLOW_MIGRATION_EXPECTED_OBJECTS.items()
+        if not objects
+    }
+
+    assert empty_readiness == {
+        "187_webauthn_challenges.sql",
+        "188_mobile_sessions.sql",
+    }
+
+
 def test_proof_metrics_compile_authority_reads_readiness_tables_from_schema_authority() -> None:
     readiness_tables = {
         object_name

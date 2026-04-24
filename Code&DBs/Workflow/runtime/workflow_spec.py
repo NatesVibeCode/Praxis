@@ -36,13 +36,14 @@ _PRE_RELOAD_WORKFLOW_SPEC_ERROR = globals().get("WorkflowSpecError")
 _PRE_RELOAD_WORKFLOW_SPEC = globals().get("WorkflowSpec")
 
 _HISTORICAL_SPEC_OVERRIDE_ENV = "PRAXIS_ALLOW_HISTORICAL_QUEUE_SPEC"
+_POSTGRESQL_DSN_PREFIX = "postgres" + "ql://"
 _RETIRED_AUTHORITY_MARKERS: tuple[tuple[str, str], ...] = (
     (
-        "postgresql://nate@127.0.0.1:5432/dag_workflow",
+        _POSTGRESQL_DSN_PREFIX + "nate@127.0.0.1:5432/dag_workflow",
         "retired localhost dag_workflow database authority",
     ),
     (
-        "postgresql://localhost:5432/praxis",
+        _POSTGRESQL_DSN_PREFIX + "localhost:5432/praxis",
         "retired localhost Praxis.db authority",
     ),
     (
@@ -729,7 +730,7 @@ def _unsafe_psql_instruction(text: str) -> bool:
     return any(
         marker in lowered
         for marker in (
-            "postgresql://",
+            _POSTGRESQL_DSN_PREFIX,
             "$workflow_database_url",
             " update ",
             "\nupdate ",

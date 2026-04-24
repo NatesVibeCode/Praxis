@@ -169,9 +169,6 @@ def test_orphan_edge_cleanup_removes_edges_to_archived():
     assert result.ok is True
 
 
-import pytest
-
-@pytest.mark.skip(reason="FK constraint prevents inserting orphan edges in test DB")
 def test_orphan_edge_cleanup_routes_deletion_through_repository():
     import uuid
     uid = uuid.uuid4().hex[:8]
@@ -179,7 +176,7 @@ def test_orphan_edge_cleanup_routes_deletion_through_repository():
     ghost_id = f"ghost_{uid}"
     eng = _fresh_engine()
     eng.insert(_entity(owner_id, name="Owner"))
-    eng.add_edge(_edge(owner_id, ghost_id))
+    assert eng.add_edge(_edge(owner_id, ghost_id)) is True
 
     repository = _RecordingMutationRepository()
     mod = OrphanEdgeCleanup(eng, repository=repository)

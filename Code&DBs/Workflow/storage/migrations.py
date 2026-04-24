@@ -182,6 +182,13 @@ _WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {
     for filename, objects in _GENERATED_WORKFLOW_MIGRATION_EXPECTED_OBJECTS.items()
 }
 
+_EMPTY_EXPECTED_OBJECT_CONTRACTS_ALLOWED = frozenset(
+    {
+        "187_webauthn_challenges.sql",
+        "188_mobile_sessions.sql",
+    }
+)
+
 
 
 def _workflow_migrations_root_path() -> Path:
@@ -615,7 +622,7 @@ def workflow_migration_expected_objects(
             path=path,
             filename=filename,
         )
-    if not objects:
+    if not objects and filename not in _EMPTY_EXPECTED_OBJECT_CONTRACTS_ALLOWED:
         raise WorkflowMigrationPathError(
             "workflow.migration_expected_objects_empty",
             "canonical workflow migration expected-object contract is empty",

@@ -26,7 +26,7 @@ def test_local_postgres_config_fails_closed_on_missing_workflow_database_url() -
             env={PRAXIS_LOCAL_POSTGRES_DATA_DIR_ENV: str(_repo_postgres_data_dir())},
         )
 
-    assert exc_info.value.reason_code == "postgres.config_missing"
+    assert exc_info.value.reason_code == "dev_postgres.config_missing"
 
 
 def test_local_postgres_config_fails_closed_on_invalid_data_dir_override() -> None:

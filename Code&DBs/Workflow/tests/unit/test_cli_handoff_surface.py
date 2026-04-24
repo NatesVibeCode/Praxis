@@ -12,7 +12,7 @@ def test_handoff_help_is_available() -> None:
 
     rc = workflow_cli_main(["handoff", "--help"], stdout=stdout)
 
-    assert rc == 2
+    assert rc == 0
     rendered = stdout.getvalue()
     assert "workflow handoff latest   [--artifact-kind KIND]" in rendered
     assert "workflow handoff lineage  [--artifact-kind KIND] --revision-ref REF" in rendered
@@ -50,4 +50,3 @@ def test_handoff_latest_dispatches_query(monkeypatch) -> None:
     assert payload["artifact"]["revision_ref"] == "definition-2"
     assert captured["query"].artifact_kind == "definition"
     assert captured["query"].artifact_ref is None
-

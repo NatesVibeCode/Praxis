@@ -320,6 +320,25 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 },
                 "required": ["action"],
             },
+            # Per-action type contract: consumes/produces slugs in data-dictionary
+            # namespace. Enables next_legal_tools(state) to narrow composition —
+            # at any graph state, only tools whose `consumes` can be satisfied
+            # by the current accumulator are legal. Polymorphic tools key by
+            # action; single-shape tools use the "default" key.
+            "type_contract": {
+                "list": {"consumes": [], "produces": ["praxis.bug.record_list"]},
+                "file": {"consumes": ["praxis.bug.observation"], "produces": ["praxis.bug.record"]},
+                "search": {"consumes": ["praxis.bug.search_query"], "produces": ["praxis.bug.record_list"]},
+                "duplicate_check": {"consumes": ["praxis.bug.search_query"], "produces": ["praxis.bug.record_list"]},
+                "stats": {"consumes": [], "produces": ["praxis.bug.stats"]},
+                "packet": {"consumes": ["praxis.bug.record"], "produces": ["praxis.bug.packet"]},
+                "history": {"consumes": ["praxis.bug.record"], "produces": ["praxis.bug.history"]},
+                "replay": {"consumes": ["praxis.bug.record"], "produces": ["praxis.bug.replay_run"]},
+                "backfill_replay": {"consumes": [], "produces": ["praxis.bug.replay_backfill_result"]},
+                "attach_evidence": {"consumes": ["praxis.bug.record", "praxis.bug.evidence_attachment"], "produces": ["praxis.bug.record"]},
+                "patch_resume": {"consumes": ["praxis.bug.record", "praxis.bug.resume_patch"], "produces": ["praxis.bug.record"]},
+                "resolve": {"consumes": ["praxis.bug.record", "praxis.bug.resolution_request"], "produces": ["praxis.bug.resolved_record"]},
+            },
         },
     ),
 }

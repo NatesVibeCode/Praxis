@@ -12,26 +12,26 @@ def _read(relative_path: str) -> str:
 
 def test_bug_f613bbfe_db_resolver_surfaces_traceback_and_dsn_hint() -> None:
     bootstrap = _read("scripts/bootstrap")
-    assert "resolve_database_authority.stderr" in bootstrap
-    assert "postgresql://user@host:5432/praxis" in bootstrap
-    assert "Precedence: WORKFLOW_DATABASE_URL env var" in bootstrap
+    assert "workflow_database_authority_for_repo" in bootstrap
+    assert "database authority:" in bootstrap
+    assert "could not resolve WORKFLOW_DATABASE_URL from repo authority" in bootstrap
 
 
 def test_bug_7b02fe94_smoke_failure_distinguishes_modes() -> None:
     bootstrap = _read("scripts/bootstrap")
-    assert "smoke diagnostics" in bootstrap
-    assert "has exited. Last 20 lines" in bootstrap
-    assert "workflow run-status" in bootstrap
-    assert "API log: $api_log_file" in bootstrap
+    assert "deterministic worker smoke" in bootstrap
+    assert "workflow stream" in bootstrap
+    assert "bootstrap smoke failed or timed out" in bootstrap
+    assert "bootstrap smoke result file did not contain run_id" in bootstrap
 
 
 def test_bug_d9b929a2_python_314_error_explains_pin() -> None:
     bootstrap = _read("scripts/bootstrap")
     env_helper = _read("scripts/_workflow_env.sh")
-    assert "native-operator-common.sh" in bootstrap
+    assert "command -v python3.14" in bootstrap
     assert "python3.14 python@3.14" not in bootstrap
-    assert "compatibility fallback" in env_helper
-    assert "WORKFLOW_PYTHON_FALLBACK_WARNED" in env_helper
+    assert "python3.14 python3.13 python3" in env_helper
+    assert "workflow_python_bin" in env_helper
 
 
 def test_bug_ba265a8a_no_backslash_escaped_ampersand_path() -> None:

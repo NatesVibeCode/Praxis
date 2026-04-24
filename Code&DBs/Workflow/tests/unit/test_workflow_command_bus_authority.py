@@ -264,8 +264,13 @@ def test_submit_surfaces_converge_on_request_control_command_authority(tmp_path,
     monkeypatch.setattr(rest, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(rest, "_shared_pg_conn", lambda: object())
     monkeypatch.setattr(
+        rest,
+        "default_native_authority_refs",
+        lambda: ("workspace.unit", "runtime_profile.unit"),
+    )
+    monkeypatch.setattr(
         "storage.postgres.connection.SyncPostgresConnection",
-        lambda: SimpleNamespace(),
+        lambda *args, **kwargs: SimpleNamespace(),
     )
     monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
     monkeypatch.setattr(workflow_cli, "_repo_root", lambda: str(tmp_path))

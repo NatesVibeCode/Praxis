@@ -72,9 +72,38 @@ _PGVECTOR = GateProbe(
     title="pgvector extension available",
     purpose=(
         "Semantic compile, discover, and recall all use pgvector-backed "
-        "embeddings; the extension must be installed for the target database."
+        "embeddings; the extension must be available (installable) on the "
+        "target Postgres server before CREATE EXTENSION can succeed."
     ),
     depends_on=("platform.psql",),
+    ok_cache_ttl_s=300,
+)
+
+
+_WORKFLOW_DATABASE = GateProbe(
+    gate_ref="platform.workflow_database",
+    domain="platform",
+    title="Target workflow database exists",
+    purpose=(
+        "scripts/bootstrap creates the praxis database when it is missing. "
+        "This probe reports whether the database already exists so the "
+        "apply handler can skip CREATE DATABASE on re-runs."
+    ),
+    depends_on=("platform.psql",),
+    ok_cache_ttl_s=60,
+)
+
+
+_PGVECTOR_INSTALLED = GateProbe(
+    gate_ref="platform.pgvector_installed",
+    domain="platform",
+    title="pgvector extension installed in the target database",
+    purpose=(
+        "Distinct from platform.pgvector (availability): this probe reports "
+        "whether CREATE EXTENSION vector has already succeeded on the target "
+        "database. The apply handler issues CREATE EXTENSION IF NOT EXISTS."
+    ),
+    depends_on=("platform.workflow_database",),
     ok_cache_ttl_s=300,
 )
 
@@ -295,9 +324,140 @@ def probe_pgvector(env: Mapping[str, str], repo_root: Path) -> GateResult:
     )
 
 
+def _parse_database_name(database_url: str) -> str:
+    from urllib.parse import unquote, urlsplit
+
+    path = urlsplit(database_url).path or ""
+    return unquote(path.lstrip("/") or "praxis")
+
+
+def _maintenance_url(database_url: str) -> str:
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(database_url)
+    return urlunsplit((parts.scheme, parts.netloc, "/postgres", parts.query, parts.fragment))
+
+
+def probe_workflow_database(env: Mapping[str, str], repo_root: Path) -> GateResult:
+    database_url = _resolve_database_url(env)
+    if database_url is None:
+        return gate_result(
+            _WORKFLOW_DATABASE,
+            status="unknown",
+            observed_state={"database_url_set": False},
+            remediation_hint=(
+                "Set WORKFLOW_DATABASE_URL (form: postgresql://user@host:5432/praxis) "
+                "before probing workflow database existence"
+            ),
+        )
+    database_name = _parse_database_name(database_url)
+    maintenance_url = _maintenance_url(database_url)
+    try:
+        completed = subprocess.run(
+            [
+                "psql",
+                maintenance_url,
+                "-v",
+                f"db_name={database_name}",
+                "-Atc",
+                "SELECT 1 FROM pg_database WHERE datname = :'db_name'",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        return gate_result(
+            _WORKFLOW_DATABASE,
+            status="blocked",
+            observed_state={"maintenance_url": maintenance_url, "psql_error": stderr or str(exc)},
+            remediation_hint=(
+                "Cannot query pg_database on the maintenance URL. Ensure Postgres is "
+                "running (brew services start postgresql@16 on macOS; "
+                "sudo systemctl start postgresql on Linux) and that the role can connect."
+            ),
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return gate_result(
+            _WORKFLOW_DATABASE,
+            status="blocked",
+            observed_state={"error": str(exc), "error_type": type(exc).__name__},
+            remediation_hint="Postgres maintenance query timed out",
+        )
+    exists = (completed.stdout or "").strip() == "1"
+    if not exists:
+        return gate_result(
+            _WORKFLOW_DATABASE,
+            status="missing",
+            observed_state={"database_name": database_name, "exists": False},
+            remediation_hint=(
+                "Database does not exist yet. ./scripts/bootstrap creates it, or run "
+                f'apply: praxis setup apply --gate platform.workflow_database --yes'
+            ),
+            apply_ref="apply.platform.workflow_database.create",
+        )
+    return gate_result(
+        _WORKFLOW_DATABASE,
+        status="ok",
+        observed_state={"database_name": database_name, "exists": True},
+    )
+
+
+def probe_pgvector_installed(env: Mapping[str, str], repo_root: Path) -> GateResult:
+    database_url = _resolve_database_url(env)
+    if database_url is None:
+        return gate_result(
+            _PGVECTOR_INSTALLED,
+            status="unknown",
+            observed_state={"database_url_set": False},
+            remediation_hint="Set WORKFLOW_DATABASE_URL before probing pgvector install state",
+        )
+    try:
+        completed = subprocess.run(
+            ["psql", database_url, "-Atc",
+             "SELECT 1 FROM pg_extension WHERE extname = 'vector'"],
+            check=True, capture_output=True, text=True, timeout=10,
+        )
+    except subprocess.CalledProcessError as exc:
+        return gate_result(
+            _PGVECTOR_INSTALLED,
+            status="blocked",
+            observed_state={"psql_error": (exc.stderr or "").strip() or str(exc)},
+            remediation_hint="Cannot query pg_extension on the target database",
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return gate_result(
+            _PGVECTOR_INSTALLED,
+            status="blocked",
+            observed_state={"error": str(exc), "error_type": type(exc).__name__},
+            remediation_hint="pgvector install-state probe timed out",
+        )
+    installed = (completed.stdout or "").strip() == "1"
+    if not installed:
+        return gate_result(
+            _PGVECTOR_INSTALLED,
+            status="missing",
+            observed_state={"installed": False},
+            remediation_hint=(
+                "CREATE EXTENSION vector has not been run on this database. "
+                "Run: praxis setup apply --gate platform.pgvector_installed --yes"
+            ),
+            apply_ref="apply.platform.pgvector_installed.enable",
+        )
+    return gate_result(
+        _PGVECTOR_INSTALLED,
+        status="ok",
+        observed_state={"installed": True},
+    )
+
+
 def register(graph=ONBOARDING_GRAPH) -> None:
     graph.register(_HOMEBREW, probe_homebrew)
     graph.register(_PYTHON_3_14, probe_python_3_14)
     graph.register(_PSQL, probe_psql)
     graph.register(_POSTGRES_ROLE, probe_postgres_role)
     graph.register(_PGVECTOR, probe_pgvector)
+    graph.register(_WORKFLOW_DATABASE, probe_workflow_database)
+    graph.register(_PGVECTOR_INSTALLED, probe_pgvector_installed)

@@ -173,6 +173,7 @@ class RateLimitProbeModule:
         """Run probes and return a HeartbeatModuleResult."""
         from runtime.heartbeat import HeartbeatModuleResult
         t0 = time.monotonic()
+        summaries: list[str] = []
         findings: list[str] = []
         errors: list[str] = []
 
@@ -184,15 +185,16 @@ class RateLimitProbeModule:
                 elif r.status == "error":
                     findings.append(f"{r.provider_slug}/{r.model_slug}: error — {r.detail}")
                 else:
-                    findings.append(f"{r.provider_slug}/{r.model_slug}: ok ({r.latency_ms}ms)")
+                    summaries.append(f"{r.provider_slug}/{r.model_slug}: ok ({r.latency_ms}ms)")
         except Exception as exc:
             errors.append(str(exc))
 
         elapsed = (time.monotonic() - t0) * 1000
         all_issues = list(findings) + list(errors)
+        status_lines = all_issues or summaries
         return HeartbeatModuleResult(
             module_name=self.name,
             ok=len(all_issues) == 0,
-            error="; ".join(all_issues) if all_issues else None,
+            error="; ".join(status_lines) if status_lines else None,
             duration_ms=elapsed,
         )

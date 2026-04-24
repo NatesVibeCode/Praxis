@@ -20,6 +20,7 @@ from surfaces.cli.mcp_tools import (
     require_confirmation,
     run_cli_tool,
 )
+from surfaces.cli._db import cli_sync_conn
 
 
 def _workspace_repo_root():
@@ -1163,8 +1164,6 @@ def _notifications_command(args: list[str], *, stdout: TextIO) -> int:
         notifications = str(payload.get("notifications") or "").rstrip()
         stdout.write((notifications or "No pending workflow notifications.") + "\n")
         return 0
-
-    from surfaces.cli._db import cli_sync_conn
 
     conn = cli_sync_conn()
     from runtime.workflow_notifications import WorkflowNotificationConsumer
@@ -2425,8 +2424,7 @@ def _supervisor_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"error: unknown supervisor subcommand: {subcommand}\n")
         return 2
 
-    workflow_root = _workspace_repo_root()
-    repo_root = workflow_root.parents[1]
+    repo_root = _workspace_repo_root()
     launcher_script = repo_root / "scripts" / "praxis"
 
     if not launcher_script.exists():

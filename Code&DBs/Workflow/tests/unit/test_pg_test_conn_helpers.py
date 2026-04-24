@@ -90,6 +90,20 @@ def test_default_test_database_url_fails_closed_when_runtime_authority_blank(
     assert "WORKFLOW_TEST_DATABASE_URL" in str(exc_info.value)
 
 
+def test_ensure_test_database_ready_skips_when_runtime_authority_blank(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("WORKFLOW_TEST_DATABASE_URL", raising=False)
+    monkeypatch.setattr(runtime_db, "resolve_runtime_database_url", lambda required=True: None)
+    pg_test_conn._ready_database_url = None
+
+    with pytest.raises(pytest.skip.Exception) as exc_info:
+        pg_test_conn.ensure_test_database_ready()
+
+    assert "postgres.config_missing" in str(exc_info.value)
+    assert "WORKFLOW_TEST_DATABASE_URL" in str(exc_info.value)
+
+
 def test_default_test_database_url_honors_explicit_test_authority(
     monkeypatch,
 ) -> None:
@@ -154,12 +168,14 @@ def test_skip_for_unavailable_authority_treats_dns_failure_as_skip() -> None:
 
 
 def test_skip_for_unavailable_authority_treats_create_database_privilege_as_skip() -> None:
-    with pytest.raises(pytest.skip.Exception, match="postgres.insufficient_privilege"):
+    with pytest.raises(pytest.skip.Exception) as exc_info:
         pg_test_conn._skip_for_unavailable_authority(
             pg_test_conn.asyncpg.InsufficientPrivilegeError(
                 "permission denied to create database"
             )
         )
+    assert "postgres.insufficient_privilege" in str(exc_info.value)
+    assert "WORKFLOW_TEST_DATABASE_URL" in str(exc_info.value)
 
 
 def test_get_test_conn_rebuilds_wrapper_when_cached_pool_is_closed(monkeypatch) -> None:

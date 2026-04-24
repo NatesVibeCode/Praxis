@@ -14,7 +14,7 @@ def test_files_help_is_available() -> None:
 
     rc = workflow_cli_main(["files", "--help"], stdout=stdout)
 
-    assert rc == 2
+    assert rc == 0
     rendered = stdout.getvalue()
     assert "workflow files list [--scope SCOPE]" in rendered
     assert "workflow files content <file-id> [--output-file <path>] [--json]" in rendered

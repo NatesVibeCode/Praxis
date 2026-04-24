@@ -589,6 +589,7 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
         compile_graph_workflow_request,
         spec_uses_graph_runtime,
     )
+    from runtime.workflow_type_contracts import validate_workflow_request_type_flow
     from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
 
     if isinstance(spec, dict):
@@ -615,16 +616,23 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
                 "details": dict(exc.details),
             }
         validation = validate_workflow_request(request)
+        type_flow_errors = validate_workflow_request_type_flow(request)
+        errors = list(validation.errors) + type_flow_errors
         return {
-            "valid": validation.is_valid,
+            "valid": validation.is_valid and not type_flow_errors,
             "summary": summary,
             "graph_runtime": True,
             "request_digest": validation.request_digest,
             "workflow_id": request.workflow_id,
             "request_id": request.request_id,
             "workflow_definition_id": request.workflow_definition_id,
-            "reason_code": validation.reason_code,
-            "errors": list(validation.errors),
+            "reason_code": (
+                "workflow.type_flow.invalid"
+                if validation.is_valid and type_flow_errors
+                else validation.reason_code
+            ),
+            "errors": errors,
+            "type_flow_errors": type_flow_errors,
             "node_count": len(request.nodes),
             "edge_count": len(request.edges),
         }

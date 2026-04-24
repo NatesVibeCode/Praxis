@@ -438,3 +438,285 @@ def test_mcp_tool_schema_advertises_gate_and_apply_ref() -> None:
     props = schema["properties"]
     assert "gate" in props
     assert "apply_ref" in props
+
+
+# --- Mutation probes (Packet 6) ---------------------------------------------
+
+
+def test_probe_env_file_missing_when_absent(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_runtime
+
+    result = probes_runtime.probe_env_file({}, tmp_path)
+    assert result.status == "missing"
+    assert result.apply_ref == "apply.runtime.env_file.write"
+    assert "apply" in (result.remediation_hint or "")
+
+
+def test_probe_env_file_blocked_when_no_database_url(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_runtime
+
+    (tmp_path / ".env").write_text("PRAXIS_API_PORT=9000\n")
+    result = probes_runtime.probe_env_file({}, tmp_path)
+    assert result.status == "blocked"
+    assert "WORKFLOW_DATABASE_URL" in (result.remediation_hint or "")
+
+
+def test_probe_env_file_ok_when_database_url_present(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_runtime
+
+    (tmp_path / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://u@h:5432/p\nPRAXIS_API_PORT=8420\n"
+    )
+    result = probes_runtime.probe_env_file({}, tmp_path)
+    assert result.status == "ok"
+    assert result.observed_state["has_database_url"] is True
+
+
+def test_probe_workflow_database_missing_when_no_url(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_platform
+
+    result = probes_platform.probe_workflow_database({}, tmp_path)
+    assert result.status == "unknown"
+    assert "WORKFLOW_DATABASE_URL" in (result.remediation_hint or "")
+
+
+def test_probe_workflow_database_ok_when_exists(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_platform
+    import subprocess
+
+    fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="1\n", stderr="")
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    with patch("runtime.onboarding.probes_platform.subprocess.run", return_value=fake):
+        result = probes_platform.probe_workflow_database(env, tmp_path)
+    assert result.status == "ok"
+    assert result.observed_state["database_name"] == "praxis"
+
+
+def test_probe_workflow_database_uses_psql_variable_not_server_guc(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_platform
+    import subprocess
+
+    fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="1\n", stderr="")
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis%27evil"}
+    calls = []
+
+    def _fake_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        return fake
+
+    with patch("runtime.onboarding.probes_platform.subprocess.run", side_effect=_fake_run):
+        result = probes_platform.probe_workflow_database(env, tmp_path)
+
+    assert result.status == "ok"
+    command = calls[0]
+    assert "-v" in command
+    assert "db_name=praxis'evil" in command
+    assert "current_setting" not in " ".join(command)
+    assert "praxis'evil" not in command[command.index("-Atc") + 1]
+
+
+def test_probe_workflow_database_missing_when_absent(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_platform
+    import subprocess
+
+    fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    with patch("runtime.onboarding.probes_platform.subprocess.run", return_value=fake):
+        result = probes_platform.probe_workflow_database(env, tmp_path)
+    assert result.status == "missing"
+    assert result.apply_ref == "apply.platform.workflow_database.create"
+
+
+def test_probe_pgvector_installed_ok_when_extension_present(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_platform
+    import subprocess
+
+    fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="1\n", stderr="")
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    with patch("runtime.onboarding.probes_platform.subprocess.run", return_value=fake):
+        result = probes_platform.probe_pgvector_installed(env, tmp_path)
+    assert result.status == "ok"
+
+
+def test_probe_pgvector_installed_missing_without_create_extension(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_platform
+    import subprocess
+
+    fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    with patch("runtime.onboarding.probes_platform.subprocess.run", return_value=fake):
+        result = probes_platform.probe_pgvector_installed(env, tmp_path)
+    assert result.status == "missing"
+    assert result.apply_ref == "apply.platform.pgvector_installed.enable"
+
+
+# --- Mutation apply handlers (Packet 6) -------------------------------------
+
+
+def test_apply_env_file_write_creates_file(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    result = applies.apply_env_file_write(env, tmp_path)
+    assert result.status == "ok"
+    body = (tmp_path / ".env").read_text()
+    assert "WORKFLOW_DATABASE_URL=postgresql://u@h:5432/praxis" in body
+    assert "WORKFLOW_DATABASE_TRUSTED=true" in body
+
+
+def test_apply_env_file_write_idempotent_leaves_existing(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+
+    (tmp_path / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://already@h:5432/praxis\n"
+    )
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://different@h:5432/praxis"}
+    applies.apply_env_file_write(env, tmp_path)
+    body = (tmp_path / ".env").read_text()
+    # Existing URL preserved; function did not overwrite.
+    assert "already@" in body
+    assert "different@" not in body
+
+
+def test_apply_env_file_write_blocks_without_url(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+
+    result = applies.apply_env_file_write({}, tmp_path)
+    assert result.status == "blocked"
+    assert "WORKFLOW_DATABASE_URL" in (result.remediation_hint or "")
+
+
+def test_apply_workflow_database_create_idempotent_when_exists(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+    import subprocess
+
+    # Check returns "1" (exists); CREATE DATABASE should NOT be invoked.
+    check_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="1\n", stderr="")
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    calls = []
+
+    def _fake_run(*args, **kwargs):
+        calls.append(args[0])
+        return check_result
+
+    with patch("runtime.onboarding.applies.subprocess.run", side_effect=_fake_run):
+        result = applies.apply_workflow_database_create(env, tmp_path)
+    assert result.status == "ok"
+    assert not any("CREATE DATABASE" in " ".join(call) for call in calls)
+
+
+def test_apply_workflow_database_create_quotes_database_name_through_psql_variable(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+    import subprocess
+
+    check_results = iter(
+        [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1\n", stderr=""),
+        ]
+    )
+    calls = []
+
+    def _fake_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        return next(check_results)
+
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis%27evil"}
+    with patch("runtime.onboarding.applies.subprocess.run", side_effect=_fake_run):
+        result = applies.apply_workflow_database_create(env, tmp_path)
+
+    assert result.status == "ok"
+    create_command = calls[1]
+    assert "db_name=praxis'evil" in create_command
+    assert create_command[create_command.index("-c") + 1] == 'CREATE DATABASE :"db_name"'
+
+
+def test_apply_workflow_database_create_runs_create_when_missing(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+    import subprocess
+
+    check_results = iter(
+        [
+            # First: existence check returns empty (not exists).
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            # Second: CREATE DATABASE succeeds.
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            # Third: post-apply probe sees the database.
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1\n", stderr=""),
+        ]
+    )
+
+    def _fake_run(*args, **kwargs):
+        return next(check_results)
+
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    with patch("runtime.onboarding.applies.subprocess.run", side_effect=_fake_run):
+        result = applies.apply_workflow_database_create(env, tmp_path)
+    assert result.status == "ok"
+
+
+def test_apply_pgvector_enable_runs_create_extension(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+    import subprocess
+
+    results = iter(
+        [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="1\n", stderr=""),
+        ]
+    )
+    calls = []
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+
+    def _fake_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        return next(results)
+
+    with patch("runtime.onboarding.applies.subprocess.run", side_effect=_fake_run):
+        result = applies.apply_pgvector_enable(env, tmp_path)
+
+    assert result.status == "ok"
+    assert "CREATE EXTENSION IF NOT EXISTS vector" in calls[0]
+
+
+def test_apply_pgvector_enable_blocks_on_psql_error(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+    import subprocess
+
+    def _fake_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(
+            returncode=1, cmd=args[0], output="", stderr="pgvector not installed"
+        )
+
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    with patch("runtime.onboarding.applies.subprocess.run", side_effect=_fake_run):
+        result = applies.apply_pgvector_enable(env, tmp_path)
+    assert result.status == "blocked"
+    assert "pgvector" in (result.remediation_hint or "").lower()
+
+
+# --- bootstrap_cli apply-gate subcommand -----------------------------------
+
+
+def test_bootstrap_cli_apply_gate_requires_yes_for_mutating_handler(tmp_path: Path) -> None:
+    import io
+    from runtime.onboarding import bootstrap_cli
+
+    saved_env = dict(os.environ) if (os := __import__("os")) else {}
+    err = io.StringIO()
+    with patch("sys.stderr", err):
+        code = bootstrap_cli.main(["apply-gate", "mcp.claude_code"])
+    assert code == 2
+    assert "--yes" in err.getvalue()
+
+
+def test_bootstrap_cli_apply_gate_with_unknown_gate(tmp_path: Path) -> None:
+    import io
+    from runtime.onboarding import bootstrap_cli
+
+    err = io.StringIO()
+    with patch("sys.stderr", err):
+        code = bootstrap_cli.main(["apply-gate", "nonexistent.gate", "--yes"])
+    assert code == 1
+    assert "no apply handler" in err.getvalue()

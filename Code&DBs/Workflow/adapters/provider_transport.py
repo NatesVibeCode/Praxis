@@ -150,11 +150,10 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
         binary="claude",
         prompt_mode="stdin",
         default_model="claude-sonnet-4-6",
-        # Anthropic is CLI-only (subscription, OAuth). Direct API endpoint and
-        # API key env var intentionally omitted per
-        # decision.2026-04-20.anthropic-cli-only-restored (migration 181).
-        # Nate has no ANTHROPIC_API_KEY; Claude is reached either via the
-        # `claude` binary (OAuth) or via OpenRouter (openrouter/anthropic/*).
+        # PUBLIC_RELEASE_REMOVE: this CLI-only Anthropic profile is Nate's
+        # private operator policy, not the public Praxis default. Public builds
+        # must admit Anthropic direct API credentials through registry/profile
+        # authority for users who provide ANTHROPIC_API_KEY.
         api_endpoint=None,
         api_protocol_family=None,
         api_key_env_vars=(),

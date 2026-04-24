@@ -1,7 +1,7 @@
 """Capability grant resolver.
 
 The resolver is deliberately small and fail-closed. Static command type hints
-can inform UX, but only this DB-backed grant coverage can authorize mobile
+can inform UX, but only this DB-backed grant coverage can authorize operator
 control execution.
 """
 

@@ -866,6 +866,22 @@ class _DashboardIngester:
         return {"TIMEOUT": 1}
 
 
+class _DashboardMetricsView:
+    def efficiency_summary(self, days: int = 1):  # noqa: ARG002
+        return {
+            "first_pass_success_rate": 0.9,
+            "total_cost_usd": 7.75,
+            "total_workflows": 3,
+        }
+
+    def recent_workflows(self, limit: int = 50):  # noqa: ARG002
+        return [
+            {"run_id": "run_1", "status": "succeeded", "cost_usd": 4.25},
+            {"run_id": "run_2", "status": "succeeded", "cost_usd": 2.0},
+            {"run_id": "run_3", "status": "failed", "cost_usd": 1.5, "failure_code": "TIMEOUT"},
+        ]
+
+
 class _DashboardSubsystems:
     def __init__(self) -> None:
         self._pg = _DashboardPg()
@@ -878,7 +894,11 @@ class _DashboardSubsystems:
         return self._ingester
 
 
-def test_handle_dashboard_get_returns_backend_authored_counts_and_health() -> None:
+def test_handle_dashboard_get_returns_backend_authored_counts_and_health(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "runtime.observability.get_workflow_metrics_view",
+        lambda: _DashboardMetricsView(),
+    )
     request = _RequestStub(subsystems=_DashboardSubsystems(), path="/api/dashboard")
 
     workflow_query._handle_dashboard_get(request, "/api/dashboard")

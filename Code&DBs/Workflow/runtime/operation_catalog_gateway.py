@@ -21,6 +21,7 @@ from .operation_catalog_bindings import (
     ResolvedHttpOperationBinding,
     resolve_http_operation_binding,
 )
+from .posture import Posture
 
 
 @dataclass(slots=True)
@@ -107,7 +108,10 @@ def _assert_mode_admits_operation(
     posture = str(_binding_value(binding, "posture", "") or "").strip()
     idempotency_policy = str(_binding_value(binding, "idempotency_policy", "") or "").strip()
     if mode == "query":
-        if operation_kind == "query" and (posture == "observe" or idempotency_policy == "read_only"):
+        if (
+            operation_kind == "query"
+            and (posture == Posture.OBSERVE.value or idempotency_policy == "read_only")
+        ):
             return
     elif mode == "command" and operation_kind == "command":
         return

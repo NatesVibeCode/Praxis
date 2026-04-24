@@ -107,6 +107,54 @@ def _cmd_require(args: argparse.Namespace) -> int:
     return 1
 
 
+def _cmd_apply_gate(args: argparse.Namespace) -> int:
+    repo_root = _resolve_repo_root()
+    env = dict(os.environ)
+    target_apply = None
+    if args.apply_ref:
+        for entry in ONBOARDING_GRAPH.applies():
+            if entry.apply_ref == args.apply_ref:
+                target_apply = entry
+                break
+    else:
+        target_apply = ONBOARDING_GRAPH.apply_for_gate(args.gate_ref)
+    if target_apply is None:
+        print(
+            f"onboarding: no apply handler for gate {args.gate_ref!r} "
+            f"apply_ref {args.apply_ref!r}",
+            file=sys.stderr,
+        )
+        return 1
+    if target_apply.requires_approval and not args.yes:
+        mutates = ", ".join(target_apply.mutates) or "no on-disk mutations"
+        print(
+            f"{target_apply.apply_ref} mutates {mutates}; pass --yes to approve.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        result = ONBOARDING_GRAPH.apply_gate(
+            target_apply.apply_ref,
+            env,
+            repo_root,
+            applied_by="bootstrap_cli",
+        )
+    except Exception as exc:
+        print(
+            f"apply {target_apply.apply_ref} raised {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    if result.status == "ok":
+        print(f"ok {target_apply.apply_ref} -> {result.gate_ref}")
+        return 0
+    probe = ONBOARDING_GRAPH.probe(result.gate_ref)
+    print(f"{probe.title} [{result.status}] after {target_apply.apply_ref}", file=sys.stderr)
+    if result.remediation_hint:
+        print(result.remediation_hint, file=sys.stderr)
+    return 1
+
+
 def _cmd_graph(args: argparse.Namespace) -> int:
     repo_root = _resolve_repo_root()
     env = dict(os.environ)
@@ -153,6 +201,19 @@ def main(argv: list[str] | None = None) -> int:
     graph = sub.add_parser("graph", help="Evaluate the whole graph.")
     graph.add_argument("--json", action="store_true", help="Emit full JSON payload.")
     graph.set_defaults(handler=_cmd_graph)
+
+    apply_cmd = sub.add_parser(
+        "apply-gate",
+        help="Run one gate's apply handler (mutation). --yes required for mutating handlers.",
+    )
+    apply_cmd.add_argument("gate_ref", nargs="?", default=None, help="Target gate_ref.")
+    apply_cmd.add_argument(
+        "--apply-ref",
+        default=None,
+        help="Apply handler ref (alternative to gate_ref when multiple handlers target one gate).",
+    )
+    apply_cmd.add_argument("--yes", action="store_true", help="Approve on-disk mutations.")
+    apply_cmd.set_defaults(handler=_cmd_apply_gate)
 
     args = parser.parse_args(argv)
     return args.handler(args)

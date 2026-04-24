@@ -1,6 +1,12 @@
 from typing import Any
 from pydantic import BaseModel
 
+from runtime.workflow_type_contracts import (
+    capability_type_contract,
+    selected_accumulated_types,
+    type_contract_satisfaction,
+)
+
 class SuggestNextNodesCommand(BaseModel):
     workflow_id: str
     body: dict[str, Any]
@@ -24,13 +30,21 @@ def handle_suggest_next_nodes(command: SuggestNextNodesCommand, subsystems: Any)
     current_title = str(current_node.get("title", "")).lower() if current_node else ""
     current_summary = str(current_node.get("summary", "")).lower() if current_node else ""
     current_route = str(current_node.get("route", "")).lower() if current_node else ""
-    
+
+    type_context = selected_accumulated_types(
+        nodes=[n for n in nodes if isinstance(n, dict)],
+        edges=[e for e in edges if isinstance(e, dict)],
+        selected_node_id=str(node_id or "").strip() or None,
+    )
+    available_types = type_context["available_types"]
+
     # Simple heuristics engine to boost related capabilities
     def score_capability(cap: dict[str, Any]) -> int:
         score = 0
         cap_title = str(cap.get("title", "")).lower()
         cap_kind = str(cap.get("capability_kind", "")).lower()
         cap_slug = str(cap.get("capability_slug", "")).lower()
+        cap_route = str(cap.get("route", "")).lower()
         
         # Domain Pattern 1: If we just researched/searched, we likely want to draft, analyze, or synthesize
         if any(word in current_title or word in current_summary for word in ["search", "research", "find", "gather"]):
@@ -52,26 +66,42 @@ def handle_suggest_next_nodes(command: SuggestNextNodesCommand, subsystems: Any)
         # Base utility: Task capabilities are generally good generic next steps
         if cap_kind == "task":
             score += 10
-            
+        if current_route.startswith("trigger") and cap_route.startswith("trigger"):
+            score -= 25
+
         return score
 
-    # 3. Score and sort all capabilities
+    # 3. Type-check, score, and sort all capabilities. The heuristic score is
+    # only used after the graph contract says the next step is legal.
     scored_capabilities = []
+    blocked_capabilities = []
     for cap in catalog:
-        # In a fully typed system, we would also filter out nodes whose `required_inputs` 
-        # are not satisfied by the upstream topological DAG traversal.
-        # For now, we assume all are "possible" and rank by "likely".
+        contract = capability_type_contract(cap)
+        satisfaction = type_contract_satisfaction(available_types, contract)
+        typed_capability = {
+            **cap,
+            "type_contract": contract,
+            "type_satisfaction": satisfaction,
+        }
+        if not satisfaction["legal"]:
+            blocked_capabilities.append(typed_capability)
+            continue
         score = score_capability(cap)
-        scored_capabilities.append({"score": score, "capability": cap})
+        score += 100
+        score += 10 * len(satisfaction.get("satisfied") or [])
+        scored_capabilities.append({"score": score, "capability": typed_capability})
         
     scored_capabilities.sort(key=lambda x: x["score"], reverse=True)
-    
-    # Split into likely (top 3) and possible (the rest)
-    likely = [item["capability"] for item in scored_capabilities[:4] if item["score"] > 10]
+
+    # Split into likely (top 4) and possible (the rest). Both lists are legal;
+    # blocked candidates are returned separately for debugging and future UI.
+    likely = [item["capability"] for item in scored_capabilities[:4]]
     possible = [item["capability"] for item in scored_capabilities if item["capability"] not in likely]
     
     return {
         "status": "success",
+        "type_context": type_context,
         "likely_next_steps": likely,
-        "possible_next_steps": possible
+        "possible_next_steps": possible,
+        "blocked_next_steps": blocked_capabilities,
     }

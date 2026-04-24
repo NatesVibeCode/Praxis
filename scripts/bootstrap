@@ -48,25 +48,24 @@ require_gate() {
     "$python_bin" -m runtime.onboarding.bootstrap_cli require "$gate_ref"
 }
 
-ensure_repo_env_file() {
-  local repo_env="$repo_root/.env"
-  local resolved_database_url="${1:-}"
-  if [ -f "$repo_env" ]; then
-    ok ".env already declares repo-local runtime authority"
-    return 0
-  fi
+apply_gate() {
+  local gate_ref="$1"
+  shift
+  REPO_ROOT="$repo_root" \
+    PRAXIS_ONBOARDING_REPO_ROOT="$repo_root" \
+    PYTHONPATH="$workflow_root${PYTHONPATH:+:$PYTHONPATH}" \
+    "$python_bin" -m runtime.onboarding.bootstrap_cli apply-gate "$gate_ref" "$@"
+}
 
+ensure_repo_env_file() {
+  local resolved_database_url="${1:-}"
   if [ -z "$resolved_database_url" ]; then
     die "could not determine WORKFLOW_DATABASE_URL for .env creation"
   fi
-  umask 077
-  {
-    printf '# Created by ./scripts/bootstrap for repo-local Praxis runtime authority.\n'
-    printf 'WORKFLOW_DATABASE_URL=%s\n' "$resolved_database_url"
-    printf 'WORKFLOW_DATABASE_TRUSTED=true\n'
-    printf 'PRAXIS_API_PORT=%s\n' "${PRAXIS_API_PORT:-8420}"
-  } > "$repo_env"
-  ok "created .env with WORKFLOW_DATABASE_URL=$(redact_url_for_log "$resolved_database_url")"
+  WORKFLOW_DATABASE_URL="$resolved_database_url" \
+    PRAXIS_API_PORT="${PRAXIS_API_PORT:-8420}" \
+    apply_gate runtime.env_file --yes >/dev/null || exit 1
+  ok ".env declares WORKFLOW_DATABASE_URL=$(redact_url_for_log "$resolved_database_url")"
 }
 
 resolve_database_authority() {
@@ -237,19 +236,14 @@ fi
 ok "postgres maintenance database reachable"
 
 step "Preparing workflow database"
-psql "$maintenance_url" -v ON_ERROR_STOP=1 -v db_name="$database_name" >/dev/null <<'SQL'
-SELECT format('CREATE DATABASE %I', :'db_name')
-WHERE NOT EXISTS (
-    SELECT 1 FROM pg_database WHERE datname = :'db_name'
-)\gexec
-SQL
+WORKFLOW_DATABASE_URL="$database_url" \
+  apply_gate platform.workflow_database --yes >/dev/null || exit 1
 ok "database ready: $database_name"
 
 WORKFLOW_DATABASE_URL="$database_url" \
   require_gate platform.pgvector >/dev/null || exit 1
-if ! psql "$database_url" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS vector;' >/dev/null; then
-  die "pgvector extension is available but CREATE EXTENSION failed; inspect psql output for permission or syntax errors."
-fi
+WORKFLOW_DATABASE_URL="$database_url" \
+  apply_gate platform.pgvector_installed --yes >/dev/null || exit 1
 ok "pgvector extension enabled"
 
 # --- Step 2: venv + dependencies --------------------------------------------
@@ -415,6 +409,6 @@ API:
 Next:
   praxis workflow query "status"
   praxis workflow run examples/hello_world.queue.json
-  (cd Code\&DBs/Workflow/surfaces/app && npm install && npm run dev)   # Moon UI
+  (cd "Code&DBs/Workflow/surfaces/app" && npm install && npm run dev)   # Moon UI
 
 DONE

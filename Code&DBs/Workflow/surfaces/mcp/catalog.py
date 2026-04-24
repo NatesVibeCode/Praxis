@@ -63,6 +63,20 @@ class McpToolDefinition:
         return dict(schema) if isinstance(schema, dict) else {}
 
     @property
+    def type_contract(self) -> dict[str, dict[str, list[str]]]:
+        raw = self.metadata.get("type_contract")
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(action): {
+                "consumes": [str(c) for c in contract.get("consumes", []) if isinstance(c, str)],
+                "produces": [str(p) for p in contract.get("produces", []) if isinstance(p, str)],
+            }
+            for action, contract in raw.items()
+            if isinstance(contract, dict)
+        }
+
+    @property
     def cli_metadata(self) -> dict[str, Any]:
         raw = self.metadata.get("cli")
         local = dict(raw) if isinstance(raw, dict) else {}

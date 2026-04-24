@@ -89,48 +89,35 @@ def _pg() -> _MutableWorkflowPg:
     )
 
 
-def test_graph_first_harden_persists_current_execution_manifest() -> None:
+def test_graph_first_harden_requires_review_before_execution_manifest() -> None:
     status, payload = _harden_graph(_pg())
 
     assert status == 200
-    assert payload["compiled_spec"]["workflow_id"] == "wf_graph_dispatch"
-    assert payload["compiled_spec"]["jobs"][0]["verify_refs"] == ["verify.support_response_quality.v1"]
-    assert payload["compiled_spec"]["jobs"][1]["depends_on"] == ["draft"]
-    assert "dependency_edges" not in payload["compiled_spec"]["jobs"][1]
-    assert payload["execution_manifest"]["execution_manifest_ref"].startswith(
-        "execution_manifest:wf_graph_dispatch:"
-    )
-    assert payload["execution_manifest"]["verify_refs"] == ["verify.support_response_quality.v1"]
+    assert payload["compiled_spec"] is None
+    assert payload["execution_manifest"] is None
+    assert payload["candidate_resolution_manifest"]["execution_readiness"] == "review_required"
+    assert payload["candidate_resolution_manifest"]["projection_status"] == {
+        "state": "ready",
+        "blocking_issue_ids": [],
+        "issue_count": 0,
+        "compiled_spec_available": False,
+    }
+    assert "Workflow shape requires explicit approval" in payload["planning_notes"][0]
 
 
-def test_graph_first_manifest_dispatches_through_trigger(tmp_path, monkeypatch) -> None:
+def test_graph_first_trigger_waits_for_approved_execution_manifest(tmp_path, monkeypatch) -> None:
     pg = _pg()
     status, _payload = _harden_graph(pg)
     assert status == 200
 
     monkeypatch.setattr(workflow_query, "REPO_ROOT", tmp_path)
-    captured_spec: dict[str, Any] = {}
-
-    def _fake_submit(*_args, **kwargs):
-        captured_spec.update(kwargs["spec"])
-        return {
-            "run_id": "dispatch_graph_123",
-            "status": "queued",
-            "spec_name": "Graph Dispatch",
-            "total_jobs": 2,
-        }
 
     trigger_request = _RequestStub(subsystems=SimpleNamespace(get_pg_conn=lambda: pg))
-    with patch.object(canonical_workflows, "_submit_spec_via_service_bus", side_effect=_fake_submit):
+    with patch.object(canonical_workflows, "_submit_spec_via_service_bus") as bus_mock:
         workflow_query._handle_trigger_post(trigger_request, "/api/trigger/wf_graph_dispatch")
 
     assert trigger_request.sent == (
-        200,
-        {
-            "triggered": True,
-            "workflow_id": "wf_graph_dispatch",
-            "workflow_name": "Graph Dispatch",
-            "run_id": "dispatch_graph_123",
-        },
+        400,
+        {"error": "Workflow 'Graph Dispatch' has no approved execution manifest. Review and harden the workflow first."},
     )
-    assert captured_spec["execution_manifest_ref"].startswith("execution_manifest:wf_graph_dispatch:")
+    bus_mock.assert_not_called()

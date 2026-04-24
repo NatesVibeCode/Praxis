@@ -11,10 +11,12 @@ import pytest
 
 from adapters.permission_matrix import (
     ALLOWED_PERMISSION_MODES,
+    API_PROVIDERS,
     DEFAULT_PERMISSION_MODE,
     PERMISSION_MODE_RANK,
     PermissionMatrixError,
     SUPPORTED_CLI_PROVIDERS,
+    api_permission_prompt_suffix,
     is_permission_step_up,
     translate_permission_flags,
 )
@@ -224,6 +226,67 @@ def test_gemini_builder_honors_model_env(monkeypatch: pytest.MonkeyPatch) -> Non
     cmd = _build_gemini_command("session-gemini", "hi")
     assert "--model" in cmd
     assert cmd[cmd.index("--model") + 1] == "gemini-2.5-pro"
+
+
+# --- API provider permission normalization (B.5) ---------------------------
+
+
+def test_api_providers_include_openrouter() -> None:
+    assert "openrouter" in API_PROVIDERS
+
+
+def test_api_permission_prompt_suffix_returns_empty_for_none_mode() -> None:
+    assert api_permission_prompt_suffix("openrouter", None) == ""
+
+
+def test_api_permission_prompt_suffix_returns_empty_for_unknown_provider() -> None:
+    assert api_permission_prompt_suffix("claude", "propose_edits") == ""
+
+
+def test_api_permission_prompt_suffix_returns_empty_for_unknown_mode() -> None:
+    assert api_permission_prompt_suffix("openrouter", "bogus") == ""
+
+
+@pytest.mark.parametrize(
+    "mode, required_fragment",
+    [
+        ("read_only",     "read_only"),
+        ("plan_only",     "plan_only"),
+        ("propose_edits", "propose_edits"),
+        ("auto_edits",    "auto_edits"),
+        ("full_autonomy", "full_autonomy"),
+    ],
+)
+def test_api_permission_prompt_suffix_names_each_mode(
+    mode: str, required_fragment: str,
+) -> None:
+    suffix = api_permission_prompt_suffix("openrouter", mode)
+    assert suffix  # non-empty
+    assert required_fragment in suffix
+
+
+def test_api_permission_prompt_suffix_read_only_forbids_actions() -> None:
+    suffix = api_permission_prompt_suffix("openrouter", "read_only")
+    assert "Do not propose changes" in suffix
+
+
+def test_api_permission_prompt_suffix_plan_only_produces_plan() -> None:
+    suffix = api_permission_prompt_suffix("openrouter", "plan_only")
+    assert "plan" in suffix.lower()
+
+
+def test_openrouter_messages_append_permission_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    from surfaces.api.agent_sessions import _openrouter_messages
+
+    # No pg_conn: skips history lookup, returns system + user only.
+    messages = _openrouter_messages(None, agent_id="a", prompt="hi", permission_mode="plan_only")
+    assert messages[0]["role"] == "system"
+    assert "Permission: plan_only" in messages[0]["content"]
+    # The base system prompt is still there.
+    assert "Praxis operator" in messages[0]["content"]
+    # No mode → no suffix.
+    messages_no_mode = _openrouter_messages(None, agent_id="a", prompt="hi", permission_mode=None)
+    assert "Permission:" not in messages_no_mode[0]["content"]
 
 
 # --- Gemini session continuity (B.1b) --------------------------------------

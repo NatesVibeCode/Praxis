@@ -137,6 +137,19 @@ def test_classify_graph_freshness_reports_unknown_without_projection_edges() -> 
     assert lag_seconds is None
 
 
+def test_compute_activity_score_decays_from_recent_timestamps() -> None:
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+
+    recent = atlas_graph.compute_activity_score(now - timedelta(minutes=5), reference_at=now)
+    older = atlas_graph.compute_activity_score(now - timedelta(days=21), reference_at=now)
+    missing = atlas_graph.compute_activity_score(None, reference_at=now)
+
+    assert recent > older
+    assert recent > 0.99
+    assert older > atlas_graph.MIN_ACTIVITY_SCORE
+    assert missing == atlas_graph.MIN_ACTIVITY_SCORE
+
+
 def test_infer_schema_area_maps_known_table_markers() -> None:
     assert atlas_graph.infer_schema_area(
         "table:operator_decisions",
@@ -145,6 +158,80 @@ def test_infer_schema_area_maps_known_table_markers() -> None:
         "",
         "schema",
     ) == "authority"
+
+
+def test_build_graph_emits_activity_signal_on_memory_entity_nodes(monkeypatch) -> None:
+    now = datetime.now(timezone.utc)
+    recent_at = now - timedelta(minutes=10)
+    older_at = now - timedelta(days=30)
+
+    monkeypatch.setattr(atlas_graph, "_connect", lambda database_url=None: object())
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_entities",
+        lambda conn: [
+            {
+                "id": "bug::BUG-123",
+                "entity_type": "bug",
+                "name": "Live bug",
+                "content_preview": "Recently touched",
+                "source": "memory_entities",
+                "updated_at": recent_at,
+            },
+            {
+                "id": "decision::old",
+                "entity_type": "operator_decision",
+                "name": "Old decision",
+                "content_preview": "Dormant",
+                "source": "memory_entities",
+                "updated_at": older_at,
+            },
+        ],
+    )
+    monkeypatch.setattr(atlas_graph, "fetch_capabilities", lambda conn: [])
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_functional_areas",
+        lambda conn: [{"area_slug": "bugs", "title": "Bugs", "summary": "Bug authority"}],
+    )
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_area_relations",
+        lambda conn: [
+            {
+                "source_kind": "bug",
+                "source_ref": "BUG-123",
+                "target_ref": "functional_area.bugs",
+                "relation_kind": "owns",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_edges",
+        lambda conn, known_ids: [
+            {
+                "source_id": "bug::BUG-123",
+                "target_id": "decision::old",
+                "relation_type": "related_to",
+                "weight": 1.0,
+                "updated_at": recent_at,
+            }
+        ],
+    )
+    monkeypatch.setattr(atlas_graph, "fetch_tools", lambda: [])
+    monkeypatch.setattr(atlas_graph, "fetch_data_dictionary_objects", lambda conn: [])
+    monkeypatch.setattr(atlas_graph, "fetch_data_dictionary_lineage", lambda conn: [])
+    monkeypatch.setattr(atlas_graph, "fetch_surface_catalog_items", lambda conn: [])
+
+    graph = atlas_graph.build_graph()
+    nodes = {node["data"]["id"]: node["data"] for node in graph["nodes"]}
+    edges = {edge["data"]["id"]: edge["data"] for edge in graph["edges"]}
+
+    assert nodes["bug::BUG-123"]["updated_at"] == recent_at.isoformat()
+    assert nodes["bug::BUG-123"]["activity_score"] > nodes["decision::old"]["activity_score"]
+    assert nodes["area::bugs"]["activity_score"] == nodes["bug::BUG-123"]["activity_score"]
+    assert edges["bug::BUG-123|related_to|decision::old"]["activity_score"] > 0.99
 
 
 def test_build_graph_projects_surface_catalog_and_dictionary_lineage(monkeypatch) -> None:

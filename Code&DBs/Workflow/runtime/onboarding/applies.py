@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -118,6 +119,230 @@ _APPLY_CLAUDE_CODE_MCP = GateApply(
 )
 
 
+# --- Runtime: .env file -----------------------------------------------------
+
+
+def apply_env_file_write(
+    env: Mapping[str, str],
+    repo_root: Path,
+    *,
+    database_url: str | None = None,
+    api_port: str | None = None,
+) -> GateResult:
+    """Write repo .env with WORKFLOW_DATABASE_URL + WORKFLOW_DATABASE_TRUSTED."""
+    from . import probes_runtime
+
+    probe = ONBOARDING_GRAPH.probe("runtime.env_file")
+    env_path = repo_root / ".env"
+
+    if env_path.exists():
+        # Idempotent: if the file already declares WORKFLOW_DATABASE_URL, leave it.
+        body = env_path.read_text(encoding="utf-8", errors="replace")
+        if any(
+            line.strip().startswith("WORKFLOW_DATABASE_URL=") and line.strip() != "WORKFLOW_DATABASE_URL="
+            for line in body.splitlines()
+        ):
+            return probes_runtime.probe_env_file(env, repo_root)
+
+    resolved_db_url = (database_url or env.get("WORKFLOW_DATABASE_URL") or "").strip()
+    if not resolved_db_url:
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state={"env_path": str(env_path), "database_url_resolved": False},
+            remediation_hint=(
+                "Cannot write .env: pass database_url=... or set WORKFLOW_DATABASE_URL "
+                "in the environment."
+            ),
+        )
+
+    port = (api_port or env.get("PRAXIS_API_PORT") or "8420").strip()
+    lines = [
+        "# Created by apply.runtime.env_file.write.",
+        f"WORKFLOW_DATABASE_URL={resolved_db_url}",
+        "WORKFLOW_DATABASE_TRUSTED=true",
+        f"PRAXIS_API_PORT={port}",
+    ]
+    tmp_path = env_path.with_suffix(".env.tmp")
+    tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.chmod(tmp_path, 0o600)
+    os.replace(tmp_path, env_path)
+
+    return probes_runtime.probe_env_file(env, repo_root)
+
+
+_APPLY_ENV_FILE = GateApply(
+    apply_ref="apply.runtime.env_file.write",
+    gate_ref="runtime.env_file",
+    description="Write repo-local .env with WORKFLOW_DATABASE_URL.",
+    handler=apply_env_file_write,
+    mutates=("filesystem:$REPO_ROOT/.env",),
+    requires_approval=True,
+)
+
+
+# --- Platform: create the workflow database --------------------------------
+
+
+def apply_workflow_database_create(
+    env: Mapping[str, str],
+    repo_root: Path,
+) -> GateResult:
+    """Idempotent CREATE DATABASE praxis via the maintenance URL."""
+    from . import probes_platform
+
+    probe = ONBOARDING_GRAPH.probe("platform.workflow_database")
+    database_url = (env.get("WORKFLOW_DATABASE_URL") or "").strip()
+    if not database_url:
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state={"database_url_set": False},
+            remediation_hint="Set WORKFLOW_DATABASE_URL before applying workflow_database.create",
+        )
+
+    database_name = probes_platform._parse_database_name(database_url)
+    maintenance_url = probes_platform._maintenance_url(database_url)
+
+    try:
+        check = subprocess.run(
+            [
+                "psql",
+                maintenance_url,
+                "-v",
+                f"db_name={database_name}",
+                "-Atc",
+                "SELECT 1 FROM pg_database WHERE datname = :'db_name'",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if (check.stdout or "").strip() == "1":
+            # Already exists; idempotent no-op.
+            return probes_platform.probe_workflow_database(env, repo_root)
+
+        subprocess.run(
+            [
+                "psql",
+                maintenance_url,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-v",
+                f"db_name={database_name}",
+                "-c",
+                'CREATE DATABASE :"db_name"',
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state={
+                "maintenance_url": maintenance_url,
+                "database_name": database_name,
+                "psql_error": stderr or str(exc),
+            },
+            remediation_hint=(
+                f"CREATE DATABASE {database_name} failed. The connecting role may "
+                'lack CREATEDB: sudo -u postgres psql -c "ALTER USER $USER CREATEDB"'
+            ),
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state={"error": str(exc), "error_type": type(exc).__name__},
+            remediation_hint="CREATE DATABASE timed out against the maintenance URL",
+        )
+
+    return probes_platform.probe_workflow_database(env, repo_root)
+
+
+_APPLY_WORKFLOW_DATABASE = GateApply(
+    apply_ref="apply.platform.workflow_database.create",
+    gate_ref="platform.workflow_database",
+    description="Run CREATE DATABASE praxis if the target database is missing.",
+    handler=apply_workflow_database_create,
+    mutates=("postgres:CREATE DATABASE",),
+    requires_approval=True,
+)
+
+
+# --- Platform: enable pgvector extension -----------------------------------
+
+
+def apply_pgvector_enable(
+    env: Mapping[str, str],
+    repo_root: Path,
+) -> GateResult:
+    """Idempotent CREATE EXTENSION IF NOT EXISTS vector on the target database."""
+    from . import probes_platform
+
+    probe = ONBOARDING_GRAPH.probe("platform.pgvector_installed")
+    database_url = (env.get("WORKFLOW_DATABASE_URL") or "").strip()
+    if not database_url:
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state={"database_url_set": False},
+            remediation_hint="Set WORKFLOW_DATABASE_URL before applying pgvector_installed.enable",
+        )
+
+    try:
+        subprocess.run(
+            [
+                "psql",
+                database_url,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                "CREATE EXTENSION IF NOT EXISTS vector",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state={"psql_error": stderr or str(exc)},
+            remediation_hint=(
+                "CREATE EXTENSION vector failed. Ensure pgvector is installed "
+                "on the server (brew install pgvector/brew/pgvector on macOS, "
+                "sudo apt install postgresql-16-pgvector on Linux)."
+            ),
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state={"error": str(exc), "error_type": type(exc).__name__},
+            remediation_hint="CREATE EXTENSION timed out",
+        )
+
+    return probes_platform.probe_pgvector_installed(env, repo_root)
+
+
+_APPLY_PGVECTOR_ENABLE = GateApply(
+    apply_ref="apply.platform.pgvector_installed.enable",
+    gate_ref="platform.pgvector_installed",
+    description="Run CREATE EXTENSION IF NOT EXISTS vector on the target database.",
+    handler=apply_pgvector_enable,
+    mutates=("postgres:CREATE EXTENSION vector",),
+    requires_approval=True,
+)
+
+
 # --- Providers: emit the exact command the operator must run ---------------
 # Provider credentials live in macOS Keychain (darwin) or env vars (linux).
 # Apply does not secretly type values on the user's behalf — it returns a
@@ -179,6 +404,9 @@ _PROVIDER_APPLIES = {
 
 def register(graph=ONBOARDING_GRAPH) -> None:
     graph.register_apply(_APPLY_CLAUDE_CODE_MCP)
+    graph.register_apply(_APPLY_ENV_FILE)
+    graph.register_apply(_APPLY_WORKFLOW_DATABASE)
+    graph.register_apply(_APPLY_PGVECTOR_ENABLE)
     for provider_slug, (env_var, human_name) in _PROVIDER_APPLIES.items():
         apply_entry = GateApply(
             apply_ref=f"apply.provider.{provider_slug}.remediate",

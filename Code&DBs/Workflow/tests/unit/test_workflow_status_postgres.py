@@ -108,9 +108,17 @@ def test_workflow_history_reports_degraded_source_when_metrics_view_fails(monkey
         "get_workflow_metrics_view",
         lambda: SimpleNamespace(recent_workflows=_raise),
     )
+    monkeypatch.setattr(
+        workflow_status.WorkflowHistory,
+        "_recent_workflows_from_runs",
+        lambda self, limit: _raise(),
+    )
 
     summary = history.summary()
     assert summary["total_workflows"] == 1
     assert summary["workflow_history_source"] == "fallback"
     assert summary["workflow_history_status"] == "degraded"
-    assert summary["workflow_history_error"] == "RuntimeError: metrics view offline"
+    assert summary["workflow_history_error"] == (
+        "RuntimeError: metrics view offline; "
+        "workflow_runs fallback RuntimeError: metrics view offline"
+    )

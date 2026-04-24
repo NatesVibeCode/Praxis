@@ -280,10 +280,12 @@ def build_execution_phases(
     draft_flow: list[dict[str, Any]],
     blocking_inputs: list[str],
 ) -> list[dict[str, Any]]:
+    first_step_id = _first_draft_flow_step_id(draft_flow)
     if method_key == "seed_fanout_synthesize":
         phases = [
             make_execution_phase(
                 phase_id="phase-001",
+                step_id=first_step_id,
                 kind="seed",
                 title="Seed research plan",
                 purpose=(
@@ -364,6 +366,7 @@ def build_execution_phases(
         phases = [
             make_execution_phase(
                 phase_id="phase-001",
+                step_id=first_step_id,
                 kind="research",
                 title="Research with grounding",
                 purpose="Run a grounded research pass that records evidence instead of producing a loose summary.",
@@ -406,6 +409,7 @@ def build_execution_phases(
         return [
             make_execution_phase(
                 phase_id="phase-001",
+                step_id=first_step_id,
                 kind="build",
                 title="Implement the workflow",
                 purpose="Execute the primary build work with explicit stage boundaries and concrete outputs.",
@@ -453,6 +457,7 @@ def build_execution_phases(
         phases = [
             make_execution_phase(
                 phase_id="phase-001",
+                step_id=first_step_id,
                 kind="stage",
                 title="Run staged workflow steps",
                 purpose="Execute the workflow as explicit ordered stages rather than collapsing it into one prompt.",
@@ -494,6 +499,7 @@ def build_execution_phases(
     return [
         make_execution_phase(
             phase_id="phase-001",
+            step_id=first_step_id,
             kind="execute",
             title="Execute directly",
             purpose="Keep the task bounded and direct with one explicit agent phase.",
@@ -515,6 +521,7 @@ def build_execution_phases(
 def make_execution_phase(
     *,
     phase_id: str,
+    step_id: str | None = None,
     kind: str,
     title: str,
     purpose: str,
@@ -546,9 +553,22 @@ def make_execution_phase(
         "requires_citations": requires_citations,
         "outputs": outputs,
     }
+    if step_id:
+        phase["step_id"] = step_id
     if fanout_count is not None:
         phase["fanout_count"] = fanout_count
     return phase
+
+
+def _first_draft_flow_step_id(draft_flow: list[dict[str, Any]]) -> str | None:
+    ordered_steps = sorted(
+        [step for step in draft_flow if isinstance(step, dict)],
+        key=lambda step: int(step.get("order") or 0),
+    )
+    if not ordered_steps:
+        return None
+    step_id = _as_text(ordered_steps[0].get("id"))
+    return step_id or None
 
 
 def build_staged_workflow_phases(

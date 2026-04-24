@@ -1,7 +1,7 @@
 """MCP integration gate probes.
 
 Checks that Claude Code's per-user .mcp.json has a valid praxis entry pointing
-at this repo's workflow root. When missing, non-mobile operators cannot use
+at this repo's workflow root. When missing, operators cannot use
 ``praxis_*`` MCP tools inside Claude Code.
 """
 

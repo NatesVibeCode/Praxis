@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, MutableMapping, Sequence
 from typing import Any
 
 from ._dispatch import _dispatch_dynamic, _dispatch_standard_post
@@ -174,6 +174,9 @@ class _LazyRouteMap(Mapping[str, object]):
     def _routes(self) -> Mapping[str, object]:
         return _route_state()[self._key]  # type: ignore[return-value]
 
+    def _mutable_routes(self) -> MutableMapping[str, object]:
+        return _route_state()[self._key]  # type: ignore[return-value]
+
     def __getitem__(self, key: str) -> object:
         return self._routes()[key]
 
@@ -185,6 +188,12 @@ class _LazyRouteMap(Mapping[str, object]):
 
     def __contains__(self, key: object) -> bool:
         return key in self._routes()
+
+    def __setitem__(self, key: str, value: object) -> None:
+        self._mutable_routes()[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        del self._mutable_routes()[key]
 
 
 ADMIN_ROUTES = _LazyRouteMap("admin_routes")

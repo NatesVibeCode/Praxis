@@ -47,6 +47,25 @@ def test_mobile_sessions_migration_adds_bootstrap_session_and_budget_ledgers() -
     assert "CREATE TABLE IF NOT EXISTS mobile_session_budget_events" in sql
 
 
+def test_mobile_v1_archive_migration_drops_mobile_only_tables_not_capability_grants() -> None:
+    sql = _migration_sql("220_archive_mobile_v1.sql")
+
+    for table_name in (
+        "mobile_session_budget_events",
+        "mobile_sessions",
+        "mobile_bootstrap_tokens",
+        "webauthn_challenges",
+        "approval_requests",
+        "device_enrollments",
+    ):
+        assert f"DROP TABLE IF EXISTS {table_name} CASCADE" in sql
+
+    assert "DROP TABLE IF EXISTS capability_grants" not in sql
+    assert "authority.mobile_access" in sql
+    assert "legacy_domain.rule.mobile" in sql
+    assert "enabled = FALSE" in sql
+
+
 def test_interactive_agent_session_migration_extends_agent_sessions_authority() -> None:
     sql = _migration_sql("211_interactive_agent_session_authority.sql")
 

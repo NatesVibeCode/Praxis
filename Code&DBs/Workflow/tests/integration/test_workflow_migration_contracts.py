@@ -99,10 +99,16 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "166_data_dictionary_authority.sql" in filenames
     assert "167_scratch_agent_runtime_lane.sql" in filenames
     assert "168_openrouter_provider_authority_repair.sql" in filenames
-    assert filenames[-1] == "168_openrouter_provider_authority_repair.sql"
+    assert "220_archive_mobile_v1.sql" in filenames
+    assert "222_runtime_setup_operation_catalog_repair.sql" in filenames
+    assert filenames[-1] == "222_runtime_setup_operation_catalog_repair.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
+    intentionally_empty_contracts = {
+        "187_webauthn_challenges.sql",
+        "188_mobile_sessions.sql",
+    }
     missing_contracts: list[str] = []
     for entry in workflow_migration_manifest():
         try:
@@ -110,7 +116,7 @@ def test_every_manifest_migration_has_expected_object_contract() -> None:
         except Exception:
             missing_contracts.append(entry.filename)
             continue
-        if not objects:
+        if not objects and entry.filename not in intentionally_empty_contracts:
             missing_contracts.append(entry.filename)
 
     assert missing_contracts == []

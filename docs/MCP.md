@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 76 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 85 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -70,6 +70,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_run_scoreboard` | `operator` | `advanced` | - | `read` | Read one run-scoped cutover scoreboard. |
 | `praxis_run_status` | `operator` | `advanced` | - | `read` | Read one run-scoped operator status view. |
 | `praxis_semantic_assertions` | `operator` | `advanced` | - | `read`, `write` | Register semantic predicates, record or retract semantic assertions, and query the canonical semantic substrate. |
+| `praxis_ui_experience_graph` | `operator` | `advanced` | - | `read` | Read the LLM-facing Praxis app experience graph: surfaces, controls, authority sources, relationships, and source-file anchors. |
 | `praxis_decompose` | `planning` | `stable` | - | `read` | Break down a large objective into small, workflow-ready micro-sprints. Returns each sprint with estimated complexity, dependencies between sprints, and the critical path. |
 | `praxis_intent_match` | `planning` | `stable` | - | `read` | Find existing UI components, workflows, and integrations that match what you want to build. Searches the registry and proposes how to compose them into an app. |
 | `praxis_manifest_generate` | `planning` | `advanced` | - | `write` | Generate a complete app manifest (UI layout, data flow, integrations) from a natural language description. Combines intent matching with LLM generation to produce a ready-to-render manifest. |
@@ -80,13 +81,21 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_context_shard` | `session` | `session` | - | `session` | Return the bounded execution shard for the current workflow MCP session. This is only valid inside workflow Docker jobs using the signed MCP bridge. |
 | `praxis_session_context` | `session` | `session` | - | `session` | Read or write persistent context on your agent session. Context survives across tool calls and is available on retry. |
 | `praxis_subscribe_events` | `session` | `session` | - | `session` | Pull build state events since the agent's last cursor position. Returns new events and advances the cursor. Call repeatedly to stay in sync with platform state changes. |
-| `praxis_setup` | `setup` | `core` | - | `read`, `write` | Runtime-target setup authority for Praxis. Reports the active runtime_target_ref, substrate kind, API authority, DB authority, native_instance contract, workspace authority, provider-family thin sandbox image contract, and the empty_thin_sandbox_default pass/fail. USE WHEN: moving Praxis between machines, adopting an existing runtime, repointing the package at a DB, or checking that the CLI, MCP, and API are bound to the same repo-local instance. Operations belong to API/MCP; CLI and website are clients. SSH is build/deploy transport only. |
+| `praxis_setup` | `setup` | `core` | - | `read` | Runtime-target setup authority for Praxis. Reports the active runtime_target_ref, substrate kind, API authority, DB authority, native_instance contract, workspace authority, provider-family thin sandbox image contract, and the empty_thin_sandbox_default pass/fail. USE WHEN: moving Praxis between machines, adopting an existing runtime, repointing the package at a DB, or checking that the CLI, MCP, and API are bound to the same repo-local instance. Operations belong to API/MCP; CLI and website are clients. SSH is build/deploy transport only. |
 | `praxis_get_submission` | `submissions` | `session` | - | `session` | Read a sealed workflow submission within the current workflow MCP session. The session token owns run_id/workflow_id and the tool only accepts submission_id or job_label for the target submission. |
 | `praxis_review_submission` | `submissions` | `session` | - | `session` | Review a sealed workflow submission within the current workflow MCP session. The session token owns run_id/workflow_id/job_label for the reviewer. The tool only accepts submission_id or job_label for the target submission. |
 | `praxis_submit_artifact_bundle` | `submissions` | `session` | - | `session` | Submit a sealed artifact bundle result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_submit_code_change` | `submissions` | `session` | - | `session` | Submit a sealed code-change result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_submit_research_result` | `submissions` | `session` | - | `session` | Submit a sealed research result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
+| `praxis_approve_proposed_plan` | `workflow` | `stable` | `workflow approve-plan` | `read` | Approve a ProposedPlan so launch_approved can submit it. Takes the ProposedPlan payload from praxis_launch_plan(preview_only=true), wraps it with approved_by + timestamp + hash, and returns an ApprovedPlan. The hash binds the approval to the exact spec_dict — tampering between approve and launch fails closed at launch time. |
+| `praxis_bind_data_pills` | `workflow` | `stable` | `workflow bind-pills` | `read` | Layer 1 (Bind) of the planning stack: extract and validate ``object.field`` data-pill references from prose intent against the data dictionary authority. Deterministic — matches explicit ``snake_case.field_path`` spans in the prose; does not infer loose references like "the user's name." Returns bound / ambiguous / unbound splits the caller confirms before decomposing intent into packets. |
+| `praxis_compose_and_launch` | `workflow` | `stable` | `workflow ship-intent` | `launch` | End-to-end: prose intent → compose → approve → launch in one call. Compose the ProposedPlan through Layers 2 → 1 → 5, wrap with an explicit approval record (approved_by + hash), and submit through the CQRS control-command bus. |
+| `praxis_compose_plan` | `workflow` | `stable` | `workflow compose-plan` | `read` | Chain Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview) in one call. Takes prose intent with explicit step markers, returns a ProposedPlan ready for approval and launch. |
 | `praxis_connector` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Build API connectors for third-party applications. One call stamps a workflow spec and launches a 4-job pipeline (discover API → map objects → build client → review). |
+| `praxis_decompose_intent` | `workflow` | `stable` | `workflow decompose` | `read` | Layer 2 (Decompose) of the planning stack: split prose intent into ordered steps by parsing explicit step markers (numbered lists, bulleted lists, or first/then/finally ordering). Deterministic — does NOT do free-prose semantic decomposition. |
+| `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
+| `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | Q-side of the planning stack: read every plan.* system_event for one workflow_id in order. Pair with praxis_compose_and_launch / praxis_approve_proposed_plan / praxis_launch_plan on the C side. |
+| `praxis_project_plan_budget` | `workflow` | `stable` | `workflow project-budget` | `read` | Estimate prompt + output token budgets for every job in a ProposedPlan. Honest: prompt tokens are char-based (len / 4), output tokens are a conservative per-stage estimate. No USD cost — real cost depends on the resolved model at run time, which is the right place to surface it. |
 | `praxis_wave` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Manage execution waves — groups of jobs with dependency ordering. Waves track which jobs are runnable (all dependencies met) and which are blocked. |
 | `praxis_workflow` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
 | `praxis_workflow_validate` | `workflow` | `advanced` | - | `read` | Dry-run a workflow spec to check for errors before executing it. Returns whether the spec is valid, how many jobs it contains, and which agents each job resolves to. |
@@ -1328,6 +1337,27 @@ Example input:
 }
 ```
 
+#### `praxis_ui_experience_graph`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_ui_experience_graph`
+- CLI schema help: `workflow tools describe praxis_ui_experience_graph`
+- When to use: Inspect the app UI experience before changing React, CSS, or surface catalog behavior.
+- When not to use: Do not use it for run-scoped execution topology or raw knowledge-graph traversal.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "surface_name": "build"
+}
+```
+
 ### Planning
 
 #### `praxis_decompose`
@@ -1557,13 +1587,13 @@ Example input:
 
 - Surface: `setup`
 - Tier: `core`
-- Badges: `core`, `setup`, `mutates-state`
-- Risks: `read`, `write`
+- Badges: `core`, `setup`
+- Risks: `read`
 - CLI entrypoint: `workflow tools call praxis_setup`
 - CLI schema help: `workflow tools describe praxis_setup`
 - When to use: Inspect or plan runtime-target setup through the same authority as `praxis setup doctor|plan|apply`, including the native_instance contract.
 - When not to use: Do not use as a workflow launch/status tool.
-- Selector: `action`; default `doctor`; values `doctor`, `plan`, `apply`
+- Selector: `action`; default `doctor`; values `doctor`, `plan`, `apply`, `graph`
 - Required args: (none)
 
 Example input:
@@ -1697,6 +1727,121 @@ Example input:
 
 ### Workflow
 
+#### `praxis_approve_proposed_plan`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:approve-plan`
+- Risks: `read`
+- CLI entrypoint: `workflow approve-plan`
+- CLI schema help: `workflow tools describe praxis_approve_proposed_plan`
+- When to use: Approve a ProposedPlan so launch_approved can submit it. Wraps the proposal with approved_by + timestamp + hash; the hash binds the approval to the exact spec_dict so tampering between approve and launch fails closed.
+- When not to use: Do not use it for no-approval launches — praxis_launch_plan in submit mode is the direct path.
+- Recommended alias: `workflow approve-plan`
+- Selector: none
+- Required args: `proposed`, `approved_by`
+
+Example input:
+
+```json
+{
+  "proposed": {
+    "spec_dict": {
+      "name": "...",
+      "jobs": []
+    },
+    "preview": {},
+    "warnings": [],
+    "workflow_id": "plan.deadbeef",
+    "spec_name": "bug_wave_0",
+    "total_jobs": 0,
+    "packet_declarations": [],
+    "binding_summary": {
+      "totals": {
+        "bound": 0,
+        "ambiguous": 0,
+        "unbound": 0
+      },
+      "unbound_refs": [],
+      "ambiguous_refs": []
+    }
+  },
+  "approved_by": "nate@praxis",
+  "approval_note": "Looks good; proceed."
+}
+```
+
+#### `praxis_bind_data_pills`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:bind-pills`
+- Risks: `read`
+- CLI entrypoint: `workflow bind-pills`
+- CLI schema help: `workflow tools describe praxis_bind_data_pills`
+- When to use: Extract and validate object.field data-pill references from prose intent against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is known to exist.
+- When not to use: Do not use it to infer missing references. This tool matches explicit object.field spans only; loose prose like "the user's name" returns no bound pills, and that's honest.
+- Recommended alias: `workflow bind-pills`
+- Selector: none
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "intent": "Update users.first_name whenever users.email changes."
+}
+```
+
+#### `praxis_compose_and_launch`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:ship-intent`, `launches-work`
+- Risks: `launch`
+- CLI entrypoint: `workflow ship-intent`
+- CLI schema help: `workflow tools describe praxis_compose_and_launch`
+- When to use: End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt in one call. For trusted automation (CI, scripts, experienced operators). Fails closed by default on unresolved routes, unbound pills, or budget-cap overrun.
+- When not to use: Do not use it for untrusted input or when the caller needs to inspect the ProposedPlan first. Use praxis_compose_plan + praxis_approve_proposed_plan + praxis_launch_plan(approved_plan=...) for the three-step flow.
+- Recommended alias: `workflow ship-intent`
+- Selector: none
+- Required args: `intent`, `approved_by`
+
+Example input:
+
+```json
+{
+  "intent": "1. Add a timezone column to users.\n2. Backfill existing rows with UTC.\n3. Update the profile UI to expose the field.",
+  "approved_by": "nate@praxis",
+  "plan_name": "timezone_rollout",
+  "budget_cap_tokens": 150000
+}
+```
+
+#### `praxis_compose_plan`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:compose-plan`
+- Risks: `read`
+- CLI entrypoint: `workflow compose-plan`
+- CLI schema help: `workflow tools describe praxis_compose_plan`
+- When to use: Turn prose intent with explicit step markers into a ProposedPlan in one call — chains Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview). Compose with approve-plan + launch-plan(approved_plan=...) for the full approval-gated flow.
+- When not to use: Do not use it for free prose without step markers. Reword the intent or pass allow_single_step=true explicitly.
+- Recommended alias: `workflow compose-plan`
+- Selector: none
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "intent": "1. Add a timezone column to users.\n2. Backfill existing rows with UTC.\n3. Update the profile UI to expose the field.",
+  "plan_name": "timezone_rollout",
+  "why": "Operator requested personalization support."
+}
+```
+
 #### `praxis_connector`
 
 - Surface: `workflow`
@@ -1716,6 +1861,112 @@ Example input:
 {
   "action": "build",
   "app_name": "Slack"
+}
+```
+
+#### `praxis_decompose_intent`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:decompose`
+- Risks: `read`
+- CLI entrypoint: `workflow decompose`
+- CLI schema help: `workflow tools describe praxis_decompose_intent`
+- When to use: Split prose intent into ordered steps by parsing explicit markers (numbered lists, bulleted lists, or first/then/finally ordering). Layer 2 (Decompose) of the planning stack — call before turning steps into PlanPackets.
+- When not to use: Do not use it to decompose free prose without markers. Reword the intent, wrap with an LLM extractor, or pass allow_single_step=true to accept the whole intent as one step.
+- Recommended alias: `workflow decompose`
+- Selector: none
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "intent": "1. Add a timezone column to users.\n2. Backfill existing rows with UTC.\n3. Update the profile UI to expose the field."
+}
+```
+
+#### `praxis_launch_plan`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:launch-plan`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow launch-plan`
+- CLI schema help: `workflow tools describe praxis_launch_plan`
+- When to use: Translate an already-planned packet list into a workflow spec and submit it (or preview first with preview_only=true). This is the layer-5 translation primitive — caller still owns upstream planning (extract data pills, decompose prose, reorder by data-flow, author per-step prompts).
+- When not to use: Do not use it to launch a pre-existing .queue.json spec from disk — use praxis_workflow action=run for that path. Do not expect it to do the planning itself (decompose prose, pick fields, reorder steps, write real prompts) — those layers live with the caller today.
+- Recommended alias: `workflow launch-plan`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "plan": {
+    "name": "fix_preview_submit_route_split",
+    "packets": [
+      {
+        "description": "Make preview call TaskTypeRouter so auto/* routes resolve the same way submit does.",
+        "write": [
+          "Code&DBs/Workflow/runtime/workflow/_admission.py"
+        ],
+        "stage": "build",
+        "label": "preview-submit-route-parity"
+      }
+    ]
+  }
+}
+```
+
+#### `praxis_plan_lifecycle`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:plan-history`
+- Risks: `read`
+- CLI entrypoint: `workflow plan-history`
+- CLI schema help: `workflow tools describe praxis_plan_lifecycle`
+- When to use: Read every plan.* event for one workflow_id in chronological order — composed, approved, launched, or blocked. The Q-side read of the planning stack's CQRS pattern.
+- When not to use: Do not use it for workflow_run status; that's a separate query surfaced by praxis_workflow status/stream actions.
+- Recommended alias: `workflow plan-history`
+- Selector: none
+- Required args: `workflow_id`
+
+Example input:
+
+```json
+{
+  "workflow_id": "plan.deadbeef12345678"
+}
+```
+
+#### `praxis_project_plan_budget`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:project-budget`
+- Risks: `read`
+- CLI entrypoint: `workflow project-budget`
+- CLI schema help: `workflow tools describe praxis_project_plan_budget`
+- When to use: Estimate token budgets for a ProposedPlan before approving. Honest projection — prompt tokens are char-based, output tokens are a per-stage upper bound, no USD cost.
+- When not to use: Do not use it to enforce a hard budget cap silently. Projection is for the caller to read and decide.
+- Recommended alias: `workflow project-budget`
+- Selector: none
+- Required args: `proposed`
+
+Example input:
+
+```json
+{
+  "proposed": {
+    "spec_dict": {
+      "name": "...",
+      "jobs": []
+    },
+    "preview": {}
+  }
 }
 ```
 

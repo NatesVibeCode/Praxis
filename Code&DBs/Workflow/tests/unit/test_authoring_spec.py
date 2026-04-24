@@ -135,6 +135,46 @@ def test_validate_workflow_spec_accepts_raw_dict_and_does_not_crash():
         assert isinstance(result, dict)
 
 
+def test_validate_workflow_spec_rejects_unsatisfied_graph_type_flow():
+    from runtime.workflow_validation import validate_workflow_spec
+
+    class _StubConn:
+        def execute(self, *args, **kwargs):
+            return []
+
+        def fetch(self, *args, **kwargs):
+            return []
+
+    raw = {
+        "name": "typed-flow-regression",
+        "workflow_id": "workflow.typed_flow_regression",
+        "workspace_ref": "workspace.test",
+        "runtime_profile_ref": "runtime_profile.test",
+        "jobs": [
+            {
+                "label": "prepare",
+                "adapter_type": "deterministic_task",
+                "expected_outputs": {"summary": "ok"},
+            },
+            {
+                "label": "notify",
+                "adapter_type": "deterministic_task",
+                "depends_on": ["prepare"],
+                "inputs": {"required_inputs": ["BugEvidencePack"]},
+                "expected_outputs": {"done": True},
+            },
+        ],
+    }
+
+    result = validate_workflow_spec(raw, pg_conn=_StubConn())
+
+    assert result["valid"] is False
+    assert result["reason_code"] == "workflow.type_flow.invalid"
+    assert result["type_flow_errors"] == [
+        "workflow.type_flow.unsatisfied_inputs:notify:bug_evidence_pack"
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Loading — basic
 # ---------------------------------------------------------------------------

@@ -20,7 +20,7 @@ def test_data_help_is_available() -> None:
 
     rc = workflow_cli_main(["data", "--help"], stdout=stdout)
 
-    assert rc == 2
+    assert rc == 0
     rendered = stdout.getvalue()
     assert "workflow data profile <input-file>" in rendered
     assert "workflow data join --job-file <job.json>" in rendered

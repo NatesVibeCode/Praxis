@@ -321,7 +321,7 @@ INSERT INTO service_definitions (
         ),
         jsonb_build_object(
             'health_path', '/',
-            'cache_policy', 'no-store_for_sensitive_mobile_routes'
+            'cache_policy', 'no-store_for_sensitive_operator_routes'
         ),
         'service_reconciler.external_declarative',
         TRUE,

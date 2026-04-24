@@ -5253,12 +5253,14 @@ class OperatorControlFrontdoor:
             )
         finally:
             await conn.close()
+        operator_decisions = [
+            _operator_decision_to_json(row)
+            for row in rows
+        ]
         return {
             "ok": True,
-            "results": [
-                _operator_decision_to_json(row)
-                for row in rows
-            ],
+            "operator_decisions": operator_decisions,
+            "results": operator_decisions,
             "as_of": normalized_as_of.isoformat(),
             "filters": {
                 "decision_kind": normalized_decision_kind,

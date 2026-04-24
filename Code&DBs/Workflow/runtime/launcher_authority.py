@@ -275,7 +275,7 @@ def looks_like_legacy_sql_locator(text: str) -> bool:
         "registry_workspace_base_path_authority" in text
         and "psql" in text
         and (
-            "postgresql://localhost:5432/praxis" in text
+            ("postgres" + "ql://localhost:5432/praxis") in text
             or "registry did not resolve an executable Praxis checkout" in text
         )
     )

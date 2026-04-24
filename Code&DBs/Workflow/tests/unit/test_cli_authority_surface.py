@@ -25,7 +25,7 @@ def test_top_level_help_mentions_authority_frontdoors() -> None:
 def test_schema_help_is_available() -> None:
     stdout = StringIO()
 
-    assert workflow_cli_main(["schema", "--help"], stdout=stdout) == 2
+    assert workflow_cli_main(["schema", "--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
     assert "workflow schema status" in rendered
     assert "workflow schema describe <object-name|migration.sql>" in rendered

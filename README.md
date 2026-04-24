@@ -66,7 +66,7 @@ The server is ready when `GET /api/health` succeeds. `POST /orient` returns full
 Moon is the canonical dashboard — one canvas, every click persists. With the API server running:
 
 ```bash
-cd Code\&DBs/Workflow/surfaces/app
+cd "Code&DBs/Workflow/surfaces/app"
 npm install
 npm run dev
 ```

@@ -922,6 +922,9 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     {"title": "Backfill replay provenance", "input": {"open_only": True}},
                 ],
             },
+            "type_contract": {
+                "default": {"consumes": [], "produces": ["praxis.bug.replay_backfill_result"]},
+            },
         },
     ),
     "praxis_semantic_bridges_backfill": (
@@ -1312,6 +1315,9 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "examples": [
                     {"title": "Read replay-ready bugs", "input": {"limit": 25}},
                 ],
+            },
+            "type_contract": {
+                "default": {"consumes": [], "produces": ["praxis.bug.replay_ready_list"]},
             },
         },
     ),

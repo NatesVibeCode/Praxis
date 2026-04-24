@@ -235,13 +235,7 @@ def test_llm_task_adapter_returns_cancelled_when_http_request_is_interrupted(
         monkeypatch.setattr(
             llm_task_mod,
             "supports_adapter",
-            lambda provider_slug, adapter_type: provider_transport.supports_adapter(
-                provider_slug,
-                adapter_type,
-                profiles=profiles,
-                adapter_config={},
-                failure_mappings={},
-            ),
+            lambda provider_slug, adapter_type: True,
         )
         monkeypatch.setattr(
             llm_task_mod,

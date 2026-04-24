@@ -29,8 +29,10 @@ from pydantic import BaseModel
 
 from adapters.permission_matrix import (
     ALLOWED_PERMISSION_MODES,
+    API_PROVIDERS,
     NormalizedPermissionMode,
     PermissionMatrixError,
+    api_permission_prompt_suffix,
     is_permission_step_up,
     translate_permission_flags,
 )
@@ -177,36 +179,11 @@ async def _require_agent_session_access(
         request.state.authenticated_principal = "public_api_token"
         return _auth_payload(principal_ref="public_api_token", auth_kind="bearer")
 
-    from runtime.mobile_security import AUTH_COOKIE_NAME
-
-    mobile_session_cookie = str(request.cookies.get(AUTH_COOKIE_NAME) or "").strip()
-    if mobile_session_cookie:
-        from runtime.capability.sessions import MobileSessionError, resolve_mobile_session
-
-        try:
-            session = resolve_mobile_session(
-                _agent_sessions_pg_conn(),
-                session_token_secret=mobile_session_cookie,
-            )
-        except MobileSessionError as exc:
-            raise HTTPException(
-                status_code=401,
-                detail={"message": str(exc), "error_code": exc.reason_code},
-            ) from exc
-
-        principal_ref = str(session.get("principal_ref") or "mobile_session").strip()
-        request.state.authenticated_principal = principal_ref
-        return _auth_payload(
-            principal_ref=principal_ref,
-            auth_kind="mobile_session",
-            mobile_session_id=str(session.get("session_id") or ""),
-        )
-
     if expected_token is None:
         raise HTTPException(
             status_code=503,
             detail={
-                "message": "PRAXIS_API_TOKEN or a valid mobile session cookie is required before agent sessions can run",
+                "message": "PRAXIS_API_TOKEN is required before agent sessions can run",
                 "error_code": "agent_sessions_auth_not_configured",
             },
         )
@@ -228,15 +205,11 @@ _PERMISSION_MODE_ENV = "PRAXIS_AGENT_PERMISSION_MODE"
 _CLI_PROVIDER_ENV = "PRAXIS_AGENT_CLI_PROVIDER"
 _CODEX_SANDBOX_ENV = "PRAXIS_AGENT_CODEX_SANDBOX"
 _OPENROUTER_MODEL_ENV = "PRAXIS_AGENT_OPENROUTER_MODEL"
-_MOBILE_WORKFLOW_PROVIDER_ENV = "PRAXIS_MOBILE_WORKFLOW_PROVIDER"
-_MOBILE_WORKFLOW_MODEL_ENV = "PRAXIS_MOBILE_WORKFLOW_MODEL"
 _DEFAULT_TURN_TIMEOUT_SECONDS = 180.0
 _DEFAULT_PERMISSION_MODE = "dontAsk"
 _DEFAULT_CLI_PROVIDER = "codex"
 _DEFAULT_CODEX_SANDBOX = "workspace-write"
 _DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-coder"
-_DEFAULT_MOBILE_WORKFLOW_PROVIDER = "openrouter"
-_DEFAULT_MOBILE_WORKFLOW_TIMEOUT_SECONDS = 900
 
 app = FastAPI(title="Agent Sessions", version="1.0.0")
 
@@ -278,21 +251,6 @@ def _validate_permission_mode(value: str | None) -> NormalizedPermissionMode | N
     return normalized  # type: ignore[return-value]
 
 
-class LaunchWorkflowRequest(BaseModel):
-    prompt: str
-    agent_id: str | None = None
-    title: str | None = None
-    provider_slug: str | None = None
-    model_slug: str | None = None
-    task_type: str | None = None
-    timeout: int | None = None
-    idempotency_key: str | None = None
-
-
-class ApproveWorkflowCommandRequest(BaseModel):
-    decision: str = "approve"
-
-
 def _agent_sessions_pg_conn() -> Any:
     factory = getattr(app.state, "pg_conn_factory", None)
     if callable(factory):
@@ -310,12 +268,8 @@ def _auth_payload(
     *,
     principal_ref: str,
     auth_kind: str,
-    mobile_session_id: str | None = None,
 ) -> dict[str, str]:
-    payload = {"principal_ref": principal_ref, "auth_kind": auth_kind}
-    if mobile_session_id:
-        payload["mobile_session_id"] = mobile_session_id
-    return payload
+    return {"principal_ref": principal_ref, "auth_kind": auth_kind}
 
 
 INTERACTIVE_SESSION_KIND = "interactive_cli"
@@ -591,246 +545,6 @@ def terminate_interactive_agent_session(
     )
 
 
-def _spend_mobile_budget_if_present(auth: dict[str, str], *, reason_code: str) -> None:
-    session_id = auth.get("mobile_session_id")
-    if not session_id:
-        return
-    from runtime.capability.sessions import MobileSessionError, spend_session_budget
-
-    try:
-        spend_session_budget(
-            _agent_sessions_pg_conn(),
-            session_id=session_id,
-            units=1,
-            reason_code=reason_code,
-        )
-    except MobileSessionError as exc:
-        raise HTTPException(
-            status_code=429,
-            detail={"message": str(exc), "error_code": exc.reason_code},
-        ) from exc
-
-
-def _require_non_empty_text(value: str | None, *, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": f"{field_name} is required",
-                "error_code": "agent_sessions_invalid_workflow_launch",
-            },
-        )
-    return text
-
-
-def _mobile_workflow_provider(value: str | None = None, env: dict[str, str] | None = None) -> str:
-    source = env if env is not None else os.environ
-    configured = value or source.get(_MOBILE_WORKFLOW_PROVIDER_ENV) or _DEFAULT_MOBILE_WORKFLOW_PROVIDER
-    return _require_non_empty_text(configured, field_name="provider_slug").lower()
-
-
-def _mobile_workflow_model(
-    provider_slug: str,
-    value: str | None = None,
-    env: dict[str, str] | None = None,
-) -> str | None:
-    source = env if env is not None else os.environ
-    configured = str(value or source.get(_MOBILE_WORKFLOW_MODEL_ENV) or "").strip()
-    if configured:
-        return configured
-    if provider_slug == "openrouter":
-        return _openrouter_model(source)
-    return None
-
-
-def _mobile_workflow_timeout(value: int | None) -> int:
-    timeout = _DEFAULT_MOBILE_WORKFLOW_TIMEOUT_SECONDS if value is None else int(value)
-    if timeout < 30 or timeout > 7200:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": "timeout must be between 30 and 7200 seconds",
-                "error_code": "agent_sessions_invalid_workflow_launch",
-            },
-        )
-    return timeout
-
-
-def _workflow_launch_summary(payload: dict[str, Any]) -> str:
-    run_id = str(payload.get("run_id") or "").strip()
-    status = str(payload.get("status") or payload.get("command_status") or "requested").strip()
-    if run_id:
-        return f"Workflow launched: {run_id} ({status})"
-    if payload.get("approval_required"):
-        return "Workflow launch needs approval"
-    error = str(payload.get("error") or payload.get("error_detail") or "").strip()
-    if error:
-        return f"Workflow launch failed: {error}"
-    return f"Workflow launch requested ({status})"
-
-
-def _launch_workflow_from_mobile(
-    conn: Any,
-    *,
-    prompt: str,
-    principal_ref: str,
-    provider_slug: str | None = None,
-    model_slug: str | None = None,
-    title: str | None = None,
-    task_type: str | None = None,
-    timeout: int | None = None,
-    idempotency_key: str | None = None,
-) -> dict[str, Any]:
-    from runtime.control_commands import submit_workflow_command
-    from runtime.spec_compiler import compile_prompt_launch_spec
-
-    normalized_prompt = _require_non_empty_text(prompt, field_name="prompt")
-    resolved_provider_slug = _mobile_workflow_provider(provider_slug)
-    resolved_model_slug = _mobile_workflow_model(resolved_provider_slug, model_slug)
-    resolved_timeout = _mobile_workflow_timeout(timeout)
-    adapter_type = "llm_task" if resolved_provider_slug == "openrouter" else None
-    workflow_id = f"mobile_prompt.{uuid4().hex[:12]}"
-
-    try:
-        launch_spec = compile_prompt_launch_spec(
-            prompt=normalized_prompt,
-            provider_slug=resolved_provider_slug,
-            model_slug=resolved_model_slug,
-            adapter_type=adapter_type,
-            timeout=resolved_timeout,
-            task_type=str(task_type or "build").strip() or "build",
-            workspace_ref="praxis.default",
-            workflow_id=workflow_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": str(exc),
-                "error_code": "agent_sessions_invalid_workflow_launch",
-            },
-        ) from exc
-
-    result = submit_workflow_command(
-        conn,
-        requested_by_kind="mobile",
-        requested_by_ref=_require_non_empty_text(principal_ref, field_name="principal_ref"),
-        inline_spec=launch_spec.to_inline_spec_dict(),
-        repo_root=str(PRAXIS_ROOT),
-        spec_name=(str(title or "").strip() or launch_spec.name),
-        total_jobs=len(launch_spec.jobs),
-        idempotency_key=str(idempotency_key or "").strip() or None,
-    )
-    payload = dict(result)
-    run_id = str(payload.get("run_id") or "").strip()
-    if run_id:
-        payload.setdefault("status_url", f"/api/workflow-runs/{run_id}/status")
-        payload.setdefault("stream_url", f"/api/workflow-runs/{run_id}/stream")
-    payload.setdefault("workflow_id", launch_spec.workflow_id)
-    payload.setdefault("spec_name", str(title or "").strip() or launch_spec.name)
-    payload["launch"] = {
-        "source": "mobile",
-        "provider": resolved_provider_slug,
-        "model": resolved_model_slug,
-        "agent": str(launch_spec.jobs[0].get("agent") or ""),
-        "task_type": str(task_type or "build").strip() or "build",
-        "timeout": resolved_timeout,
-    }
-    return payload
-
-
-def _control_command_spec_summary(payload: Any) -> tuple[str | None, int | None]:
-    if not isinstance(payload, dict):
-        return None, None
-    inline_spec = payload.get("inline_spec")
-    if not isinstance(inline_spec, dict):
-        return None, None
-    workflow_id = str(inline_spec.get("workflow_id") or "").strip()
-    jobs = inline_spec.get("jobs")
-    total_jobs = len(jobs) if isinstance(jobs, list) else None
-    return workflow_id or None, total_jobs
-
-
-def _approve_workflow_command_from_mobile(
-    conn: Any,
-    *,
-    command_id: str,
-    principal_ref: str,
-) -> dict[str, Any]:
-    from runtime.control_commands import (
-        ControlCommandError,
-        ControlCommandStatus,
-        ControlCommandType,
-        accept_control_command,
-        execute_control_command,
-        load_control_command,
-        render_workflow_submit_response,
-    )
-
-    normalized_command_id = _require_non_empty_text(command_id, field_name="command_id")
-    normalized_principal_ref = _require_non_empty_text(principal_ref, field_name="principal_ref")
-    command = load_control_command(conn, normalized_command_id)
-    if command is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "message": f"control command not found: {normalized_command_id}",
-                "error_code": "agent_sessions_workflow_command_not_found",
-            },
-        )
-    if command.command_type != ControlCommandType.WORKFLOW_SUBMIT.value:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": "only mobile workflow.submit commands can be approved here",
-                "error_code": "agent_sessions_workflow_command_type_rejected",
-            },
-        )
-    if command.requested_by_kind != "mobile" or command.requested_by_ref != normalized_principal_ref:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "message": "mobile workflow command belongs to a different principal",
-                "error_code": "agent_sessions_workflow_command_forbidden",
-            },
-        )
-
-    spec_name, total_jobs = _control_command_spec_summary(command.payload)
-    try:
-        if command.command_status == ControlCommandStatus.REQUESTED.value:
-            command = accept_control_command(
-                conn,
-                command.command_id,
-                approved_by=f"mobile:{normalized_principal_ref}",
-            )
-        if command.command_status == ControlCommandStatus.ACCEPTED.value:
-            command = execute_control_command(conn, command.command_id)
-    except ControlCommandError as exc:
-        status_code = 409
-        if exc.reason_code == "control.command.not_found":
-            status_code = 404
-        raise HTTPException(
-            status_code=status_code,
-            detail={
-                "message": str(exc),
-                "error_code": exc.reason_code,
-                "details": exc.details,
-            },
-        ) from exc
-
-    payload = render_workflow_submit_response(
-        command,
-        spec_name=spec_name,
-        total_jobs=total_jobs,
-    )
-    payload["approval"] = {
-        "approved_by": f"mobile:{normalized_principal_ref}",
-        "command_id": command.command_id,
-    }
-    return payload
-
-
 @app.get("/")
 async def service_index() -> dict[str, Any]:
     return {
@@ -841,8 +555,6 @@ async def service_index() -> dict[str, Any]:
             "/agents/{agent_id}/messages",
             "/agents/{agent_id}/stream",
             "/agents/{agent_id}",
-            "/workflows/launch",
-            "/workflows/commands/{command_id}/approve",
         ],
     }
 
@@ -1209,15 +921,20 @@ def _openrouter_model(env: dict[str, str] | None = None) -> str:
     return str(source.get(_OPENROUTER_MODEL_ENV) or _DEFAULT_OPENROUTER_MODEL).strip()
 
 
-def _openrouter_messages(pg_conn: Any | None, *, agent_id: str, prompt: str) -> list[dict[str, str]]:
+def _openrouter_messages(
+    pg_conn: Any | None,
+    *,
+    agent_id: str,
+    prompt: str,
+    permission_mode: NormalizedPermissionMode | None = None,
+) -> list[dict[str, str]]:
+    base_system = (
+        "You are the Praxis operator's persistent agent-session conversation. "
+        "Be concise, direct, and preserve continuity from the visible prior turns."
+    )
+    suffix = api_permission_prompt_suffix("openrouter", permission_mode)
     messages: list[dict[str, str]] = [
-        {
-            "role": "system",
-            "content": (
-                "You are Praxis mobile's persistent operator conversation. "
-                "Be concise, direct, and preserve continuity from the visible prior turns."
-            ),
-        }
+        {"role": "system", "content": base_system + suffix},
     ]
     if pg_conn is not None:
         for event in list_interactive_agent_events(pg_conn, agent_id=agent_id):
@@ -1255,8 +972,8 @@ def _openrouter_json_request(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://praxis.local/mobile",
-            "X-Title": "Praxis Mobile",
+            "HTTP-Referer": "https://praxis.local/operator-console",
+            "X-Title": "Praxis Operator Console",
         },
     )
     with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
@@ -1269,18 +986,21 @@ async def _run_openrouter_turn(
     prompt: str,
     *,
     pg_conn: Any | None,
+    permission_mode: NormalizedPermissionMode | None = None,
 ) -> tuple[str, list[dict[str, Any]], int, str]:
     api_key = str(os.environ.get("OPENROUTER_API_KEY") or "").strip()
     if not api_key:
         event = {
             "type": "error",
             "error_code": "agent_provider_not_configured",
-            "message": "OPENROUTER_API_KEY is not configured for the mobile agent provider",
+            "message": "OPENROUTER_API_KEY is not configured for the agent session OpenRouter provider",
         }
         return event["message"], [event], 78, session_id
 
     model = _openrouter_model()
-    messages = _openrouter_messages(pg_conn, agent_id=agent_id, prompt=prompt)
+    messages = _openrouter_messages(
+        pg_conn, agent_id=agent_id, prompt=prompt, permission_mode=permission_mode,
+    )
     try:
         payload = await asyncio.to_thread(
             _openrouter_json_request,
@@ -1339,6 +1059,7 @@ async def _run_turn(
             session_id,
             prompt,
             pg_conn=pg_conn,
+            permission_mode=permission_mode,
         )
     if provider_slug == "codex":
         fd, raw_reply_file = tempfile.mkstemp(prefix=f"praxis-agent-{agent_id}-", suffix=".txt")
@@ -1523,7 +1244,6 @@ async def create_agent(
         )
 
     pg_conn = _agent_sessions_pg_conn()
-    _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.create")
 
     agent_id = str(uuid4())
     session_id = str(uuid4())
@@ -1650,7 +1370,6 @@ async def send_message(
     session = get_interactive_agent_session(pg_conn, agent_id=agent_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
-    _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.message")
     validated_mode = _validate_permission_mode(body.permission_mode)
     if validated_mode is not None:
         prior_mode = _most_recent_permission_mode(pg_conn, agent_id=agent_id)
@@ -1714,81 +1433,6 @@ async def send_message(
     return {"reply": reply, "turn_events": turn_events, "exit_code": exit_code, "session_id": effective_session_id, "provider": provider_slug}
 
 
-@app.post("/workflows/launch")
-async def launch_workflow(
-    request: Request,
-    body: LaunchWorkflowRequest,
-    _auth: dict[str, str] = Security(_require_agent_session_access),
-) -> dict[str, Any]:
-    if _runner_url():
-        return await _proxy_runner_json(
-            method="POST",
-            path="/workflows/launch",
-            headers=_forward_auth_headers(request),
-            body=body.model_dump(exclude_none=True),
-        )
-
-    pg_conn = _agent_sessions_pg_conn()
-    agent_id = str(body.agent_id or "").strip() or None
-    if agent_id is not None:
-        agent_id = _normalize_agent_id(agent_id)
-        if get_interactive_agent_session(pg_conn, agent_id=agent_id) is None:
-            raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
-
-    _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.workflow.launch")
-    payload = _launch_workflow_from_mobile(
-        pg_conn,
-        prompt=body.prompt,
-        principal_ref=_auth["principal_ref"],
-        provider_slug=body.provider_slug,
-        model_slug=body.model_slug,
-        title=body.title,
-        task_type=body.task_type,
-        timeout=body.timeout,
-        idempotency_key=body.idempotency_key,
-    )
-    if agent_id is not None:
-        append_interactive_agent_event(
-            pg_conn,
-            agent_id=agent_id,
-            event_kind="workflow.launch.requested",
-            payload=payload,
-            text_content=_workflow_launch_summary(payload),
-        )
-    return payload
-
-
-@app.post("/workflows/commands/{command_id}/approve")
-async def approve_workflow_command(
-    request: Request,
-    command_id: str,
-    body: ApproveWorkflowCommandRequest | None = None,
-    _auth: dict[str, str] = Security(_require_agent_session_access),
-) -> dict[str, Any]:
-    if body is not None and str(body.decision or "approve").strip().lower() != "approve":
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": "only approve is supported by this mobile control endpoint",
-                "error_code": "agent_sessions_workflow_command_decision_rejected",
-            },
-        )
-    if _runner_url():
-        return await _proxy_runner_json(
-            method="POST",
-            path=f"/workflows/commands/{command_id}/approve",
-            headers=_forward_auth_headers(request),
-            body=None if body is None else body.model_dump(exclude_none=True),
-        )
-
-    _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.workflow.approve")
-    return _approve_workflow_command_from_mobile(
-        _agent_sessions_pg_conn(),
-        command_id=command_id,
-        principal_ref=_auth["principal_ref"],
-    )
-
-
 @app.get("/agents/{agent_id}/messages")
 async def get_messages(
     agent_id: str,
@@ -1849,7 +1493,6 @@ async def delete_agent(
     if get_interactive_agent_session(pg_conn, agent_id=agent_id) is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} not found")
 
-    _spend_mobile_budget_if_present(_auth, reason_code="agent_sessions.terminate")
     terminated = await _terminate_process(agent_id)
     now = _now_iso()
     termination_event = {"event": "terminated", "at": now}

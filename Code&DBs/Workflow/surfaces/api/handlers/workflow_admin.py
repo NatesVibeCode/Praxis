@@ -413,9 +413,9 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/research": "Research sessions (search local knowledge)",
         "/api/status": "Catalog-backed operator status snapshot with queue and failure breakdown.",
         "/api/launcher/status": "Launcher readiness plus runtime target and sandbox contract status.",
-        "/api/setup/doctor": "Runtime-target setup doctor with sandbox, DB, API, workspace, and image contract.",
-        "/api/setup/plan": "Runtime-target setup plan showing authority rows, services, images, and cleanup checks.",
-        "/api/setup/apply": "Runtime-target setup apply gate; API/MCP own setup authority, SSH is build/deploy transport only.",
+        "/api/setup/doctor": "Catalog-backed runtime-target setup doctor with sandbox, DB, API, workspace, and image contract.",
+        "/api/setup/plan": "Catalog-backed runtime-target setup plan showing authority rows, services, images, and cleanup checks.",
+        "/api/setup/apply": "Catalog-backed runtime-target setup apply gate; API/MCP own setup authority, SSH is build/deploy transport only.",
         "/api/setup/graph": "Onboarding gate-probe graph: per-gate status, observed state, and copy-pasteable remediation hints.",
         "/api/operator/graph": "Catalog-backed cross-domain operator graph projection.",
         "/api/operator/issue-backlog": "Catalog-backed canonical issue backlog read.",
@@ -1228,61 +1228,14 @@ def _handle_launcher_status_get(request: Any, path: str) -> None:
 
 
 def _handle_setup_get(request: Any, path: str) -> None:
-    try:
-        mode = path.rsplit("/", 1)[-1]
-        if mode == "graph":
-            from runtime.setup_wizard import setup_graph_payload
-
-            request._send_json(
-                200,
-                setup_graph_payload(repo_root=REPO_ROOT, authority_surface="api"),
-            )
-            return
-        if mode not in {"doctor", "plan"}:
-            request._send_json(404, {"error": "unknown setup mode"})
-            return
-        from runtime.setup_wizard import setup_payload
-
-        request._send_json(200, setup_payload(mode, repo_root=REPO_ROOT, authority_surface="api"))
-    except Exception as exc:
-        request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
-
-
-def _handle_setup_apply_post(request: Any, path: str) -> None:
     del path
     try:
-        body = _read_json_body(request)
-        approved = bool(body.get("yes") or body.get("apply") or body.get("approved"))
-        gate_ref = (body.get("gate") or body.get("gate_ref") or "").strip() or None
-        apply_ref = (body.get("apply_ref") or "").strip() or None
+        from runtime.setup_wizard import setup_graph_payload
 
-        if gate_ref or apply_ref:
-            from runtime.setup_wizard import setup_apply_gate_payload
-
-            payload = setup_apply_gate_payload(
-                gate_ref=gate_ref,
-                apply_ref=apply_ref,
-                repo_root=REPO_ROOT,
-                approved=approved,
-                applied_by="api_setup_apply",
-                authority_surface="api",
-            )
-            if payload.get("ok"):
-                status_code = 200
-            elif payload.get("error_code") == "setup.apply_requires_approval":
-                status_code = 409
-            elif payload.get("error_code") in {"setup.apply_gate_required", "setup.apply_gate_unknown"}:
-                status_code = 400
-            else:
-                status_code = 409
-            request._send_json(status_code, payload)
-            return
-
-        from runtime.setup_wizard import setup_payload
-
-        payload = setup_payload("apply", repo_root=REPO_ROOT, apply=approved, authority_surface="api")
-        status_code = 200 if payload.get("ok") else (501 if approved else 409)
-        request._send_json(status_code, payload)
+        request._send_json(
+            200,
+            setup_graph_payload(repo_root=REPO_ROOT, authority_surface="api"),
+        )
     except Exception as exc:
         request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
 
@@ -1330,7 +1283,6 @@ def _handle_launcher_recover_post(request: Any, path: str) -> None:
 
 
 ADMIN_POST_ROUTES: list[RouteEntry] = [
-    (_exact("/api/setup/apply"), _handle_setup_apply_post),
     (_exact("/api/launcher/recover"), _handle_launcher_recover_post),
 ]
 
@@ -1338,8 +1290,6 @@ ADMIN_GET_ROUTES: list[RouteEntry] = [
     (_exact("/"), _handle_root_get),
     (_exact("/api/platform-overview"), _handle_platform_overview_get),
     (_exact("/api/launcher/status"), _handle_launcher_status_get),
-    (_exact("/api/setup/doctor"), _handle_setup_get),
-    (_exact("/api/setup/plan"), _handle_setup_get),
     (_exact("/api/setup/graph"), _handle_setup_get),
     (_exact("/api/workflow-templates"), _handle_workflow_templates_get),
 ]

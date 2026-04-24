@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from runtime import setup_wizard
+from runtime.operation_catalog_bindings import resolve_python_reference
 from runtime.service_lifecycle import RegisterRuntimeTargetCommand, normalize_substrate_kind
 
 
@@ -113,7 +115,7 @@ def test_setup_apply_is_blocked_until_it_has_durable_write_authority(
     assert payload["error_code"] == "setup.apply_not_implemented"
 
 
-def test_runtime_setup_apply_catalog_seed_is_preview_only() -> None:
+def test_runtime_setup_apply_catalog_seed_is_a_receipted_command() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     migration = (
         repo_root
@@ -125,8 +127,26 @@ def test_runtime_setup_apply_catalog_seed_is_preview_only() -> None:
     ).read_text(encoding="utf-8")
     apply_row = migration.split("'runtime-setup-apply'", 1)[1].split(")\nON CONFLICT", 1)[0]
 
-    assert "'operation_query'" in apply_row
-    assert "'query'" in apply_row
-    assert "'runtime_setup_apply_requested'" not in apply_row
-    assert "'observe'" in apply_row
-    assert "'read_only'" in apply_row
+    assert "'operation_command'" in apply_row
+    assert "'command'" in apply_row
+    assert "'runtime_setup_apply_requested'" in apply_row
+    assert "'operate'" in apply_row
+    assert "'non_idempotent'" in apply_row
+
+
+def test_runtime_setup_catalog_bindings_resolve_to_live_contracts() -> None:
+    assert issubclass(
+        resolve_python_reference("runtime.setup_wizard.SetupQuery"),
+        BaseModel,
+    )
+    assert issubclass(
+        resolve_python_reference("runtime.setup_wizard.SetupApplyCommand"),
+        BaseModel,
+    )
+
+    for handler_ref in (
+        "runtime.setup_wizard.handle_setup_doctor",
+        "runtime.setup_wizard.handle_setup_plan",
+        "runtime.setup_wizard.handle_setup_apply",
+    ):
+        assert callable(resolve_python_reference(handler_ref))

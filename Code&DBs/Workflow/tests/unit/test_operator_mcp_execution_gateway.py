@@ -101,6 +101,7 @@ def test_mcp_operator_catalog_tool_returns_structured_error_when_authority_unava
     result = operator.tool_praxis_replay_ready_bugs({"limit": 10})
 
     assert result == {
+        "ok": False,
         "error": "WORKFLOW_DATABASE_URL authority unavailable",
         "error_code": "postgres.authority_unavailable",
         "operation_name": "operator.replay_ready_bugs",

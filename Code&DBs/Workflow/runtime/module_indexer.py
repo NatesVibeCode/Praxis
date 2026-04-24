@@ -705,6 +705,13 @@ class ModuleIndexer:
         self._vector_store = PostgresVectorStore(conn, self._embedder)
         self._embeddings_repo = PostgresModuleEmbeddingsRepository(conn)
 
+    def _module_embeddings_repo(self) -> PostgresModuleEmbeddingsRepository:
+        repo = getattr(self, "_embeddings_repo", None)
+        if repo is None:
+            repo = PostgresModuleEmbeddingsRepository(self._conn)
+            self._embeddings_repo = repo
+        return repo
+
     def index_codebase(
         self,
         subdirs: list[str] | None = None,
@@ -744,23 +751,23 @@ class ModuleIndexer:
         pruned_missing = 0
         try:
             for path, ids in walked_ids_by_path.items():
-                stale_module_ids = self._embeddings_repo.fetch_module_ids_for_path(
+                stale_module_ids = self._module_embeddings_repo().fetch_module_ids_for_path(
                     module_path=path,
                     module_ids=list(ids),
                 )
                 for stale_module_id in stale_module_ids:
-                    self._embeddings_repo.delete_module_id(module_id=stale_module_id)
+                    self._module_embeddings_repo().delete_module_id(module_id=stale_module_id)
                     pruned_orphans += 1
 
             for subdir in subdirs:
                 like = f"{to_repo_ref(subdir)}/%"
-                candidate_rows = self._embeddings_repo.fetch_module_paths_like(
+                candidate_rows = self._module_embeddings_repo().fetch_module_paths_like(
                     like_pattern=like
                 )
                 for candidate_path in candidate_rows:
                     if candidate_path in walked_paths:
                         continue
-                    self._embeddings_repo.delete_module_path(module_path=candidate_path)
+                    self._module_embeddings_repo().delete_module_path(module_path=candidate_path)
                     pruned_missing += 1
         except Exception as exc:
             import sys
@@ -771,7 +778,7 @@ class ModuleIndexer:
         existing_hashes = {}
         if not force:
             try:
-                existing_hashes = self._embeddings_repo.fetch_source_hashes()
+                existing_hashes = self._module_embeddings_repo().fetch_source_hashes()
             except Exception:
                 pass
 
@@ -821,7 +828,7 @@ class ModuleIndexer:
                 if not normalized_embedding:
                     raise RuntimeError("embedding_empty")
                 vector_literal = format_vector_literal(normalized_embedding)
-                self._embeddings_repo.upsert_embedding(
+                self._module_embeddings_repo().upsert_embedding(
                     module_id=unit.module_id,
                     module_path=unit.module_path,
                     kind=unit.kind,
@@ -986,8 +993,8 @@ class ModuleIndexer:
     def stats(self) -> dict[str, Any]:
         """Return index statistics."""
         try:
-            total = self._embeddings_repo.fetch_total()
-            by_kind_rows = self._embeddings_repo.fetch_counts_by_kind()
+            total = self._module_embeddings_repo().fetch_total()
+            by_kind_rows = self._module_embeddings_repo().fetch_counts_by_kind()
             return {
                 "total_indexed": total,
                 "by_kind": {kind: count for kind, count in by_kind_rows},
@@ -1017,7 +1024,7 @@ class ModuleIndexer:
         """
 
         try:
-            rows = self._embeddings_repo.fetch_path_hash_rows()
+            rows = self._module_embeddings_repo().fetch_path_hash_rows()
         except Exception as exc:
             return {
                 "stale_count": 0,

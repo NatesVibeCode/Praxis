@@ -64,6 +64,15 @@ def resolve_credential(
     source = env if env is not None else os.environ
     segments = auth_ref.rsplit(".", maxsplit=1)
     provider_hint = segments[-1].lower() if segments else ""
+    if provider_hint == "anthropic":
+        # PUBLIC_RELEASE_REMOVE: this is Nate's private operator policy, not
+        # the public Praxis default. Public builds must move Anthropic direct
+        # API admission behind registry/profile authority instead of blocking
+        # every user who legitimately has ANTHROPIC_API_KEY.
+        raise CredentialResolutionError(
+            "credential.direct_anthropic_api_forbidden",
+            "Anthropic is CLI-only in this Praxis registry; direct API credentials are not admitted.",
+        )
 
     env_vars = resolve_api_key_env_vars(provider_hint)
     if not env_vars:

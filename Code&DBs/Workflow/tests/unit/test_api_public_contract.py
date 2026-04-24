@@ -61,6 +61,8 @@ def test_public_v1_create_run_uses_idempotency_and_returns_public_links(monkeypa
             json={
                 "name": "Public Build",
                 "phase": "build",
+                "workspace_ref": "praxis",
+                "runtime_profile_ref": "praxis",
                 "jobs": [
                     {
                         "label": "build",
@@ -95,8 +97,8 @@ def test_public_v1_create_run_uses_idempotency_and_returns_public_links(monkeypa
             "name": "Public Build",
             "workflow_id": "workflow.api.v1.public.build",
             "phase": "build",
-            "workspace_ref": rest._default_workspace_ref(),
-            "runtime_profile_ref": rest._default_runtime_profile_ref(),
+            "workspace_ref": "praxis",
+            "runtime_profile_ref": "praxis",
             "jobs": [
                 {
                     "label": "build",

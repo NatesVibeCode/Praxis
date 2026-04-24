@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from runtime.instance import PRAXIS_RUNTIME_PROFILE_ENV, PRAXIS_RUNTIME_PROFILES_CONFIG_ENV
+from surfaces._workflow_database import workflow_database_url_for_repo
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -29,7 +30,7 @@ def contract_map() -> dict[str, str]:
     """
     repo = str(REPO_ROOT)
     return {
-        "WORKFLOW_DATABASE_URL": f"postgresql://postgres@localhost:5432/praxis",
+        "WORKFLOW_DATABASE_URL": str(workflow_database_url_for_repo(REPO_ROOT)),
         "PRAXIS_LOCAL_POSTGRES_DATA_DIR": f"{repo}/Code&DBs/Databases/postgres-dev/data",
         "PRAXIS_RUNTIME_PROFILE": "praxis",
         "PRAXIS_INSTANCE_NAME": "praxis",
@@ -40,6 +41,7 @@ def contract_map() -> dict[str, str]:
 
 def repo_local_env() -> dict[str, str]:
     return {
+        "WORKFLOW_DATABASE_URL": str(workflow_database_url_for_repo(REPO_ROOT)),
         PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(REPO_ROOT / "config" / "runtime_profiles.json"),
         PRAXIS_RUNTIME_PROFILE_ENV: "praxis",
     }

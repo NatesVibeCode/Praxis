@@ -10,7 +10,7 @@ from storage.migrations import (
 
 
 CANONICAL_MIGRATION = "081_observability_lineage_and_metrics.sql"
-BOOTSTRAP_ONLY_MIGRATION = "082_event_log.sql"
+BOOTSTRAP_ONLY_MIGRATION = "043_workflow_runtime_notification_sync_rename.sql"
 
 
 def test_canonical_lookup_allows_canonical_migrations() -> None:

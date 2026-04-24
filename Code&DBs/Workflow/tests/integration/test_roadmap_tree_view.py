@@ -602,6 +602,7 @@ async def _exercise_roadmap_write_preview_parity() -> None:
             ),
             "work_item_assessments": len(payload["work_item_assessments"]),
             "semantic_neighbors": len(payload["semantic_neighbors"]),
+            "roadmap_item_clusters": len(payload["roadmap_item_clusters"]),
         }
         assert "Roadmap write preview parity" in payload["rendered_markdown"]
         assert any(

@@ -241,6 +241,8 @@ class TestDispatchGraphExecution:
     def test_evidence_recorded_per_node(self, workspace):
         spec = _workflow_spec(
             prompt="Add farewell",
+            provider_slug="mock",
+            adapter_type="cli_llm",
             workdir=workspace,
             scope_write=["greeting.py"],
             context_sections=[{"name": "FILE", "content": "pass"}],
@@ -273,6 +275,8 @@ class TestDispatchGraphExecution:
     def test_file_written_by_graph(self, workspace):
         spec = _workflow_spec(
             prompt="Add farewell",
+            provider_slug="mock",
+            adapter_type="cli_llm",
             workdir=workspace,
             scope_write=["greeting.py"],
             context_sections=[{"name": "FILE", "content": "pass"}],

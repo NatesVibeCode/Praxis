@@ -35,6 +35,11 @@ _DEFAULT_TEST_DATABASE = "praxis_test"
 _TEST_DATABASE_URL_ENV = "WORKFLOW_TEST_DATABASE_URL"
 _DUPLICATE_MIGRATION_SQLSTATES = frozenset({"42P07", "42701", "42710"})
 _DEFAULT_SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DB_SKIP_ACTION = (
+    "Set WORKFLOW_TEST_DATABASE_URL to an existing, writable test database "
+    "(for example, a pre-created `praxis_test` database), or ensure your "
+    "configured authority has CREATE DATABASE permission."
+)
 
 
 def _database_name_from_url(database_url: str) -> str:
@@ -130,7 +135,11 @@ def ensure_test_database_ready() -> str:
         if _ready_database_url is not None:
             return _ready_database_url
 
-        database_url = _default_test_database_url()
+        try:
+            database_url = _default_test_database_url()
+        except Exception as exc:
+            _skip_for_unavailable_authority(exc)
+            raise
         probe_database = _probe_database(database_url)
         try:
             _run_sync(probe_database)
@@ -154,14 +163,14 @@ def ensure_test_database_ready() -> str:
                     create_database.close()
                 except Exception:
                     pass
-                _skip_for_unavailable_authority(exc)
+                _skip_for_unavailable_authority(exc, database_url=database_url)
                 raise
         except Exception as exc:
             try:
                 probe_database.close()
             except Exception:
                 pass
-            _skip_for_unavailable_authority(exc)
+            _skip_for_unavailable_authority(exc, database_url=database_url)
             raise
         _ready_database_url = database_url
         return _ready_database_url
@@ -190,9 +199,12 @@ def _get_pool():
     if _pool is None:
         from storage.postgres.connection import get_workflow_pool
         try:
-            _pool = get_workflow_pool(env=_resolve_test_env())
+            env = _resolve_test_env()
+            _pool = get_workflow_pool(env=env)
         except Exception as exc:
-            _skip_for_unavailable_authority(exc)
+            _skip_for_unavailable_authority(
+                exc, database_url=env.get("WORKFLOW_DATABASE_URL")
+            )
             raise
     return _pool
 
@@ -208,7 +220,49 @@ def _exception_chain(exc: BaseException) -> list[BaseException]:
     return chain
 
 
-def _skip_for_unavailable_authority(exc: BaseException) -> None:
+def _redact_test_database_url(database_url: str) -> str:
+    try:
+        parsed = urlsplit(database_url)
+        host = parsed.hostname or "<unknown-host>"
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme}://{host}{port}/{_database_name_from_url(database_url)}"
+    except Exception:
+        return "<invalid test database URL>"
+
+
+def _build_unavailable_authority_message(
+    reason_code: str,
+    *,
+    database_url: str | None = None,
+) -> str:
+    message = (
+        "repo-local Postgres authority unavailable for DB-backed tests: "
+        f"{reason_code}"
+    )
+    if database_url:
+        message = f"{message} (target={_redact_test_database_url(database_url)})"
+
+    if reason_code in {
+        _AUTHORITY_UNAVAILABLE,
+        _CONFIG_MISSING,
+        "postgres.invalid_authorization",
+    }:
+        return (
+            f"{message}. Verify WORKFLOW_DATABASE_URL / WORKFLOW_TEST_DATABASE_URL "
+            "point to a reachable workflow Postgres authority."
+        )
+
+    if reason_code == "postgres.insufficient_privilege":
+        return f"{message}. {_TEST_DB_SKIP_ACTION}"
+
+    return message
+
+
+def _skip_for_unavailable_authority(
+    exc: BaseException,
+    *,
+    database_url: str | None = None,
+) -> None:
     reason_code = getattr(exc, "reason_code", "")
     unavailable = reason_code in {_AUTHORITY_UNAVAILABLE, _CONFIG_MISSING}
     for item in _exception_chain(exc):
@@ -233,8 +287,10 @@ def _skip_for_unavailable_authority(exc: BaseException) -> None:
     import pytest
 
     pytest.skip(
-        "repo-local Postgres authority unavailable for DB-backed tests: "
-        f"{reason_code}",
+        _build_unavailable_authority_message(
+            reason_code or "postgres.authority_unavailable",
+            database_url=database_url,
+        ),
         allow_module_level=True,
     )
 
@@ -345,10 +401,14 @@ class _IsolatedSyncPostgresConnection:
         from storage.postgres.connection import _run_sync, connect_workflow_database
 
         self._run_sync = _run_sync
+        env = _resolve_test_env()
         try:
-            self._conn = self._run_sync(connect_workflow_database(env=_resolve_test_env()))
+            self._conn = self._run_sync(connect_workflow_database(env=env))
         except Exception as exc:
-            _skip_for_unavailable_authority(exc)
+            _skip_for_unavailable_authority(
+                exc,
+                database_url=env.get("WORKFLOW_DATABASE_URL"),
+            )
             raise
         self._transaction = self._conn.transaction()
         self._run_sync(self._transaction.start())

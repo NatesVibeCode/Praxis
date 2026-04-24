@@ -76,6 +76,18 @@ _API_HEALTHY = GateProbe(
 )
 
 
+_ENV_FILE = GateProbe(
+    gate_ref="runtime.env_file",
+    domain="runtime",
+    title="Repo .env declares WORKFLOW_DATABASE_URL",
+    purpose=(
+        "scripts/bootstrap writes the resolved DSN into repo-local .env so "
+        "later invocations do not need the env var exported in the shell."
+    ),
+    ok_cache_ttl_s=300,
+)
+
+
 def _resolve_api_host_port(env: Mapping[str, str]) -> tuple[str, int]:
     port = int((env.get("PRAXIS_API_PORT") or "8420").strip())
     host = (env.get("PRAXIS_API_HOST") or "127.0.0.1").strip()
@@ -273,8 +285,44 @@ def probe_api_healthy(env: Mapping[str, str], repo_root: Path) -> GateResult:
     )
 
 
+def probe_env_file(env: Mapping[str, str], repo_root: Path) -> GateResult:
+    env_path = repo_root / ".env"
+    if not env_path.exists():
+        return gate_result(
+            _ENV_FILE,
+            status="missing",
+            observed_state={"env_path": str(env_path), "exists": False},
+            remediation_hint=(
+                "Repo .env is absent. ./scripts/bootstrap writes it on first run, "
+                "or apply: praxis setup apply --gate runtime.env_file --yes"
+            ),
+            apply_ref="apply.runtime.env_file.write",
+        )
+    body = env_path.read_text(encoding="utf-8", errors="replace")
+    has_database_url = any(
+        line.strip().startswith("WORKFLOW_DATABASE_URL=") and line.strip() != "WORKFLOW_DATABASE_URL="
+        for line in body.splitlines()
+    )
+    if not has_database_url:
+        return gate_result(
+            _ENV_FILE,
+            status="blocked",
+            observed_state={"env_path": str(env_path), "has_database_url": False},
+            remediation_hint=(
+                f"{env_path} exists but does not declare WORKFLOW_DATABASE_URL. "
+                "Add the DSN line or rerun ./scripts/bootstrap."
+            ),
+        )
+    return gate_result(
+        _ENV_FILE,
+        status="ok",
+        observed_state={"env_path": str(env_path), "has_database_url": True},
+    )
+
+
 def register(graph=ONBOARDING_GRAPH) -> None:
     graph.register(_API_PORT_FREE, probe_api_port_free)
     graph.register(_VENV, probe_venv)
     graph.register(_LAUNCHER_INSTALLED, probe_launcher_installed)
     graph.register(_API_HEALTHY, probe_api_healthy)
+    graph.register(_ENV_FILE, probe_env_file)

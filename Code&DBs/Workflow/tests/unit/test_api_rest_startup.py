@@ -170,8 +170,6 @@ def test_agent_sessions_surface_is_mounted(monkeypatch, tmp_path) -> None:
     assert index_response.status_code == 200
     assert index_response.json()["service"] == "agent_sessions"
     assert index_response.json()["base_path"] == "/api/agent-sessions"
-    assert "/api/agent-sessions/workflows/launch" in index_response.json()["routes"]
-    assert "/api/agent-sessions/workflows/commands/{command_id}/approve" in index_response.json()["routes"]
     assert agents_response.status_code == 200
     assert agents_response.json() == []
 
@@ -201,69 +199,6 @@ def test_launcher_serves_pwa_manifest_and_service_worker(monkeypatch, tmp_path) 
     assert "self.skipWaiting" in sw_response.text
 
 
-def test_mobile_app_routes_are_inline_and_installable() -> None:
-    with TestClient(rest.app) as client:
-        app_response = client.get("/mobile")
-        manifest_response = client.get("/mobile/manifest.webmanifest")
-        sw_response = client.get("/mobile/sw.js")
-
-    assert app_response.status_code == 200
-    assert app_response.headers["content-type"].startswith("text/html")
-    assert "Praxis" in app_response.text
-    assert "/api/agent-sessions/agents" in app_response.text
-    assert "/api/agent-sessions/workflows/launch" in app_response.text
-    assert "/api/agent-sessions/workflows/commands/" in app_response.text
-    assert "providerMeta" in app_response.text
-    assert "waitForWorkflow" in app_response.text
-    assert manifest_response.status_code == 200
-    assert manifest_response.headers["content-type"].startswith("application/manifest+json")
-    assert manifest_response.json()["start_url"] == "/mobile"
-    assert sw_response.status_code == 200
-    assert "praxis-mobile" in sw_response.text
-
-
-def test_mobile_bootstrap_issue_is_host_only_and_db_backed(monkeypatch) -> None:
-    class _FakeConn:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, tuple[object, ...]]] = []
-
-        def execute(self, sql: str, *args: object):
-            self.calls.append((sql, args))
-            if "INSERT INTO mobile_bootstrap_tokens" in sql:
-                return [
-                    {
-                        "token_id": "00000000-0000-4000-8000-000000000010",
-                        "principal_ref": args[0],
-                        "token_hash": args[1],
-                        "issued_at": datetime(2026, 4, 23, tzinfo=timezone.utc),
-                        "expires_at": datetime(2026, 4, 23, 0, 10, tzinfo=timezone.utc),
-                    }
-                ]
-            return []
-
-    fake_conn = _FakeConn()
-    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: fake_conn)
-
-    with TestClient(rest.app, client=("127.0.0.1", 50000)) as client:
-        response = client.post(
-            "/api/mobile/bootstrap-token",
-            json={"principal_ref": "operator:nate", "ttl_s": 300},
-        )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["pairing_code"]
-    assert payload["principal_ref"] == "operator:nate"
-    assert fake_conn.calls
-    assert "sha256:" in str(fake_conn.calls[0][1][1])
-
-    with TestClient(rest.app, client=("192.0.2.10", 50000)) as client:
-        denied = client.post("/api/mobile/bootstrap-token")
-
-    assert denied.status_code == 403
-    assert denied.json()["error_code"] == "mobile.bootstrap_issue_host_only"
-
-
 def test_launcher_recover_endpoint_returns_structured_payload(monkeypatch) -> None:
     monkeypatch.setattr(
         rest.launcher_handlers,
@@ -291,70 +226,15 @@ def test_launcher_recover_endpoint_returns_structured_payload(monkeypatch) -> No
     assert response.json()["service"] == "workflow-api"
 
 
-def test_service_lifecycle_catalog_http_routes_execute_handlers(monkeypatch) -> None:
-    calls: list[tuple[str, object]] = []
-
-    def _handler(name: str):
-        def _capture(command, _subsystems):
-            calls.append((name, command))
-            return {"status": name}
-
-        return _capture
-
-    monkeypatch.setattr(rest, "handle_register_runtime_target", _handler("target_registered"))
-    monkeypatch.setattr(rest, "handle_list_runtime_targets", _handler("targets_listed"))
-    monkeypatch.setattr(rest, "handle_register_service_definition", _handler("service_registered"))
-    monkeypatch.setattr(rest, "handle_declare_service_desired_state", _handler("desired_state_declared"))
-    monkeypatch.setattr(rest, "handle_record_service_lifecycle_event", _handler("event_recorded"))
-    monkeypatch.setattr(rest, "handle_query_service_projection", _handler("projection_found"))
-
-    with TestClient(rest.app) as client:
-        responses = [
-            client.post(
-                "/api/service-lifecycle/targets",
-                json={"runtime_target_ref": "target.alpha", "substrate_kind": "container"},
-            ),
-            client.get("/api/service-lifecycle/targets?workspace_ref=praxis&limit=5"),
-            client.post(
-                "/api/service-lifecycle/services",
-                json={"service_ref": "service.api", "service_kind": "http_api"},
-            ),
-            client.post(
-                "/api/service-lifecycle/desired-state",
-                json={
-                    "service_ref": "service.api",
-                    "runtime_target_ref": "target.alpha",
-                    "desired_status": "running",
-                },
-            ),
-            client.post(
-                "/api/service-lifecycle/events",
-                json={
-                    "service_ref": "service.api",
-                    "runtime_target_ref": "target.alpha",
-                    "event_type": "health_check_passed",
-                },
-            ),
-            client.get("/api/service-lifecycle/projection/service.api/target.alpha"),
-        ]
-
-    assert [response.status_code for response in responses] == [200, 200, 200, 200, 200, 200]
-    assert [response.json()["status"] for response in responses] == [
-        "target_registered",
-        "targets_listed",
-        "service_registered",
-        "desired_state_declared",
-        "event_recorded",
-        "projection_found",
+def test_service_lifecycle_http_routes_are_not_hardcoded() -> None:
+    hardcoded_routes = [
+        route
+        for route in rest.app.routes
+        if getattr(route, "path", "").startswith("/api/service-lifecycle")
+        and (route.openapi_extra or {}).get("x-praxis-binding-source") != "operation_catalog"
     ]
-    assert [name for name, _command in calls] == [
-        "target_registered",
-        "targets_listed",
-        "service_registered",
-        "desired_state_declared",
-        "event_recorded",
-        "projection_found",
-    ]
+
+    assert hardcoded_routes == []
 
 
 def test_api_routes_endpoint_lists_the_live_http_surface() -> None:

@@ -29,11 +29,13 @@ from typing import Literal
 
 __all__ = [
     "ALLOWED_PERMISSION_MODES",
+    "API_PROVIDERS",
     "DEFAULT_PERMISSION_MODE",
     "NormalizedPermissionMode",
     "PERMISSION_MODE_RANK",
     "PermissionMatrixError",
     "SUPPORTED_CLI_PROVIDERS",
+    "api_permission_prompt_suffix",
     "is_permission_step_up",
     "translate_permission_flags",
 ]
@@ -72,6 +74,44 @@ PERMISSION_MODE_RANK: dict[NormalizedPermissionMode, int] = {
 
 
 SUPPORTED_CLI_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "gemini"})
+
+
+# API-backed providers that talk to an HTTP chat-completions endpoint rather
+# than spawning a local CLI. Permission modes for these do not map to argv
+# flags — the API has no tool sandbox to toggle, no approval prompts to
+# route — so the matrix expresses them as system-prompt suffixes that
+# constrain what the model is asked to produce. Honest: this is softer than
+# the CLI flag path. An API provider that grows tool-use will need its own
+# capability layer on top of this vocabulary.
+API_PROVIDERS: frozenset[str] = frozenset({"openrouter"})
+
+
+_API_PERMISSION_PROMPT_SUFFIX: dict[NormalizedPermissionMode, str] = {
+    "read_only": (
+        "\n\nPermission: read_only. Answer questions about the workspace and "
+        "describe what you observe. Do not propose changes, commands, or actions."
+    ),
+    "plan_only": (
+        "\n\nPermission: plan_only. Produce a structured plan of actions the "
+        "operator could take. Do not describe actions as executed or imply "
+        "execution is underway."
+    ),
+    "propose_edits": (
+        "\n\nPermission: propose_edits. You may propose specific edits and "
+        "commands for the operator to apply. Do not claim to have executed "
+        "anything — the API transport cannot run your suggestions."
+    ),
+    "auto_edits": (
+        "\n\nPermission: auto_edits. Propose precise edits the operator's "
+        "environment will apply automatically. Be specific about file paths "
+        "and exact text."
+    ),
+    "full_autonomy": (
+        "\n\nPermission: full_autonomy. The operator has delegated broad "
+        "authority for this turn. Propose edits and commands freely while "
+        "staying focused on the task."
+    ),
+}
 
 
 class PermissionMatrixError(ValueError):
@@ -137,6 +177,24 @@ _MATRIX: dict[str, dict[NormalizedPermissionMode, tuple[str, ...]]] = {
     "codex":  _CODEX_MATRIX,
     "gemini": _GEMINI_MATRIX,
 }
+
+
+def api_permission_prompt_suffix(
+    provider_slug: str,
+    mode: NormalizedPermissionMode | str | None,
+) -> str:
+    """Return a system-prompt suffix for an API provider at the given mode.
+
+    Empty string when ``mode`` is None or the provider does not participate
+    in the API-prompt-suffix scheme. Unknown modes also return empty —
+    typo'd modes do not leak into the system prompt.
+    """
+    if mode is None:
+        return ""
+    provider = provider_slug.strip().lower()
+    if provider not in API_PROVIDERS:
+        return ""
+    return _API_PERMISSION_PROMPT_SUFFIX.get(mode, "")  # type: ignore[arg-type]
 
 
 def is_permission_step_up(

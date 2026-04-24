@@ -88,6 +88,7 @@ def _request(run_index: int) -> WorkflowRequest:
                     "task_name": "prepare",
                     "input_payload": {
                         "step": 0,
+                        "allow_passthrough_echo": True,
                     },
                 },
                 expected_outputs={"result": "prepared"},
@@ -109,6 +110,7 @@ def _request(run_index: int) -> WorkflowRequest:
                     "task_name": "admit",
                     "input_payload": {
                         "step": 1,
+                        "allow_passthrough_echo": True,
                     },
                 },
                 expected_outputs={"result": "admitted"},

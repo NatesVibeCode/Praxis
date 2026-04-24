@@ -207,7 +207,7 @@ describe('MoonBuildPage', () => {
     ]);
   });
 
-  test('explains that free text is enough and offers example prompts in compose mode', async () => {
+  test('explains the compose contract in compose mode', async () => {
     render(
       <MoonBuildPage
         workflowId={null}
@@ -215,14 +215,10 @@ describe('MoonBuildPage', () => {
       />,
     );
 
-    expect(await screen.findByText(/free text is enough/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /research competitor pricing/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /research competitor pricing/i }));
-
-    expect(screen.getByRole('textbox')).toHaveValue(
-      'Research competitor pricing, classify by tier, draft a comparison report, notify the team on Slack',
-    );
+    expect(await screen.findByText(/describe the workflow/i)).toBeInTheDocument();
+    expect(screen.getByText(/authority it should trust/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/scrape gmail/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /build workflow/i })).toBeDisabled();
   });
 
   test('applies the yielding detail-dock class when the detail panel is opened on a populated graph', () => {

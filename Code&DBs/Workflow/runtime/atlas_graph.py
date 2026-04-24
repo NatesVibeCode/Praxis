@@ -20,32 +20,35 @@ from storage.postgres.connection import SyncPostgresConnection, get_workflow_poo
 REPO_ROOT = workspace_repo_root()
 HEURISTIC_MAP_PATH = scratch_path("atlas_heuristic_map")
 FRESHNESS_LAG_TOLERANCE_SECONDS = 2.0
+ACTIVITY_HALF_LIFE_SECONDS = 7 * 24 * 60 * 60
+MIN_ACTIVITY_SCORE = 0.08
 
-# One color per area. Keep this here so the API, app, and static export share
-# the same visual semantics.
+# Atlas is a living map, not a categorical dashboard. Keep area color payloads
+# monochrome so downstream renderers cannot quietly reintroduce the old rainbow
+# browser language.
 AREA_COLORS = {
-    "compiler": "#7aa2f7",
-    "scheduler": "#bb9af7",
-    "sandbox": "#9ece6a",
+    "compiler": "#b7b0a3",
+    "scheduler": "#d8d2c5",
+    "sandbox": "#8c8a84",
     "routing": "#e0af68",
-    "circuits": "#f7768e",
-    "outbox": "#2ac3de",
-    "receipts": "#73daca",
-    "memory": "#c0caf5",
-    "bugs": "#db4b4b",
-    "roadmap": "#ff9e64",
-    "authority": "#a9b1d6",
-    "build": "#b4f9f8",
-    "governance": "#e0dc8f",
-    "heal": "#9ece6a",
-    "discover": "#41a6b5",
-    "debate": "#f7768e",
-    "moon": "#ad8ee6",
-    "mcp": "#7dcfff",
+    "circuits": "#f3efe6",
+    "outbox": "#8c8a84",
+    "receipts": "#d8d2c5",
+    "memory": "#b7b0a3",
+    "bugs": "#f3efe6",
+    "roadmap": "#d8d2c5",
+    "authority": "#b7b0a3",
+    "build": "#8c8a84",
+    "governance": "#d8d2c5",
+    "heal": "#8c8a84",
+    "discover": "#b7b0a3",
+    "debate": "#f3efe6",
+    "moon": "#d8d2c5",
+    "mcp": "#b7b0a3",
     "cli": "#cfc9c2",
-    "integrations": "#ff9e64",
+    "integrations": "#e0af68",
 }
-UNOWNED_COLOR = "#4a5068"
+UNOWNED_COLOR = "#6d6b67"
 
 SCHEMA_AREA_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
@@ -155,7 +158,8 @@ def fetch_entities(conn: SyncPostgresConnection) -> list[dict[str, Any]]:
         for r in conn.fetch(
             """
             SELECT id, entity_type, name, COALESCE(LEFT(content, 300), '') AS content_preview,
-                   COALESCE(source, '') AS source
+                   COALESCE(source, '') AS source,
+                   updated_at
               FROM memory_entities
              WHERE NOT archived
                AND name IS NOT NULL AND name <> ''
@@ -168,7 +172,8 @@ def fetch_entities(conn: SyncPostgresConnection) -> list[dict[str, Any]]:
 def fetch_edges(conn: SyncPostgresConnection, known_ids: set[str]) -> list[dict[str, Any]]:
     rows = conn.fetch(
         """
-        SELECT source_id, target_id, relation_type, weight
+        SELECT source_id, target_id, relation_type, weight,
+               GREATEST(created_at, COALESCE(last_validated_at, created_at)) AS updated_at
           FROM memory_edges
          WHERE active = true
         """
@@ -313,6 +318,11 @@ def _workflow_database_url() -> str:
 
 
 def _as_utc(value: Any) -> datetime | None:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
     if not isinstance(value, datetime):
         return None
     if value.tzinfo is None:
@@ -331,6 +341,17 @@ def _seconds_between(start: Any, end: Any) -> float | None:
     if start_at is None or end_at is None:
         return None
     return max(0.0, (end_at - start_at).total_seconds())
+
+
+def compute_activity_score(updated_at: Any, *, reference_at: Any | None = None) -> float:
+    """Map a durable timestamp into a bounded liveness signal for Atlas."""
+    updated = _as_utc(updated_at)
+    if updated is None:
+        return MIN_ACTIVITY_SCORE
+    reference = _as_utc(reference_at) or datetime.now(timezone.utc)
+    age_seconds = max(0.0, (reference - updated).total_seconds())
+    score = 1.0 / (1.0 + age_seconds / ACTIVITY_HALF_LIFE_SECONDS)
+    return round(max(MIN_ACTIVITY_SCORE, min(1.0, score)), 4)
 
 
 def classify_graph_freshness(
@@ -428,6 +449,7 @@ def _connect(database_url: str | None = None) -> SyncPostgresConnection:
 
 
 def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, Any]]]:
+    reference_at = datetime.now(timezone.utc)
     conn = _connect(database_url)
     entities = fetch_entities(conn)
     capabilities = fetch_capabilities(conn)
@@ -483,6 +505,8 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
                     "area": area_slug,
                     "preview": area_row["summary"],
                     "color": color,
+                    "updated_at": None,
+                    "activity_score": MIN_ACTIVITY_SCORE,
                     "is_area": True,
                 }
             }
@@ -500,7 +524,10 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
     ) -> None:
         if node_id in node_ids:
             return
-        explicit_area = str((extra or {}).get("area") or "").strip()
+        extra_data = dict(extra or {})
+        explicit_area = str(extra_data.get("area") or "").strip()
+        updated_at = extra_data.pop("updated_at", None)
+        activity_score = extra_data.pop("activity_score", None)
         area = (
             node_area.get(node_id)
             or explicit_area
@@ -516,9 +543,15 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
             "source": source,
             "authority_source": source,
             "color": color,
+            "updated_at": _iso(updated_at),
+            "activity_score": (
+                round(float(activity_score), 4)
+                if activity_score is not None
+                else compute_activity_score(updated_at, reference_at=reference_at)
+            ),
         }
-        if extra:
-            data.update(extra)
+        if extra_data:
+            data.update(extra_data)
         nodes.append({"data": data})
         node_ids.add(node_id)
 
@@ -529,6 +562,7 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
             str(entity["entity_type"]),
             str(entity["content_preview"]),
             str(entity["source"]),
+            extra={"updated_at": entity.get("updated_at")},
         )
 
     for capability in capabilities:
@@ -619,6 +653,11 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
                     "target": edge["target_id"],
                     "label": relation,
                     "weight": float(edge["weight"] or 1.0),
+                    "updated_at": _iso(edge.get("updated_at")),
+                    "activity_score": compute_activity_score(
+                        edge.get("updated_at"),
+                        reference_at=reference_at,
+                    ),
                 }
             }
         )
@@ -639,6 +678,8 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
                     "weight": float(lineage["confidence"] or 1.0),
                     "authority_source": "data_dictionary_lineage_effective",
                     "relation_source": str(lineage["effective_source"] or ""),
+                    "updated_at": None,
+                    "activity_score": MIN_ACTIVITY_SCORE,
                 }
             }
         )
@@ -659,6 +700,8 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
                     "label": "belongs_to_surface",
                     "weight": 1.0,
                     "authority_source": "surface_catalog_registry",
+                    "updated_at": None,
+                    "activity_score": MIN_ACTIVITY_SCORE,
                 }
             }
         )
@@ -671,6 +714,8 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
         degree[target] = degree.get(target, 0) + 1
 
     area_member_count: dict[str, int] = {}
+    area_activity_score: dict[str, float] = {}
+    area_updated_at: dict[str, datetime] = {}
     for node in nodes:
         data = node["data"]
         if data.get("is_area"):
@@ -678,14 +723,26 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
         area = str(data.get("area") or "")
         if area:
             area_member_count[area] = area_member_count.get(area, 0) + 1
+            area_activity_score[area] = max(
+                area_activity_score.get(area, MIN_ACTIVITY_SCORE),
+                float(data.get("activity_score") or MIN_ACTIVITY_SCORE),
+            )
+            node_updated_at = _as_utc(data.get("updated_at"))
+            if node_updated_at is not None:
+                current_updated_at = area_updated_at.get(area)
+                if current_updated_at is None or node_updated_at > current_updated_at:
+                    area_updated_at[area] = node_updated_at
 
     for node in nodes:
         data = node["data"]
         node_id = str(data["id"])
         if data.get("is_area"):
-            count = area_member_count.get(str(data["area"]), 1)
+            area = str(data["area"])
+            count = area_member_count.get(area, 1)
             data["degree"] = count
             data["size"] = max(42, min(140, 34 + 7 * count**0.55))
+            data["activity_score"] = round(area_activity_score.get(area, MIN_ACTIVITY_SCORE), 4)
+            data["updated_at"] = _iso(area_updated_at.get(area))
         else:
             node_degree = max(1, degree.get(node_id, 1))
             data["degree"] = node_degree
@@ -744,6 +801,8 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
                     "label": relation,
                     "weight": float(count),
                     "is_aggregate": True,
+                    "updated_at": None,
+                    "activity_score": MIN_ACTIVITY_SCORE,
                 },
                 "classes": "aggregate",
             }

@@ -20,6 +20,15 @@ def test_cqrs_dynamic_route_mounting_and_dispatch(monkeypatch: Any) -> None:
     through the resolved binding handler.
     """
     class MockConn:
+        def transaction(self):
+            class _Transaction:
+                def __enter__(_self):
+                    return self
+
+                def __exit__(_self, exc_type, exc, tb):
+                    return False
+
+            return _Transaction()
         def execute(self, *args, **kwargs):
             return []
         def fetch(self, *args, **kwargs):

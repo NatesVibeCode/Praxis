@@ -75,7 +75,7 @@ def _node(
         node_type=MINIMAL_WORKFLOW_NODE_TYPE,
         adapter_type=adapter_type,
         display_name=display_name,
-        inputs=inputs or {"task_name": display_name},
+        inputs=inputs or {"task_name": display_name, "allow_passthrough_echo": True},
         expected_outputs=expected_outputs or {},
         success_condition={"status": "success"},
         failure_behavior={"status": "fail_closed"},

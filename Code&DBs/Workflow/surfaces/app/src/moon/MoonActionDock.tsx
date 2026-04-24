@@ -68,7 +68,15 @@ export function MoonActionDock({
     suggestNextSteps(workflowId, selectedNodeId, payload.build_graph as any)
       .then((res: any) => {
         if (cancelled) return;
-        setSuggestedCatalogIds(res.likely_next_steps.map((s: any) => s.capability_ref || s.id));
+        const ids = (res.likely_next_steps || []).flatMap((s: any) => [
+          s.catalog_item_id,
+          s.capability_ref,
+          s.id,
+          s.route,
+          s.actionValue,
+          s.capability_slug ? `cap-${String(s.capability_slug).replace(/\//g, '-')}` : null,
+        ]).filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
+        setSuggestedCatalogIds(Array.from(new Set(ids)));
       })
       .catch(() => {})
       .finally(() => {

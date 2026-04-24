@@ -9,6 +9,11 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
+from runtime.workflow.mcp_session import (
+    WorkflowMcpSessionError,
+    verify_workflow_mcp_session_token,
+)
+
 from .catalog import canonical_tool_name, get_tool_catalog, resolve_tool_entry
 
 _EMBEDDING_PREWARM_TOOLS = frozenset(
@@ -85,11 +90,6 @@ def invoke_tool(
     try:
         allowed = normalize_allowed_tool_names(allowed_tool_names)
         if token_text:
-            from runtime.workflow.mcp_session import (
-                WorkflowMcpSessionError,
-                verify_workflow_mcp_session_token,
-            )
-
             try:
                 claims = verify_workflow_mcp_session_token(token_text)
             except WorkflowMcpSessionError as exc:

@@ -211,7 +211,7 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
     fake_runner = _FakeRunner()
 
     monkeypatch.setattr(
-        "surfaces._subsystems_base.bootstrap_pg_conn",
+        "surfaces._boot.bootstrap_pg_conn",
         lambda **_kwargs: fake_conn,
     )
 
@@ -266,7 +266,7 @@ def test_get_pg_conn_is_connection_only(monkeypatch) -> None:
     fake_conn = _FakeConn()
 
     monkeypatch.setattr(
-        "surfaces._subsystems_base.create_pg_conn",
+        "surfaces._boot.create_pg_conn",
         lambda **_kwargs: fake_conn,
     )
     monkeypatch.setattr(
@@ -296,7 +296,7 @@ def test_boot_warns_when_registry_sync_steps_are_skipped(
     fake_conn = _FakeConn()
 
     monkeypatch.setattr(
-        "surfaces._subsystems_base.bootstrap_pg_conn",
+        "surfaces._boot.bootstrap_pg_conn",
         lambda **_kwargs: fake_conn,
     )
     monkeypatch.setattr(
@@ -349,7 +349,7 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
     fake_conn = _FakeConn()
 
     monkeypatch.setattr(
-        "surfaces._subsystems_base.bootstrap_pg_conn",
+        "surfaces._boot.bootstrap_pg_conn",
         lambda **_kwargs: fake_conn,
     )
     monkeypatch.setattr(

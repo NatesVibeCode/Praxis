@@ -19,6 +19,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, field_validator
+
 from runtime.docker_image_authority import (
     AGENT_FAMILY_IMAGE_MAP,
     CONTROL_WORKER_IMAGE,
@@ -118,6 +120,66 @@ _PACKAGE_COMPONENTS: tuple[dict[str, str], ...] = (
 )
 
 
+class SetupQuery(BaseModel):
+    mode: str | None = None
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _normalize_mode(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip().lower()
+        return text or None
+
+
+class SetupApplyCommand(BaseModel):
+    approved: bool = False
+    yes: bool = False
+    apply: bool = False
+    gate: str | None = None
+    gate_ref: str | None = None
+    apply_ref: str | None = None
+
+    @field_validator("gate", "gate_ref", "apply_ref", mode="before")
+    @classmethod
+    def _normalize_optional_ref(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+
+def handle_setup_doctor(query: SetupQuery, subsystems: Any) -> dict[str, Any]:
+    del query, subsystems
+    return setup_payload("doctor", repo_root=workspace_repo_root(), authority_surface="api")
+
+
+def handle_setup_plan(query: SetupQuery, subsystems: Any) -> dict[str, Any]:
+    del query, subsystems
+    return setup_payload("plan", repo_root=workspace_repo_root(), authority_surface="api")
+
+
+def handle_setup_apply(command: SetupApplyCommand, subsystems: Any) -> dict[str, Any]:
+    del subsystems
+    approved = bool(command.yes or command.apply or command.approved)
+    gate_ref = command.gate or command.gate_ref
+    if gate_ref or command.apply_ref:
+        return setup_apply_gate_payload(
+            gate_ref=gate_ref,
+            apply_ref=command.apply_ref,
+            repo_root=workspace_repo_root(),
+            approved=approved,
+            applied_by="api_setup_apply",
+            authority_surface="api",
+        )
+    return setup_payload(
+        "apply",
+        repo_root=workspace_repo_root(),
+        apply=approved,
+        authority_surface="api",
+    )
+
+
 def _runtime_profiles_config_path(repo_root: Path | None = None) -> Path:
     root = repo_root or workspace_repo_root()
     return root / "config" / "runtime_profiles.json"
@@ -189,7 +251,7 @@ def _setup_authority_env(
     if authority.database_url:
         source["WORKFLOW_DATABASE_URL"] = authority.database_url
         source["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] = authority.source
-    source.setdefault("PRAXIS_WORKSPACE_BASE_PATH", str(root))
+    source["PRAXIS_WORKSPACE_BASE_PATH"] = str(root)
     return source, authority
 
 

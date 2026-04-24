@@ -87,7 +87,7 @@ INSERT INTO operation_catalog_registry (
         'GET',
         '/api/setup/doctor',
         'runtime.setup_wizard.SetupQuery',
-        'runtime.setup_wizard.setup_payload',
+        'runtime.setup_wizard.handle_setup_doctor',
         'authority.service_lifecycle',
         'authority.service_lifecycle',
         'projection.service_lifecycle.instances',
@@ -98,7 +98,7 @@ INSERT INTO operation_catalog_registry (
         '{}'::jsonb,
         '["http","mcp","cli","website"]'::jsonb,
         15000,
-        FALSE,
+        TRUE,
         FALSE,
         NULL,
         'projection_freshness.default',
@@ -116,7 +116,7 @@ INSERT INTO operation_catalog_registry (
         'GET',
         '/api/setup/plan',
         'runtime.setup_wizard.SetupQuery',
-        'runtime.setup_wizard.setup_payload',
+        'runtime.setup_wizard.handle_setup_plan',
         'authority.service_lifecycle',
         'authority.service_lifecycle',
         'projection.service_lifecycle.instances',
@@ -140,12 +140,12 @@ INSERT INTO operation_catalog_registry (
     (
         'runtime-setup-apply',
         'runtime.setup.apply',
-        'operation_query',
-        'query',
+        'operation_command',
+        'command',
         'POST',
         '/api/setup/apply',
         'runtime.setup_wizard.SetupApplyCommand',
-        'runtime.setup_wizard.setup_payload',
+        'runtime.setup_wizard.handle_setup_apply',
         'authority.service_lifecycle',
         'authority.service_lifecycle',
         'projection.service_lifecycle.instances',
@@ -157,11 +157,11 @@ INSERT INTO operation_catalog_registry (
         '["http","mcp","cli","website"]'::jsonb,
         15000,
         TRUE,
-        FALSE,
-        NULL,
+        TRUE,
+        'runtime_setup_apply_requested',
         'projection_freshness.default',
-        'observe',
-        'read_only',
+        'operate',
+        'non_idempotent',
         TRUE,
         'binding.operation_catalog_registry.runtime_setup.20260422',
         'decision.runtime_setup.empty_thin_sandbox.20260422'
@@ -193,6 +193,108 @@ ON CONFLICT (operation_ref) DO UPDATE SET
     enabled = EXCLUDED.enabled,
     binding_revision = EXCLUDED.binding_revision,
     decision_ref = EXCLUDED.decision_ref,
+    updated_at = now();
+
+INSERT INTO data_dictionary_objects (
+    object_kind,
+    label,
+    category,
+    summary,
+    origin_ref,
+    metadata
+) VALUES
+    (
+        'operation.runtime.setup.doctor',
+        'runtime.setup.doctor',
+        'command',
+        'Query operation for inspecting runtime setup state.',
+        '{"migration":"209_empty_thin_sandbox_runtime_targets.sql"}'::jsonb,
+        '{"authority_domain_ref":"authority.service_lifecycle","operation_kind":"query"}'::jsonb
+    ),
+    (
+        'operation.runtime.setup.plan',
+        'runtime.setup.plan',
+        'command',
+        'Query operation for planning runtime setup remediation.',
+        '{"migration":"209_empty_thin_sandbox_runtime_targets.sql"}'::jsonb,
+        '{"authority_domain_ref":"authority.service_lifecycle","operation_kind":"query"}'::jsonb
+    ),
+    (
+        'operation.runtime.setup.apply',
+        'runtime.setup.apply',
+        'command',
+        'Command operation for applying approved runtime setup remediation.',
+        '{"migration":"209_empty_thin_sandbox_runtime_targets.sql"}'::jsonb,
+        '{"authority_domain_ref":"authority.service_lifecycle","operation_kind":"command"}'::jsonb
+    )
+ON CONFLICT (object_kind) DO UPDATE SET
+    label = EXCLUDED.label,
+    category = EXCLUDED.category,
+    summary = EXCLUDED.summary,
+    origin_ref = EXCLUDED.origin_ref,
+    metadata = EXCLUDED.metadata,
+    updated_at = now();
+
+INSERT INTO authority_object_registry (
+    object_ref,
+    object_kind,
+    object_name,
+    schema_name,
+    authority_domain_ref,
+    data_dictionary_object_kind,
+    lifecycle_status,
+    write_model_kind,
+    owner_ref,
+    source_decision_ref,
+    metadata
+) VALUES
+    (
+        'operation.runtime.setup.doctor',
+        'command',
+        'runtime.setup.doctor',
+        NULL,
+        'authority.service_lifecycle',
+        'operation.runtime.setup.doctor',
+        'active',
+        'read_model',
+        'praxis.engine',
+        'decision.runtime_setup.empty_thin_sandbox.20260422',
+        '{"operation_ref":"runtime-setup-doctor","operation_kind":"query","source_kind":"operation_query"}'::jsonb
+    ),
+    (
+        'operation.runtime.setup.plan',
+        'command',
+        'runtime.setup.plan',
+        NULL,
+        'authority.service_lifecycle',
+        'operation.runtime.setup.plan',
+        'active',
+        'read_model',
+        'praxis.engine',
+        'decision.runtime_setup.empty_thin_sandbox.20260422',
+        '{"operation_ref":"runtime-setup-plan","operation_kind":"query","source_kind":"operation_query"}'::jsonb
+    ),
+    (
+        'operation.runtime.setup.apply',
+        'command',
+        'runtime.setup.apply',
+        NULL,
+        'authority.service_lifecycle',
+        'operation.runtime.setup.apply',
+        'active',
+        'command_model',
+        'praxis.engine',
+        'decision.runtime_setup.empty_thin_sandbox.20260422',
+        '{"operation_ref":"runtime-setup-apply","operation_kind":"command","source_kind":"operation_command"}'::jsonb
+    )
+ON CONFLICT (object_ref) DO UPDATE SET
+    authority_domain_ref = EXCLUDED.authority_domain_ref,
+    data_dictionary_object_kind = EXCLUDED.data_dictionary_object_kind,
+    lifecycle_status = EXCLUDED.lifecycle_status,
+    write_model_kind = EXCLUDED.write_model_kind,
+    owner_ref = EXCLUDED.owner_ref,
+    source_decision_ref = EXCLUDED.source_decision_ref,
+    metadata = EXCLUDED.metadata,
     updated_at = now();
 
 INSERT INTO operator_decisions (

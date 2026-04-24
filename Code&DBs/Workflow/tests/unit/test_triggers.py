@@ -99,7 +99,22 @@ class _Conn:
                 ]
             return rows
         if "FROM workflow_triggers" in normalized or "FROM public.workflow_triggers" in normalized:
-            return self.workflow_triggers
+            rows = list(self.workflow_triggers)
+            if "t.event_type = $" in normalized or "WHERE t.event_type = $" in normalized:
+                expected = args[0]
+                rows = [
+                    row
+                    for row in rows
+                    if (row.get("event_type") or "run.succeeded") == expected
+                ]
+            elif "t.event_type = ANY" in normalized or "WHERE t.event_type = ANY" in normalized:
+                expected = set(args[0])
+                rows = [
+                    row
+                    for row in rows
+                    if (row.get("event_type") or "run.succeeded") in expected
+                ]
+            return rows
         if "FROM event_subscriptions" in normalized or "FROM public.event_subscriptions" in normalized:
             return self.subscriptions
         if (

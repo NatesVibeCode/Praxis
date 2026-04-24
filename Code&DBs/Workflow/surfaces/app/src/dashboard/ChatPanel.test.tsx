@@ -368,7 +368,8 @@ describe('FIX #5 – error-flavored message rendering', () => {
 describe('general rendering', () => {
   it('renders empty state when there are no messages', () => {
     render(<ChatPanel open onClose={jest.fn()} />);
-    expect(screen.getByText(/ask about workflows/i)).toBeInTheDocument();
+    expect(screen.getByText(/start with a useful ask/i)).toBeInTheDocument();
+    expect(screen.getByText(/control plane, persisted chats, and workflow history/i)).toBeInTheDocument();
   });
 
   it('renders user and assistant messages', () => {
@@ -399,10 +400,11 @@ describe('general rendering', () => {
     expect(screen.getByRole('button', { name: /sending/i })).toBeDisabled();
   });
 
-  it('disables Send button when no conversationId', () => {
+  it('shows the conversation chooser when no conversationId is active', () => {
     mockUseChat.mockReturnValue(makeChatState({ conversationId: null }));
     render(<ChatPanel open onClose={jest.fn()} />);
-    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /new chat/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /send/i })).not.toBeInTheDocument();
   });
 
   it('calls sendMessage via the Send button', async () => {

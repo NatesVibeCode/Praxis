@@ -2,9 +2,11 @@
 
 One probe per named provider. Each checks that the credential env var is
 resolvable via the standard secret-resolution chain (explicit env → macOS
-Keychain → process env → .env). Anthropic is CLI-only per standing order
+Keychain → process env → .env). Anthropic is CLI-only for Nate's private
+operator profile per standing order
 ``decision.2026-04-20.anthropic-cli-only-restored`` — its probe verifies the
-claude binary is authenticated, not an API key.
+claude binary is authenticated, not an API key. PUBLIC_RELEASE_REMOVE: public
+builds must replace this with registry/profile-driven Anthropic API admission.
 """
 
 from __future__ import annotations
@@ -55,10 +57,10 @@ _ANTHROPIC_PROBE = GateProbe(
     domain="provider",
     title="Anthropic CLI (claude) authenticated",
     purpose=(
-        "Anthropic access is CLI-only (standing order "
+        "Anthropic access is CLI-only for this private operator profile (standing order "
         "decision.2026-04-20.anthropic-cli-only-restored). Direct API calls are "
-        "forbidden; the claude binary must be installed and authenticated via "
-        "OAuth under the subscription plan."
+        "forbidden here; public builds must admit ANTHROPIC_API_KEY through "
+        "registry/profile authority for users who have one."
     ),
     ok_cache_ttl_s=900,
 )
