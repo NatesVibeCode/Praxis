@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 import uuid
@@ -1314,6 +1315,116 @@ def propose_plan(
         packet_declarations=packet_declarations,
         binding_summary=binding_summary,
     )
+
+
+@dataclass(frozen=True)
+class ApprovedPlan:
+    """A ProposedPlan bound to an explicit approval record.
+
+    Produced by :func:`approve_proposed_plan`. The hash is computed over the
+    ProposedPlan's spec_dict at approval time; :func:`launch_approved`
+    re-hashes the plan's spec_dict at submit time and refuses to launch if
+    the hashes disagree — so a spec that was tampered with between approve
+    and launch (whether by accident or intent) fails closed.
+
+    ``approved_by`` is whatever identifier the caller uses to name the
+    approver: an operator email, an agent slug, a CI system name. The field
+    is free-form by design; callers upstream decide what identity kinds
+    they accept.
+    """
+
+    proposed: ProposedPlan
+    approved_by: str
+    approved_at: str  # ISO-8601 timestamp, assigned at approve time
+    proposal_hash: str
+    approval_note: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "proposed": self.proposed.to_dict(),
+            "approved_by": self.approved_by,
+            "approved_at": self.approved_at,
+            "proposal_hash": self.proposal_hash,
+            "approval_note": self.approval_note,
+        }
+
+
+def _hash_proposed_plan(proposed: ProposedPlan) -> str:
+    """Hash the spec_dict — the only part that actually gets submitted.
+
+    Preview payload, binding_summary, and packet_declarations are derived
+    views that can shift between propose calls without invalidating the
+    approval. Only the spec_dict the platform will actually run gets hashed.
+    """
+    return stable_hash(proposed.spec_dict)
+
+
+def approve_proposed_plan(
+    proposed: ProposedPlan,
+    *,
+    approved_by: str,
+    approval_note: str | None = None,
+) -> ApprovedPlan:
+    """Wrap a :class:`ProposedPlan` with an explicit approval record.
+
+    No submission here — just records who approved what, when, and bakes
+    the spec_dict hash so downstream launch can detect tampering.
+    """
+    approver = str(approved_by or "").strip()
+    if not approver:
+        raise ValueError("approved_by is required — pick an identifier for the approver")
+    proposal_hash = _hash_proposed_plan(proposed)
+    approved_at = datetime.now(timezone.utc).isoformat()
+    return ApprovedPlan(
+        proposed=proposed,
+        approved_by=approver,
+        approved_at=approved_at,
+        proposal_hash=proposal_hash,
+        approval_note=str(approval_note).strip() if approval_note else None,
+    )
+
+
+class ApprovalHashMismatchError(ValueError):
+    """Raised when an ApprovedPlan's recorded hash no longer matches its spec.
+
+    Means the ProposedPlan was modified between approval and launch.
+    Launch fails closed; caller must re-propose + re-approve.
+    """
+
+
+def launch_approved(
+    approved: ApprovedPlan,
+    *,
+    conn: Any,
+    requested_by_kind: str = "launch_approved",
+    requested_by_ref: str | None = None,
+) -> LaunchReceipt:
+    """Submit an :class:`ApprovedPlan` — strictly typed launch path.
+
+    Recomputes the spec_dict hash and refuses to launch if it differs from
+    the approval's recorded hash. A mismatch means the proposal was
+    tampered with after approval; launch fails closed. Caller must
+    re-propose + re-approve to get a fresh approval on the new spec.
+
+    ``approved_by`` is threaded into the control-command bus as the
+    ``requested_by_ref`` so the audit trail shows who approved the launch.
+    """
+    current_hash = _hash_proposed_plan(approved.proposed)
+    if current_hash != approved.proposal_hash:
+        raise ApprovalHashMismatchError(
+            f"ApprovedPlan hash mismatch — the spec changed after approval by "
+            f"{approved.approved_by!r} at {approved.approved_at}. "
+            f"Expected {approved.proposal_hash!r}, got {current_hash!r}. "
+            "Re-propose and re-approve before launching."
+        )
+
+    receipt = launch_proposed(
+        approved.proposed,
+        conn=conn,
+        requested_by_kind=requested_by_kind,
+        requested_by_ref=requested_by_ref or approved.approved_by,
+    )
+    return receipt
 
 
 def launch_proposed(

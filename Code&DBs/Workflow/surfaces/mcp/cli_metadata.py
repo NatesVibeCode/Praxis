@@ -889,6 +889,41 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
+    "praxis_approve_proposed_plan": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="approve-plan",
+        when_to_use=(
+            "Approve a ProposedPlan so launch_approved can submit it. Wraps the "
+            "proposal with approved_by + timestamp + hash; the hash binds the "
+            "approval to the exact spec_dict so tampering between approve and "
+            "launch fails closed."
+        ),
+        when_not_to_use=(
+            "Do not use it for no-approval launches — praxis_launch_plan in "
+            "submit mode is the direct path."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Approve a proposal returned by praxis_launch_plan(preview_only=true)",
+                {
+                    "proposed": {
+                        "spec_dict": {"name": "...", "jobs": []},
+                        "preview": {},
+                        "warnings": [],
+                        "workflow_id": "plan.deadbeef",
+                        "spec_name": "bug_wave_0",
+                        "total_jobs": 0,
+                        "packet_declarations": [],
+                        "binding_summary": {"totals": {"bound": 0, "ambiguous": 0, "unbound": 0}, "unbound_refs": [], "ambiguous_refs": []},
+                    },
+                    "approved_by": "nate@praxis",
+                    "approval_note": "Looks good; proceed.",
+                },
+            )
+        ],
+    ),
     "praxis_bind_data_pills": _tool(
         surface="workflow",
         tier="stable",

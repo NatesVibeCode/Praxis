@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan."""
 from __future__ import annotations
 
 import json
@@ -1618,12 +1618,72 @@ def tool_praxis_launch_plan(params: dict) -> dict:
       the caller declared vs what the platform derived. No submission.
       Use to inspect before approving the run.
     """
+    approved_payload = params.get("approved_plan")
+    if approved_payload is not None:
+        if not isinstance(approved_payload, dict):
+            return {
+                "ok": False,
+                "error": "approved_plan must be the ApprovedPlan dict from praxis_approve_proposed_plan",
+                "reason_code": "approved_plan.invalid",
+            }
+        try:
+            pg_conn = _subs.get_pg_conn()
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "reason_code": "postgres.authority.unavailable",
+            }
+        try:
+            from runtime.spec_compiler import (
+                ApprovalHashMismatchError,
+                ApprovedPlan,
+                ProposedPlan,
+                launch_approved,
+            )
+
+            proposed_payload = approved_payload.get("proposed") or {}
+            proposed = ProposedPlan(
+                spec_dict=dict(proposed_payload.get("spec_dict") or {}),
+                preview=dict(proposed_payload.get("preview") or {}),
+                warnings=list(proposed_payload.get("warnings") or []),
+                workflow_id=str(proposed_payload.get("workflow_id") or ""),
+                spec_name=str(proposed_payload.get("spec_name") or ""),
+                total_jobs=int(proposed_payload.get("total_jobs") or 0),
+                packet_declarations=list(proposed_payload.get("packet_declarations") or []),
+                binding_summary=dict(proposed_payload.get("binding_summary") or {}),
+            )
+            approved = ApprovedPlan(
+                proposed=proposed,
+                approved_by=str(approved_payload.get("approved_by") or ""),
+                approved_at=str(approved_payload.get("approved_at") or ""),
+                proposal_hash=str(approved_payload.get("proposal_hash") or ""),
+                approval_note=approved_payload.get("approval_note"),
+            )
+            receipt = launch_approved(approved, conn=pg_conn)
+        except ApprovalHashMismatchError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "reason_code": "approval.hash_mismatch",
+            }
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "reason_code": "approval.invalid"}
+        except Exception as exc:
+            return _structured_runtime_error(exc, action="launch_approved")
+
+        payload = receipt.to_dict()
+        payload["ok"] = True
+        payload["mode"] = "launched_approved"
+        return payload
+
     plan = params.get("plan")
     if not isinstance(plan, dict):
         return {
             "error": (
                 "plan must be a dict with 'name' and either 'packets' or a "
-                "'from_*' shortcut (from_bugs / from_roadmap_items)"
+                "'from_*' shortcut (from_bugs / from_roadmap_items), OR pass "
+                "'approved_plan' to submit a previously approved plan"
             )
         }
     has_packets = bool(plan.get("packets"))
@@ -1675,6 +1735,65 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     payload = receipt.to_dict()
     payload["ok"] = True
     payload["mode"] = "submitted"
+    return payload
+
+
+def tool_praxis_approve_proposed_plan(params: dict) -> dict:
+    """Approve a ProposedPlan so launch_approved can submit it.
+
+    Takes the ProposedPlan payload that came back from praxis_launch_plan
+    with preview_only=true, wraps it with an explicit approval record
+    (approved_by + timestamp + hash), and returns an ApprovedPlan payload.
+    The hash binds the approval to the exact spec_dict — any modification
+    between approve and launch will fail closed at launch time.
+
+    Use when launch requires explicit approval (agent-initiated launches,
+    user-facing UI confirmations, budget-gated workflows). For no-approval
+    launches, keep using praxis_launch_plan in submit mode directly.
+    """
+    proposed_payload = params.get("proposed")
+    if not isinstance(proposed_payload, dict):
+        return {
+            "ok": False,
+            "error": "proposed must be a ProposedPlan dict from praxis_launch_plan(preview_only=true)",
+            "reason_code": "proposed.invalid",
+        }
+    approved_by = params.get("approved_by")
+    if not isinstance(approved_by, str) or not approved_by.strip():
+        return {
+            "ok": False,
+            "error": "approved_by is required — identifier of the approver",
+            "reason_code": "approved_by.invalid",
+        }
+
+    try:
+        from runtime.spec_compiler import (
+            ProposedPlan,
+            approve_proposed_plan,
+        )
+
+        proposed = ProposedPlan(
+            spec_dict=dict(proposed_payload.get("spec_dict") or {}),
+            preview=dict(proposed_payload.get("preview") or {}),
+            warnings=list(proposed_payload.get("warnings") or []),
+            workflow_id=str(proposed_payload.get("workflow_id") or ""),
+            spec_name=str(proposed_payload.get("spec_name") or ""),
+            total_jobs=int(proposed_payload.get("total_jobs") or 0),
+            packet_declarations=list(proposed_payload.get("packet_declarations") or []),
+            binding_summary=dict(proposed_payload.get("binding_summary") or {}),
+        )
+        approved = approve_proposed_plan(
+            proposed,
+            approved_by=approved_by,
+            approval_note=params.get("approval_note"),
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "reason_code": "approval.invalid"}
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="approve_proposed_plan")
+
+    payload = approved.to_dict()
+    payload["ok"] = True
     return payload
 
 
@@ -2010,8 +2129,59 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "what will actually run before committing to resources."
                         ),
                     },
+                    "approved_plan": {
+                        "type": "object",
+                        "description": (
+                            "Submit a previously approved plan — the ApprovedPlan payload "
+                            "returned by praxis_approve_proposed_plan. Fails closed if the "
+                            "spec_dict hash no longer matches the approval (tampering guard). "
+                            "When this field is set, 'plan' and 'preview_only' are ignored."
+                        ),
+                    },
                 },
-                "required": ["plan"],
+            },
+        },
+    ),
+    "praxis_approve_proposed_plan": (
+        tool_praxis_approve_proposed_plan,
+        {
+            "description": (
+                "Approve a ProposedPlan so launch_approved can submit it. "
+                "Takes the ProposedPlan payload from praxis_launch_plan(preview_only=true), "
+                "wraps it with approved_by + timestamp + hash, and returns an ApprovedPlan. "
+                "The hash binds the approval to the exact spec_dict — tampering between "
+                "approve and launch fails closed at launch time.\n\n"
+                "USE WHEN: launch must be explicit and audit-friendly — agent-initiated "
+                "launches, user-facing UI confirmations, budget-gated workflows.\n\n"
+                "DO NOT USE TO: skip approval for direct launches. For those, use "
+                "praxis_launch_plan in submit mode directly.\n\n"
+                "FLOW: praxis_launch_plan(preview_only=true, plan={...}) → inspect ProposedPlan → "
+                "praxis_approve_proposed_plan(proposed={...}, approved_by='nate@praxis') → "
+                "praxis_launch_plan(approved_plan={...})."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "proposed": {
+                        "type": "object",
+                        "description": (
+                            "The ProposedPlan payload returned by "
+                            "praxis_launch_plan(preview_only=true)."
+                        ),
+                    },
+                    "approved_by": {
+                        "type": "string",
+                        "description": (
+                            "Identifier of the approver: operator email, agent slug, "
+                            "or CI system name."
+                        ),
+                    },
+                    "approval_note": {
+                        "type": "string",
+                        "description": "Optional free-form note captured with the approval.",
+                    },
+                },
+                "required": ["proposed", "approved_by"],
             },
         },
     ),

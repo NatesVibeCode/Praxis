@@ -11,6 +11,8 @@ import pytest
 
 from runtime import spec_compiler
 from runtime.spec_compiler import (
+    ApprovalHashMismatchError,
+    ApprovedPlan,
     CompiledSpec,
     CompilePlanError,
     LaunchReceipt,
@@ -18,7 +20,9 @@ from runtime.spec_compiler import (
     PlanPacket,
     ProposedPlan,
     _coerce_plan,
+    approve_proposed_plan,
     compile_plan,
+    launch_approved,
     launch_plan,
     launch_proposed,
     propose_plan,
@@ -773,3 +777,97 @@ def test_launch_proposed_submits_previously_built_spec(monkeypatch) -> None:
     assert receipt.total_jobs == 1
     assert captured["kwargs"]["dispatch_reason"] == "launch_proposed:two_phase"
     assert captured["kwargs"]["inline_spec"] is proposed.spec_dict
+
+
+def _build_proposed_for_approval(monkeypatch) -> ProposedPlan:
+    """Build a fresh ProposedPlan to feed approval tests."""
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    _install_empty_binding(monkeypatch)
+
+    import runtime.workflow._admission as admission_mod
+
+    monkeypatch.setattr(
+        admission_mod,
+        "preview_workflow_execution",
+        lambda conn, *, inline_spec, **_kwargs: {"action": "preview", "jobs": [], "warnings": []},
+    )
+
+    return propose_plan(
+        {
+            "name": "approval_target",
+            "packets": [
+                {"description": "do the thing", "write": ["x.py"], "stage": "build", "label": "thing-1"},
+            ],
+        },
+        conn=_FakeConn(),
+        workdir="/repo",
+    )
+
+
+def test_approve_proposed_plan_records_approver_and_hash(monkeypatch) -> None:
+    proposed = _build_proposed_for_approval(monkeypatch)
+
+    approved = approve_proposed_plan(
+        proposed,
+        approved_by="nate@praxis",
+        approval_note="Looks good; proceed.",
+    )
+
+    assert isinstance(approved, ApprovedPlan)
+    assert approved.approved_by == "nate@praxis"
+    assert approved.approval_note == "Looks good; proceed."
+    assert approved.approved_at.endswith("+00:00")  # ISO-8601 UTC
+    assert len(approved.proposal_hash) >= 16
+    assert approved.proposed is proposed
+
+
+def test_approve_proposed_plan_rejects_empty_approver(monkeypatch) -> None:
+    proposed = _build_proposed_for_approval(monkeypatch)
+    with pytest.raises(ValueError, match="approved_by is required"):
+        approve_proposed_plan(proposed, approved_by="   ")
+
+
+def test_launch_approved_submits_on_matching_hash(monkeypatch) -> None:
+    proposed = _build_proposed_for_approval(monkeypatch)
+    approved = approve_proposed_plan(proposed, approved_by="nate@praxis")
+
+    captured: dict[str, object] = {}
+
+    def _fake_submit(conn, **kwargs):
+        captured["kwargs"] = kwargs
+        return {
+            "run_id": "workflow_approved_001",
+            "status": "queued",
+            "total_jobs": kwargs["total_jobs"],
+            "spec_name": kwargs["spec_name"],
+        }
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _fake_submit)
+
+    receipt = launch_approved(approved, conn=_FakeConn())
+
+    assert receipt.run_id == "workflow_approved_001"
+    assert captured["kwargs"]["requested_by_kind"] == "launch_approved"
+    # requested_by_ref defaults to approved_by for audit trail.
+    assert captured["kwargs"]["requested_by_ref"] == "nate@praxis"
+
+
+def test_launch_approved_fails_closed_on_tampered_spec(monkeypatch) -> None:
+    proposed = _build_proposed_for_approval(monkeypatch)
+    approved = approve_proposed_plan(proposed, approved_by="nate@praxis")
+
+    # Simulate tampering — mutate the spec_dict after approval. Since
+    # ProposedPlan is frozen we can still mutate its contained dicts.
+    approved.proposed.spec_dict["name"] = "TAMPERED"
+
+    def _forbid_submit(*_args, **_kwargs):
+        raise AssertionError("submit_workflow_command should not run on tampered plans")
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
+
+    with pytest.raises(ApprovalHashMismatchError, match="hash mismatch"):
+        launch_approved(approved, conn=_FakeConn())
