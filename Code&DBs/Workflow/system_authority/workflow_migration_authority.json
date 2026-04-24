@@ -238,7 +238,9 @@
     "230_anthropic_llm_task_admission_deny.sql",
     "231_deepseek_economics_cleanup.sql",
     "233_operation_catalog_surface_template_register.sql",
-    "234_register_plan_operations.sql"
+    "234_register_plan_operations.sql",
+    "235_plan_orchestration_gateway_handlers.sql",
+    "236_operation_catalog_surface_action_performed.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5786,6 +5788,17 @@
       {"object_type": "row", "object_name": "authority_object_registry.operation.compose_plan"},
       {"object_type": "row", "object_name": "operation_catalog_registry.launch-plan"},
       {"object_type": "row", "object_name": "operation_catalog_registry.compose-plan"}
+    ],
+    "235_plan_orchestration_gateway_handlers.sql": [
+      {"object_type": "row", "object_name": "operation_catalog_registry.launch-plan"},
+      {"object_type": "row", "object_name": "operation_catalog_registry.compose-plan"}
+    ],
+    "236_operation_catalog_surface_action_performed.sql": [
+      {"object_type": "row", "object_name": "operation_catalog_registry.surface-action-performed"},
+      {"object_type": "row", "object_name": "authority_event_contracts.event_contract.surface.action.performed"},
+      {"object_type": "row", "object_name": "authority_object_registry.operation.surface.action.performed"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.operation.surface.action.performed"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.event.surface.action.performed"}
     ]
   },
   "policy_buckets": {
@@ -6028,7 +6041,9 @@
       "230_anthropic_llm_task_admission_deny.sql",
       "231_deepseek_economics_cleanup.sql",
       "233_operation_catalog_surface_template_register.sql",
-      "234_register_plan_operations.sql"
+      "234_register_plan_operations.sql",
+      "235_plan_orchestration_gateway_handlers.sql",
+      "236_operation_catalog_surface_action_performed.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
