@@ -1122,6 +1122,44 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
     )
 
 
+def _enrich_prompt_with_context(
+    base_prompt: str,
+    *,
+    bug_refs: list[str] | None,
+    verify_refs: list[str] | None,
+    read_scope: list[str] | None,
+) -> str:
+    """Append a Context section to the compiled prompt when extra grounding exists.
+
+    The stage-template prompt that ``compile_spec`` emits is intentionally
+    thin — it covers the 'what' and 'where', but not the 'why' or the
+    'proof'. When the packet carries bug references, verifier references,
+    or an explicit read scope, this helper appends a single Context block
+    so the agent sees the grounding without having to go fetch it.
+
+    Pure helper — does not touch authority, does not mutate inputs. Returns
+    the original prompt unchanged when no extra context is available.
+    """
+    context_lines: list[str] = []
+    if bug_refs:
+        context_lines.append(
+            "- Addresses bug(s): " + ", ".join(bug_refs)
+        )
+    if read_scope:
+        context_lines.append(
+            "- Reference files (read before writing): " + ", ".join(read_scope)
+        )
+    if verify_refs:
+        context_lines.append(
+            "- Must pass verifier(s): " + ", ".join(verify_refs)
+        )
+
+    if not context_lines:
+        return base_prompt
+
+    return base_prompt.rstrip() + "\n\n---\nContext:\n" + "\n".join(context_lines)
+
+
 def _packet_to_job(
     packet: PlanPacket,
     *,
@@ -1136,10 +1174,21 @@ def _packet_to_job(
     """
     label = packet.label or compiled.label or f"packet_{index}"
     agent = packet.agent or f"auto/{packet.stage}"
+    effective_bug_refs = (
+        list(packet.bug_refs)
+        if packet.bug_refs
+        else ([packet.bug_ref] if packet.bug_ref else None)
+    )
+    prompt = _enrich_prompt_with_context(
+        compiled.prompt,
+        bug_refs=effective_bug_refs,
+        verify_refs=list(compiled.verify_refs) if compiled.verify_refs else None,
+        read_scope=list(packet.read) if packet.read else None,
+    )
     job: dict[str, Any] = {
         "label": label,
         "agent": agent,
-        "prompt": compiled.prompt,
+        "prompt": prompt,
         "task_type": packet.stage,
         "write_scope": list(packet.write),
         "workdir": workdir,

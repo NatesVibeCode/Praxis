@@ -166,6 +166,93 @@ def test_launch_plan_rejects_empty_packets() -> None:
         compile_plan({"name": "empty", "packets": []}, conn=_FakeConn())
 
 
+def test_job_prompt_is_enriched_with_bug_and_verify_context(monkeypatch) -> None:
+    """Every job's prompt carries a Context: section when bug_refs + verify_refs exist."""
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    plan = {
+        "name": "enriched",
+        "packets": [
+            {
+                "description": "fix bug evidence authority",
+                "write": ["Code&DBs/Workflow/runtime/bugs.py"],
+                "stage": "build",
+                "label": "bug-authority",
+                "bug_ref": "BUG-175EB9F3",
+                "read": ["Code&DBs/Workflow/runtime/audit.py"],
+            }
+        ],
+    }
+    spec_dict, _ = compile_plan(plan, conn=_FakeConn(), workdir="/repo")
+    prompt = spec_dict["jobs"][0]["prompt"]
+
+    # Base prompt from stub still in place.
+    assert prompt.startswith("PROMPT(")
+    # Context block appended.
+    assert "\n---\nContext:" in prompt
+    assert "Addresses bug(s): BUG-175EB9F3" in prompt
+    assert "Reference files (read before writing): Code&DBs/Workflow/runtime/audit.py" in prompt
+    assert "Must pass verifier(s): verify." in prompt  # stub produces verify.<label>
+
+
+def test_job_prompt_has_no_context_block_when_no_extras(monkeypatch) -> None:
+    """No bug_refs / verify_refs / read → plain base prompt, no Context: section."""
+
+    def _plain_stub(intent_dict, *, conn):
+        return (
+            CompiledSpec(
+                prompt=f"PROMPT({intent_dict['description']})",
+                scope_write=list(intent_dict.get("write") or []),
+                capabilities=["cap"],
+                tier="mid",
+                label=intent_dict["stage"],
+                task_type=intent_dict["stage"],
+                verify_refs=None,  # no verifiers
+            ),
+            [],
+        )
+
+    monkeypatch.setattr(spec_compiler, "compile_spec", _plain_stub)
+
+    plan = {
+        "name": "plain",
+        "packets": [
+            {
+                "description": "just do it",
+                "write": ["x.py"],
+                "stage": "build",
+                "label": "plain-1",
+                # no bug_ref, no read
+            }
+        ],
+    }
+    spec_dict, _ = compile_plan(plan, conn=_FakeConn(), workdir="/repo")
+    prompt = spec_dict["jobs"][0]["prompt"]
+    assert "Context:" not in prompt
+    assert "\n---\n" not in prompt
+
+
+def test_job_prompt_enrichment_joins_multiple_bug_refs(monkeypatch) -> None:
+    """When a cluster has bug_refs list, the Context lists all of them."""
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    plan = {
+        "name": "cluster",
+        "packets": [
+            {
+                "description": "resolve a cluster",
+                "write": ["x.py"],
+                "stage": "fix",
+                "label": "cluster-1",
+                "bug_refs": ["BUG-A", "BUG-B", "BUG-C"],
+            }
+        ],
+    }
+    spec_dict, _ = compile_plan(plan, conn=_FakeConn(), workdir="/repo")
+    prompt = spec_dict["jobs"][0]["prompt"]
+    assert "Addresses bug(s): BUG-A, BUG-B, BUG-C" in prompt
+
+
 def test_launch_plan_deduplicates_colliding_labels(monkeypatch) -> None:
     monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
 
