@@ -397,6 +397,99 @@ def test_propose_plan_surfaces_unresolved_auto_routes_as_warning(monkeypatch) ->
     assert any("pkt-1" in w for w in proposed.warnings)
 
 
+def test_propose_plan_appends_bound_data_fields_to_job_prompt(monkeypatch) -> None:
+    """Bound pills from binding surface in the job prompt so agents see typed fields."""
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    import runtime.intent_binding as intent_binding_mod
+
+    def _fake_bind_with_bound(intent, *, conn, object_kinds=None):
+        return intent_binding_mod.BoundIntent(
+            intent=intent,
+            bound=[
+                intent_binding_mod.BoundPill(
+                    matched_span="users.first_name",
+                    object_kind="users",
+                    field_path="first_name",
+                    field_kind="text",
+                    source="auto",
+                    display_order=1,
+                ),
+                intent_binding_mod.BoundPill(
+                    matched_span="users.email",
+                    object_kind="users",
+                    field_path="email",
+                    field_kind="text",
+                    source="auto",
+                    display_order=2,
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(intent_binding_mod, "bind_data_pills", _fake_bind_with_bound)
+
+    import runtime.workflow._admission as admission_mod
+
+    monkeypatch.setattr(
+        admission_mod,
+        "preview_workflow_execution",
+        lambda conn, *, inline_spec, **_kwargs: {"action": "preview", "jobs": [], "warnings": []},
+    )
+
+    proposed = propose_plan(
+        {
+            "name": "bound_pills_prompt",
+            "packets": [
+                {
+                    "description": "update users.first_name when users.email changes",
+                    "write": ["src/profile.py"],
+                    "stage": "build",
+                    "label": "update-name",
+                }
+            ],
+        },
+        conn=_FakeConn(),
+        workdir="/repo",
+    )
+
+    prompt = proposed.spec_dict["jobs"][0]["prompt"]
+    assert "Bound data fields:" in prompt
+    assert "users.first_name (text)" in prompt
+    assert "users.email (text)" in prompt
+
+
+def test_propose_plan_omits_bound_data_fields_line_when_no_bound_pills(monkeypatch) -> None:
+    """No bound pills → no Bound data fields line in prompt."""
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    _install_empty_binding(monkeypatch)
+
+    import runtime.workflow._admission as admission_mod
+
+    monkeypatch.setattr(
+        admission_mod,
+        "preview_workflow_execution",
+        lambda conn, *, inline_spec, **_kwargs: {"action": "preview", "jobs": [], "warnings": []},
+    )
+
+    proposed = propose_plan(
+        {
+            "name": "no_pills",
+            "packets": [
+                {
+                    "description": "just do it",
+                    "write": ["x.py"],
+                    "stage": "build",
+                    "label": "no-pills",
+                }
+            ],
+        },
+        conn=_FakeConn(),
+        workdir="/repo",
+    )
+
+    assert "Bound data fields:" not in proposed.spec_dict["jobs"][0]["prompt"]
+
+
 def test_propose_plan_surfaces_unbound_data_pills_as_warnings(monkeypatch) -> None:
     monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
 

@@ -1463,6 +1463,25 @@ def propose_plan(
                 data_pills["warnings"].append(
                     f"bind_data_pills failed: {type(exc).__name__}: {exc}"
                 )
+        # Add resolved bound pills to the job's prompt so the agent sees the
+        # typed fields it's expected to work with, not just the free-prose
+        # description. Non-destructive — appends after the Context block
+        # already set by _enrich_prompt_with_context in _packet_to_job.
+        bound_entries = data_pills.get("bound") or []
+        if bound_entries:
+            field_refs = []
+            for entry in bound_entries:
+                object_kind = entry.get("object_kind")
+                field_path = entry.get("field_path")
+                field_kind = entry.get("field_kind") or "unknown"
+                if object_kind and field_path:
+                    field_refs.append(f"{object_kind}.{field_path} ({field_kind})")
+            if field_refs:
+                job["prompt"] = (
+                    job["prompt"].rstrip()
+                    + "\n- Bound data fields: "
+                    + ", ".join(field_refs)
+                )
         packet_declarations.append(
             {
                 "label": job["label"],
