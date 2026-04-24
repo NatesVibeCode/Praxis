@@ -40,6 +40,14 @@ without_contract_env() {
   env -u WORKFLOW_DATABASE_URL -u WORKFLOW_DATABASE_AUTHORITY_SOURCE "$@"
 }
 
+require_gate() {
+  local gate_ref="$1"
+  REPO_ROOT="$repo_root" \
+    PRAXIS_ONBOARDING_REPO_ROOT="$repo_root" \
+    PYTHONPATH="$workflow_root${PYTHONPATH:+:$PYTHONPATH}" \
+    "$python_bin" -m runtime.onboarding.bootstrap_cli require "$gate_ref"
+}
+
 ensure_repo_env_file() {
   local repo_env="$repo_root/.env"
   local resolved_database_url="${1:-}"
@@ -207,9 +215,7 @@ fi
 python_bin="$(command -v python3.14)"
 ok "python3.14 at $python_bin"
 
-if ! command -v psql >/dev/null 2>&1; then
-  die "psql not on PATH. Install Postgres 16+ with pgvector."
-fi
+require_gate platform.psql >/dev/null || exit 1
 ok "psql at $(command -v psql)"
 
 database_authority="$(
@@ -239,8 +245,10 @@ WHERE NOT EXISTS (
 SQL
 ok "database ready: $database_name"
 
+WORKFLOW_DATABASE_URL="$database_url" \
+  require_gate platform.pgvector >/dev/null || exit 1
 if ! psql "$database_url" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS vector;' >/dev/null; then
-  die "pgvector is not installed for $database_name. Install pgvector, then rerun ./scripts/bootstrap."
+  die "pgvector extension is available but CREATE EXTENSION failed; inspect psql output for permission or syntax errors."
 fi
 ok "pgvector extension enabled"
 

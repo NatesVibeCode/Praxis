@@ -74,7 +74,7 @@ _PGVECTOR = GateProbe(
         "Semantic compile, discover, and recall all use pgvector-backed "
         "embeddings; the extension must be installed for the target database."
     ),
-    depends_on=("platform.postgres_role",),
+    depends_on=("platform.psql",),
     ok_cache_ttl_s=300,
 )
 
