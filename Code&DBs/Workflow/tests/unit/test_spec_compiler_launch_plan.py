@@ -16,6 +16,7 @@ from runtime.spec_compiler import (
     Plan,
     PlanPacket,
     ProposedPlan,
+    _coerce_plan,
     compile_plan,
     launch_plan,
     launch_proposed,
@@ -138,6 +139,7 @@ def test_launch_plan_routes_through_command_bus(monkeypatch) -> None:
         {
             "label": "bug-authority",
             "bug_ref": "BUG-175EB9F3",
+            "bug_refs": None,
             "agent": "auto/build",
             "stage": "build",
         }
@@ -316,6 +318,193 @@ def test_propose_plan_surfaces_unbound_data_pills_as_warnings(monkeypatch) -> No
     # Per-packet data_pills carry the full detail for display.
     pills = proposed.packet_declarations[0]["data_pills"]
     assert pills["unbound"][0]["matched_span"] == "users.first_nm"
+
+
+class _BugFetchConn:
+    """Conn stand-in for _plan_packets_from_bugs SQL lookup.
+
+    ``execute`` returns the bugs that match the IN-clause. Any bug IDs
+    not in ``rows_by_id`` simulate missing rows (derive_bug_packets drops
+    them silently).
+    """
+
+    def __init__(self, rows_by_id: dict[str, dict[str, object]]) -> None:
+        self._rows_by_id = rows_by_id
+
+    def execute(self, query, *params):
+        # Defensive: only handle the bugs IN-query this test needs.
+        assert query.startswith("SELECT bug_id, title"), f"unexpected query: {query!r}"
+        return [self._rows_by_id[bug_id] for bug_id in params if bug_id in self._rows_by_id]
+
+
+def _fake_derive(**kwargs):
+    """Stand-in for derive_bug_packets used by from_bugs tests.
+
+    Returns two clusters across two waves so we can assert wave→label
+    depends_on wiring. The shape matches the real function's output.
+    """
+    bugs = kwargs["bugs"]
+    program_id = kwargs["program_id"]
+    bugs_by_id = {bug["bug_id"]: bug for bug in bugs}
+    wave_0_ids = [bug_id for bug_id in ("BUG-AUTH-1", "BUG-AUTH-2") if bug_id in bugs_by_id]
+    wave_1_ids = [bug_id for bug_id in ("BUG-RUN-1",) if bug_id in bugs_by_id]
+    derived: list[dict[str, object]] = []
+    if wave_0_ids:
+        derived.append(
+            {
+                "packet_id": f"{program_id}.w0-authority-repair",
+                "packet_slug": "w0-authority-repair",
+                "packet_kind": "authority_bug_repair",
+                "wave_id": "W0",
+                "depends_on_wave": [],
+                "lane_id": "authority_bug_system",
+                "lane_label": "Authority / bug system",
+                "bug_ids": wave_0_ids,
+                "bug_titles": [bugs_by_id[b].get("title") for b in wave_0_ids],
+                "highest_severity": "P1",
+                "authority_owner": "bugs_authority",
+                "cluster": {
+                    "cluster_key": "authority_repair",
+                    "label": "Authority repair",
+                    "reason_code": "bug_cluster.authority",
+                },
+                "verification_surface": "workflow orient + bug stats must return clean",
+                "done_criteria": ["Authority path deterministic", "Bugs prove closure"],
+                "stop_boundary": "Do not widen beyond authority repair",
+                "replay_ready_count": len(wave_0_ids),
+                "replay_blocked_bug_ids": [],
+                "blocked_reason_codes": [],
+                "categories": ["ARCHITECTURE"],
+            }
+        )
+    if wave_1_ids:
+        derived.append(
+            {
+                "packet_id": f"{program_id}.w1-runtime-repair",
+                "packet_slug": "w1-runtime-repair",
+                "packet_kind": "runtime_bug_repair",
+                "wave_id": "W1",
+                "depends_on_wave": ["W0"],
+                "lane_id": "workflow_runtime",
+                "lane_label": "Workflow / runtime",
+                "bug_ids": wave_1_ids,
+                "bug_titles": [bugs_by_id[b].get("title") for b in wave_1_ids],
+                "highest_severity": "P2",
+                "authority_owner": "workflow_runtime",
+                "cluster": {
+                    "cluster_key": "runtime_repair",
+                    "label": "Runtime repair",
+                    "reason_code": "bug_cluster.runtime",
+                },
+                "verification_surface": "focused runtime tests + evidence",
+                "done_criteria": ["Runtime path stable"],
+                "stop_boundary": "Do not touch unrelated UI",
+                "replay_ready_count": len(wave_1_ids),
+                "replay_blocked_bug_ids": [],
+                "blocked_reason_codes": [],
+                "categories": ["RUNTIME"],
+            }
+        )
+    return derived
+
+
+def test_coerce_plan_with_from_bugs_materializes_clustered_packets(monkeypatch) -> None:
+    import runtime.bug_resolution_program as bug_program_mod
+
+    monkeypatch.setattr(bug_program_mod, "derive_bug_packets", _fake_derive)
+
+    conn = _BugFetchConn(
+        {
+            "BUG-AUTH-1": {"bug_id": "BUG-AUTH-1", "title": "Authority 1", "replay_ready": True},
+            "BUG-AUTH-2": {"bug_id": "BUG-AUTH-2", "title": "Authority 2", "replay_ready": True},
+            "BUG-RUN-1": {"bug_id": "BUG-RUN-1", "title": "Runtime 1", "replay_ready": True},
+        }
+    )
+
+    plan = _coerce_plan(
+        {
+            "name": "bug_wave_burn",
+            "from_bugs": ["BUG-AUTH-1", "BUG-AUTH-2", "BUG-RUN-1"],
+        },
+        conn=conn,
+    )
+
+    assert plan.name == "bug_wave_burn"
+    assert plan.from_bugs == ["BUG-AUTH-1", "BUG-AUTH-2", "BUG-RUN-1"]
+    assert len(plan.packets) == 2
+    auth, runtime = plan.packets
+
+    # Cluster 1: authority wave, no deps, bug_refs carries both IDs.
+    assert auth.label == "w0-authority-repair"
+    assert auth.stage == "fix"
+    assert auth.write == ["."]
+    assert auth.bug_refs == ["BUG-AUTH-1", "BUG-AUTH-2"]
+    assert auth.bug_ref == "BUG-AUTH-1"  # primary
+    assert auth.depends_on is None
+    assert "Authority repair" in auth.description
+    assert "BUG-AUTH-1, BUG-AUTH-2" in auth.description
+    assert "Done when all of:" in auth.description
+
+    # Cluster 2: runtime wave, depends on the authority cluster's label.
+    assert runtime.label == "w1-runtime-repair"
+    assert runtime.depends_on == ["w0-authority-repair"]
+    assert runtime.bug_refs == ["BUG-RUN-1"]
+
+
+def test_coerce_plan_rejects_both_packets_and_from_bugs(monkeypatch) -> None:
+    with pytest.raises(ValueError, match="either explicit 'packets'"):
+        _coerce_plan(
+            {
+                "name": "ambiguous",
+                "packets": [{"description": "x", "write": ["a"], "stage": "build"}],
+                "from_bugs": ["BUG-1"],
+            },
+            conn=_BugFetchConn({}),
+        )
+
+
+def test_coerce_plan_from_bugs_rejects_empty_result(monkeypatch) -> None:
+    import runtime.bug_resolution_program as bug_program_mod
+
+    monkeypatch.setattr(bug_program_mod, "derive_bug_packets", lambda **_kwargs: [])
+
+    conn = _BugFetchConn({"BUG-KNOWN": {"bug_id": "BUG-KNOWN", "title": "x", "replay_ready": True}})
+    with pytest.raises(ValueError, match="no packets could be materialized"):
+        _coerce_plan(
+            {"name": "empty", "from_bugs": ["BUG-MISSING"]},
+            conn=conn,
+        )
+
+
+def test_propose_plan_from_bugs_warns_on_workspace_root_scope(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+    _install_empty_binding(monkeypatch)
+
+    import runtime.bug_resolution_program as bug_program_mod
+
+    monkeypatch.setattr(bug_program_mod, "derive_bug_packets", _fake_derive)
+
+    import runtime.workflow._admission as admission_mod
+
+    monkeypatch.setattr(
+        admission_mod,
+        "preview_workflow_execution",
+        lambda conn, *, inline_spec, **_kwargs: {"action": "preview", "jobs": [], "warnings": []},
+    )
+
+    conn = _BugFetchConn(
+        {"BUG-AUTH-1": {"bug_id": "BUG-AUTH-1", "title": "Authority 1", "replay_ready": True}}
+    )
+
+    proposed = propose_plan(
+        {"name": "bug_wave", "from_bugs": ["BUG-AUTH-1"]},
+        conn=conn,
+        workdir="/repo",
+    )
+
+    assert any("workspace root" in warning for warning in proposed.warnings)
+    assert proposed.spec_dict["jobs"][0]["bug_refs"] == ["BUG-AUTH-1"]
+    assert proposed.packet_declarations[0]["declared_bug_refs"] == ["BUG-AUTH-1"]
 
 
 def test_launch_proposed_submits_previously_built_spec(monkeypatch) -> None:

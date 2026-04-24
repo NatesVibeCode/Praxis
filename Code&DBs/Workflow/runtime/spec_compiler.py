@@ -599,6 +599,11 @@ class PlanPacket:
     description/write/stage match Intent; everything else is derivable or
     optional wiring (label auto-generated, agent defaults to auto/<stage>,
     verify_refs computed from write scope).
+
+    ``bug_ref`` holds the primary bug this packet resolves (singular).
+    ``bug_refs`` holds the full list when the packet resolves a cluster of
+    related bugs (e.g. from ``derive_bug_packets``) — the primary is the
+    first entry. Both may be set; bug_refs is authoritative when present.
     """
 
     description: str
@@ -608,13 +613,25 @@ class PlanPacket:
     read: list[str] | None = None
     depends_on: list[str] | None = None
     bug_ref: str | None = None
+    bug_refs: list[str] | None = None
     agent: str | None = None
     complexity: str | None = None
 
 
 @dataclass(frozen=True)
 class Plan:
-    """A named batch of packets, submitted as one workflow_run."""
+    """A named batch of packets, submitted as one workflow_run.
+
+    Callers can either hand-write packets OR supply a source-authority
+    shortcut and let the plan materialize packets from authority:
+
+      - ``from_bugs``: list of bug IDs. Bugs fetched + clustered through
+        ``runtime.bug_resolution_program.derive_bug_packets``; each cluster
+        becomes one PlanPacket with wave-dependency wiring preserved.
+
+    Explicit ``packets`` always win — if both ``packets`` and a ``from_*``
+    shortcut are set, the shortcut is rejected as an ambiguity error.
+    """
 
     name: str
     packets: list[PlanPacket]
@@ -622,6 +639,7 @@ class Plan:
     why: str | None = None
     phase: str = "build"
     workdir: str | None = None
+    from_bugs: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -661,26 +679,154 @@ def _coerce_packet(value: Any) -> PlanPacket:
         read=list(value["read"]) if value.get("read") else None,
         depends_on=list(value["depends_on"]) if value.get("depends_on") else None,
         bug_ref=value.get("bug_ref"),
+        bug_refs=list(value["bug_refs"]) if value.get("bug_refs") else None,
         agent=value.get("agent"),
         complexity=value.get("complexity"),
     )
 
 
-def _coerce_plan(plan: Any) -> Plan:
+def _plan_packets_from_bugs(
+    bug_ids: list[str],
+    *,
+    conn: Any,
+    program_id: str,
+) -> list[PlanPacket]:
+    """Materialize PlanPackets from bug IDs via derive_bug_packets.
+
+    Fetches the rows from the bugs table, runs the deterministic
+    lane+wave classifier, then translates each derived cluster into one
+    PlanPacket. Wave-level depends_on_wave edges are converted into
+    per-PlanPacket label-based depends_on so the workflow engine's
+    existing dependency wiring can run the waves correctly.
+
+    Missing / unknown bug IDs are silently dropped by derive_bug_packets —
+    the caller sees fewer packets than IDs supplied. No silent mutation.
+    """
+    if not bug_ids:
+        return []
+
+    deduped = list({bug_id.strip(): None for bug_id in bug_ids if bug_id and bug_id.strip()})
+    if not deduped:
+        return []
+
+    placeholders = ", ".join(f"${i+1}" for i in range(len(deduped)))
+    rows = conn.execute(
+        f"SELECT bug_id, title, category, severity, status, replay_ready, "
+        f"replay_reason_code FROM bugs WHERE bug_id IN ({placeholders})",
+        *deduped,
+    )
+    bugs = [dict(row) for row in rows or []]
+    if not bugs:
+        return []
+
+    from runtime.bug_resolution_program import derive_bug_packets
+
+    derived = derive_bug_packets(program_id=program_id, bugs=bugs)
+    if not derived:
+        return []
+
+    # Map wave_id → set of packet labels in that wave, for depends_on wiring.
+    wave_to_labels: dict[str, list[str]] = {}
+    for packet in derived:
+        wave_to_labels.setdefault(str(packet["wave_id"]), []).append(str(packet["packet_slug"]))
+
+    plan_packets: list[PlanPacket] = []
+    for packet in derived:
+        cluster_label = str(packet["cluster"]["label"])
+        bug_ids_for_packet = list(packet["bug_ids"])
+        done_criteria = list(packet.get("done_criteria") or [])
+        description_lines = [
+            f"Resolve bug cluster: {cluster_label}",
+            f"Bugs: {', '.join(bug_ids_for_packet)}",
+            f"Highest severity: {packet.get('highest_severity')}",
+            f"Lane: {packet.get('lane_label')} (wave {packet.get('wave_id')})",
+            f"Verification surface: {packet.get('verification_surface')}",
+        ]
+        if done_criteria:
+            description_lines.append("Done when all of:")
+            description_lines.extend(f"  - {criterion}" for criterion in done_criteria)
+        stop_boundary = packet.get("stop_boundary")
+        if stop_boundary:
+            description_lines.append(f"Stop boundary: {stop_boundary}")
+        description = "\n".join(description_lines)
+
+        # Wave deps → label deps. Exclude the packet's own label.
+        depends_on_labels: list[str] = []
+        own_label = str(packet["packet_slug"])
+        for dep_wave in packet.get("depends_on_wave") or []:
+            for label in wave_to_labels.get(str(dep_wave), []):
+                if label != own_label and label not in depends_on_labels:
+                    depends_on_labels.append(label)
+
+        plan_packets.append(
+            PlanPacket(
+                description=description,
+                # No explicit write scope — bug-resolution packets discover
+                # scope at runtime from bug evidence / registry paths. Use
+                # workspace root as the safe-but-broad default; ProposedPlan
+                # surfaces this as a warning so caller can narrow before
+                # launching if they have a tighter scope in mind.
+                write=["."],
+                stage="fix",
+                label=own_label,
+                depends_on=depends_on_labels or None,
+                bug_ref=bug_ids_for_packet[0] if bug_ids_for_packet else None,
+                bug_refs=bug_ids_for_packet or None,
+            )
+        )
+    return plan_packets
+
+
+def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
     if isinstance(plan, Plan):
         return plan
     if not isinstance(plan, dict):
         raise ValueError(
             f"plan must be a Plan or dict, got {type(plan).__name__}"
         )
-    packets = [_coerce_packet(p) for p in (plan.get("packets") or [])]
+    explicit_packets_raw = plan.get("packets") or []
+    from_bugs_raw = plan.get("from_bugs") or None
+
+    if explicit_packets_raw and from_bugs_raw:
+        raise ValueError(
+            "plan accepts either explicit 'packets' OR a 'from_*' shortcut, "
+            "not both — remove one to resolve the ambiguity"
+        )
+
+    plan_name = str(plan.get("name") or "launch_plan").strip() or "launch_plan"
+    from_bugs: list[str] | None = None
+
+    if from_bugs_raw:
+        if conn is None:
+            raise ValueError(
+                "plan.from_bugs requires a live Postgres conn to materialize "
+                "packets; pass conn=... to compile_plan / propose_plan / launch_plan"
+            )
+        if not isinstance(from_bugs_raw, list) or not all(
+            isinstance(item, str) for item in from_bugs_raw
+        ):
+            raise ValueError("plan.from_bugs must be a list of bug ID strings")
+        from_bugs = list(from_bugs_raw)
+        program_id = str(plan.get("program_id") or f"plan.{plan_name}").strip()
+        packets = _plan_packets_from_bugs(
+            from_bugs, conn=conn, program_id=program_id
+        )
+        if not packets:
+            raise ValueError(
+                f"from_bugs supplied {len(from_bugs)} bug ID(s) but no packets "
+                "could be materialized — check bug IDs exist in Praxis.db"
+            )
+    else:
+        packets = [_coerce_packet(p) for p in explicit_packets_raw]
+
     return Plan(
-        name=str(plan.get("name") or "launch_plan").strip() or "launch_plan",
+        name=plan_name,
         packets=packets,
         workflow_id=(str(plan["workflow_id"]).strip() if plan.get("workflow_id") else None),
         why=plan.get("why"),
         phase=str(plan.get("phase") or "build"),
         workdir=plan.get("workdir"),
+        from_bugs=from_bugs,
     )
 
 
@@ -718,7 +864,11 @@ def _packet_to_job(
         job["capabilities"] = list(compiled.capabilities)
     if compiled.tier and not agent.startswith("auto/"):
         job["tier"] = compiled.tier
-    if packet.bug_ref:
+    if packet.bug_refs:
+        job["bug_refs"] = list(packet.bug_refs)
+        if not packet.bug_ref:
+            job["bug_ref"] = packet.bug_refs[0]
+    if packet.bug_ref and "bug_ref" not in job:
         job["bug_ref"] = packet.bug_ref
     return job
 
@@ -734,7 +884,7 @@ def compile_plan(
     Returns (spec_dict, warnings). No submission; this is the pure translation
     step. Use :func:`launch_plan` for the full continuous flow.
     """
-    plan_obj = _coerce_plan(plan)
+    plan_obj = _coerce_plan(plan, conn=conn)
     if not plan_obj.packets:
         raise ValueError("plan.packets must have at least one packet")
 
@@ -846,7 +996,7 @@ def propose_plan(
     ``launch_proposed`` or discard.
     """
     spec_dict, warnings_all = compile_plan(plan, conn=conn, workdir=workdir)
-    plan_obj = _coerce_plan(plan)
+    plan_obj = _coerce_plan(plan, conn=conn)
 
     from runtime.workflow._admission import preview_workflow_execution
 
@@ -899,6 +1049,7 @@ def propose_plan(
                 "declared_label": packet.label,
                 "declared_depends_on": list(packet.depends_on) if packet.depends_on else None,
                 "declared_bug_ref": packet.bug_ref,
+                "declared_bug_refs": list(packet.bug_refs) if packet.bug_refs else None,
                 "declared_agent": packet.agent,
                 "declared_complexity": packet.complexity,
                 "data_pills": data_pills,
@@ -913,6 +1064,24 @@ def propose_plan(
     if binding_error:
         binding_summary["error"] = binding_error
         warnings_all = [*warnings_all, binding_error]
+
+    # Bug-derived packets default write=[".") (workspace root). Warn so the
+    # caller can narrow before launch if they have a tighter scope in mind.
+    if plan_obj.from_bugs:
+        broad_scope_labels = sorted(
+            packet["label"]
+            for packet in packet_declarations
+            if packet["declared_write"] == ["."]
+        )
+        if broad_scope_labels:
+            warnings_all = [
+                *warnings_all,
+                (
+                    f"{len(broad_scope_labels)} bug-derived packet(s) "
+                    f"{broad_scope_labels} default write scope to workspace root; "
+                    "narrow before launch if you know the target files"
+                ),
+            ]
     if binding_unbound:
         labels = sorted({entry["label"] for entry in binding_unbound})
         warnings_all = [
@@ -1019,7 +1188,7 @@ def launch_plan(
     ``launch_proposed`` to submit only if the proposal is approved.
     """
     spec_dict, warnings_all = compile_plan(plan, conn=conn, workdir=workdir)
-    plan_obj = _coerce_plan(plan)
+    plan_obj = _coerce_plan(plan, conn=conn)
 
     from runtime.control_commands import submit_workflow_command
 
@@ -1037,6 +1206,7 @@ def launch_plan(
         {
             "label": job["label"],
             "bug_ref": packet.bug_ref,
+            "bug_refs": list(packet.bug_refs) if packet.bug_refs else None,
             "agent": job["agent"],
             "stage": packet.stage,
         }

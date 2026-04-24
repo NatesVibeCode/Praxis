@@ -1620,9 +1620,18 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     """
     plan = params.get("plan")
     if not isinstance(plan, dict):
-        return {"error": "plan must be a dict with 'name' and 'packets'"}
-    if not plan.get("packets"):
-        return {"error": "plan.packets must have at least one packet"}
+        return {"error": "plan must be a dict with 'name' and either 'packets' or 'from_bugs'"}
+    has_packets = bool(plan.get("packets"))
+    has_from_bugs = bool(plan.get("from_bugs"))
+    if has_packets and has_from_bugs:
+        return {
+            "error": (
+                "plan accepts either explicit 'packets' OR 'from_bugs', not both — "
+                "remove one to resolve the ambiguity"
+            )
+        }
+    if not has_packets and not has_from_bugs:
+        return {"error": "plan must supply either 'packets' or 'from_bugs'"}
 
     workdir = params.get("workdir")
     preview_only = bool(params.get("preview_only"))
@@ -1909,10 +1918,14 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "plan": {
                         "type": "object",
                         "description": (
-                            "Plan to compile and launch. Fields: name (required), packets (required, "
-                            "non-empty list), workflow_id (optional, auto-generated if absent), why "
-                            "(optional narrative), phase (optional, default 'build'), workdir "
-                            "(optional, defaults to caller's workdir)."
+                            "Plan to compile and launch. Required: name PLUS either 'packets' "
+                            "(explicit list) or 'from_bugs' (bug-ID list that materializes "
+                            "packets through derive_bug_packets with wave-dependency wiring). "
+                            "Supplying both is rejected as an ambiguity error. Optional: "
+                            "workflow_id (auto-generated if absent), why (narrative), phase "
+                            "(default 'build'), workdir (defaults to caller's workdir), "
+                            "program_id (used as the bug-resolution program ID when from_bugs "
+                            "is set; defaults to 'plan.<name>')."
                         ),
                         "properties": {
                             "name": {"type": "string"},
@@ -1920,9 +1933,19 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "workflow_id": {"type": "string"},
                             "phase": {"type": "string"},
                             "workdir": {"type": "string"},
+                            "program_id": {"type": "string"},
+                            "from_bugs": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "Bug IDs to materialize into clustered PlanPackets via "
+                                    "derive_bug_packets. Each cluster becomes one packet; "
+                                    "wave dependencies become per-packet depends_on edges. "
+                                    "Unknown or missing bug IDs are silently dropped."
+                                ),
+                            },
                             "packets": {
                                 "type": "array",
-                                "minItems": 1,
                                 "items": {
                                     "type": "object",
                                     "properties": {
@@ -1936,6 +1959,14 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                                         "read": {"type": "array", "items": {"type": "string"}},
                                         "depends_on": {"type": "array", "items": {"type": "string"}},
                                         "bug_ref": {"type": "string"},
+                                        "bug_refs": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                            "description": (
+                                                "All bugs this packet resolves when it covers a "
+                                                "cluster. bug_ref (singular) is the primary."
+                                            ),
+                                        },
                                         "agent": {"type": "string"},
                                         "complexity": {"type": "string", "enum": ["low", "moderate", "high"]},
                                     },
@@ -1943,7 +1974,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                                 },
                             },
                         },
-                        "required": ["name", "packets"],
+                        "required": ["name"],
                     },
                     "workdir": {
                         "type": "string",

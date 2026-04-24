@@ -980,6 +980,20 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     }
                 },
             ),
+            _example(
+                "Materialize packets from bug IDs (wave deps auto-wired)",
+                {
+                    "plan": {
+                        "name": "bug_burn_p1_authority",
+                        "why": "Wave-based burn-down of P1 authority bugs.",
+                        "from_bugs": [
+                            "BUG-175EB9F3",
+                            "BUG-1DBACCD8",
+                            "BUG-9B812B32",
+                        ],
+                    }
+                },
+            ),
         ],
     ),
 }
