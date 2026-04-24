@@ -27,6 +27,13 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
+from adapters.permission_matrix import (
+    ALLOWED_PERMISSION_MODES,
+    NormalizedPermissionMode,
+    PermissionMatrixError,
+    translate_permission_flags,
+)
+
 __all__ = ["app"]
 
 
@@ -244,10 +251,30 @@ class CreateAgentRequest(BaseModel):
     title: str | None = None
     prompt: str | None = None
     provider: str | None = None
+    permission_mode: str | None = None
 
 
 class SendMessageRequest(BaseModel):
     prompt: str
+    permission_mode: str | None = None
+
+
+def _validate_permission_mode(value: str | None) -> NormalizedPermissionMode | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if normalized not in ALLOWED_PERMISSION_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    f"unknown permission_mode {normalized!r}; "
+                    f"allowed: {list(ALLOWED_PERMISSION_MODES)}"
+                ),
+                "error_code": "agent_sessions_invalid_permission_mode",
+            },
+        )
+    return normalized  # type: ignore[return-value]
 
 
 class LaunchWorkflowRequest(BaseModel):
@@ -1019,7 +1046,17 @@ def _claude_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
     return process_env
 
 
-def _build_claude_command(session_id: str, prompt: str, env: dict[str, str] | None = None) -> list[str]:
+def _build_claude_command(
+    session_id: str,
+    prompt: str,
+    env: dict[str, str] | None = None,
+    *,
+    permission_mode: NormalizedPermissionMode | None = None,
+) -> list[str]:
+    if permission_mode is not None:
+        permission_flags = list(translate_permission_flags("claude", permission_mode))
+    else:
+        permission_flags = ["--permission-mode", _claude_permission_mode(env)]
     return [
         "claude",
         "-p",
@@ -1027,8 +1064,7 @@ def _build_claude_command(session_id: str, prompt: str, env: dict[str, str] | No
         session_id,
         "--output-format",
         "stream-json",
-        "--permission-mode",
-        _claude_permission_mode(env),
+        *permission_flags,
         prompt,
     ]
 
@@ -1042,22 +1078,25 @@ def _build_codex_command(
     prompt: str,
     output_path: Path,
     env: dict[str, str] | None = None,
+    *,
+    permission_mode: NormalizedPermissionMode | None = None,
 ) -> list[str]:
     base = ["codex", "exec"]
     if _is_codex_thread_id(session_id):
         base.extend(["resume", session_id])
-    base.extend(
-        [
-            "--json",
-            "--output-last-message",
-            str(output_path),
-            "--cd",
-            str(_claude_cwd(env)),
-            "--sandbox",
-            _codex_sandbox(env),
-            prompt,
-        ]
-    )
+    core = [
+        "--json",
+        "--output-last-message",
+        str(output_path),
+        "--cd",
+        str(_claude_cwd(env)),
+    ]
+    if permission_mode is not None:
+        core.extend(translate_permission_flags("codex", permission_mode))
+    else:
+        core.extend(["--sandbox", _codex_sandbox(env)])
+    core.append(prompt)
+    base.extend(core)
     return base
 
 
@@ -1194,6 +1233,7 @@ async def _run_turn(
     *,
     provider_slug: str,
     pg_conn: Any | None = None,
+    permission_mode: NormalizedPermissionMode | None = None,
 ) -> tuple[str, list[dict[str, Any]], int, str]:
     queue = _get_queue(agent_id)
     messages_path = _messages_path(agent_id)
@@ -1209,9 +1249,13 @@ async def _run_turn(
         fd, raw_reply_file = tempfile.mkstemp(prefix=f"praxis-agent-{agent_id}-", suffix=".txt")
         os.close(fd)
         reply_file = Path(raw_reply_file)
-        cmd = _build_codex_command(session_id, prompt, reply_file)
+        cmd = _build_codex_command(
+            session_id, prompt, reply_file, permission_mode=permission_mode
+        )
     else:
-        cmd = _build_claude_command(session_id, prompt)
+        cmd = _build_claude_command(
+            session_id, prompt, permission_mode=permission_mode
+        )
     timeout_seconds = _turn_timeout_seconds()
 
     print(f"[agent_sessions] launching {provider_slug} agent={agent_id}", flush=True)
@@ -1430,6 +1474,7 @@ async def create_agent(
                 body.prompt,
                 provider_slug=provider_slug,
                 pg_conn=pg_conn,
+                permission_mode=_validate_permission_mode(body.permission_mode),
             )
         finally:
             lock.release()
@@ -1508,6 +1553,7 @@ async def send_message(
             body.prompt,
             provider_slug=provider_slug,
             pg_conn=pg_conn,
+            permission_mode=_validate_permission_mode(body.permission_mode),
         )
     finally:
         lock.release()
