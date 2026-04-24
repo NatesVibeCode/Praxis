@@ -108,6 +108,12 @@ const ManifestEditorPage = React.lazy(() =>
   }))
 );
 
+const SurfaceComposeView = React.lazy(() =>
+  import('./praxis/SurfaceComposeView').then(m => ({ default: m.SurfaceComposeView })).catch(() => ({
+    default: () => <SurfaceFallback title="Compose surface unavailable." copy="The compose view failed to load." />
+  }))
+);
+
 const AtlasPage = React.lazy(() =>
   import('./atlas/AtlasPage').then(m => ({ default: m.AtlasPage })).catch(() => ({
     default: () => <SurfaceFallback title="Atlas unavailable." copy="The atlas surface failed to load." />
@@ -599,6 +605,15 @@ export function AppShell() {
 
     if (activeSurface.category === 'dynamic' && activeSurface.kind === 'manifest-editor' && activeSurface.dynamicTab.manifestId) {
       return <ManifestEditorPage manifestId={activeSurface.dynamicTab.manifestId} />;
+    }
+
+    if (activeSurface.category === 'dynamic' && activeSurface.kind === 'compose') {
+      return (
+        <SurfaceComposeView
+          intent={activeSurface.dynamicTab.intent}
+          pillRefs={activeSurface.dynamicTab.pillRefs}
+        />
+      );
     }
 
     return <SurfaceFallback title="No tab selected" copy="Select a tab to continue." />;

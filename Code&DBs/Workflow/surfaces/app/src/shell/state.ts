@@ -4,7 +4,7 @@ import { shellUrl } from './routes';
 export type StaticTabId = 'dashboard' | 'build' | 'manifests' | 'atlas';
 /** Auxiliary view on the Overview surface (not a primary tab). */
 export type DashboardDetail = 'costs' | null;
-export type DynamicTabKind = 'run-detail' | 'manifest' | 'manifest-editor';
+export type DynamicTabKind = 'run-detail' | 'manifest' | 'manifest-editor' | 'compose';
 export type AppTabId = StaticTabId | string;
 export type BuildView = 'moon';
 
@@ -16,6 +16,10 @@ export interface DynamicTab {
   runId?: string | null;
   manifestId?: string | null;
   manifestTabId?: string | null;
+  /** Compose: entity id of the intent being compiled (e.g. 'intent.invoice_approval'). */
+  intent?: string | null;
+  /** Compose: ordered pill_type ids to bind into template slots. */
+  pillRefs?: string[];
 }
 
 export interface ShellState {
@@ -51,12 +55,16 @@ function normalizeDynamicTab(value: unknown): DynamicTab | null {
     kind !== 'run-detail'
     && kind !== 'manifest'
     && kind !== 'manifest-editor'
+    && kind !== 'compose'
   ) {
     return null;
   }
   const id = asString(value.id);
   const label = asString(value.label);
   if (!id || !label) return null;
+  const rawPills = Array.isArray(value.pillRefs)
+    ? value.pillRefs.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    : undefined;
   return {
     id,
     kind,
@@ -65,6 +73,8 @@ function normalizeDynamicTab(value: unknown): DynamicTab | null {
     runId: asString(value.runId),
     manifestId: asString(value.manifestId),
     manifestTabId: asString(value.manifestTabId),
+    intent: asString(value.intent),
+    pillRefs: rawPills,
   };
 }
 
@@ -78,6 +88,11 @@ export function manifestEditorShellId(manifestId: string): string {
 
 export function runDetailShellId(runId: string): string {
   return `run-detail:${runId}`;
+}
+
+export function composeShellId(intent: string, pillRefs: readonly string[] = []): string {
+  const fingerprint = pillRefs.length > 0 ? pillRefs.join('|') : 'no-pills';
+  return `compose:${intent}:${fingerprint}`;
 }
 
 export function createDefaultShellState(): ShellState {
@@ -190,6 +205,30 @@ export function parseShellLocationState(search: string, pathname: string = windo
       },
       chatOpen: false,
     };
+  }
+
+  if (appRelative === 'compose' || appRelative.startsWith('compose/')) {
+    const intent = asString(params.get('intent'));
+    if (intent) {
+      const pillRefs = params.getAll('pill').filter((p) => p && p.trim());
+      const labelPills = pillRefs.length > 0 ? ` · ${pillRefs.length} pill${pillRefs.length === 1 ? '' : 's'}` : '';
+      const dynamicTab: DynamicTab = {
+        id: composeShellId(intent, pillRefs),
+        kind: 'compose',
+        label: `Compose ${intent}${labelPills}`,
+        closable: true,
+        intent,
+        pillRefs,
+      };
+      return {
+        shellState: {
+          ...shellState,
+          activeTabId: dynamicTab.id,
+          dynamicTabs: [dynamicTab],
+        },
+        chatOpen: false,
+      };
+    }
   }
 
   const manifestId = asString(params.get('manifest'));
@@ -355,6 +394,15 @@ export function buildShellUrl(state: ShellState, chatOpen: boolean): string {
   const activeDynamicTab = state.dynamicTabs.find((tab) => tab.id === state.activeTabId) || null;
   if (activeDynamicTab?.kind === 'run-detail' && activeDynamicTab.runId) {
     return `/app/run/${activeDynamicTab.runId}`;
+  }
+
+  if (activeDynamicTab?.kind === 'compose' && activeDynamicTab.intent) {
+    const params = new URLSearchParams();
+    params.set('intent', activeDynamicTab.intent);
+    for (const pill of activeDynamicTab.pillRefs ?? []) {
+      params.append('pill', pill);
+    }
+    return `/app/compose?${params.toString()}`;
   }
 
   // Fallback to query params for manifest and other dynamic tabs

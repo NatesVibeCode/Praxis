@@ -114,6 +114,16 @@ const DYNAMIC_SURFACES = {
     }),
     getNavigateDescription: (_tab: DynamicTab) => 'Open the manifest editor tab.',
   },
+  compose: {
+    kindLabel: 'Compose',
+    getContext: (tab: DynamicTab): ShellSurfaceContext => ({
+      label: 'Compose surface',
+      detail: tab.intent
+        ? `Compiled from ${tab.intent}${tab.pillRefs?.length ? ` + ${tab.pillRefs.length} pill${tab.pillRefs.length === 1 ? '' : 's'}` : ''} via legal_templates projection.`
+        : 'Compile an experience template from intent + pills through legal_templates.',
+    }),
+    getNavigateDescription: (_tab: DynamicTab) => 'Open the composed surface.',
+  },
 } satisfies Record<DynamicTab['kind'], {
   kindLabel: string;
   getContext: (tab: DynamicTab) => ShellSurfaceContext;
