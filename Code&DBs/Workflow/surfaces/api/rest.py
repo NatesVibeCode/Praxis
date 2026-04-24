@@ -5054,6 +5054,52 @@ def launcher_app_path(path: str = "") -> Any:
     )
 
 
+# --- Operator console (dev-only) -------------------------------------------
+
+_OPERATOR_CONSOLE_HTML = Path(__file__).resolve().parents[1] / "console" / "index.html"
+
+
+def _operator_console_enabled(env: dict[str, str] | None = None) -> bool:
+    source = env if env is not None else os.environ
+    return str(source.get("PRAXIS_OPERATOR_DEV_MODE") or "").strip().lower() in {"1", "true", "yes"}
+
+
+@app.get("/console", response_model=None, include_in_schema=False)
+@app.get("/console/", response_model=None, include_in_schema=False)
+def operator_console_root() -> Any:
+    """Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE).
+
+    Reachable only when the env flag is set. No public docs, no PWA manifest
+    — a single self-contained HTML page designed to be loaded over Tailscale
+    from the operator's phone or laptop.
+    """
+    if not _operator_console_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": "operator console is not enabled",
+                "error_code": "operator_console_disabled",
+            },
+        )
+    try:
+        body = _OPERATOR_CONSOLE_HTML.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": f"operator console asset unavailable: {exc}",
+                "error_code": "operator_console_asset_missing",
+            },
+        ) from exc
+    return HTMLResponse(
+        body,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 def _apply_route_visibility_policy(target_app: FastAPI | None = None) -> None:
     resolved_app = target_app or app
     for route in resolved_app.routes:

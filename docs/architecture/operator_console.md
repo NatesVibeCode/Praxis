@@ -34,8 +34,8 @@ These bind future work on this surface. Every anti-pattern below was something m
 
 ### Surface
 
-- A new Vite entry at `Code&DBs/Workflow/surfaces/app/operator-console/` — separate from Moon's canvas-heavy bundle.
-- Served by the existing API under a path gated by `PRAXIS_OPERATOR_DEV_MODE=1`. When the gate is off, the route returns 404.
+- A single self-contained HTML page at `Code&DBs/Workflow/surfaces/console/index.html`. React + htm loaded via `esm.sh`; no Vite build step, no npm install, no bundler. The page is small enough to iterate in seconds and ship over a Tailscale link without a build pipeline.
+- Served by the existing API at `GET /console`, gated on `PRAXIS_OPERATOR_DEV_MODE=1`. When the gate is off, the route returns 404.
 - Bound to the Tailscale interface in production. The console is not reachable from public internet.
 
 ### Interaction model
@@ -72,7 +72,7 @@ The surviving piece of mobile v1's budget infrastructure is `capability_grants`,
 
 - **B.0** — Durable records (this doc + `operator_decisions` row).
 - **B.1** — Normalized permission matrix. Extend `ProviderCLIProfile` with `normalized_permission_modes`; register mappings for claude, codex, gemini; extend `agent_sessions.py` create/send endpoints to accept a normalized mode; unit tests across providers × modes. No UI.
-- **B.2** — Chat UI skeleton at `operator-console/`. Conversation list + turn stream + composer. Reads from the existing SSE stream.
+- **B.2** — Chat UI skeleton at `surfaces/console/index.html`. Provider picker, permission-mode dropdown, agent list, turn stream, composer, bearer-token gate. Self-contained HTML + React via esm.sh. Reads from and writes to the existing `agent_sessions` API (`/api/agent-sessions/agents`, `/agents/{id}/messages`, `/agents/{id}/messages` GET for history).
 - **B.3** — Plan rendering + approval gate. Plans as structured turn events; approval updates agent state via a new `permission_step_up` event kind on the existing session events table.
 - **B.4** — Tailscale VPS setup. Pure networking: Tailscale node on VPS, one on phone. Bind the API to the tailnet interface. No Praxis code change.
 
