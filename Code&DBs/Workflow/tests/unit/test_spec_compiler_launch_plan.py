@@ -337,6 +337,26 @@ class _BugFetchConn:
         return [self._rows_by_id[bug_id] for bug_id in params if bug_id in self._rows_by_id]
 
 
+class _MultiSourceConn:
+    """Conn that dispatches bugs and roadmap queries to separate dicts."""
+
+    def __init__(
+        self,
+        *,
+        bugs: dict[str, dict[str, object]] | None = None,
+        roadmap_items: dict[str, dict[str, object]] | None = None,
+    ) -> None:
+        self._bugs = bugs or {}
+        self._roadmap_items = roadmap_items or {}
+
+    def execute(self, query, *params):
+        if query.startswith("SELECT bug_id, title"):
+            return [self._bugs[bid] for bid in params if bid in self._bugs]
+        if query.startswith("SELECT roadmap_item_id"):
+            return [self._roadmap_items[rid] for rid in params if rid in self._roadmap_items]
+        raise AssertionError(f"unexpected query: {query!r}")
+
+
 def _fake_derive(**kwargs):
     """Stand-in for derive_bug_packets used by from_bugs tests.
 
@@ -474,6 +494,110 @@ def test_coerce_plan_from_bugs_rejects_empty_result(monkeypatch) -> None:
             {"name": "empty", "from_bugs": ["BUG-MISSING"]},
             conn=conn,
         )
+
+
+def test_coerce_plan_with_from_roadmap_items_materializes_packets() -> None:
+    conn = _MultiSourceConn(
+        roadmap_items={
+            "roadmap_item.ship_ui_polish": {
+                "roadmap_item_id": "roadmap_item.ship_ui_polish",
+                "title": "Ship UI polish",
+                "summary": "Tidy up Moon dashboard spacing, labels, and hover states.",
+                "acceptance_criteria": {
+                    "must_have": [
+                        "Moon dashboard hover states consistent",
+                        "Spacing scale applied to every panel",
+                    ],
+                    "outcome_gate": "Operator reports no remaining visual friction in Moon.",
+                },
+                "priority": "p2",
+                "lifecycle": "planned",
+                "source_bug_id": None,
+            },
+            "roadmap_item.retire_legacy_api": {
+                "roadmap_item_id": "roadmap_item.retire_legacy_api",
+                "title": "Retire legacy v1 API",
+                "summary": "Remove legacy /api/v1 routes after v2 migration is complete.",
+                "acceptance_criteria": {"must_have": ["No callers remain on /api/v1"]},
+                "priority": "p1",
+                "lifecycle": "planned",
+                "source_bug_id": "BUG-LEGACY-API",
+            },
+            "roadmap_item.already_done": {
+                "roadmap_item_id": "roadmap_item.already_done",
+                "title": "Old stuff",
+                "summary": "Completed long ago.",
+                "acceptance_criteria": {},
+                "priority": "p3",
+                "lifecycle": "completed",
+                "source_bug_id": None,
+            },
+        },
+    )
+
+    plan = _coerce_plan(
+        {
+            "name": "roadmap_landing",
+            "from_roadmap_items": [
+                "roadmap_item.ship_ui_polish",
+                "roadmap_item.retire_legacy_api",
+                "roadmap_item.already_done",
+            ],
+        },
+        conn=conn,
+    )
+
+    # Completed items get dropped — only the two active ones become packets.
+    assert len(plan.packets) == 2
+    ui, legacy = plan.packets
+
+    assert ui.label == "ship_ui_polish"
+    assert ui.stage == "build"  # no source_bug_id
+    assert ui.bug_ref is None
+    assert "Roadmap item: Ship UI polish" in ui.description
+    assert "Priority: p2" in ui.description
+    assert "Must have:" in ui.description
+    assert "Moon dashboard hover states consistent" in ui.description
+    assert "Outcome gate:" in ui.description
+
+    assert legacy.stage == "fix"  # source_bug_id present
+    assert legacy.bug_ref == "BUG-LEGACY-API"
+    assert "Retire legacy v1 API" in legacy.description
+
+
+def test_coerce_plan_combines_from_bugs_and_from_roadmap_items(monkeypatch) -> None:
+    import runtime.bug_resolution_program as bug_program_mod
+
+    monkeypatch.setattr(bug_program_mod, "derive_bug_packets", _fake_derive)
+
+    conn = _MultiSourceConn(
+        bugs={"BUG-AUTH-1": {"bug_id": "BUG-AUTH-1", "title": "a", "replay_ready": True}},
+        roadmap_items={
+            "roadmap_item.ship_it": {
+                "roadmap_item_id": "roadmap_item.ship_it",
+                "title": "Ship it",
+                "summary": "Launch the thing.",
+                "acceptance_criteria": {"must_have": ["launched"]},
+                "priority": "p1",
+                "lifecycle": "planned",
+                "source_bug_id": None,
+            }
+        },
+    )
+
+    plan = _coerce_plan(
+        {
+            "name": "combined",
+            "from_bugs": ["BUG-AUTH-1"],
+            "from_roadmap_items": ["roadmap_item.ship_it"],
+        },
+        conn=conn,
+    )
+
+    # Bug cluster first (extends), then roadmap item.
+    assert len(plan.packets) == 2
+    assert plan.packets[0].bug_refs == ["BUG-AUTH-1"]  # bug cluster
+    assert plan.packets[1].label == "ship_it"  # roadmap item
 
 
 def test_propose_plan_from_bugs_warns_on_workspace_root_scope(monkeypatch) -> None:

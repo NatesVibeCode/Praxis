@@ -640,6 +640,7 @@ class Plan:
     phase: str = "build"
     workdir: str | None = None
     from_bugs: list[str] | None = None
+    from_roadmap_items: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -777,6 +778,97 @@ def _plan_packets_from_bugs(
     return plan_packets
 
 
+def _plan_packets_from_roadmap_items(
+    item_ids: list[str],
+    *,
+    conn: Any,
+) -> list[PlanPacket]:
+    """Materialize PlanPackets from roadmap_item IDs.
+
+    Each active roadmap item becomes one PlanPacket with description built
+    from title + summary + acceptance_criteria.must_have. Stage defaults to
+    'fix' when the item has a source_bug_id, else 'build'. Completed items
+    are silently dropped — the caller sees fewer packets than IDs supplied.
+
+    Write scope defaults to workspace root '.' — roadmap items don't carry
+    enforced registry paths today; ProposedPlan surfaces this as a warning.
+    No cross-item dependency wiring in MVP — caller edits depends_on
+    explicitly when the items have a known order.
+    """
+    if not item_ids:
+        return []
+
+    deduped = list({item.strip(): None for item in item_ids if item and item.strip()})
+    if not deduped:
+        return []
+
+    placeholders = ", ".join(f"${i+1}" for i in range(len(deduped)))
+    rows = conn.execute(
+        f"SELECT roadmap_item_id, title, summary, acceptance_criteria, "
+        f"priority, lifecycle, source_bug_id "
+        f"FROM roadmap_items WHERE roadmap_item_id IN ({placeholders})",
+        *deduped,
+    )
+    items = [
+        dict(row)
+        for row in rows or []
+        if str(dict(row).get("lifecycle") or "") != "completed"
+    ]
+    if not items:
+        return []
+
+    plan_packets: list[PlanPacket] = []
+    for item in items:
+        item_id = str(item["roadmap_item_id"])
+        title = str(item.get("title") or item_id)
+        summary = str(item.get("summary") or "").strip()
+        acceptance_raw = item.get("acceptance_criteria") or {}
+        if isinstance(acceptance_raw, str):
+            import json as _json
+            try:
+                acceptance = _json.loads(acceptance_raw)
+            except (ValueError, TypeError):
+                acceptance = {}
+        else:
+            acceptance = dict(acceptance_raw) if isinstance(acceptance_raw, dict) else {}
+        must_have = list(acceptance.get("must_have") or [])
+        outcome_gate = str(acceptance.get("outcome_gate") or "").strip()
+
+        priority = str(item.get("priority") or "").strip()
+        source_bug_id = item.get("source_bug_id")
+        stage = "fix" if source_bug_id else "build"
+
+        description_lines = [f"Roadmap item: {title}"]
+        if priority:
+            description_lines.append(f"Priority: {priority}")
+        if summary:
+            description_lines.append(f"Summary: {summary}")
+        if must_have:
+            description_lines.append("Must have:")
+            description_lines.extend(f"  - {criterion}" for criterion in must_have)
+        if outcome_gate:
+            description_lines.append(f"Outcome gate: {outcome_gate}")
+        description = "\n".join(description_lines)
+
+        # Derive a stable, reasonably short label from the roadmap_item_id.
+        # Drop the leading 'roadmap_item.' prefix if present; cap at 64 chars.
+        label_seed = item_id
+        if label_seed.startswith("roadmap_item."):
+            label_seed = label_seed[len("roadmap_item.") :]
+        label = label_seed[:64]
+
+        plan_packets.append(
+            PlanPacket(
+                description=description,
+                write=["."],
+                stage=stage,
+                label=label,
+                bug_ref=str(source_bug_id) if source_bug_id else None,
+            )
+        )
+    return plan_packets
+
+
 def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
     if isinstance(plan, Plan):
         return plan
@@ -786,37 +878,65 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
         )
     explicit_packets_raw = plan.get("packets") or []
     from_bugs_raw = plan.get("from_bugs") or None
+    from_roadmap_items_raw = plan.get("from_roadmap_items") or None
+    has_from_source = bool(from_bugs_raw or from_roadmap_items_raw)
 
-    if explicit_packets_raw and from_bugs_raw:
+    if explicit_packets_raw and has_from_source:
         raise ValueError(
-            "plan accepts either explicit 'packets' OR a 'from_*' shortcut, "
+            "plan accepts either explicit 'packets' OR 'from_*' shortcuts, "
             "not both — remove one to resolve the ambiguity"
         )
 
     plan_name = str(plan.get("name") or "launch_plan").strip() or "launch_plan"
     from_bugs: list[str] | None = None
+    from_roadmap_items: list[str] | None = None
+    packets: list[PlanPacket] = []
 
-    if from_bugs_raw:
+    if has_from_source:
         if conn is None:
             raise ValueError(
-                "plan.from_bugs requires a live Postgres conn to materialize "
-                "packets; pass conn=... to compile_plan / propose_plan / launch_plan"
+                "plan from_* shortcuts require a live Postgres conn to "
+                "materialize packets; pass conn=... to compile_plan / "
+                "propose_plan / launch_plan"
             )
+
+    if from_bugs_raw:
         if not isinstance(from_bugs_raw, list) or not all(
             isinstance(item, str) for item in from_bugs_raw
         ):
             raise ValueError("plan.from_bugs must be a list of bug ID strings")
         from_bugs = list(from_bugs_raw)
         program_id = str(plan.get("program_id") or f"plan.{plan_name}").strip()
-        packets = _plan_packets_from_bugs(
+        bug_packets = _plan_packets_from_bugs(
             from_bugs, conn=conn, program_id=program_id
         )
-        if not packets:
+        if not bug_packets:
             raise ValueError(
                 f"from_bugs supplied {len(from_bugs)} bug ID(s) but no packets "
                 "could be materialized — check bug IDs exist in Praxis.db"
             )
-    else:
+        packets.extend(bug_packets)
+
+    if from_roadmap_items_raw:
+        if not isinstance(from_roadmap_items_raw, list) or not all(
+            isinstance(item, str) for item in from_roadmap_items_raw
+        ):
+            raise ValueError(
+                "plan.from_roadmap_items must be a list of roadmap_item ID strings"
+            )
+        from_roadmap_items = list(from_roadmap_items_raw)
+        roadmap_packets = _plan_packets_from_roadmap_items(
+            from_roadmap_items, conn=conn
+        )
+        if not roadmap_packets:
+            raise ValueError(
+                f"from_roadmap_items supplied {len(from_roadmap_items)} ID(s) "
+                "but no packets could be materialized — check IDs exist in "
+                "Praxis.db and are not already completed"
+            )
+        packets.extend(roadmap_packets)
+
+    if not has_from_source:
         packets = [_coerce_packet(p) for p in explicit_packets_raw]
 
     return Plan(
@@ -827,6 +947,7 @@ def _coerce_plan(plan: Any, *, conn: Any = None) -> Plan:
         phase=str(plan.get("phase") or "build"),
         workdir=plan.get("workdir"),
         from_bugs=from_bugs,
+        from_roadmap_items=from_roadmap_items,
     )
 
 
@@ -1065,9 +1186,10 @@ def propose_plan(
         binding_summary["error"] = binding_error
         warnings_all = [*warnings_all, binding_error]
 
-    # Bug-derived packets default write=[".") (workspace root). Warn so the
-    # caller can narrow before launch if they have a tighter scope in mind.
-    if plan_obj.from_bugs:
+    # Source-authority-derived packets default write=["."] (workspace root).
+    # Warn so the caller can narrow before launch if they have a tighter
+    # scope in mind.
+    if plan_obj.from_bugs or plan_obj.from_roadmap_items:
         broad_scope_labels = sorted(
             packet["label"]
             for packet in packet_declarations
@@ -1077,7 +1199,7 @@ def propose_plan(
             warnings_all = [
                 *warnings_all,
                 (
-                    f"{len(broad_scope_labels)} bug-derived packet(s) "
+                    f"{len(broad_scope_labels)} source-derived packet(s) "
                     f"{broad_scope_labels} default write scope to workspace root; "
                     "narrow before launch if you know the target files"
                 ),

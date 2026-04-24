@@ -994,6 +994,18 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     }
                 },
             ),
+            _example(
+                "Materialize packets from roadmap items",
+                {
+                    "plan": {
+                        "name": "q2_roadmap_landing",
+                        "why": "Land the two active roadmap items this phase.",
+                        "from_roadmap_items": [
+                            "roadmap_item.make.moon.ui.emit.runnable.graph.authority.for.gated.9.step.workflows",
+                        ],
+                    }
+                },
+            ),
         ],
     ),
 }

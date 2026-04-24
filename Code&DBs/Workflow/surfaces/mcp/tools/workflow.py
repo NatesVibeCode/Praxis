@@ -1620,18 +1620,27 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     """
     plan = params.get("plan")
     if not isinstance(plan, dict):
-        return {"error": "plan must be a dict with 'name' and either 'packets' or 'from_bugs'"}
-    has_packets = bool(plan.get("packets"))
-    has_from_bugs = bool(plan.get("from_bugs"))
-    if has_packets and has_from_bugs:
         return {
             "error": (
-                "plan accepts either explicit 'packets' OR 'from_bugs', not both — "
-                "remove one to resolve the ambiguity"
+                "plan must be a dict with 'name' and either 'packets' or a "
+                "'from_*' shortcut (from_bugs / from_roadmap_items)"
             )
         }
-    if not has_packets and not has_from_bugs:
-        return {"error": "plan must supply either 'packets' or 'from_bugs'"}
+    has_packets = bool(plan.get("packets"))
+    has_from_source = bool(plan.get("from_bugs") or plan.get("from_roadmap_items"))
+    if has_packets and has_from_source:
+        return {
+            "error": (
+                "plan accepts either explicit 'packets' OR 'from_*' shortcuts, "
+                "not both — remove one to resolve the ambiguity"
+            )
+        }
+    if not has_packets and not has_from_source:
+        return {
+            "error": (
+                "plan must supply either 'packets', 'from_bugs', or 'from_roadmap_items'"
+            )
+        }
 
     workdir = params.get("workdir")
     preview_only = bool(params.get("preview_only"))
@@ -1942,6 +1951,18 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                                     "derive_bug_packets. Each cluster becomes one packet; "
                                     "wave dependencies become per-packet depends_on edges. "
                                     "Unknown or missing bug IDs are silently dropped."
+                                ),
+                            },
+                            "from_roadmap_items": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "Roadmap item IDs to materialize into PlanPackets. Each "
+                                    "active item becomes one packet whose description is built "
+                                    "from title + summary + acceptance_criteria.must_have. "
+                                    "Stage defaults to 'fix' when the roadmap item has a "
+                                    "source_bug_id, else 'build'. Completed items are dropped. "
+                                    "from_bugs and from_roadmap_items can be combined."
                                 ),
                             },
                             "packets": {
