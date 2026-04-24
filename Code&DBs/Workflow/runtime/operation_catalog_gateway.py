@@ -422,9 +422,25 @@ def _with_operation_receipt(
     )
     if isinstance(result, Mapping):
         payload = dict(result)
+        if "ok" not in payload:
+            payload["ok"] = True
+        if binding.operation_kind == "query" and "results" not in payload:
+            # If a query returns a mapping that isn't 'results' but contains a list,
+            # we should encourage the handler to use 'results', but as a fallback
+            # we don't force it here yet to avoid breaking very specific contracts.
+            pass
         payload["operation_receipt"] = operation_receipt
         return payload
+
+    if binding.operation_kind == "query" and isinstance(result, list):
+        return {
+            "ok": True,
+            "results": result,
+            "operation_receipt": operation_receipt,
+        }
+
     return {
+        "ok": True,
         "result": result,
         "operation_receipt": operation_receipt,
     }
@@ -481,7 +497,11 @@ async def aexecute_operation_binding(
             error_code=type(exc).__name__,
             error_detail=str(exc),
         )
-        raise
+        return {
+            "ok": False,
+            "error": str(exc),
+            "error_code": type(exc).__name__,
+        }
     receipt = _persist_operation_outcome(
         conn,
         binding,
@@ -529,7 +549,11 @@ def execute_operation_binding(
             error_code=type(exc).__name__,
             error_detail=str(exc),
         )
-        raise
+        return {
+            "ok": False,
+            "error": str(exc),
+            "error_code": type(exc).__name__,
+        }
     receipt = _persist_operation_outcome(
         conn,
         binding,

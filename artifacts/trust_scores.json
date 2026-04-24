@@ -62,11 +62,11 @@
   {
     "provider_slug": "openai",
     "model_slug": null,
-    "elo_score": 868.78401722982,
-    "total_runs": 10,
+    "elo_score": 821.4541261198708,
+    "total_runs": 15,
     "wins": 0,
-    "losses": 10,
+    "losses": 15,
     "win_rate": 0.0,
-    "last_updated": "2026-04-17T06:10:07.845735+00:00"
+    "last_updated": "2026-04-23T21:32:47.090001+00:00"
   }
 ]

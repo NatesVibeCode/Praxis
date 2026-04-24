@@ -84,3 +84,39 @@ def test_resolve_http_operation_binding_rejects_missing_reference() -> None:
         )
 
     assert "missing_handler" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("input_model_ref", "handler_ref", "expected_command_class"),
+    [
+        (
+            "runtime.authority_objects.ListAuthorityDomainSummaryCommand",
+            "runtime.authority_objects.handle_list_authority_domain_summary",
+            "ListAuthorityDomainSummaryCommand",
+        ),
+        (
+            "runtime.operations.commands.structured_documents.RecordStructuredDocumentContextSelectionCommand",
+            "runtime.operations.commands.structured_documents.handle_record_context_selection",
+            "RecordStructuredDocumentContextSelectionCommand",
+        ),
+        (
+            "runtime.operations.queries.structured_documents.ListStructuredDocumentContextSelectionsQuery",
+            "runtime.operations.queries.structured_documents.handle_list_context_selection_receipts",
+            "ListStructuredDocumentContextSelectionsQuery",
+        ),
+    ],
+)
+def test_resolve_http_operation_binding_loads_catalog_migrated_bindings(
+    input_model_ref: str,
+    handler_ref: str,
+    expected_command_class: str,
+) -> None:
+    binding = resolve_http_operation_binding(
+        _definition(
+            input_model_ref=input_model_ref,
+            handler_ref=handler_ref,
+        )
+    )
+
+    assert binding.command_class.__name__ == expected_command_class
+    assert callable(binding.handler)

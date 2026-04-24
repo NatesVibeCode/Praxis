@@ -24,6 +24,7 @@ def _parse_iso_datetime(value: object, *, field_name: str) -> datetime:
 
 def _structured_runtime_error(exc: Exception, *, operation_name: str) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        "ok": False,
         "error": str(exc),
         "error_code": getattr(exc, "reason_code", f"{operation_name}.failed"),
         "operation_name": operation_name,
@@ -36,11 +37,14 @@ def _structured_runtime_error(exc: Exception, *, operation_name: str) -> dict[st
 
 def _execute_catalog_tool(*, operation_name: str, payload: dict[str, Any]) -> dict:
     try:
-        return execute_operation_from_subsystems(
+        result = execute_operation_from_subsystems(
             _subs,
             operation_name=operation_name,
             payload=payload,
         )
+        if isinstance(result, dict) and "ok" not in result:
+            result["ok"] = True
+        return result
     except Exception as exc:
         return _structured_runtime_error(exc, operation_name=operation_name)
 

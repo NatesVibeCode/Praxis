@@ -42,7 +42,7 @@ def handle_query_operator_decisions(
 ) -> dict[str, Any]:
     from surfaces.api.operator_write import OperatorControlFrontdoor
 
-    return OperatorControlFrontdoor().list_operator_decisions(
+    result = OperatorControlFrontdoor().list_operator_decisions(
         as_of=query.as_of,
         decision_kind=query.decision_kind,
         decision_source=query.decision_source,
@@ -52,6 +52,11 @@ def handle_query_operator_decisions(
         limit=query.limit,
         env=_resolved_env(subsystems),
     )
+    return {
+        "ok": True,
+        "results": result.get("results", []),
+        **{k: v for k, v in result.items() if k not in ("results", "ok")},
+    }
 
 
 __all__ = ["QueryOperatorDecisions", "handle_query_operator_decisions"]

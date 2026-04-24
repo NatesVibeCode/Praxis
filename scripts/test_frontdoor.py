@@ -369,14 +369,18 @@ def _check_affected_payload(args: list[str]) -> dict[str, Any]:
             "warnings": [],
         }
     analysis = _queue_analysis(args[0])
-    warnings: list[str] = []
     if not analysis["affected_suites"]:
-        warnings.append("no known test suites matched the queue file paths")
+        return {
+            "ok": False,
+            "results": analysis,
+            "errors": ["no known test suites matched the queue file paths"],
+            "warnings": [],
+        }
     return {
         "ok": True,
         "results": analysis,
         "errors": [],
-        "warnings": warnings,
+        "warnings": [],
     }
 
 
@@ -394,19 +398,7 @@ def _validate_payload(args: list[str]) -> dict[str, Any]:
     ok = run["returncode"] == 0
     errors: list[str] = []
     warnings: list[str] = []
-    if ok:
-        pass
-    elif "Spec Validation: PASSED" in run["stdout"] and "Agent resolution check failed" in run["stdout"]:
-        ok = True
-        warnings.append(
-            "workflow spec validated, but agent resolution was blocked by the sandbox permission surface"
-        )
-    elif "agent authority unavailable:" in run["stdout"] and "AUTHORITY ERROR" in run["stdout"]:
-        ok = True
-        warnings.append(
-            "workflow spec parsed, but agent resolution was blocked by the sandbox permission surface"
-        )
-    else:
+    if not ok:
         errors.append(f"workflow validation failed with exit code {run['returncode']}")
         if run["stderr"]:
             errors.append(run["stderr"].strip())

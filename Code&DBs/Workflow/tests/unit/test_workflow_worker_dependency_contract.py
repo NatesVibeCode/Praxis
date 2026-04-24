@@ -50,6 +50,37 @@ def test_compose_worker_does_not_pin_parallelism_by_default() -> None:
     assert "PRAXIS_WORKER_MAX_PARALLEL: ${PRAXIS_WORKER_MAX_PARALLEL:-}" in compose_text
 
 
+def test_compose_builds_pass_layout_defaults_to_required_dockerfiles() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert (
+        compose_text.count(
+            "PRAXIS_CONTAINER_WORKSPACE_ROOT: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
+        )
+        == 4
+    )
+    assert (
+        compose_text.count(
+            "PRAXIS_CONTAINER_HOME: ${PRAXIS_CONTAINER_HOME:-/home/praxis-agent}"
+        )
+        == 4
+    )
+
+
+def test_compose_allows_docker_specific_database_authority_override() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert (
+        compose_text.count(
+            "WORKFLOW_DATABASE_URL: ${PRAXIS_DOCKER_WORKFLOW_DATABASE_URL:-${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}}"
+        )
+        == 3
+    )
+    assert compose_text.count('"host.docker.internal:host-gateway"') == 3
+
+
 def test_start_worker_checks_dependency_contract_before_launch(monkeypatch) -> None:
     observed: dict[str, object] = {}
     monkeypatch.delenv("PRAXIS_WORKSPACE_BASE_PATH", raising=False)

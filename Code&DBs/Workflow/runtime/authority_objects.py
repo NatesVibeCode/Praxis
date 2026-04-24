@@ -53,6 +53,12 @@ class ListAuthorityAdoptionCommand(BaseModel):
     limit: int = 100
 
 
+class ListAuthorityDomainSummaryCommand(BaseModel):
+    authority_domain_ref: str | None = None
+    adoption_status: str | None = None
+    limit: int = 100
+
+
 def _text(value: object, *, field_name: str, required: bool = False) -> str | None:
     if value is None:
         if required:
@@ -184,6 +190,30 @@ def list_authority_adoption(
     return _fetch(conn, "\n".join(clauses), *args)
 
 
+def list_authority_domain_summary(
+    conn: Any,
+    *,
+    authority_domain_ref: str | None = None,
+    adoption_status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Return per-domain legacy assignment summary rows."""
+
+    clauses = ["SELECT * FROM authority_legacy_domain_assignment_summary WHERE TRUE"]
+    args: list[Any] = []
+    normalized_domain = _text(authority_domain_ref, field_name="authority_domain_ref")
+    normalized_status = _text(adoption_status, field_name="adoption_status")
+    if normalized_domain is not None:
+        args.append(normalized_domain)
+        clauses.append(f"AND authority_domain_ref = ${len(args)}")
+    if normalized_status is not None:
+        args.append(normalized_status)
+        clauses.append(f"AND adoption_status = ${len(args)}")
+    args.append(_limit(limit))
+    clauses.append(f"ORDER BY authority_domain_ref, adoption_status LIMIT ${len(args)}")
+    return _fetch(conn, "\n".join(clauses), *args)
+
+
 def handle_list_authority_objects(
     command: ListAuthorityObjectsCommand,
     subsystems: Any,
@@ -226,15 +256,31 @@ def handle_list_authority_adoption(
     return {"status": "listed", "adoption": rows, "count": len(rows)}
 
 
+def handle_list_authority_domain_summary(
+    command: ListAuthorityDomainSummaryCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    rows = list_authority_domain_summary(
+        subsystems.get_pg_conn(),
+        authority_domain_ref=command.authority_domain_ref,
+        adoption_status=command.adoption_status,
+        limit=command.limit,
+    )
+    return {"status": "listed", "domain_summaries": rows, "count": len(rows)}
+
+
 __all__ = [
     "AuthorityObjectError",
     "ListAuthorityAdoptionCommand",
+    "ListAuthorityDomainSummaryCommand",
     "ListAuthorityDriftCommand",
     "ListAuthorityObjectsCommand",
     "handle_list_authority_adoption",
+    "handle_list_authority_domain_summary",
     "handle_list_authority_drift",
     "handle_list_authority_objects",
     "list_authority_adoption",
+    "list_authority_domain_summary",
     "list_authority_drift",
     "list_authority_objects",
 ]

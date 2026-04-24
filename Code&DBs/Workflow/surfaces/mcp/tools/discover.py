@@ -100,6 +100,7 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
                 pass
 
         return {
+            "ok": True,
             "query": query,
             "results": clean,
             "count": len(clean),
@@ -124,12 +125,14 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
             else:
                 _progress_emitter.emit(progress=1, total=1, message=f"Done — {count} entities indexed")
         return {
+            "ok": True,
             "action": "reindex",
             "result": result,
         }
 
     elif action == "stats":
         return {
+            "ok": True,
             "action": "stats",
             **indexer.stats(),
         }
@@ -137,6 +140,7 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
     elif action == "stale-check":
         sample = int(params.get("sample_limit", 50))
         return {
+            "ok": True,
             "action": "stale-check",
             **indexer.stale_check(sample_limit=sample),
         }

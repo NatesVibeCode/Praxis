@@ -44,6 +44,8 @@ const STATE_MAP: Record<string, MoonStatusState> = {
   running: 'active',
   succeeded: 'ok',
   failed: 'failed',
+  rejected: 'failed',
+  refused: 'failed',
   dead_letter: 'failed',
   blocked: 'failed',
   parent_failed: 'failed',

@@ -10,6 +10,8 @@ services:
       dockerfile: docker/praxis-control.Dockerfile
       args:
         PRAXIS_DEPENDENCY_SCOPE: semantic_backend
+        PRAXIS_CONTAINER_WORKSPACE_ROOT: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+        PRAXIS_CONTAINER_HOME: ${PRAXIS_CONTAINER_HOME:-/home/praxis-agent}
     image: praxis-semantic-backend:latest
     env_file:
       - .env
@@ -42,6 +44,8 @@ services:
       dockerfile: docker/praxis-control.Dockerfile
       args:
         PRAXIS_DEPENDENCY_SCOPE: api_server
+        PRAXIS_CONTAINER_WORKSPACE_ROOT: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+        PRAXIS_CONTAINER_HOME: ${PRAXIS_CONTAINER_HOME:-/home/praxis-agent}
     image: praxis-api:latest
     depends_on:
       semantic-backend:
@@ -49,7 +53,7 @@ services:
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
+      WORKFLOW_DATABASE_URL: ${PRAXIS_DOCKER_WORKFLOW_DATABASE_URL:-${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}}
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
@@ -86,6 +90,8 @@ services:
       - exec python3 -m surfaces.api.server --host "$${PRAXIS_API_HOST}" --port "$${PRAXIS_API_PORT}" --no-reload
     ports:
       - "8420:8420"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS \"http://127.0.0.1:$${PRAXIS_API_PORT}/api/health\" >/dev/null"]
       interval: 10s
@@ -98,16 +104,20 @@ services:
       dockerfile: docker/praxis-control.Dockerfile
       args:
         PRAXIS_DEPENDENCY_SCOPE: scheduler
+        PRAXIS_CONTAINER_WORKSPACE_ROOT: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+        PRAXIS_CONTAINER_HOME: ${PRAXIS_CONTAINER_HOME:-/home/praxis-agent}
     image: praxis-scheduler:latest
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
+      WORKFLOW_DATABASE_URL: ${PRAXIS_DOCKER_WORKFLOW_DATABASE_URL:-${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}}
       PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
       PRAXIS_WORKSPACE_BASE_PATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
       - python3
       - -m
@@ -125,6 +135,8 @@ services:
       dockerfile: docker/praxis-worker.Dockerfile
       args:
         PRAXIS_DEPENDENCY_SCOPE: workflow_worker
+        PRAXIS_CONTAINER_WORKSPACE_ROOT: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+        PRAXIS_CONTAINER_HOME: ${PRAXIS_CONTAINER_HOME:-/home/praxis-agent}
     image: praxis-worker:latest
     depends_on:
       semantic-backend:
@@ -136,7 +148,7 @@ services:
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: ${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}
+      WORKFLOW_DATABASE_URL: ${PRAXIS_DOCKER_WORKFLOW_DATABASE_URL:-${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}}
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
@@ -183,6 +195,8 @@ services:
       # ephemeral CLI containers bind-mount from these paths, and worker
       # must read them back for _dehydrate_copy after exec.
       - /tmp:/tmp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
       - sh
       - -c

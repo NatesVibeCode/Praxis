@@ -319,8 +319,8 @@ function apiServerPlugin(apiPort: number) {
 
 export default defineConfig(async ({ command }) => {
   const isServe = command === 'serve';
-  const preferredUiPort = Number.parseInt(process.env.PRAXIS_UI_PORT ?? '5173', 10);
-  const preferredApiPort = Number.parseInt(process.env.PRAXIS_API_PORT ?? '8420', 10);
+  const preferredUiPort = Number.parseInt(process.env.PRAXIS_UI_PORT ?? '5180', 10);
+  const preferredApiPort = Number.parseInt(process.env.PRAXIS_API_PORT ?? '8430', 10);
 
   const [uiPort, apiPort] = isServe
     ? await Promise.all([

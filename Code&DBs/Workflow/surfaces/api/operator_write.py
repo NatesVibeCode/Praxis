@@ -5244,7 +5244,8 @@ class OperatorControlFrontdoor:
         finally:
             await conn.close()
         return {
-            "operator_decisions": [
+            "ok": True,
+            "results": [
                 _operator_decision_to_json(row)
                 for row in rows
             ],

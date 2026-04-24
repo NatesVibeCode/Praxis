@@ -637,16 +637,48 @@ def _load_leaderboard_snapshot(subs: Any, *, since_hours: int = 72) -> list[dict
 
 
 def _load_receipt_rollup(subs: Any, *, since_hours: int = 24) -> dict[str, Any]:
-    ingester = subs.get_receipt_ingester()
-    receipts = ingester.load_recent(since_hours=since_hours)
-    pass_rate = ingester.compute_pass_rate(receipts)
-    total_cost = round(sum(_safe_float(receipt.get("cost_usd")) for receipt in receipts), 4)
+    from collections import defaultdict
+    from runtime.observability import get_workflow_metrics_view
+    
+    view = get_workflow_metrics_view()
+    # efficiency_summary works in days
+    days = max(1, since_hours // 24)
+    summary = view.efficiency_summary(days=days)
+    
+    # recent_workflows gives us the 'receipts' list for the dashboard
+    # We load slightly more than the default to ensure a good sample
+    metrics_rows = view.recent_workflows(limit=50)
+    
+    # Map metrics rows to the shape the dashboard expects (compatibility with ReceiptIngester)
+    receipts = []
+    failure_counts: dict[str, int] = defaultdict(int)
+    
+    for row in metrics_rows:
+        r = dict(row)
+        # Compatibility mapping
+        if "created_at" in r and "timestamp" not in r:
+            r["timestamp"] = r["created_at"].isoformat()
+        if "workflow_label" in r and "label" not in r:
+            r["label"] = r["workflow_label"]
+        
+        receipts.append(r)
+        
+        # Track failures for top_failure_codes
+        if r.get("status") != "succeeded":
+            code = r.get("failure_code")
+            if code:
+                failure_counts[code] += 1
+
+    # Sort and limit failure codes
+    sorted_failures = sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)
+    top_failures = dict(sorted_failures[:10])
+
     return {
         "receipts": receipts,
-        "pass_rate": round(pass_rate, 4) if pass_rate is not None else None,
-        "top_failure_codes": ingester.top_failure_codes(receipts),
-        "total_cost_usd": total_cost,
-        "total_runs": len(receipts),
+        "pass_rate": summary.get("first_pass_success_rate"),
+        "top_failure_codes": top_failures,
+        "total_cost_usd": summary.get("total_cost_usd", 0.0),
+        "total_runs": summary.get("total_workflows", 0),
         "since_hours": since_hours,
     }
 

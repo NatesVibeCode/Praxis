@@ -55,6 +55,7 @@ ensure_repo_env_file() {
   {
     printf '# Created by ./scripts/bootstrap for repo-local Praxis runtime authority.\n'
     printf 'WORKFLOW_DATABASE_URL=%s\n' "$resolved_database_url"
+    printf 'WORKFLOW_DATABASE_TRUSTED=true\n'
     printf 'PRAXIS_API_PORT=%s\n' "${PRAXIS_API_PORT:-8420}"
   } > "$repo_env"
   ok "created .env with WORKFLOW_DATABASE_URL=$(redact_url_for_log "$resolved_database_url")"

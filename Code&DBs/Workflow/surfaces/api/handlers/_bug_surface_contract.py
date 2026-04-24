@@ -189,6 +189,7 @@ def list_bugs_payload(
     else:
         bug_dicts = [serialize_bug(bug) for bug in bugs[:limit]]
     payload: dict[str, Any] = {
+        "ok": True,
         "bugs": bug_dicts[:limit],
         "count": len(bug_dicts) if replay_ready_only else total_count,
         "returned_count": len(bug_dicts[:limit]),
@@ -239,7 +240,7 @@ def file_bug_payload(
         resume_context=resume_ctx if isinstance(resume_ctx, dict) else None,
     )
     bug = filed[0] if isinstance(filed, tuple) else filed
-    payload: dict[str, Any] = {"filed": True, "bug": serialize_bug(bug)}
+    payload: dict[str, Any] = {"ok": True, "filed": True, "bug": serialize_bug(bug)}
     if include_similar_bugs and isinstance(filed, tuple) and len(filed) > 1 and filed[1]:
         payload["similar_bugs"] = filed[1]
     return payload
@@ -284,7 +285,7 @@ def search_bugs_payload(
         )
     else:
         bug_dicts = [serialize_bug(bug) for bug in bugs]
-    payload: dict[str, Any] = {"bugs": bug_dicts, "count": len(bug_dicts)}
+    payload: dict[str, Any] = {"ok": True, "bugs": bug_dicts, "count": len(bug_dicts)}
     if include_clusters:
         cluster_payload = cluster_bug_items(bug_dicts)
         payload["clusters"] = cluster_payload["clusters"]
@@ -324,6 +325,7 @@ def duplicate_check_payload(
     )
     bug_dicts = [serialize_bug(bug) for bug in bugs]
     return {
+        "ok": True,
         "duplicates": bug_dicts,
         "bugs": bug_dicts,
         "count": len(bug_dicts),
@@ -343,7 +345,7 @@ def duplicate_check_payload(
 
 
 def stats_payload(*, bt: Any, serialize: Serializer) -> dict[str, Any]:
-    return {"stats": serialize(bt.stats())}
+    return {"ok": True, "stats": serialize(bt.stats())}
 
 
 def packet_payload(
@@ -362,7 +364,7 @@ def packet_payload(
     )
     if packet is None:
         raise ValueError(f"bug not found: {bug_id}")
-    return {"packet": serialize(packet, strip_empty=True)}
+    return {"ok": True, "packet": serialize(packet, strip_empty=True)}
 
 
 def history_payload(
@@ -381,7 +383,7 @@ def history_payload(
     )
     if packet is None:
         raise ValueError(f"bug not found: {bug_id}")
-    return {"history": serialize(_bug_evidence.history_summary(bug_id=bug_id, packet=packet), strip_empty=True)}
+    return {"ok": True, "history": serialize(_bug_evidence.history_summary(bug_id=bug_id, packet=packet), strip_empty=True)}
 
 
 def replay_payload(
@@ -400,7 +402,7 @@ def replay_payload(
     )
     if replay is None:
         raise ValueError(f"bug not found: {bug_id}")
-    return {"replay": serialize(replay)}
+    return {"ok": True, "replay": serialize(replay)}
 
 
 def backfill_replay_payload(
@@ -412,6 +414,7 @@ def backfill_replay_payload(
     limit_raw = body.get("limit")
     limit = None if limit_raw in (None, "") else max(0, int(limit_raw))
     return {
+        "ok": True,
         "backfill": serialize(
             bt.bulk_backfill_replay_provenance(
                 limit=limit,
@@ -451,7 +454,7 @@ def attach_evidence_payload(
     )
     if link is None:
         raise ValueError("failed to attach bug evidence")
-    return {"attached": True, "evidence_link": serialize(link)}
+    return {"ok": True, "attached": True, "evidence_link": serialize(link)}
 
 
 def resolve_bug_payload(
@@ -536,7 +539,7 @@ def resolve_bug_payload(
     bug = bt.resolve(bug_id, status)
     if bug is None:
         raise ValueError(f"bug not found: {bug_id}")
-    payload = {"resolved": True, "bug": serialize_bug(bug)}
+    payload = {"ok": True, "resolved": True, "bug": serialize_bug(bug)}
     if verification_payload is not None:
         payload["verification"] = serialize(verification_payload, strip_empty=True)
     if evidence_link is not None:
@@ -561,7 +564,7 @@ def patch_resume_payload(
     bug = bt.merge_resume_context(bug_id, raw_patch)
     if bug is None:
         raise ValueError(f"bug not found: {bug_id}")
-    return {"updated": True, "bug": serialize_bug(bug)}
+    return {"ok": True, "updated": True, "bug": serialize_bug(bug)}
 
 
 __all__ = [

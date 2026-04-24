@@ -3,8 +3,8 @@
   "workflow_id": "mcp_api_lan_thin_client_20260423",
   "phase": "build",
   "outcome_goal": "Local-network thin clients can authenticate to the Praxis API and HTTP MCP bridge with the same operator API bearer token, while workflow-scoped MCP session tokens remain constrained to their allowed tools.",
-  "target_repo": "/Volumes/Users/natha/Documents/Builds/Praxis",
-  "workdir": "/Volumes/Users/natha/Documents/Builds/Praxis",
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
   "anti_requirements": [
     "Do not use SSH as the operator login path.",
     "Do not create a second MCP authority.",

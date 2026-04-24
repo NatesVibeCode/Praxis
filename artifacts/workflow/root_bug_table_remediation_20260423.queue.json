@@ -2,9 +2,9 @@
   "name": "root_bug_table_remediation_20260423",
   "workflow_id": "root_bug_table_remediation_20260423",
   "phase": "build",
-  "outcome_goal": "Resolve the current 49 OPEN bugs from the authoritative Praxis bugs table through root-cause authority repairs, verifier-backed evidence, and explicit bug closeout. Keep work inside /Volumes/Users/natha/Documents/Builds/Praxis and do not launch deprecated localhost Postgres fallbacks.",
-  "target_repo": "/Volumes/Users/natha/Documents/Builds/Praxis",
-  "workdir": "/Volumes/Users/natha/Documents/Builds/Praxis",
+  "outcome_goal": "Resolve the current 49 OPEN bugs from the authoritative Praxis bugs table through root-cause authority repairs, verifier-backed evidence, and explicit bug closeout. Keep work inside /Users/nate/Praxis and do not launch deprecated localhost Postgres fallbacks.",
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
   "bug_source": {
     "authority": "praxis workflow tools call praxis_bugs",
     "snapshot_date": "2026-04-23",

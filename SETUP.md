@@ -21,7 +21,7 @@ This script is idempotent. It resolves setup/registry DB authority, creates `.en
 
 ## Docker Setup
 
-Requires Docker and Docker Compose. The compose stack does **not** include its own database. It uses `WORKFLOW_DATABASE_URL` from `.env` or the shell, so the database can be host-local, remote on the LAN, or any reachable Postgres 16+ instance with `pgvector`.
+Requires Docker and Docker Compose. The compose stack does **not** include its own database. It uses `WORKFLOW_DATABASE_URL` from `.env` or the shell, so the database can be host-local, remote on the LAN, or any reachable Postgres 16+ instance with `pgvector`. If container networking needs a different DSN than native host tools do, set `PRAXIS_DOCKER_WORKFLOW_DATABASE_URL` to the container-reachable authority while leaving `WORKFLOW_DATABASE_URL` pointed at the native host authority.
 
 ```bash
 # Start the cockpit services (semantic-backend + api-server + scheduler)
@@ -228,6 +228,7 @@ Located at `config/runtime_profiles.json`. Defines provider routing policy:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WORKFLOW_DATABASE_URL` | (none) | PostgreSQL connection string |
+| `PRAXIS_DOCKER_WORKFLOW_DATABASE_URL` | falls back to `WORKFLOW_DATABASE_URL` | Optional Docker-only PostgreSQL connection string for compose services when the native host DSN uses `localhost` or `127.0.0.1` |
 | `PRAXIS_API_PORT` | `8420` | HTTP API port |
 | `PRAXIS_API_HOST` | `0.0.0.0` | HTTP API bind address |
 | `PRAXIS_API_URL` | (runtime target) | Client-facing API authority for remote/runtime-target clients; do not use the bind address as the client URL |

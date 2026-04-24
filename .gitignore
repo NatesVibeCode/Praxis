@@ -66,6 +66,8 @@ Code&DBs/artifacts/
 artifacts/debates/
 artifacts/duplicate_absorption/
 artifacts/runtime_receipts/
+artifacts/cutover/
+scratch/
 
 # External tool leftovers
 $CODEX_HOME/

@@ -105,6 +105,21 @@ def resolve_runtime_database_authority(
             source=f"repo_env:{repo_env_path}",
         )
 
+    # Try launcher resolution fallback if .env failed
+    try:
+        from runtime.launcher_authority import read_launcher_seed_config, resolve_launcher_workspace
+        seed = read_launcher_seed_config(env=source)
+        resolution = resolve_launcher_workspace(seed, env=source)
+        if seed.database_url:
+            return WorkflowDatabaseAuthority(
+                database_url=resolve_workflow_database_url(
+                    env={_WORKFLOW_DATABASE_URL_ENV: seed.database_url}
+                ),
+                source=f"launcher_resolution:{seed.config_path}",
+            )
+    except Exception:
+        pass
+
     if required:
         raise PostgresConfigurationError(
             "postgres.config_missing",
