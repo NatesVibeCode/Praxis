@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_project_plan_budget, praxis_compose_and_launch."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_project_plan_budget, praxis_compose_and_launch, praxis_plan_lifecycle."""
 from __future__ import annotations
 
 import json
@@ -1741,6 +1741,43 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     payload = receipt.to_dict()
     payload["ok"] = True
     payload["mode"] = "submitted"
+    return payload
+
+
+def tool_praxis_plan_lifecycle(params: dict) -> dict:
+    """Read every plan.* system_event for one workflow_id in order.
+
+    Q-side of the planning stack's CQRS pattern: the C path (propose,
+    approve, launch, compose_and_launch) emits plan.composed /
+    plan.approved / plan.launched / plan.blocked via emit_system_event;
+    this tool pulls them back for Moon, CLI, or ad-hoc inspection.
+    """
+    workflow_id = params.get("workflow_id")
+    if not isinstance(workflow_id, str) or not workflow_id.strip():
+        return {
+            "ok": False,
+            "error": "workflow_id is required",
+            "reason_code": "workflow_id.invalid",
+        }
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    try:
+        from runtime.intent_composition import get_plan_lifecycle
+
+        lifecycle = get_plan_lifecycle(workflow_id, conn=pg_conn)
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="plan_lifecycle")
+
+    payload = lifecycle.to_dict()
+    payload["ok"] = True
     return payload
 
 
