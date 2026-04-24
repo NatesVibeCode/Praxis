@@ -36,6 +36,32 @@ from runtime.spec_compiler import (
     launch_approved,
     propose_plan,
 )
+from runtime.system_events import emit_system_event
+
+
+def _best_effort_emit(
+    conn: Any,
+    *,
+    event_type: str,
+    source_id: str,
+    payload: dict[str, Any],
+) -> None:
+    """Emit a plan-lifecycle system event, never failing the primary flow.
+
+    Observability should never break planning. A degraded event bus (or a
+    test using a conn stub that doesn't implement record_system_event) is
+    allowed to silently skip the emit — primary flow continues.
+    """
+    try:
+        emit_system_event(
+            conn,
+            event_type=event_type,
+            source_id=source_id,
+            source_type="plan",
+            payload=payload,
+        )
+    except Exception:
+        pass
 
 
 def packets_from_steps(
@@ -145,7 +171,24 @@ def compose_plan_from_intent(
     if why:
         plan_dict["why"] = str(why)
 
-    return propose_plan(plan_dict, conn=conn, workdir=workdir)
+    proposed = propose_plan(plan_dict, conn=conn, workdir=workdir)
+
+    _best_effort_emit(
+        conn,
+        event_type="plan.composed",
+        source_id=proposed.workflow_id,
+        payload={
+            "spec_name": proposed.spec_name,
+            "total_jobs": proposed.total_jobs,
+            "detection_mode": decomposed.detection_mode,
+            "step_count": len(decomposed.steps),
+            "has_unresolved_routes": bool(proposed.unresolved_routes),
+            "unbound_pill_count": len(
+                (proposed.binding_summary or {}).get("unbound_refs") or []
+            ),
+        },
+    )
+    return proposed
 
 
 class ComposeAndLaunchBlocked(ValueError):
@@ -257,6 +300,16 @@ def compose_and_launch(
             )
 
     if blocked:
+        _best_effort_emit(
+            conn,
+            event_type="plan.blocked",
+            source_id=proposed.workflow_id,
+            payload={
+                "spec_name": proposed.spec_name,
+                "approved_by_attempted": approved_by,
+                "blocked_reasons": blocked,
+            },
+        )
         raise ComposeAndLaunchBlocked(blocked)
 
     approved = approve_proposed_plan(
@@ -264,11 +317,34 @@ def compose_and_launch(
         approved_by=approved_by,
         approval_note=approval_note,
     )
-    return launch_approved(
+    _best_effort_emit(
+        conn,
+        event_type="plan.approved",
+        source_id=proposed.workflow_id,
+        payload={
+            "spec_name": proposed.spec_name,
+            "approved_by": approved.approved_by,
+            "approved_at": approved.approved_at,
+            "proposal_hash": approved.proposal_hash,
+        },
+    )
+    receipt = launch_approved(
         approved,
         conn=conn,
         requested_by_kind="compose_and_launch",
     )
+    _best_effort_emit(
+        conn,
+        event_type="plan.launched",
+        source_id=proposed.workflow_id,
+        payload={
+            "spec_name": proposed.spec_name,
+            "run_id": receipt.run_id,
+            "total_jobs": receipt.total_jobs,
+            "approved_by": approved.approved_by,
+        },
+    )
+    return receipt
 
 
 __all__ = [

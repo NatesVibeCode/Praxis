@@ -404,3 +404,117 @@ def test_compose_and_launch_allows_explicit_safety_override(monkeypatch) -> None
         refuse_unbound_pills=False,  # explicit opt-out
     )
     assert isinstance(receipt, LaunchReceipt)
+
+
+def _install_event_capture(monkeypatch) -> list[dict[str, object]]:
+    """Wire emit_system_event to a list sink so tests can assert emissions."""
+    events: list[dict[str, object]] = []
+
+    def _fake_emit(conn, *, event_type, source_id, source_type, payload):
+        events.append(
+            {
+                "event_type": event_type,
+                "source_id": source_id,
+                "source_type": source_type,
+                "payload": dict(payload),
+            }
+        )
+
+    import runtime.intent_composition as composition_mod
+
+    monkeypatch.setattr(composition_mod, "emit_system_event", _fake_emit)
+    return events
+
+
+def test_compose_plan_emits_composed_event(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+    events = _install_event_capture(monkeypatch)
+
+    compose_plan_from_intent(
+        "1. Step one\n2. Step two",
+        conn=_FakeConn(),
+        workdir="/repo",
+    )
+
+    composed = [e for e in events if e["event_type"] == "plan.composed"]
+    assert len(composed) == 1
+    payload = composed[0]["payload"]
+    assert payload["detection_mode"] == "numbered_list"
+    assert payload["step_count"] == 2
+    assert payload["total_jobs"] == 2
+    assert payload["has_unresolved_routes"] is False
+    assert payload["unbound_pill_count"] == 0
+
+
+def test_compose_and_launch_emits_approved_then_launched(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+    _install_submit_command_stub(monkeypatch, run_id="workflow_events_001")
+    events = _install_event_capture(monkeypatch)
+
+    compose_and_launch(
+        "1. Step one\n2. Step two",
+        conn=_FakeConn(),
+        approved_by="ci@praxis",
+    )
+
+    ordered_types = [e["event_type"] for e in events]
+    assert ordered_types == ["plan.composed", "plan.approved", "plan.launched"]
+
+    approved_payload = events[1]["payload"]
+    assert approved_payload["approved_by"] == "ci@praxis"
+    assert approved_payload["proposal_hash"]
+
+    launched_payload = events[2]["payload"]
+    assert launched_payload["run_id"] == "workflow_events_001"
+    assert launched_payload["approved_by"] == "ci@praxis"
+
+
+def test_compose_and_launch_blocked_emits_blocked_event(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+    events = _install_event_capture(monkeypatch)
+
+    # Force budget cap overrun — 3 build-stage jobs ≈ 12000 output tokens.
+    def _forbid_submit(*_args, **_kwargs):
+        raise AssertionError("submit should not run when blocked")
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
+
+    with pytest.raises(ComposeAndLaunchBlocked):
+        compose_and_launch(
+            "1. One\n2. Two\n3. Three",
+            conn=_FakeConn(),
+            approved_by="ci@praxis",
+            budget_cap_tokens=500,
+        )
+
+    ordered_types = [e["event_type"] for e in events]
+    # composed fires, then blocked; no approved / launched because the
+    # pipeline stopped at the safeguard.
+    assert ordered_types == ["plan.composed", "plan.blocked"]
+    blocked_payload = events[1]["payload"]
+    assert blocked_payload["approved_by_attempted"] == "ci@praxis"
+    assert any(
+        entry["kind"] == "budget_exceeded"
+        for entry in blocked_payload["blocked_reasons"]
+    )
+
+
+def test_event_emission_failures_do_not_break_primary_flow(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+
+    def _failing_emit(*_args, **_kwargs):
+        raise RuntimeError("event bus is down")
+
+    import runtime.intent_composition as composition_mod
+
+    monkeypatch.setattr(composition_mod, "emit_system_event", _failing_emit)
+
+    # Primary flow must still complete even though every emit raises.
+    proposed = compose_plan_from_intent(
+        "1. Step one\n2. Step two",
+        conn=_FakeConn(),
+        workdir="/repo",
+    )
+    assert proposed.total_jobs == 2
