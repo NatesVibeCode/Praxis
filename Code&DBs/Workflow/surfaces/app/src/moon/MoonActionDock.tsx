@@ -57,10 +57,20 @@ export function MoonActionDock({
 
   const [suggestedCatalogIds, setSuggestedCatalogIds] = useState<string[]>([]);
   const [suggestedLoading, setSuggestedLoading] = useState(false);
+  // BUG-FC232024: suggest_next can time out (20s client timeout against a
+  // synchronous backend). Previously .catch swallowed the error silently,
+  // leaving the UI in an ambiguous state ("no suggestions" could mean
+  // "genuinely nothing legal" or "fetch failed"). Now: preserve the last
+  // successful suggestion set as stale fallback, expose error + stale
+  // flags so the UI can signal the degradation.
+  const [suggestedError, setSuggestedError] = useState<string | null>(null);
+  const [suggestedStale, setSuggestedStale] = useState(false);
 
   useEffect(() => {
     if (!workflowId || !selectedNodeId || !payload?.build_graph) {
       setSuggestedCatalogIds([]);
+      setSuggestedError(null);
+      setSuggestedStale(false);
       return undefined;
     }
     let cancelled = false;
@@ -77,8 +87,18 @@ export function MoonActionDock({
           s.capability_slug ? `cap-${String(s.capability_slug).replace(/\//g, '-')}` : null,
         ]).filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
         setSuggestedCatalogIds(Array.from(new Set(ids)));
+        setSuggestedError(null);
+        setSuggestedStale(false);
       })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Preserve previous suggestedCatalogIds (don't clear) so the user
+        // still has the last-known-good set to work from. Mark the set
+        // stale and surface the error so the UI can offer retry.
+        const message = err instanceof Error ? err.message : String(err || 'suggest_next failed');
+        setSuggestedError(message);
+        setSuggestedStale(true);
+      })
       .finally(() => {
         if (!cancelled) setSuggestedLoading(false);
       });
@@ -477,9 +497,57 @@ export function MoonActionDock({
             <span className="moon-spinner" /> Finding suggestions...
           </div>
         )}
+        {suggestedError && !suggestedLoading && (
+          <div
+            className="moon-action__suggestion-error"
+            data-praxis-element="moon.action_dock.suggested_next.error"
+            role="status"
+            aria-live="polite"
+          >
+            Couldn't refresh suggestions{suggestedStale ? ' (showing last known)' : ''}: {suggestedError}
+            <button
+              type="button"
+              className="moon-action__suggestion-retry"
+              onClick={() => {
+                // Re-trigger the effect by flipping a dep indirectly:
+                // easiest reliable way is to clear then restore selectedNodeId
+                // upstream, OR refetch directly. Direct refetch:
+                if (!workflowId || !selectedNodeId || !payload?.build_graph) return;
+                setSuggestedLoading(true);
+                setSuggestedError(null);
+                suggestNextSteps(workflowId, selectedNodeId, payload.build_graph as any)
+                  .then((res: any) => {
+                    const ids = (res.likely_next_steps || []).flatMap((s: any) => [
+                      s.catalog_item_id,
+                      s.capability_ref,
+                      s.id,
+                      s.route,
+                      s.actionValue,
+                      s.capability_slug ? `cap-${String(s.capability_slug).replace(/\//g, '-')}` : null,
+                    ]).filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
+                    setSuggestedCatalogIds(Array.from(new Set(ids)));
+                    setSuggestedStale(false);
+                  })
+                  .catch((err: unknown) => {
+                    const message = err instanceof Error ? err.message : String(err || 'suggest_next failed');
+                    setSuggestedError(message);
+                    setSuggestedStale(true);
+                  })
+                  .finally(() => setSuggestedLoading(false));
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
         {suggestedCatalogIds.length > 0 && !familyFilter && (
-          <div className="moon-action__suggestions">
-            <div className="moon-dock__section-label">Suggested next</div>
+          <div
+            className={`moon-action__suggestions${suggestedStale ? ' moon-action__suggestions--stale' : ''}`}
+            data-praxis-element="moon.action_dock.suggested_next"
+          >
+            <div className="moon-dock__section-label">
+              Suggested next{suggestedStale ? ' (stale)' : ''}
+            </div>
             <div className="moon-dock__catalog-grid">
               {suggestedCatalogIds.map(id => {
                 const model = primaryCatalog.find(m => m.item.id === id || m.item.actionValue === id || m.item.id.includes(id));
