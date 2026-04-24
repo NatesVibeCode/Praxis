@@ -44,20 +44,26 @@ def _scalar_output(value: Any, *, fmt: str) -> dict[str, Any]:
     return {"value": coerced, "format": fmt}
 
 
-def _pass_rate_reducer(subs: Any, *, source_ref: str) -> dict[str, Any]:
+def _pass_rate_reducer(subs: Any, *, source_ref: str, **_: Any) -> dict[str, Any]:
     del source_ref
     return _scalar_output(_platform_overview_snapshot(subs).get("pass_rate"), fmt="percent")
 
 
-def _open_bugs_reducer(subs: Any, *, source_ref: str) -> dict[str, Any]:
+def _open_bugs_reducer(subs: Any, *, source_ref: str, **_: Any) -> dict[str, Any]:
     del source_ref
     # open_bugs is not in operator.status_snapshot — pull from the full platform-overview read.
     return _scalar_output(_platform_overview_full(subs).get("open_bugs"), fmt="number")
 
 
-def _total_runs_reducer(subs: Any, *, source_ref: str) -> dict[str, Any]:
+def _total_runs_reducer(subs: Any, *, source_ref: str, **_: Any) -> dict[str, Any]:
     del source_ref
     return _scalar_output(_platform_overview_full(subs).get("total_workflow_runs"), fmt="number")
+
+
+def _legal_templates_reducer(subs: Any, *, source_ref: str, **kwargs: Any) -> dict[str, Any]:
+    from runtime.surface_template_compiler import legal_templates_reducer as _reducer
+
+    return _reducer(subs, source_ref=source_ref, query_params=kwargs.get("query_params"))
 
 
 def _platform_overview_full(subs: Any) -> dict[str, Any]:
@@ -91,6 +97,7 @@ REDUCERS: dict[str, Reducer] = {
     "runtime.surface_projections.pass_rate_reducer": _pass_rate_reducer,
     "runtime.surface_projections.open_bugs_reducer": _open_bugs_reducer,
     "runtime.surface_projections.total_runs_reducer": _total_runs_reducer,
+    "runtime.surface_template_compiler.legal_templates_reducer": _legal_templates_reducer,
 }
 
 

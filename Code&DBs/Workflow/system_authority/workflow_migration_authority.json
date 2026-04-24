@@ -233,7 +233,8 @@
     "225_bug_lifecycle_data_dictionary_types.sql",
     "226_authority_event_contract_typed_gap_created.sql",
     "227_surface_module_projection_first_wedge.sql",
-    "228_surface_module_projections_batch.sql"
+    "228_surface_module_projections_batch.sql",
+    "229_surface_template_type_lattice.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5747,6 +5748,20 @@
       {"object_type": "row", "object_name": "authority_object_registry.projection.surface_module.platform_overview_total_runs"},
       {"object_type": "row", "object_name": "data_dictionary_objects.projection.surface_module.platform_overview_open_bugs"},
       {"object_type": "row", "object_name": "data_dictionary_objects.projection.surface_module.platform_overview_total_runs"}
+    ],
+    "229_surface_template_type_lattice.sql": [
+      {"object_type": "row", "object_name": "memory_entities.shape.split"},
+      {"object_type": "row", "object_name": "memory_entities.pill_type.document"},
+      {"object_type": "row", "object_name": "memory_entities.pill_type.document.invoice"},
+      {"object_type": "row", "object_name": "memory_entities.pill_type.document.purchase_order"},
+      {"object_type": "row", "object_name": "memory_entities.template.doc.compare.split"},
+      {"object_type": "row", "object_name": "memory_entities.template.invoice.with_po.review"},
+      {"object_type": "row", "object_name": "memory_entities.framework.document_review"},
+      {"object_type": "row", "object_name": "memory_entities.intent.invoice_approval"},
+      {"object_type": "row", "object_name": "authority_projection_registry.projection.surface.legal_templates"},
+      {"object_type": "row", "object_name": "authority_projection_contracts.projection_contract.surface.legal_templates"},
+      {"object_type": "row", "object_name": "authority_object_registry.projection.surface.legal_templates"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.projection.surface.legal_templates"}
     ]
   },
   "policy_buckets": {
@@ -5984,7 +5999,8 @@
       "225_bug_lifecycle_data_dictionary_types.sql",
       "226_authority_event_contract_typed_gap_created.sql",
       "227_surface_module_projection_first_wedge.sql",
-      "228_surface_module_projections_batch.sql"
+      "228_surface_module_projections_batch.sql",
+      "229_surface_template_type_lattice.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

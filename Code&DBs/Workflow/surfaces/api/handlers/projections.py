@@ -15,6 +15,7 @@ migrated preset (currently only ``pass-rate``).
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from ._shared import _serialize
 
@@ -114,8 +115,13 @@ def _handle_projection_get(request: Any, path: str) -> None:
 
     warnings: list[str] = []
     source_ref = row["source_ref"] or ""
+    query_params = parse_qs(urlparse(path).query, keep_blank_values=False)
     try:
-        output = reducer(request.subsystems, source_ref=source_ref)
+        output = reducer(
+            request.subsystems,
+            source_ref=source_ref,
+            query_params=query_params,
+        )
     except Exception as exc:  # noqa: BLE001 - reducer failure surfaces in envelope, not 500, per failure_visibility_required.
         output = None
         warnings.append(f"reducer_failed: {type(exc).__name__}: {exc}")
