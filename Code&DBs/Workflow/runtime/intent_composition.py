@@ -131,6 +131,7 @@ def compose_plan_from_intent(
     write_scope_per_step: list[list[str]] | None = None,
     default_write_scope: list[str] | None = None,
     default_stage: str = "build",
+    serialize_scope_conflicts: bool = False,
 ) -> ProposedPlan:
     """Turn a prose intent into a :class:`ProposedPlan` end-to-end.
 
@@ -151,6 +152,8 @@ def compose_plan_from_intent(
         default_write_scope=default_write_scope,
         default_stage=default_stage,
     )
+    if serialize_scope_conflicts:
+        packets = reorder_packets_by_write_conflicts(packets)
 
     resolved_name = (
         str(plan_name or "").strip()
@@ -164,6 +167,7 @@ def compose_plan_from_intent(
                 "write": list(p.write),
                 "stage": p.stage,
                 "label": p.label,
+                **({"depends_on": list(p.depends_on)} if p.depends_on else {}),
             }
             for p in packets
         ],
@@ -189,6 +193,106 @@ def compose_plan_from_intent(
         },
     )
     return proposed
+
+
+def _scopes_overlap(a_scope: list[str], b_scope: list[str]) -> bool:
+    """Return True when two file-path scopes share any common path.
+
+    Honest-scope match — two scopes overlap when one is equal to the other,
+    one is a directory prefix of the other, or both resolve to the same
+    workspace root. Normalizes trailing slashes and ``./`` prefixes.
+    """
+
+    def _normalize(entry: str) -> str:
+        text = (entry or "").strip()
+        if text.startswith("./"):
+            text = text[2:]
+        return text.rstrip("/")
+
+    a_norm = {_normalize(p) for p in (a_scope or []) if p}
+    b_norm = {_normalize(p) for p in (b_scope or []) if p}
+    if not a_norm or not b_norm:
+        return False
+    for a in a_norm:
+        for b in b_norm:
+            if a == b:
+                return True
+            # Directory-prefix match — 'src/' covers 'src/foo.py'.
+            if a and b and (
+                (a + "/").startswith(b + "/") or (b + "/").startswith(a + "/")
+            ):
+                return True
+            # Workspace-root ('.') covers every other scope.
+            if a == "." or b == ".":
+                return True
+    return False
+
+
+def reorder_packets_by_write_conflicts(
+    packets: list[PlanPacket],
+) -> list[PlanPacket]:
+    """Add depends_on edges to serialize packets with conflicting scopes.
+
+    Honest, deterministic Layer 3. For each packet pair (i, j) with i < j:
+
+      - Write-write conflict: both packets' write scopes overlap. Packet
+        j's ``depends_on`` gains packet i's label so both can't run in
+        parallel against the same files.
+      - Write-read conflict: packet j's read scope overlaps packet i's
+        write scope. Packet j depends on packet i so j reads what i
+        produced, not what existed before.
+
+    Caller-supplied ``depends_on`` is never overwritten — new edges are
+    merged in additively, deduplicated, and order-preserved. Packets are
+    returned in their input order; execution ordering is expressed via
+    depends_on for the workflow engine to honor.
+
+    No cycle detection needed: all new edges point strictly backward
+    (i < j). Caller-supplied forward edges are the caller's contract.
+    """
+    if not packets:
+        return []
+
+    # Quick lookup from label to original index so we can preserve the
+    # caller's manual edges and only add new ones.
+    label_at: dict[str, int] = {}
+    for idx, packet in enumerate(packets):
+        label = packet.label or f"packet_{idx}"
+        label_at.setdefault(label, idx)
+
+    reordered: list[PlanPacket] = []
+    for j, packet in enumerate(packets):
+        existing_deps = list(packet.depends_on or [])
+        new_deps: list[str] = list(existing_deps)
+
+        for i in range(j):
+            earlier = packets[i]
+            earlier_label = earlier.label or f"packet_{i}"
+            if earlier_label in new_deps:
+                continue
+            write_conflict = _scopes_overlap(earlier.write, packet.write)
+            read_conflict = _scopes_overlap(earlier.write, packet.read or [])
+            if write_conflict or read_conflict:
+                new_deps.append(earlier_label)
+
+        if new_deps == existing_deps:
+            reordered.append(packet)
+            continue
+        reordered.append(
+            PlanPacket(
+                description=packet.description,
+                write=list(packet.write),
+                stage=packet.stage,
+                label=packet.label,
+                read=list(packet.read) if packet.read else None,
+                depends_on=new_deps,
+                bug_ref=packet.bug_ref,
+                bug_refs=list(packet.bug_refs) if packet.bug_refs else None,
+                agent=packet.agent,
+                complexity=packet.complexity,
+            )
+        )
+    return reordered
 
 
 class ComposeAndLaunchBlocked(ValueError):
@@ -225,6 +329,7 @@ def compose_and_launch(
     refuse_unresolved_routes: bool = True,
     refuse_unbound_pills: bool = True,
     budget_cap_tokens: int | None = None,
+    serialize_scope_conflicts: bool = False,
 ) -> LaunchReceipt:
     """End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt.
 
@@ -258,6 +363,7 @@ def compose_and_launch(
         write_scope_per_step=write_scope_per_step,
         default_write_scope=default_write_scope,
         default_stage=default_stage,
+        serialize_scope_conflicts=serialize_scope_conflicts,
     )
 
     blocked: list[dict[str, Any]] = []
@@ -352,4 +458,5 @@ __all__ = [
     "compose_and_launch",
     "compose_plan_from_intent",
     "packets_from_steps",
+    "reorder_packets_by_write_conflicts",
 ]

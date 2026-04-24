@@ -15,6 +15,7 @@ from runtime.intent_composition import (
     compose_and_launch,
     compose_plan_from_intent,
     packets_from_steps,
+    reorder_packets_by_write_conflicts,
 )
 from runtime.intent_decomposition import (
     DecompositionRequiresLLMError,
@@ -518,3 +519,131 @@ def test_event_emission_failures_do_not_break_primary_flow(monkeypatch) -> None:
         workdir="/repo",
     )
     assert proposed.total_jobs == 2
+
+
+def test_reorder_packets_serializes_write_write_conflicts() -> None:
+    packets = [
+        PlanPacket(description="a", write=["src/foo.py"], stage="build", label="pkt_a"),
+        PlanPacket(description="b", write=["src/bar.py"], stage="build", label="pkt_b"),
+        PlanPacket(description="c", write=["src/foo.py"], stage="fix", label="pkt_c"),
+    ]
+    reordered = reorder_packets_by_write_conflicts(packets)
+    # pkt_a and pkt_b have disjoint scopes — no dep between them.
+    assert reordered[1].depends_on is None or "pkt_a" not in (reordered[1].depends_on or [])
+    # pkt_c touches the same file as pkt_a — depends_on gains pkt_a.
+    assert reordered[2].depends_on == ["pkt_a"]
+
+
+def test_reorder_packets_handles_directory_prefix_overlap() -> None:
+    packets = [
+        PlanPacket(description="setup", write=["src/"], stage="build", label="setup"),
+        PlanPacket(description="feature", write=["src/foo.py"], stage="build", label="feature"),
+    ]
+    reordered = reorder_packets_by_write_conflicts(packets)
+    # 'src/' covers 'src/foo.py' — feature depends on setup.
+    assert reordered[1].depends_on == ["setup"]
+
+
+def test_reorder_packets_handles_workspace_root_as_universal() -> None:
+    packets = [
+        PlanPacket(description="broad", write=["."], stage="build", label="broad"),
+        PlanPacket(description="narrow", write=["src/x.py"], stage="build", label="narrow"),
+    ]
+    reordered = reorder_packets_by_write_conflicts(packets)
+    # Workspace-root scope touches everything; narrow depends on broad.
+    assert reordered[1].depends_on == ["broad"]
+
+
+def test_reorder_packets_wires_write_read_conflict() -> None:
+    """If packet B reads what packet A writes, B must wait for A."""
+    packets = [
+        PlanPacket(description="write", write=["data/users.json"], stage="build", label="write_users"),
+        PlanPacket(
+            description="read",
+            write=["data/profile.json"],
+            stage="build",
+            label="read_users",
+            read=["data/users.json"],
+        ),
+    ]
+    reordered = reorder_packets_by_write_conflicts(packets)
+    assert reordered[1].depends_on == ["write_users"]
+
+
+def test_reorder_packets_preserves_caller_supplied_deps() -> None:
+    packets = [
+        PlanPacket(description="a", write=["src/a.py"], stage="build", label="a"),
+        PlanPacket(description="b", write=["src/b.py"], stage="build", label="b", depends_on=["a"]),
+        PlanPacket(description="c", write=["src/b.py"], stage="fix", label="c"),
+    ]
+    reordered = reorder_packets_by_write_conflicts(packets)
+    # Caller said b→a; that survives. c gains b from write-scope conflict.
+    assert reordered[1].depends_on == ["a"]
+    assert reordered[2].depends_on == ["b"]
+
+
+def test_reorder_packets_dedupes_existing_edges() -> None:
+    """If a caller-supplied dep would also be added by reorder, no duplicate."""
+    packets = [
+        PlanPacket(description="a", write=["src/x.py"], stage="build", label="a"),
+        PlanPacket(
+            description="b",
+            write=["src/x.py"],
+            stage="build",
+            label="b",
+            depends_on=["a"],
+        ),
+    ]
+    reordered = reorder_packets_by_write_conflicts(packets)
+    assert reordered[1].depends_on == ["a"]
+
+
+def test_reorder_packets_empty_input() -> None:
+    assert reorder_packets_by_write_conflicts([]) == []
+
+
+def test_compose_plan_opt_in_serialization(monkeypatch) -> None:
+    """serialize_scope_conflicts=True wires depends_on into the compose output."""
+    _install_quiet_preview_and_binding(monkeypatch)
+
+    intent = "1. Touch src/foo.py\n2. Also touch src/foo.py\n3. Unrelated work"
+
+    # Force every step to have the same write scope so the reorder kicks in.
+    write_scope_per_step = [
+        ["src/foo.py"],
+        ["src/foo.py"],
+        ["src/other.py"],
+    ]
+
+    proposed = compose_plan_from_intent(
+        intent,
+        conn=_FakeConn(),
+        write_scope_per_step=write_scope_per_step,
+        serialize_scope_conflicts=True,
+        workdir="/repo",
+    )
+
+    jobs = proposed.spec_dict["jobs"]
+    assert "depends_on" not in jobs[0]
+    assert jobs[1]["depends_on"] == ["step_1"]
+    # step_3 touches src/other.py — no conflict with foo.
+    assert "depends_on" not in jobs[2]
+
+
+def test_compose_plan_serialization_off_by_default(monkeypatch) -> None:
+    """Without the opt-in flag, compose_plan_from_intent does NOT wire scope deps."""
+    _install_quiet_preview_and_binding(monkeypatch)
+
+    intent = "1. Touch src/foo.py\n2. Touch src/foo.py again"
+    write_scope_per_step = [["src/foo.py"], ["src/foo.py"]]
+
+    proposed = compose_plan_from_intent(
+        intent,
+        conn=_FakeConn(),
+        write_scope_per_step=write_scope_per_step,
+        workdir="/repo",
+    )
+    # Opt-in is OFF by default — no depends_on wired.
+    jobs = proposed.spec_dict["jobs"]
+    assert "depends_on" not in jobs[0]
+    assert "depends_on" not in jobs[1]
