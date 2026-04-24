@@ -889,6 +889,51 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
+    "praxis_compose_plan": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="compose-plan",
+        when_to_use=(
+            "Turn prose intent with explicit step markers into a ProposedPlan "
+            "in one call — chains Layer 2 (decompose) → Layer 1 (bind) → "
+            "Layer 5 (translate + preview). Compose with approve-plan + "
+            "launch-plan(approved_plan=...) for the full approval-gated flow."
+        ),
+        when_not_to_use=(
+            "Do not use it for free prose without step markers. Reword the "
+            "intent or pass allow_single_step=true explicitly."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Compose a numbered-list intent",
+                {
+                    "intent": (
+                        "1. Add a timezone column to users.\n"
+                        "2. Backfill existing rows with UTC.\n"
+                        "3. Update the profile UI to expose the field."
+                    ),
+                    "plan_name": "timezone_rollout",
+                    "why": "Operator requested personalization support.",
+                },
+            ),
+            _example(
+                "Compose with per-step write scope",
+                {
+                    "intent": (
+                        "1. Update the users schema.\n"
+                        "2. Migrate existing rows.\n"
+                        "3. Update the UI."
+                    ),
+                    "write_scope_per_step": [
+                        ["Code&DBs/Databases/migrations/"],
+                        ["Code&DBs/Workflow/scripts/backfill.py"],
+                        ["Code&DBs/Workflow/surfaces/app/src/"]
+                    ],
+                },
+            ),
+        ],
+    ),
     "praxis_decompose_intent": _tool(
         surface="workflow",
         tier="stable",

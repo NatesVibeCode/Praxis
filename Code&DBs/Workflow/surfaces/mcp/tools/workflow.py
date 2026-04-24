@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan."""
 from __future__ import annotations
 
 import json
@@ -1744,6 +1744,67 @@ def tool_praxis_launch_plan(params: dict) -> dict:
     return payload
 
 
+def tool_praxis_compose_plan(params: dict) -> dict:
+    """Chain Layer 2 → Layer 1 → Layer 5 in one call.
+
+    Takes prose intent with explicit step markers, decomposes into steps,
+    translates each step into a PlanPacket, then runs propose_plan (which
+    compiles + previews + binds data pills per packet). Returns a
+    ProposedPlan ready for caller approval and launch. No submission.
+
+    Fails closed if the prose has no step markers unless the caller passes
+    allow_single_step=true to accept the whole intent as one step. This is
+    deliberate — free-prose decomposition is real LLM work that should not
+    happen silently.
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str) or not intent.strip():
+        return {
+            "ok": False,
+            "error": "intent must be a non-empty string",
+            "reason_code": "intent.invalid",
+        }
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    try:
+        from runtime.intent_composition import compose_plan_from_intent
+        from runtime.intent_decomposition import DecompositionRequiresLLMError
+
+        proposed = compose_plan_from_intent(
+            intent,
+            conn=pg_conn,
+            plan_name=params.get("plan_name"),
+            why=params.get("why"),
+            workdir=params.get("workdir"),
+            allow_single_step=bool(params.get("allow_single_step")),
+            write_scope_per_step=params.get("write_scope_per_step"),
+            default_write_scope=params.get("default_write_scope"),
+            default_stage=str(params.get("default_stage") or "build"),
+        )
+    except DecompositionRequiresLLMError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "decomposition.requires_llm",
+        }
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "reason_code": "compose.invalid"}
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="compose_plan")
+
+    payload = proposed.to_dict()
+    payload["ok"] = True
+    return payload
+
+
 def tool_praxis_decompose_intent(params: dict) -> dict:
     """Split prose intent into ordered steps — deterministic, honest scope.
 
@@ -2216,6 +2277,73 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         ),
                     },
                 },
+            },
+        },
+    ),
+    "praxis_compose_plan": (
+        tool_praxis_compose_plan,
+        {
+            "description": (
+                "Chain Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview) "
+                "in one call. Takes prose intent with explicit step markers, returns a "
+                "ProposedPlan ready for approval and launch.\n\n"
+                "USE WHEN: you have a numbered / bulleted / first-then-finally intent and "
+                "want the full pre-submit pipeline in one shot. Composes with "
+                "praxis_approve_proposed_plan + praxis_launch_plan(approved_plan=...) for "
+                "the full approval-gated launch.\n\n"
+                "DO NOT USE TO: skip planning. Free prose without step markers fails closed "
+                "with reason_code='decomposition.requires_llm' — reword the intent, wrap "
+                "with an LLM extractor upstream, or pass allow_single_step=true to treat "
+                "the whole intent as one step.\n\n"
+                "EXAMPLE: praxis_compose_plan(intent='1. Add timezone column\\n2. Backfill "
+                "UTC\\n3. Update UI', plan_name='timezone_rollout')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Prose with explicit step markers (numbered, bulleted, or first/then/finally).",
+                    },
+                    "plan_name": {
+                        "type": "string",
+                        "description": "Name for the resulting Plan. Auto-generated if absent.",
+                    },
+                    "why": {
+                        "type": "string",
+                        "description": "Optional narrative about why this plan is being launched.",
+                    },
+                    "workdir": {
+                        "type": "string",
+                        "description": "Optional override for the workflow's workdir.",
+                    },
+                    "allow_single_step": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Accept prose without step markers as a single step.",
+                    },
+                    "write_scope_per_step": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "string"}},
+                        "description": (
+                            "Optional per-step write scope. Length must match the decomposed "
+                            "step count. When absent, default_write_scope is used for every "
+                            "step (workspace root by default, with a warning)."
+                        ),
+                    },
+                    "default_write_scope": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Fallback write scope when no per-step scope is provided.",
+                    },
+                    "default_stage": {
+                        "type": "string",
+                        "enum": ["build", "fix", "review", "test", "research"],
+                        "default": "build",
+                        "description": "Stage used when a step has no stage_hint from its verb.",
+                    },
+                },
+                "required": ["intent"],
             },
         },
     ),
