@@ -1303,6 +1303,48 @@ def _handle_workflows_runs_get(request: Any, path: str) -> None:
         request._send_json(500, {"error": str(exc)})
 
 
+def _validate_type_flow_on_commit(body: dict[str, Any]) -> list[str]:
+    """Reject commits whose graph shape fails type-flow validation.
+
+    Honors architecture-policy::platform-architecture::fail-closed-at-
+    compile-no-silent-defaults: commitDefinition must not save a graph
+    whose nodes declare inputs that no upstream node (or ambient input)
+    can provide. Phase 1.2.a wiring — closes BUG-C6EE740C, BUG-5DD67C2A,
+    BUG-99B9DC7E, BUG-2729F8B7 at the save boundary (prose-shaped nodes
+    with empty contracts can no longer reach a persisted definition).
+
+    Body shapes (graceful fallbacks):
+      - ``body['build_graph']`` — Moon authoring shape (preferred)
+      - ``body['definition']`` — older workflow definition carrier
+
+    Empty graphs or bodies without a graph shape pass through: trigger-only
+    updates, name-only updates, or non-Moon callers must not be blocked
+    by a validator that has nothing to check.
+
+    Returns an empty list when the graph is satisfied (or absent); a list
+    of ``workflow.type_flow.unsatisfied_inputs:{node_id}:{missing}`` error
+    strings otherwise.
+    """
+    try:
+        from runtime.workflow_type_contracts import (
+            validate_workflow_request_type_flow,
+        )
+    except Exception:
+        # Degraded substrate: do not block the commit; the higher-level
+        # validator will catch other contract violations.
+        return []
+    if not isinstance(body, dict):
+        return []
+    graph: object | None = body.get("build_graph")
+    if not isinstance(graph, dict):
+        graph = body.get("definition")
+    if not isinstance(graph, dict):
+        return []
+    if not graph.get("nodes") and not graph.get("edges"):
+        return []
+    return list(validate_workflow_request_type_flow(graph) or [])
+
+
 def _handle_workflows_post(request: Any, path: str) -> None:
     try:
         body = _read_json_body(request)
@@ -1315,6 +1357,20 @@ def _handle_workflows_post(request: Any, path: str) -> None:
             error = _validate_workflow_body(body, require_name=True, require_definition=True)
             if error:
                 request._send_json(400, {"error": error})
+                return
+            type_flow_errors = _validate_type_flow_on_commit(body)
+            if type_flow_errors:
+                request._send_json(
+                    400,
+                    {
+                        "error": "workflow type flow unsatisfied",
+                        "type_flow_errors": type_flow_errors,
+                        "policy_ref": (
+                            "architecture-policy::platform-architecture::"
+                            "fail-closed-at-compile-no-silent-defaults"
+                        ),
+                    },
+                )
                 return
             row = save_workflow(
                 request.subsystems.get_pg_conn(),
@@ -1335,6 +1391,21 @@ def _handle_workflows_post(request: Any, path: str) -> None:
             return
         if not body:
             request._send_json(400, {"error": "No workflow fields provided for update"})
+            return
+
+        type_flow_errors = _validate_type_flow_on_commit(body)
+        if type_flow_errors:
+            request._send_json(
+                400,
+                {
+                    "error": "workflow type flow unsatisfied",
+                    "type_flow_errors": type_flow_errors,
+                    "policy_ref": (
+                        "architecture-policy::platform-architecture::"
+                        "fail-closed-at-compile-no-silent-defaults"
+                    ),
+                },
+            )
             return
 
         row = save_workflow(
