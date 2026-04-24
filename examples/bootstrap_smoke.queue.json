@@ -1,6 +1,7 @@
 {
   "name": "Bootstrap Smoke",
   "workflow_id": "bootstrap_smoke",
+  "workdir": ".",
   "jobs": [
     {
       "label": "deterministic_worker_ready",

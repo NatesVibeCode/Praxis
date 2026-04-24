@@ -43,6 +43,7 @@ from runtime.workflow_graph_compiler import (
 from ._adapter_registry import build_workflow_adapter_registry
 from ._shared import (
     _WORKFLOW_REPLAYABLE_RUN_STATES,
+    _definition_version_for_hash,
     _json_loads_maybe,
     _normalize_paths,
     _slugify,
@@ -160,12 +161,13 @@ def _submit_transaction(conn: SyncPostgresConnection):
 
 def _graph_request_envelope(request: WorkflowRequest) -> dict[str, object]:
     workflow_definition_id = request.workflow_definition_id
+    definition_version = _definition_version_for_hash(request.definition_hash)
     return {
         "schema_version": request.schema_version,
         "workflow_id": request.workflow_id,
         "request_id": request.request_id,
         "workflow_definition_id": workflow_definition_id,
-        "definition_version": 1,
+        "definition_version": definition_version,
         "definition_hash": request.definition_hash,
         "workspace_ref": request.workspace_ref,
         "runtime_profile_ref": request.runtime_profile_ref,
@@ -1340,11 +1342,12 @@ def _persist_graph_authority(
         """INSERT INTO workflow_definitions (
                workflow_definition_id, workflow_id, schema_version, definition_version,
                definition_hash, status, request_envelope, normalized_definition, created_at
-           ) VALUES ($1, $2, $3, 1, $4, 'active', $5::jsonb, $5::jsonb, $6)
+           ) VALUES ($1, $2, $3, $4, $5, 'active', $6::jsonb, $6::jsonb, $7)
            ON CONFLICT (workflow_definition_id) DO NOTHING""",
         definition_id,
         request.workflow_id,
         request.schema_version,
+        envelope["definition_version"],
         definition_hash,
         request_envelope_json,
         requested_at,

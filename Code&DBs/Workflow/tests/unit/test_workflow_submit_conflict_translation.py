@@ -1,21 +1,18 @@
-"""Regression tests for the workflow-definition-collision error translator.
-
-The admission layer's INSERT into `workflow_definitions` uses a unique
-constraint on `(workflow_id, definition_version)` and, in the graph-submit
-path, hardcodes `definition_version=1`. A re-submit with the same
-workflow_id therefore raises a psycopg UniqueViolation that — without the
-translator below — reaches operators as a raw SQL constraint name.
-
-These tests pin the translator so that regression doesn't silently
-re-introduce the opaque error.
-"""
+"""Regression tests for workflow-definition admission collisions."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+from contracts.domain import WorkflowNodeContract, WorkflowRequest
 from runtime.workflow._admission import (
     WorkflowSubmitConflict,
+    _graph_request_envelope,
+    _persist_graph_authority,
     _translate_definition_collision,
 )
+from runtime.workflow._shared import _definition_version_for_hash
 
 
 class _DiagStub:
@@ -78,3 +75,72 @@ def test_conflict_str_is_the_remediation_text() -> None:
 
     assert str(conflict) == "do the thing to fix it"
     assert conflict.reason_code == "workflow.submit.definition_collision"
+
+
+def test_graph_admission_uses_hash_derived_definition_version() -> None:
+    digest = "9c9483619e16d5888db910ed032e3d895d54d7a66d812a13e5b9a2772a6edac9"
+    definition_hash = f"sha256:{digest}"
+    request = WorkflowRequest(
+        schema_version=1,
+        workflow_id="workflow.bootstrap.smoke",
+        request_id="req.bootstrap.smoke",
+        workflow_definition_id="workflow_def:bootstrap_smoke",
+        definition_hash=definition_hash,
+        workspace_ref="praxis",
+        runtime_profile_ref="native",
+        nodes=(
+            WorkflowNodeContract(
+                node_id="deterministic_worker_ready",
+                node_type="deterministic_task",
+                adapter_type="deterministic_task",
+                display_name="Deterministic worker ready",
+                inputs={"allow_passthrough_echo": True},
+                expected_outputs={"ok": True},
+                success_condition={},
+                failure_behavior={},
+                authority_requirements={},
+                execution_boundary={},
+                position_index=0,
+            ),
+        ),
+        edges=(),
+    )
+    expected_version = _definition_version_for_hash(definition_hash)
+    assert expected_version == _definition_version_for_hash(digest)
+
+    envelope = _graph_request_envelope(request)
+
+    assert envelope["definition_version"] == expected_version
+
+    class _Conn:
+        definition_insert_args = None
+
+        def execute(self, query: str, *args):
+            if "INSERT INTO workflow_definitions" in query:
+                self.definition_insert_args = args
+            return []
+
+    now = datetime.now(timezone.utc)
+    decision = SimpleNamespace(
+        admission_decision_id="decision.bootstrap.smoke",
+        decision=SimpleNamespace(value="admit"),
+        reason_code="claim.validated",
+        decided_at=now,
+        decided_by="test",
+        policy_snapshot_ref="policy",
+        validation_result_ref="validation",
+        authority_context_ref="authority",
+    )
+    outcome = SimpleNamespace(
+        admitted_definition_hash=None,
+        admitted_definition_ref=None,
+        admission_decision=decision,
+        current_state=SimpleNamespace(value="claim_accepted"),
+        run_id="run.bootstrap.smoke",
+    )
+    conn = _Conn()
+
+    _persist_graph_authority(conn, intake_outcome=outcome, request=request, requested_at=now)
+
+    assert conn.definition_insert_args is not None
+    assert conn.definition_insert_args[3] == expected_version

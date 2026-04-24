@@ -1,6 +1,7 @@
 """Shared constants and utilities for the unified workflow runtime."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -153,7 +154,14 @@ def _normalize_paths(raw) -> list[str]:
 
 def _definition_version_for_hash(definition_hash: str) -> int:
     """Derive a deterministic positive int32-safe definition version."""
-    seed = int(definition_hash[:16], 16)
+    raw_text = str(definition_hash or "").strip()
+    digest_text = raw_text
+    if digest_text.lower().startswith("sha256:"):
+        digest_text = digest_text.split(":", 1)[1]
+    hex_text = "".join(re.findall(r"[0-9a-fA-F]+", digest_text))
+    if len(hex_text) < 16:
+        hex_text = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+    seed = int(hex_text[:16], 16)
     return (seed % (_MAX_INT32 - 1)) + 1
 
 
