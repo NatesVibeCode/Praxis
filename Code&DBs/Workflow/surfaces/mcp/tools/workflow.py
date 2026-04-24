@@ -2469,6 +2469,36 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "praxis_plan_lifecycle": (
+        tool_praxis_plan_lifecycle,
+        {
+            "description": (
+                "Q-side of the planning stack: read every plan.* system_event for one "
+                "workflow_id in order. Pair with praxis_compose_and_launch / "
+                "praxis_approve_proposed_plan / praxis_launch_plan on the C side.\n\n"
+                "USE WHEN: an operator or Moon wants to inspect what happened to a plan "
+                "— composed when, approved by whom, launched (with run_id) or blocked "
+                "(with which gate).\n\n"
+                "DO NOT USE TO: read workflow_run status. That's a separate Q on the "
+                "workflow_runs + workflow_jobs tables, surfaced by praxis_workflow's "
+                "status / stream actions.\n\n"
+                "EXAMPLE: praxis_plan_lifecycle(workflow_id='plan.deadbeef12345678')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": {
+                        "type": "string",
+                        "description": (
+                            "The workflow_id the plan was composed under — carried in "
+                            "ProposedPlan.workflow_id and LaunchReceipt.workflow_id."
+                        ),
+                    },
+                },
+                "required": ["workflow_id"],
+            },
+        },
+    ),
     "praxis_compose_and_launch": (
         tool_praxis_compose_and_launch,
         {
