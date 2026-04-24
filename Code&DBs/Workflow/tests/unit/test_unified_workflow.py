@@ -3004,7 +3004,7 @@ def test_preview_workflow_execution_returns_worker_facing_payload(monkeypatch):
     assert preview["jobs"][0]["label"] == "build_a"
     assert preview["jobs"][0]["route_status"] == "unresolved"
     assert preview["jobs"][0]["resolved_agent"] is None
-    assert "preview skips task-type routing" in preview["warnings"][0]
+    assert any("task_type_router" in warning for warning in preview["warnings"])
     assert "--- EXECUTION CONTEXT SHARD ---" in preview["jobs"][0]["rendered_user_prompt"]
     assert "--- EXECUTION CONTROL BUNDLE ---" in preview["jobs"][0]["rendered_user_prompt"]
     assert "praxis_query" in preview["jobs"][0]["mcp_tool_names"]

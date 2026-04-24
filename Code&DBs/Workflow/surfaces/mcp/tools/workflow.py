@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan."""
 from __future__ import annotations
 
 import json
@@ -1600,6 +1600,47 @@ def tool_praxis_workflow_validate(params: dict) -> dict:
         }
 
 
+def tool_praxis_launch_plan(params: dict) -> dict:
+    """Compile a plan dict into a workflow spec and submit it in one call.
+
+    The continuous plan-to-launch path. Caller provides packets (each with
+    description + write + stage); this tool runs compile_spec per packet,
+    assembles the multi-job workflow spec, and submits through the canonical
+    inline admission path. No spec-JSON writing, no separate validate step,
+    no regenerate loops. Returns a LaunchReceipt with run_id and per-packet
+    mapping (including bug_ref linkage for closeout).
+    """
+    plan = params.get("plan")
+    if not isinstance(plan, dict):
+        return {"error": "plan must be a dict with 'name' and 'packets'"}
+    if not plan.get("packets"):
+        return {"error": "plan.packets must have at least one packet"}
+
+    workdir = params.get("workdir")
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    try:
+        from runtime.spec_compiler import launch_plan
+
+        receipt = launch_plan(plan, conn=pg_conn, workdir=workdir)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "reason_code": "plan.invalid"}
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="launch_plan")
+
+    payload = receipt.to_dict()
+    payload["ok"] = True
+    return payload
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_workflow": (
         tool_praxis_workflow,
@@ -1760,6 +1801,78 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "spec_path": {"type": "string", "description": "Path to a .queue.json spec file."},
                 },
                 "required": ["spec_path"],
+            },
+        },
+    ),
+    "praxis_launch_plan": (
+        tool_praxis_launch_plan,
+        {
+            "description": (
+                "Compile a plan (list of packets) into a workflow spec and launch it in one call. "
+                "This is the continuous plan-to-run path: caller provides minimal packet intents "
+                "(description + write scope + stage); this tool runs compile_spec per packet, "
+                "assembles a multi-job workflow spec, and submits through the canonical inline "
+                "admission path. No JSON files, no separate validate step, no regenerate loop.\n\n"
+                "USE WHEN: you have a plan (one or more packets) to execute as a single workflow_run. "
+                "Each packet is minimal — describe what to do (description), where it writes "
+                "(write: list of paths), and the stage (build/fix/review/test/research). Optional "
+                "per-packet fields: label, read, depends_on (labels to wait for), bug_ref (links the "
+                "packet to a tracked bug for closeout), complexity ('low' triggers prefer_cost routing).\n\n"
+                "USE INSTEAD OF: hand-writing queue.json files + praxis_workflow_validate + "
+                "praxis_workflow action=run. That three-step path is the loop this tool replaces.\n\n"
+                "EXAMPLE: praxis_launch_plan(plan={\"name\": \"bug_wave_0\", \"packets\": ["
+                "{\"description\": \"fix bug evidence authority\", "
+                "\"write\": [\"Code&DBs/Workflow/runtime/bugs.py\"], "
+                "\"stage\": \"build\", \"bug_ref\": \"BUG-175EB9F3\"}]})"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "type": "object",
+                        "description": (
+                            "Plan to compile and launch. Fields: name (required), packets (required, "
+                            "non-empty list), workflow_id (optional, auto-generated if absent), why "
+                            "(optional narrative), phase (optional, default 'build'), workdir "
+                            "(optional, defaults to caller's workdir)."
+                        ),
+                        "properties": {
+                            "name": {"type": "string"},
+                            "why": {"type": "string"},
+                            "workflow_id": {"type": "string"},
+                            "phase": {"type": "string"},
+                            "workdir": {"type": "string"},
+                            "packets": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "description": {"type": "string"},
+                                        "write": {"type": "array", "items": {"type": "string"}},
+                                        "stage": {
+                                            "type": "string",
+                                            "enum": ["build", "fix", "review", "test", "research"],
+                                        },
+                                        "label": {"type": "string"},
+                                        "read": {"type": "array", "items": {"type": "string"}},
+                                        "depends_on": {"type": "array", "items": {"type": "string"}},
+                                        "bug_ref": {"type": "string"},
+                                        "agent": {"type": "string"},
+                                        "complexity": {"type": "string", "enum": ["low", "moderate", "high"]},
+                                    },
+                                    "required": ["description", "write", "stage"],
+                                },
+                            },
+                        },
+                        "required": ["name", "packets"],
+                    },
+                    "workdir": {
+                        "type": "string",
+                        "description": "Optional override for the workflow's workdir.",
+                    },
+                },
+                "required": ["plan"],
             },
         },
     ),

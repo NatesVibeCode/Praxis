@@ -575,3 +575,259 @@ def compile_prompt_launch_spec(
         plan_revision=plan_revision,
         packet_provenance=packet_provenance,
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan → spec → launch continuous flow
+# ---------------------------------------------------------------------------
+#
+# The programmatic counterpart to the Moon UI's graph-to-run chain
+# (roadmap_item.make.moon.ui.emit.runnable.graph.authority.for.gated.9.step.workflows).
+# Callers describe packets as minimal intents; this module compiles, translates
+# into the platform's workflow spec shape, and submits — never handing the
+# spec-JSON step back to a caller or LLM.
+#
+# Collapses the plan→spec→validate→submit→launch friction tracked in
+# BUG-8DB03A36 (submission lifecycle spread) and BUG-5D0140CD (validation
+# contract spread).
+
+
+@dataclass(frozen=True)
+class PlanPacket:
+    """One unit of work in a plan.
+
+    description/write/stage match Intent; everything else is derivable or
+    optional wiring (label auto-generated, agent defaults to auto/<stage>,
+    verify_refs computed from write scope).
+    """
+
+    description: str
+    write: list[str]
+    stage: str = "build"
+    label: str | None = None
+    read: list[str] | None = None
+    depends_on: list[str] | None = None
+    bug_ref: str | None = None
+    agent: str | None = None
+    complexity: str | None = None
+
+
+@dataclass(frozen=True)
+class Plan:
+    """A named batch of packets, submitted as one workflow_run."""
+
+    name: str
+    packets: list[PlanPacket]
+    workflow_id: str | None = None
+    why: str | None = None
+    phase: str = "build"
+    workdir: str | None = None
+
+
+@dataclass(frozen=True)
+class LaunchReceipt:
+    """Result of launch_plan: one run_id covering every packet as a job."""
+
+    run_id: str
+    spec_name: str
+    workflow_id: str
+    total_jobs: int
+    packet_map: list[dict[str, Any]]
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "spec_name": self.spec_name,
+            "workflow_id": self.workflow_id,
+            "total_jobs": self.total_jobs,
+            "packet_map": list(self.packet_map),
+            "warnings": list(self.warnings),
+        }
+
+
+def _coerce_packet(value: Any) -> PlanPacket:
+    if isinstance(value, PlanPacket):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"plan packet must be a PlanPacket or dict, got {type(value).__name__}"
+        )
+    return PlanPacket(
+        description=str(value.get("description") or "").strip(),
+        write=list(value.get("write") or []),
+        stage=str(value.get("stage") or "build"),
+        label=value.get("label"),
+        read=list(value["read"]) if value.get("read") else None,
+        depends_on=list(value["depends_on"]) if value.get("depends_on") else None,
+        bug_ref=value.get("bug_ref"),
+        agent=value.get("agent"),
+        complexity=value.get("complexity"),
+    )
+
+
+def _coerce_plan(plan: Any) -> Plan:
+    if isinstance(plan, Plan):
+        return plan
+    if not isinstance(plan, dict):
+        raise ValueError(
+            f"plan must be a Plan or dict, got {type(plan).__name__}"
+        )
+    packets = [_coerce_packet(p) for p in (plan.get("packets") or [])]
+    return Plan(
+        name=str(plan.get("name") or "launch_plan").strip() or "launch_plan",
+        packets=packets,
+        workflow_id=(str(plan["workflow_id"]).strip() if plan.get("workflow_id") else None),
+        why=plan.get("why"),
+        phase=str(plan.get("phase") or "build"),
+        workdir=plan.get("workdir"),
+    )
+
+
+def _packet_to_job(
+    packet: PlanPacket,
+    *,
+    compiled: CompiledSpec,
+    workdir: str,
+    index: int,
+) -> dict[str, Any]:
+    """Translate a compiled packet into a workflow-spec job dict.
+
+    This is the translation that used to require a human/LLM step:
+    CompiledSpec fields get mapped onto the job shape submit expects.
+    """
+    label = packet.label or compiled.label or f"packet_{index}"
+    agent = packet.agent or f"auto/{packet.stage}"
+    job: dict[str, Any] = {
+        "label": label,
+        "agent": agent,
+        "prompt": compiled.prompt,
+        "task_type": packet.stage,
+        "write_scope": list(packet.write),
+        "workdir": workdir,
+    }
+    if packet.read:
+        job["read_scope"] = list(packet.read)
+    if packet.depends_on:
+        job["depends_on"] = list(packet.depends_on)
+    if packet.complexity:
+        job["complexity"] = packet.complexity
+    if compiled.verify_refs:
+        job["verify_refs"] = list(compiled.verify_refs)
+    if compiled.capabilities:
+        job["capabilities"] = list(compiled.capabilities)
+    if compiled.tier and not agent.startswith("auto/"):
+        job["tier"] = compiled.tier
+    if packet.bug_ref:
+        job["bug_ref"] = packet.bug_ref
+    return job
+
+
+def compile_plan(
+    plan: Plan | dict,
+    *,
+    conn: Any,
+    workdir: str | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Compile a plan into a submittable workflow-spec dict.
+
+    Returns (spec_dict, warnings). No submission; this is the pure translation
+    step. Use :func:`launch_plan` for the full continuous flow.
+    """
+    plan_obj = _coerce_plan(plan)
+    if not plan_obj.packets:
+        raise ValueError("plan.packets must have at least one packet")
+
+    resolved_workdir = str(workdir or plan_obj.workdir or os.getcwd())
+    warnings_all: list[str] = []
+    jobs: list[dict[str, Any]] = []
+    used_labels: set[str] = set()
+
+    for index, packet in enumerate(plan_obj.packets):
+        intent_dict: dict[str, Any] = {
+            "description": packet.description,
+            "write": list(packet.write),
+            "stage": packet.stage,
+        }
+        if packet.read:
+            intent_dict["read"] = list(packet.read)
+        if packet.label:
+            intent_dict["label"] = packet.label
+        compiled, warnings = compile_spec(intent_dict, conn=conn)
+        prefix = packet.label or packet.bug_ref or f"packet_{index}"
+        warnings_all.extend(f"{prefix}: {w}" for w in warnings)
+        job = _packet_to_job(packet, compiled=compiled, workdir=resolved_workdir, index=index)
+        base_label = job["label"]
+        label = base_label
+        suffix = 1
+        while label in used_labels:
+            suffix += 1
+            label = f"{base_label}__{suffix}"
+        if label != base_label:
+            job["label"] = label
+        used_labels.add(label)
+        jobs.append(job)
+
+    resolved_workflow_id = plan_obj.workflow_id or f"plan.{uuid.uuid4().hex[:12]}"
+    spec_dict: dict[str, Any] = {
+        "name": plan_obj.name,
+        "workflow_id": resolved_workflow_id,
+        "phase": plan_obj.phase,
+        "workdir": resolved_workdir,
+        "jobs": jobs,
+    }
+    if plan_obj.why:
+        spec_dict["why"] = plan_obj.why
+    return spec_dict, warnings_all
+
+
+def launch_plan(
+    plan: Plan | dict,
+    *,
+    conn: Any,
+    workdir: str | None = None,
+    requested_by_kind: str = "launch_plan",
+    requested_by_ref: str | None = None,
+) -> LaunchReceipt:
+    """Compile + submit a plan in one call via the control-command bus.
+
+    The continuous path from intent to a running workflow_run. Callers give
+    minimal packet intents (what + where + stage); this function compiles
+    each packet through the capability catalog, translates into the workflow
+    spec shape, and submits through ``submit_workflow_command`` — the same
+    CQRS surface used by CLI/API/MCP/mobile for workflow.submit. No JSON
+    files, no intermediate validate-then-regenerate loop, and every launch
+    is captured as a durable control command for audit and replay.
+    """
+    spec_dict, warnings_all = compile_plan(plan, conn=conn, workdir=workdir)
+    plan_obj = _coerce_plan(plan)
+
+    from runtime.control_commands import submit_workflow_command
+
+    submit_result = submit_workflow_command(
+        conn,
+        requested_by_kind=requested_by_kind,
+        requested_by_ref=requested_by_ref or plan_obj.name,
+        inline_spec=spec_dict,
+        spec_name=plan_obj.name,
+        total_jobs=len(spec_dict["jobs"]),
+        dispatch_reason=f"launch_plan:{plan_obj.name}",
+    )
+
+    packet_map: list[dict[str, Any]] = [
+        {
+            "label": job["label"],
+            "bug_ref": packet.bug_ref,
+            "agent": job["agent"],
+            "stage": packet.stage,
+        }
+        for packet, job in zip(plan_obj.packets, spec_dict["jobs"])
+    ]
+    return LaunchReceipt(
+        run_id=str(submit_result.get("run_id") or ""),
+        spec_name=plan_obj.name,
+        workflow_id=str(spec_dict["workflow_id"]),
+        total_jobs=int(submit_result.get("total_jobs") or len(spec_dict["jobs"])),
+        packet_map=packet_map,
+        warnings=warnings_all,
+    )

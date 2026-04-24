@@ -881,6 +881,66 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
+    "praxis_launch_plan": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="launch-plan",
+        when_to_use=(
+            "Launch a plan (one or more packet intents) as a single workflow_run. "
+            "Replaces the write-JSON-then-validate-then-submit loop. Routes through "
+            "the control-command bus (CQRS) so every surface lands on the same "
+            "durable record."
+        ),
+        when_not_to_use=(
+            "Do not use it to launch a pre-existing .queue.json spec from disk — "
+            "use praxis_workflow action=run for that path."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Launch a one-packet plan",
+                {
+                    "plan": {
+                        "name": "fix_preview_submit_route_split",
+                        "packets": [
+                            {
+                                "description": "Make preview call TaskTypeRouter so auto/* routes resolve the same way submit does.",
+                                "write": ["Code&DBs/Workflow/runtime/workflow/_admission.py"],
+                                "stage": "build",
+                                "label": "preview-submit-route-parity",
+                            }
+                        ],
+                    }
+                },
+            ),
+            _example(
+                "Launch a multi-packet wave with dependencies",
+                {
+                    "plan": {
+                        "name": "bug_wave_0_authority",
+                        "why": "Fix bug/evidence authority before burning down dependent bugs.",
+                        "packets": [
+                            {
+                                "description": "Require verifier/evidence link before FIXED transitions.",
+                                "write": ["Code&DBs/Workflow/runtime/bugs.py"],
+                                "stage": "build",
+                                "label": "bug-fixed-requires-evidence",
+                                "bug_ref": "BUG-175EB9F3",
+                            },
+                            {
+                                "description": "Disallow silent FIXED -> DEFERRED without superseding evidence.",
+                                "write": ["Code&DBs/Workflow/runtime/bugs.py"],
+                                "stage": "build",
+                                "label": "bug-supersede-rule",
+                                "bug_ref": "BUG-9B812B32",
+                                "depends_on": ["bug-fixed-requires-evidence"],
+                            },
+                        ],
+                    }
+                },
+            ),
+        ],
+    ),
 }
 
 

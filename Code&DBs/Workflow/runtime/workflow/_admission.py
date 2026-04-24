@@ -1094,14 +1094,21 @@ def _preview_route_payload(job: Mapping[str, object]) -> dict[str, object]:
             "route_status": "not_applicable",
         }
     requested_agent = requested_agent or "auto/build"
+    route_plan = job.get("_route_plan")
+    if route_plan is not None:
+        return {
+            "requested_agent": str(getattr(route_plan, "original_slug", "") or requested_agent),
+            "resolved_agent": str(getattr(route_plan, "primary", "") or requested_agent),
+            "route_status": "resolved",
+        }
     if requested_agent.startswith("auto/"):
         return {
             "requested_agent": requested_agent,
             "resolved_agent": None,
             "route_status": "unresolved",
             "route_reason": (
-                "preview skips task-type routing for auto/* agents; "
-                "resolved_agent is intentionally withheld"
+                "task_type_router could not resolve this auto/* slug — "
+                "submit would reject for the same reason"
             ),
         }
     return {
@@ -1171,6 +1178,22 @@ def preview_workflow_execution(
 
     spec_verify_refs = _normalize_paths(raw_snapshot.get("verify_refs"))
     warnings: list[str] = []
+
+    try:
+        from runtime.task_type_router import TaskTypeRouter
+
+        TaskTypeRouter(conn).resolve_spec_jobs(
+            spec.jobs,
+            runtime_profile_ref=runtime_profile_ref or None,
+        )
+    except Exception as exc:
+        if runtime_profile_ref:
+            raise RuntimeError(
+                f"workflow preview failed closed for runtime profile "
+                f"{runtime_profile_ref!r}: {exc}",
+            ) from exc
+        warnings.append(f"task_type_router unavailable: {exc}")
+
     jobs: list[dict[str, object]] = []
     for index, job in enumerate(spec.jobs):
         label = str(job.get("label") or f"job_{index}")
