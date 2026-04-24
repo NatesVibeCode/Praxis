@@ -691,7 +691,7 @@ export function Dashboard({
                     type="button"
                     className="dash-hero-card__stat dash-hero-card__stat--link"
                     onClick={onOpenCosts}
-                    title="Open Cost Summary"
+                    title="View token spend (stays under Overview)"
                   >
                     <span>Spend</span>
                     <strong>{loading ? '...' : formatCurrency(summary.total_cost_24h)}</strong>

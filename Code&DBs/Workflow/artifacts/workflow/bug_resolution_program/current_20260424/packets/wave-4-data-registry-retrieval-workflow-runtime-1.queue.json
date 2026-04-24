@@ -1,0 +1,67 @@
+{
+  "name": "Wave 4: data/registry/retrieval cleanup / workflow_runtime / batch 1",
+  "workflow_id": "wave-4-data-registry-retrieval-workflow-runtime-1",
+  "queue_id": "wave-4-data-registry-retrieval-workflow-runtime-1",
+  "phase": "bug_resolution_packet",
+  "description": "Small focused packet for 2 open bug(s). Uses auto/* routing so Praxis can choose lower-cost admitted models where suitable.",
+  "outcome_goal": "Drive BUG-5AA2CCF3, BUG-D7801F5D to proof-backed terminal outcomes or leave explicit blockers in CLOSEOUT.md.",
+  "token_policy": {
+    "strategy": "small_focused_jobs",
+    "default_model_routing": "explicit lower-cost openai/gpt-5.4-mini for plan/verify/contained packets; openai/gpt-5.4 only for core authority execution",
+    "strong_model_only_when": "authority design or invasive implementation genuinely requires it",
+    "max_bugs_per_packet": 5
+  },
+  "anti_requirements": [
+    "Do not widen beyond listed bug IDs.",
+    "Do not resolve FIXED without validates_fix evidence.",
+    "Do not use ad hoc SQL for bug status or evidence writes.",
+    "Do not create wrapper scripts for behavior that belongs in runtime, registry, event bus, or DB authority.",
+    "Use praxis workflow discover before implementing new code or patterns."
+  ],
+  "bug_ids": [
+    "BUG-5AA2CCF3",
+    "BUG-D7801F5D"
+  ],
+  "jobs": [
+    {
+      "id": "plan_packet",
+      "label": "Plan workflow_runtime packet",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "review",
+      "prefer_cost": true,
+      "prompt": "Orient from Praxis.db standing orders first. Then use praxis workflow discover/recall as needed to plan this packet.\n\nBugs in scope:\n- BUG-5AA2CCF3 [P2/VERIFY]: [hygiene-2026-04-23/workflow-history-authority] Workflow history merges process-local fallback into durable status summaries\n- BUG-D7801F5D [P2/VERIFY]: No existing workflow receipts for ui_atlas_refinement wave IDs before edit\n\nWrite Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/PLAN.md with: authority model, files to read, files allowed to change, verification path, stop boundary, and per-bug intended outcome. Do not edit code in this job.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/PLAN.md"
+    },
+    {
+      "id": "execute_packet",
+      "label": "Execute workflow_runtime packet",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "prefer_cost": true,
+      "depends_on": [
+        "plan_packet"
+      ],
+      "prompt": "Read Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/PLAN.md first. Implement the smallest durable fix or document a proof-backed DEFERRED/WONT_FIX outcome.\n\nBugs in scope:\n- BUG-5AA2CCF3 [P2/VERIFY]: [hygiene-2026-04-23/workflow-history-authority] Workflow history merges process-local fallback into durable status summaries\n- BUG-D7801F5D [P2/VERIFY]: No existing workflow receipts for ui_atlas_refinement wave IDs before edit\n\nRules: use praxis workflow discover before new code; keep writes inside the active Praxis workspace boundary; do not cross Coder/Recruiter boundaries; do not resolve bugs in this job. Write Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/EXECUTION.md with changed files, evidence collected, and intended terminal status per bug.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/EXECUTION.md",
+      "verify_refs": [
+        "verify.bug_resolution_current_20260424.wave-4-data-registry-retrieval-workflow-runtime-1.execute_packet"
+      ]
+    },
+    {
+      "id": "verify_and_resolve_packet",
+      "label": "Verify and resolve workflow_runtime packet",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "test",
+      "prefer_cost": true,
+      "depends_on": [
+        "execute_packet"
+      ],
+      "prompt": "Read Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/PLAN.md and Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/EXECUTION.md. Run the narrowest meaningful verifier. Use only praxis workflow bugs attach_evidence and praxis workflow bugs resolve for bug state.\n\nBugs in scope:\n- BUG-5AA2CCF3 [P2/VERIFY]: [hygiene-2026-04-23/workflow-history-authority] Workflow history merges process-local fallback into durable status summaries\n- BUG-D7801F5D [P2/VERIFY]: No existing workflow receipts for ui_atlas_refinement wave IDs before edit\n\nIf verification fails, leave the bug open and record the blocker. Write Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/CLOSEOUT.md with proof, commands, status outcome, and unresolved risks.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-4-data-registry-retrieval-workflow-runtime-1/CLOSEOUT.md",
+      "verify_refs": [
+        "verify.bug_resolution_current_20260424.wave-4-data-registry-retrieval-workflow-runtime-1.verify_and_resolve_packet"
+      ]
+    }
+  ],
+  "workdir": "."
+}

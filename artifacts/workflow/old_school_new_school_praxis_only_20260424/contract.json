@@ -1,0 +1,52 @@
+{
+  "api_contract": {
+    "function": "handle_stripe_webhook(event, user_store)",
+    "inputs": {
+      "event": "Stripe-like dict with type and data.object fields",
+      "user_store": "dict keyed by customer id"
+    },
+    "outputs": {
+      "customer_id": "string when updated",
+      "updated": "boolean",
+      "user_status": "active or inactive when updated"
+    }
+  },
+  "data_schema": {
+    "event.data.object.customer": "non-empty string",
+    "event.data.object.status": "Stripe subscription status string",
+    "event.type": "customer.subscription.updated"
+  },
+  "dependencies": [],
+  "objective": "add a Stripe webhook that updates user status",
+  "required_components": [
+    "webhook handler function",
+    "subscription status mapping",
+    "in-memory user store boundary",
+    "unit tests for active, canceled, and ignored events"
+  ],
+  "static_guards": [
+    "no external dependencies",
+    "no network access",
+    "no circular execution path",
+    "all verifier commands run inside the proof artifact directory"
+  ],
+  "status_mapping": {
+    "active": "active",
+    "canceled": "inactive",
+    "incomplete": "inactive",
+    "past_due": "inactive",
+    "trialing": "active",
+    "unpaid": "inactive"
+  },
+  "system_boundaries": {
+    "inside_scope": [
+      "pure Python handler",
+      "local test suite"
+    ],
+    "outside_scope": [
+      "Stripe signature verification",
+      "database adapter",
+      "HTTP framework"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "attempt": 1,
+  "classification": "logic_error",
+  "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -m unittest discover -s . -p test_*.py",
+  "ok": false,
+  "returncode": 1,
+  "stderr": ".F.\n======================================================================\nFAIL: test_canceled_subscription_marks_user_inactive (test_stripe_webhook.StripeWebhookTests.test_canceled_subscription_marks_user_inactive)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Users/nate/Praxis/artifacts/workflow/old_school_new_school_praxis_only_20260424/attempts/attempt_1/test_stripe_webhook.py\", line 26, in test_canceled_subscription_marks_user_inactive\n    self.assertEqual(result[\"user_status\"], \"inactive\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'active' != 'inactive'\n- active\n+ inactive\n? ++\n\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nFAILED (failures=1)\n",
+  "stdout": ""
+}

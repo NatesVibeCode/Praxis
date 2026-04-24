@@ -1,0 +1,9 @@
+{
+  "attempt": 2,
+  "classification": "none",
+  "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -m unittest discover -s . -p test_*.py",
+  "ok": true,
+  "returncode": 0,
+  "stderr": "...\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+  "stdout": ""
+}

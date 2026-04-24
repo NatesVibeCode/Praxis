@@ -1,0 +1,12 @@
+{
+  "expected_repair_path": "The first generated attempt intentionally mishandles canceled subscriptions so the repair loop is exercised.",
+  "objective": "add a Stripe webhook that updates user status",
+  "plan": [
+    "Parse the vague webhook request into one handler boundary.",
+    "Generate code and tests against the explicit status mapping contract.",
+    "Run deterministic unit tests and capture full command output.",
+    "Classify any failure and write a structured bug packet.",
+    "Apply the smallest patch that satisfies the failing test.",
+    "Re-run the same verifier and bind the valid output to the current revision."
+  ]
+}

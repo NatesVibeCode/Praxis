@@ -134,7 +134,8 @@ function SurfaceFallback({ title, copy }: { title: string; copy: string }) {
 }
 
 function initialShellPayload(): ShellHistoryPayload {
-  return parseShellHistoryPayload(window.history.state) ?? parseShellLocationState(window.location.search);
+  return parseShellHistoryPayload(window.history.state)
+    ?? parseShellLocationState(window.location.search, window.location.pathname);
 }
 
 interface BuildDraftGuardState {
@@ -231,7 +232,8 @@ export function AppShell() {
 
   useEffect(() => {
     const onPopState = (event: PopStateEvent) => {
-      const payload = parseShellHistoryPayload(event.state) ?? parseShellLocationState(window.location.search);
+      const payload = parseShellHistoryPayload(event.state)
+        ?? parseShellLocationState(window.location.search, window.location.pathname);
       const currentState = stateRef.current;
       if (shouldBlockBuildDraftExit(currentState, payload.shellState)) {
         restoreCurrentHistoryEntry();
@@ -258,13 +260,29 @@ export function AppShell() {
     const current = stateRef.current;
     // Clearing moonRunId on any tab switch: the run view is URL-addressable
     // via /app/run/:id; leaving the surface exits run mode.
-    const nextState: ShellState = { ...current, activeTabId: tabId, moonRunId: null };
+    const nextState: ShellState = {
+      ...current,
+      activeTabId: tabId,
+      moonRunId: null,
+      dashboardDetail: null,
+    };
     if (tabId === 'build' && !current.buildWorkflowId) {
       nextState.buildView = 'moon';
     }
     if (shouldBlockBuildDraftExit(current, nextState, options)) return;
     commitShellState(nextState, historyMode);
   }, [commitShellState, shouldBlockBuildDraftExit]);
+
+  const openDashboardCosts = useCallback(() => {
+    const current = stateRef.current;
+    const nextState: ShellState = {
+      ...current,
+      activeTabId: 'dashboard',
+      dashboardDetail: 'costs',
+      moonRunId: null,
+    };
+    commitShellState(nextState, 'push');
+  }, [commitShellState]);
 
   const openBuild = useCallback((opts?: {
     workflowId?: string | null;
@@ -281,6 +299,7 @@ export function AppShell() {
       builderSeed: opts?.seed ?? null,
       buildView: opts?.view ?? current.buildView,
       moonRunId: null,
+      dashboardDetail: null,
     };
     if (shouldBlockBuildDraftExit(current, nextState, options)) return;
     commitShellState(nextState, historyMode);
@@ -299,6 +318,7 @@ export function AppShell() {
       activeTabId: 'build',
       buildView: 'moon',
       moonRunId: runId,
+      dashboardDetail: null,
     };
     if (shouldBlockBuildDraftExit(current, nextState)) return;
     commitShellState(nextState, historyMode);
@@ -319,6 +339,7 @@ export function AppShell() {
       ...current,
       activeTabId: nextTab.id,
       dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
+      dashboardDetail: null,
     };
     if (shouldBlockBuildDraftExit(current, nextState)) return;
     commitShellState(nextState, historyMode);
@@ -337,6 +358,7 @@ export function AppShell() {
       ...current,
       activeTabId: nextTab.id,
       dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
+      dashboardDetail: null,
     };
     if (shouldBlockBuildDraftExit(current, nextState)) return;
     commitShellState(nextState, historyMode);
@@ -349,6 +371,7 @@ export function AppShell() {
       ...current,
       dynamicTabs: resolved.dynamicTabs,
       activeTabId: resolved.activeTabId,
+      dashboardDetail: null,
     };
     if (shouldBlockBuildDraftExit(current, nextState)) return;
     commitShellState(nextState, historyMode);
@@ -498,9 +521,18 @@ export function AppShell() {
       { id: 'create', title: 'Create', items: createItems },
       { id: 'navigate', title: 'Navigate', items: navigateItems },
     ];
-  }, [activateTab, chatOpen, createSeedTab, creatingSeedId, openBuild, setChatOpen, state]);
+  }, [activateTab, chatOpen, createSeedTab, creatingSeedId, openBuild, openDashboardCosts, setChatOpen, state]);
 
   const renderActiveTab = () => {
+    if (activeSurface.category === 'static' && activeSurface.id === 'dashboard' && state.dashboardDetail === 'costs') {
+      return (
+        <CostsPanel
+          onBack={() => activateTab('dashboard')}
+          onViewRun={(runId: string) => openRunDetail(runId)}
+        />
+      );
+    }
+
     if (activeSurface.category === 'static' && activeSurface.id === 'dashboard') {
       return (
         <Dashboard
@@ -510,7 +542,7 @@ export function AppShell() {
           onNewWorkflow={() => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' })}
           onChat={() => setChatOpen(true)}
           onDescribe={() => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' })}
-          onOpenCosts={() => activateTab('costs')}
+          onOpenCosts={openDashboardCosts}
         />
       );
     }
@@ -530,15 +562,6 @@ export function AppShell() {
           onViewRun={(runId) => openRunDetail(runId)}
           onDraftStateChange={handleBuildDraftStateChange}
           initialMode={state.buildIntent === '__compose__' || (!state.buildWorkflowId && !state.moonRunId) ? 'compose' : undefined}
-        />
-      );
-    }
-
-    if (activeSurface.category === 'static' && activeSurface.id === 'costs') {
-      return (
-        <CostsPanel
-          onBack={() => activateTab('dashboard')}
-          onViewRun={(runId) => openRunDetail(runId)}
         />
       );
     }

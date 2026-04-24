@@ -1,0 +1,124 @@
+{
+  "name": "Integration Builder \u2014 OpenWeather",
+  "phase": "W",
+  "queue_id": "integration_builder_openweather_20260418",
+  "outcome_goal": "A manifest-declared integration for OpenWeather is registered in integration_registry, loads via praxis workflow discover, and exposes its MVP capabilities.",
+  "anti_requirements": [
+    "Do NOT write a custom Python handler when a declarative TOML manifest suffices \u2014 manifest-only is the default.",
+    "Do NOT hardcode secrets. Auth must resolve via resolve_secret (.env \u2192 Keychain service=praxis \u2192 env var) or a credential_ref.",
+    "Do NOT exceed the MVP scope agreed in the scoping phase \u2014 extra endpoints go in a follow-up spec."
+  ],
+  "verify_refs": [
+    "verifier.job.python.pytest_file"
+  ],
+  "jobs": [
+    {
+      "label": "discover_existing",
+      "task_type": "research",
+      "description": "Scan for prior openweather code, manifests, or tool-catalog rows; decide build-new vs extend.",
+      "outcome_goal": "A note at artifacts/integration_builder_openweather/00_discovery.md that lists: any existing manifest/adapter, the closest analogue to copy, and the verdict (new-manifest | extend-manifest | custom-adapter).",
+      "prompt": "Orient with `praxis workflow query status` and `praxis workflow discover \"openweather\"`. Then:\n\n1. Confirm there is no existing integration for openweather. Search:\n   - `Code&DBs/Integrations/manifests/*.toml`\n   - `Code&DBs/Workflow/runtime/integrations/` for custom Python adapters\n   - `integration_registry` rows via `praxis workflow tools call praxis_integration --input-json '{\"action\":\"list\"}' --yes`\n2. Read the manifest schema to confirm supported auth modes and capability shape:\n   - `Code&DBs/Workflow/runtime/integration_manifest.py` \u2014 IntegrationManifest, AuthShape, ActionSpec\n   - `Code&DBs/Integrations/manifests/webhook-example.toml` \u2014 the canonical example\n3. Pick the closest analogue manifest to copy from. Write `artifacts/integration_builder_openweather/00_discovery.md` with: prior art found (or none), analogue manifest chosen, verdict, and any gaps that would block a pure-manifest build (e.g. URL path interpolation, custom auth flow).",
+      "read": [
+        "Code&DBs/Workflow/runtime/integration_manifest.py",
+        "Code&DBs/Integrations/manifests/webhook-example.toml",
+        "Code&DBs/Integrations/README.md"
+      ],
+      "write": [
+        "artifacts/integration_builder_openweather/00_discovery.md"
+      ],
+      "verify_command": "test -s artifacts/integration_builder_openweather/00_discovery.md"
+    },
+    {
+      "label": "research_api",
+      "task_type": "research",
+      "depends_on": [
+        "discover_existing"
+      ],
+      "description": "Resolve OpenWeather auth mode, base URL, minimum scopes, and candidate endpoints.",
+      "outcome_goal": "A note at artifacts/integration_builder_openweather/01_api_contract.md with auth model (bearer/api_key/oauth2), base URL, scopes, and \u2265 8 candidate endpoints (method + full URL + body shape + description).",
+      "prompt": "Using the vendor's public docs at https://openweathermap.org/api and adjacent reference pages, produce `artifacts/integration_builder_openweather/01_api_contract.md` containing:\n\n- **Auth**: which mode (`api_key` / `oauth2` / `env_var`), what header / token format, what env var name (use UPPER_SNAKE convention: e.g. `OPENWEATHER_API_KEY`), any scope list.\n- **Base URL**: fully qualified origin, e.g. `https://api.example.com/v1`.\n- **Endpoint inventory**: at least 8 candidate endpoints. Each row must include: action slug (`snake_case_verb_object`), HTTP method, full URL (https://\u2026), one-line description, and the expected body shape (or `n/a`).\n- **Gaps**: any capability that the declarative manifest cannot express (URL path params, multipart upload, webhook callback, pagination helpers). Flag these for the scoping phase.",
+      "read": [
+        "artifacts/integration_builder_openweather/00_discovery.md"
+      ],
+      "write": [
+        "artifacts/integration_builder_openweather/01_api_contract.md"
+      ],
+      "verify_command": "grep -qE '^\\|? *(GET|POST|PUT|PATCH|DELETE)' artifacts/integration_builder_openweather/01_api_contract.md && grep -qi 'base url' artifacts/integration_builder_openweather/01_api_contract.md"
+    },
+    {
+      "label": "scope_mvp",
+      "task_type": "research",
+      "depends_on": [
+        "research_api"
+      ],
+      "description": "Trim the endpoint inventory to the minimum useful MVP; decide per-endpoint body shape.",
+      "outcome_goal": "artifacts/integration_builder_openweather/02_mvp_scope.md names the MVP actions (no more than 12), each with action slug, method, URL, and whether it needs a body_template.",
+      "prompt": "Read 01_api_contract.md. Produce `artifacts/integration_builder_openweather/02_mvp_scope.md` selecting an MVP set with the smallest possible coverage that still lets a caller do useful end-to-end work. Heuristics:\n\n- Prefer read + create + search over update/delete in v1.\n- Keep total capabilities \u2264 12.\n- Skip any endpoint that needs URL path params (/{id}) until the manifest loader supports them \u2014 note that in an \"out of scope\" section.\n- For each selected action, decide: does it need a `body_template` (static shape with `{{placeholder}}`s) or can we pass the caller's args straight through as the JSON body?\n- List an explicit \"out of scope \u2014 follow-up\" section so we can file the next builder run cleanly.",
+      "read": [
+        "artifacts/integration_builder_openweather/01_api_contract.md"
+      ],
+      "write": [
+        "artifacts/integration_builder_openweather/02_mvp_scope.md"
+      ],
+      "verify_command": "test -s artifacts/integration_builder_openweather/02_mvp_scope.md && grep -qi 'out of scope' artifacts/integration_builder_openweather/02_mvp_scope.md"
+    },
+    {
+      "label": "write_manifest",
+      "task_type": "build",
+      "depends_on": [
+        "scope_mvp"
+      ],
+      "description": "Emit Code&DBs/Integrations/manifests/openweather.toml from the MVP scope and verify it parses.",
+      "outcome_goal": "Code&DBs/Integrations/manifests/openweather.toml exists, parses via load_manifests(), and yields an IntegrationManifest with id=openweather and the agreed capabilities.",
+      "prompt": "Read 02_mvp_scope.md and write `Code&DBs/Integrations/manifests/openweather.toml`.\n\nManifest rules (from runtime/integration_manifest.py):\n- Required top blocks: `[integration]` (id, name, description, provider, icon), `[auth]`, and one or more `[[capabilities]]` arrays.\n- `integration.id` must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,126}[a-zA-Z0-9]$`.\n- `auth.kind` \u2208 {`env_var`, `api_key`, `oauth2`}. For bearer PATs use `api_key` + `env_var = \"OPENWEATHER_API_KEY\"`.\n- Each `[[capabilities]]` row needs `action` (snake_case), `method` (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS), `path` (full `https://\u2026` URL), `description`. Optional: `body_template` (dict with `{{placeholder}}`s) and `response_extract` (single top-level key).\n- Max 50 capabilities, max 64 KB file size.\n- Add a header comment with the keychain command: `security add-generic-password -U -a praxis -s OPENWEATHER_API_KEY -w <token>`.\n\nAfter writing, verify the manifest parses:\n  PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"from runtime.integration_manifest import load_manifests; ms=[m for m in load_manifests() if m.id=='openweather']; assert ms, 'manifest missing'; print(len(ms[0].capabilities), 'caps')\"",
+      "read": [
+        "Code&DBs/Workflow/runtime/integration_manifest.py",
+        "Code&DBs/Integrations/manifests/webhook-example.toml",
+        "artifacts/integration_builder_openweather/02_mvp_scope.md"
+      ],
+      "write": [
+        "Code&DBs/Integrations/manifests/openweather.toml"
+      ],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"from runtime.integration_manifest import load_manifests; ms=[m for m in load_manifests() if m.id=='openweather']; assert ms and ms[0].auth_shape.env_var=='OPENWEATHER_API_KEY' and len(ms[0].capabilities)>=1\""
+    },
+    {
+      "label": "patch_infra_gaps",
+      "task_type": "build",
+      "depends_on": [
+        "discover_existing"
+      ],
+      "description": "Fix or file bugs for any manifest-loader / credential-resolution gaps surfaced during discovery.",
+      "outcome_goal": "Every gap flagged in 00_discovery.md or 02_mvp_scope.md either (a) has a landed fix in runtime/integration_manifest.py or adapters/, or (b) is filed as a praxis bug with a clear repro.",
+      "prompt": "Review `artifacts/integration_builder_openweather/00_discovery.md` and `02_mvp_scope.md` for any items labelled \"gap\" or \"out of scope \u2014 loader limitation\". For each:\n\n1. If the fix is < 30 LOC and localized to `runtime/integration_manifest.py` or `adapters/keychain.py`/`adapters/credentials.py`, land the fix and run `PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_integration_manifest.py` (create the test file if none exists).\n2. Otherwise, file a bug: `praxis workflow tools call praxis_bugs --input-json '{\"action\":\"create\",\"title\":\"...\",\"evidence_refs\":[\"artifacts/integration_builder_openweather/...\"]}' --yes`.\n\nIf no gaps were flagged, this job exits with a no-op log and the verify_command still succeeds.",
+      "read": [
+        "artifacts/integration_builder_openweather/00_discovery.md",
+        "artifacts/integration_builder_openweather/02_mvp_scope.md",
+        "Code&DBs/Workflow/runtime/integration_manifest.py",
+        "Code&DBs/Workflow/adapters/keychain.py",
+        "Code&DBs/Workflow/adapters/credentials.py"
+      ],
+      "write": [
+        "artifacts/integration_builder_openweather/03_infra_gaps.md"
+      ],
+      "verify_command": "test -f artifacts/integration_builder_openweather/03_infra_gaps.md"
+    },
+    {
+      "label": "register_and_verify",
+      "task_type": "build",
+      "depends_on": [
+        "write_manifest",
+        "patch_infra_gaps"
+      ],
+      "description": "Sync the registry, confirm the integration appears, and smoke-test one capability if a token is present.",
+      "outcome_goal": "integration_registry has a row for openweather; praxis workflow discover \"openweather\" returns the manifest; a dry-run call to one capability succeeds or cleanly reports credential.env_var_missing.",
+      "prompt": "Run the sync and verify:\n\n1. `praxis workflow tools call praxis_reload --input-json '{}' --yes` (or `praxis workflow discover reindex --yes` if reload is unavailable).\n2. Query the registry:\n   - `praxis workflow tools call praxis_integration --input-json '{\"action\":\"describe\",\"integration_id\":\"openweather\"}' --yes`\n3. Discover: `praxis workflow discover \"openweather\"` must return the integration.\n4. Dry-run a capability:\n   - Pick the safest `list_*` capability from the manifest.\n   - `praxis workflow tools call praxis_integration --input-json '{\"action\":\"call\",\"integration_id\":\"openweather\",\"integration_action\":\"<action>\",\"args\":{}}' --yes`\n   - Success = HTTP 200, OR reason_code `credential.env_var_missing` (expected when the keychain secret isn't populated on the build host).\n\nWrite a short summary to `artifacts/integration_builder_openweather/04_verify.md` recording: registry row present (y/n), discover hit (y/n), smoke-test status, and the exact keychain command the operator needs to run to store the secret.",
+      "read": [
+        "Code&DBs/Integrations/manifests/openweather.toml"
+      ],
+      "write": [
+        "artifacts/integration_builder_openweather/04_verify.md"
+      ],
+      "verify_command": "test -s artifacts/integration_builder_openweather/04_verify.md && test -f Code&DBs/Integrations/manifests/openweather.toml"
+    }
+  ]
+}

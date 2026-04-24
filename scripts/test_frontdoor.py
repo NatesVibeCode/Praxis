@@ -384,6 +384,25 @@ def _check_affected_payload(args: list[str]) -> dict[str, Any]:
     }
 
 
+def _workflow_validate_semantic_failure(run: dict[str, Any]) -> tuple[bool, str | None]:
+    """Detect validate failures from combined output (stdout + stderr).
+
+    The front door must not report ok for ``validate`` when the CLI printed a
+    failure banner or authority errors, even if the wrapped process exit code
+    is wrong or missing.
+    """
+    text = f"{run.get('stdout') or ''}\n{run.get('stderr') or ''}"
+    if "Spec Validation: PASSED" in text and "Agent resolution check failed" in text:
+        return True, "resolution_paradox"
+    if "AUTHORITY ERROR" in text:
+        return True, "authority"
+    if "agent authority unavailable" in text.lower():
+        return True, "authority"
+    if "Spec Validation: FAILED" in text:
+        return True, "spec_failed"
+    return False, None
+
+
 def _validate_payload(args: list[str]) -> dict[str, Any]:
     if len(args) != 1:
         return {
@@ -395,33 +414,42 @@ def _validate_payload(args: list[str]) -> dict[str, Any]:
     queue_file = args[0]
     command = [str(REPO_ROOT / "scripts" / "workflow.sh"), "validate", queue_file]
     run = _run_command(command)
-    ok = run["returncode"] == 0
+    cmd_ok = run["returncode"] == 0
+    semantic_fail, reason = _workflow_validate_semantic_failure(run)
+    ok = cmd_ok and not semantic_fail
+
+    blocked_err = (
+        "workflow validation failed: agent resolution was blocked by the sandbox permission surface"
+    )
+    blocked_warn_validated = (
+        "workflow spec validated, but agent resolution was blocked by the sandbox permission surface"
+    )
+    blocked_warn_parse = (
+        "workflow spec parsed, but agent resolution was blocked by the sandbox permission surface"
+    )
+
     errors: list[str] = []
     warnings: list[str] = []
-    if ok:
-        pass
-    elif "Spec Validation: PASSED" in run["stdout"] and "Agent resolution check failed" in run["stdout"]:
-        ok = False
-        errors.append(
-            "workflow validation failed: agent resolution was blocked by the sandbox permission surface"
-        )
-        warnings.append(
-            "workflow spec validated, but agent resolution was blocked by the sandbox permission surface"
-        )
-    elif "agent authority unavailable:" in run["stdout"] and "AUTHORITY ERROR" in run["stdout"]:
-        ok = False
-        errors.append(
-            "workflow validation failed: agent resolution was blocked by the sandbox permission surface"
-        )
-        warnings.append(
-            "workflow spec parsed, but agent resolution was blocked by the sandbox permission surface"
-        )
-    else:
-        errors.append(f"workflow validation failed with exit code {run['returncode']}")
-        if run["stderr"]:
-            errors.append(run["stderr"].strip())
-        elif run["stdout"]:
-            errors.append(run["stdout"].strip())
+    if not ok:
+        if reason == "resolution_paradox":
+            errors.append(blocked_err)
+            warnings.append(blocked_warn_validated)
+        elif reason == "authority":
+            errors.append(blocked_err)
+            warnings.append(blocked_warn_parse)
+        elif reason == "spec_failed":
+            errors.append("workflow validation failed: spec validation reported FAILURE")
+        elif not cmd_ok:
+            errors.append(f"workflow validation failed with exit code {run['returncode']}")
+            if run["stderr"]:
+                errors.append(run["stderr"].strip())
+            elif run["stdout"]:
+                errors.append(run["stdout"].strip())
+        else:
+            errors.append(
+                "workflow validation failed: output indicated failure despite zero exit code",
+            )
+
     return {
         "ok": ok,
         "results": {

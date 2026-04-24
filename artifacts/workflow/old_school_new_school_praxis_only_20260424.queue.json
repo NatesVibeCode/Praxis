@@ -1,0 +1,41 @@
+{
+  "name": "Old School + New School + Praxis-Only Objective Proof",
+  "workflow_id": "old_school_new_school_praxis_only_20260424",
+  "phase": "execute",
+  "outcome_goal": "Take a vague technical objective, produce a concrete implementation and tests, verify them, repair the first failure, and leave an evidence trail from input to final valid output.",
+  "anti_requirements": [
+    "Do not mutate production application code during the proof run.",
+    "Do not rely on LLM judgment without deterministic verification.",
+    "Do not write demo failures into the canonical Praxis bug table.",
+    "Do not use external services or network calls for the generated Stripe webhook proof."
+  ],
+  "jobs": [
+    {
+      "label": "objective_build_verify_repair",
+      "adapter_type": "deterministic_task",
+      "inputs": {
+        "task_name": "autonomous objective build verify repair proof",
+        "deterministic_builder": "runtime.autonomous_objective_proof.run_autonomous_objective_proof",
+        "workspace_root": ".",
+        "output_dir": "artifacts/workflow/old_school_new_school_praxis_only_20260424",
+        "task": "add a Stripe webhook that updates user status",
+        "generation_source": "mocked_llm_fallback"
+      },
+      "expected_outputs": {
+        "result": "verified",
+        "final_valid": true,
+        "repair_iterations": 1,
+        "initial_failure_classification": "logic_error"
+      },
+      "scope": {
+        "write": [
+          "artifacts/workflow/old_school_new_school_praxis_only_20260424/"
+        ],
+        "read": [
+          "Code&DBs/Workflow/runtime/autonomous_objective_proof.py",
+          "Code&DBs/Workflow/runtime/workflow_eval.py"
+        ]
+      }
+    }
+  ]
+}

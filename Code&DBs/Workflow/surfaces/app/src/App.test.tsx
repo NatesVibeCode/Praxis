@@ -10,7 +10,14 @@ const appShellMoonMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./dashboard/Dashboard', () => ({
-  Dashboard: () => <div>Dashboard Surface</div>,
+  Dashboard: ({ onOpenCosts }: { onOpenCosts?: () => void }) => (
+    <div>
+      <div>Dashboard Surface</div>
+      <button type="button" onClick={onOpenCosts}>
+        Open spend detail
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('./dashboard/CostsPanel', () => ({
@@ -65,6 +72,12 @@ vi.mock('./praxis/ManifestBundleView', () => ({
   ManifestBundleView: () => <div>Manifest Bundle Surface</div>,
 }));
 
+function clickCommandMenuNewWorkflow() {
+  const el = document.querySelector<HTMLButtonElement>('[data-menu-item-id="create:builder"]');
+  if (!el) throw new Error('expected create:builder in command menu');
+  fireEvent.click(el);
+}
+
 describe('AppShell', () => {
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
@@ -73,29 +86,30 @@ describe('AppShell', () => {
     vi.restoreAllMocks();
   });
 
-  test('opens the command menu and switches to the blank builder surface', async () => {
+  test('opens the command menu and switches to the new workflow builder surface', async () => {
     render(<AppShell />);
 
     await screen.findByText('Dashboard Surface');
 
     fireEvent.click(screen.getByRole('button', { name: /workspace new/i }));
 
-    fireEvent.click(await screen.findByRole('button', { name: /blank builder/i }));
+    await screen.findByRole('dialog', { name: /open or create/i });
+    clickCommandMenuNewWorkflow();
 
     await screen.findByText('Builder Surface');
     expect(screen.getByText('App builder')).toBeInTheDocument();
   });
 
-  test('switches into the cost summary surface from the shell navigation menu', async () => {
+  test('opens spend detail from overview without promoting it to a primary tab', async () => {
     render(<AppShell />);
 
     await screen.findByText('Dashboard Surface');
 
-    fireEvent.click(screen.getByRole('button', { name: /workspace new/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /cost summary/i }));
+    fireEvent.click(screen.getByRole('button', { name: /open spend detail/i }));
 
     await screen.findByText('Costs Surface');
-    expect(screen.getByText('Cost ledger')).toBeInTheDocument();
+    expect(screen.getByText('Control plane')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /overview/i })).toHaveAttribute('aria-selected', 'true');
   });
 
   test('does not leave the builder when escape is pressed', async () => {
@@ -104,7 +118,8 @@ describe('AppShell', () => {
     await screen.findByText('Dashboard Surface');
 
     fireEvent.click(screen.getByRole('button', { name: /workspace new/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /blank builder/i }));
+    await screen.findByRole('dialog', { name: /open or create/i });
+    clickCommandMenuNewWorkflow();
 
     await screen.findByText('Builder Surface');
 
@@ -124,7 +139,8 @@ describe('AppShell', () => {
     await screen.findByText('Dashboard Surface');
 
     fireEvent.click(screen.getByRole('button', { name: /workspace new/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /blank builder/i }));
+    await screen.findByRole('dialog', { name: /open or create/i });
+    clickCommandMenuNewWorkflow();
 
     await screen.findByText('Builder Surface');
 
@@ -144,7 +160,8 @@ describe('AppShell', () => {
     await screen.findByText('Dashboard Surface');
 
     fireEvent.click(screen.getByRole('button', { name: /workspace new/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /blank builder/i }));
+    await screen.findByRole('dialog', { name: /open or create/i });
+    clickCommandMenuNewWorkflow();
 
     await screen.findByText('Builder Surface');
 

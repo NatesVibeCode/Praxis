@@ -1,0 +1,12 @@
+{
+  "change": "Replace the fallback user status with explicit inactive mapping for non-active Stripe subscription states.",
+  "classification": "logic_error",
+  "repair_iteration": 1,
+  "strategy": "minimal_patch",
+  "uses": [
+    "failing tests",
+    "captured logs",
+    "contract.json",
+    "attempts/attempt_1/stripe_webhook.py"
+  ]
+}

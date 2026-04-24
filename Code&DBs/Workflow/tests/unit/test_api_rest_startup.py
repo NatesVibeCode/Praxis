@@ -764,6 +764,15 @@ def test_legacy_ui_routes_are_absent() -> None:
     assert response.status_code == 404
 
 
+def test_legacy_atlas_artifact_route_redirects_to_live_app() -> None:
+    with TestClient(rest.app) as client:
+        response = client.get("/api/atlas.html", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/app/atlas"
+    assert "no-store" in response.headers["cache-control"]
+
+
 def test_launcher_app_reports_missing_build(monkeypatch, tmp_path: Path) -> None:
     dist_dir = tmp_path / "missing-dist"
     monkeypatch.setattr(rest, "_APP_DIST_DIR", dist_dir)

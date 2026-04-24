@@ -1,0 +1,15 @@
+{
+  "current_revision": "71847c6f3a795b44cf3765b49ecc41c15960edb1",
+  "final_attempt": 2,
+  "invalidates_on": [
+    "input_task_change",
+    "contract_change",
+    "implementation_hash_change",
+    "test_hash_change",
+    "git_revision_change"
+  ],
+  "repair_iterations": 1,
+  "valid": true,
+  "validated_by": "python -m unittest discover",
+  "validity_hash": "eb5ff461aba443b4a71e798600f6a353e1efb97445b43bb8e1d81789864ceb17"
+}

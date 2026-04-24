@@ -18,7 +18,7 @@ export interface ShellTabDescriptor {
 export type ResolvedShellSurface =
   | {
       category: 'static';
-      id: 'dashboard' | 'build' | 'costs' | 'manifests' | 'atlas';
+      id: 'dashboard' | 'build' | 'manifests' | 'atlas';
       context: ShellSurfaceContext;
     }
   | {
@@ -64,15 +64,6 @@ const STATIC_SURFACES = {
       state.moonRunId ? 'Return to the active run view.' : 'Jump back into Moon Build.'
     ),
   },
-  costs: {
-    kindLabel: 'Finance',
-    getTabLabel: (_state: ShellState) => 'Cost Summary',
-    getContext: (_state: ShellState): ShellSurfaceContext => ({
-      label: 'Cost ledger',
-      detail: 'Review token spend, recent receipts, and per-run cost concentration.',
-    }),
-    getNavigateDescription: (_state: ShellState) => 'Inspect token spend and recent costed runs.',
-  },
   manifests: {
     kindLabel: 'Catalog',
     getTabLabel: (_state: ShellState) => 'Manifests',
@@ -91,7 +82,7 @@ const STATIC_SURFACES = {
     }),
     getNavigateDescription: (_state: ShellState) => 'Open the knowledge-graph diagram.',
   },
-} satisfies Record<'dashboard' | 'build' | 'costs' | 'manifests' | 'atlas', {
+} satisfies Record<'dashboard' | 'build' | 'manifests' | 'atlas', {
   kindLabel: string;
   getTabLabel: (state: ShellState) => string;
   getContext: (state: ShellState) => ShellSurfaceContext;
@@ -141,7 +132,6 @@ export function resolveActiveShellSurface(
   if (
     state.activeTabId === 'dashboard'
     || state.activeTabId === 'build'
-    || state.activeTabId === 'costs'
     || state.activeTabId === 'manifests'
     || state.activeTabId === 'atlas'
   ) {

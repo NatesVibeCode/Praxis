@@ -93,11 +93,19 @@ describe('shell state helpers', () => {
     expect(payload.shellState.buildView).toBe('moon');
   });
 
-  test('parses costs urls into the costs tab', () => {
+  test('parses costs urls into overview with costs detail (not a primary tab)', () => {
     const payload = parseShellLocationState('?page=costs', '/app/costs');
 
-    expect(payload.shellState.activeTabId).toBe('costs');
+    expect(payload.shellState.activeTabId).toBe('dashboard');
+    expect(payload.shellState.dashboardDetail).toBe('costs');
     expect(payload.chatOpen).toBe(false);
+  });
+
+  test('parses detail=costs on /app into overview drill-in', () => {
+    const payload = parseShellLocationState('?detail=costs', '/app');
+
+    expect(payload.shellState.activeTabId).toBe('dashboard');
+    expect(payload.shellState.dashboardDetail).toBe('costs');
   });
 
   test('parses manifests urls into the manifest catalog tab', () => {
@@ -127,13 +135,14 @@ describe('shell state helpers', () => {
     expect(buildShellUrl(state, false)).toBe('/app/workflow?workflow=wf_moon&intent=research');
   });
 
-  test('builds costs urls from the active static tab', () => {
+  test('builds /app?detail=costs when overview shows spend drill-in', () => {
     const state = {
       ...createDefaultShellState(),
-      activeTabId: 'costs' as const,
+      activeTabId: 'dashboard' as const,
+      dashboardDetail: 'costs' as const,
     };
 
-    expect(buildShellUrl(state, false)).toBe('/app/costs');
+    expect(buildShellUrl(state, false)).toBe('/app?detail=costs');
   });
 
   test('builds manifest catalog urls from the active static tab', () => {

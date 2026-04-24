@@ -1,7 +1,9 @@
 import { parseEditorSurface } from '../dashboard/operatingModelSurfaceState';
 import { shellUrl } from './routes';
 
-export type StaticTabId = 'dashboard' | 'build' | 'costs' | 'manifests' | 'atlas';
+export type StaticTabId = 'dashboard' | 'build' | 'manifests' | 'atlas';
+/** Auxiliary view on the Overview surface (not a primary tab). */
+export type DashboardDetail = 'costs' | null;
 export type DynamicTabKind = 'run-detail' | 'manifest' | 'manifest-editor';
 export type AppTabId = StaticTabId | string;
 export type BuildView = 'moon';
@@ -25,6 +27,8 @@ export interface ShellState {
   buildView: BuildView;
   /** When set, Moon renders a run-view over its canvas using this run_id. */
   moonRunId: string | null;
+  /** Optional drill-in on Overview (e.g. token spend) without a top-level tab. */
+  dashboardDetail: DashboardDetail;
 }
 
 export interface ShellHistoryPayload {
@@ -85,6 +89,7 @@ export function createDefaultShellState(): ShellState {
     builderSeed: null,
     buildView: 'moon',
     moonRunId: null,
+    dashboardDetail: null,
   };
 }
 
@@ -94,15 +99,23 @@ export function parseShellHistoryPayload(value: unknown): ShellHistoryPayload | 
   const dynamicTabs = Array.isArray(shellState.dynamicTabs)
     ? shellState.dynamicTabs.map(normalizeDynamicTab).filter((item): item is DynamicTab => item !== null)
     : [];
+  let activeTabId = asString(shellState.activeTabId) || 'dashboard';
+  const rawDetail = shellState.dashboardDetail;
+  let dashboardDetail: DashboardDetail = rawDetail === 'costs' ? 'costs' : null;
+  if (activeTabId === 'costs') {
+    activeTabId = 'dashboard';
+    dashboardDetail = 'costs';
+  }
   return {
     shellState: {
-      activeTabId: asString(shellState.activeTabId) || 'dashboard',
+      activeTabId,
       dynamicTabs,
       buildWorkflowId: asString(shellState.buildWorkflowId),
       buildIntent: asString(shellState.buildIntent),
       builderSeed: (shellState.builderSeed as unknown | null) ?? null,
       buildView: 'moon' as const,
       moonRunId: asString(shellState.moonRunId),
+      dashboardDetail,
     },
     chatOpen: Boolean(value.chatOpen),
   };
@@ -152,7 +165,8 @@ export function parseShellLocationState(search: string, pathname: string = windo
     return {
       shellState: {
         ...shellState,
-        activeTabId: 'costs',
+        activeTabId: 'dashboard',
+        dashboardDetail: 'costs',
       },
       chatOpen: false,
     };
@@ -225,7 +239,8 @@ export function parseShellLocationState(search: string, pathname: string = windo
     return {
       shellState: {
         ...shellState,
-        activeTabId: 'costs',
+        activeTabId: 'dashboard',
+        dashboardDetail: 'costs',
       },
       chatOpen: false,
     };
@@ -293,6 +308,18 @@ export function parseShellLocationState(search: string, pathname: string = windo
     };
   }
 
+  const detail = params.get('detail');
+  if (detail === 'costs') {
+    return {
+      shellState: {
+        ...shellState,
+        activeTabId: 'dashboard',
+        dashboardDetail: 'costs',
+      },
+      chatOpen: page === 'chat',
+    };
+  }
+
   return {
     shellState,
     chatOpen: page === 'chat',
@@ -313,8 +340,8 @@ export function buildShellUrl(state: ShellState, chatOpen: boolean): string {
     return `/app/workflow${query ? `?${query}` : ''}`;
   }
 
-  if (state.activeTabId === 'costs') {
-    return '/app/costs';
+  if (state.activeTabId === 'dashboard' && state.dashboardDetail === 'costs') {
+    return '/app?detail=costs';
   }
 
   if (state.activeTabId === 'manifests') {

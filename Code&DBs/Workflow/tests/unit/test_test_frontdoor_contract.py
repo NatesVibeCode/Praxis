@@ -21,6 +21,29 @@ def _load_test_frontdoor(monkeypatch: pytest.MonkeyPatch):
     return module
 
 
+def test_validate_payload_fails_when_spec_failed_banner_despite_zero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frontdoor = _load_test_frontdoor(monkeypatch)
+
+    monkeypatch.setattr(
+        frontdoor,
+        "_run_command",
+        lambda _command: {
+            "duration_s": 0.01,
+            "returncode": 0,
+            "stdout": "=== Spec Validation: FAILED ===\nName: smoke\nWorkflow ID: cli_validate_smoke\n",
+            "stderr": "",
+        },
+    )
+
+    payload = frontdoor._validate_payload(["config/cascade/specs/demo.queue.json"])
+
+    assert payload["ok"] is False
+    assert any("spec validation reported FAILURE" in err for err in payload["errors"])
+    assert payload["warnings"] == []
+
+
 def test_validate_payload_treats_structured_authority_error_as_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

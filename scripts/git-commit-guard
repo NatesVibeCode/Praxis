@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Repo commit coordination gate (multi-agent / index.lock awareness).
+
+See Praxis AGENTS.md — emit JSON with ``--json`` for tooling.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+_STATE_BASENAME = "praxis_commit_guard.json"
+
+
+def _find_git_dir(start: Path) -> Path | None:
+    current = start.resolve()
+    for directory in (current, *current.parents):
+        git = directory / ".git"
+        if git.is_dir():
+            return git
+    return None
+
+
+def _load_state(git_dir: Path) -> dict[str, object]:
+    path = git_dir / _STATE_BASENAME
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _write_state(git_dir: Path, data: dict[str, object]) -> None:
+    path = git_dir / _STATE_BASENAME
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _remove_state(git_dir: Path) -> None:
+    path = git_dir / _STATE_BASENAME
+    if path.is_file():
+        path.unlink()
+
+
+def _emit(payload: dict[str, object], *, as_json: bool) -> None:
+    if as_json:
+        json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        msg = str(payload.get("message") or "")
+        if msg:
+            print(msg)
+
+
+def _status_payload(git_dir: Path | None) -> dict[str, object]:
+    if git_dir is None:
+        return {
+            "ok": False,
+            "git_index_locked": False,
+            "claimed": False,
+            "owner": None,
+            "message": "not a git repository (no .git directory found from script location)",
+        }
+
+    locked = (git_dir / "index.lock").is_file()
+
+    state = _load_state(git_dir)
+    owner = state.get("owner")
+    owner_str = str(owner).strip() if owner is not None else ""
+    claimed = bool(owner_str)
+
+    parts: list[str] = []
+    if locked:
+        parts.append("git index is locked (index.lock present)")
+    if claimed:
+        parts.append(f"commit gate claimed by {owner_str!r}")
+    if not parts:
+        parts.append("commit gate clear")
+
+    return {
+        "ok": not locked,
+        "git_index_locked": locked,
+        "claimed": claimed,
+        "owner": owner_str or None,
+        "claimed_at": state.get("claimed_at"),
+        "message": "; ".join(parts),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    want_json = "--json" in raw
+    raw = [token for token in raw if token != "--json"]
+
+    parser = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
+    sub = parser.add_subparsers(dest="command")
+
+    p_claim = sub.add_parser("claim", help="Record an exclusive commit-prep owner")
+    p_claim.add_argument("--owner", required=True, help="Agent or session id")
+
+    p_release = sub.add_parser("release", help="Clear the gate if owner matches")
+    p_release.add_argument("--owner", required=True)
+
+    args = parser.parse_args(raw)
+
+    script_dir = Path(__file__).resolve().parent
+    git_dir = _find_git_dir(script_dir)
+    if git_dir is None:
+        payload = _status_payload(None)
+        _emit(payload, as_json=want_json)
+        return 1
+
+    if args.command is None:
+        status = _status_payload(git_dir)
+        _emit(status, as_json=want_json)
+        if status.get("git_index_locked") or status.get("claimed"):
+            return 1
+        return 0 if status.get("ok") else 1
+
+    if args.command == "claim":
+        status = _status_payload(git_dir)
+        if status["git_index_locked"]:
+            payload = {**status, "ok": False, "message": str(status["message"])}
+            _emit(payload, as_json=want_json)
+            return 1
+        existing = _load_state(git_dir)
+        prev = str(existing.get("owner") or "").strip()
+        owner = str(args.owner).strip()
+        if prev and prev != owner:
+            payload = {
+                **status,
+                "ok": False,
+                "claimed": True,
+                "owner": prev,
+                "message": f"commit gate already claimed by {prev!r} (not {owner!r})",
+            }
+            _emit(payload, as_json=want_json)
+            return 1
+        _write_state(
+            git_dir,
+            {
+                "owner": owner,
+                "claimed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
+        fresh = _status_payload(git_dir)
+        out = {**fresh, "ok": True, "message": f"commit gate claimed by {owner!r}"}
+        _emit(out, as_json=want_json)
+        return 0
+
+    if args.command == "release":
+        owner = str(args.owner).strip()
+        existing = _load_state(git_dir)
+        prev = str(existing.get("owner") or "").strip()
+        if prev != owner:
+            payload = {
+                **_status_payload(git_dir),
+                "ok": False,
+                "message": f"cannot release: gate held by {prev!r}, not {owner!r}",
+            }
+            _emit(payload, as_json=want_json)
+            return 1
+        _remove_state(git_dir)
+        out = {
+            **_status_payload(git_dir),
+            "ok": True,
+            "message": f"commit gate released by {owner!r}",
+        }
+        _emit(out, as_json=want_json)
+        return 0
+
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

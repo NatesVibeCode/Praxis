@@ -1,0 +1,47 @@
+# OpenWeather integration discovery artifact.
+#
+# The working v1 path is the generated connector in artifacts/connectors/openweather
+# because OpenWeather expects the API key in query parameter appid.
+# Store a real key when available:
+#   security add-generic-password -U -a praxis -s OPENWEATHER_API_KEY -w <token>
+
+[integration]
+id = "openweather"
+name = "OpenWeather"
+description = "OpenWeather API discovery manifest. Runtime calls use the generated connector until query auth placement is supported in declarative manifests."
+provider = "connector"
+icon = "cloud-sun"
+
+[auth]
+kind = "api_key"
+env_var = "OPENWEATHER_API_KEY"
+
+[[capabilities]]
+action = "get_current_weather"
+description = "Current weather by coordinates. Query auth requires appid; use connector implementation for runtime calls."
+method = "GET"
+path = "https://api.openweathermap.org/data/2.5/weather"
+
+[[capabilities]]
+action = "get_five_day_forecast"
+description = "Five day forecast by coordinates. Query auth requires appid; use connector implementation for runtime calls."
+method = "GET"
+path = "https://api.openweathermap.org/data/2.5/forecast"
+
+[[capabilities]]
+action = "geocode_direct"
+description = "Resolve a location name to coordinates."
+method = "GET"
+path = "https://api.openweathermap.org/geo/1.0/direct"
+
+[[capabilities]]
+action = "geocode_reverse"
+description = "Resolve coordinates to a location name."
+method = "GET"
+path = "https://api.openweathermap.org/geo/1.0/reverse"
+
+[[capabilities]]
+action = "get_air_pollution"
+description = "Air pollution data by coordinates."
+method = "GET"
+path = "https://api.openweathermap.org/data/2.5/air_pollution"

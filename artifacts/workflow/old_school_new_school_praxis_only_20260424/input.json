@@ -1,0 +1,5 @@
+{
+  "continuation_rule": "continue with mocked generation if provider output is absent",
+  "generation_source": "mocked_llm_fallback",
+  "task": "add a Stripe webhook that updates user status"
+}

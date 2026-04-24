@@ -1,0 +1,735 @@
+{
+  "program": "bug_resolution_program_current_20260424",
+  "captured_at": "2026-04-24T13:28:57.240Z",
+  "source": "praxis workflow bugs list --open-only --json --limit 200",
+  "open_bug_count": 110,
+  "model_policy": {
+    "default": "explicit openai/gpt-5.4-mini by default; openai/gpt-5.4 only for core authority execute jobs",
+    "cheap_jobs": [
+      "plan_packet",
+      "verify_and_resolve_packet",
+      "non-core execute_packet"
+    ],
+    "stronger_jobs": "core authority execute_packet only",
+    "packet_size": "3-5 bugs max; fewer for core authority lanes"
+  },
+  "waves": [
+    {
+      "wave_id": "wave_0_bug_evidence_authority",
+      "label": "Wave 0: bug/evidence/validation authority",
+      "depends_on": [],
+      "packet_count": 5,
+      "bug_count": 9,
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-bug-evidence-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-provider-routing-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-runtime-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-workflow-runtime-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-data-registry-1.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_1_core_authority",
+      "label": "Wave 1: core runtime authority",
+      "depends_on": [
+        "wave_0_bug_evidence_authority"
+      ],
+      "packet_count": 12,
+      "bug_count": 22,
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-app-ui-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-architecture-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-bug-evidence-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-data-registry-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-provider-routing-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-secrets-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-secrets-2.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-workflow-runtime-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-input-security-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-provider-routing-2.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-verify-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-workflow-runtime-2.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_2_runtime_unblockers",
+      "label": "Wave 2: runtime unblockers",
+      "depends_on": [
+        "wave_1_core_authority"
+      ],
+      "packet_count": 11,
+      "bug_count": 34,
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-runtime-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-workflow-runtime-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-2.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-3.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-bug-evidence-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-contract-deps-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-data-registry-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-input-security-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-provider-routing-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-workflow-runtime-2.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_3_input_security",
+      "label": "Wave 3: input/security hardening",
+      "depends_on": [
+        "wave_1_core_authority"
+      ],
+      "packet_count": 4,
+      "bug_count": 13,
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-2.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-3.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-4.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_4_data_registry_retrieval",
+      "label": "Wave 4: data/registry/retrieval cleanup",
+      "depends_on": [
+        "wave_0_bug_evidence_authority"
+      ],
+      "packet_count": 6,
+      "bug_count": 14,
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-bug-evidence-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-app-ui-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-bug-evidence-2.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-data-registry-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-verify-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-workflow-runtime-1.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_5_ui_product",
+      "label": "Wave 5: UI/product fixes",
+      "depends_on": [
+        "wave_2_runtime_unblockers"
+      ],
+      "packet_count": 4,
+      "bug_count": 5,
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-app-ui-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-architecture-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-provider-routing-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-workflow-runtime-1.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_6_contract_deps_cleanup",
+      "label": "Wave 6: contracts/dependencies/cleanup",
+      "depends_on": [
+        "wave_0_bug_evidence_authority"
+      ],
+      "packet_count": 6,
+      "bug_count": 13,
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-architecture-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-provider-routing-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-wiring-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-workflow-runtime-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-contract-deps-1.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-test-1.queue.json"
+      ]
+    }
+  ],
+  "validate_order": [
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-bug-evidence-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-provider-routing-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-runtime-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-workflow-runtime-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-data-registry-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-app-ui-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-architecture-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-bug-evidence-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-data-registry-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-provider-routing-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-secrets-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-secrets-2.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-workflow-runtime-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-input-security-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-provider-routing-2.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-verify-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-workflow-runtime-2.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-runtime-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-workflow-runtime-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-2.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-3.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-bug-evidence-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-contract-deps-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-data-registry-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-input-security-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-provider-routing-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-workflow-runtime-2.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-2.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-3.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-4.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-bug-evidence-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-app-ui-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-bug-evidence-2.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-data-registry-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-verify-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-workflow-runtime-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-app-ui-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-architecture-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-provider-routing-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-workflow-runtime-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-architecture-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-provider-routing-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-wiring-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-workflow-runtime-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-contract-deps-1.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-test-1.queue.json"
+  ],
+  "packets": [
+    {
+      "wave": "wave_0_bug_evidence_authority",
+      "lane": "bug_evidence",
+      "slug": "wave-0-bug-evidence-authority-bug-evidence-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-bug-evidence-1.queue.json",
+      "bug_ids": [
+        "BUG-175EB9F3",
+        "BUG-1D9FAF57",
+        "BUG-1DBACCD8",
+        "BUG-9B812B32",
+        "BUG-A84383D1"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_0_bug_evidence_authority",
+      "lane": "provider_routing",
+      "slug": "wave-0-bug-evidence-authority-provider-routing-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-provider-routing-1.queue.json",
+      "bug_ids": [
+        "BUG-D39EBC3F"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_0_bug_evidence_authority",
+      "lane": "runtime",
+      "slug": "wave-0-bug-evidence-authority-runtime-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-runtime-1.queue.json",
+      "bug_ids": [
+        "BUG-A5FE235C"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_0_bug_evidence_authority",
+      "lane": "workflow_runtime",
+      "slug": "wave-0-bug-evidence-authority-workflow-runtime-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-workflow-runtime-1.queue.json",
+      "bug_ids": [
+        "BUG-AF55552F"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_0_bug_evidence_authority",
+      "lane": "data_registry",
+      "slug": "wave-0-bug-evidence-authority-data-registry-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-0-bug-evidence-authority-data-registry-1.queue.json",
+      "bug_ids": [
+        "BUG-F8C9F5B5"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "app_ui",
+      "slug": "wave-1-core-authority-app-ui-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-app-ui-1.queue.json",
+      "bug_ids": [
+        "BUG-46A6C7F2"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "architecture",
+      "slug": "wave-1-core-authority-architecture-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-architecture-1.queue.json",
+      "bug_ids": [
+        "BUG-9BB04947",
+        "BUG-DFC8607C"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "bug_evidence",
+      "slug": "wave-1-core-authority-bug-evidence-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-bug-evidence-1.queue.json",
+      "bug_ids": [
+        "BUG-080157FE"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "data_registry",
+      "slug": "wave-1-core-authority-data-registry-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-data-registry-1.queue.json",
+      "bug_ids": [
+        "BUG-268ECD3F",
+        "BUG-F9FD6AC3"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "provider_routing",
+      "slug": "wave-1-core-authority-provider-routing-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-provider-routing-1.queue.json",
+      "bug_ids": [
+        "BUG-EEE3E88E",
+        "BUG-F2EA854B",
+        "BUG-91A91284"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "secrets",
+      "slug": "wave-1-core-authority-secrets-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-secrets-1.queue.json",
+      "bug_ids": [
+        "BUG-2337DB51",
+        "BUG-25224975",
+        "BUG-2CF335E3"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "secrets",
+      "slug": "wave-1-core-authority-secrets-2",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-secrets-2.queue.json",
+      "bug_ids": [
+        "BUG-BF734C00",
+        "BUG-6AB79F3B",
+        "BUG-DDFA8F9E"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "workflow_runtime",
+      "slug": "wave-1-core-authority-workflow-runtime-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-workflow-runtime-1.queue.json",
+      "bug_ids": [
+        "BUG-4C7E2290",
+        "BUG-AF7C1773",
+        "BUG-D74C9598"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "input_security",
+      "slug": "wave-1-core-authority-input-security-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-input-security-1.queue.json",
+      "bug_ids": [
+        "BUG-FF008A47"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "provider_routing",
+      "slug": "wave-1-core-authority-provider-routing-2",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-provider-routing-2.queue.json",
+      "bug_ids": [
+        "BUG-96F12329"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "verify",
+      "slug": "wave-1-core-authority-verify-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-verify-1.queue.json",
+      "bug_ids": [
+        "BUG-1A4029F2"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_1_core_authority",
+      "lane": "workflow_runtime",
+      "slug": "wave-1-core-authority-workflow-runtime-2",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-1-core-authority-workflow-runtime-2.queue.json",
+      "bug_ids": [
+        "BUG-8DB03A36"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "app_ui",
+      "slug": "wave-2-runtime-unblockers-app-ui-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-1.queue.json",
+      "bug_ids": [
+        "BUG-0AB8A780",
+        "BUG-3CC5D3AD",
+        "BUG-40494726",
+        "BUG-22B49805",
+        "BUG-5861F7F9"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "runtime",
+      "slug": "wave-2-runtime-unblockers-runtime-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-runtime-1.queue.json",
+      "bug_ids": [
+        "BUG-90E70AA6",
+        "BUG-A9A42870"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "workflow_runtime",
+      "slug": "wave-2-runtime-unblockers-workflow-runtime-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-workflow-runtime-1.queue.json",
+      "bug_ids": [
+        "BUG-AA7CA63D",
+        "BUG-1980557E",
+        "BUG-39D02693",
+        "BUG-7C5D8AE4",
+        "BUG-8D8C5256"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "app_ui",
+      "slug": "wave-2-runtime-unblockers-app-ui-2",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-2.queue.json",
+      "bug_ids": [
+        "BUG-6F69A6DF",
+        "BUG-8742C732",
+        "BUG-8B3AED45",
+        "BUG-8DADDD64",
+        "BUG-8E1C52AE"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "app_ui",
+      "slug": "wave-2-runtime-unblockers-app-ui-3",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-app-ui-3.queue.json",
+      "bug_ids": [
+        "BUG-A63D9317",
+        "BUG-AA6AC4E0",
+        "BUG-AAE46E22",
+        "BUG-F758C3D4"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "bug_evidence",
+      "slug": "wave-2-runtime-unblockers-bug-evidence-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-bug-evidence-1.queue.json",
+      "bug_ids": [
+        "BUG-07771B2A",
+        "BUG-30798A5F",
+        "BUG-69870BA5",
+        "BUG-DF4CAB94"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "contract_deps",
+      "slug": "wave-2-runtime-unblockers-contract-deps-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-contract-deps-1.queue.json",
+      "bug_ids": [
+        "BUG-EE65C154"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "data_registry",
+      "slug": "wave-2-runtime-unblockers-data-registry-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-data-registry-1.queue.json",
+      "bug_ids": [
+        "BUG-247C050D",
+        "BUG-C4091203"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "input_security",
+      "slug": "wave-2-runtime-unblockers-input-security-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-input-security-1.queue.json",
+      "bug_ids": [
+        "BUG-ABBEFC6F"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "provider_routing",
+      "slug": "wave-2-runtime-unblockers-provider-routing-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-provider-routing-1.queue.json",
+      "bug_ids": [
+        "BUG-91D41A89",
+        "BUG-C094B483",
+        "BUG-EAD36E8A"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_2_runtime_unblockers",
+      "lane": "workflow_runtime",
+      "slug": "wave-2-runtime-unblockers-workflow-runtime-2",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-2-runtime-unblockers-workflow-runtime-2.queue.json",
+      "bug_ids": [
+        "BUG-9CA0CB78",
+        "BUG-A3B51E8D"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_3_input_security",
+      "lane": "input_security",
+      "slug": "wave-3-input-security-input-security-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-1.queue.json",
+      "bug_ids": [
+        "BUG-24F87D0F",
+        "BUG-34C2F2DA",
+        "BUG-419EDA6D",
+        "BUG-5FBAF694"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_3_input_security",
+      "lane": "input_security",
+      "slug": "wave-3-input-security-input-security-2",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-2.queue.json",
+      "bug_ids": [
+        "BUG-76A0519D",
+        "BUG-AD855F0C",
+        "BUG-B3315290",
+        "BUG-DB815755"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_3_input_security",
+      "lane": "input_security",
+      "slug": "wave-3-input-security-input-security-3",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-3.queue.json",
+      "bug_ids": [
+        "BUG-EBE6B0E1",
+        "BUG-3E0DDC73",
+        "BUG-616A0D2E",
+        "BUG-94DB9A53"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_3_input_security",
+      "lane": "input_security",
+      "slug": "wave-3-input-security-input-security-4",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-3-input-security-input-security-4.queue.json",
+      "bug_ids": [
+        "BUG-EC542D26"
+      ],
+      "highest_severity": "P3"
+    },
+    {
+      "wave": "wave_4_data_registry_retrieval",
+      "lane": "bug_evidence",
+      "slug": "wave-4-data-registry-retrieval-bug-evidence-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-bug-evidence-1.queue.json",
+      "bug_ids": [
+        "BUG-32E01522",
+        "BUG-121B5049",
+        "BUG-4BBE6C43",
+        "BUG-79695B46",
+        "BUG-A75BC81E"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_4_data_registry_retrieval",
+      "lane": "app_ui",
+      "slug": "wave-4-data-registry-retrieval-app-ui-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-app-ui-1.queue.json",
+      "bug_ids": [
+        "BUG-BFEA3DEE"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_4_data_registry_retrieval",
+      "lane": "bug_evidence",
+      "slug": "wave-4-data-registry-retrieval-bug-evidence-2",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-bug-evidence-2.queue.json",
+      "bug_ids": [
+        "BUG-EFB55FC7"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_4_data_registry_retrieval",
+      "lane": "data_registry",
+      "slug": "wave-4-data-registry-retrieval-data-registry-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-data-registry-1.queue.json",
+      "bug_ids": [
+        "BUG-1FB4A132",
+        "BUG-507AB442",
+        "BUG-68256068",
+        "BUG-5553FA7C"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_4_data_registry_retrieval",
+      "lane": "verify",
+      "slug": "wave-4-data-registry-retrieval-verify-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-verify-1.queue.json",
+      "bug_ids": [
+        "BUG-08E4B65C"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_4_data_registry_retrieval",
+      "lane": "workflow_runtime",
+      "slug": "wave-4-data-registry-retrieval-workflow-runtime-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-4-data-registry-retrieval-workflow-runtime-1.queue.json",
+      "bug_ids": [
+        "BUG-5AA2CCF3",
+        "BUG-D7801F5D"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_5_ui_product",
+      "lane": "app_ui",
+      "slug": "wave-5-ui-product-app-ui-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-app-ui-1.queue.json",
+      "bug_ids": [
+        "BUG-37D18B71",
+        "BUG-E340E42A"
+      ],
+      "highest_severity": "P1"
+    },
+    {
+      "wave": "wave_5_ui_product",
+      "lane": "architecture",
+      "slug": "wave-5-ui-product-architecture-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-architecture-1.queue.json",
+      "bug_ids": [
+        "BUG-54EEB8B5"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_5_ui_product",
+      "lane": "provider_routing",
+      "slug": "wave-5-ui-product-provider-routing-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-provider-routing-1.queue.json",
+      "bug_ids": [
+        "BUG-F8B4EDE7"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_5_ui_product",
+      "lane": "workflow_runtime",
+      "slug": "wave-5-ui-product-workflow-runtime-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-5-ui-product-workflow-runtime-1.queue.json",
+      "bug_ids": [
+        "BUG-AD8C5792"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_6_contract_deps_cleanup",
+      "lane": "architecture",
+      "slug": "wave-6-contract-deps-cleanup-architecture-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-architecture-1.queue.json",
+      "bug_ids": [
+        "BUG-50389B7D",
+        "BUG-644C5F2D",
+        "BUG-C3582EAA"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_6_contract_deps_cleanup",
+      "lane": "provider_routing",
+      "slug": "wave-6-contract-deps-cleanup-provider-routing-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-provider-routing-1.queue.json",
+      "bug_ids": [
+        "BUG-9ACEE016",
+        "BUG-D92E6B38"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_6_contract_deps_cleanup",
+      "lane": "wiring",
+      "slug": "wave-6-contract-deps-cleanup-wiring-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-wiring-1.queue.json",
+      "bug_ids": [
+        "BUG-0FB23DDF"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_6_contract_deps_cleanup",
+      "lane": "workflow_runtime",
+      "slug": "wave-6-contract-deps-cleanup-workflow-runtime-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-workflow-runtime-1.queue.json",
+      "bug_ids": [
+        "BUG-5D0140CD",
+        "BUG-7C80AB3F",
+        "BUG-E162C5F1",
+        "BUG-505104EE"
+      ],
+      "highest_severity": "P2"
+    },
+    {
+      "wave": "wave_6_contract_deps_cleanup",
+      "lane": "contract_deps",
+      "slug": "wave-6-contract-deps-cleanup-contract-deps-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-contract-deps-1.queue.json",
+      "bug_ids": [
+        "BUG-0C0174D7",
+        "BUG-50ACD990"
+      ],
+      "highest_severity": "P3"
+    },
+    {
+      "wave": "wave_6_contract_deps_cleanup",
+      "lane": "test",
+      "slug": "wave-6-contract-deps-cleanup-test-1",
+      "path": "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-test-1.queue.json",
+      "bug_ids": [
+        "BUG-D7187A1C"
+      ],
+      "highest_severity": "P3"
+    }
+  ]
+}
