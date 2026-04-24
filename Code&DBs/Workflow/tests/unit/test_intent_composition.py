@@ -650,3 +650,95 @@ def test_compose_plan_serialization_off_by_default(monkeypatch) -> None:
     jobs = proposed.spec_dict["jobs"]
     assert "depends_on" not in jobs[0]
     assert "depends_on" not in jobs[1]
+
+
+class _EventsConn:
+    """Conn that returns pre-canned system_events rows on query."""
+
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self._rows = rows
+
+    def execute(self, query, *params):
+        assert query.startswith("SELECT id, event_type"), f"unexpected query: {query!r}"
+        # params is (workflow_id,); filter client-side so the stub matches real behavior.
+        wf = params[0]
+        return [row for row in self._rows if row.get("source_id") == wf]
+
+
+def test_get_plan_lifecycle_returns_ordered_events_for_one_workflow_id() -> None:
+    conn = _EventsConn(
+        [
+            {
+                "id": 1,
+                "event_type": "plan.composed",
+                "source_id": "plan.alpha",
+                "payload": {"spec_name": "alpha", "step_count": 2},
+                "created_at": "2026-04-24T10:00:00+00:00",
+            },
+            {
+                "id": 2,
+                "event_type": "plan.approved",
+                "source_id": "plan.alpha",
+                "payload": {"approved_by": "ci@praxis"},
+                "created_at": "2026-04-24T10:00:05+00:00",
+            },
+            {
+                "id": 3,
+                "event_type": "plan.launched",
+                "source_id": "plan.alpha",
+                "payload": {"run_id": "workflow_abc"},
+                "created_at": "2026-04-24T10:00:10+00:00",
+            },
+            # Unrelated plan.composed event for a different workflow_id — filtered out.
+            {
+                "id": 4,
+                "event_type": "plan.composed",
+                "source_id": "plan.beta",
+                "payload": {},
+                "created_at": "2026-04-24T10:00:07+00:00",
+            },
+        ]
+    )
+
+    lifecycle = get_plan_lifecycle("plan.alpha", conn=conn)
+
+    assert isinstance(lifecycle, PlanLifecycle)
+    assert lifecycle.workflow_id == "plan.alpha"
+    assert [event.event_type for event in lifecycle.events] == [
+        "plan.composed",
+        "plan.approved",
+        "plan.launched",
+    ]
+    assert lifecycle.latest_event_type == "plan.launched"
+    assert lifecycle.events[1].payload["approved_by"] == "ci@praxis"
+    assert lifecycle.events[2].payload["run_id"] == "workflow_abc"
+
+
+def test_get_plan_lifecycle_empty_when_no_events() -> None:
+    conn = _EventsConn([])
+    lifecycle = get_plan_lifecycle("plan.ghost", conn=conn)
+    assert lifecycle.events == []
+    assert lifecycle.latest_event_type is None
+
+
+def test_get_plan_lifecycle_handles_jsonb_serialized_as_string() -> None:
+    """payload sometimes comes back as a JSON string from the repository."""
+    conn = _EventsConn(
+        [
+            {
+                "id": 1,
+                "event_type": "plan.blocked",
+                "source_id": "plan.alpha",
+                "payload": '{"blocked_reasons": [{"kind": "budget_exceeded"}]}',
+                "created_at": "2026-04-24T10:00:00+00:00",
+            }
+        ]
+    )
+    lifecycle = get_plan_lifecycle("plan.alpha", conn=conn)
+    assert lifecycle.events[0].event_type == "plan.blocked"
+    assert lifecycle.events[0].payload["blocked_reasons"][0]["kind"] == "budget_exceeded"
+
+
+def test_get_plan_lifecycle_rejects_empty_workflow_id() -> None:
+    with pytest.raises(ValueError, match="workflow_id is required"):
+        get_plan_lifecycle("   ", conn=_EventsConn([]))
