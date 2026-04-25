@@ -109,17 +109,20 @@ def build_execution_setup(
     has_workflow = has_multiple_jobs or has_workflow_cues or (
         has_connector_flow and has_build_cues and (has_research or has_review or text_has_any(compiled_prose, "test", "qa"))
     )
-    briefing_fields = infer_briefing_fields(
-        compiled_prose=compiled_prose,
-        draft_flow=draft_flow,
-        unresolved=unresolved,
-    )
-    blocking_inputs = infer_blocking_inputs(
-        compiled_prose=compiled_prose,
-        draft_flow=draft_flow,
-        unresolved=unresolved,
-        briefing_fields=briefing_fields,
-    )
+    # BUG-3330D2CD + architecture-policy::compile::retrieval-is-the-filter-no-
+    # template-fallbacks (2026-04-25): the keyword-gated constant functions
+    # infer_briefing_fields / infer_blocking_inputs / connector_flow_self_
+    # scaffolds_inputs emitted a hardcoded 5-item list whenever prose
+    # contained {connector, api docs, common objects, application, docs}.
+    # That template preempted the 23 prose-grounded capability nodes in
+    # definition_graph and turned the Moon build_graph render into 5 fake
+    # "Resolve typed input gap" stubs. Retrieval is the filter — if it finds
+    # nothing, a retrieval.no_match typed_gap fires downstream (future
+    # commit). These two lists stay here as anchors so _build_execution_setup
+    # keeps its shape, but they carry no content until retrieval-grounded
+    # projection lands.
+    briefing_fields: list[str] = []
+    blocking_inputs: list[str] = []
     needs_long_running = has_fanout or text_has_any(
         compiled_prose,
         "long-running",
@@ -807,127 +810,22 @@ def infer_persistence_targets(*, title: str, summary: str) -> list[str]:
     return dedupe_texts(targets)
 
 
-def infer_blocking_inputs(
-    *,
-    compiled_prose: str,
-    draft_flow: list[dict[str, Any]],
-    unresolved: list[str],
-    briefing_fields: list[str],
-) -> list[str]:
-    if unresolved:
-        return []
-    haystack = " ".join(
-        [
-            compiled_prose.lower(),
-            *[_as_text(step.get("title")).lower() for step in draft_flow if isinstance(step, dict)],
-            *[_as_text(step.get("summary")).lower() for step in draft_flow if isinstance(step, dict)],
-        ]
-    )
-    if not text_has_any(haystack, "connector", "api docs", "common objects", "application", "docs"):
-        return []
-    if connector_flow_self_scaffolds_inputs(compiled_prose=compiled_prose, draft_flow=draft_flow):
-        return []
-    return briefing_fields or [
-        "Target application or applications in scope",
-        "Official API docs entrypoint or outbound internet research target",
-        "Authentication setup and credential shape",
-        "Persistence contract for captured docs and connector state",
-        "Common object scope and target field mappings",
-    ]
-
-
-def infer_briefing_fields(
-    *,
-    compiled_prose: str,
-    draft_flow: list[dict[str, Any]],
-    unresolved: list[str],
-) -> list[str]:
-    haystack = " ".join(
-        [
-            compiled_prose.lower(),
-            *[_as_text(step.get("title")).lower() for step in draft_flow if isinstance(step, dict)],
-            *[_as_text(step.get("summary")).lower() for step in draft_flow if isinstance(step, dict)],
-        ]
-    )
-    if text_has_any(haystack, "connector", "api docs", "common objects", "application", "docs"):
-        return [
-            "Target application or applications in scope",
-            "Official API docs entrypoint or outbound internet research target",
-            "Authentication setup and credential shape",
-            "Persistence contract for captured docs and connector state",
-            "Common object scope and target field mappings",
-        ]
-    if not text_has_any(haystack, "research", "investigate", "analyze", "compare", "brief", "find out", "sources"):
-        return []
-
-    suggested = [
-        "Research topic, company, or question to investigate",
-        "Scope boundaries and decision the research should support",
-        "Freshness window or time horizon",
-        "Required primary sources or source restrictions",
-        "Output format or deliverable expectation",
-    ]
-    if text_has_any(haystack, "compare", "competitor", "competitors", "multiple sources", "cross-check"):
-        suggested.insert(1, "Comparison set or entities in scope")
-    return dedupe_texts(suggested)
-
-
-def connector_flow_self_scaffolds_inputs(*, compiled_prose: str, draft_flow: list[dict[str, Any]]) -> bool:
-    steps = [
-        " ".join(
-            [
-                _as_text(step.get("title")).lower(),
-                _as_text(step.get("summary")).lower(),
-            ]
-        ).strip()
-        for step in draft_flow
-        if isinstance(step, dict)
-    ]
-
-    haystack = " ".join(filter(None, [compiled_prose.lower(), *steps]))
-    has_connector_research = text_has_any(
-        haystack,
-        "api docs",
-        "official api",
-        "documentation",
-        "search the web",
-        "find the docs",
-        "research the api",
-    )
-    has_delivery_chain = text_has_any(
-        haystack,
-        "connector",
-    ) and (
-        text_has_any(haystack, "plan", "sketch", "first pass", "skinny", "lean")
-        or text_has_any(haystack, "skinny integration")
-    ) and text_has_any(
-        haystack,
-        "build",
-        "implement",
-        "create",
-        "make",
-    ) and text_has_any(
-        haystack,
-        "test",
-        "verify",
-        "qa",
-        "test it until it works",
-        "created and tested",
-    )
-    has_intake_step = text_has_any(
-        haystack,
-        "application name",
-        "target application",
-        "applications in scope",
-        "feed you an application name",
-        "give you an application name",
-        "collect the target app",
-        "saas name",
-        "system name",
-        "product name",
-        "target system",
-    )
-    return has_connector_research and has_delivery_chain and has_intake_step
+# Deleted 2026-04-25 under architecture-policy::compile::retrieval-is-the-
+# filter-no-template-fallbacks and BUG-3330D2CD:
+#   - infer_blocking_inputs
+#   - infer_briefing_fields
+#   - connector_flow_self_scaffolds_inputs
+# These were keyword-gated constant functions that emitted a hardcoded
+# 5-item list (Target application / Official API docs / Authentication /
+# Persistence / Common object) whenever prose contained any of
+# {connector, api docs, common objects, application, docs}. The list was
+# written to execution_setup.constraints.blocking_inputs and turned into
+# the 5 "Resolve typed input gap" stubs that Moon rendered as build_graph,
+# preempting the 23 prose-grounded capability nodes definition_graph
+# already contained. The policy is clear: retrieval is the filter. No
+# silent template substitution. Projection from definition_graph with
+# pill-typed edges is the follow-up commit; this cut removes the lie at
+# its source so the empty-but-honest state is visible.
 
 
 def match_blocking_inputs(blocking_inputs: list[str], *keywords: str) -> list[str]:
