@@ -7,12 +7,15 @@ from types import SimpleNamespace
 from registry.native_runtime_profile_sync import (
     NativeRuntimeProfileSyncError,
     NativeRuntimeProfileConfig,
+    _LiveCandidate,
+    _LiveRouteState,
     _default_live_budget_window,
     _default_sync_conn,
     _latest_budget_window_sync,
     _live_candidates_sync,
     _native_transport_ready_refs,
     _native_runtime_configs_from_rows,
+    _sync_runtime_profile_admitted_routes_projection_sync,
     _upsert_profile_authority_rows_sync,
 )
 from registry.runtime_profile_admission import _effective_provider_policy_name
@@ -193,6 +196,75 @@ def test_latest_budget_window_sync_synthesizes_default_when_missing() -> None:
     assert budget.requests_used == 0
     assert budget.tokens_used == 0
     assert budget.spend_used_usd == "0.000000"
+
+
+def test_admitted_route_projection_materializes_only_admitted_candidates() -> None:
+    conn = _FakeConn()
+    config = _config()
+    candidates = (
+        _LiveCandidate(
+            candidate_ref="candidate.openai.gpt-5.4",
+            provider_ref="provider.openai",
+            provider_name="openai",
+            provider_slug="openai",
+            model_slug="gpt-5.4",
+            priority=1,
+            position_index=0,
+        ),
+        _LiveCandidate(
+            candidate_ref="candidate.openai.retired",
+            provider_ref="provider.openai",
+            provider_name="openai",
+            provider_slug="openai",
+            model_slug="retired-model",
+            priority=2,
+            position_index=1,
+        ),
+    )
+    states = {
+        "gpt-5.4": _LiveRouteState(
+            model_slug="gpt-5.4",
+            eligibility_status="eligible",
+            reason_code="provider_route_authority.healthy",
+            source_window_refs=("transport:llm_task",),
+        ),
+        "retired-model": _LiveRouteState(
+            model_slug="retired-model",
+            eligibility_status="rejected",
+            reason_code="provider_disabled",
+            source_window_refs=(),
+        ),
+    }
+
+    _sync_runtime_profile_admitted_routes_projection_sync(
+        conn,
+        config,
+        candidates,
+        states,
+    )
+
+    insert_calls = [
+        params
+        for query, params in conn.calls
+        if "INSERT INTO runtime_profile_admitted_routes" in query
+    ]
+    delete_calls = [
+        params
+        for query, params in conn.calls
+        if "DELETE FROM runtime_profile_admitted_routes" in query
+    ]
+    assert len(insert_calls) == 1
+    assert insert_calls[0][0:7] == (
+        "praxis",
+        "model_profile.praxis.default",
+        "provider_policy.praxis.default",
+        "candidate.openai.gpt-5.4",
+        "provider.openai",
+        "openai",
+        "gpt-5.4",
+    )
+    assert delete_calls == [("praxis", ["candidate.openai.gpt-5.4"])]
+    assert any("INSERT INTO authority_projection_state" in query for query, _ in conn.calls)
 
 
 def test_default_live_budget_window_falls_back_to_provider_name() -> None:

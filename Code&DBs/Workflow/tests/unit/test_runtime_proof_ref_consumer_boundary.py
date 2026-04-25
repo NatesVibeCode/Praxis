@@ -10,6 +10,9 @@ must route through the authority:
   * ``runtime.primitive_contracts.build_proof_ref_contract`` — projects
     the proof-ref primitive (allowed ref kinds, evidence kinds, and
     evidence roles) from the authority for /orient consumers.
+  * ``runtime.proof_timeline`` — projects existing receipt, run,
+    verification, healing, and bug-evidence rows into one queryable
+    proof timeline.
 
 Concretely, no module outside the proof-ref authority may hand-roll
 ``evidence_role="validates_fix"`` (or the other role literals) in a
@@ -43,6 +46,7 @@ _PROOF_REF_AUTHORITY_ALLOWLIST: frozenset[str] = frozenset(
         "runtime/bug_evidence.py",
         "runtime/bug_tracker.py",
         "runtime/primitive_contracts.py",
+        "runtime/proof_timeline.py",
     }
 )
 
@@ -143,8 +147,13 @@ def test_proof_ref_contract_projects_roles_from_authority() -> None:
     """Smoke check: the contract mirrors the bug_evidence authority roles."""
     from runtime.bug_evidence import ALLOWED_EVIDENCE_KINDS, ALLOWED_EVIDENCE_ROLES
     from runtime.primitive_contracts import build_proof_ref_contract
+    from runtime.proof_timeline import PROOF_TIMELINE_AUTHORITY
 
     contract = build_proof_ref_contract()
+    assert contract["authority"] == PROOF_TIMELINE_AUTHORITY
+    assert contract["timeline_projection"]["bug_entrypoint"] == (
+        "runtime.proof_timeline.bug_proof_timeline"
+    )
     assert set(contract["allowed_evidence_roles"]) == set(ALLOWED_EVIDENCE_ROLES)
     assert set(contract["allowed_evidence_kinds"]) == set(ALLOWED_EVIDENCE_KINDS)
     assert "evidence_role" in contract["required_fields"]

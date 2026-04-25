@@ -28,7 +28,10 @@ def parse_bug_status(bt_mod: Any, raw_status: object) -> Any:
     else:
         status = getattr(getattr(bt_mod, "BugStatus", None), str(raw_status).strip().upper(), None)
     if status is None:
-        raise ValueError("status must be one of OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED")
+        raise ValueError(
+            "status must be one of OPEN, IN_PROGRESS, FIX_PENDING_VERIFICATION, "
+            "FIXED, WONT_FIX, DEFERRED"
+        )
     return status
 
 
@@ -482,8 +485,12 @@ def resolve_bug_payload(
     status = parse_status(bt_mod, body.get("status"))
     if status is None:
         raise ValueError("status is required to resolve a bug")
-    if status not in resolved_statuses:
+    pending_status = getattr(bt_mod.BugStatus, "FIX_PENDING_VERIFICATION", None)
+    is_pending_verification = status == pending_status
+    if status not in resolved_statuses and not is_pending_verification:
         allowed = ", ".join(sorted(item.value for item in resolved_statuses))
+        if pending_status is not None:
+            allowed = f"{allowed}, {pending_status.value}"
         raise ValueError(f"resolve status must be one of {allowed}")
     verifier_ref = _optional_text(body.get("verifier_ref"))
     bug_getter = getattr(bt, "get", None)
@@ -491,6 +498,28 @@ def resolve_bug_payload(
         raise ValueError(f"bug not found: {bug_id}")
     if verifier_ref and status != getattr(bt_mod.BugStatus, "FIXED", None):
         raise ValueError("verifier_ref may only be used when resolving status FIXED")
+    resolution_summary = (
+        _optional_text(body.get("resolution_summary"))
+        or _optional_text(body.get("notes"))
+    )
+    if is_pending_verification:
+        updater = getattr(bt, "update_status", None)
+        if not callable(updater):
+            raise ValueError("bug tracker does not support status updates")
+        bug = updater(
+            bug_id,
+            status,
+            resolution_summary=resolution_summary
+            or "Fix landed; waiting for validates_fix verification evidence.",
+        )
+        if bug is None:
+            raise ValueError(f"bug not found: {bug_id}")
+        return {
+            "ok": True,
+            "resolved": False,
+            "marked": True,
+            "bug": serialize_bug(bug),
+        }
     verification_payload: dict[str, Any] | None = None
     evidence_link: dict[str, Any] | None = None
     if verifier_ref:
@@ -543,7 +572,11 @@ def resolve_bug_payload(
             raise ValueError(
                 f"failed to attach validates_fix verification evidence for {bug_id}"
             )
-    bug = bt.resolve(bug_id, status)
+    bug = bt.resolve(
+        bug_id,
+        status,
+        resolution_summary=resolution_summary,
+    )
     if bug is None:
         raise ValueError(f"bug not found: {bug_id}")
     payload = {"ok": True, "resolved": True, "bug": serialize_bug(bug)}

@@ -5,6 +5,14 @@ description: "Praxis repo-local adversarial strategy skill. Use when the current
 
 # Praxis Debate
 
+## Current Surface Docs
+
+- MCP/catalog reference: `docs/MCP.md`
+- CLI reference: `docs/CLI.md`
+- API route reference: `docs/API.md`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
+
 Use this skill when the direction is non-trivial and the current state needs adversarial pressure before work is packaged.
 
 ## Mission

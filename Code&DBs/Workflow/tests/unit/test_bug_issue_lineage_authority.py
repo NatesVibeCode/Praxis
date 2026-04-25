@@ -155,6 +155,22 @@ def test_bug_tracker_file_bug_persists_source_issue_id() -> None:
     assert _bug_to_dict(bug)["source_issue_id"] == "issue.dispatch-gap"
 
 
+def test_bug_tracker_file_bug_derives_non_blank_decision_ref() -> None:
+    conn = _RecordingConn()
+    tracker = BugTracker(conn=conn)
+
+    bug, _similar = tracker.file_bug(
+        title="Decision fallback",
+        severity=BugSeverity.P2,
+        category=BugCategory.RUNTIME,
+        description="Blank decision refs should not persist as hidden missing authority.",
+        filed_by="tester",
+        source_kind="mcp workflow server",
+    )
+
+    assert bug.decision_ref == "decision.bug_tracker.filing.mcp-workflow-server.implicit"
+
+
 def test_async_file_bug_uses_canonical_bug_tracker_insert_contract() -> None:
     conn = _AsyncRecordingBugConn()
 
@@ -182,6 +198,7 @@ def test_async_file_bug_uses_canonical_bug_tracker_insert_contract() -> None:
     assert row["category"] == "RUNTIME"
     assert row["filed_by"] == "operator_write"
     assert row["source_issue_id"] == "issue.dispatch-gap"
+    assert row["decision_ref"] == "decision.bug_tracker.filing.issue_promotion.implicit"
 
 
 def test_issue_promotion_routes_through_bug_tracker_authority() -> None:
@@ -223,6 +240,7 @@ def test_file_bug_payload_forwards_source_issue_id_to_tracker() -> None:
     )
 
     assert captured["source_issue_id"] == "issue.dispatch-gap"
+    assert captured["decision_ref"] == ""
     assert payload["bug"]["source_issue_id"] == "issue.dispatch-gap"
 
 
@@ -268,6 +286,43 @@ def test_list_and_search_payloads_apply_source_issue_filter() -> None:
     assert captured["search"]["source_issue_id"] == "issue.dispatch-gap"
     assert listed["bugs"][0]["source_issue_id"] == "issue.dispatch-gap"
     assert found["bugs"][0]["source_issue_id"] == "issue.dispatch-gap"
+
+
+def test_resolve_payload_marks_fix_pending_verification_without_terminal_resolution() -> None:
+    captured: dict[str, object] = {}
+    bug = _sample_bug()
+
+    class _FakeBugTracker:
+        def get(self, bug_id: str):
+            assert bug_id == bug.bug_id
+            return bug
+
+        def update_status(self, bug_id: str, status: BugStatus, *, resolution_summary=None):
+            captured["bug_id"] = bug_id
+            captured["status"] = status
+            captured["resolution_summary"] = resolution_summary
+            return bug
+
+    payload = bug_contract.resolve_bug_payload(
+        bt=_FakeBugTracker(),
+        bt_mod=SimpleNamespace(BugStatus=BugStatus, BugTracker=BugTracker),
+        body={
+            "bug_id": bug.bug_id,
+            "status": "FIX_PENDING_VERIFICATION",
+            "notes": "Fix is in tree; verifier evidence still needs to run.",
+        },
+        serialize_bug=_bug_to_dict,
+        resolved_statuses={BugStatus.FIXED, BugStatus.WONT_FIX, BugStatus.DEFERRED},
+    )
+
+    assert payload["ok"] is True
+    assert payload["resolved"] is False
+    assert payload["marked"] is True
+    assert captured == {
+        "bug_id": bug.bug_id,
+        "status": BugStatus.FIX_PENDING_VERIFICATION,
+        "resolution_summary": "Fix is in tree; verifier evidence still needs to run.",
+    }
 
 
 def test_bug_scoreboard_surfaces_source_issue_id(tmp_path: Path) -> None:

@@ -9,15 +9,17 @@ must route through the state-semantics authority:
     ``bug_status_legacy_resolved_aliases`` / ``bug_status_sql_in_literal``
     / ``bug_status_sql_equals_literal``.
   * ``runtime.bug_tracker`` — defines ``class BugStatus(enum.Enum)`` with
-    members ``OPEN``, ``IN_PROGRESS``, ``FIXED``, ``WONT_FIX``,
-    ``DEFERRED`` and owns bug-state transition writes.
+    members ``OPEN``, ``IN_PROGRESS``, ``FIX_PENDING_VERIFICATION``,
+    ``FIXED``, ``WONT_FIX``, ``DEFERRED`` and owns bug-state transition
+    writes.
 
 Concretely, no module outside the state-semantics authority may:
 
   * hand-roll a collection literal containing two or more canonical bug
     statuses (e.g. ``{"OPEN", "IN_PROGRESS"}``); or
   * compare against a uniquely-bug-status literal (``IN_PROGRESS``,
-    ``FIXED``, ``WONT_FIX``, ``DEFERRED``) via ``==`` / ``!=``; or
+    ``FIX_PENDING_VERIFICATION``, ``FIXED``, ``WONT_FIX``, ``DEFERRED``)
+    via ``==`` / ``!=``; or
   * assign a bug-status literal into a ``next_status`` or
     ``current_status`` slot (dict/kwarg).
 
@@ -57,10 +59,10 @@ _STATE_SEMANTICS_AUTHORITY_ALLOWLIST: frozenset[str] = frozenset(
 )
 
 
-_BUG_STATUS_ANY = r"(?:OPEN|IN_PROGRESS|FIXED|WONT_FIX|DEFERRED)"
+_BUG_STATUS_ANY = r"(?:OPEN|IN_PROGRESS|FIX_PENDING_VERIFICATION|FIXED|WONT_FIX|DEFERRED)"
 # Bug-status values that are uniquely bug-shaped. ``OPEN`` is omitted
 # because it overlaps with circuit-breaker and generic event vocabulary.
-_BUG_STATUS_UNIQUE = r"(?:IN_PROGRESS|FIXED|WONT_FIX|DEFERRED)"
+_BUG_STATUS_UNIQUE = r"(?:IN_PROGRESS|FIX_PENDING_VERIFICATION|FIXED|WONT_FIX|DEFERRED)"
 
 
 # Forbidden patterns target code-level constructs where canonical bug
@@ -144,7 +146,7 @@ def test_bug_open_status_values_projects_from_authority() -> None:
 
     open_statuses = set(bug_open_status_values())
     resolved_statuses = set(bug_resolved_status_values())
-    assert open_statuses == {"OPEN", "IN_PROGRESS"}
+    assert open_statuses == {"OPEN", "IN_PROGRESS", "FIX_PENDING_VERIFICATION"}
     assert resolved_statuses == {"FIXED", "WONT_FIX", "DEFERRED"}
     # The open and resolved partitions must be disjoint by construction.
     assert open_statuses.isdisjoint(resolved_statuses)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from runtime.module_indexer import walk_codebase
+from runtime.module_indexer import default_index_subdirs, walk_codebase
 
 
 def test_walk_codebase_skips_artifact_trees(tmp_path) -> None:
@@ -25,3 +25,17 @@ def test_walk_codebase_skips_artifact_trees(tmp_path) -> None:
 
     assert "Code&DBs/Workflow/runtime/real_module.py" in module_paths
     assert not any(path.startswith("artifacts/") for path in module_paths)
+
+
+def test_default_index_subdirs_follow_workspace_layout(tmp_path) -> None:
+    refs = default_index_subdirs(tmp_path)
+
+    assert refs == [
+        "Code&DBs/Workflow/runtime",
+        "Code&DBs/Workflow/memory",
+        "Code&DBs/Workflow/storage",
+        "Code&DBs/Workflow/surfaces",
+        "Code&DBs/Workflow/adapters",
+        "Code&DBs/Workflow/registry",
+        "Code&DBs/Workflow/observability",
+    ]

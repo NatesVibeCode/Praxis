@@ -9,18 +9,13 @@ from __future__ import annotations
 from typing import Any
 
 
-APP_SURFACES: tuple[dict[str, Any], ...] = (
+APP_SURFACE_BLUEPRINTS: tuple[dict[str, Any], ...] = (
     {
         "id": "dashboard",
         "label": "Overview",
         "kind": "suite",
         "role": "control-plane overview and launch pad",
-        "authority_source": "source_code:shell/surfaceRegistry.tsx",
-        "primary_files": [
-            "Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/dashboard/dashboard.css",
-            "Code&DBs/Workflow/surfaces/app/src/dashboard/ChatPanel.tsx",
-        ],
+        "authority_source": "ui_shell_route_registry + ui_surface_action_registry",
         "main_actions": [
             "open Moon builder",
             "open chat",
@@ -35,14 +30,6 @@ APP_SURFACES: tuple[dict[str, Any], ...] = (
         "kind": "build",
         "role": "primary workflow design, inspection, and release surface",
         "authority_source": "surface_catalog_registry + workflow build authority",
-        "primary_files": [
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonActionDock.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonNodeDetail.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts",
-            "Code&DBs/Workflow/surfaces/app/src/shared/buildGraphDefinition.ts",
-        ],
         "main_actions": [
             "compose from prose",
             "choose trigger",
@@ -60,11 +47,6 @@ APP_SURFACES: tuple[dict[str, Any], ...] = (
         "kind": "dynamic-run",
         "role": "execution observer for one workflow run",
         "authority_source": "workflow_runs and run graph projections",
-        "primary_files": [
-            "Code&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/shared/RunGraphView.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/dashboard/useLiveRunSnapshot.ts",
-        ],
         "main_actions": [
             "inspect job state",
             "select job",
@@ -78,11 +60,6 @@ APP_SURFACES: tuple[dict[str, Any], ...] = (
         "kind": "assistant",
         "role": "operator conversation and compile entry surface",
         "authority_source": "provider routing policy + workspace chat runtime",
-        "primary_files": [
-            "Code&DBs/Workflow/surfaces/app/src/dashboard/ChatPanel.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/workspace/useChat.ts",
-            "Code&DBs/Workflow/surfaces/app/src/workspace/ToolResultRenderer.tsx",
-        ],
         "main_actions": [
             "send message",
             "render tool result",
@@ -95,11 +72,6 @@ APP_SURFACES: tuple[dict[str, Any], ...] = (
         "kind": "catalog",
         "role": "control-plane manifest discovery and editing",
         "authority_source": "manifest registry",
-        "primary_files": [
-            "Code&DBs/Workflow/surfaces/app/src/praxis/ManifestCatalogPage.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/grid/ManifestEditorPage.tsx",
-            "Code&DBs/Workflow/surfaces/app/src/praxis/ManifestBundleView.tsx",
-        ],
         "main_actions": [
             "discover manifest",
             "open manifest tab",
@@ -112,10 +84,6 @@ APP_SURFACES: tuple[dict[str, Any], ...] = (
         "kind": "graph-map",
         "role": "secondary system map, not the primary app experience",
         "authority_source": "Praxis.db via Atlas read model",
-        "primary_files": [
-            "Code&DBs/Workflow/surfaces/app/src/atlas/AtlasPage.tsx",
-            "Code&DBs/Workflow/runtime/atlas_graph.py",
-        ],
         "main_actions": [
             "inspect graph area",
             "filter nodes",
@@ -148,8 +116,8 @@ SHELL_RELATIONSHIPS: tuple[dict[str, str], ...] = (
 KNOWN_WEAKNESSES: tuple[dict[str, str], ...] = (
     {
         "scope": "shell navigation",
-        "problem": "static app surfaces still live in TypeScript registry constants",
-        "recommended_change": "promote app surface registry to DB-backed authority or generated read model",
+        "problem": "shell navigation state still needs a generated React adapter from ui_shell_route_registry",
+        "recommended_change": "generate shell route adapters from DB registry instead of keeping a hand-authored TypeScript route map",
     },
     {
         "scope": "dashboard actions",
@@ -207,6 +175,55 @@ def _fetch_surface_catalog_controls(conn: Any) -> list[dict[str, Any]]:
     return controls
 
 
+def _fetch_surface_file_anchors(conn: Any) -> tuple[dict[str, list[dict[str, Any]]], str | None]:
+    try:
+        rows = conn.fetch(
+            """
+            SELECT surface_name, source_file, anchor_kind, label, notes,
+                   binding_revision, decision_ref
+              FROM ui_surface_file_anchor_registry
+             WHERE enabled = true
+             ORDER BY surface_name, display_order, anchor_id
+            """
+        )
+    except Exception as exc:
+        return {}, f"{type(exc).__name__}: {exc}"
+
+    anchors_by_surface: dict[str, list[dict[str, Any]]] = {}
+    for row in rows or []:
+        surface_name = str(row["surface_name"])
+        anchors_by_surface.setdefault(surface_name, []).append(
+            {
+                "source_file": row["source_file"],
+                "anchor_kind": row["anchor_kind"],
+                "label": row["label"],
+                "notes": row["notes"],
+                "authority_source": "ui_surface_file_anchor_registry",
+                "binding_revision": row["binding_revision"],
+                "decision_ref": row["decision_ref"],
+            }
+        )
+    return anchors_by_surface, None
+
+
+def _build_app_surfaces(
+    anchors_by_surface: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    surfaces: list[dict[str, Any]] = []
+    for blueprint in APP_SURFACE_BLUEPRINTS:
+        surface_id = str(blueprint["id"])
+        file_anchors = list(anchors_by_surface.get(surface_id, ()))
+        surfaces.append(
+            {
+                **blueprint,
+                "file_anchor_authority": "ui_surface_file_anchor_registry",
+                "primary_files": [anchor["source_file"] for anchor in file_anchors],
+                "file_anchors": file_anchors,
+            }
+        )
+    return surfaces
+
+
 def _matches_focus(value: Any, focus: str) -> bool:
     if not focus:
         return True
@@ -240,10 +257,12 @@ def build_ui_experience_graph(
     focus_text = str(focus or "").strip().lower()
     surface_filter = _app_surface_filter(surface_name)
     control_surface_filter = _control_surface_filter(surface_name)
+    surface_file_anchors, anchor_error = _fetch_surface_file_anchors(conn)
+    app_surfaces = _build_app_surfaces(surface_file_anchors)
 
     surfaces = [
         surface
-        for surface in APP_SURFACES
+        for surface in app_surfaces
         if (not surface_filter or str(surface["id"]).lower() == surface_filter)
         and _matches_payload(surface, focus_text)
     ]
@@ -272,7 +291,11 @@ def build_ui_experience_graph(
         )
     ]
 
-    surface_ids = {str(surface["id"]) for surface in APP_SURFACES}
+    missing_file_anchor_authority = [
+        str(surface["id"])
+        for surface in app_surfaces
+        if not surface.get("primary_files")
+    ]
     controls_by_surface: dict[str, int] = {}
     for control in controls:
         surface = str(control["surface"])
@@ -281,7 +304,7 @@ def build_ui_experience_graph(
     return {
         "view": "ui_experience_graph",
         "consumer": "llm",
-        "source_authority": "Praxis.db surface catalog plus app shell source registry",
+        "source_authority": "Praxis.db surface catalog plus UI surface file-anchor registry",
         "filters": {
             "focus": focus,
             "surface_name": surface_name,
@@ -290,7 +313,7 @@ def build_ui_experience_graph(
             "limit": max_items,
         },
         "counts": {
-            "surfaces_total": len(APP_SURFACES),
+            "surfaces_total": len(app_surfaces),
             "surfaces_returned": len(surfaces),
             "surface_controls_returned": len(controls),
             "relationships_returned": len(relationships),
@@ -307,13 +330,10 @@ def build_ui_experience_graph(
         "agent_guidance": [
             "Start with build/Moon for primary workflow UX; Atlas is only a secondary map.",
             "For Moon controls and gates, trust surface_catalog_registry over React constants.",
-            "For shell/dashboard experience, inspect the listed renderer files and migrate repeated action contracts into DB authority when they become durable.",
+            "For source-file anchors, trust ui_surface_file_anchor_registry over Python or React constants.",
             "When changing visual layout, keep authority reads separate from renderer polish so future agents can reason without launching Vite.",
         ],
-        "missing_authority": [
-            surface["id"]
-            for surface in APP_SURFACES
-            if surface["id"] in surface_ids
-            and surface["authority_source"].startswith("source_code:")
-        ],
+        "missing_authority": [],
+        "missing_file_anchor_authority": missing_file_anchor_authority,
+        "anchor_authority_error": anchor_error,
     }

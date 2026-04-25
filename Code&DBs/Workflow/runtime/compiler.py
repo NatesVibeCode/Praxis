@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
+from runtime.compile_observability import compile_trace_scope
 from runtime.compile_reuse import module_surface_revision, stable_hash
 from runtime.build_authority import apply_authority_bundle, build_authority_bundle
 import runtime.compiler_components as _compiler_components
@@ -91,6 +92,38 @@ def compile_prose(
     clean_prose = (prose or "").strip()
     if not clean_prose:
         return _empty_result("Empty prose")
+    llm_requested_for_trace = _compiler_llm_enabled() if enable_llm is None else enable_llm
+    with compile_trace_scope(
+        conn,
+        prose=clean_prose,
+        title=title,
+        task_type="build",
+        llm_requested=llm_requested_for_trace,
+    ) as _trace:
+        return _compile_prose_inner(
+            prose=clean_prose,
+            title=title,
+            enable_llm=enable_llm,
+            compile_index_ref=compile_index_ref,
+            compile_surface_revision=compile_surface_revision,
+            compile_index_snapshot=compile_index_snapshot,
+            conn=conn,
+            _trace=_trace,
+        )
+
+
+def _compile_prose_inner(
+    *,
+    prose: str,
+    title: str | None,
+    enable_llm: bool | None,
+    compile_index_ref: str | None,
+    compile_surface_revision: str | None,
+    compile_index_snapshot: CompileIndexSnapshot | None,
+    conn: Any | None,
+    _trace: Any,
+) -> dict[str, Any]:
+    clean_prose = prose
 
     errors: list[str] = []
     compile_index = compile_index_snapshot
@@ -147,6 +180,9 @@ def compile_prose(
             raise RuntimeError(f"compile_artifact.reuse_failed: {exc}") from exc
         if reusable_definition is not None:
             definition = json.loads(json.dumps(reusable_definition.payload, default=str))
+            _trace.cache_hit = True
+            _trace.cache_reason = "definition.compile.exact_input_match"
+            _trace.measure_definition(definition)
             return _finalize_compile_result(
                 definition=definition,
                 title=title,
@@ -237,10 +273,24 @@ def compile_prose(
                     raise
                 compiled = _call_llm_compile(clean_prose, context, conn=conn)
             llm_succeeded = True
+            _trace.llm_fired = True
+            # Record provider/model resolution if the compiled response
+            # surfaced it; otherwise the helper will leave them None and
+            # the route resolver inside _call_llm_compile is the source.
+            _trace.provider_slug = _trace.provider_slug or _as_text(
+                (compiled or {}).get("provider_slug")
+            ) or None
+            _trace.model_slug = _trace.model_slug or _as_text(
+                (compiled or {}).get("model_slug")
+            ) or None
         except Exception as exc:
             logger.warning("LLM compilation failed: %s", exc)
             llm_error = str(exc)
             errors.append(f"llm_compile_failed: {exc}")
+            _trace.llm_fired = False
+            _trace.llm_skip_reason = f"{type(exc).__name__}: {str(exc)[:200]}"
+    else:
+        _trace.llm_skip_reason = "llm_not_requested"
 
     if llm_requested and llm_succeeded:
         compiled, llm_guard_reason = _guard_llm_compiled_output(clean_prose, compiled)
@@ -336,6 +386,12 @@ def compile_prose(
             logger.error("Definition compile artifact persistence failed: %s", exc)
             raise RuntimeError(f"compile_artifact.persist_failed: {exc}") from exc
 
+    # The deterministic fallback path runs when llm_requested is false OR
+    # the LLM failed and we still produced a structural definition from the
+    # local kernel. Record that on the trace so an empty-output run is
+    # attributable to "fallback path" instead of looking like LLM success.
+    _trace.deterministic_fallback = bool(not llm_succeeded or not llm_requested)
+    _trace.measure_definition(definition)
     return _finalize_compile_result(
         definition=definition,
         title=title,

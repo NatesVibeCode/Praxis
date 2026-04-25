@@ -63,7 +63,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_operator_native_primary_cutover_gate` | `operator` | `advanced` | - | `write` | Admit a native primary cutover gate into operator-control decision and gate authority tables. |
 | `praxis_operator_relations` | `operator` | `advanced` | - | `write` | Record canonical functional areas and cross-object semantic relations. |
 | `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | Read one roadmap subtree and its dependency edges from DB-backed authority. |
-| `praxis_operator_write` | `operator` | `advanced` | - | `read`, `write` | Preview, validate, or commit roadmap rows through the shared operator-write validation gate. |
+| `praxis_operator_write` | `operator` | `advanced` | - | `read`, `write` | Preview, validate, commit, update, retire, or re-parent roadmap rows through the shared operator-write validation gate. |
 | `praxis_replay_ready_bugs` | `operator` | `advanced` | - | `read` | Read the replay-ready bug backlog from authoritative provenance. |
 | `praxis_run_graph` | `operator` | `advanced` | - | `read` | Read one run-scoped workflow graph. |
 | `praxis_run_lineage` | `operator` | `advanced` | - | `read` | Read one run-scoped lineage view. |
@@ -1197,8 +1197,8 @@ Example input:
 - CLI schema help: `workflow tools describe praxis_operator_write`
 - When to use: Preview, validate, or commit roadmap writes through the operator gate.
 - When not to use: Do not use it for read-only backlog inspection.
-- Selector: `action`; default `preview`; values `preview`, `validate`, `commit`
-- Required args: `title`, `intent_brief`
+- Selector: `action`; default `preview`; values `preview`, `validate`, `commit`, `update`, `retire`, `re_parent`, `reparent`
+- Required args: (none)
 
 Example input:
 

@@ -95,6 +95,18 @@ def scratch_path(name: str, *, repo_root: Path | None = None) -> Path:
     return code_tree_root(repo_root) / relative
 
 
+def module_index_subdirs(*, repo_root: Path | None = None) -> tuple[str, ...]:
+    """Canonical repo refs the semantic module indexer should scan by default."""
+    configured = _layout()["module_index_subdirs"]
+    assert isinstance(configured, list)
+    root = (repo_root or _repo_root()).resolve()
+    workflow_dir = workflow_root(root)
+    return tuple(
+        to_repo_ref(workflow_dir / str(subdir), repo_root=root)
+        for subdir in configured
+    )
+
+
 def container_workspace_root(*, env: Mapping[str, str] | None = None) -> Path:
     """Canonical workspace root inside sandbox/container execution."""
     source = env if env is not None else os.environ

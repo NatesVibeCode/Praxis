@@ -169,7 +169,11 @@ Praxis exposes catalog-backed tools via the Model Context Protocol. Add to your 
 
 Tool surfaces: Workflow, Operator, Knowledge, Evidence, Bugs, Discovery, Query, Health, Session, Intent, Submission, Governance, Artifacts, Wave, Context, Connector.
 
-See [docs/MCP.md](docs/MCP.md) for the full tool reference.
+Generated surface references:
+
+- [docs/MCP.md](docs/MCP.md) for MCP/catalog tools.
+- [docs/CLI.md](docs/CLI.md) for terminal entrypoints and aliases.
+- [docs/API.md](docs/API.md) for public and internal HTTP routes.
 
 The same catalog now powers terminal discovery:
 

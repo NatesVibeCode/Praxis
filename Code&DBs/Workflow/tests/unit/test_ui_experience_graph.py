@@ -6,7 +6,28 @@ from runtime.ui_experience_graph import build_ui_experience_graph
 
 
 class FakeConn:
-    def fetch(self, _query: str) -> list[dict[str, Any]]:
+    def fetch(self, query: str) -> list[dict[str, Any]]:
+        if "FROM ui_surface_file_anchor_registry" in query:
+            return [
+                {
+                    "surface_name": "build",
+                    "source_file": "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx",
+                    "anchor_kind": "renderer",
+                    "label": "Moon build page",
+                    "notes": "Primary workflow design surface.",
+                    "binding_revision": "binding.ui_surface_file_anchor_registry.test",
+                    "decision_ref": "architecture-policy::ui-experience-graph::registry-owned-file-anchors",
+                },
+                {
+                    "surface_name": "atlas",
+                    "source_file": "Code&DBs/Workflow/surfaces/app/src/atlas/AtlasPage.tsx",
+                    "anchor_kind": "renderer",
+                    "label": "Atlas page",
+                    "notes": "Secondary system map renderer.",
+                    "binding_revision": "binding.ui_surface_file_anchor_registry.test",
+                    "decision_ref": "architecture-policy::ui-experience-graph::registry-owned-file-anchors",
+                },
+            ]
         return [
             {
                 "catalog_item_id": "trigger-manual",
@@ -53,10 +74,21 @@ class FakeConn:
         ]
 
 
+class MissingAnchorConn(FakeConn):
+    def fetch(self, query: str) -> list[dict[str, Any]]:
+        if "FROM ui_surface_file_anchor_registry" in query:
+            raise RuntimeError("missing registry")
+        return super().fetch(query)
+
+
 def test_build_surface_name_reads_moon_catalog_controls() -> None:
     graph = build_ui_experience_graph(FakeConn(), surface_name="build")
 
     assert [surface["id"] for surface in graph["surfaces"]] == ["build"]
+    assert graph["surfaces"][0]["primary_files"] == [
+        "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+    ]
+    assert graph["surfaces"][0]["file_anchors"][0]["authority_source"] == "ui_surface_file_anchor_registry"
     assert [control["id"] for control in graph["surface_controls"]] == ["trigger-manual"]
     assert graph["filters"]["resolved_surface_name"] == "build"
     assert graph["filters"]["resolved_control_surface_name"] == "moon"
@@ -75,3 +107,18 @@ def test_focus_filter_keeps_relevant_release_surface() -> None:
 
     assert [surface["id"] for surface in graph["surfaces"]] == ["build"]
     assert graph["counts"]["surfaces_returned"] == 1
+
+
+def test_missing_anchor_registry_does_not_fallback_to_python_file_literals() -> None:
+    graph = build_ui_experience_graph(MissingAnchorConn(), surface_name="build")
+
+    assert graph["surfaces"][0]["primary_files"] == []
+    assert graph["missing_file_anchor_authority"] == [
+        "dashboard",
+        "build",
+        "run-detail",
+        "chat",
+        "manifests",
+        "atlas",
+    ]
+    assert graph["anchor_authority_error"] == "RuntimeError: missing registry"

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from runtime.workflow_validation import (
@@ -259,16 +258,13 @@ def test_runtime_profile_route_admission_accepts_admitted_candidate(monkeypatch)
         "registry.native_runtime_profile_sync.default_native_runtime_profile_ref",
         lambda _conn: "scratch_agent",
     )
-    monkeypatch.setattr(
-        "registry.runtime_profile_admission.load_admitted_runtime_profile_candidates",
-        lambda _conn, runtime_profile_ref: (
-            SimpleNamespace(provider_slug="cursor", model_slug="composer-2"),
-        ),
-    )
 
     warnings = _preflight_runtime_profile_route_admission(
         spec,
-        pg_conn=_FakeConn([]),
+        pg_conn=_FakeConn([{
+            "provider_slug": "cursor",
+            "model_slug": "composer-2",
+        }]),
         agent_resolution_details=[{
             "label": "agent_step",
             "requested_slug": "cursor_local/composer-2",
@@ -291,16 +287,13 @@ def test_runtime_profile_route_admission_blocks_unadmitted_candidate(monkeypatch
         "registry.native_runtime_profile_sync.default_native_runtime_profile_ref",
         lambda _conn: "scratch_agent",
     )
-    monkeypatch.setattr(
-        "registry.runtime_profile_admission.load_admitted_runtime_profile_candidates",
-        lambda _conn, runtime_profile_ref: (
-            SimpleNamespace(provider_slug="openai", model_slug="gpt-5.4"),
-        ),
-    )
 
     warnings = _preflight_runtime_profile_route_admission(
         spec,
-        pg_conn=_FakeConn([]),
+        pg_conn=_FakeConn([{
+            "provider_slug": "openai",
+            "model_slug": "gpt-5.4",
+        }]),
         agent_resolution_details=[{
             "label": "agent_step",
             "requested_slug": "cursor_local/composer-2",

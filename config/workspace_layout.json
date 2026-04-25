@@ -20,6 +20,15 @@
     "atlas_heuristic_map": "Workflow/artifacts/workflow/atlas_heuristic_map.json",
     "workflow_sandbox_root": "Workflow/artifacts/workflow-sandbox"
   },
+  "module_index_subdirs": [
+    "runtime",
+    "memory",
+    "storage",
+    "surfaces",
+    "adapters",
+    "registry",
+    "observability"
+  ],
   "execution_mounts": {
     "container_workspace_root": "/workspace",
     "container_home": "/home/praxis-agent",

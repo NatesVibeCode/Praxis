@@ -56,9 +56,15 @@ _SCHEMA_BOOTSTRAP_LOCK_POLL_INTERVAL_S = 0.25
 _SCHEMA_BOOTSTRAP_WAIT_WARNING_THRESHOLD_S = 2.0
 _SCHEMA_BOOTSTRAP_WAIT_LOG_INTERVAL_S = 10.0
 _ROW_EXPECTATION_KEY_COLUMNS = {
+    "authority_domains": "authority_domain_ref",
     "authority_event_contracts": "event_contract_ref",
     "authority_object_registry": "object_ref",
+    "authority_projection_contracts": "projection_contract_ref",
+    "authority_projection_registry": "projection_ref",
+    "authority_projection_state": "projection_ref",
+    "app_manifests": "id",
     "data_dictionary_objects": "object_kind",
+    "memory_entities": "id",
     "model_profile_candidate_bindings": "model_profile_candidate_binding_id",
     "model_profiles": "model_profile_id",
     "model_sync_config": "provider_slug",
@@ -66,6 +72,7 @@ _ROW_EXPECTATION_KEY_COLUMNS = {
     "operation_catalog_source_policy_registry": "source_kind",
     "operator_decisions": "operator_decision_id",
     "platform_config": "config_key",
+    "primitive_catalog": "primitive_slug",
     "provider_concurrency": "provider_slug",
     "provider_cli_profiles": "provider_slug",
     "provider_lane_policy": "provider_slug",

@@ -16,6 +16,14 @@ from runtime.definition_compile_kernel import split_sentences as _kernel_split_s
 
 logger = logging.getLogger(__name__)
 
+# Auto-route key. The router's resolve_failover_chain accepts either an
+# auto/X key (which maps to task_type=X) or an explicit provider/model
+# slug. A bare task_type like "build" is rejected as Invalid agent slug.
+# Earlier failure mode that hid here: openrouter llm_task admission was
+# briefly degraded so the resolved chain had no llm_task adapter, raising
+# "task_type_routing has no llm_task-backed primary for 'auto/build'" and
+# falling through to the deterministic path. compile_runs trace now records
+# this with llm_skip_reason set to the exact RuntimeError.
 _APP_COMPILE_TASK_ROUTE = "auto/build"
 _LOW_VALUE_DUPLICATE_WORD_RE = re.compile(
     r"\b(?P<word>a|an|and|or|the|of|to|in|on|for|with|by|from)\b(?:\s+\b(?P=word)\b)+",
@@ -229,7 +237,13 @@ OUTPUT (JSON only, no markdown fences, no other text):
     )
     response = call_llm(request)
     logger.debug("Compile response (%d chars): %.300s", len(response.content), response.content)
-    return parse_compile_response(response.content, prose)
+    parsed = parse_compile_response(response.content, prose)
+    # Surface provider + model on the parsed payload so compile_run_trace can
+    # record which lane fired without a second resolution pass.
+    if isinstance(parsed, dict):
+        parsed.setdefault("provider_slug", provider_slug)
+        parsed.setdefault("model_slug", model_slug)
+    return parsed
 
 
 def _resolve_app_compile_route() -> tuple[str, str]:

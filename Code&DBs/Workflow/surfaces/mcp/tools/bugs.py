@@ -211,8 +211,9 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  Patch handoff:     praxis_bugs(action='patch_resume', bug_id='BUG-1234', resume_patch={'hypothesis': '...', 'next_steps': ['...']})\n"
                 "  Bug stats:         praxis_bugs(action='stats')\n"
                 "  Resolve a bug:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='WONT_FIX')\n"
+                "  Mark fix pending:  praxis_bugs(action='resolve', bug_id='BUG-1234', status='FIX_PENDING_VERIFICATION')\n"
                 "  Resolve FIXED:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='FIXED', verifier_ref='verifier.job.python.pytest_file', inputs={'path': 'tests/unit/test_bug.py'})\n\n"
-                "STATUSES: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
+                "STATUSES: OPEN, IN_PROGRESS, FIX_PENDING_VERIFICATION, FIXED, WONT_FIX, DEFERRED\n"
                 "SEVERITIES: P0 (critical), P1 (high), P2 (medium), P3 (low)"
             ),
             "inputSchema": {
@@ -226,7 +227,13 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "bug_id": {"type": "string", "description": "Bug id (for resolve)."},
                     "title": {"type": "string", "description": "Bug title (for file/search)."},
                     "severity": {"type": "string", "description": "Bug severity: P0, P1, P2, P3.", "default": "P2"},
-                    "status": {"type": "string", "description": "Status filter (for list) or terminal resolution status (for resolve): OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED."},
+                    "status": {
+                        "type": "string",
+                        "description": (
+                            "Status filter (for list) or lifecycle status for resolve: "
+                            "OPEN, IN_PROGRESS, FIX_PENDING_VERIFICATION, FIXED, WONT_FIX, DEFERRED."
+                        ),
+                    },
                     "category": {"type": "string", "description": "Bug category for list/file actions: SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER."},
                     "title_like": {
                         "type": "string",

@@ -307,27 +307,32 @@ def _preflight_runtime_profile_route_admission(
         }]
 
     try:
-        from registry.runtime_profile_admission import load_admitted_runtime_profile_candidates
-
-        admitted_candidates = load_admitted_runtime_profile_candidates(
-            pg_conn,
-            runtime_profile_ref=runtime_profile_ref,
+        projection_rows = pg_conn.execute(
+            """
+            SELECT provider_slug, model_slug
+            FROM runtime_profile_admitted_routes
+            WHERE runtime_profile_ref = $1
+            """,
+            runtime_profile_ref,
         )
     except Exception as exc:
         return [{
-            "kind": "runtime_profile_admission_query_failed",
+            "kind": "runtime_profile_admitted_routes_projection_unavailable",
             "severity": "error",
             "label": None,
             "message": (
-                f"could not resolve admitted candidates for runtime profile "
+                f"could not read admitted-route projection for runtime profile "
                 f"{runtime_profile_ref!r}: {type(exc).__name__}: {exc}"
             ),
         }]
 
-    admitted_slugs = {
-        f"{candidate.provider_slug}/{candidate.model_slug}"
-        for candidate in admitted_candidates
-    }
+    admitted_slugs: set[str] = set()
+    for row in projection_rows or []:
+        item = _row_mapping(row)
+        provider_slug = str(item.get("provider_slug") or "").strip()
+        model_slug = str(item.get("model_slug") or "").strip()
+        if provider_slug and model_slug:
+            admitted_slugs.add(f"{provider_slug}/{model_slug}")
     warnings: list[dict[str, Any]] = []
     for label, selected_slug in sorted(selected.items()):
         if selected_slug in admitted_slugs:

@@ -879,6 +879,52 @@ def _live_route_states_sync(
     return result
 
 
+def _route_state_for_candidate(
+    config: NativeRuntimeProfileConfig,
+    candidate: _LiveCandidate,
+    states_by_model: dict[str, _LiveRouteState],
+) -> _LiveRouteState:
+    live_state = states_by_model.get(candidate.model_slug)
+    eligibility_status = (
+        live_state.eligibility_status
+        if live_state is not None
+        else "rejected"
+    )
+    reason_code = (
+        live_state.reason_code
+        if live_state is not None
+        else "provider_route_authority.no_live_probe_state"
+    )
+    source_window_refs = (
+        list(live_state.source_window_refs)
+        if live_state is not None
+        else [f"budget.{config.runtime_profile_ref}.runtime"]
+    )
+    transport_refs = _native_transport_ready_refs(candidate.provider_slug)
+    if transport_refs is not None:
+        for ref in transport_refs:
+            if ref not in source_window_refs:
+                source_window_refs.append(ref)
+    return _LiveRouteState(
+        model_slug=candidate.model_slug,
+        eligibility_status=eligibility_status,
+        reason_code=reason_code,
+        source_window_refs=tuple(source_window_refs),
+    )
+
+
+def _route_state_is_projected_admitted(state: _LiveRouteState) -> bool:
+    if state.eligibility_status == "eligible":
+        return True
+    if state.reason_code not in {
+        "provider_route_authority.no_live_probe_state",
+        "provider_route_authority.health_degraded",
+        "provider_route_control_tower.health_degraded",
+    }:
+        return False
+    return any(ref.startswith("transport:") for ref in state.source_window_refs)
+
+
 async def _live_route_states_async(
     conn: "asyncpg.Connection",
     config: NativeRuntimeProfileConfig,
@@ -1543,27 +1589,7 @@ def _sync_route_states_sync(
 ) -> None:
     active_refs = [candidate.candidate_ref for candidate in candidates]
     for candidate in candidates:
-        live_state = states_by_model.get(candidate.model_slug)
-        eligibility_status = (
-            live_state.eligibility_status
-            if live_state is not None
-            else "rejected"
-        )
-        reason_code = (
-            live_state.reason_code
-            if live_state is not None
-            else "provider_route_authority.no_live_probe_state"
-        )
-        source_window_refs = (
-            list(live_state.source_window_refs)
-            if live_state is not None
-            else [f"budget.{config.runtime_profile_ref}.runtime"]
-        )
-        transport_refs = _native_transport_ready_refs(candidate.provider_slug)
-        if transport_refs is not None:
-            for ref in transport_refs:
-                if ref not in source_window_refs:
-                    source_window_refs.append(ref)
+        route_state = _route_state_for_candidate(config, candidate, states_by_model)
         conn.execute(
             """
             INSERT INTO route_eligibility_states (
@@ -1594,9 +1620,9 @@ def _sync_route_states_sync(
             config.model_profile_id,
             config.provider_policy_id,
             candidate.candidate_ref,
-            eligibility_status,
-            reason_code,
-            json.dumps(source_window_refs),
+            route_state.eligibility_status,
+            route_state.reason_code,
+            json.dumps(list(route_state.source_window_refs)),
             f"decision.route_eligibility.{config.runtime_profile_ref}.{_slug_token(candidate.model_slug)}",
         )
     conn.execute(
@@ -1620,27 +1646,7 @@ async def _sync_route_states_async(
 ) -> None:
     active_refs = [candidate.candidate_ref for candidate in candidates]
     for candidate in candidates:
-        live_state = states_by_model.get(candidate.model_slug)
-        eligibility_status = (
-            live_state.eligibility_status
-            if live_state is not None
-            else "rejected"
-        )
-        reason_code = (
-            live_state.reason_code
-            if live_state is not None
-            else "provider_route_authority.no_live_probe_state"
-        )
-        source_window_refs = (
-            list(live_state.source_window_refs)
-            if live_state is not None
-            else [f"budget.{config.runtime_profile_ref}.runtime"]
-        )
-        transport_refs = _native_transport_ready_refs(candidate.provider_slug)
-        if transport_refs is not None:
-            for ref in transport_refs:
-                if ref not in source_window_refs:
-                    source_window_refs.append(ref)
+        route_state = _route_state_for_candidate(config, candidate, states_by_model)
         await conn.execute(
             """
             INSERT INTO route_eligibility_states (
@@ -1671,9 +1677,9 @@ async def _sync_route_states_async(
             config.model_profile_id,
             config.provider_policy_id,
             candidate.candidate_ref,
-            eligibility_status,
-            reason_code,
-            json.dumps(source_window_refs),
+            route_state.eligibility_status,
+            route_state.reason_code,
+            json.dumps(list(route_state.source_window_refs)),
             f"decision.route_eligibility.{config.runtime_profile_ref}.{_slug_token(candidate.model_slug)}",
         )
     await conn.execute(
@@ -1686,6 +1692,178 @@ async def _sync_route_states_async(
         config.model_profile_id,
         config.provider_policy_id,
         active_refs,
+    )
+
+
+def _sync_runtime_profile_admitted_routes_projection_sync(
+    conn: "SyncPostgresConnection",
+    config: NativeRuntimeProfileConfig,
+    candidates: tuple[_LiveCandidate, ...],
+    states_by_model: dict[str, _LiveRouteState],
+) -> None:
+    admitted_refs: list[str] = []
+    for candidate in candidates:
+        route_state = _route_state_for_candidate(config, candidate, states_by_model)
+        if not _route_state_is_projected_admitted(route_state):
+            continue
+        admitted_refs.append(candidate.candidate_ref)
+        conn.execute(
+            """
+            INSERT INTO runtime_profile_admitted_routes (
+                runtime_profile_ref,
+                model_profile_id,
+                provider_policy_id,
+                candidate_ref,
+                provider_ref,
+                provider_slug,
+                model_slug,
+                eligibility_status,
+                reason_code,
+                source_window_refs,
+                projected_at,
+                projection_ref
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, now(),
+                'projection.runtime_profile_admitted_routes'
+            )
+            ON CONFLICT (runtime_profile_ref, candidate_ref) DO UPDATE
+            SET model_profile_id = EXCLUDED.model_profile_id,
+                provider_policy_id = EXCLUDED.provider_policy_id,
+                provider_ref = EXCLUDED.provider_ref,
+                provider_slug = EXCLUDED.provider_slug,
+                model_slug = EXCLUDED.model_slug,
+                eligibility_status = EXCLUDED.eligibility_status,
+                reason_code = EXCLUDED.reason_code,
+                source_window_refs = EXCLUDED.source_window_refs,
+                projected_at = now(),
+                projection_ref = EXCLUDED.projection_ref
+            """,
+            config.runtime_profile_ref,
+            config.model_profile_id,
+            config.provider_policy_id,
+            candidate.candidate_ref,
+            candidate.provider_ref,
+            candidate.provider_slug,
+            candidate.model_slug,
+            route_state.eligibility_status,
+            route_state.reason_code,
+            json.dumps(list(route_state.source_window_refs)),
+        )
+    conn.execute(
+        """
+        DELETE FROM runtime_profile_admitted_routes
+        WHERE runtime_profile_ref = $1
+          AND NOT (candidate_ref = ANY($2::text[]))
+        """,
+        config.runtime_profile_ref,
+        admitted_refs,
+    )
+    conn.execute(
+        """
+        INSERT INTO authority_projection_state (
+            projection_ref,
+            last_refreshed_at,
+            freshness_status,
+            updated_at
+        ) VALUES (
+            'projection.runtime_profile_admitted_routes',
+            now(),
+            'fresh',
+            now()
+        )
+        ON CONFLICT (projection_ref) DO UPDATE
+        SET last_refreshed_at = EXCLUDED.last_refreshed_at,
+            freshness_status = EXCLUDED.freshness_status,
+            error_code = NULL,
+            error_detail = NULL,
+            updated_at = now()
+        """
+    )
+
+
+async def _sync_runtime_profile_admitted_routes_projection_async(
+    conn: "asyncpg.Connection",
+    config: NativeRuntimeProfileConfig,
+    candidates: tuple[_LiveCandidate, ...],
+    states_by_model: dict[str, _LiveRouteState],
+) -> None:
+    admitted_refs: list[str] = []
+    for candidate in candidates:
+        route_state = _route_state_for_candidate(config, candidate, states_by_model)
+        if not _route_state_is_projected_admitted(route_state):
+            continue
+        admitted_refs.append(candidate.candidate_ref)
+        await conn.execute(
+            """
+            INSERT INTO runtime_profile_admitted_routes (
+                runtime_profile_ref,
+                model_profile_id,
+                provider_policy_id,
+                candidate_ref,
+                provider_ref,
+                provider_slug,
+                model_slug,
+                eligibility_status,
+                reason_code,
+                source_window_refs,
+                projected_at,
+                projection_ref
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, now(),
+                'projection.runtime_profile_admitted_routes'
+            )
+            ON CONFLICT (runtime_profile_ref, candidate_ref) DO UPDATE
+            SET model_profile_id = EXCLUDED.model_profile_id,
+                provider_policy_id = EXCLUDED.provider_policy_id,
+                provider_ref = EXCLUDED.provider_ref,
+                provider_slug = EXCLUDED.provider_slug,
+                model_slug = EXCLUDED.model_slug,
+                eligibility_status = EXCLUDED.eligibility_status,
+                reason_code = EXCLUDED.reason_code,
+                source_window_refs = EXCLUDED.source_window_refs,
+                projected_at = now(),
+                projection_ref = EXCLUDED.projection_ref
+            """,
+            config.runtime_profile_ref,
+            config.model_profile_id,
+            config.provider_policy_id,
+            candidate.candidate_ref,
+            candidate.provider_ref,
+            candidate.provider_slug,
+            candidate.model_slug,
+            route_state.eligibility_status,
+            route_state.reason_code,
+            json.dumps(list(route_state.source_window_refs)),
+        )
+    await conn.execute(
+        """
+        DELETE FROM runtime_profile_admitted_routes
+        WHERE runtime_profile_ref = $1
+          AND NOT (candidate_ref = ANY($2::text[]))
+        """,
+        config.runtime_profile_ref,
+        admitted_refs,
+    )
+    await conn.execute(
+        """
+        INSERT INTO authority_projection_state (
+            projection_ref,
+            last_refreshed_at,
+            freshness_status,
+            updated_at
+        ) VALUES (
+            'projection.runtime_profile_admitted_routes',
+            now(),
+            'fresh',
+            now()
+        )
+        ON CONFLICT (projection_ref) DO UPDATE
+        SET last_refreshed_at = EXCLUDED.last_refreshed_at,
+            freshness_status = EXCLUDED.freshness_status,
+            error_code = NULL,
+            error_detail = NULL,
+            updated_at = now()
+        """
     )
 
 
@@ -1703,6 +1881,12 @@ def sync_native_runtime_profile_authority(
         _sync_candidate_bindings_sync(conn, config, candidates)
         _sync_budget_window_sync(conn, config, budget)
         _sync_route_states_sync(conn, config, candidates, live_states)
+        _sync_runtime_profile_admitted_routes_projection_sync(
+            conn,
+            config,
+            candidates,
+            live_states,
+        )
 
     refs = [config.runtime_profile_ref for config in configs]
     del prune
@@ -1725,6 +1909,12 @@ async def sync_native_runtime_profile_authority_async(
         await _sync_candidate_bindings_async(conn, config, candidates)
         await _sync_budget_window_async(conn, config, budget)
         await _sync_route_states_async(conn, config, candidates, live_states)
+        await _sync_runtime_profile_admitted_routes_projection_async(
+            conn,
+            config,
+            candidates,
+            live_states,
+        )
 
     refs = [config.runtime_profile_ref for config in configs]
     del prune

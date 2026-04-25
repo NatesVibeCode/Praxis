@@ -46,6 +46,12 @@ _BUG_STATUS_SEMANTICS: dict[str, dict[str, bool]] = {
         "is_resolved": False,
         "is_terminal": False,
     },
+    "FIX_PENDING_VERIFICATION": {
+        "is_open": True,
+        "is_active": True,
+        "is_resolved": False,
+        "is_terminal": False,
+    },
     "FIXED": {
         "is_open": False,
         "is_active": False,
@@ -389,12 +395,21 @@ def build_proof_ref_contract() -> dict[str, Any]:
     """Project the proof-ref primitive shape used by repair and closeout paths."""
 
     from runtime.bug_evidence import ALLOWED_EVIDENCE_KINDS, ALLOWED_EVIDENCE_ROLES
+    from runtime.proof_timeline import PROOF_TIMELINE_AUTHORITY
 
     return {
         "kind": "proof_ref_contract",
-        "authority": "receipts + bug evidence + operator decisions",
+        "authority": PROOF_TIMELINE_AUTHORITY,
         "policy_decision_ref": _POLICY_DECISION_REF,
         "policy_decision_key": _POLICY_DECISION_KEY,
+        "source_authorities": [
+            "receipts",
+            "workflow_runs",
+            "verification_runs",
+            "healing_runs",
+            "bug_evidence_links",
+            "operator_decisions",
+        ],
         "allowed_ref_kinds": [
             "receipt",
             "run",
@@ -408,6 +423,12 @@ def build_proof_ref_contract() -> dict[str, Any]:
         "allowed_evidence_kinds": sorted(ALLOWED_EVIDENCE_KINDS),
         "allowed_evidence_roles": sorted(ALLOWED_EVIDENCE_ROLES),
         "required_fields": ["ref_kind", "ref_id", "evidence_role"],
+        "timeline_projection": {
+            "module": PROOF_TIMELINE_AUTHORITY,
+            "bug_entrypoint": "runtime.proof_timeline.bug_proof_timeline",
+            "status_field": "proof_status",
+            "success_field": "proof_passed",
+        },
         "repair_extensions": ["before_state_ref", "after_state_ref", "reason_code"],
         "replay_ref": {
             "required_when_available": ["run_id", "receipt_id"],

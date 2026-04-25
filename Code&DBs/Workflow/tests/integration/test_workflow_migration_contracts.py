@@ -115,7 +115,10 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "240_register_operation_atomic_helper_event_required_default.sql" in filenames
     assert "241_app_manifests_workspace_seed_bundles.sql" in filenames
     assert "242_workflow_type_token_data_dictionary_objects.sql" in filenames
-    assert filenames[-1] == "242_workflow_type_token_data_dictionary_objects.sql"
+    assert "243_runtime_profile_admitted_routes_projection.sql" in filenames
+    assert "244_ui_surface_file_anchor_registry.sql" in filenames
+    assert "245_compile_run_trace.sql" in filenames
+    assert filenames[-1] == "245_compile_run_trace.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:

@@ -12,14 +12,36 @@ from runtime.typed_gap_events import emit_typed_gap
 
 
 class _RecordingConn:
-    """Minimal Postgres conn stub: records system_events INSERT calls."""
+    """Minimal Postgres conn stub: records all INSERT calls.
+
+    ``events`` returns only system_events writes (one per emit) so existing
+    count-based assertions stay accurate after the dual-write to
+    authority_events landed (BUG-A0983040 follow-up + Phase 2 CQRS migration).
+    ``all_writes`` returns every INSERT for tests that care about both paths.
+    """
 
     def __init__(self) -> None:
-        self.events: list[tuple[str, tuple]] = []
+        self.all_writes: list[tuple[str, tuple]] = []
 
     def execute(self, sql: str, *args):
-        self.events.append((sql, args))
+        self.all_writes.append((sql, args))
         return []
+
+    @property
+    def events(self) -> list[tuple[str, tuple]]:
+        return [
+            (sql, args)
+            for sql, args in self.all_writes
+            if "INSERT INTO system_events" in sql
+        ]
+
+    @property
+    def authority_events(self) -> list[tuple[str, tuple]]:
+        return [
+            (sql, args)
+            for sql, args in self.all_writes
+            if "INSERT INTO authority_events" in sql
+        ]
 
 
 def _captured_payload(conn: _RecordingConn) -> dict:
@@ -115,17 +137,27 @@ def test_emit_typed_gap_generates_unique_gap_ids():
     assert id1 != id2
 
 
-def test_emit_typed_gap_returns_none_on_emission_failure(monkeypatch):
-    """When the emit_system_event path raises, helper returns None
-    rather than propagating."""
+class _BrokenConn:
+    """Conn stub whose execute() always raises — for both-paths-fail tests."""
+
+    def execute(self, *args, **kwargs):
+        raise RuntimeError("simulated DB outage")
+
+
+def test_emit_typed_gap_returns_none_when_both_paths_fail(monkeypatch):
+    """When both authority_events and system_events writes fail, helper
+    returns None rather than propagating. Single-path failure still
+    succeeds via the surviving path (dual-write resilience).
+    """
     import runtime.system_events as se_mod
 
     def broken(*args, **kwargs):
         raise RuntimeError("simulated outage")
 
     monkeypatch.setattr(se_mod, "emit_system_event", broken)
+    # _BrokenConn fails the authority_events INSERT too; both paths now broken.
     result = emit_typed_gap(
-        _RecordingConn(),
+        _BrokenConn(),
         gap_kind="stage",
         missing_type="stage_template",
         reason_code="r",
@@ -133,9 +165,78 @@ def test_emit_typed_gap_returns_none_on_emission_failure(monkeypatch):
     assert result is None
 
 
+def test_emit_typed_gap_resilient_when_only_sidecar_fails(monkeypatch):
+    """When only the system_events sidecar fails, the authority_events
+    write still lands the event, so the caller gets the gap_id back."""
+    import runtime.system_events as se_mod
+
+    monkeypatch.setattr(
+        se_mod, "emit_system_event", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("sidecar down"))
+    )
+    conn = _RecordingConn()
+    result = emit_typed_gap(
+        conn,
+        gap_kind="stage",
+        missing_type="stage_template",
+        reason_code="r",
+    )
+    # authority_events write still happened, so the gap_id is returned.
+    assert result is not None
+    assert conn.authority_events  # canonical stream did receive the event
+
+
+def test_emit_typed_gap_dual_writes_to_authority_events_and_system_events():
+    """Phase 2 CQRS migration: every typed_gap.created emission lands in
+    BOTH authority_events (canonical) AND system_events (sidecar) so
+    consumers in either stream see the gap. Removed once consumers migrate
+    off the sidecar.
+    """
+    conn = _RecordingConn()
+    gap_id = emit_typed_gap(
+        conn,
+        gap_kind="stage",
+        missing_type="stage_template",
+        reason_code="stage.template_missing",
+        source_ref="compose_plan_from_intent:smoke",
+    )
+    assert gap_id is not None
+    # authority_events row: event_type=typed_gap.created, operation_ref=source_ref
+    assert len(conn.authority_events) == 1
+    auth_sql, auth_args = conn.authority_events[0]
+    # auth args: (authority_domain_ref, aggregate_ref, event_type, payload_json, operation_ref, emitted_by)
+    assert auth_args[2] == "typed_gap.created"
+    assert auth_args[1] == gap_id  # aggregate_ref mirrors gap_id
+    assert auth_args[4] == "compose_plan_from_intent:smoke"
+    # system_events sidecar row: event_type='typed_gap.created'
+    assert len(conn.events) == 1
+    sys_sql, sys_args = conn.events[0]
+    assert sys_args[0] == "typed_gap.created"
+
+
+def test_emit_typed_gap_resilient_when_only_authority_path_fails(monkeypatch):
+    """When the authority_events INSERT fails but the sidecar succeeds,
+    the caller still gets the gap_id back (the sidecar wrote it)."""
+    import runtime.typed_gap_events as tge_mod
+
+    monkeypatch.setattr(
+        tge_mod, "_write_typed_gap_to_authority_events", lambda *a, **kw: False
+    )
+    conn = _RecordingConn()
+    result = emit_typed_gap(
+        conn,
+        gap_kind="stage",
+        missing_type="stage_template",
+        reason_code="r",
+    )
+    assert result is not None
+    assert conn.events  # sidecar stream received the event
+
+
 def test_emit_typed_gap_returns_none_on_import_failure(monkeypatch):
-    """When system_events module can't be imported, helper returns None."""
+    """When system_events module can't be imported AND the authority_events
+    write fails, helper returns None."""
     import builtins
+    import runtime.typed_gap_events as tge_mod
 
     real_import = builtins.__import__
 
@@ -145,6 +246,9 @@ def test_emit_typed_gap_returns_none_on_import_failure(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
+    monkeypatch.setattr(
+        tge_mod, "_write_typed_gap_to_authority_events", lambda *a, **kw: False
+    )
     result = emit_typed_gap(
         _RecordingConn(),
         gap_kind="stage",

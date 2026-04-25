@@ -22,6 +22,7 @@ from runtime.workspace_paths import (
     container_workspace_root,
     databases_root,
     log_path,
+    module_index_subdirs,
     scratch_path,
     strip_workflow_prefix,
     to_repo_ref,
@@ -37,6 +38,7 @@ def test_layout_file_exists_and_parses() -> None:
     assert "subdirs" in layout
     assert "log_paths" in layout
     assert "scratch_paths" in layout
+    assert "module_index_subdirs" in layout
     assert "execution_mounts" in layout
 
 
@@ -76,6 +78,16 @@ def test_scratch_path_resolves() -> None:
     sandbox = scratch_path("workflow_sandbox_root")
     assert sandbox.name == "workflow-sandbox"
     assert "Workflow/artifacts" in str(sandbox)
+
+
+def test_module_index_subdirs_are_workflow_root_refs() -> None:
+    canonical = code_tree_dirname()
+    refs = module_index_subdirs()
+
+    assert refs
+    assert refs[0] == f"{canonical}/Workflow/runtime"
+    assert all(ref.startswith(f"{canonical}/Workflow/") for ref in refs)
+    assert not any(alias in ref for alias in tree_aliases() for ref in refs)
 
 
 def test_container_workspace_root_comes_from_layout_authority() -> None:

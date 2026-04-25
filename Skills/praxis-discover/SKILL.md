@@ -5,6 +5,14 @@ description: "Search before you build. Use this skill BEFORE implementing any ne
 
 # Search Before You Build
 
+## Current Surface Docs
+
+- MCP/catalog reference: `docs/MCP.md`
+- CLI reference: `docs/CLI.md`
+- API route reference: `docs/API.md`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
+
 Every time you're about to write new code in this repo, stop and search first. The codebase is large and has extensive existing infrastructure. Duplicating what already exists wastes time and creates maintenance burden.
 
 ## When to Search

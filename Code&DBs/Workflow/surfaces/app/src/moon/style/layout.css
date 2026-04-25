@@ -110,7 +110,13 @@
   min-width: 0;
   width: 100%;
   max-width: none;
-  padding: calc(var(--moon-nav-clearance) + 4px) var(--moon-dock-pad-h) var(--moon-dock-pad-v);
+  /* Bottom padding doubles the dock-pad to keep the last save/release
+     control above the dock floor instead of flush against it
+     (BUG-EBFFD508). Combined with overflow-y: auto + max-height: 100%,
+     this guarantees the bottom controls are reachable on every
+     viewport size. */
+  padding: calc(var(--moon-nav-clearance) + 4px) var(--moon-dock-pad-h)
+    calc(var(--moon-dock-pad-v) * 2);
   background: linear-gradient(180deg, var(--moon-shell-overlay-start), var(--moon-shell-overlay-end));
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -121,6 +127,22 @@
   overflow-x: hidden;
   box-shadow: var(--moon-shadow-line-soft);
   min-height: 0;
+  max-height: 100%;
+  /* Force a visible scrollbar on overflow so operators see when bottom
+     controls sit below the fold instead of guessing (BUG-EBFFD508). */
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+.moon-dock-overlay::-webkit-scrollbar {
+  width: 8px;
+}
+.moon-dock-overlay::-webkit-scrollbar-thumb {
+  background: var(--moon-white-a10);
+  border-radius: 4px;
+}
+.moon-dock-overlay::-webkit-scrollbar-thumb:hover {
+  background: var(--moon-white-a18);
 }
 
 .moon-dock-overlay--left {

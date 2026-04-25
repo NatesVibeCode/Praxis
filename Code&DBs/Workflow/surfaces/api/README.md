@@ -16,6 +16,9 @@ The API should expose the system, not re-implement it.
 
 Discoverability front doors:
 
+- `docs/API.md` is the generated HTTP route reference.
+- `docs/CLI.md` is the generated terminal reference for route discovery and catalog-backed aliases.
+- `docs/MCP.md` is the generated MCP/catalog tool reference.
 - `workflow api routes` prints the live HTTP route catalog from the CLI.
 - `workflow api help` opens the same route-discovery help from the API namespace.
 - `workflow routes` is the flat alias when you want the same discovery path without the `api` namespace.

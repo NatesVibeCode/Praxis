@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from storage.postgres import PostgresModuleEmbeddingsRepository
-from runtime.workspace_paths import to_repo_ref
+from runtime.workspace_paths import module_index_subdirs, to_repo_ref
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -306,6 +306,11 @@ _SKIP_DIRS = {
 
 # Files to skip
 _SKIP_FILES = {'__init__.py', 'conftest.py'}
+
+
+def default_index_subdirs(repo_root: str | Path) -> list[str]:
+    """Return layout-authoritative repo refs for default semantic indexing."""
+    return list(module_index_subdirs(repo_root=Path(repo_root)))
 
 
 def extract_code_units(filepath: str, repo_root: str) -> list[CodeUnit]:
@@ -727,15 +732,7 @@ class ModuleIndexer:
         Returns dict with counts: indexed, skipped, total.
         """
         if subdirs is None:
-            subdirs = [
-                "Code&DBs/Workflow/runtime",
-                "Code&DBs/Workflow/memory",
-                "Code&DBs/Workflow/storage",
-                "Code&DBs/Workflow/surfaces",
-                "Code&DBs/Workflow/adapters",
-                "Code&DBs/Workflow/registry",
-                "Code&DBs/Workflow/observability",
-            ]
+            subdirs = default_index_subdirs(self._repo_root)
 
         units = walk_codebase(self._repo_root, subdirs)
 

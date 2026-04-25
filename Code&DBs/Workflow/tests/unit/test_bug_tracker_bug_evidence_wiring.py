@@ -252,6 +252,39 @@ def test_resolve_fixed_surfaces_validates_fix_query_failure(monkeypatch) -> None
         tracker.resolve(bug.bug_id, BugStatus.FIXED)
 
 
+def test_passed_validates_fix_evidence_routes_through_proof_timeline(monkeypatch) -> None:
+    tracker = BugTracker(conn=object())
+    captured: dict[str, object] = {}
+
+    def _fake_timeline(*, bug_id: str, query_rows_fn):
+        captured["bug_id"] = bug_id
+        captured["query_rows_fn"] = query_rows_fn
+        return [
+            {
+                "proof_kind": "verification_run",
+                "proof_ref": "verification-run-1",
+                "evidence_role": "validates_fix",
+                "proof_passed": True,
+            }
+        ], None
+
+    monkeypatch.setattr(_mod._proof_timeline, "bug_proof_timeline", _fake_timeline)
+
+    rows, error = tracker._passed_validates_fix_evidence_with_error("BUG-TEST")
+
+    assert error is None
+    assert rows == [
+        {
+            "proof_kind": "verification_run",
+            "proof_ref": "verification-run-1",
+            "evidence_role": "validates_fix",
+            "proof_passed": True,
+        }
+    ]
+    assert captured["bug_id"] == "BUG-TEST"
+    assert captured["query_rows_fn"].__self__ is tracker
+
+
 def test_resolve_fixed_updates_bug_when_passed_verification_exists(monkeypatch) -> None:
     class _RecordingConn:
         def __init__(self) -> None:
