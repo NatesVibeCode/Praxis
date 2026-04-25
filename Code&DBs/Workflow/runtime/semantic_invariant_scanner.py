@@ -97,22 +97,31 @@ def _file_imports_or_uses_callsite(source: str, callsite: str) -> list[int]:
 
 
 def _allowed_authority_paths(workflow_root: Path, allowed: Iterable[str]) -> set[Path]:
-    """Resolve allowed_authorities (dotted module paths) to filesystem paths."""
+    """Resolve allowed_authorities (dotted module paths) to filesystem paths.
+
+    Strategy: try the full path as a module file or package dir first; if
+    that fails, drop exactly one trailing ``.callable`` segment and try
+    again.  No greedy walk-back — that would silently widen the allow-list
+    to a parent directory and let bypass sites slip through.
+    """
+
     resolved: set[Path] = set()
     for entry in allowed:
-        # Drop the trailing ``.callable`` segment if present; we want the module path.
         parts = str(entry).split(".")
-        # Walk back until we find an existing file or directory.
-        while parts:
-            candidate = workflow_root.joinpath(*parts).with_suffix(".py")
-            if candidate.exists():
-                resolved.add(candidate)
+        candidates_to_try: list[list[str]] = []
+        if parts:
+            candidates_to_try.append(parts)
+        if len(parts) > 1:
+            candidates_to_try.append(parts[:-1])
+        for attempt in candidates_to_try:
+            file_candidate = workflow_root.joinpath(*attempt).with_suffix(".py")
+            if file_candidate.exists():
+                resolved.add(file_candidate)
                 break
-            dir_candidate = workflow_root.joinpath(*parts)
+            dir_candidate = workflow_root.joinpath(*attempt)
             if dir_candidate.is_dir():
                 resolved.add(dir_candidate)
                 break
-            parts = parts[:-1]
     return resolved
 
 
