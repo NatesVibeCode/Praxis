@@ -765,23 +765,36 @@ async def _maybe_auto_promote(
         rationale,
         decision_ref,
     )
+    event_payload = {
+        "promotion_id": promotion_id,
+        "dataset_family": family,
+        "specialist_target": policy.specialist_target,
+        "policy_id": policy.policy_id,
+        "promoted_by": promoted_by,
+        "promotion_kind": "auto",
+        "split_tag": split_tag,
+        "candidate_ids": [candidate.candidate_id],
+        "decision_ref": decision_ref,
+    }
     await aemit(
         conn,
         channel=CHANNEL_DATASET,
         event_type=_EVENT_DATASET_PROMOTION_RECORDED,
         entity_id=promotion_id,
         entity_kind="dataset_promotion",
-        payload={
-            "promotion_id": promotion_id,
-            "dataset_family": family,
-            "specialist_target": policy.specialist_target,
-            "policy_id": policy.policy_id,
-            "promoted_by": promoted_by,
-            "promotion_kind": "auto",
-            "split_tag": split_tag,
-            "candidate_ids": [candidate.candidate_id],
-            "decision_ref": decision_ref,
-        },
+        payload=event_payload,
+        emitted_by="dataset_candidate_subscriber.auto_promote",
+    )
+    # Causal side effects (cache invalidation, etc) flow through the
+    # semantic_predicate_catalog so this auto path shares the same
+    # declared propagation as the manual operator_write path.  Predicate:
+    # ``dataset_promotion.invalidates_curated_projection_cache``.
+    from runtime.semantic_propagation_engine import fire_causal_propagations
+
+    await fire_causal_propagations(
+        conn,
+        event_type=_EVENT_DATASET_PROMOTION_RECORDED,
+        event_payload=event_payload,
         emitted_by="dataset_candidate_subscriber.auto_promote",
     )
     return promotion_id

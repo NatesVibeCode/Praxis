@@ -234,7 +234,7 @@ def _post_onboarding_sync(
     try:
         native_rows = conn.execute(
             """
-            SELECT runtime_profile_ref, allowed_models
+            SELECT runtime_profile_ref, provider_names, allowed_models
             FROM registry_native_runtime_profile_authority
             ORDER BY runtime_profile_ref
             """
@@ -248,22 +248,38 @@ def _post_onboarding_sync(
         if native_rows and added_models:
             updated_profiles: list[str] = []
             for row in native_rows:
+                providers = row.get("provider_names") or []
+                if isinstance(providers, str):
+                    providers = json.loads(providers)
+                provider_list = [
+                    str(value).strip()
+                    for value in providers
+                    if str(value).strip()
+                ]
+                merged_providers = list(dict.fromkeys([*provider_list, provider_slug]))
+
                 allowed = row.get("allowed_models") or []
                 if isinstance(allowed, str):
                     allowed = json.loads(allowed)
-                allowed_list = [str(value).strip() for value in allowed if str(value).strip()]
-                merged = list(dict.fromkeys([*allowed_list, *added_models]))
-                if merged == allowed_list:
+                allowed_list = [
+                    str(value).strip()
+                    for value in allowed
+                    if str(value).strip()
+                ]
+                merged_models = list(dict.fromkeys([*allowed_list, *added_models]))
+                if merged_providers == provider_list and merged_models == allowed_list:
                     continue
                 conn.execute(
                     """
                     UPDATE registry_native_runtime_profile_authority
-                    SET allowed_models = $2::jsonb,
+                    SET provider_names = $2::jsonb,
+                        allowed_models = $3::jsonb,
                         recorded_at = now()
                     WHERE runtime_profile_ref = $1
                     """,
                     str(row["runtime_profile_ref"]),
-                    json.dumps(merged),
+                    json.dumps(merged_providers),
+                    json.dumps(merged_models),
                 )
                 updated_profiles.append(str(row["runtime_profile_ref"]))
             if updated_profiles:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -82,6 +83,31 @@ class ProviderAdapterContract:
             "retryable_failure_codes": list(self.retryable_failure_codes),
             "failover_failure_codes": list(self.failover_failure_codes),
         }
+
+    @classmethod
+    def from_contract(cls, contract: Mapping[str, Any]) -> "ProviderAdapterContract":
+        payload = dict(contract)
+        return cls(
+            provider_slug=str(payload["provider_slug"]),
+            adapter_type=str(payload["adapter_type"]),
+            transport_kind=str(payload["transport_kind"]),
+            execution_kind=str(payload["execution_kind"]),
+            failure_namespace=str(payload["failure_namespace"]),
+            prompt_envelope=dict(payload.get("prompt_envelope") or {}),
+            tool_policy=dict(payload.get("tool_policy") or {}),
+            structured_output=dict(payload.get("structured_output") or {}),
+            timeout_seconds=int(payload["timeout_seconds"]),
+            telemetry=dict(payload.get("telemetry") or {}),
+            retry_policy=dict(payload.get("retry_policy") or {}),
+            failure_mapping=dict(payload.get("failure_mapping") or {}),
+            readiness=dict(payload.get("readiness") or {}),
+            retryable_failure_codes=tuple(
+                str(code) for code in payload.get("retryable_failure_codes") or ()
+            ),
+            failover_failure_codes=tuple(
+                str(code) for code in payload.get("failover_failure_codes") or ()
+            ),
+        )
 
     def map_failure_code(self, reason_code: str) -> str:
         """Map a low-level failure into this adapter's failure namespace."""

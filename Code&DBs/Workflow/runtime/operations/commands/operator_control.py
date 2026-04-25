@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class RoadmapWriteCommand(BaseModel):
     action: str = "preview"
+    dry_run: bool | None = None
     title: str | None = None
     intent_brief: str | None = None
     template: str = "single_capability"
@@ -30,6 +31,36 @@ class RoadmapWriteCommand(BaseModel):
     proof_kind: str | None = None
     roadmap_item_id: str | None = None
     phase_order: str | None = None
+
+
+_ROADMAP_PREVIEW_FIRST_ACTIONS = frozenset({"update", "retire", "re-parent", "reparent"})
+
+
+def _normalized_roadmap_write_action(command: RoadmapWriteCommand) -> tuple[str, dict[str, Any]]:
+    action = (command.action or "preview").strip().lower()
+    if action in _ROADMAP_PREVIEW_FIRST_ACTIONS:
+        if not (command.roadmap_item_id or "").strip():
+            raise ValueError(f"roadmap_item_id is required for action='{action}'")
+        if action in {"re-parent", "reparent"} and not (
+            command.parent_roadmap_item_id or ""
+        ).strip():
+            raise ValueError("parent_roadmap_item_id is required for action='re-parent'")
+        effective_dry_run = command.dry_run is not False
+        payload: dict[str, Any] = {
+            "action": "preview" if effective_dry_run else "commit",
+            "lifecycle": (
+                "retired"
+                if action == "retire" and command.lifecycle is None
+                else command.lifecycle
+            ),
+            "dry_run": effective_dry_run,
+        }
+        return action, payload
+    return action, {
+        "action": command.action,
+        "lifecycle": command.lifecycle,
+        "dry_run": command.dry_run,
+    }
 
 
 class WorkItemCloseoutCommand(BaseModel):
@@ -163,8 +194,9 @@ def handle_operator_roadmap_write(
 ) -> dict[str, Any]:
     from surfaces.api.operator_write import OperatorControlFrontdoor
 
+    requested_action, normalized = _normalized_roadmap_write_action(command)
     return OperatorControlFrontdoor().roadmap_write(
-        action=command.action,
+        action=normalized["action"],
         title=command.title,
         intent_brief=command.intent_brief,
         template=command.template,
@@ -178,7 +210,7 @@ def handle_operator_roadmap_write(
         decision_ref=command.decision_ref,
         item_kind=command.item_kind,
         status=command.status,
-        lifecycle=command.lifecycle,
+        lifecycle=normalized["lifecycle"],
         tier=command.tier,
         phase_ready=command.phase_ready,
         approval_tag=command.approval_tag,
@@ -188,7 +220,7 @@ def handle_operator_roadmap_write(
         roadmap_item_id=command.roadmap_item_id,
         phase_order=command.phase_order,
         env=_resolved_env(subsystems),
-    )
+    ) | {"requested_action": requested_action, "dry_run": normalized["dry_run"]}
 
 
 def handle_operator_ideas(

@@ -48,19 +48,20 @@ def _dispatch_standard_post(
             )
             return True
 
-        if body_required and body == {}:
-            payload = {"error": "Request body is required and must be a non-empty JSON object"}
-            request._send_json(400, payload)
-            record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                request_body=body,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return True
+        if body_required:
+            if not body:
+                payload = {"error": "Request body is required and must be a non-empty JSON object"}
+                request._send_json(400, payload)
+                record_api_route_usage(
+                    request.subsystems,
+                    path=path,
+                    method="POST",
+                    status_code=400,
+                    request_body=body,
+                    response_payload=payload,
+                    headers=request.headers,
+                )
+                return True
     except (json.JSONDecodeError, ValueError) as exc:
         payload = {"error": f"Invalid JSON: {exc}"}
         request._send_json(400, payload)

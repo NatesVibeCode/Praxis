@@ -670,13 +670,18 @@ class WorkflowRunner:
         except Exception:
             protocol = None
 
-        if not protocol:
+        from runtime.http_transport import parse_telemetry, telemetry_family_for_provider
+
+        telemetry_family = telemetry_family_for_provider(
+            provider,
+            protocol_family=protocol,
+        )
+        if not telemetry_family:
             # Fallback: extract result text from common envelope keys
             result_text = data.get("result") or data.get("response") or raw_stdout
             return None, result_text
 
-        from runtime.http_transport import parse_telemetry
-        parsed = parse_telemetry(protocol, data)
+        parsed = parse_telemetry(telemetry_family, data)
         if parsed is None:
             result_text = data.get("result") or data.get("response") or raw_stdout
             return None, result_text

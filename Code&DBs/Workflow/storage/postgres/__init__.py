@@ -31,6 +31,7 @@ from .schema import (
     bootstrap_workflow_schema,
     inspect_control_plane_schema,
     inspect_workflow_schema,
+    record_migration_apply,
 )
 
 # Evidence reading
@@ -197,6 +198,7 @@ __all__ = [
     "inspect_workflow_schema",
     "load_app_manifest_record",
     "persist_workflow_admission",
+    "record_migration_apply",
     "resolve_workflow_authority_cache_key",
     "resolve_workflow_database_url",
     "record_app_manifest_history",

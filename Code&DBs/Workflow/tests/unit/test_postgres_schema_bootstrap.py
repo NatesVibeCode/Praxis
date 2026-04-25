@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import asyncpg
 import pytest
 import storage.postgres.schema as postgres_schema
 
@@ -549,8 +550,10 @@ def test_bootstrap_migration_skips_commented_transaction_wrappers(
     assert "BEGIN" not in executed_query
     assert "COMMIT" not in executed_query
     assert executed_params == ()
-    assert conn.transaction_entries == 2
-    assert conn.transaction_exits == 2
+    # Outer migration transaction + savepoint for the CREATE TABLE statement
+    # (BUG-25C5319C: migration runs all-or-nothing under one outer transaction).
+    assert conn.transaction_entries == 3
+    assert conn.transaction_exits == 3
 
 
 def test_bootstrap_migration_skips_comment_only_statements(
@@ -574,8 +577,10 @@ def test_bootstrap_migration_skips_comment_only_statements(
     assert len(executed_queries) == 2
     assert "CREATE TABLE IF NOT EXISTS schema_migrations" in executed_queries[0]
     assert executed_queries[1] == "CREATE TABLE demo (id INT)"
-    assert conn.transaction_entries == 2
-    assert conn.transaction_exits == 2
+    # Outer migration transaction + savepoint for the CREATE TABLE statement
+    # (BUG-25C5319C: migration runs all-or-nothing under one outer transaction).
+    assert conn.transaction_entries == 3
+    assert conn.transaction_exits == 3
 
 
 def test_schema_migrations_bootstrap_contract_declares_constraints() -> None:
@@ -775,3 +780,43 @@ def test_acquire_schema_bootstrap_lock_logs_wait_holder_details(
     assert "application_name=dag-worker" in caplog.text
     assert "idle in transaction" in caplog.text
     assert "acquired after 2.60s wait" in caplog.text
+
+
+class _FakeBootstrapConnEnsureThenFail(_FakeAsyncConn):
+    """Runs schema_migrations ensure DDL, then raises on migration statements."""
+
+    def __init__(self, exc: Exception) -> None:
+        super().__init__()
+        self._exc = exc
+
+    async def execute(self, query: str, *params: object) -> str:
+        if "CREATE TABLE IF NOT EXISTS schema_migrations" in query:
+            return await super().execute(query, params)
+        raise self._exc
+
+
+def test_bootstrap_migration_postgres_error_message_includes_server_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = _FakeBootstrapConnEnsureThenFail(
+        asyncpg.exceptions.CheckViolationError('check constraint "demo_check" violated'),
+    )
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_bootstrap_migration_statements",
+        lambda _filename: ("SELECT 1;",),
+    )
+
+    with pytest.raises(postgres_schema.PostgresSchemaError) as raised:
+        asyncio.run(postgres_schema._bootstrap_migration(conn, "demo.sql"))
+
+    assert 'check constraint "demo_check" violated' in str(raised.value)
+    assert raised.value.details.get("sqlstate") == "23514"
+
+
+def test_record_migration_apply_documented_public_export() -> None:
+    """Regression: manual-apply path stays importable (BUG-431B3436)."""
+
+    assert hasattr(postgres_schema, "record_migration_apply")
+    assert postgres_schema.record_migration_apply is postgres_schema._record_migration_apply

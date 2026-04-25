@@ -277,9 +277,15 @@ def _resolve_workspace_base_path(raw_value: object, *, field_name: str) -> Path:
         env_name = match.group(1)
         env_value = os.environ.get(env_name)
         if not env_value or not env_value.strip():
-            raise NativeRuntimeProfileSyncError(
-                f"{field_name} references ${env_name}, but {env_name} is not set"
-            )
+            # Fall back to the self-deriving repo root authority. The placeholder
+            # pattern in the registry encodes "use the value from this env var,"
+            # but the runtime can also authoritatively answer "where is my
+            # workspace?" by computing the repo root from this module's own
+            # filesystem location (via runtime.workspace_paths.repo_root). Falling
+            # back keeps the registry portable across machines / users / MCP
+            # launchers (Claude.app's disclaimer helper bypasses bash wrappers,
+            # so env propagation cannot be relied on at the launch boundary).
+            return _repo_root().resolve()
         raw_text = env_value.strip()
     candidate = Path(raw_text).expanduser()
     if not candidate.is_absolute():

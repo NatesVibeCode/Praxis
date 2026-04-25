@@ -1,0 +1,42 @@
+{
+  "name": "replay_ready_gc_20260424_A_recon",
+  "workflow_id": "replay_ready_gc_20260424_A_recon",
+  "phase": "build",
+  "outcome_goal": "Produce a recon packet for the 4 confirmed replay-ready receipt-failure bugs (BUG-7C5D8AE4, BUG-39D02693, BUG-A3B51E8D, BUG-1980557E) so downstream code-fix specs can run without trampling in-flight edits. No source edits; artifact only.",
+  "bug_source": {
+    "authority": "praxis workflow tools call praxis_replay_ready_bugs",
+    "snapshot_date": "2026-04-24",
+    "open_count": 151,
+    "replay_ready_count": 4,
+    "replay_blocked_count": 136
+  },
+  "anti_requirements": [
+    "Do not edit any source file.",
+    "Do not revert dirty worktree changes made by parallel work under Code&DBs/Workflow.",
+    "Do not invent run_id, receipt_id, replay_run_id, or replay_receipt_id.",
+    "Do not call api.anthropic.com directly (standing order decision.2026-04-20.anthropic-cli-only-restored).",
+    "Do not widen scope beyond the four listed bugs."
+  ],
+  "verify_refs": [
+    "praxis workflow tools call praxis_workflow_validate --input-json '{\"spec_path\":\"artifacts/workflow/replay_ready_gc_20260424_A_recon.queue.json\"}'",
+    "test -s artifacts/workflow/replay_ready_gc_20260424_RECON.md"
+  ],
+  "jobs": [
+    {
+      "label": "recon_replay_ready_bugs",
+      "agent": "google/gemini-3.1-pro-preview",
+      "adapter_type": "cli_llm",
+      "task_type": "analysis",
+      "bug_ids": [
+        "BUG-7C5D8AE4",
+        "BUG-39D02693",
+        "BUG-A3B51E8D",
+        "BUG-1980557E"
+      ],
+      "write_scope": [
+        "artifacts/workflow/replay_ready_gc_20260424_RECON.md"
+      ],
+      "prompt": "Produce the recon packet for the Gemini/Cursor replay-ready remediation run.\n\n## Inputs to gather (read-only)\n1. `praxis workflow bugs stats --json`\n2. `praxis workflow tools call praxis_replay_ready_bugs --input-json '{\"limit\":100}'`\n3. For each bug id (BUG-7C5D8AE4, BUG-39D02693, BUG-A3B51E8D, BUG-1980557E):\n   - `praxis workflow bugs packet --bug-id <id>` — current status, resume_context, evidence links\n   - `praxis workflow bugs history --bug-id <id>` — full lifecycle\n4. `git status --short` and `git diff --stat HEAD` — current dirty worktree state\n5. Read the wave8 block of `artifacts/workflow/root_bug_table_remediation_20260423.queue.json` to understand prior assignment.\n6. `praxis workflow discover \"receipt failure aggregation\"` and `praxis workflow discover \"sandbox_error\"` to locate current authority.\n\n## Output\nWrite ONE file: `artifacts/workflow/replay_ready_gc_20260424_RECON.md` containing:\n\n- **Snapshot** — stats counts + timestamp.\n- **Per-bug table** — bug_id, current status, current resume_context one-liner, most recent replay_run_id / replay_receipt_id, whether the 2026-04-23 wave8 already closed it.\n- **Dirty-worktree collision map** — files under the write scopes of Spec B (sandbox_runtime.py, receipt_store.py, test_sandbox_runtime.py, test_receipt_store.py) and Spec C (runtime/workflow/submission_contract.py, test_submission_contract.py, test_launch_submit_failed.py) that currently have uncommitted edits. Flag each as GREEN (clean), YELLOW (dirty but non-conflicting), RED (do not launch until operator commits).\n- **Go / no-go table** — one row per downstream spec (B_sandbox, C_submission, D_closeout) with recommendation and one-line justification.\n- **Spec -> run_id table** — four empty rows for spec_A, spec_B, spec_C, spec_D. Document that run_ids are filled in as each spec launches.\n- **Replay command cheatsheet** — exact `praxis workflow bugs replay --bug-id <id>` commands for each bug.\n\n## Rules\n- No source edits. No bug resolution. This packet exists to prevent the automated workers from trampling in-flight edits.\n- Do not fabricate any run_id / receipt_id — only record what the bug packet / history actually shows.\n- If any bug is already FIXED, say so explicitly in the go/no-go table (the downstream spec becomes a no-op for that bug).\n- If the dirty-worktree overlap is severe enough that Cursor will lose work, recommend NO-GO for the affected spec and suggest the operator commit or stash first."
+    }
+  ]
+}

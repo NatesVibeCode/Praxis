@@ -106,7 +106,16 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "225_bug_lifecycle_data_dictionary_types.sql" in filenames
     assert "226_authority_event_contract_typed_gap_created.sql" in filenames
     assert "227_surface_module_projection_first_wedge.sql" in filenames
-    assert filenames[-1] == "227_surface_module_projection_first_wedge.sql"
+    assert "234_register_plan_operations.sql" in filenames
+    assert "235_plan_orchestration_gateway_handlers.sql" in filenames
+    assert "236_operation_catalog_surface_action_performed.sql" in filenames
+    assert "237_semantic_predicate_catalog.sql" in filenames
+    assert "238_backfill_empty_semantic_predicate_allowlists.sql" in filenames
+    assert "239_register_operation_atomic_helper.sql" in filenames
+    assert "240_register_operation_atomic_helper_event_required_default.sql" in filenames
+    assert "241_app_manifests_workspace_seed_bundles.sql" in filenames
+    assert "242_workflow_type_token_data_dictionary_objects.sql" in filenames
+    assert filenames[-1] == "242_workflow_type_token_data_dictionary_objects.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:

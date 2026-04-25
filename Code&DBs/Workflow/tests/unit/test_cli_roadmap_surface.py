@@ -123,6 +123,54 @@ def test_roadmap_write_commit_routes_to_command_tool(monkeypatch: pytest.MonkeyP
     assert payload["action"] == "commit"
 
 
+def test_roadmap_write_preserves_rich_linkage_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"ok": True, "action": params.get("action")}
+
+    monkeypatch.setattr(roadmap_commands, "run_cli_tool", _fake_run_cli_tool)
+    stdout = StringIO()
+
+    assert (
+        workflow_cli_main(
+            [
+                "roadmap",
+                "write",
+                "preview",
+                "--title",
+                "Promote the closeout gate",
+                "--intent-brief",
+                "Carry source bug and registry lineage through the stable surface",
+                "--source-bug-id",
+                "BUG-EXAMPLE",
+                "--registry-paths",
+                "surfaces/operator",
+                "--priority",
+                "p1",
+                "--outcome-gate",
+                "Closed loop with stable references",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured["tool_name"] == "praxis_operator_write"
+    assert captured["params"] == {
+        "action": "preview",
+        "title": "Promote the closeout gate",
+        "intent_brief": "Carry source bug and registry lineage through the stable surface",
+        "source_bug_id": "BUG-EXAMPLE",
+        "registry_paths": ["surfaces/operator"],
+        "priority": "p1",
+        "outcome_gate": "Closed loop with stable references",
+    }
+    assert json.loads(stdout.getvalue())["action"] == "preview"
+
+
 def test_roadmap_write_forwards_proof_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

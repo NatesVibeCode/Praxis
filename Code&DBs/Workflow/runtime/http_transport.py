@@ -36,6 +36,15 @@ _REGISTRY: dict[str, TransportHandler] = {}
 _TELEMETRY_REGISTRY: dict[str, TelemetryParser] = {}
 _MESSAGE_REGISTRY: dict[str, MessageFormatter] = {}
 
+_PROVIDER_TELEMETRY_FAMILY_BY_SLUG: dict[str, str] = {
+    "anthropic": "anthropic_messages",
+    "google": "google_generate_content",
+    "gemini": "google_generate_content",
+    "openai": "openai_chat_completions",
+    "openrouter": "openai_chat_completions",
+    "deepseek": "openai_chat_completions",
+}
+
 _CURSOR_API_BASE = "https://api.cursor.com"
 _CURSOR_NONTERMINAL_STATUSES = frozenset({"CREATING", "RUNNING"})
 _CURSOR_SUCCESS_STATUSES = frozenset({"FINISHED"})
@@ -86,6 +95,28 @@ def get_handler(protocol_family: str) -> TransportHandler:
 def get_telemetry_parser(protocol_family: str) -> TelemetryParser | None:
     """Look up a telemetry parser. Returns None if no parser registered."""
     return _TELEMETRY_REGISTRY.get(protocol_family)
+
+
+def telemetry_family_for_provider(
+    provider_slug: str,
+    *,
+    protocol_family: str | None = None,
+) -> str | None:
+    """Resolve the parser family for CLI telemetry.
+
+    API protocol family is transport authority, not CLI telemetry authority.
+    CLI-only providers may legitimately have no API protocol while still
+    emitting usage envelopes that match a known parser family.
+    """
+
+    family = str(protocol_family or "").strip()
+    if family and family in _TELEMETRY_REGISTRY:
+        return family
+    provider = str(provider_slug or "").strip().lower()
+    mapped = _PROVIDER_TELEMETRY_FAMILY_BY_SLUG.get(provider)
+    if mapped and mapped in _TELEMETRY_REGISTRY:
+        return mapped
+    return None
 
 
 def parse_telemetry(protocol_family: str, raw_json: dict[str, Any]) -> dict[str, Any] | None:

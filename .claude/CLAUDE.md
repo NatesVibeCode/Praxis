@@ -94,12 +94,25 @@ Master plan filed as `decision.2026-04-24.public-beta-ramp-master-plan`
   223. Remaining: preview-first re-parent validation + `praxis_operator_closeout`
   branch for authoring cleanup vs proof-backed closeout.
 
-**CQRS follow-ups queued:** register `launch_plan` + `plan.composed` as
-operations in `operation_catalog_registry` so emission flows through
-`operation_receipt.event_ids`. Event *contracts* are already registered
-(migrations 224/226) — the missing piece is the operation registration
-that unlocks receipt-backed emission. Emission currently via
-`emit_system_event` observability sidecar.
+**CQRS follow-ups (substantially landed 2026-04-24):** Migrations 234 + 235
+register `launch_plan` + `compose_plan` as command operations in
+`operation_catalog_registry` (with `event_required=TRUE`, `event_type=plan.launched`
+/ `plan.composed`), add the `plan.composed` event contract, and re-point
+the handler_ref at the new gateway-friendly wrappers in
+`runtime/operations/commands/plan_orchestration.py` (`LaunchPlanCommand` +
+`handle_launch_plan`, `ComposePlanCommand` + `handle_compose_plan`). MCP
+tools `tool_praxis_launch_plan` and `tool_praxis_compose_plan` now dispatch
+through `execute_operation_from_subsystems` instead of calling the
+underlying functions directly — the gateway auto-generates `event_ids` on
+completed receipts and inserts `plan.launched` / `plan.composed` rows into
+`authority_events` with `receipt_id` linkage. End-to-end smoke verified:
+gateway dispatch produces `authority_events.event_type=plan.composed`
+rows with proper `operation_ref` + `receipt_id`. **Remaining:** the
+underlying `runtime.spec_compiler.launch_plan` and
+`runtime.intent_composition.compose_plan_from_intent` still call
+`emit_system_event` as a sidecar — dual-write during transition. Removing
+the sidecar requires migrating any `system_events` consumers (Moon
+observability, replay tooling) to read from `authority_events` first.
 
 **Parallel work (other model):** Phase 2 Moon Composer — query-side
 projections (`legal_modules_for(pills)`, `surface_for(workflow_run)`),

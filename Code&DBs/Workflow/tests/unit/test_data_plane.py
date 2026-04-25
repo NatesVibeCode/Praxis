@@ -17,6 +17,35 @@ def test_normalize_data_job_requires_input_source() -> None:
         normalize_data_job({"operation": "profile"})
 
 
+def test_supported_data_operations_cover_the_dispatch_surface() -> None:
+    assert data_plane.SUPPORTED_DATA_OPERATIONS == {
+        "parse",
+        "profile",
+        "filter",
+        "sort",
+        "normalize",
+        "repair",
+        "repair_loop",
+        "backfill",
+        "redact",
+        "checkpoint",
+        "replay",
+        "approve",
+        "apply",
+        "validate",
+        "transform",
+        "join",
+        "merge",
+        "aggregate",
+        "split",
+        "export",
+        "dead_letter",
+        "dedupe",
+        "reconcile",
+        "sync",
+    }
+
+
 def test_normalize_data_job_accepts_plan_and_approval_manifest_ids() -> None:
     job = normalize_data_job(
         {

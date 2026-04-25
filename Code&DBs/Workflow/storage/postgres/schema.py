@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import time
+from typing import Any
 
 import asyncpg
 
@@ -95,6 +96,36 @@ _BOOTSTRAP_BASELINE_ANCHOR_OBJECTS = (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _postgres_error_annotation(exc: asyncpg.PostgresError) -> dict[str, Any]:
+    """Attach Postgres error fields so CHECK / FK violations stay visible."""
+
+    annotation: dict[str, Any] = {}
+    for attr in (
+        "message",
+        "detail",
+        "hint",
+        "constraint_name",
+        "schema_name",
+        "table_name",
+        "column_name",
+        "datatype_name",
+    ):
+        val = getattr(exc, attr, None)
+        if val not in (None, ""):
+            annotation[f"postgres_{attr}"] = val
+    return annotation
+
+
+def _postgres_error_tail(exc: asyncpg.PostgresError) -> str:
+    detail = getattr(exc, "detail", None)
+    message = getattr(exc, "message", None) or str(exc)
+    return (str(detail).strip() if detail else str(message).strip()) or str(exc)
+
+
+def _postgres_bootstrap_failure_summary(filename: str, exc: asyncpg.PostgresError) -> str:
+    return f"failed to bootstrap workflow migration {filename}: {_postgres_error_tail(exc)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -609,18 +640,29 @@ async def _ensure_schema_migrations_table(conn: asyncpg.Connection) -> None:
             return
         raise PostgresSchemaError(
             "postgres.schema_bootstrap_failed",
-            "failed to ensure schema_migrations apply-tracking table exists",
-            details={"sqlstate": getattr(exc, "sqlstate", None)},
+            f"failed to ensure schema_migrations apply-tracking table exists: {_postgres_error_tail(exc)}",
+            details={
+                "sqlstate": getattr(exc, "sqlstate", None),
+                **_postgres_error_annotation(exc),
+            },
         ) from exc
 
 
-async def _record_migration_apply(
+async def record_migration_apply(
     conn: asyncpg.Connection,
     filename: str,
     *,
     applied_by: str = _SCHEMA_MIGRATIONS_APPLIED_BY_BOOTSTRAP,
 ) -> None:
     """Record a successful migration apply.
+
+    Public manual-apply API. When a migration runs out-of-band (e.g. an
+    operator applies a single file via psql or a one-off script), the
+    schema_migrations row must still be written so future drift checks
+    succeed and ``inspect_workflow_schema`` reports the right state. The
+    schema_migrations table requires both ``content_sha256`` and
+    ``bootstrap_role``; manual INSERT attempts hit two NOT NULL violations
+    in sequence (BUG-431B3436). This helper fills both correctly.
 
     Computes sha256 of the migration's SQL text at apply time so later drift
     between disk content and recorded hash is detectable. Uses ON CONFLICT DO
@@ -672,28 +714,47 @@ async def _record_migration_apply(
 
 
 async def _bootstrap_migration(conn: asyncpg.Connection, filename: str) -> None:
+    """Apply one migration file all-or-nothing.
+
+    The whole migration runs in a single outer transaction so a failure on
+    statement N rolls back statements 1..N-1. Each statement runs inside a
+    savepoint (asyncpg nests transactions as savepoints) so duplicate-object
+    errors can be skipped without poisoning the outer transaction
+    (BUG-25C5319C). The schema_migrations row is recorded as the last
+    in-transaction step — if it lands, every statement landed too.
+    """
     await _ensure_schema_migrations_table(conn)
-    for statement in workflow_bootstrap_migration_statements(filename):
-        if _is_comment_only_statement(statement):
-            continue
-        if _is_transaction_wrapper_statement(statement):
-            continue
-        try:
-            async with conn.transaction():
-                await conn.execute(statement)
-        except asyncpg.PostgresError as exc:
-            if _is_duplicate_object_error(exc):
+    async with conn.transaction():
+        for statement in workflow_bootstrap_migration_statements(filename):
+            if _is_comment_only_statement(statement):
                 continue
-            raise PostgresSchemaError(
-                "postgres.schema_bootstrap_failed",
-                f"failed to bootstrap workflow migration {filename}",
-                details={
+            if _is_transaction_wrapper_statement(statement):
+                continue
+            try:
+                async with conn.transaction():
+                    await conn.execute(statement)
+            except asyncpg.PostgresError as exc:
+                if _is_duplicate_object_error(exc):
+                    continue
+                details = {
                     "filename": filename,
                     "sqlstate": getattr(exc, "sqlstate", None),
                     "statement": statement[:120],
-                },
-            ) from exc
-    await _record_migration_apply(conn, filename)
+                }
+                details.update(_postgres_error_annotation(exc))
+                raise PostgresSchemaError(
+                    "postgres.schema_bootstrap_failed",
+                    _postgres_bootstrap_failure_summary(filename, exc),
+                    details=details,
+                ) from exc
+        await _record_migration_apply(conn, filename)
+
+
+# Backwards-compat alias — historic callers (tests, scripts) reference the
+# private name. Public API is ``record_migration_apply``. Internal callers
+# go through the underscore alias so monkeypatch-based tests can intercept
+# the apply-tracking step without also intercepting external surfaces.
+_record_migration_apply = record_migration_apply
 
 
 async def _record_bootstrapped_schema_migration_rows(

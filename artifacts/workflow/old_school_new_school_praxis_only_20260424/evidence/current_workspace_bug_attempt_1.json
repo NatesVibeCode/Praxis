@@ -1,0 +1,13 @@
+{
+  "captured_at": "2026-04-24T22:55:19Z",
+  "category": "logic_error",
+  "description": "Current workspace verification reproduced the original repair trigger: the first generated implementation does not mark canceled subscriptions inactive.",
+  "failing_command": "cd artifacts/workflow/old_school_new_school_praxis_only_20260424/attempts/attempt_1 && python3 - <<'PY' ...",
+  "input_task": "add a Stripe webhook that updates user status",
+  "observed_in": "evidence/current_workspace_verification_attempt_1.json",
+  "severity": "P2",
+  "source_kind": "autonomous_objective_workflow",
+  "stderr_excerpt": "Traceback (most recent call last):\n  File \"<stdin>\", line 15, in <module>\nAssertionError\n",
+  "stdout_excerpt": "",
+  "title": "Current workspace reproduces the Stripe webhook status-mapping bug in attempt 1"
+}

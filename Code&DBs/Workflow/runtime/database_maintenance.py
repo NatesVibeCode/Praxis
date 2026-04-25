@@ -428,11 +428,15 @@ class DatabaseMaintenanceProcessor:
                 policy_key=policy_key,
             )
 
-        from runtime.workflow.unified import submit_workflow_inline
+        from runtime.control_commands import submit_workflow_command
 
-        workflow_start_result = submit_workflow_inline(
+        workflow_start_result = submit_workflow_command(
             self._conn,
-            spec_dict,
+            requested_by_kind="runtime",
+            requested_by_ref=f"database_maintenance.{policy_key}",
+            inline_spec=spec_dict,
+            spec_name=str(spec_dict.get("name") or policy_key),
+            total_jobs=len(spec_dict.get("jobs") or []),
             packet_provenance={
                 "source_kind": "database_maintenance",
                 "maintenance_policy": policy_key,

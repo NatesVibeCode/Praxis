@@ -152,6 +152,14 @@ def infer_schema_area(node_id: str, label: str, etype: str, preview: str, source
     return None
 
 
+def normalize_relation_label(label: str) -> str:
+    normalized = label.strip().lower()
+    return {
+        "derives_from": "derived_from",
+        "derived_from": "derived_from",
+    }.get(normalized, normalized)
+
+
 def fetch_entities(conn: SyncPostgresConnection) -> list[dict[str, Any]]:
     return [
         dict(r)
@@ -639,16 +647,21 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
         )
 
     edge_rows: list[dict[str, Any]] = []
+    seen_edge_ids: set[str] = set()
     for edge in edges:
         if edge["source_id"] not in node_ids or edge["target_id"] not in node_ids:
             continue
-        relation = str(edge["relation_type"])
+        relation = normalize_relation_label(str(edge["relation_type"]))
         if relation == "belongs_to_area":
             continue
+        edge_id = f"{edge['source_id']}|{relation}|{edge['target_id']}"
+        if edge_id in seen_edge_ids:
+            continue
+        seen_edge_ids.add(edge_id)
         edge_rows.append(
             {
                 "data": {
-                    "id": f"{edge['source_id']}|{relation}|{edge['target_id']}",
+                    "id": edge_id,
                     "source": edge["source_id"],
                     "target": edge["target_id"],
                     "label": relation,
@@ -667,11 +680,15 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
         target = str(lineage["dst_object_kind"])
         if source not in node_ids or target not in node_ids:
             continue
-        relation = str(lineage["edge_kind"])
+        relation = normalize_relation_label(str(lineage["edge_kind"]))
+        edge_id = f"{source}|{relation}|{target}"
+        if edge_id in seen_edge_ids:
+            continue
+        seen_edge_ids.add(edge_id)
         edge_rows.append(
             {
                 "data": {
-                    "id": f"{source}|{relation}|{target}",
+                    "id": edge_id,
                     "source": source,
                     "target": target,
                     "label": relation,
@@ -691,10 +708,14 @@ def build_graph(*, database_url: str | None = None) -> dict[str, list[dict[str, 
         target = f"area::{surface_name if surface_name in AREA_COLORS else 'moon'}"
         if source not in node_ids or target not in node_ids:
             continue
+        edge_id = f"{source}|belongs_to_surface|{target}"
+        if edge_id in seen_edge_ids:
+            continue
+        seen_edge_ids.add(edge_id)
         edge_rows.append(
             {
                 "data": {
-                    "id": f"{source}|belongs_to_surface|{target}",
+                    "id": edge_id,
                     "source": source,
                     "target": target,
                     "label": "belongs_to_surface",

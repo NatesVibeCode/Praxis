@@ -1777,29 +1777,22 @@ def tool_praxis_launch_plan(params: dict) -> dict:
             payload["mode"] = "preview"
             return payload
 
-        from runtime.spec_compiler import LaunchSubmitFailedError, launch_plan
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
-        receipt = launch_plan(plan, conn=pg_conn, workdir=workdir)
-    except LaunchSubmitFailedError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "reason_code": "launch.submit_failed",
-            "submit_status": exc.status,
-            "submit_error_code": exc.error_code,
-            "submit_error_detail": exc.error_detail,
-            "spec_name": exc.spec_name,
-            "submit_result": exc.submit_result,
-        }
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc), "reason_code": "plan.invalid"}
+        result = execute_operation_from_subsystems(
+            _subs,
+            operation_name="launch_plan",
+            payload={"plan": plan, "workdir": workdir},
+        )
     except Exception as exc:
         return _structured_runtime_error(exc, action="launch_plan")
 
-    payload = receipt.to_dict()
-    payload["ok"] = True
-    payload["mode"] = "submitted"
-    return payload
+    if not isinstance(result, dict):
+        return _structured_runtime_error(
+            RuntimeError(f"launch_plan returned non-dict: {type(result).__name__}"),
+            action="launch_plan",
+        )
+    return result
 
 
 def tool_praxis_plan_lifecycle(params: dict) -> dict:
@@ -2036,34 +2029,31 @@ def tool_praxis_compose_plan(params: dict) -> dict:
         }
 
     try:
-        from runtime.intent_composition import compose_plan_from_intent
-        from runtime.intent_decomposition import DecompositionRequiresLLMError
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
-        proposed = compose_plan_from_intent(
-            intent,
-            conn=pg_conn,
-            plan_name=params.get("plan_name"),
-            why=params.get("why"),
-            workdir=params.get("workdir"),
-            allow_single_step=bool(params.get("allow_single_step")),
-            write_scope_per_step=params.get("write_scope_per_step"),
-            default_write_scope=params.get("default_write_scope"),
-            default_stage=str(params.get("default_stage") or "build"),
+        result = execute_operation_from_subsystems(
+            _subs,
+            operation_name="compose_plan",
+            payload={
+                "intent": intent,
+                "plan_name": params.get("plan_name"),
+                "why": params.get("why"),
+                "workdir": params.get("workdir"),
+                "allow_single_step": bool(params.get("allow_single_step")),
+                "write_scope_per_step": params.get("write_scope_per_step"),
+                "default_write_scope": params.get("default_write_scope"),
+                "default_stage": str(params.get("default_stage") or "build"),
+            },
         )
-    except DecompositionRequiresLLMError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "reason_code": "decomposition.requires_llm",
-        }
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc), "reason_code": "compose.invalid"}
     except Exception as exc:
         return _structured_runtime_error(exc, action="compose_plan")
 
-    payload = proposed.to_dict()
-    payload["ok"] = True
-    return payload
+    if not isinstance(result, dict):
+        return _structured_runtime_error(
+            RuntimeError(f"compose_plan returned non-dict: {type(result).__name__}"),
+            action="compose_plan",
+        )
+    return result
 
 
 def tool_praxis_decompose_intent(params: dict) -> dict:

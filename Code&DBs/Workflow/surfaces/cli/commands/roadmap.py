@@ -30,7 +30,8 @@ def _help_text() -> str:
             "      Run-scoped operator views (require a workflow run id).",
             "  Command:",
             "    workflow roadmap write <preview|validate|commit> --title <title> --intent-brief <brief> [options] [--json]",
-            "      Options include --proof-kind capability_delivered_by_decision_filing for capability rows delivered by a decided operator decision.",
+            "      Options include --source-bug-id/--source-bug, --registry-path/--registry-paths,",
+            "      --priority, --outcome-gate, and --proof-kind capability_delivered_by_decision_filing.",
             "    workflow roadmap closeout <preview|commit> [--bug-id <id>]... [--roadmap-item-id <id>]...",
             "",
             "Tip: `view` is read-only; write and closeout mutate state only when action is commit.",
@@ -173,9 +174,9 @@ def _roadmap_write_command(args: list[str], *, stdout: TextIO) -> int:
             params["slug"] = value
         elif flag == "--depends-on":
             depends_on.append(value)
-        elif flag == "--source-bug":
+        elif flag in {"--source-bug", "--source-bug-id"}:
             params["source_bug_id"] = value
-        elif flag == "--registry-path":
+        elif flag in {"--registry-path", "--registry-paths"}:
             registry_paths.append(value)
         elif flag == "--decision-ref":
             params["decision_ref"] = value

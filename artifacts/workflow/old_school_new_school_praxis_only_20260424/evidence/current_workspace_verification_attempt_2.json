@@ -1,0 +1,18 @@
+{
+  "attempt": 2,
+  "captured_at": "2026-04-24T22:55:19Z",
+  "classification": "none",
+  "command": "cd artifacts/workflow/old_school_new_school_praxis_only_20260424/attempts/attempt_2 && python3 - <<'PY'\nfrom stripe_webhook import handle_stripe_webhook\n\ndef subscription_event(customer_id, status):\n    return {\n        'type': 'customer.subscription.updated',\n        'data': {'object': {'customer': customer_id, 'status': status}},\n    }\nusers = {'cus_123': {'status': 'inactive'}}\nresult = handle_stripe_webhook(subscription_event('cus_123', 'active'), users)\nassert result['updated'] is True\nassert users['cus_123']['status'] == 'active'\nusers = {'cus_123': {'status': 'active'}}\nresult = handle_stripe_webhook(subscription_event('cus_123', 'canceled'), users)\nassert result['updated'] is True\nassert result['user_status'] == 'inactive'\nassert users['cus_123']['status'] == 'inactive'\nusers = {}\nresult = handle_stripe_webhook({'type': 'invoice.paid'}, users)\nassert result == {'updated': False, 'reason': 'ignored_event'}\nassert users == {}\nprint('verification passed')\nPY",
+  "environment": {
+    "cwd": "/workspace",
+    "interpreter": "/usr/bin/python3",
+    "notes": [
+      "Sandbox python lacks stdlib modules such as json and unittest.",
+      "Verification used inline assertions instead of unittest discovery."
+    ]
+  },
+  "ok": true,
+  "returncode": 0,
+  "stderr": "",
+  "stdout": "verification passed\n"
+}

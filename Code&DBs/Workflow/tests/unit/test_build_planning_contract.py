@@ -33,6 +33,26 @@ def _base_definition() -> dict[str, object]:
     }
 
 
+def _definition_with_build_graph() -> dict[str, object]:
+    definition = _base_definition()
+    definition["build_graph"] = {
+        "graph_id": "shape:support-inbox",
+        "nodes": [
+            {
+                "node_id": "step-001",
+                "id": "step-001",
+                "kind": "step",
+                "title": "Review support inbox",
+                "summary": "Review the support inbox.",
+                "route": "llm_task",
+            }
+        ],
+        "edges": [],
+        "projection_status": {"state": "ready"},
+    }
+    return definition
+
+
 def test_candidate_resolution_manifest_surfaces_proposals_only(monkeypatch) -> None:
     monkeypatch.setattr(
         "runtime.build_planning_contract.effective_workflow_build_review_state",
@@ -67,6 +87,98 @@ def test_candidate_resolution_manifest_surfaces_proposals_only(monkeypatch) -> N
     assert slot["approved_ref"] is None
     assert slot["candidates"][0]["candidate_approval_state"] == "proposed"
     assert manifest["workflow_shape_candidates"][0]["approval_state"] == "unapproved"
+
+
+def test_candidate_resolution_manifest_projects_the_same_shape_into_storage(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _PlanningConn:
+        def fetchrow(self, *_args, **_kwargs):
+            return {"manifest_ref": "candidate_manifest:wf_alpha:def_candidate_manifest_alpha"}
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        "runtime.build_planning_contract.effective_workflow_build_review_state",
+        lambda conn, workflow_id, definition_revision: {
+            "review_group_ref": None,
+            "latest_records": [],
+            "latest_by_target": {},
+            "approval_records": [],
+            "approved_binding_refs": [],
+            "approved_import_snapshot_refs": [],
+            "approved_bundle_refs": [],
+            "approved_workflow_shape_ref": None,
+            "proposal_requests": [],
+            "widening_ops": [],
+        },
+    )
+    monkeypatch.setattr("runtime.build_planning_contract._load_shape_family_defs", lambda conn: [])
+    monkeypatch.setattr("runtime.build_planning_contract._load_bundle_defs", lambda conn: [])
+    monkeypatch.setattr(
+        "runtime.build_planning_contract.replace_workflow_build_candidate_manifest",
+        lambda conn, **kwargs: captured.setdefault("projection", kwargs),
+    )
+    monkeypatch.setattr(
+        "runtime.build_planning_contract.upsert_workflow_build_review_session",
+        lambda conn, **kwargs: captured.setdefault("review_session", kwargs),
+    )
+
+    manifest = build_candidate_resolution_manifest(
+        definition=_definition_with_build_graph(),
+        workflow_id="wf_alpha",
+        conn=_PlanningConn(),
+    )
+
+    projection = captured["projection"]
+    assert projection["manifest_ref"] == manifest["manifest_ref"]
+    assert projection["workflow_id"] == "wf_alpha"
+    assert projection["definition_revision"] == "def_candidate_manifest_alpha"
+    assert projection["manifest_revision"] == manifest["manifest_revision"]
+    assert projection["intent_ref"] == manifest["intent_ref"]
+    assert projection["review_group_ref"] == "workflow_build:wf_alpha:def_candidate_manifest_alpha"
+    assert projection["execution_readiness"] == manifest["execution_readiness"]
+    assert projection["projection_status"] == manifest["projection_status"]
+    assert projection["blocking_issues"] == manifest["blocking_issues"]
+    assert projection["required_confirmations"] == manifest["required_confirmations"]
+    assert len(projection["slots"]) == len(manifest["binding_slots"]) + len(manifest["workflow_shape_candidates"])
+    assert len(projection["candidates"]) == sum(
+        len(slot["candidates"]) for slot in manifest["binding_slots"]
+    ) + len(manifest["workflow_shape_candidates"])
+
+    binding_slot = next(slot for slot in projection["slots"] if slot["slot_ref"] == "binding:ref-001")
+    assert binding_slot["slot_kind"] == "binding"
+    assert binding_slot["source_binding_ref"] == "binding:ref-001"
+    assert binding_slot["candidate_resolution_state"] == "candidate_set"
+    assert binding_slot["approval_state"] == "unapproved"
+    assert binding_slot["top_ranked_ref"] == "integration_registry:gmail/search"
+    assert binding_slot["approved_ref"] is None
+    assert binding_slot["slot_metadata"] == {
+        "source_label": "@gmail/search",
+        "source_node_ids": ["step-001"],
+        "blocking_issue_ids": ["issue:binding:ref-001"],
+        "freshness": None,
+    }
+
+    shape_slot = next(slot for slot in projection["slots"] if slot["slot_ref"] == "workflow_shape")
+    assert shape_slot["slot_kind"] == "workflow_shape"
+    assert shape_slot["candidate_resolution_state"] == "candidate_set"
+    assert shape_slot["approval_state"] == "unapproved"
+    assert shape_slot["slot_metadata"] == {"shape_family_ref": None}
+    assert shape_slot["top_ranked_ref"] == "workflow_shape:def_candidate_manifest_alpha"
+
+    binding_candidate = next(candidate for candidate in projection["candidates"] if candidate["slot_ref"] == "binding:ref-001")
+    assert binding_candidate["target_kind"] == "integration"
+    assert binding_candidate["target_ref"] == "integration_registry:gmail/search"
+    assert binding_candidate["candidate_approval_state"] == "proposed"
+    assert binding_candidate["candidate_rationale"] == manifest["binding_slots"][0]["rationale"]
+
+    shape_candidate = next(candidate for candidate in projection["candidates"] if candidate["slot_ref"] == "workflow_shape")
+    assert shape_candidate["target_kind"] == "workflow_shape"
+    assert shape_candidate["target_ref"] == "workflow_shape:def_candidate_manifest_alpha"
+    assert shape_candidate["candidate_approval_state"] == "proposed"
+    assert shape_candidate["candidate_rationale"] == "Current workflow shape candidate"
 
 
 def test_reviewable_plan_tracks_approvals_and_proposal_requests(monkeypatch) -> None:

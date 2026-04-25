@@ -1,0 +1,17 @@
+{
+  "attempt": 1,
+  "captured_at": "2026-04-24T22:56:27Z",
+  "command": "raw MCP JSON-RPC call to praxis_submit_code_change",
+  "ok": false,
+  "reason_code": "workflow_submission.out_of_scope",
+  "message": "measured workspace changes escaped the declared write scope",
+  "details_summary": {
+    "write_scope": [
+      "artifacts/workflow"
+    ],
+    "notes": [
+      "The submission service reported many pre-existing paths outside artifacts/workflow as measured changes.",
+      "The rejection appears to come from workspace baseline drift rather than from the additive artifact files created in this job."
+    ]
+  }
+}

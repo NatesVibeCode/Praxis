@@ -218,6 +218,43 @@ def _latest_payload(conn, *, workflow_id: str) -> dict[str, object]:
     return build_workflow_build_moment(row, conn=conn)
 
 
+def test_real_db_candidate_manifest_projection_matches_persisted_shape() -> None:
+    workflow_id = f"wf_build_contract_{uuid.uuid4().hex[:8]}"
+    definition_revision = f"def_build_contract_{uuid.uuid4().hex[:8]}"
+
+    with transactional_test_conn() as conn:
+        definition = _persist_support_workflow(
+            conn,
+            workflow_id=workflow_id,
+            definition_revision=definition_revision,
+        )
+
+        manifest = build_candidate_resolution_manifest(
+            definition=definition,
+            workflow_id=workflow_id,
+            conn=conn,
+            compiled_spec=None,
+        )
+        payload = _latest_payload(conn, workflow_id=workflow_id)
+        projected = payload["candidate_resolution_manifest"]
+
+        for key in (
+            "manifest_version",
+            "manifest_id",
+            "manifest_ref",
+            "manifest_revision",
+            "execution_readiness",
+            "review_group_ref",
+            "projection_status",
+            "blocking_issues",
+            "required_confirmations",
+            "binding_slots",
+            "capability_bundle_candidates",
+            "workflow_shape_candidates",
+        ):
+            assert projected[key] == manifest[key]
+
+
 def test_real_db_candidate_manifest_and_payload_require_explicit_binding_approval() -> None:
     workflow_id = f"wf_build_contract_{uuid.uuid4().hex[:8]}"
     definition_revision = f"def_build_contract_{uuid.uuid4().hex[:8]}"

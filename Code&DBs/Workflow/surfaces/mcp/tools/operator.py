@@ -7,6 +7,10 @@ from typing import Any
 from ..subsystems import _subs
 
 _OPERATOR_READ_LIMIT_MAX = 500
+_OPERATOR_BOOLEAN_VALUES = frozenset(
+    {"true", "false", "1", "0", "yes", "no", "on", "off", "y", "n"}
+)
+_OPERATOR_BOOLEAN_TRUE = frozenset({"1", "true", "yes", "on", "y"})
 
 
 def _parse_iso_datetime(value: object, *, field_name: str) -> datetime:
@@ -43,6 +47,33 @@ def _structured_input_error(exc: Exception, *, operation_name: str) -> dict[str,
     }
 
 
+def _parse_positive_int(value: Any, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a positive integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text.isdigit():
+            raise ValueError(f"{field_name} must be a positive integer")
+        parsed = int(text)
+    else:
+        raise ValueError(f"{field_name} must be a positive integer")
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be greater than zero")
+    return parsed
+
+
+def _parse_bool(value: Any, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _OPERATOR_BOOLEAN_VALUES:
+            return normalized in _OPERATOR_BOOLEAN_TRUE
+    raise ValueError(f"{field_name} must be a boolean")
+
+
 def _bounded_limit(
     params: dict[str, Any],
     *,
@@ -52,19 +83,7 @@ def _bounded_limit(
     raw = params.get("limit", default)
     if raw is None or raw == "":
         raw = default
-    if isinstance(raw, bool):
-        raise ValueError("limit must be a positive integer")
-    if isinstance(raw, int):
-        limit = raw
-    elif isinstance(raw, str):
-        text = raw.strip()
-        if not text or not text.lstrip("-").isdigit():
-            raise ValueError("limit must be a positive integer")
-        limit = int(text)
-    else:
-        raise ValueError("limit must be a positive integer")
-    if limit <= 0:
-        raise ValueError("limit must be greater than zero")
+    limit = _parse_positive_int(raw, field_name="limit")
     return min(limit, maximum)
 
 
@@ -129,12 +148,15 @@ def tool_praxis_orient(params: dict) -> dict:
 def tool_praxis_metrics_reset(params: dict) -> dict:
     """Reset observability metrics through explicit operator maintenance authority."""
 
+    operation_name = "operator.metrics_reset"
+    try:
+        confirm = _parse_bool(params.get("confirm", False), field_name="confirm")
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+
     return _execute_catalog_tool(
         operation_name="operator.metrics_reset",
-        payload={
-            "confirm": bool(params.get("confirm", False)),
-            "before_date": params.get("before_date"),
-        },
+        payload={"confirm": confirm, "before_date": params.get("before_date")},
     )
 
 
@@ -146,14 +168,29 @@ def tool_praxis_bug_replay_provenance_backfill(params: dict) -> dict:
         limit = _bounded_limit(params, default=50)
     except ValueError as exc:
         return _structured_input_error(exc, operation_name=operation_name)
+
+    try:
+        open_only = _parse_bool(
+            params.get(
+                "open_only",
+                _bug_query_default_open_only_backlog(),
+            ),
+            field_name="open_only",
+        )
+        receipt_limit = _parse_positive_int(
+            params.get("receipt_limit", 1),
+            field_name="receipt_limit",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    receipt_limit = min(receipt_limit, 500)
+
     return _execute_catalog_tool(
         operation_name=operation_name,
         payload={
             "limit": limit,
-            "open_only": bool(
-                params.get("open_only", _bug_query_default_open_only_backlog())
-            ),
-            "receipt_limit": params.get("receipt_limit", 1),
+            "open_only": open_only,
+            "receipt_limit": receipt_limit,
         },
     )
 
@@ -162,16 +199,29 @@ def tool_praxis_semantic_bridges_backfill(params: dict) -> dict:
     """Replay semantic bridges from canonical operator authority."""
 
     as_of = params.get("as_of")
+    operation_name = "operator.semantic_bridges_backfill"
+    try:
+        include_object_relations = _parse_bool(
+            params.get("include_object_relations", True),
+            field_name="include_object_relations",
+        )
+        include_operator_decisions = _parse_bool(
+            params.get("include_operator_decisions", True),
+            field_name="include_operator_decisions",
+        )
+        include_roadmap_items = _parse_bool(
+            params.get("include_roadmap_items", True),
+            field_name="include_roadmap_items",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+
     return _execute_catalog_tool(
         operation_name="operator.semantic_bridges_backfill",
         payload={
-            "include_object_relations": bool(
-                params.get("include_object_relations", True)
-            ),
-            "include_operator_decisions": bool(
-                params.get("include_operator_decisions", True)
-            ),
-            "include_roadmap_items": bool(params.get("include_roadmap_items", True)),
+            "include_object_relations": include_object_relations,
+            "include_operator_decisions": include_operator_decisions,
+            "include_roadmap_items": include_roadmap_items,
             "as_of": (
                 _parse_iso_datetime(as_of, field_name="as_of")
                 if as_of is not None
@@ -249,12 +299,18 @@ def tool_praxis_graph_projection(params: dict) -> dict:
 def tool_praxis_ui_experience_graph(params: dict) -> dict:
     """Read the LLM-facing app experience graph."""
 
+    operation_name = "operator.ui_experience_graph"
+    try:
+        limit = _bounded_limit(params, default=80)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+
     return _execute_catalog_tool(
-        operation_name="operator.ui_experience_graph",
+        operation_name=operation_name,
         payload={
             "focus": params.get("focus"),
             "surface_name": params.get("surface_name"),
-            "limit": params.get("limit", 80),
+            "limit": limit,
         },
     )
 
@@ -276,13 +332,18 @@ def tool_praxis_issue_backlog(params: dict) -> dict:
         limit = _bounded_limit(params, default=50)
     except ValueError as exc:
         return _structured_input_error(exc, operation_name=operation_name)
+    try:
+        open_only = _parse_bool(
+            params.get("open_only", _bug_query_default_open_only_backlog()),
+            field_name="open_only",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
     return _execute_catalog_tool(
         operation_name=operation_name,
         payload={
             "limit": limit,
-            "open_only": bool(
-                params.get("open_only", _bug_query_default_open_only_backlog())
-            ),
+            "open_only": open_only,
             "status": params.get("status"),
         },
     )
@@ -294,6 +355,13 @@ def tool_praxis_operator_ideas(params: dict) -> dict:
     operation_name = "operator.ideas"
     try:
         limit = _bounded_limit(params, default=50)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    try:
+        open_only = _parse_bool(
+            params.get("open_only", _bug_query_default_open_only_backlog()),
+            field_name="open_only",
+        )
     except ValueError as exc:
         return _structured_input_error(exc, operation_name=operation_name)
     return execute_operation_from_subsystems(
@@ -319,9 +387,7 @@ def tool_praxis_operator_ideas(params: dict) -> dict:
             "created_at": params.get("created_at"),
             "updated_at": params.get("updated_at"),
             "idea_ids": _optional_sequence_payload(params, "idea_ids"),
-            "open_only": bool(
-                params.get("open_only", _bug_query_default_open_only_backlog())
-            ),
+            "open_only": open_only,
             "limit": limit,
         },
     )
@@ -344,7 +410,7 @@ def tool_praxis_replay_ready_bugs(params: dict) -> dict:
 
 
 def tool_praxis_operator_write(params: dict) -> dict:
-    """Preview, validate, or commit roadmap rows through the shared operator-write gate."""
+    """Preview, validate, commit, update, retire, or re-parent roadmap rows."""
 
     operation_name = "operator.roadmap_write"
     action = str(params.get("action") or "").strip() or "preview"
@@ -352,10 +418,37 @@ def tool_praxis_operator_write(params: dict) -> dict:
     intent_brief = str(params.get("intent_brief") or "").strip()
     roadmap_item_id = str(params.get("roadmap_item_id") or "").strip() or None
     phase_order = str(params.get("phase_order") or "").strip() or None
+    dry_run = params.get("dry_run")
     if not action:
         return _structured_input_error(
             ValueError("action is required and cannot be empty"), operation_name=operation_name
         )
+    normalized_action = action.lower()
+    if normalized_action in {"update", "retire", "re-parent", "reparent"}:
+        if roadmap_item_id is None:
+            return _structured_input_error(
+                ValueError(f"roadmap_item_id is required for action='{action}'"),
+                operation_name=operation_name,
+            )
+        if normalized_action in {"re-parent", "reparent"} and not str(
+            params.get("parent_roadmap_item_id") or ""
+        ).strip():
+            return _structured_input_error(
+                ValueError("parent_roadmap_item_id is required for action='re-parent'"),
+                operation_name=operation_name,
+            )
+        if dry_run is None:
+            dry_run = True
+        else:
+            try:
+                dry_run = _parse_bool(dry_run, field_name="dry_run")
+            except ValueError as exc:
+                return _structured_input_error(exc, operation_name=operation_name)
+    elif dry_run is not None:
+        try:
+            dry_run = _parse_bool(dry_run, field_name="dry_run")
+        except ValueError as exc:
+            return _structured_input_error(exc, operation_name=operation_name)
     if not title and roadmap_item_id is None:
         return _structured_input_error(
             ValueError(
@@ -398,6 +491,7 @@ def tool_praxis_operator_write(params: dict) -> dict:
             "proof_kind": params.get("proof_kind"),
             "roadmap_item_id": roadmap_item_id,
             "phase_order": phase_order,
+            "dry_run": dry_run,
         },
     )
 
@@ -508,6 +602,10 @@ def tool_praxis_semantic_assertions(params: dict) -> dict:
         operation_name = "semantic_assertions.list"
         as_of = params.get("as_of")
         try:
+            active_only = _parse_bool(params.get("active_only", True), field_name="active_only")
+        except ValueError as exc:
+            return _structured_input_error(exc, operation_name=operation_name)
+        try:
             limit = _bounded_limit(params, default=100)
         except ValueError as exc:
             return _structured_input_error(exc, operation_name=operation_name)
@@ -522,7 +620,7 @@ def tool_praxis_semantic_assertions(params: dict) -> dict:
                 "object_ref": params.get("object_ref"),
                 "source_kind": params.get("source_kind"),
                 "source_ref": params.get("source_ref"),
-                "active_only": bool(params.get("active_only", True)),
+                "active_only": active_only,
                 "as_of": (
                     _parse_iso_datetime(as_of, field_name="as_of")
                     if as_of is not None
@@ -1335,10 +1433,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_operator_write,
         {
             "description": (
-                "Preview, validate, or commit roadmap rows through the shared operator-write validation gate.\n\n"
+                "Preview, validate, commit, update, retire, or re-parent roadmap rows through the shared operator-write validation gate.\n\n"
                 "USE WHEN: you want to add a roadmap item or a packaged roadmap program without raw SQL. "
                 "This gate auto-generates ids, keys, dependency ids, and phase ordering, then returns a preview "
-                "before commit.\n\n"
+                "before commit. The update/retire/re-parent aliases default to dry-run so callers see the "
+                "would-be mutation before writing it.\n\n"
                 "EXAMPLE: praxis_operator_write(action='preview', title='Unified operator write gate', "
                 "intent_brief='Single preview-first validation gate for roadmap writes', "
                 "parent_roadmap_item_id='roadmap_item.authority.cleanup', template='hard_cutover_program')"
@@ -1348,15 +1447,42 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["preview", "validate", "commit"],
+                        "enum": [
+                            "preview",
+                            "validate",
+                            "commit",
+                            "update",
+                            "retire",
+                            "re-parent",
+                            "reparent",
+                        ],
                         "default": "preview",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": (
+                            "For action=update|retire|re-parent, true returns the would-be "
+                            "change and false commits it. Omitted defaults to true for those "
+                            "actions and is ignored for preview|validate|commit."
+                        ),
                     },
                     "title": {"type": "string"},
                     "intent_brief": {"type": "string"},
                     "template": {
                         "type": "string",
-                        "enum": ["single_capability", "hard_cutover_program"],
+                        "enum": [
+                            "single_capability",
+                            "hard_cutover_program",
+                            "multi_phase_program",
+                            "data_dictionary_impact_program",
+                        ],
                         "default": "single_capability",
+                        "description": (
+                            "Roadmap shape. multi_phase_program produces 5 phase "
+                            "placeholder children (foundations / build-out / substrate / "
+                            "supervision / release) that the operator customizes via "
+                            "action='update'."
+                        ),
                     },
                     "priority": {
                         "type": "string",

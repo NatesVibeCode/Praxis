@@ -208,18 +208,30 @@ def _submit_workflow_inline(
     lineage_depth: int | None = None,
     packet_provenance: dict[str, Any],
 ) -> dict[str, Any]:
-    from runtime.workflow.unified import submit_workflow_inline
+    from runtime.control_commands import submit_workflow_command
 
-    return submit_workflow_inline(
+    requested_by_ref = (
+        str(packet_provenance.get("integration_action") or "").strip()
+        or str(packet_provenance.get("source_kind") or "").strip()
+        or "workflow_inline"
+    )
+    result = submit_workflow_command(
         pg,
-        spec_dict,
+        requested_by_kind="integration",
+        requested_by_ref=requested_by_ref,
+        inline_spec=spec_dict,
         parent_run_id=parent_run_id,
         parent_job_label=parent_job_label,
         dispatch_reason=dispatch_reason,
         trigger_depth=trigger_depth,
         lineage_depth=lineage_depth,
         packet_provenance=packet_provenance,
+        spec_name=str(spec_dict.get("name") or requested_by_ref),
+        total_jobs=len(spec_dict.get("jobs") or []),
     )
+    if result.get("error") or not result.get("run_id"):
+        raise RuntimeError(str(result.get("error") or result))
+    return result
 
 
 def _search_receipts(
@@ -251,9 +263,25 @@ def _get_run_status(pg: Any, run_id: str) -> dict[str, Any] | None:
 
 
 def _cancel_workflow_run(pg: Any, run_id: str, *, include_running: bool = False) -> dict[str, Any]:
-    from runtime.workflow.unified import cancel_run
+    from runtime.control_commands import (
+        ControlCommandType,
+        ControlIntent,
+        execute_control_intent,
+        render_control_command_response,
+    )
 
-    return cancel_run(pg, run_id, include_running=include_running)
+    command = execute_control_intent(
+        pg,
+        ControlIntent(
+            command_type=ControlCommandType.WORKFLOW_CANCEL,
+            requested_by_kind="integration",
+            requested_by_ref="workflow.cancel",
+            idempotency_key=f"workflow.cancel.integration.{run_id}",
+            payload={"run_id": run_id, "include_running": include_running},
+        ),
+        approved_by="integration.workflow.cancel",
+    )
+    return render_control_command_response(pg, command, action="cancel", run_id=run_id)
 
 
 def _record_workflow_invocation(pg: Any, *, workflow_id: str) -> None:

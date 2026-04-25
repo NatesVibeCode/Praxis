@@ -252,7 +252,7 @@ def _fire_workflow_trigger(
     source_depth = payload.get("trigger_depth", 0)
     parent_run_id = payload.get("run_id") or event.get("source_id")
 
-    from runtime.workflow.unified import submit_workflow_inline
+    from runtime.control_commands import submit_workflow_command
 
     spec_copy = json.loads(json.dumps(compiled_spec))
     if spec_copy.get("jobs"):
@@ -264,12 +264,19 @@ def _fire_workflow_trigger(
         )
         spec_copy["jobs"][0]["prompt"] = spec_copy["jobs"][0].get("prompt", "") + event_context
 
-    result = submit_workflow_inline(
+    result = submit_workflow_command(
         conn,
-        spec_copy,
+        requested_by_kind="runtime",
+        requested_by_ref=f"workflow_trigger.{trigger_id}",
+        inline_spec=spec_copy,
         parent_run_id=parent_run_id,
+        dispatch_reason=f"workflow_trigger.{event_type}",
         trigger_depth=source_depth + 1,
+        spec_name=str(spec_copy.get("name") or workflow_name),
+        total_jobs=len(spec_copy.get("jobs") or []),
     )
+    if result.get("error") or not result.get("run_id"):
+        raise RuntimeError(str(result.get("error") or result))
 
     logger.info(
         "Trigger %s fired workflow '%s' → run %s (depth=%d)",
@@ -647,7 +654,7 @@ def _submit_workflow_for_event(
     event_type = event["event_type"]
     parent_run_id = payload.get("run_id") or event.get("source_id")
 
-    from runtime.workflow.unified import submit_workflow_inline
+    from runtime.control_commands import submit_workflow_command
 
     if spec_copy.get("jobs"):
         extra_lines = [
@@ -659,12 +666,19 @@ def _submit_workflow_for_event(
         event_context = f"\n\n## {context_title}\n" + "\n".join(extra_lines)
         spec_copy["jobs"][0]["prompt"] = spec_copy["jobs"][0].get("prompt", "") + event_context
 
-    result = submit_workflow_inline(
+    result = submit_workflow_command(
         conn,
-        spec_copy,
+        requested_by_kind="runtime",
+        requested_by_ref=f"event_subscription.{workflow_id}",
+        inline_spec=spec_copy,
         parent_run_id=parent_run_id,
+        dispatch_reason=f"event_subscription.{event_type}",
         trigger_depth=source_depth + 1,
+        spec_name=str(spec_copy.get("name") or workflow_name),
+        total_jobs=len(spec_copy.get("jobs") or []),
     )
+    if result.get("error") or not result.get("run_id"):
+        raise RuntimeError(str(result.get("error") or result))
     logger.info(
         "Workflow '%s' triggered by %s → run %s (depth=%d)",
         workflow_name,

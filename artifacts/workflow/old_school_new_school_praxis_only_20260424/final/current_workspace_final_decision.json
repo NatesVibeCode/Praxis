@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-04-24T22:55:19Z",
+  "contract_sha256": "43383aacdda9d956ed4738d664ba4ff3b4114f9a3d03f5735f8b24e2f7ff6494",
+  "environment_constraints": [
+    "git is unavailable in this sandbox, so no repo revision was recorded.",
+    "python3 is present but missing stdlib modules such as json and unittest, so the verifier was rewritten as inline assertions."
+  ],
+  "final_attempt": 2,
+  "implementation_sha256": "78454e8f0f70a083e40668855d16e352003506a7e142a5b8024af4b0a996167e",
+  "input_task": "add a Stripe webhook that updates user status",
+  "invalidates_on": [
+    "input_task_change",
+    "contract_change",
+    "implementation_hash_change",
+    "test_hash_change",
+    "verification_command_change"
+  ],
+  "repair_iterations": 1,
+  "test_sha256": "c4a03bebda51ac04b761815a6b29c05b80273f480d27e2107eb2ca068c010f7a",
+  "valid": true,
+  "validated_by": "evidence/current_workspace_verification_attempt_2.json"
+}

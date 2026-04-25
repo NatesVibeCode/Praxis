@@ -2710,10 +2710,43 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
         job_id = sub_args[0]
 
         try:
-            from runtime.workflow.unified import cancel_job
+            from runtime.control_commands import (
+                ControlCommandType,
+                ControlIntent,
+                execute_control_intent,
+                render_control_command_response,
+            )
 
             conn = _workflow_runtime_conn()
-            result = cancel_job(conn, job_id)
+            rows = conn.execute(
+                """SELECT run_id
+                   FROM workflow_jobs
+                   WHERE id = $1::bigint
+                   LIMIT 1""",
+                job_id,
+            )
+            if not rows:
+                stdout.write(f"error: workflow job not found: {job_id}\n")
+                return 1
+            run_id = str(rows[0]["run_id"])
+            command = execute_control_intent(
+                conn,
+                ControlIntent(
+                    command_type=ControlCommandType.WORKFLOW_CANCEL,
+                    requested_by_kind="cli",
+                    requested_by_ref="workflow.queue.cancel",
+                    idempotency_key=f"workflow.cancel.cli.queue.{job_id}",
+                    payload={"run_id": run_id, "include_running": True},
+                ),
+                approved_by="cli.workflow.queue.cancel",
+            )
+            result = render_control_command_response(
+                conn,
+                command,
+                action="cancel",
+                run_id=run_id,
+                job_id=job_id,
+            )
         except Exception as exc:
             stdout.write(f"error: failed to cancel job: {exc}\n")
             return 1

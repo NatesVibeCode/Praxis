@@ -509,7 +509,13 @@ def test_post_onboarding_sync_updates_native_runtime_allowed_models(monkeypatch)
                     }
                 ]
             if "FROM registry_native_runtime_profile_authority" in query:
-                return [{"runtime_profile_ref": "praxis", "allowed_models": '["gpt-5.4"]'}]
+                return [
+                    {
+                        "runtime_profile_ref": "praxis",
+                        "provider_names": '["openai"]',
+                        "allowed_models": '["gpt-5.4"]',
+                    }
+                ]
             return []
 
     fake_sync_conn = _FakeSyncConn()
@@ -525,15 +531,27 @@ def test_post_onboarding_sync_updates_native_runtime_allowed_models(monkeypatch)
 
     result = provider_onboarding_execute._post_onboarding_sync(
         database_url="postgresql://example.test/workflow",
-        provider_slug="openai",
-        model_reports=({"model_slug": "gpt-5.4-mini"},),
+        provider_slug="cursor",
+        model_reports=({"model_slug": "composer-2"},),
     )
 
     assert result["native_runtime_profiles"] is True
     assert result["updated_runtime_profile_refs"] == ["praxis"]
-    assert result["added_to_allowed_models"] == ["gpt-5.4-mini"]
+    assert result["added_to_allowed_models"] == ["composer-2"]
     assert result["cap_columns"][0]["caps"]["cap_build_med"] is True
     assert result["cap_columns"][0]["caps"]["cap_review"] is True
+    update_calls = [
+        params
+        for query, params in fake_sync_conn.calls
+        if "UPDATE registry_native_runtime_profile_authority" in query
+    ]
+    assert update_calls == [
+        (
+            "praxis",
+            '["openai", "cursor"]',
+            '["gpt-5.4", "composer-2"]',
+        )
+    ]
     assert any(
         "UPDATE registry_native_runtime_profile_authority" in query
         for query, _ in fake_sync_conn.calls

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
 import pytest
 
 from storage.postgres import connection as connection_mod
@@ -31,6 +34,14 @@ class _ExhaustedPool(_FakePool):
     def acquire(self, *, timeout=None):
         self.acquire_timeout = timeout
         return _TimeoutAcquireContext()
+
+
+class _CodecConn:
+    def __init__(self) -> None:
+        self.codecs: list[tuple[str, dict[str, object]]] = []
+
+    async def set_type_codec(self, typename: str, **kwargs: object) -> None:
+        self.codecs.append((typename, kwargs))
 
 
 def test_get_workflow_pool_rotates_when_dsn_changes(monkeypatch) -> None:
@@ -155,6 +166,33 @@ def test_sync_connection_pool_acquire_timeout_is_typed(monkeypatch) -> None:
     assert exc_info.value.details["operation"] == "fetchval"
     assert exc_info.value.details["timeout_s"] == 0.25
     assert "after 0.25s" in str(exc_info.value)
+
+
+def test_json_codec_encoder_preserves_preencoded_json_text() -> None:
+    assert connection_mod._encode_json_value("[]") == "[]"
+    assert connection_mod._encode_json_value("{}") == "{}"
+    assert connection_mod._encode_json_value('{"event_ids":["evt-1"]}') == (
+        '{"event_ids":["evt-1"]}'
+    )
+    assert json.loads(connection_mod._encode_json_value(["evt-1"])) == ["evt-1"]
+    assert json.loads(connection_mod._encode_json_value({"event_ids": ["evt-1"]})) == {
+        "event_ids": ["evt-1"]
+    }
+    assert json.loads(connection_mod._encode_json_value("plain text")) == "plain text"
+
+
+def test_register_jsonb_codec_uses_tolerant_encoder_for_json_and_jsonb() -> None:
+    conn = _CodecConn()
+
+    asyncio.run(connection_mod._register_jsonb_codec(conn))
+
+    registered = {typename: kwargs for typename, kwargs in conn.codecs}
+    assert set(registered) == {"jsonb", "json"}
+    for typename in ("jsonb", "json"):
+        assert registered[typename]["schema"] == "pg_catalog"
+        assert registered[typename]["format"] == "text"
+        assert registered[typename]["encoder"] is connection_mod._encode_json_value
+        assert registered[typename]["decoder"]("[]") == []
 
 
 def test_resolve_workflow_authority_cache_key_sanitizes_database_identity() -> None:

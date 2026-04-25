@@ -1,0 +1,42 @@
+{
+  "name": "replay_ready_gc_20260424_D_closeout",
+  "workflow_id": "replay_ready_gc_20260424_D_closeout",
+  "phase": "build",
+  "outcome_goal": "Close out the Gemini/Cursor replay-ready remediation run: verify every fix has a validates_fix evidence link, resolve FIXED bugs through the bug tracker surface, and write the closeout artifact with before/after stats, resolved IDs, still-open IDs, verifier evidence refs, and residual risks.",
+  "bug_source": {
+    "authority": "praxis workflow tools call praxis_replay_ready_bugs",
+    "snapshot_date": "2026-04-24",
+    "open_count": 151,
+    "replay_ready_count": 4
+  },
+  "anti_requirements": [
+    "Do not edit any source file — this spec writes one artifact and resolves bugs through the tracker only.",
+    "Do not resolve FIXED without at least one validates_fix evidence link per bug.",
+    "Do not invent run_id, receipt_id, replay_run_id, or replay_receipt_id — only record what Spec B / Spec C / the bug tracker actually produced.",
+    "Do not call api.anthropic.com directly (Anthropic is CLI-only per standing order decision.2026-04-20.anthropic-cli-only-restored).",
+    "Do not widen scope to the other 147 OPEN bugs — those are out of scope for this pilot.",
+    "Do not mark a bug FIXED on prose alone; if replay still fails, leave OPEN with updated resume_context."
+  ],
+  "verify_refs": [
+    "praxis workflow tools call praxis_workflow_validate --input-json '{\"spec_path\":\"artifacts/workflow/replay_ready_gc_20260424_D_closeout.queue.json\"}'",
+    "test -s artifacts/workflow/replay_ready_gc_20260424_CLOSEOUT.md"
+  ],
+  "jobs": [
+    {
+      "label": "closeout_replay_ready_remediation",
+      "agent": "google/gemini-3.1-pro-preview",
+      "adapter_type": "cli_llm",
+      "task_type": "analysis",
+      "bug_ids": [
+        "BUG-7C5D8AE4",
+        "BUG-39D02693",
+        "BUG-A3B51E8D",
+        "BUG-1980557E"
+      ],
+      "write_scope": [
+        "artifacts/workflow/replay_ready_gc_20260424_CLOSEOUT.md"
+      ],
+      "prompt": "Close out the Gemini/Cursor replay-ready remediation run.\n\n## Inputs\n1. `artifacts/workflow/replay_ready_gc_20260424_RECON.md` — baseline snapshot and spec -> run_id map.\n2. `praxis workflow run-status <run_id>` for Spec B run_id and Spec C run_id (from recon artifact).\n3. For each of the 4 bug ids (BUG-7C5D8AE4, BUG-39D02693, BUG-A3B51E8D, BUG-1980557E):\n   - `praxis workflow bugs packet --bug-id <id>` — confirm current status, evidence links, resume_context.\n   - `praxis workflow bugs history --bug-id <id>` — full lifecycle after Spec B / Spec C.\n4. `praxis workflow bugs stats --json` — post-run stats.\n5. `git diff --stat HEAD` and recent commits under `Code&DBs/Workflow/runtime/` — confirm what Spec B / Spec C actually changed.\n\n## Resolution rules\nFor each bug:\n- If the bug packet shows at least one `validates_fix` evidence link (from Spec B or Spec C) AND the status is not already FIXED: resolve with\n  `praxis workflow bugs resolve --bug-id <id> --status FIXED --verifier-ref <verifier_ref_from_evidence>`\n- If the bug packet is missing `validates_fix` evidence: leave OPEN. Update `resume_context` via `praxis workflow bugs resume_context --bug-id <id> --text \"<one-line blocker>\"` describing the exact remaining blocker.\n- Never mark FIXED on prose alone. Never invent verifier refs.\n\n## Output artifact\nWrite `artifacts/workflow/replay_ready_gc_20260424_CLOSEOUT.md` containing:\n\n- **Before / after stats table** — `open_count`, `replay_ready_count`, `fix_verified_count`, `underlinked_count` from the recon snapshot vs. current.\n- **Per-bug outcome table** — bug_id, prior status, final status, verifier_ref (if FIXED), or blocker (if still OPEN).\n- **Spec -> run_id -> outcome table** — pulled from the recon artifact's spec/run map plus the final pass/fail signal.\n- **Verifier evidence index** — for each FIXED bug, the exact `evidence_kind`, `evidence_ref`, and `evidence_role=validates_fix` row it was resolved against.\n- **Residual risk** — anything Spec B / Spec C changed in `receipt_store.py` that could impact the other 147 OPEN bugs (positive or negative).\n- **Next-wave recommendation** — whether to expand to P0+P1 bugs next, or stay in replay-ready mode while signatures stabilize.\n\n## Rules\n- No source edits. No new test files. This is an analysis + resolution packet only.\n- Use the catalog-backed bug tracker surface for every mutation (`praxis workflow bugs resolve`, `attach_evidence`, `resume_context`). Never touch SQL directly.\n- If a FIXED bug has no `validates_fix` link, do NOT resolve it — instead note the missing evidence as a residual risk and leave it OPEN."
+    }
+  ]
+}

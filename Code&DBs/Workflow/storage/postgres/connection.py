@@ -226,6 +226,46 @@ def resolve_workflow_authority_cache_key(
     return workflow_authority_cache_key(resolve_workflow_database_url(env=env))
 
 
+async def _register_jsonb_codec(conn: asyncpg.Connection) -> None:
+    """Force JSONB columns to come back as Python dicts/lists, not strings.
+
+    asyncpg returns JSONB as text by default; downstream code that calls
+    ``isinstance(row.get('jsonb_column'), Mapping)`` silently falls through
+    to ``{}`` and loses data (BUG-A0983040). Registering the codec here
+    means every JSONB read across the workflow surface gets the parsed
+    object — single source of truth, no per-site fallbacks.
+    """
+    import json as _json
+
+    for typename in ("jsonb", "json"):
+        await conn.set_type_codec(
+            typename,
+            schema="pg_catalog",
+            encoder=_encode_json_value,
+            decoder=_json.loads,
+            format="text",
+        )
+
+
+def _encode_json_value(value: object) -> str:
+    """Encode json/jsonb parameters without double-encoding JSON text.
+
+    Most workflow write sites already pass serialized JSON strings alongside
+    ``$n::jsonb`` casts. The asyncpg codec encoder sits underneath those
+    callers, so it must preserve valid JSON text instead of turning ``[]``
+    into the JSON string ``"[]"``.
+    """
+    import json as _json
+
+    if isinstance(value, str):
+        try:
+            _json.loads(value)
+        except _json.JSONDecodeError:
+            return _json.dumps(value, default=str)
+        return value
+    return _json.dumps(value, sort_keys=True, default=str)
+
+
 async def connect_workflow_database(
     env: Mapping[str, str] | None = None,
 ) -> asyncpg.Connection:
@@ -233,13 +273,15 @@ async def connect_workflow_database(
 
     database_url = resolve_workflow_database_url(env=env)
     try:
-        return await asyncpg.connect(database_url)
+        conn = await asyncpg.connect(database_url)
     except _AUTHORITY_UNAVAILABLE_EXCEPTIONS as exc:
         raise _normalize_authority_error(
             exc,
             database_url=database_url,
             operation="connect_workflow_database",
         ) from exc
+    await _register_jsonb_codec(conn)
+    return conn
 
 
 def _get_bg_loop() -> asyncio.AbstractEventLoop:
@@ -280,7 +322,12 @@ async def create_workflow_pool(
     """Create a shared asyncpg connection pool for the workflow database."""
     database_url = resolve_workflow_database_url(env=env)
     try:
-        return await asyncpg.create_pool(database_url, min_size=min_size, max_size=max_size)
+        return await asyncpg.create_pool(
+            database_url,
+            min_size=min_size,
+            max_size=max_size,
+            init=_register_jsonb_codec,
+        )
     except _AUTHORITY_UNAVAILABLE_EXCEPTIONS as exc:
         raise _normalize_authority_error(
             exc,

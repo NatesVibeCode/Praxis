@@ -212,6 +212,20 @@ def _workflow_submit_dispatch(
     dispatch_reason = command.payload.get("dispatch_reason")
     if dispatch_reason is not None:
         dispatch_reason = _nt(dispatch_reason, field_name="payload.dispatch_reason")
+    trigger_depth = command.payload.get("trigger_depth")
+    if trigger_depth is not None:
+        try:
+            trigger_depth = max(int(trigger_depth), 0)
+        except (TypeError, ValueError) as exc:
+            raise ControlCommandExecutionError(
+                "control.command.workflow_submit_invalid_payload",
+                "payload.trigger_depth must be an integer >= 0",
+                details={
+                    "command_id": command.command_id,
+                    "command_type": command.command_type,
+                    "trigger_depth": trigger_depth,
+                },
+            ) from exc
     lineage_depth = command.payload.get("lineage_depth")
     if lineage_depth is not None:
         try:
@@ -249,6 +263,9 @@ def _workflow_submit_dispatch(
         field_name="payload.force_fresh_run",
         default_value=False,
     )
+    packet_provenance = command.payload.get("packet_provenance")
+    if packet_provenance is not None:
+        packet_provenance = _np(packet_provenance, field_name="payload.packet_provenance")
 
     inline_spec_field = None
     inline_spec_payload = None
@@ -284,7 +301,9 @@ def _workflow_submit_dispatch(
                 parent_run_id=parent_run_id,
                 parent_job_label=parent_job_label,
                 dispatch_reason=dispatch_reason,
+                trigger_depth=trigger_depth or 0,
                 lineage_depth=lineage_depth,
+                packet_provenance=packet_provenance,
             )
         except Exception as exc:
             raise ControlCommandExecutionError(
@@ -297,7 +316,9 @@ def _workflow_submit_dispatch(
                     "parent_run_id": parent_run_id,
                     "parent_job_label": parent_job_label,
                     "dispatch_reason": dispatch_reason,
+                    "trigger_depth": trigger_depth,
                     "lineage_depth": lineage_depth,
+                    "packet_provenance": packet_provenance,
                     "force_fresh_run": force_fresh_run,
                 },
             ) from exc
@@ -789,7 +810,9 @@ def request_workflow_submit_command(
     parent_run_id: str | None = None,
     parent_job_label: str | None = None,
     dispatch_reason: str | None = None,
+    trigger_depth: int | None = None,
     lineage_depth: int | None = None,
+    packet_provenance: Mapping[str, Any] | None = None,
     force_fresh_run: bool = False,
     idempotency_key: str | None = None,
     command_id: str | None = None,
@@ -813,7 +836,9 @@ def request_workflow_submit_command(
     n_parent_run_id = None if parent_run_id is None else _nt(parent_run_id, field_name="parent_run_id")
     n_parent_job_label = None if parent_job_label is None else _nt(parent_job_label, field_name="parent_job_label")
     n_dispatch_reason = None if dispatch_reason is None else _nt(dispatch_reason, field_name="dispatch_reason")
+    n_trigger_depth = None if trigger_depth is None else max(int(trigger_depth), 0)
     n_lineage_depth = None if lineage_depth is None else max(int(lineage_depth), 0)
+    n_packet_provenance = None if packet_provenance is None else _np(packet_provenance, field_name="packet_provenance")
     n_force_fresh_run = _nb(force_fresh_run, field_name="force_fresh_run", default_value=False)
     n_ikey = None if idempotency_key is None else _nt(idempotency_key, field_name="idempotency_key")
     has_spec_path = spec_path is not None
@@ -846,8 +871,12 @@ def request_workflow_submit_command(
         _payload["parent_job_label"] = n_parent_job_label
     if n_dispatch_reason is not None:
         _payload["dispatch_reason"] = n_dispatch_reason
+    if n_trigger_depth is not None:
+        _payload["trigger_depth"] = n_trigger_depth
     if n_lineage_depth is not None:
         _payload["lineage_depth"] = n_lineage_depth
+    if n_packet_provenance is not None:
+        _payload["packet_provenance"] = n_packet_provenance
     if n_force_fresh_run:
         _payload["force_fresh_run"] = True
 

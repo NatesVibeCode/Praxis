@@ -1,0 +1,46 @@
+{
+  "name": "replay_ready_gc_20260424_B_sandbox",
+  "workflow_id": "replay_ready_gc_20260424_B_sandbox",
+  "phase": "build",
+  "outcome_goal": "Root-cause the two replay-ready sandbox_error bugs (BUG-7C5D8AE4, BUG-39D02693), fix the failure, attach validates_fix evidence through the bug tracker surface, and confirm replay succeeds for both.",
+  "bug_source": {
+    "authority": "praxis workflow tools call praxis_replay_ready_bugs",
+    "snapshot_date": "2026-04-24",
+    "open_count": 151,
+    "replay_ready_count": 4
+  },
+  "anti_requirements": [
+    "Do not edit files outside the declared write_scope.",
+    "Do not revert dirty worktree changes made by parallel work.",
+    "Do not invent run_id, receipt_id, replay_run_id, or replay_receipt_id — read them from the bug packet.",
+    "Do not resolve FIXED without a validates_fix evidence link.",
+    "Do not call api.anthropic.com directly (Anthropic is CLI-only per standing order decision.2026-04-20.anthropic-cli-only-restored).",
+    "Do not paper over duplicated authority with compatibility shims; fix the root cause.",
+    "Do not widen scope to the other replay-ready bugs — those are owned by Spec C."
+  ],
+  "verify_refs": [
+    "praxis workflow tools call praxis_workflow_validate --input-json '{\"spec_path\":\"artifacts/workflow/replay_ready_gc_20260424_B_sandbox.queue.json\"}'",
+    "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_sandbox_runtime.py Code&DBs/Workflow/tests/unit/test_receipt_store.py",
+    "praxis workflow bugs replay --bug-id BUG-7C5D8AE4",
+    "praxis workflow bugs replay --bug-id BUG-39D02693"
+  ],
+  "jobs": [
+    {
+      "label": "fix_sandbox_error_cluster",
+      "agent": "cursor_local/composer-2",
+      "adapter_type": "cli_llm",
+      "task_type": "build",
+      "bug_ids": [
+        "BUG-7C5D8AE4",
+        "BUG-39D02693"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/sandbox_runtime.py",
+        "Code&DBs/Workflow/runtime/receipt_store.py",
+        "Code&DBs/Workflow/tests/unit/test_sandbox_runtime.py",
+        "Code&DBs/Workflow/tests/unit/test_receipt_store.py"
+      ],
+      "prompt": "Fix the replay-ready sandbox_error cluster: BUG-7C5D8AE4 (signature 04b2528b35) and BUG-39D02693 (signature 90e94ba32c). Both originated in `wave0_integrated_design` and surfaced through receipt_store aggregation.\n\n## Before editing\n1. Read `artifacts/workflow/replay_ready_gc_20260424_RECON.md` — this is the collision guard for this run. If it flags RED for your write_scope, stop and report; do not edit.\n2. `praxis workflow bugs packet --bug-id BUG-7C5D8AE4` and `--bug-id BUG-39D02693` — read the resume_context and existing evidence links.\n3. `praxis workflow bugs history --bug-id BUG-7C5D8AE4` and `--bug-id BUG-39D02693`.\n4. `praxis workflow discover \"sandbox_error\"` and `praxis workflow discover \"receipt failure aggregation\"` — locate the canonical failure path.\n5. `praxis workflow recall \"sandbox runtime authority\"` — policy context.\n\n## Required outcome\n- Identify the root cause of the sandbox_error failure class (not just suppress the symptom).\n- If the two bugs share a root cause, make the fix dedupe them through the canonical receipt-failure aggregation (wave1 of the 2026-04-23 spec introduced this pattern — reuse, do not duplicate).\n- Add or extend unit tests in `test_sandbox_runtime.py` / `test_receipt_store.py` that would catch this failure class before it reaches production.\n- Stay inside the declared write_scope. If you need to edit outside it, stop and escalate via resume_context.\n\n## Verification (must pass before resolving any bug)\n- `PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_sandbox_runtime.py Code&DBs/Workflow/tests/unit/test_receipt_store.py`\n- `praxis workflow bugs replay --bug-id BUG-7C5D8AE4` returns a success envelope\n- `praxis workflow bugs replay --bug-id BUG-39D02693` returns a success envelope\n\n## Resolution\nFor each bug that replays green, attach `validates_fix` evidence and resolve:\n\n```\npraxis workflow bugs attach_evidence --bug-id <id> --evidence-kind verification_run --evidence-ref <verification_run_id> --evidence-role validates_fix\npraxis workflow bugs resolve --bug-id <id> --status FIXED --verifier-ref verifier.job.python.pytest_file --inputs-json '{\"path\":\"Code&DBs/Workflow/tests/unit/test_sandbox_runtime.py\"}'\n```\n\nIf replay still fails, leave the bug OPEN with updated `resume_context` describing the exact blocker — do not mark FIXED on prose."
+    }
+  ]
+}

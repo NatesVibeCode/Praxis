@@ -624,6 +624,79 @@ _ROADMAP_TEMPLATE_CHILDREN: dict[str, tuple[_RoadmapTemplateChild, ...]] = {
             ),
         ),
     ),
+    "multi_phase_program": (
+        _RoadmapTemplateChild(
+            suffix="phase_1_foundations",
+            title="Phase 1 — Foundations",
+            priority="p1",
+            summary=(
+                "First phase placeholder: foundations and primitives the rest "
+                "of the program builds on. Update with the actual phase 1 scope "
+                "via praxis_operator_write action='update'."
+            ),
+            must_have=(
+                "Replace this placeholder with the actual phase 1 outcome gate.",
+                "Refine acceptance_criteria for the foundations work.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="phase_2_buildout",
+            title="Phase 2 — Build-out",
+            priority="p1",
+            summary=(
+                "Second phase placeholder: extend the foundations to the next "
+                "operator surface. Update with the actual phase 2 scope via "
+                "praxis_operator_write action='update'."
+            ),
+            must_have=(
+                "Replace this placeholder with the actual phase 2 outcome gate.",
+                "Wire the new surface to the foundations from phase 1.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="phase_3_substrate",
+            title="Phase 3 — Substrate hardening",
+            priority="p1",
+            summary=(
+                "Third phase placeholder: typed contracts, freshness, and "
+                "fail-closed paths underneath the surfaces from phases 1-2. "
+                "Update with the actual phase 3 scope via praxis_operator_write "
+                "action='update'."
+            ),
+            must_have=(
+                "Replace this placeholder with the actual phase 3 outcome gate.",
+                "Define the typed substrate the program depends on.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="phase_4_supervision",
+            title="Phase 4 — Supervision and pattern packs",
+            priority="p2",
+            summary=(
+                "Fourth phase placeholder: human-control-room primitives and "
+                "reusable pattern packs. Update with the actual phase 4 scope "
+                "via praxis_operator_write action='update'."
+            ),
+            must_have=(
+                "Replace this placeholder with the actual phase 4 outcome gate.",
+                "Identify the supervision primitives the program needs.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="phase_5_release",
+            title="Phase 5 — Release ramp",
+            priority="p2",
+            summary=(
+                "Fifth phase placeholder: end-to-end demo, docs, onboarding "
+                "and smoke tests. Update with the actual phase 5 scope via "
+                "praxis_operator_write action='update'."
+            ),
+            must_have=(
+                "Replace this placeholder with the actual phase 5 outcome gate.",
+                "Define the release readiness criteria for the program.",
+            ),
+        ),
+    ),
     "data_dictionary_impact_program": (
         _RoadmapTemplateChild(
             suffix="contract",
@@ -3439,10 +3512,15 @@ class OperatorControlFrontdoor:
                 )
 
         existing_acceptance: Mapping[str, Any] = {}
-        if existing_row is not None and isinstance(
-            existing_row.get("acceptance_criteria"), Mapping
-        ):
-            existing_acceptance = existing_row["acceptance_criteria"]
+        if existing_row is not None:
+            raw_acceptance = existing_row.get("acceptance_criteria")
+            if isinstance(raw_acceptance, str) and raw_acceptance.strip():
+                try:
+                    raw_acceptance = json.loads(raw_acceptance)
+                except (ValueError, TypeError):
+                    raw_acceptance = None
+            if isinstance(raw_acceptance, Mapping):
+                existing_acceptance = raw_acceptance
 
         normalized_title = (
             _optional_text(title, field_name="title")
@@ -3456,7 +3534,10 @@ class OperatorControlFrontdoor:
             or (str(existing_row.get("summary")) if existing_row is not None else None)
         )
         if not normalized_intent_brief:
-            blocking_errors.append("intent_brief is required")
+            blocking_errors.append(
+                "intent_brief is required; use workflow roadmap write <preview|validate|commit> "
+                "--title <title> --intent-brief <brief>"
+            )
             normalized_intent_brief = "__placeholder__"
         normalized_template = _require_roadmap_template(template)
         normalized_priority = (
@@ -7557,31 +7638,37 @@ async def arecord_dataset_promotion(
                 rationale,
                 resolved_decision_ref,
             )
+            event_payload = {
+                "promotion_id": pid,
+                "dataset_family": dataset_family,
+                "specialist_target": specialist_target,
+                "policy_id": policy_id,
+                "promoted_by": promoted_by,
+                "promotion_kind": promotion_kind,
+                "split_tag": split_tag,
+                "candidate_ids": list(candidate_ids),
+                "decision_ref": resolved_decision_ref,
+            }
             event_id = await aemit(
                 conn,
                 channel=CHANNEL_DATASET,
                 event_type=EVENT_DATASET_PROMOTION_RECORDED,
                 entity_id=pid,
                 entity_kind="dataset_promotion",
-                payload={
-                    "promotion_id": pid,
-                    "dataset_family": dataset_family,
-                    "specialist_target": specialist_target,
-                    "policy_id": policy_id,
-                    "promoted_by": promoted_by,
-                    "promotion_kind": promotion_kind,
-                    "split_tag": split_tag,
-                    "candidate_ids": list(candidate_ids),
-                    "decision_ref": resolved_decision_ref,
-                },
+                payload=event_payload,
                 emitted_by="operator_write.arecord_dataset_promotion",
             )
-            await aemit_cache_invalidation(
+            # Causal side effects (cache invalidation, etc) flow through the
+            # semantic_predicate_catalog so manual + auto promotion paths
+            # share one declaration.  See predicate
+            # ``dataset_promotion.invalidates_curated_projection_cache``.
+            from runtime.semantic_propagation_engine import fire_causal_propagations
+
+            await fire_causal_propagations(
                 conn,
-                cache_kind=CACHE_KIND_DATASET_CURATED_PROJECTION,
-                cache_key=f"{specialist_target}:{dataset_family}:{split_tag or 'none'}",
-                reason=f"new promotion {pid}",
-                invalidated_by="operator_write.arecord_dataset_promotion",
+                event_type=EVENT_DATASET_PROMOTION_RECORDED,
+                event_payload=event_payload,
+                emitted_by="operator_write.arecord_dataset_promotion",
             )
     finally:
         await conn.close()

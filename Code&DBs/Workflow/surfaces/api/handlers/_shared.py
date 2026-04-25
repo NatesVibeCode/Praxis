@@ -16,6 +16,7 @@ from runtime.workspace_paths import repo_root as workspace_repo_root
 REPO_ROOT = workspace_repo_root()
 WORKFLOW_ROOT = REPO_ROOT / "Code&DBs" / "Workflow"
 RECEIPTS_DIR = str(REPO_ROOT / "artifacts" / "workflow_receipts")
+MAX_REQUEST_BODY_BYTES = 1024 * 1024
 
 RouteMatcher = Callable[[str], bool]
 RouteHandler = Callable[[Any, str], None]
@@ -168,7 +169,16 @@ def _prefix_suffix(path_prefix: str, path_suffix: str) -> RouteMatcher:
 
 
 def _read_json_body(request: Any) -> Any:
-    content_length = int(request.headers.get("Content-Length", 0))
+    try:
+        content_length = int(request.headers.get("Content-Length", 0))
+    except (TypeError, ValueError):
+        raise ValueError("Content-Length header must be a non-negative integer")
+    if content_length < 0:
+        raise ValueError("Content-Length header must be a non-negative integer")
+    if content_length > MAX_REQUEST_BODY_BYTES:
+        raise ValueError(
+            "Request body exceeds maximum size of 1,048,576 bytes"
+        )
     raw = request.rfile.read(content_length) if content_length else b""
     return json.loads(raw) if raw else {}
 

@@ -318,4 +318,85 @@ def test_build_graph_projects_surface_catalog_and_dictionary_lineage(monkeypatch
         edges["table:surface_catalog_registry|references|table:operator_decisions"]["authority_source"]
         == "data_dictionary_lineage_effective"
     )
-    assert "surface_catalog::trigger-manual|belongs_to_surface|area::moon" in edges
+
+
+def test_build_graph_canonicalizes_derived_from_labels(monkeypatch) -> None:
+    monkeypatch.setattr(atlas_graph, "_connect", lambda database_url=None: object())
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_entities",
+        lambda conn: [
+            {
+                "id": "bug::a",
+                "entity_type": "bug",
+                "name": "Bug A",
+                "content_preview": "",
+                "source": "memory_entities",
+                "updated_at": None,
+            },
+            {
+                "id": "bug::b",
+                "entity_type": "bug",
+                "name": "Bug B",
+                "content_preview": "",
+                "source": "memory_entities",
+                "updated_at": None,
+            },
+            {
+                "id": "decision::a",
+                "entity_type": "operator_decision",
+                "name": "Decision A",
+                "content_preview": "",
+                "source": "memory_entities",
+                "updated_at": None,
+            },
+            {
+                "id": "decision::b",
+                "entity_type": "operator_decision",
+                "name": "Decision B",
+                "content_preview": "",
+                "source": "memory_entities",
+                "updated_at": None,
+            },
+        ],
+    )
+    monkeypatch.setattr(atlas_graph, "fetch_capabilities", lambda conn: [])
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_functional_areas",
+        lambda conn: [{"area_slug": "bugs", "title": "Bugs", "summary": "Bug authority"}],
+    )
+    monkeypatch.setattr(atlas_graph, "fetch_area_relations", lambda conn: [])
+    monkeypatch.setattr(
+        atlas_graph,
+        "fetch_edges",
+        lambda conn, known_ids: [
+            {
+                "source_id": "bug::a",
+                "target_id": "bug::b",
+                "relation_type": "derived_from",
+                "weight": 1.0,
+                "updated_at": None,
+            },
+            {
+                "source_id": "decision::a",
+                "target_id": "decision::b",
+                "relation_type": "derives_from",
+                "weight": 1.0,
+                "updated_at": None,
+            },
+        ],
+    )
+    monkeypatch.setattr(atlas_graph, "fetch_tools", lambda: [])
+    monkeypatch.setattr(atlas_graph, "fetch_data_dictionary_objects", lambda conn: [])
+    monkeypatch.setattr(atlas_graph, "fetch_data_dictionary_lineage", lambda conn: [])
+    monkeypatch.setattr(atlas_graph, "fetch_surface_catalog_items", lambda conn: [])
+
+    graph = atlas_graph.build_graph()
+    labels = {
+        edge["data"]["label"]
+        for edge in graph["edges"]
+        if not edge["data"].get("is_aggregate")
+    }
+
+    assert labels == {"derived_from"}

@@ -1,0 +1,17 @@
+{
+  "attempt": 2,
+  "captured_at": "2026-04-24T22:57:46Z",
+  "command": "raw MCP JSON-RPC call to praxis_submit_code_change with declared_operations",
+  "ok": false,
+  "reason_code": "workflow_submission.out_of_scope",
+  "message": "measured workspace changes escaped the declared write scope",
+  "details_summary": {
+    "write_scope": [
+      "artifacts/workflow"
+    ],
+    "notes": [
+      "Retrying with explicit declared_operations for the new artifact files did not change the result.",
+      "The submission gate still reports broad workspace drift outside the declared scope."
+    ]
+  }
+}

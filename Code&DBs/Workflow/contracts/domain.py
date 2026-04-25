@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from typing import Any
@@ -94,6 +94,41 @@ class WorkflowNodeContract:
     position_index: int
     template_owner_node_id: str | None = None
 
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "node_type": self.node_type,
+            "adapter_type": self.adapter_type,
+            "display_name": self.display_name,
+            "inputs": dict(self.inputs),
+            "expected_outputs": dict(self.expected_outputs),
+            "success_condition": dict(self.success_condition),
+            "failure_behavior": dict(self.failure_behavior),
+            "authority_requirements": dict(self.authority_requirements),
+            "execution_boundary": dict(self.execution_boundary),
+            "position_index": self.position_index,
+            "template_owner_node_id": self.template_owner_node_id,
+        }
+
+    @classmethod
+    def from_json(cls, payload: Mapping[str, Any]) -> "WorkflowNodeContract":
+        if not isinstance(payload, Mapping):
+            raise WorkflowContractError("workflow node payload must be a JSON object")
+        return cls(
+            node_id=str(payload["node_id"]),
+            node_type=str(payload["node_type"]),
+            adapter_type=str(payload["adapter_type"]),
+            display_name=str(payload["display_name"]),
+            inputs=dict(payload.get("inputs") or {}),
+            expected_outputs=dict(payload.get("expected_outputs") or {}),
+            success_condition=dict(payload.get("success_condition") or {}),
+            failure_behavior=dict(payload.get("failure_behavior") or {}),
+            authority_requirements=dict(payload.get("authority_requirements") or {}),
+            execution_boundary=dict(payload.get("execution_boundary") or {}),
+            position_index=int(payload["position_index"]),
+            template_owner_node_id=_optional_text(payload.get("template_owner_node_id")),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class WorkflowEdgeContract:
@@ -107,6 +142,33 @@ class WorkflowEdgeContract:
     payload_mapping: Mapping[str, Any]
     position_index: int
     template_owner_node_id: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "edge_id": self.edge_id,
+            "edge_type": self.edge_type,
+            "from_node_id": self.from_node_id,
+            "to_node_id": self.to_node_id,
+            "release_condition": dict(self.release_condition),
+            "payload_mapping": dict(self.payload_mapping),
+            "position_index": self.position_index,
+            "template_owner_node_id": self.template_owner_node_id,
+        }
+
+    @classmethod
+    def from_json(cls, payload: Mapping[str, Any]) -> "WorkflowEdgeContract":
+        if not isinstance(payload, Mapping):
+            raise WorkflowContractError("workflow edge payload must be a JSON object")
+        return cls(
+            edge_id=str(payload["edge_id"]),
+            edge_type=str(payload["edge_type"]),
+            from_node_id=str(payload["from_node_id"]),
+            to_node_id=str(payload["to_node_id"]),
+            release_condition=dict(payload.get("release_condition") or {}),
+            payload_mapping=dict(payload.get("payload_mapping") or {}),
+            position_index=int(payload["position_index"]),
+            template_owner_node_id=_optional_text(payload.get("template_owner_node_id")),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +185,58 @@ class WorkflowRequest:
     nodes: tuple[WorkflowNodeContract, ...]
     edges: tuple[WorkflowEdgeContract, ...]
     requested_at: datetime | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "workflow_id": self.workflow_id,
+            "request_id": self.request_id,
+            "workflow_definition_id": self.workflow_definition_id,
+            "definition_hash": self.definition_hash,
+            "workspace_ref": self.workspace_ref,
+            "runtime_profile_ref": self.runtime_profile_ref,
+            "nodes": [node.to_json() for node in self.nodes],
+            "edges": [edge.to_json() for edge in self.edges],
+            "requested_at": (
+                self.requested_at.astimezone(timezone.utc).isoformat()
+                if self.requested_at is not None
+                else None
+            ),
+        }
+
+    @classmethod
+    def from_json(cls, payload: Mapping[str, Any]) -> "WorkflowRequest":
+        if not isinstance(payload, Mapping):
+            raise WorkflowContractError("workflow request payload must be a JSON object")
+        requested_at_value = payload.get("requested_at")
+        requested_at: datetime | None
+        if isinstance(requested_at_value, datetime):
+            requested_at = requested_at_value.astimezone(timezone.utc)
+        elif requested_at_value is None or str(requested_at_value).strip() == "":
+            requested_at = None
+        else:
+            requested_at = datetime.fromisoformat(str(requested_at_value).replace("Z", "+00:00"))
+            if requested_at.tzinfo is None or requested_at.utcoffset() is None:
+                requested_at = requested_at.replace(tzinfo=timezone.utc)
+            requested_at = requested_at.astimezone(timezone.utc)
+        return cls(
+            schema_version=int(payload["schema_version"]),
+            workflow_id=str(payload["workflow_id"]),
+            request_id=str(payload["request_id"]),
+            workflow_definition_id=str(payload["workflow_definition_id"]),
+            definition_hash=str(payload["definition_hash"]),
+            workspace_ref=str(payload["workspace_ref"]),
+            runtime_profile_ref=str(payload["runtime_profile_ref"]),
+            nodes=tuple(
+                WorkflowNodeContract.from_json(item)
+                for item in payload.get("nodes") or ()
+            ),
+            edges=tuple(
+                WorkflowEdgeContract.from_json(item)
+                for item in payload.get("edges") or ()
+            ),
+            requested_at=requested_at,
+        )
 
 
 @dataclass(frozen=True, slots=True)

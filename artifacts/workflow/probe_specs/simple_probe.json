@@ -1,0 +1,13 @@
+{
+  "name": "simple_probe",
+  "jobs": [
+    {
+      "label": "probe",
+      "agent": "auto/build",
+      "task_type": "build",
+      "prompt": "Print hello world to stdout. Use python.",
+      "write_scope": ["artifacts/workflow/"],
+      "workdir": "/Users/nate/Praxis"
+    }
+  ]
+}

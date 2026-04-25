@@ -37,6 +37,54 @@ def test_mcp_operator_write_uses_operation_catalog_gateway(monkeypatch) -> None:
     assert captured["payload"]["registry_paths"] == []
 
 
+def test_mcp_operator_write_update_defaults_to_dry_run(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_write(
+        {
+            "action": "update",
+            "roadmap_item_id": "roadmap_item.authority.cleanup.operator_write",
+            "intent_brief": "Tighten mutation handling.",
+        }
+    )
+
+    assert result == {"ok": True}
+    assert captured["operation_name"] == "operator.roadmap_write"
+    assert captured["payload"]["action"] == "update"
+    assert captured["payload"]["roadmap_item_id"] == (
+        "roadmap_item.authority.cleanup.operator_write"
+    )
+    assert captured["payload"]["dry_run"] is True
+
+
+def test_mcp_operator_write_reparent_requires_parent(monkeypatch) -> None:
+    monkeypatch.setattr(operator, "_subs", object())
+
+    result = operator.tool_praxis_operator_write(
+        {
+            "action": "re-parent",
+            "roadmap_item_id": "roadmap_item.authority.cleanup.operator_write",
+        }
+    )
+
+    assert result == {
+        "ok": False,
+        "error": "parent_roadmap_item_id is required for action='re-parent'",
+        "error_code": "operator.roadmap_write.invalid_input",
+        "operation_name": "operator.roadmap_write",
+    }
+
+
 def test_mcp_operator_closeout_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

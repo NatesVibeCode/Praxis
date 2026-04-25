@@ -332,7 +332,7 @@ def submit_chain(
     """
     try:
         from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
-        from runtime.workflow.unified import submit_workflow_inline
+        from runtime.control_commands import submit_workflow_command
 
         jobs: list[dict[str, Any]] = []
         for index, spec in enumerate(specs):
@@ -365,7 +365,16 @@ def submit_chain(
         }
 
         conn = SyncPostgresConnection(get_workflow_pool())
-        result = submit_workflow_inline(conn, workflow_spec)
+        result = submit_workflow_command(
+            conn,
+            requested_by_kind="runtime",
+            requested_by_ref="job_dependencies.submit_chain",
+            inline_spec=workflow_spec,
+            spec_name=workflow_spec["name"],
+            total_jobs=len(jobs),
+        )
+        if result.get("error") or not result.get("run_id"):
+            raise RuntimeError(str(result.get("error") or result))
         job_rows = conn.execute(
             """SELECT id
                FROM workflow_jobs

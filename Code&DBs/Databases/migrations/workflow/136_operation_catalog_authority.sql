@@ -1,5 +1,9 @@
 BEGIN;
 
+-- Authoring note: new enabled operations need data_dictionary_objects and
+-- authority_object_registry rows before operation_catalog_registry. See README.md
+-- in this directory ("Operation catalog registration").
+
 CREATE TABLE IF NOT EXISTS operation_catalog_registry (
     operation_ref TEXT PRIMARY KEY CHECK (btrim(operation_ref) <> ''),
     operation_name TEXT NOT NULL UNIQUE CHECK (btrim(operation_name) <> ''),

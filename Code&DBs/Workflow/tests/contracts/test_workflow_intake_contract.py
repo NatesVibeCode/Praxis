@@ -136,6 +136,15 @@ def test_validate_workflow_request_accepts_the_minimal_slice_graph() -> None:
     assert result.validation_result_ref.startswith("validation:")
 
 
+def test_workflow_request_json_round_trips_cleanly() -> None:
+    request = _valid_request()
+
+    round_tripped = WorkflowRequest.from_json(request.to_json())
+
+    assert round_tripped == request
+    assert round_tripped.to_json() == request.to_json()
+
+
 def test_validate_workflow_request_rejects_malformed_collection_shape() -> None:
     valid_request = _valid_request()
     malformed_request = WorkflowRequest(

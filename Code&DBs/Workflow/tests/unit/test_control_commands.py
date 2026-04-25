@@ -1442,9 +1442,11 @@ def test_control_command_submit_inline_spec_routes_through_inline_submit_authori
         parent_run_id=None,
         parent_job_label=None,
         dispatch_reason=None,
+        trigger_depth=0,
         lineage_depth=None,
+        packet_provenance=None,
     ):
-        called.append((spec, run_id))
+        called.append((spec, run_id, trigger_depth, packet_provenance))
         return {"run_id": "run-inline-1", "status": "queued", "spec_name": spec["name"]}
 
     monkeypatch.setattr(control_commands.unified_dispatch, "submit_workflow", _fail_saved_spec_submit)
@@ -1458,7 +1460,7 @@ def test_control_command_submit_inline_spec_routes_through_inline_submit_authori
     )
     loaded = control_commands.load_control_command(conn, final.command_id)
 
-    assert called == [(dict(intent.payload["spec"]), None)]
+    assert called == [(dict(intent.payload["spec"]), None, 0, None)]
     assert final.command_status == "succeeded"
     assert final.result_ref == "workflow_run:run-inline-1"
     assert final.error_code is None

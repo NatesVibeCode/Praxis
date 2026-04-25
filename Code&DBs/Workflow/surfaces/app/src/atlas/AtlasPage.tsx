@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import cytoscape, { type Core, type ElementDefinition, type NodeSingular } from 'cytoscape';
-import fcose from 'cytoscape-fcose';
+import cytoscape, { type Core, type EdgeSingular, type ElementDefinition, type NodeSingular } from 'cytoscape';
 import './AtlasPage.css';
 
 interface AtlasElementData {
@@ -29,6 +28,17 @@ interface AtlasElementData {
   is_area?: boolean;
   is_aggregate?: boolean;
   display_color?: string;
+  display_size?: number;
+  signal_activity?: number;
+  signal_authority?: number;
+  signal_data?: number;
+  signal_dependency?: number;
+  signal_risk?: number;
+  signal_stale?: number;
+  semantic_role?: SemanticObjectRole;
+  semantic_rank?: number;
+  original_id?: string;
+  node_kind?: 'area' | 'object' | 'class_label';
 }
 
 interface AtlasElement {
@@ -45,6 +55,8 @@ interface AtlasArea {
 }
 
 type GraphFreshnessState = 'fresh' | 'projection_lagging' | 'unknown' | string;
+type AtlasViewMode = 'overview' | 'area_focus' | 'item_inspect';
+type SemanticObjectRole = 'authority' | 'data' | 'dependency' | 'risk' | 'live' | 'stale';
 
 interface AtlasFreshness {
   graph_freshness_state?: GraphFreshnessState;
@@ -78,51 +90,73 @@ interface AtlasPayload {
   detail?: string;
 }
 
-type ScopeKind = 'all' | 'area' | 'kind' | 'recent' | 'stale' | 'orphans' | 'search';
-
-interface Scope {
-  kind: ScopeKind;
-  value: string;
-  raw: string;
+interface AreaSignal {
+  slug: string;
+  title: string;
+  summary: string;
+  memberCount: number;
+  authorityCount: number;
+  dataCount: number;
+  dependencyCount: number;
+  riskCount: number;
+  liveCount: number;
+  staleCount: number;
+  activityScore: number;
+  semanticWeight: number;
+  displaySize: number;
 }
 
-const SCOPE_ALL: Scope = { kind: 'all', value: '', raw: '' };
+interface DependencySignal {
+  id: string;
+  sourceArea: string;
+  targetArea: string;
+  relation: string;
+  weight: number;
+  activityScore: number;
+}
+
+interface SemanticObject {
+  node: AtlasElementData;
+  role: SemanticObjectRole;
+  rank: number;
+  dependencyCount: number;
+}
+
+interface SemanticModel {
+  areaSignals: Map<string, AreaSignal>;
+  areas: AreaSignal[];
+  dependencies: DependencySignal[];
+  nodeById: Map<string, AtlasElementData>;
+  rawEdgesByNode: Map<string, AtlasElementData[]>;
+  semanticObjectsByArea: Map<string, SemanticObject[]>;
+}
+
 const ATLAS_POLL_MS = 30_000;
 const ATLAS_GRAPH_TIMEOUT_MS = 15_000;
-const ATLAS_RENDER_READY_TIMEOUT_MS = 4_000;
-const ATLAS_EASING = 'ease-in-out-cubic';
-const FLASH_MS = 1500;
-const NEUTRAL_TONES = ['#f3efe6', '#d8d2c5', '#b7b0a3', '#8c8a84', '#6d6b67'];
-const DEFAULT_GLOW = '#b7b0a3';
+const MAX_OVERVIEW_DEPENDENCIES = 34;
+const MAX_FOCUS_DEPENDENCIES = 7;
+const MAX_FOCUS_OBJECTS = 10;
+const MAX_SELECTED_EDGES = 4;
+const MIN_ACTIVITY_SCORE = 0.08;
+const OUTER_REVEAL_HOLD_MS = 1200;
+const OUTER_REVEAL_MOVE = 0.94;
 
-const TYPE_GLOW: Record<string, string> = {
-  bug: '#f3efe6',
-  issue: '#f3efe6',
-  roadmap_item: '#d8d2c5',
-  operator_decision: '#b7b0a3',
-  decision: '#b7b0a3',
-  workflow: '#f3efe6',
-  workflow_build_intent: '#f3efe6',
-  capability: '#d8d2c5',
-  tool: '#d8d2c5',
-  table: '#b7b0a3',
-  surface_catalog_item: '#8c8a84',
-  functional_area: '#f3efe6',
+const ROLE_COLORS: Record<SemanticObjectRole, string> = {
+  authority: '#f3efe6',
+  data: '#9fb7aa',
+  dependency: '#d2b075',
+  risk: '#c98b6f',
+  live: '#d8d2c5',
+  stale: '#6d6b67',
 };
 
-let fcoseRegistered = false;
+const AREA_TONES = ['#f3efe6', '#d8d2c5', '#b7b0a3', '#8c8a84', '#d2b075', '#9fb7aa'];
 
 declare global {
   interface Window {
     __PRAXIS_ATLAS_READY__?: boolean;
     __PRAXIS_ATLAS_VISIBLE_COUNTS__?: { nodes: number; edges: number };
   }
-}
-
-function ensureFcoseRegistered() {
-  if (fcoseRegistered) return;
-  cytoscape.use(fcose);
-  fcoseRegistered = true;
 }
 
 function stableHash(value: string): number {
@@ -134,13 +168,26 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-function toneFor(data: AtlasElementData): string {
-  const key = data.area || data.type || data.object_kind || data.id;
-  return NEUTRAL_TONES[stableHash(key) % NEUTRAL_TONES.length];
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
-function glowFor(data: AtlasElementData): string {
-  return TYPE_GLOW[data.type || ''] || TYPE_GLOW[data.object_kind || ''] || toneFor(data) || DEFAULT_GLOW;
+function areaColor(area: string) {
+  return AREA_TONES[stableHash(area) % AREA_TONES.length];
+}
+
+function objectId(id: string) {
+  return `object::${id}`;
+}
+
+function areaId(slug: string) {
+  return `area::${slug}`;
+}
+
+function freshnessTone(state: GraphFreshnessState | undefined) {
+  if (state === 'fresh') return 'ok';
+  if (state === 'projection_lagging') return 'warn';
+  return 'unknown';
 }
 
 function formatWhen(value?: string | null) {
@@ -153,12 +200,6 @@ function formatWhen(value?: string | null) {
     hour: 'numeric',
     minute: '2-digit',
   });
-}
-
-function freshnessTone(state: GraphFreshnessState | undefined) {
-  if (state === 'fresh') return 'ok';
-  if (state === 'projection_lagging') return 'warn';
-  return 'unknown';
 }
 
 function freshnessTooltip(payload: AtlasPayload) {
@@ -175,125 +216,119 @@ function freshnessTooltip(payload: AtlasPayload) {
   ].filter(Boolean).join('\n');
 }
 
-function seedCirclePositions(nodes: cytoscape.NodeCollection, radius: number) {
-  const sorted = nodes.sort((a, b) => String(a.id()).localeCompare(String(b.id())));
-  const count = Math.max(sorted.length, 1);
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  sorted.forEach((node, index) => {
-    const h = stableHash(node.id());
-    const ring = 0.82 + ((h % 17) / 100);
-    const r = radius * Math.sqrt((index + 1) / count);
-    const angle = index * golden + ((h % 29) / 29) * 0.22;
-    node.position({ x: Math.cos(angle) * r * ring, y: Math.sin(angle) * r * ring });
-  });
-}
-
-function memberClusterRadius(count: number): number {
-  if (count <= 1) return 52;
-  return Math.min(360, Math.max(88, 46 + 34 * Math.sqrt(count)));
-}
-
-function memberCloudPositions(
-  members: cytoscape.NodeCollection,
-  center: { x: number; y: number },
-  radius: number,
-  areaSlug: string,
-) {
-  const positions = new Map<string, { x: number; y: number }>();
-  const sorted = members.sort((a, b) => {
-    const degreeDelta = b.degree(true) - a.degree(true);
-    if (degreeDelta !== 0) return degreeDelta;
-    return String(a.id()).localeCompare(String(b.id()));
-  });
-  const count = Math.max(sorted.length, 1);
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  sorted.forEach((node, index) => {
-    const h = stableHash(`${areaSlug}:${node.id()}`);
-    const jitter = (h % 997) / 997;
-    const progress = count === 1 ? 0 : (index + 0.35) / count;
-    const lane = 0.84 + ((h % 23) / 100);
-    const angle = index * golden + jitter * 0.46;
-    const distance = Math.sqrt(progress) * radius * lane;
-    positions.set(node.id(), {
-      x: center.x + Math.cos(angle) * distance,
-      y: center.y + Math.sin(angle) * distance,
-    });
-  });
-  return positions;
-}
-
-function toElementDefinitions(payload: AtlasPayload): ElementDefinition[] {
+function haystack(data: AtlasElementData) {
   return [
-    ...payload.nodes.map((node) => ({
-      data: {
-        ...node.data,
-        display_color: toneFor(node.data),
-      },
-      classes: node.classes,
-    })),
-    ...payload.edges.map((edge) => ({ data: edge.data, classes: edge.classes })),
-  ] as ElementDefinition[];
+    data.id,
+    data.label,
+    data.type,
+    data.object_kind,
+    data.category,
+    data.area,
+    data.authority_source,
+    data.source,
+    data.definition_summary,
+    data.preview,
+  ].filter(Boolean).join(' ').toLowerCase();
 }
 
-function parseScope(raw: string): Scope {
-  const trimmed = raw.trim();
-  if (!trimmed) return SCOPE_ALL;
-  const lower = trimmed.toLowerCase();
-  if (lower === 'recent' || lower === 'live') return { kind: 'recent', value: '', raw: trimmed };
-  if (lower === 'stale' || lower === 'cold') return { kind: 'stale', value: '', raw: trimmed };
-  if (lower === 'orphans' || lower === 'orphan') return { kind: 'orphans', value: '', raw: trimmed };
-  const areaMatch = lower.match(/^area:(.+)$/);
-  if (areaMatch) return { kind: 'area', value: areaMatch[1].trim(), raw: trimmed };
-  const kindMatch = lower.match(/^kind:(.+)$/);
-  if (kindMatch) return { kind: 'kind', value: kindMatch[1].trim(), raw: trimmed };
-  return { kind: 'search', value: lower, raw: trimmed };
-}
+function semanticRoleFor(data: AtlasElementData): SemanticObjectRole {
+  const text = haystack(data);
+  const authority = String(data.authority_source || data.source || '').toLowerCase();
+  const type = String(data.type || data.category || '').toLowerCase();
+  const objectKind = String(data.object_kind || data.id || '').toLowerCase();
+  const activity = data.activity_score ?? MIN_ACTIVITY_SCORE;
 
-function scopeLabel(scope: Scope): string {
-  if (scope.kind === 'all') return 'all';
-  if (scope.kind === 'area') return `area · ${scope.value}`;
-  if (scope.kind === 'kind') return `kind · ${scope.value}`;
-  if (scope.kind === 'recent') return 'recent';
-  if (scope.kind === 'stale') return 'stale';
-  if (scope.kind === 'orphans') return 'orphans';
-  return `"${scope.raw}"`;
-}
-
-function nodeMatchesScope(data: AtlasElementData, scope: Scope, degree: number): boolean {
-  if (data.is_area) return false;
-  if (scope.kind === 'all') return true;
-  if (scope.kind === 'area') return (data.area || '').toLowerCase() === scope.value;
-  if (scope.kind === 'kind') {
-    return [data.type, data.object_kind, data.category]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(scope.value));
+  if (text.includes('bug') || text.includes('issue') || text.includes('risk') || text.includes('failure')) {
+    return 'risk';
   }
-  if (scope.kind === 'recent') return (data.activity_score ?? 0) >= 0.5;
-  if (scope.kind === 'stale') return (data.activity_score ?? 0) < 0.2 && Boolean(data.updated_at);
-  if (scope.kind === 'orphans') return degree <= 1;
-  if (scope.kind === 'search') {
-    const haystack = [
-      data.label,
-      data.id,
-      data.type,
-      data.area,
-      data.authority_source,
-      data.object_kind,
-      data.definition_summary,
-      data.route_ref,
-      data.decision_ref,
-    ].filter(Boolean).join(' ').toLowerCase();
-    return haystack.includes(scope.value);
+
+  if (
+    objectKind.includes('operator_decision')
+    || objectKind.includes('authority_')
+    || objectKind.includes('registry')
+    || type.includes('decision')
+    || authority.includes('operator_decisions')
+  ) {
+    return 'authority';
   }
-  return true;
+
+  if (
+    authority === 'data_dictionary_objects'
+    || type === 'table'
+    || objectKind.startsWith('table:')
+  ) {
+    return 'data';
+  }
+
+  if (
+    type.includes('surface_catalog')
+    || type.includes('capability')
+    || type.includes('tool')
+    || text.includes('connector')
+    || text.includes('dependency')
+  ) {
+    return 'dependency';
+  }
+
+  if (activity >= 0.5) return 'live';
+  if (activity < 0.18 && Boolean(data.updated_at)) return 'stale';
+  return 'data';
+}
+
+function roleLabel(role: SemanticObjectRole) {
+  if (role === 'authority') return 'authority';
+  if (role === 'data') return 'data';
+  if (role === 'dependency') return 'dependency';
+  if (role === 'risk') return 'risk';
+  if (role === 'live') return 'live';
+  return 'stale';
+}
+
+function objectRank(data: AtlasElementData, dependencyCount: number) {
+  const role = semanticRoleFor(data);
+  const roleScore: Record<SemanticObjectRole, number> = {
+    authority: 460,
+    risk: 430,
+    data: 330,
+    dependency: 290,
+    live: 230,
+    stale: 120,
+  };
+  return roleScore[role]
+    + dependencyCount * 24
+    + Math.round((data.activity_score ?? MIN_ACTIVITY_SCORE) * 130)
+    + Math.min(44, Number(data.size || 0));
 }
 
 function nodeKindLabel(data: AtlasElementData) {
-  return data.object_kind || data.category || data.type || 'unknown';
+  return data.object_kind || data.category || data.type || 'object';
 }
 
-function nodeAuthorityLabel(data: AtlasElementData) {
-  return data.authority_source || data.source || 'unknown';
+function semanticDisplayLabel(data: AtlasElementData) {
+  const raw = data.label || data.object_kind || data.type || data.id;
+  const clean = raw
+    .replace(/^table:/i, '')
+    .replace(/^memory:/i, '')
+    .replace(/[_:/.-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const words = clean.split(' ').filter(Boolean);
+  if (words.length <= 3) return clean;
+  return words.slice(0, 3).join(' ');
+}
+
+function authorityLabel(data: AtlasElementData) {
+  return data.authority_source || data.source || 'Praxis.db';
+}
+
+function outcomeLine(data: AtlasElementData, dependencyCount: number) {
+  const role = semanticRoleFor(data);
+  if (role === 'authority') return 'Source-of-truth object for nearby system behavior.';
+  if (role === 'risk') return 'Risk or defect object; inspect before trusting this area.';
+  if (role === 'dependency') return 'Bridge object; it explains how this area touches another system.';
+  if (role === 'live') return `Recently active object with ${dependencyCount} visible dependency${dependencyCount === 1 ? '' : 'ies'}.`;
+  if (role === 'stale') return 'Cold object; verify whether it still belongs in this semantic map.';
+  return 'Data dictionary object; use it to understand what this area owns.';
 }
 
 function useAtlasGraph() {
@@ -343,748 +378,928 @@ function useAtlasGraph() {
   return { payload, loading, error, refresh, lastRefresh };
 }
 
+function buildSemanticModel(payload: AtlasPayload): SemanticModel {
+  const nodeById = new Map<string, AtlasElementData>();
+  const rawEdgesByNode = new Map<string, AtlasElementData[]>();
+  const areaSignals = new Map<string, AreaSignal>();
+  const dependencyByArea = new Map<string, number>();
+  const dependencySignals: DependencySignal[] = [];
+
+  payload.nodes.forEach((node) => {
+    nodeById.set(node.data.id, node.data);
+  });
+
+  payload.areas.forEach((area) => {
+    areaSignals.set(area.slug, {
+      slug: area.slug,
+      title: area.title,
+      summary: area.summary,
+      memberCount: area.member_count,
+      authorityCount: 0,
+      dataCount: 0,
+      dependencyCount: 0,
+      riskCount: 0,
+      liveCount: 0,
+      staleCount: 0,
+      activityScore: MIN_ACTIVITY_SCORE,
+      semanticWeight: Math.max(1, area.member_count),
+      displaySize: 88,
+    });
+  });
+
+  payload.edges.forEach((edge) => {
+    const data = edge.data;
+    if (!data.source || !data.target) return;
+
+    if (!data.is_aggregate) {
+      rawEdgesByNode.set(data.source, [...(rawEdgesByNode.get(data.source) || []), data]);
+      rawEdgesByNode.set(data.target, [...(rawEdgesByNode.get(data.target) || []), data]);
+      return;
+    }
+
+    const sourceArea = nodeById.get(data.source)?.area || '';
+    const targetArea = nodeById.get(data.target)?.area || '';
+    if (!sourceArea || !targetArea || sourceArea === targetArea) return;
+    const weight = Number(data.weight || 1);
+    dependencySignals.push({
+      id: data.id,
+      sourceArea,
+      targetArea,
+      relation: data.label || 'depends_on',
+      weight,
+      activityScore: data.activity_score ?? MIN_ACTIVITY_SCORE,
+    });
+    dependencyByArea.set(sourceArea, (dependencyByArea.get(sourceArea) || 0) + weight);
+    dependencyByArea.set(targetArea, (dependencyByArea.get(targetArea) || 0) + weight);
+  });
+
+  const semanticObjectsByArea = new Map<string, SemanticObject[]>();
+  payload.nodes.forEach((node) => {
+    const data = node.data;
+    if (data.is_area || !data.area) return;
+    const area = areaSignals.get(data.area);
+    if (!area) return;
+
+    const dependencyCount = rawEdgesByNode.get(data.id)?.length || Number(data.degree || 0) || 0;
+    const role = semanticRoleFor(data);
+    const semanticObject: SemanticObject = {
+      node: data,
+      role,
+      rank: objectRank(data, dependencyCount),
+      dependencyCount,
+    };
+
+    semanticObjectsByArea.set(data.area, [...(semanticObjectsByArea.get(data.area) || []), semanticObject]);
+    area.activityScore = Math.max(area.activityScore, data.activity_score ?? MIN_ACTIVITY_SCORE);
+    if (role === 'authority') area.authorityCount += 1;
+    if (role === 'data') area.dataCount += 1;
+    if (role === 'dependency') area.dependencyCount += 1;
+    if (role === 'risk') area.riskCount += 1;
+    if ((data.activity_score ?? MIN_ACTIVITY_SCORE) >= 0.5) area.liveCount += 1;
+    if ((data.activity_score ?? MIN_ACTIVITY_SCORE) < 0.18 && Boolean(data.updated_at)) area.staleCount += 1;
+  });
+
+  areaSignals.forEach((area) => {
+    area.dependencyCount += Math.round(dependencyByArea.get(area.slug) || 0);
+    area.semanticWeight = area.memberCount * 0.35
+      + area.authorityCount * 2.2
+      + area.dataCount * 1.4
+      + area.dependencyCount * 1.1
+      + area.riskCount * 3.2
+      + area.liveCount * 1.2;
+    area.displaySize = clamp(66 + Math.sqrt(Math.max(1, area.semanticWeight)) * 9, 72, 166);
+  });
+
+  semanticObjectsByArea.forEach((objects, area) => {
+    semanticObjectsByArea.set(area, objects.sort((a, b) => b.rank - a.rank));
+  });
+
+  dependencySignals.sort((a, b) => b.weight - a.weight || b.activityScore - a.activityScore);
+
+  return {
+    areaSignals,
+    areas: [...areaSignals.values()].sort((a, b) => b.semanticWeight - a.semanticWeight),
+    dependencies: dependencySignals,
+    nodeById,
+    rawEdgesByNode,
+    semanticObjectsByArea,
+  };
+}
+
+function areaPosition(area: AreaSignal, index: number, total: number) {
+  if (index === 0) return { x: 0, y: 0 };
+  const innerCount = Math.min(8, Math.max(1, total - 1));
+  const outerIndex = index - 1;
+  const inner = outerIndex < innerCount;
+  const ringIndex = inner ? outerIndex : outerIndex - innerCount;
+  const count = inner ? innerCount : Math.max(1, total - 1 - innerCount);
+  const radius = inner ? 315 : 540;
+  const angle = -Math.PI / 2 + (ringIndex / count) * Math.PI * 2 + (stableHash(area.slug) % 17) * 0.01;
+  return {
+    x: Math.cos(angle) * radius * (inner ? 1.08 : 1.16),
+    y: Math.sin(angle) * radius * (inner ? 0.78 : 0.86),
+  };
+}
+
+function outerAreaPosition(area: AreaSignal, focusArea: string, index: number, total: number) {
+  const angle = -Math.PI / 2 + (index / Math.max(1, total)) * Math.PI * 2 + (stableHash(`${focusArea}:${area.slug}`) % 23) * 0.008;
+  return {
+    x: Math.cos(angle) * 520,
+    y: Math.sin(angle) * 345,
+  };
+}
+
+function classRole(role: SemanticObjectRole): 'authority' | 'data' | 'dependency' | 'risk' {
+  if (role === 'authority') return 'authority';
+  if (role === 'dependency') return 'dependency';
+  if (role === 'risk' || role === 'stale') return 'risk';
+  return 'data';
+}
+
+function objectPosition(object: SemanticObject, indexInClass: number, classCount: number) {
+  const centers: Record<ReturnType<typeof classRole>, { x: number; y: number }> = {
+    authority: { x: -145, y: -112 },
+    data: { x: 120, y: -108 },
+    dependency: { x: -130, y: 110 },
+    risk: { x: 120, y: 110 },
+  };
+  const role = classRole(object.role);
+  const center = centers[role];
+  const columns = classCount <= 3 ? classCount : 3;
+  const col = indexInClass % Math.max(1, columns);
+  const row = Math.floor(indexInClass / Math.max(1, columns));
+  const xOffset = (col - (columns - 1) / 2) * 58;
+  const yOffset = row * 58;
+  return {
+    x: center.x + xOffset,
+    y: center.y + yOffset,
+  };
+}
+
+function inspectNeighborPosition(index: number) {
+  const positions = [
+    { x: 92, y: -112 },
+    { x: 158, y: -34 },
+    { x: 158, y: 48 },
+    { x: 92, y: 124 },
+  ];
+  return positions[index] || { x: 150, y: -80 + index * 58 };
+}
+
+function selectFocusObjects(model: SemanticModel, areaSlug: string) {
+  const objects = model.semanticObjectsByArea.get(areaSlug) || [];
+  const selected: SemanticObject[] = [];
+  const byRole = new Map<SemanticObjectRole, SemanticObject[]>();
+
+  objects.forEach((object) => {
+    byRole.set(object.role, [...(byRole.get(object.role) || []), object]);
+  });
+
+  (['authority', 'data', 'dependency', 'risk', 'live', 'stale'] as SemanticObjectRole[]).forEach((role) => {
+    const cap = role === 'data' ? 4 : role === 'authority' ? 2 : 2;
+    selected.push(...(byRole.get(role) || []).slice(0, cap));
+  });
+
+  const seen = new Set(selected.map((object) => object.node.id));
+  objects.forEach((object) => {
+    if (selected.length >= MAX_FOCUS_OBJECTS) return;
+    if (!seen.has(object.node.id)) {
+      selected.push(object);
+      seen.add(object.node.id);
+    }
+  });
+
+  return selected.slice(0, MAX_FOCUS_OBJECTS);
+}
+
+function selectedEdges(model: SemanticModel, selectedId: string | null) {
+  if (!selectedId) return [];
+  return [...(model.rawEdgesByNode.get(selectedId) || [])]
+    .map((edge) => {
+      const neighborId = edge.source === selectedId ? edge.target : edge.source;
+      const neighbor = neighborId ? model.nodeById.get(neighborId) : undefined;
+      const dependencyCount = neighbor ? model.rawEdgesByNode.get(neighbor.id)?.length || Number(neighbor.degree || 0) || 0 : 0;
+      const rank = neighbor ? objectRank(neighbor, dependencyCount) : 0;
+      return { edge, neighbor, rank };
+    })
+    .filter((item): item is { edge: AtlasElementData; neighbor: AtlasElementData; rank: number } => Boolean(item.neighbor && !item.neighbor.is_area))
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, MAX_SELECTED_EDGES);
+}
+
+function buildElements(
+  model: SemanticModel,
+  mode: AtlasViewMode,
+  focusArea: string | null,
+  selectedId: string | null,
+): ElementDefinition[] {
+  if (mode === 'overview' || !focusArea) {
+    const areaIndex = new Map(model.areas.map((area, index) => [area.slug, index]));
+    const total = model.areas.length;
+    const nodes = model.areas.map((area) => ({
+      data: {
+        id: areaId(area.slug),
+        label: area.title,
+        area: area.slug,
+        node_kind: 'area',
+        display_size: area.displaySize,
+        display_color: areaColor(area.slug),
+        signal_activity: area.activityScore,
+        signal_authority: area.authorityCount,
+        signal_data: area.dataCount,
+        signal_dependency: area.dependencyCount,
+        signal_risk: area.riskCount,
+        signal_stale: area.staleCount,
+      },
+      position: areaPosition(area, areaIndex.get(area.slug) || 0, total),
+      classes: 'area-node area-overview',
+    }));
+
+    const edges = model.dependencies.slice(0, MAX_OVERVIEW_DEPENDENCIES).map((dep) => ({
+      data: {
+        id: `overview::${dep.id}`,
+        source: areaId(dep.sourceArea),
+        target: areaId(dep.targetArea),
+        label: dep.relation,
+        display_color: areaColor(dep.sourceArea),
+        weight: dep.weight,
+        signal_activity: dep.activityScore,
+      },
+      classes: 'overview-dependency',
+    }));
+
+    return [...nodes, ...edges] as ElementDefinition[];
+  }
+
+  const focusSignal = model.areaSignals.get(focusArea);
+  const focusDeps = model.dependencies
+    .filter((dep) => dep.sourceArea === focusArea || dep.targetArea === focusArea)
+    .slice(0, MAX_FOCUS_DEPENDENCIES);
+  const outerAreas = model.areas.filter((area) => area.slug !== focusArea);
+  const inspecting = mode === 'item_inspect' && Boolean(selectedId);
+  const focusObjects = inspecting ? [] : selectFocusObjects(model, focusArea);
+  const selectedEdgeItems = selectedEdges(model, selectedId);
+  const objectMap = new Map<string, SemanticObject>();
+  const objectPositions = new Map<string, { x: number; y: number }>();
+  const classIndex = new Map<ReturnType<typeof classRole>, number>();
+  const classCounts = focusObjects.reduce((counts, object) => {
+    const klass = classRole(object.role);
+    counts.set(klass, (counts.get(klass) || 0) + 1);
+    return counts;
+  }, new Map<ReturnType<typeof classRole>, number>());
+
+  focusObjects.forEach((object) => {
+    objectMap.set(object.node.id, object);
+    const klass = classRole(object.role);
+    const index = classIndex.get(klass) || 0;
+    classIndex.set(klass, index + 1);
+    objectPositions.set(object.node.id, objectPosition(object, index, classCounts.get(klass) || 1));
+  });
+
+  if (selectedId && !objectMap.has(selectedId)) {
+    const selectedNode = model.nodeById.get(selectedId);
+    if (selectedNode) {
+      const dependencyCount = model.rawEdgesByNode.get(selectedId)?.length || Number(selectedNode.degree || 0) || 0;
+      const object = {
+        node: selectedNode,
+        role: semanticRoleFor(selectedNode),
+        rank: objectRank(selectedNode, dependencyCount),
+        dependencyCount,
+      };
+      objectMap.set(selectedId, object);
+      objectPositions.set(selectedId, inspecting ? { x: -98, y: 0 } : { x: 0, y: 0 });
+    }
+  }
+
+  selectedEdgeItems.forEach((item, index) => {
+    if (!objectMap.has(item.neighbor.id)) {
+      const role = semanticRoleFor(item.neighbor);
+      objectMap.set(item.neighbor.id, {
+        node: item.neighbor,
+        role,
+        rank: objectRank(item.neighbor, item.rank),
+        dependencyCount: model.rawEdgesByNode.get(item.neighbor.id)?.length || Number(item.neighbor.degree || 0) || 0,
+      });
+      const base = objectPositions.get(selectedId || '') || { x: -98, y: 0 };
+      const offset = inspectNeighborPosition(index);
+      objectPositions.set(item.neighbor.id, {
+        x: base.x + offset.x,
+        y: base.y + offset.y,
+      });
+    }
+  });
+
+  const areaNodes: ElementDefinition[] = [
+    {
+      data: {
+        id: areaId(focusArea),
+        label: focusSignal?.title || focusArea,
+        area: focusArea,
+        node_kind: 'area',
+        display_color: areaColor(focusArea),
+        display_size: 1,
+      },
+      position: { x: 0, y: 0 },
+      classes: 'area-node focus-anchor',
+    },
+    ...outerAreas.map((area, index) => ({
+      data: {
+        id: areaId(area.slug),
+        label: area.title,
+        area: area.slug,
+        node_kind: 'area',
+        display_color: areaColor(area.slug),
+        display_size: clamp(area.displaySize * 0.54, 38, 72),
+        signal_activity: area.activityScore,
+      },
+      position: outerAreaPosition(area, focusArea, index, outerAreas.length),
+      classes: `area-node area-outer ${focusDeps.some((dep) => dep.sourceArea === area.slug || dep.targetArea === area.slug) ? 'dependency-source' : ''}`,
+    })),
+  ] as ElementDefinition[];
+
+  const objectNodes: ElementDefinition[] = [...objectMap.values()].map((object, index) => {
+    const position = objectPositions.get(object.node.id) || { x: 0, y: 0 };
+    const labelled = object.node.id === selectedId;
+    return {
+      data: {
+        ...object.node,
+        id: objectId(object.node.id),
+        label: semanticDisplayLabel(object.node),
+        original_id: object.node.id,
+        node_kind: 'object',
+        semantic_role: object.role,
+        semantic_rank: object.rank,
+        display_size: clamp(26 + Math.sqrt(object.rank) * 0.9, 32, 54),
+      },
+      position,
+      classes: `semantic-object role-${object.role} class-${classRole(object.role)} ${labelled ? 'labelled-object' : ''} ${object.node.id === selectedId ? 'selected-object' : ''}`,
+    };
+  }) as ElementDefinition[];
+
+  const classLabelNodes: ElementDefinition[] = inspecting ? [] : [
+    ['authority', 'authority', -145, -182],
+    ['data', 'data dictionary', 120, -178],
+    ['dependency', 'active dependencies', -130, 55],
+    ['risk', 'risk / stale', 120, 55],
+  ].flatMap(([key, label, x, y]) => {
+    const count = classCounts.get(key as ReturnType<typeof classRole>) || 0;
+    if (count <= 0) return [];
+    return [{
+      data: {
+        id: `class-label::${focusArea}::${key}`,
+        label: `${label} ${count}`,
+        node_kind: 'class_label',
+        display_size: 1,
+      },
+      position: { x: Number(x), y: Number(y) },
+      classes: 'class-label',
+    }];
+  }) as ElementDefinition[];
+
+  const dependencyEdges: ElementDefinition[] = inspecting ? [] : focusDeps.map((dep) => ({
+    data: {
+      id: `focus::${dep.id}`,
+      source: areaId(dep.sourceArea),
+      target: areaId(dep.targetArea),
+      label: dep.relation,
+      display_color: areaColor(dep.sourceArea === focusArea ? dep.targetArea : dep.sourceArea),
+      weight: dep.weight,
+      signal_activity: dep.activityScore,
+    },
+    classes: 'focus-dependency',
+  })) as ElementDefinition[];
+
+  const inspectEdges: ElementDefinition[] = selectedEdgeItems.map((item) => ({
+    data: {
+      id: `inspect::${item.edge.id}`,
+      source: objectId(selectedId || ''),
+      target: objectId(item.neighbor.id),
+      label: item.edge.label || 'related',
+      weight: item.edge.weight || 1,
+      signal_activity: item.edge.activity_score ?? MIN_ACTIVITY_SCORE,
+    },
+    classes: 'selection-edge',
+  })) as ElementDefinition[];
+
+  return [...areaNodes, ...classLabelNodes, ...objectNodes, ...dependencyEdges, ...inspectEdges] as ElementDefinition[];
+}
+
+export { buildElements, buildSemanticModel };
+
+const atlasStyles = [
+  {
+    selector: 'node',
+    style: {
+      'background-color': '#050505',
+      'background-opacity': 0,
+      'border-color': '#d8d2c5',
+      'border-opacity': 0.72,
+      'border-width': 1.5,
+      color: '#f3efe6',
+      'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      'font-size': 11,
+      'font-weight': 700,
+      height: 'data(display_size)',
+      label: 'data(label)',
+      'min-zoomed-font-size': 0,
+      'overlay-opacity': 0,
+      'shadow-blur': 0,
+      'shadow-color': '#f3efe6',
+      'shadow-opacity': 0,
+      shape: 'ellipse',
+      'text-halign': 'center',
+      'text-max-width': 104,
+      'text-outline-color': '#050505',
+      'text-outline-opacity': 1,
+      'text-outline-width': 5,
+      'text-valign': 'center',
+      'text-wrap': 'wrap',
+      width: 'data(display_size)',
+    },
+  },
+  {
+    selector: 'node.area-overview',
+    style: {
+      'background-opacity': 'mapData(signal_activity, 0.08, 1, 0.015, 0.12)' as unknown as number,
+      'border-color': 'data(display_color)',
+      'border-opacity': 'mapData(signal_activity, 0.08, 1, 0.48, 1)' as unknown as number,
+      'border-width': 'mapData(signal_risk, 0, 12, 1.6, 4.2)' as unknown as number,
+      'font-size': 12,
+      'shadow-blur': 'mapData(signal_activity, 0.08, 1, 0, 24)' as unknown as number,
+      'shadow-opacity': 'mapData(signal_activity, 0.08, 1, 0, 0.22)' as unknown as number,
+      'text-opacity': 1,
+      'z-index': 5,
+    },
+  },
+  {
+    selector: 'node.area-outer',
+    style: {
+      'background-opacity': 0.01,
+      'border-color': 'data(display_color)',
+      'border-opacity': 0.18,
+      'border-width': 1.2,
+      'font-size': 10,
+      'text-max-width': 82,
+      'text-opacity': 0,
+      'z-index': 2,
+    },
+  },
+  {
+    selector: 'node.area-outer.dependency-source',
+    style: {
+      'background-opacity': 0.025,
+      'border-color': 'data(display_color)',
+      'border-opacity': 0.58,
+      'shadow-blur': 8,
+      'shadow-color': 'data(display_color)',
+      'shadow-opacity': 0.06,
+      'z-index': 4,
+    },
+  },
+  {
+    selector: 'node.area-outer.hot-source',
+    style: {
+      'background-opacity': 0.055,
+      'border-color': 'data(display_color)',
+      'border-opacity': 1,
+      'font-size': 10,
+      height: 'mapData(display_size, 38, 72, 47, 84)' as unknown as number,
+      'shadow-blur': 18,
+      'shadow-opacity': 0.18,
+      'text-opacity': 1,
+      width: 'mapData(display_size, 38, 72, 47, 84)' as unknown as number,
+      'z-index': 8,
+    },
+  },
+  {
+    selector: 'node.area-outer.primary-source',
+    style: {
+      'border-width': 2.2,
+      'shadow-blur': 22,
+      'shadow-opacity': 0.24,
+    },
+  },
+  {
+    selector: 'node.focus-anchor',
+    style: {
+      events: 'no',
+      opacity: 0,
+      'text-opacity': 0,
+      'z-index': 0,
+    },
+  },
+  {
+    selector: 'node.class-label',
+    style: {
+      events: 'no',
+      'background-opacity': 0,
+      'border-opacity': 0,
+      color: '#8c8a84',
+      'font-size': 9,
+      'font-weight': 700,
+      height: 1,
+      'text-opacity': 1,
+      'text-outline-width': 4,
+      width: 1,
+      'z-index': 6,
+    },
+  },
+  {
+    selector: 'node.semantic-object',
+    style: {
+      'background-opacity': 0.065,
+      'border-opacity': 0.92,
+      'border-width': 2,
+      'font-size': 9,
+      'shadow-blur': 14,
+      'shadow-opacity': 0.1,
+      'text-margin-y': 8,
+      'text-max-width': 72,
+      'text-opacity': 0,
+      'text-valign': 'bottom',
+      'z-index': 7,
+    },
+  },
+  { selector: 'node.labelled-object', style: { 'text-opacity': 1 } },
+  {
+    selector: 'node.role-authority',
+    style: {
+      'border-color': ROLE_COLORS.authority,
+      'shadow-color': ROLE_COLORS.authority,
+      shape: 'octagon',
+    },
+  },
+  {
+    selector: 'node.role-data',
+    style: {
+      'border-color': ROLE_COLORS.data,
+      'shadow-color': ROLE_COLORS.data,
+      shape: 'hexagon',
+    },
+  },
+  {
+    selector: 'node.role-dependency',
+    style: {
+      'border-color': ROLE_COLORS.dependency,
+      'shadow-color': ROLE_COLORS.dependency,
+      shape: 'tag',
+    },
+  },
+  {
+    selector: 'node.role-risk',
+    style: {
+      'background-opacity': 0.12,
+      'border-color': ROLE_COLORS.risk,
+      'border-width': 2.8,
+      'shadow-color': ROLE_COLORS.risk,
+      'shadow-opacity': 0.18,
+      shape: 'diamond',
+    },
+  },
+  {
+    selector: 'node.role-live',
+    style: {
+      'border-color': ROLE_COLORS.live,
+      'shadow-color': ROLE_COLORS.live,
+      'shadow-opacity': 0.16,
+      shape: 'ellipse',
+    },
+  },
+  {
+    selector: 'node.role-stale',
+    style: {
+      'border-color': ROLE_COLORS.stale,
+      'border-opacity': 0.62,
+      'border-width': 1.3,
+      shape: 'ellipse',
+    },
+  },
+  {
+    selector: 'node:selected, node.selected-object',
+    style: {
+      'background-opacity': 0.12,
+      'border-color': '#ffffff',
+      'border-opacity': 1,
+      'border-width': 3,
+      'shadow-blur': 22,
+      'shadow-color': '#ffffff',
+      'shadow-opacity': 0.18,
+      'text-opacity': 1,
+      'z-index': 12,
+    },
+  },
+  {
+    selector: 'node.hover',
+    style: {
+      'background-opacity': 0.13,
+      'border-opacity': 1,
+      'shadow-blur': 20,
+      'shadow-opacity': 0.2,
+      'text-opacity': 1,
+      'z-index': 12,
+    },
+  },
+  {
+    selector: 'edge',
+    style: {
+      'curve-style': 'bezier',
+      'line-color': '#6d6b67',
+      'line-opacity': 0.16,
+      'target-arrow-shape': 'none',
+      width: 1,
+      'z-index': 1,
+    },
+  },
+  {
+    selector: 'edge.overview-dependency',
+    style: {
+      'line-opacity': 'mapData(weight, 1, 32, 0.08, 0.28)' as unknown as number,
+      'line-color': 'data(display_color)',
+      width: 'mapData(weight, 1, 32, 0.6, 3.2)' as unknown as number,
+    },
+  },
+  {
+    selector: 'edge.focus-dependency',
+    style: {
+      'line-color': 'data(display_color)',
+      'line-opacity': 'mapData(weight, 1, 32, 0.1, 0.24)' as unknown as number,
+      width: 'mapData(weight, 1, 32, 0.8, 2.2)' as unknown as number,
+    },
+  },
+  {
+    selector: 'edge.focus-dependency.hot-edge',
+    style: {
+      'line-color': 'data(display_color)',
+      'line-opacity': 0.64,
+      width: 2.3,
+      'z-index': 6,
+    },
+  },
+  {
+    selector: 'edge.selection-edge',
+    style: {
+      'line-color': '#f3efe6',
+      'line-opacity': 0.62,
+      width: 1.6,
+      'z-index': 8,
+    },
+  },
+  { selector: 'node.faded', style: { opacity: 0.15 } },
+  { selector: 'edge.faded', style: { opacity: 0.05 } },
+];
+
 export function AtlasPage() {
   const { payload, loading, error, refresh, lastRefresh } = useAtlasGraph();
   const graphRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
-  const expandedAreasRef = useRef<Set<string>>(new Set());
-  const scopeRef = useRef<Scope>(SCOPE_ALL);
-  const selectedNodeIdRef = useRef<string | null>(null);
-  const previousUpdatedAtRef = useRef<Map<string, string>>(new Map());
-  const changedNodeIdsRef = useRef<Set<string>>(new Set());
-
-  const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
-  const [scope, setScope] = useState<Scope>(SCOPE_ALL);
+  const transientClearTimerRef = useRef<number | null>(null);
+  const [viewMode, setViewMode] = useState<AtlasViewMode>('overview');
+  const [focusArea, setFocusArea] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandDraft, setCommandDraft] = useState('');
-  const [selectedNode, setSelectedNode] = useState<AtlasElementData | null>(null);
-  const [selectedNeighbors, setSelectedNeighbors] = useState<AtlasElementData[]>([]);
-  const [cardPosition, setCardPosition] = useState<{ x: number; y: number } | null>(null);
-  const [renderIssue, setRenderIssue] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
-  const nodeById = useMemo(() => {
-    const index = new Map<string, AtlasElementData>();
-    payload?.nodes.forEach((node) => index.set(node.data.id, node.data));
-    return index;
-  }, [payload]);
+  const model = useMemo(() => (payload ? buildSemanticModel(payload) : null), [payload]);
+  const selectedNode = selectedId && model ? model.nodeById.get(selectedId) || null : null;
+  const selectedEdgeItems = useMemo(() => (model ? selectedEdges(model, selectedId) : []), [model, selectedId]);
+  const elements = useMemo(() => (
+    model ? buildElements(model, viewMode, focusArea, selectedId) : []
+  ), [focusArea, model, selectedId, viewMode]);
 
-  const degreeMap = useMemo(() => {
-    const d = new Map<string, number>();
-    payload?.edges.forEach((edge) => {
-      if (edge.data.is_aggregate) return;
-      if (edge.data.source) d.set(edge.data.source, (d.get(edge.data.source) || 0) + 1);
-      if (edge.data.target) d.set(edge.data.target, (d.get(edge.data.target) || 0) + 1);
-    });
-    return d;
-  }, [payload]);
+  const focusSignal = focusArea && model ? model.areaSignals.get(focusArea) || null : null;
+  const visibleObjectCount = elements.filter((element) => element.data?.node_kind === 'object').length;
+  const visibleDependencyCount = elements.filter((element) => Boolean(element.data?.source && element.data?.target)).length;
 
-  const activeCount = useMemo(() => {
-    if (!payload) return 0;
-    return payload.nodes.reduce((count, node) => {
-      const data = node.data;
-      if (data.is_area) return count;
-      const degree = degreeMap.get(data.id) || 0;
-      return nodeMatchesScope(data, scope, degree) ? count + 1 : count;
-    }, 0);
-  }, [degreeMap, payload, scope]);
-
-  const hotCount = useMemo(() => {
-    if (!payload) return 0;
-    return payload.nodes.reduce((count, node) => (
-      !node.data.is_area && (node.data.activity_score ?? 0) >= 0.5 ? count + 1 : count
-    ), 0);
-  }, [payload]);
-
-  const applyLabelMode = useCallback(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const zoom = cy.zoom();
-    cy.nodes().not('[?is_area]').forEach((node) => {
-      const hovered = node.hasClass('hover') || node.selected();
-      node.style('text-opacity', hovered || zoom > 1.35 ? 1 : 0);
-    });
+  const showOverview = useCallback(() => {
+    setViewMode('overview');
+    setFocusArea(null);
+    setSelectedId(null);
   }, []);
 
-  const setGlobalReady = useCallback((cy: Core, readyState: boolean) => {
-    const visibleNodes = cy.nodes().filter((node) => node.style('display') !== 'none').length;
-    const visibleEdges = cy.edges().filter((edge) => edge.style('display') !== 'none').length;
-    window.__PRAXIS_ATLAS_READY__ = readyState;
-    window.__PRAXIS_ATLAS_VISIBLE_COUNTS__ = { nodes: visibleNodes, edges: visibleEdges };
+  const focusAreaBySlug = useCallback((slug: string) => {
+    setFocusArea(slug);
+    setSelectedId(null);
+    setViewMode('area_focus');
   }, []);
 
-  const fitVisibleGraph = useCallback((padding = 90) => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const expanded = expandedAreasRef.current;
-    if (expanded.size > 0) {
-      const expandedTarget = cy.nodes().filter((node) => {
-        const data = node.data() as AtlasElementData;
-        if (data.is_area) return node.style('display') !== 'none';
-        return expanded.has(data.area || '') && node.style('display') !== 'none';
-      });
-      if (expandedTarget.length) {
-        cy.fit(expandedTarget, padding);
-        setGlobalReady(cy, true);
-        return;
-      }
-    }
-    const visible = cy.nodes().filter((node) => node.style('display') !== 'none');
-    const target = visible.length ? visible : cy.nodes('[?is_area]');
-    if (target.length) cy.fit(target, padding);
-    setGlobalReady(cy, true);
-  }, [setGlobalReady]);
+  const inspectNode = useCallback((id: string) => {
+    const node = model?.nodeById.get(id);
+    if (!node || node.is_area) return;
+    setFocusArea(node.area || focusArea);
+    setSelectedId(id);
+    setViewMode('item_inspect');
+  }, [focusArea, model]);
 
-  const setAreaVisualState = useCallback((areaNode: NodeSingular, expanded: boolean, animate: boolean) => {
-    const collapsedSize = Number(areaNode.data('collapsed_size') || areaNode.data('size') || 92);
-    const targetSize = collapsedSize;
-    areaNode.toggleClass('expanded', expanded);
-    areaNode.stop(true, false);
-    if (!animate) {
-      areaNode.style({ width: targetSize, height: targetSize });
+  const submitCommand = useCallback((event?: FormEvent) => {
+    event?.preventDefault();
+    if (!model) return;
+    const raw = commandDraft.trim();
+    const query = raw.toLowerCase();
+    if (!query) {
+      showOverview();
+      setCommandOpen(false);
       return;
     }
-    areaNode.animate(
-      { style: { width: targetSize, height: targetSize } },
-      { duration: 420, easing: ATLAS_EASING },
-    );
-  }, []);
-
-  const layoutArea = useCallback((areaSlug: string) => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const areaNode = cy.getElementById(`area::${areaSlug}`);
-    const members = cy.nodes().filter((node) => !node.data('is_area') && node.data('area') === areaSlug);
-    if (!areaNode.length || !members.length) return;
-    const center = areaNode.position();
-    const radius = memberClusterRadius(members.length);
-    const positions = memberCloudPositions(members, center, radius, areaSlug);
-    members.layout({
-      name: 'preset',
-      positions: (nodeId: string | NodeSingular) => {
-        const id = typeof nodeId === 'string' ? nodeId : nodeId.id();
-        return positions.get(id) || center;
-      },
-      animate: true,
-      animationDuration: 460,
-      animationEasing: ATLAS_EASING,
-      fit: false,
-      padding: 24,
-    } as cytoscape.LayoutOptions).run();
-  }, []);
-
-  const displaceAreaOrbit = useCallback((focusArea: string) => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const focusNode = cy.getElementById(`area::${focusArea}`);
-    if (!focusNode.length) return;
-    const center = focusNode.position();
-    const memberCount = cy.nodes().filter((node) => !node.data('is_area') && node.data('area') === focusArea).length;
-    const orbitRadius = memberClusterRadius(memberCount) + 290;
-    const otherAreas = cy.nodes('[?is_area]')
-      .filter((node) => node.data('area') !== focusArea && node.style('display') !== 'none')
-      .sort((a, b) => String(a.id()).localeCompare(String(b.id())));
-    const count = Math.max(otherAreas.length, 1);
-    otherAreas.forEach((node, index) => {
-      const hashOffset = (stableHash(`${focusArea}:${node.id()}`) % 19) / 19;
-      const angle = -Math.PI / 2 + (index / count) * Math.PI * 2 + hashOffset * 0.08;
-      const xRadius = orbitRadius * 1.18;
-      const yRadius = orbitRadius * 0.88;
-      node.animate(
-        {
-          position: {
-            x: center.x + Math.cos(angle) * xRadius,
-            y: center.y + Math.sin(angle) * yRadius,
-          },
-        },
-        { duration: 460, easing: ATLAS_EASING },
-      );
-    });
-  }, []);
-
-  const applyScopeVisuals = useCallback(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const currentScope = scopeRef.current;
-    const expanded = expandedAreasRef.current;
-
-    cy.nodes().forEach((node) => {
-      const data = node.data() as AtlasElementData;
-      if (data.is_area) {
-        const matchesAreaScope = currentScope.kind !== 'area'
-          || (data.area || '').toLowerCase() === currentScope.value;
-        node.style('display', matchesAreaScope ? 'element' : 'none');
-        node.toggleClass('scope-dim', currentScope.kind !== 'all' && currentScope.kind !== 'area');
-        setAreaVisualState(node, expanded.has(data.area || ''), false);
-        return;
-      }
-      const degree = degreeMap.get(data.id) || 0;
-      const inScope = nodeMatchesScope(data, currentScope, degree);
-      const areaExpanded = expanded.has(data.area || '');
-      const isLandmark = (data.activity_score ?? 0) >= 0.86 || degree >= 8;
-      const isTexturePoint = stableHash(data.id) % 100 < 18;
-      const visible = areaExpanded
-        ? isLandmark || isTexturePoint
-        : currentScope.kind !== 'all' && inScope;
-      node.style('display', visible ? 'element' : 'none');
-      node.toggleClass('scope-hit', inScope && currentScope.kind !== 'all');
-      node.toggleClass('scope-dim', !inScope && currentScope.kind !== 'all');
-      node.toggleClass('expanded-member', visible && areaExpanded);
-      node.toggleClass(
-        'landmark',
-        visible && areaExpanded && isLandmark,
-      );
-    });
-
-    cy.edges().forEach((edge) => {
-      const data = edge.data() as AtlasElementData;
-      const sourceVisible = edge.source().style('display') !== 'none';
-      const targetVisible = edge.target().style('display') !== 'none';
-      if (!sourceVisible || !targetVisible) {
-        edge.style('display', 'none');
-        return;
-      }
-      if (data.is_aggregate) {
-        const sourceArea = edge.source().data('area');
-        const targetArea = edge.target().data('area');
-        const bothExpanded = expanded.has(sourceArea) && expanded.has(targetArea);
-        edge.style('display', bothExpanded ? 'none' : 'element');
-        return;
-      }
-      edge.style('display', 'element');
-    });
-
-    applyLabelMode();
-    setGlobalReady(cy, true);
-  }, [applyLabelMode, degreeMap, setAreaVisualState, setGlobalReady]);
-
-  const syncExpandedAreas = useCallback((next: Set<string>) => {
-    const focusArea = Array.from(next)[0] || '';
-    const focused = focusArea ? new Set([focusArea]) : new Set<string>();
-    expandedAreasRef.current = focused;
-    const cy = cyRef.current;
-    if (cy) {
-      cy.nodes('[?is_area]').forEach((node) => {
-        setAreaVisualState(node, focused.has(node.data('area')), true);
-      });
-    }
-    setExpandedAreas(new Set(focused));
-    applyScopeVisuals();
-    if (focusArea) {
-      layoutArea(focusArea);
-      displaceAreaOrbit(focusArea);
-    }
-    window.setTimeout(() => fitVisibleGraph(52), 480);
-  }, [applyScopeVisuals, displaceAreaOrbit, fitVisibleGraph, layoutArea, setAreaVisualState]);
-
-  const updateCardPosition = useCallback((nodeId: string) => {
-    const cy = cyRef.current;
-    if (!cy) return;
-    const node = cy.getElementById(nodeId);
-    if (!node.length) return;
-    const rendered = node.renderedPosition();
-    setCardPosition({ x: rendered.x, y: rendered.y });
-  }, []);
-
-  const selectNode = useCallback((nodeId: string, animate = true) => {
-    const data = nodeById.get(nodeId);
-    if (!data || data.is_area) return;
-    const neighbors = payload?.edges
-      .filter((edge) => !edge.data.is_aggregate && (edge.data.source === nodeId || edge.data.target === nodeId))
-      .map((edge) => nodeById.get(edge.data.source === nodeId ? edge.data.target || '' : edge.data.source || ''))
-      .filter((node): node is AtlasElementData => Boolean(node && !node.is_area)) || [];
-    const cy = cyRef.current;
-    if (cy) {
-      const node = cy.getElementById(nodeId);
-      if (node.length) {
-        cy.$(':selected').unselect();
-        node.select();
-        const area = String(data.area || '');
-        if (area) {
-          const next = new Set([area]);
-          expandedAreasRef.current = next;
-          setExpandedAreas(new Set(next));
-          layoutArea(area);
-          displaceAreaOrbit(area);
-        }
-        applyScopeVisuals();
-        if (animate) cy.animate({ center: { eles: node }, zoom: 1.55 }, { duration: 300 });
-        updateCardPosition(nodeId);
-      }
-    }
-    selectedNodeIdRef.current = nodeId;
-    setSelectedNode(data);
-    setSelectedNeighbors(neighbors);
-  }, [applyScopeVisuals, displaceAreaOrbit, layoutArea, nodeById, payload, updateCardPosition]);
-
-  const dismissSelection = useCallback(() => {
-    const cy = cyRef.current;
-    if (cy) cy.$(':selected').unselect();
-    selectedNodeIdRef.current = null;
-    setSelectedNode(null);
-    setSelectedNeighbors([]);
-    setCardPosition(null);
-  }, []);
-
-  const applyScope = useCallback((next: Scope) => {
-    scopeRef.current = next;
-    setScope(next);
-    const cy = cyRef.current;
-    if (!cy) return;
-    applyScopeVisuals();
-
-    if (next.kind === 'area' && next.value) {
-      const expanded = new Set([next.value]);
-      syncExpandedAreas(expanded);
-      const areaNode = cy.getElementById(`area::${next.value}`);
-      if (areaNode.length) cy.animate({ center: { eles: areaNode }, zoom: 1.08 }, { duration: 320 });
+    const areaQuery = query.match(/^area:(.+)$/)?.[1]?.trim();
+    const areaMatch = model.areas.find((area) => (
+      area.slug.toLowerCase() === (areaQuery || query)
+      || area.title.toLowerCase().includes(areaQuery || query)
+    ));
+    if (areaMatch) {
+      focusAreaBySlug(areaMatch.slug);
+      setCommandOpen(false);
       return;
     }
-
-    if (next.kind === 'search' && next.value) {
-      const match = cy.nodes().filter((node) => {
-        const data = node.data() as AtlasElementData;
-        if (data.is_area) return false;
-        const degree = degreeMap.get(data.id) || 0;
-        return nodeMatchesScope(data, next, degree);
-      }).first();
-      if (match.length) selectNode(match.id());
-      return;
-    }
-
-    window.setTimeout(() => fitVisibleGraph(52), 60);
-  }, [applyScopeVisuals, degreeMap, fitVisibleGraph, selectNode, syncExpandedAreas]);
+    const nodeMatch = [...model.nodeById.values()].find((node) => (
+      !node.is_area && haystack(node).includes(query)
+    ));
+    if (nodeMatch) inspectNode(nodeMatch.id);
+    setCommandOpen(false);
+  }, [commandDraft, focusAreaBySlug, inspectNode, model, showOverview]);
 
   useEffect(() => {
-    if (!payload) return;
-    const previous = previousUpdatedAtRef.current;
-    const next = new Map<string, string>();
-    const changed = new Set<string>();
-    payload.nodes.forEach((node) => {
-      const data = node.data;
-      if (data.is_area || !data.updated_at) return;
-      next.set(data.id, data.updated_at);
-      const prev = previous.get(data.id);
-      if ((prev && prev !== data.updated_at) || (!prev && previous.size > 0)) changed.add(data.id);
-    });
-    previousUpdatedAtRef.current = next;
-    changedNodeIdsRef.current = changed;
-  }, [payload]);
-
-  useEffect(() => {
-    if (!selectedNodeIdRef.current || !payload) return;
-    const latest = nodeById.get(selectedNodeIdRef.current);
-    if (!latest) {
-      dismissSelection();
-      return;
-    }
-    setSelectedNode(latest);
-    const neighbors = payload.edges
-      .filter((edge) => !edge.data.is_aggregate && (
-        edge.data.source === latest.id || edge.data.target === latest.id
-      ))
-      .map((edge) => nodeById.get(edge.data.source === latest.id ? edge.data.target || '' : edge.data.source || ''))
-      .filter((node): node is AtlasElementData => Boolean(node && !node.is_area));
-    setSelectedNeighbors(neighbors);
-  }, [dismissSelection, nodeById, payload]);
-
-  useEffect(() => {
-    if (!payload || !graphRef.current) return undefined;
-    ensureFcoseRegistered();
+    if (!graphRef.current || !model) return undefined;
     setReady(false);
-    setRenderIssue(null);
-    expandedAreasRef.current = new Set();
-    scopeRef.current = SCOPE_ALL;
-    setScope(SCOPE_ALL);
-    setExpandedAreas(new Set());
-
     const cy = cytoscape({
       container: graphRef.current,
-      elements: toElementDefinitions(payload),
-      style: [
-        {
-          selector: 'node',
-          style: {
-            'background-color': '#050505',
-            'background-opacity': 0.08,
-            'border-width': 1,
-            'border-color': 'data(display_color)',
-            'border-opacity': 'mapData(activity_score, 0, 1, 0.2, 0.82)' as unknown as number,
-            label: 'data(label)',
-            color: '#f3efe6',
-            'font-size': '10px',
-            'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            'text-valign': 'bottom',
-            'text-halign': 'center',
-            'text-margin-y': 5,
-            width: 'data(size)',
-            height: 'data(size)',
-            'text-outline-width': 3,
-            'text-outline-color': '#050505',
-            'text-outline-opacity': 1,
-            'min-zoomed-font-size': 8,
-            'text-opacity': 0,
-            'overlay-color': 'data(display_color)',
-            'overlay-opacity': 'mapData(activity_score, 0, 1, 0.02, 0.18)' as unknown as number,
-            'overlay-padding': 8,
-            'transition-property': 'opacity, border-opacity, overlay-opacity, width, height',
-            'transition-duration': 220,
-          },
-        },
-        {
-          selector: 'node[!is_area]',
-          style: {
-            width: 'mapData(size, 6, 32, 9, 28)',
-            height: 'mapData(size, 6, 32, 9, 28)',
-            'z-index': 4,
-          },
-        },
-        ...Object.entries(TYPE_GLOW).map(([type, hex]) => ({
-          selector: `node[type = "${type}"]`,
-          style: {
-            'border-color': hex,
-            'overlay-color': hex,
-          },
-        })),
-        {
-          selector: 'node[?is_area]',
-          style: {
-            'background-color': '#050505',
-            'background-opacity': 0,
-            'border-width': 2.5,
-            'border-color': 'data(display_color)',
-            'border-opacity': 'mapData(activity_score, 0, 1, 0.5, 1)' as unknown as number,
-            'overlay-opacity': 0,
-            'overlay-padding': 0,
-            shape: 'ellipse',
-            label: 'data(label)',
-            'font-size': '17px',
-            'font-weight': 700,
-            color: '#f3efe6',
-            'text-valign': 'center',
-            'text-halign': 'center',
-            'text-opacity': 1,
-            'text-outline-width': 7,
-            'text-outline-color': '#050505',
-            'text-outline-opacity': 1,
-            'min-zoomed-font-size': 0,
-            'text-wrap': 'wrap',
-            'text-max-width': '118px',
-            padding: '24px',
-            'text-background-color': '#050505',
-            'text-background-opacity': 0,
-            'text-background-padding': '0px',
-            'text-background-shape': 'roundrectangle',
-            'z-index': 1,
-          },
-        },
-        {
-          selector: 'node[?is_area].expanded',
-          style: {
-            'background-opacity': 0,
-            'border-style': 'dashed',
-            'border-opacity': 0.5,
-            'text-valign': 'top',
-            'text-margin-y': 16,
-            'font-size': '14px',
-            'text-max-width': '150px',
-            'z-index': 0,
-          },
-        },
-        {
-          selector: 'node.expanded-member',
-          style: {
-            width: 5,
-            height: 5,
-            'background-opacity': 0.025,
-            'border-opacity': 0.22,
-            'overlay-opacity': 0.01 as unknown as number,
-          },
-        },
-        {
-          selector: 'node.landmark',
-          style: {
-            width: 'mapData(size, 6, 32, 12, 26)',
-            height: 'mapData(size, 6, 32, 12, 26)',
-            'background-opacity': 0.1,
-            'border-opacity': 0.78,
-            'overlay-opacity': 0.12 as unknown as number,
-            'font-size': '9px',
-            'text-opacity': 1,
-            'text-wrap': 'wrap',
-            'text-max-width': '76px',
-            'text-margin-y': 6,
-            'z-index': 8,
-          },
-        },
-        {
-          selector: 'node:selected',
-          style: {
-            'border-width': 2,
-            'border-color': '#ffffff',
-            'border-opacity': 1,
-            'text-opacity': 1,
-            'overlay-opacity': 0.32 as unknown as number,
-          },
-        },
-        {
-          selector: 'node.hover',
-          style: {
-            'text-opacity': 1,
-            'border-opacity': 1,
-            'z-index': 10,
-          },
-        },
-        {
-          selector: 'node.scope-hit',
-          style: {
-            'border-opacity': 1,
-            'overlay-opacity': 0.26 as unknown as number,
-          },
-        },
-        {
-          selector: 'node.scope-dim',
-          style: {
-            'border-opacity': 0.1,
-            'overlay-opacity': 0.01 as unknown as number,
-          },
-        },
-        {
-          selector: 'node.flash',
-          style: {
-            'border-color': '#ffffff',
-            'border-opacity': 1,
-            'overlay-color': '#ffffff',
-            'overlay-opacity': 0.5 as unknown as number,
-          },
-        },
-        {
-          selector: 'edge',
-          style: {
-            width: 1,
-            'line-color': '#5f5b53',
-            'line-opacity': 0.36,
-            'curve-style': 'bezier',
-            'control-point-step-size': 30,
-            'target-arrow-shape': 'none',
-            'transition-property': 'opacity, width, line-color',
-            'transition-duration': 180,
-          },
-        },
-        {
-          selector: 'edge[?is_aggregate]',
-          style: {
-            width: 'mapData(weight, 1, 40, 1, 4.8)',
-            'line-opacity': 0.48,
-            'curve-style': 'bezier',
-            'control-point-step-size': 80,
-            'z-index': 2,
-          },
-        },
-        {
-          selector: 'edge.highlight',
-          style: {
-            'line-color': '#f3efe6',
-            'line-opacity': 0.96,
-            width: 2,
-            'z-index': 5,
-          },
-        },
-        { selector: 'node.faded', style: { opacity: 0.08 } },
-        { selector: 'edge.faded', style: { opacity: 0.04 } },
-      ] as unknown as cytoscape.StylesheetJson,
-      layout: { name: 'preset' },
-      minZoom: 0.08,
-      maxZoom: 4,
+      elements,
+      layout: { name: 'preset', fit: true, padding: viewMode === 'overview' ? 82 : 62 },
+      maxZoom: 3.4,
+      minZoom: 0.18,
+      style: atlasStyles as unknown as cytoscape.StylesheetJson,
     });
 
     cyRef.current = cy;
-    setGlobalReady(cy, false);
-    cy.nodes('[?is_area]').forEach((node) => {
-      node.data('collapsed_size', Number(node.data('size') || 92));
-      setAreaVisualState(node, false, false);
+    cy.nodes('.area-outer').forEach((node) => {
+      node.scratch('_atlasHomePosition', { ...node.position() });
     });
 
-    const flashIds = changedNodeIdsRef.current;
-    flashIds.forEach((id) => {
-      const node = cy.getElementById(id);
-      if (!node.length) return;
-      node.addClass('flash');
-      window.setTimeout(() => node.removeClass('flash'), FLASH_MS);
-    });
+    const cancelScheduledClear = () => {
+      if (transientClearTimerRef.current != null) {
+        window.clearTimeout(transientClearTimerRef.current);
+        transientClearTimerRef.current = null;
+      }
+    };
 
-    cy.on('zoom', applyLabelMode);
-    cy.on('mouseover', 'node', (event) => {
-      const node = event.target as NodeSingular;
-      const visibleEdges = node.connectedEdges().filter((edge) => edge.style('display') !== 'none');
-      const neighbors = visibleEdges.connectedNodes();
-      const hood = node.union(neighbors).union(visibleEdges);
-      cy.elements().not(hood).addClass('faded');
-      hood.removeClass('faded');
-      visibleEdges.addClass('highlight');
-      node.addClass('hover');
-      hood.nodes().style('text-opacity', 1);
-    });
-    cy.on('mouseout', 'node', (event) => {
-      const node = event.target as NodeSingular;
-      node.removeClass('hover');
+    const clearTransient = (immediate = false) => {
+      cancelScheduledClear();
       cy.elements().removeClass('faded');
-      cy.edges().removeClass('highlight');
-      applyLabelMode();
-    });
+      cy.nodes().removeClass('hover primary-source');
+      cy.edges().removeClass('hot-edge');
+      cy.nodes('.area-outer').forEach((node) => {
+        const home = node.scratch('_atlasHomePosition') as { x: number; y: number } | undefined;
+        if (!home) return;
+        node.stop().animate({ position: home }, { duration: immediate ? 0 : 520 });
+      });
+      const removeHot = () => cy.nodes('.area-outer').removeClass('hot-source');
+      if (immediate) removeHot(); else window.setTimeout(removeHot, 360);
+    };
+
+    const scheduleTransientClear = () => {
+      cancelScheduledClear();
+      transientClearTimerRef.current = window.setTimeout(() => {
+        clearTransient();
+      }, OUTER_REVEAL_HOLD_MS);
+    };
+
+    const revealDependencySet = (primaryArea?: string) => {
+      cancelScheduledClear();
+      cy.elements().removeClass('faded');
+      cy.nodes().removeClass('hover hot-source primary-source');
+      cy.edges().removeClass('hot-edge');
+
+      const edges = cy.edges('.focus-dependency');
+      const connectedOuter = edges.connectedNodes('.area-outer');
+      edges.addClass('hot-edge');
+      connectedOuter.addClass('hot-source');
+      connectedOuter.forEach((node) => {
+        const home = node.scratch('_atlasHomePosition') as { x: number; y: number } | undefined;
+        if (!home) return;
+        node.stop().animate({
+          position: {
+            x: home.x * OUTER_REVEAL_MOVE,
+            y: home.y * OUTER_REVEAL_MOVE,
+          },
+        }, { duration: 360 });
+      });
+      if (primaryArea) {
+        cy.getElementById(areaId(primaryArea)).addClass('primary-source');
+      }
+
+      const active = edges.union(connectedOuter).union(cy.nodes('.focus-anchor'));
+      cy.elements().not(active).not('node.semantic-object').not('node.class-label').addClass('faded');
+    };
+
     cy.on('tap', 'node', (event) => {
       const node = event.target as NodeSingular;
       const data = node.data() as AtlasElementData;
-      if (data.is_area) {
-        const area = data.area || '';
-        const next = expandedAreasRef.current.has(area) ? new Set<string>() : new Set([area]);
-        cy.elements().removeClass('faded');
-        cy.edges().removeClass('highlight');
-        cy.nodes().removeClass('hover');
-        syncExpandedAreas(next);
+      if (data.node_kind === 'area' && data.area) {
+        focusAreaBySlug(data.area);
         return;
       }
-      selectNode(node.id(), false);
+      if (data.node_kind === 'object' && data.original_id) {
+        inspectNode(data.original_id);
+      }
     });
-    cy.on('pan zoom position', () => {
-      if (selectedNodeIdRef.current) updateCardPosition(selectedNodeIdRef.current);
+
+    cy.on('tap', 'edge.focus-dependency', (event) => {
+      const edge = event.target as EdgeSingular;
+      const sourceArea = edge.source().data('area') as string | undefined;
+      const targetArea = edge.target().data('area') as string | undefined;
+      const nextArea = sourceArea === focusArea ? targetArea : sourceArea;
+      if (nextArea) focusAreaBySlug(nextArea);
     });
+
     cy.on('tap', (event) => {
-      if (event.target === cy) dismissSelection();
+      if (event.target !== cy) return;
+      if (selectedId) {
+        setSelectedId(null);
+        setViewMode(focusArea ? 'area_focus' : 'overview');
+        return;
+      }
+      clearTransient();
     });
 
-    const readyTimeout = window.setTimeout(() => {
-      if (cyRef.current !== cy || ready) return;
-      applyScopeVisuals();
-      cy.resize();
-      fitVisibleGraph(52);
-      setReady(true);
-      setGlobalReady(cy, true);
-    }, ATLAS_RENDER_READY_TIMEOUT_MS);
+    cy.on('mouseover', 'node', (event) => {
+      const node = event.target as NodeSingular;
+      const data = node.data() as AtlasElementData;
+      node.addClass('hover');
+      if (data.node_kind === 'area' && focusArea && data.area !== focusArea) {
+        if (node.hasClass('dependency-source')) revealDependencySet(data.area);
+      }
+    });
 
-    try {
-      const areaNodes = cy.nodes('[?is_area]');
-      seedCirclePositions(areaNodes, 460);
-      const overview = areaNodes.union(cy.edges('[?is_aggregate]')).layout({
-        name: 'fcose',
-        animate: false,
-        randomize: false,
-        nodeRepulsion: 125000,
-        idealEdgeLength: 210,
-        edgeElasticity: 0.1,
-        gravity: 0.05,
-        numIter: 3000,
-        packComponents: true,
-        uniformNodeDimensions: false,
-        nodeSeparation: 115,
-        fit: false,
-      } as cytoscape.LayoutOptions);
-      overview.one('layoutstop', () => {
-        window.clearTimeout(readyTimeout);
-        cy.nodes('[?is_area]').forEach((areaNode) => {
-          const position = areaNode.position();
-          cy.nodes().filter((node) => !node.data('is_area') && node.data('area') === areaNode.data('area'))
-            .forEach((member) => {
-              member.position(position);
-            });
-        });
-        applyScopeVisuals();
-        cy.resize();
-        fitVisibleGraph(52);
-        setReady(true);
-        setGlobalReady(cy, true);
-        if (selectedNodeIdRef.current) selectNode(selectedNodeIdRef.current, false);
-      });
-      overview.run();
-    } catch (err) {
-      window.clearTimeout(readyTimeout);
-      applyScopeVisuals();
-      cy.resize();
-      fitVisibleGraph(52);
-      setReady(true);
-      setGlobalReady(cy, true);
-      setRenderIssue(err instanceof Error ? err.message : 'Atlas layout failed.');
-    }
+    cy.on('mouseout', 'node', () => {
+      scheduleTransientClear();
+    });
 
-    const onResize = () => {
-      cy.resize();
-      fitVisibleGraph(52);
+    cy.on('mouseover', 'edge', (event) => {
+      const edge = event.target as EdgeSingular;
+      if (!edge.hasClass('focus-dependency')) return;
+      const sourceArea = edge.source().data('area') as string | undefined;
+      const targetArea = edge.target().data('area') as string | undefined;
+      const primaryArea = sourceArea === focusArea ? targetArea : sourceArea;
+      revealDependencySet(primaryArea);
+    });
+
+    cy.on('mouseout', 'edge', () => {
+      scheduleTransientClear();
+    });
+
+    cy.on('mouseover', 'node.semantic-object', (event) => {
+      const node = event.target as NodeSingular;
+      const edges = node.connectedEdges('.selection-edge');
+      if (!edges.length) return;
+      cy.elements().not(node.union(edges).union(edges.connectedNodes())).addClass('faded');
+    });
+
+    window.__PRAXIS_ATLAS_READY__ = true;
+    window.__PRAXIS_ATLAS_VISIBLE_COUNTS__ = {
+      nodes: cy.nodes().length,
+      edges: cy.edges().length,
     };
-    window.addEventListener('resize', onResize);
+    setReady(true);
 
     return () => {
-      window.clearTimeout(readyTimeout);
-      window.removeEventListener('resize', onResize);
+      cancelScheduledClear();
       cy.destroy();
       if (cyRef.current === cy) cyRef.current = null;
       window.__PRAXIS_ATLAS_READY__ = false;
     };
-  }, [
-    applyLabelMode,
-    applyScopeVisuals,
-    dismissSelection,
-    fitVisibleGraph,
-    payload,
-    ready,
-    selectNode,
-    setAreaVisualState,
-    setGlobalReady,
-    syncExpandedAreas,
-    updateCardPosition,
-  ]);
+  }, [elements, focusArea, focusAreaBySlug, inspectNode, model, selectedId, viewMode]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (commandOpen) {
-          setCommandOpen(false);
-          return;
-        }
-        if (selectedNode) {
-          dismissSelection();
-          return;
-        }
-        if (scope.kind !== 'all') {
-          applyScope(SCOPE_ALL);
-        }
-        return;
-      }
-      if (event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
       const isInput = target && (
         target.tagName === 'INPUT'
         || target.tagName === 'TEXTAREA'
         || target.isContentEditable
       );
-      if (isInput) return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        setCommandDraft(scope.raw);
-        setCommandOpen(true);
+      if (event.key === 'Escape') {
+        if (commandOpen) {
+          setCommandOpen(false);
+          return;
+        }
+        if (selectedId) {
+          setSelectedId(null);
+          setViewMode(focusArea ? 'area_focus' : 'overview');
+          return;
+        }
+        if (focusArea) showOverview();
         return;
       }
-      if (event.key === '/') {
+      if (isInput || event.defaultPrevented) return;
+      if (event.key === '/' || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) {
         event.preventDefault();
-        setCommandDraft(scope.raw);
+        setCommandDraft('');
         setCommandOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [applyScope, commandOpen, dismissSelection, scope, selectedNode]);
-
-  const onCommandSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    const next = parseScope(commandDraft);
-    applyScope(next);
-    setCommandOpen(false);
-  };
-
-  const onCommandClear = () => {
-    setCommandDraft('');
-    applyScope(SCOPE_ALL);
-    setCommandOpen(false);
-  };
+  }, [commandOpen, focusArea, selectedId, showOverview]);
 
   if (loading) {
     return (
@@ -1094,7 +1309,7 @@ export function AtlasPage() {
     );
   }
 
-  if (error || !payload) {
+  if (error || !payload || !model) {
     return (
       <div className="atlas-page atlas-page--blank">
         <div className="atlas-page__status-hint">atlas unavailable</div>
@@ -1109,46 +1324,27 @@ export function AtlasPage() {
     || 'unknown';
   const tone = freshnessTone(freshnessState);
   const refreshedAgoSec = Math.max(0, Math.round((Date.now() - lastRefresh) / 1000));
-  const areaMatch = scope.kind === 'area'
-    ? payload.areas.find((area) => area.slug.toLowerCase() === scope.value)
-    : null;
+  const summaryCounts = focusSignal
+    ? [
+      ['authority', focusSignal.authorityCount],
+      ['data', focusSignal.dataCount],
+      ['deps', focusSignal.dependencyCount],
+      ['risk', focusSignal.riskCount],
+    ]
+    : [
+      ['areas', model.areas.length],
+      ['objects', payload.metadata.node_count],
+      ['deps', model.dependencies.length],
+      ['live', model.areas.reduce((sum, area) => sum + area.liveCount, 0)],
+    ];
 
   return (
     <section className="atlas-page" aria-label="Praxis Atlas">
       <div className="atlas-page__canvas" ref={graphRef} />
 
-      <div className="atlas-hud atlas-hud--tl">
-        <button
-          type="button"
-          className={`atlas-hud__scope atlas-hud__scope--${scope.kind}`}
-          onClick={() => {
-            setCommandDraft(scope.raw);
-            setCommandOpen(true);
-          }}
-          title="Change scope"
-        >
-          <span className="atlas-hud__dot" aria-hidden="true" />
-          <span>{scopeLabel(scope)}</span>
-          {scope.kind !== 'all' && (
-            <span
-              className="atlas-hud__clear"
-              role="button"
-              tabIndex={0}
-              onClick={(event) => {
-                event.stopPropagation();
-                applyScope(SCOPE_ALL);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  applyScope(SCOPE_ALL);
-                }
-              }}
-            >
-              x
-            </span>
-          )}
-        </button>
+      <div className="atlas-hud atlas-hud--tl atlas-mode-chip">
+        <span className="atlas-hud__dot" aria-hidden="true" />
+        <span>{viewMode === 'overview' ? 'semantic map' : focusSignal?.title || focusArea}</span>
       </div>
 
       <div
@@ -1159,18 +1355,31 @@ export function AtlasPage() {
         <span className="atlas-hud__freshness-label">{freshnessState}</span>
       </div>
 
+      {viewMode !== 'overview' && (
+        <button type="button" className="atlas-collapse-control" onClick={showOverview}>Overview</button>
+      )}
+
       <div className="atlas-hud atlas-hud--br">
-        <span className="atlas-hud__count">{activeCount}</span>
-        <span className="atlas-hud__count-label">{scope.kind === 'all' ? 'nodes' : 'in scope'}</span>
+        <span className="atlas-hud__count">{visibleObjectCount || model.areas.length}</span>
+        <span className="atlas-hud__count-label">{viewMode === 'overview' ? 'areas' : 'objects'}</span>
         <span className="atlas-hud__sep">/</span>
-        <span className="atlas-hud__hot">{hotCount} live</span>
+        <span className="atlas-hud__hot">{visibleDependencyCount} deps</span>
       </div>
 
       <div className="atlas-hud atlas-hud--bl">
         <kbd>/</kbd>
-        <span>scope</span>
+        <span>find</span>
         <span className="atlas-hud__sep">/</span>
         <span className="atlas-hud__ago">{refreshedAgoSec}s ago</span>
+      </div>
+
+      <div className="atlas-semantic-strip">
+        {summaryCounts.map(([label, value]) => (
+          <span key={label}>
+            <strong>{value}</strong>
+            {label}
+          </span>
+        ))}
       </div>
 
       {payload.warnings.length > 0 && (
@@ -1184,18 +1393,18 @@ export function AtlasPage() {
             if (event.target === event.currentTarget) setCommandOpen(false);
           }}
         >
-          <form className="atlas-command__box" onSubmit={onCommandSubmit}>
+          <form className="atlas-command__box" onSubmit={submitCommand}>
             <input
               autoFocus
               type="text"
               value={commandDraft}
               onChange={(event) => setCommandDraft(event.target.value)}
-              placeholder="bug id, area:scheduler, kind:table, recent, stale, orphans"
+              placeholder="area:authority, table name, bug id, surface, dependency"
             />
             <div className="atlas-command__hints">
               <span>enter</span>
               <span>/</span>
-              <button type="button" onClick={onCommandClear}>clear</button>
+              <button type="button" onClick={() => { setCommandDraft(''); showOverview(); setCommandOpen(false); }}>overview</button>
               <span>/</span>
               <span>esc</span>
             </div>
@@ -1206,29 +1415,17 @@ export function AtlasPage() {
       {selectedNode && (
         <AtlasFocusCard
           node={selectedNode}
-          neighbors={selectedNeighbors}
-          position={cardPosition}
-          onNeighborClick={selectNode}
-          onDismiss={dismissSelection}
+          edges={selectedEdgeItems.map((item) => ({ edge: item.edge, neighbor: item.neighbor }))}
+          onNeighborClick={(id) => inspectNode(id)}
+          onDismiss={() => {
+            setSelectedId(null);
+            setViewMode(focusArea ? 'area_focus' : 'overview');
+          }}
         />
       )}
 
-      {(!ready || renderIssue) && (
-        <div className="atlas-page__status-hint atlas-page__status-hint--overlay">
-          {renderIssue || 'rendering'}
-        </div>
-      )}
-
-      {areaMatch && (
-        <div className="atlas-area-hint" title={areaMatch.summary}>
-          {areaMatch.title} / {areaMatch.member_count} members
-        </div>
-      )}
-
-      {expandedAreas.size > 0 && scope.kind === 'all' && (
-        <div className="atlas-area-hint atlas-area-hint--secondary">
-          {expandedAreas.size} area{expandedAreas.size === 1 ? '' : 's'} open
-        </div>
+      {!ready && (
+        <div className="atlas-page__status-hint atlas-page__status-hint--overlay">rendering</div>
       )}
     </section>
   );
@@ -1236,21 +1433,14 @@ export function AtlasPage() {
 
 interface FocusCardProps {
   node: AtlasElementData;
-  neighbors: AtlasElementData[];
-  position: { x: number; y: number } | null;
+  edges: { edge: AtlasElementData; neighbor: AtlasElementData }[];
   onNeighborClick: (id: string) => void;
   onDismiss: () => void;
 }
 
-function AtlasFocusCard({ node, neighbors, position, onNeighborClick, onDismiss }: FocusCardProps) {
-  const width = 330;
-  const style: CSSProperties = position
-    ? {
-      left: Math.max(16, Math.min(window.innerWidth - width - 16, position.x + 24)),
-      top: Math.max(16, Math.min(window.innerHeight - 240, position.y + 24)),
-    }
-    : { right: 24, top: 24 };
-  const glow = glowFor(node);
+function AtlasFocusCard({ node, edges, onNeighborClick, onDismiss }: FocusCardProps) {
+  const role = semanticRoleFor(node);
+  const color = ROLE_COLORS[role];
   const liveness = node.activity_score == null
     ? 'unknown'
     : node.activity_score >= 0.5
@@ -1258,31 +1448,34 @@ function AtlasFocusCard({ node, neighbors, position, onNeighborClick, onDismiss 
       : node.activity_score >= 0.2
         ? 'recent'
         : 'cold';
+  const style: CSSProperties = { borderColor: color };
 
   return (
-    <div className="atlas-card" style={style} role="dialog" aria-label={node.label || node.id}>
-      <div className="atlas-card__head" style={{ borderColor: glow }}>
+    <div className="atlas-card" role="dialog" aria-label={node.label || node.id}>
+      <div className="atlas-card__head" style={style}>
         <div className="atlas-card__title">{node.label || node.id}</div>
         <button type="button" className="atlas-card__close" onClick={onDismiss} aria-label="close">x</button>
       </div>
       <div className="atlas-card__meta">
         {node.area && <span>{node.area}</span>}
+        <span>{roleLabel(role)}</span>
         <span>{nodeKindLabel(node)}</span>
         <span className="atlas-card__liveness" title={node.updated_at || 'unknown'}>{liveness}</span>
       </div>
       <div className="atlas-card__id">{node.id}</div>
+      <div className="atlas-card__outcome">{outcomeLine(node, edges.length)}</div>
       {(node.definition_summary || node.preview) && (
         <div className="atlas-card__body">{node.definition_summary || node.preview}</div>
       )}
-      <div className="atlas-card__authority">{nodeAuthorityLabel(node)}</div>
-      {neighbors.length > 0 && (
+      <div className="atlas-card__authority">{authorityLabel(node)}</div>
+      {edges.length > 0 && (
         <div className="atlas-card__neighbors">
-          {neighbors.slice(0, 12).map((neighbor) => (
-            <button key={neighbor.id} type="button" onClick={() => onNeighborClick(neighbor.id)} title={neighbor.id}>
+          {edges.map(({ edge, neighbor }) => (
+            <button key={edge.id} type="button" onClick={() => onNeighborClick(neighbor.id)} title={neighbor.id}>
+              <span>{edge.label || 'related'}</span>
               {neighbor.label || neighbor.id}
             </button>
           ))}
-          {neighbors.length > 12 && <span className="atlas-card__more">+{neighbors.length - 12} more</span>}
         </div>
       )}
     </div>

@@ -15,6 +15,7 @@ from adapters.deterministic import DeterministicTaskRequest
 from adapters.http_transport import HTTPResponse
 from adapters.llm_client import LLMClientError, LLMRequest, LLMResponse, call_llm, call_llm_streaming
 from adapters.llm_task import LLMTaskAdapter
+from adapters.provider_types import ProviderAdapterContract
 from registry.provider_execution_registry import resolve_api_endpoint
 from runtime.http_transport import TransportExecutionError
 from runtime.task_type_router import TaskTypeRouter
@@ -1231,6 +1232,37 @@ def test_provider_adapter_contract_exposes_explicit_transport_surface() -> None:
     )
     assert api_contract.failure_mapping["llm_client.timeout"] == "adapter.timeout"
     assert api_contract.failure_mapping["http_transport.http_error"] == "adapter.http_error"
+
+
+def test_provider_adapter_contract_round_trips_through_contract_shape() -> None:
+    contract = ProviderAdapterContract(
+        provider_slug="openai",
+        adapter_type="llm_task",
+        transport_kind="http",
+        execution_kind="request",
+        failure_namespace="provider.openai",
+        prompt_envelope={"protocol_family": "openai_chat_completions"},
+        tool_policy={"mode": "catalog"},
+        structured_output={"format": "json"},
+        timeout_seconds=300,
+        telemetry={"authority": "test"},
+        retry_policy={"max_attempts": 3},
+        failure_mapping={"timeout": "provider.openai.timeout"},
+        readiness={"status": "ready"},
+        retryable_failure_codes=(
+            "provider.openai.timeout",
+            "provider.openai.rate_limited",
+            "provider.openai.service_unavailable",
+        ),
+        failover_failure_codes=(
+            "provider.openai.timeout",
+            "provider.openai.service_unavailable",
+        ),
+    )
+
+    round_tripped = ProviderAdapterContract.from_contract(contract.to_contract())
+
+    assert round_tripped == contract
 
 
 def test_http_failure_mapping_merges_db_overrides_without_dropping_builtin_codes() -> None:

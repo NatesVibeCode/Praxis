@@ -1,0 +1,46 @@
+{
+  "name": "replay_ready_gc_20260424_C_submission",
+  "workflow_id": "replay_ready_gc_20260424_C_submission",
+  "phase": "build",
+  "outcome_goal": "Root-cause the two replay-ready runtime bugs that flow through the workflow submission contract path (BUG-A3B51E8D workflow.timeout, BUG-1980557E workflow_submission.required_missing), fix them, attach validates_fix evidence, and confirm replay succeeds for both.",
+  "bug_source": {
+    "authority": "praxis workflow tools call praxis_replay_ready_bugs",
+    "snapshot_date": "2026-04-24",
+    "open_count": 151,
+    "replay_ready_count": 4
+  },
+  "anti_requirements": [
+    "Do not edit files outside the declared write_scope.",
+    "Do not revert dirty worktree changes made by parallel work.",
+    "Do not invent run_id, receipt_id, replay_run_id, or replay_receipt_id — read them from the bug packet.",
+    "Do not resolve FIXED without a validates_fix evidence link.",
+    "Do not call api.anthropic.com directly (Anthropic is CLI-only per standing order decision.2026-04-20.anthropic-cli-only-restored).",
+    "Do not paper over duplicated authority with compatibility shims; fix the root cause.",
+    "Do not widen scope to the sandbox_error bugs — those are owned by Spec B."
+  ],
+  "verify_refs": [
+    "praxis workflow tools call praxis_workflow_validate --input-json '{\"spec_path\":\"artifacts/workflow/replay_ready_gc_20260424_C_submission.queue.json\"}'",
+    "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_submission_contract.py Code&DBs/Workflow/tests/unit/test_launch_submit_failed.py",
+    "praxis workflow bugs replay --bug-id BUG-A3B51E8D",
+    "praxis workflow bugs replay --bug-id BUG-1980557E"
+  ],
+  "jobs": [
+    {
+      "label": "fix_timeout_and_submission_cluster",
+      "agent": "cursor_local/composer-2",
+      "adapter_type": "cli_llm",
+      "task_type": "build",
+      "bug_ids": [
+        "BUG-A3B51E8D",
+        "BUG-1980557E"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow/submission_contract.py",
+        "Code&DBs/Workflow/runtime/receipt_store.py",
+        "Code&DBs/Workflow/tests/unit/test_submission_contract.py",
+        "Code&DBs/Workflow/tests/unit/test_launch_submit_failed.py"
+      ],
+      "prompt": "Fix the two replay-ready runtime bugs that flow through the workflow submission contract.\n\n- BUG-A3B51E8D — workflow.timeout (signature 5e651fdf9b), origin node `wave6_blast_radius_threshold_halve`\n- BUG-1980557E — workflow_submission.required_missing (signature 76d3094c50), origin node `wave0_migration_capability_ledger`\n\nBoth are grouped here because both fail at submission/launch time and the canonical authority is `runtime/workflow/submission_contract.py`.\n\n## Before editing\n1. Read `artifacts/workflow/replay_ready_gc_20260424_RECON.md` first. If it flags your write_scope RED, stop and report.\n2. `praxis workflow bugs packet --bug-id BUG-A3B51E8D` and `--bug-id BUG-1980557E`.\n3. `praxis workflow bugs history --bug-id BUG-A3B51E8D` and `--bug-id BUG-1980557E`.\n4. `praxis workflow discover \"workflow submission contract\"` and `praxis workflow discover \"workflow timeout receipt\"`.\n5. `praxis workflow recall \"submission contract authority\"`.\n6. The test files `test_submission_contract.py` and `test_launch_submit_failed.py` already exist in the worktree (currently untracked). Read them first and extend rather than replacing.\n\n## Required outcome\n- **BUG-1980557E**: the submission contract must raise a typed `workflow_submission.required_missing` error before the run starts, with the exact missing-field list in the failure payload. Make sure the contract tests assert the typed failure rather than a generic error.\n- **BUG-A3B51E8D**: timeouts must surface through the contract / receipt_store with a bounded retry-or-fail signal, not hang silently. If a timeout is a legitimate outcome (long-running job), record it as `workflow.timeout` with the node label preserved in the receipt so aggregation can dedupe.\n- Extend the two test files to cover the repeated-failure path and the required-missing path. Do not weaken the existing assertions.\n- Stay inside the declared write_scope. If the fix requires a change outside it, stop and escalate.\n\n## Coordination with Spec B\n`receipt_store.py` is in both specs' write scope. The recon artifact's collision map must show whether Spec B already committed changes there. If Spec B is still mid-run, read its diff before editing and pull in its canonical receipt-failure aggregation helper instead of writing a parallel one.\n\n## Verification\n- `PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_submission_contract.py Code&DBs/Workflow/tests/unit/test_launch_submit_failed.py`\n- `praxis workflow bugs replay --bug-id BUG-A3B51E8D` returns a success envelope\n- `praxis workflow bugs replay --bug-id BUG-1980557E` returns a success envelope\n\n## Resolution\nFor each bug that replays green, attach `validates_fix` evidence and resolve via the bug tracker surface. If replay still fails, leave OPEN with updated `resume_context`."
+    }
+  ]
+}

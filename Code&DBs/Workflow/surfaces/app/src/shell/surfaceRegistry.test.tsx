@@ -25,7 +25,7 @@ describe('surfaceRegistry', () => {
     expect(tabs).toEqual([
       { id: 'dashboard', label: 'Overview', kind: 'Suite', closable: false },
       { id: 'build', label: 'Workflow workspace', kind: 'Build', closable: false },
-      { id: 'atlas', label: 'Graph Diagram', kind: 'Accent', closable: false },
+      { id: 'atlas', label: 'Atlas', kind: 'Atlas', closable: false },
       { id: 'manifests', label: 'Manifests', kind: 'Catalog', closable: false },
       { id: 'run-detail:run_123', label: 'Run run_123', kind: 'Run', closable: true },
     ]);
@@ -50,8 +50,8 @@ describe('surfaceRegistry', () => {
       selected: false,
     });
     expect(navigateItems.find((item) => item.id === 'navigate:atlas')).toMatchObject({
-      label: 'Graph Diagram',
-      description: 'Open the knowledge-graph diagram.',
+      label: 'Atlas',
+      description: 'Open the Atlas map.',
       selected: false,
     });
     expect(navigateItems.find((item) => item.id === 'tab:run-detail:run_123')).toMatchObject({
