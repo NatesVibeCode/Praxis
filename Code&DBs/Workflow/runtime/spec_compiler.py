@@ -908,6 +908,23 @@ def _build_packet_map_entry(
         raw = job.get("bug_refs")
         bug_refs = list(raw) if isinstance(raw, list) else None
     agent = job["agent"]
+    job_produces = list(job.get("produces") or [])
+    job_consumes = list(job.get("consumes") or [])
+    job_consumes_any = list(job.get("consumes_any") or [])
+    # Each produced type becomes a typed gate that auto-satisfies when the
+    # runtime emits a matching produced artifact. No human review required —
+    # gate satisfaction is computable from typed state per
+    # architecture-policy::platform-architecture::legal-equals-computable-to-
+    # non-gap-output. Closes BUG-2729F8B7 (Moon generated workflow has no
+    # release gates or typed gate contracts).
+    expected_typed_gates = [
+        {
+            "type": type_token,
+            "kind": "typed_produce",
+            "auto_satisfies_when_produced": True,
+        }
+        for type_token in job_produces
+    ]
     return {
         # Legacy fields (stable consumer contract):
         "label": job["label"],
@@ -921,6 +938,10 @@ def _build_packet_map_entry(
         "capabilities": list(job.get("capabilities") or []),
         "write_envelope": write_envelope,
         "expected_gates": list(job.get("verify_refs") or []),
+        "expected_typed_gates": expected_typed_gates,
+        "consumes": job_consumes,
+        "consumes_any": job_consumes_any,
+        "produces": job_produces,
         "verification_gaps": _compute_verification_gaps(write_envelope),
         # Data pills (Phase 1.1.f) — atomic object.field refs extracted from
         # packet.description against data_dictionary_entries. Surfaced even
