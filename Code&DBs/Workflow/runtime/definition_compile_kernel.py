@@ -131,16 +131,25 @@ def build_definition_graph(
             }
         )
 
+    from runtime.workflow_type_contracts import (
+        capability_type_contract,
+        route_type_contract,
+    )
+
     for index, capability in enumerate(capabilities, start=1):
         slug = as_text(capability.get("slug"))
         if not slug:
             continue
+        contract = capability_type_contract(capability)
         nodes.append(
             {
                 "id": f"capability:{slug}",
                 "kind": "capability",
                 "order": index,
                 "payload": json.loads(json.dumps(capability, default=str)),
+                "consumes": list(contract["consumes"]),
+                "consumes_any": list(contract["consumes_any"]),
+                "produces": list(contract["produces"]),
             }
         )
 
@@ -183,12 +192,21 @@ def build_definition_graph(
         step_id = as_text(step.get("id"))
         if not step_id:
             continue
+        step_route = as_text(step.get("agent_route") or step.get("route"))
+        step_contract = route_type_contract(
+            step_route or "auto/build",
+            title=as_text(step.get("title")),
+            summary=as_text(step.get("summary") or step.get("purpose")),
+        )
         nodes.append(
             {
                 "id": step_id,
                 "kind": "draft_step",
                 "order": int(step.get("order") or 0),
                 "payload": json.loads(json.dumps(step, default=str)),
+                "consumes": list(step_contract["consumes"]),
+                "consumes_any": list(step_contract["consumes_any"]),
+                "produces": list(step_contract["produces"]),
             }
         )
         for block_id in as_string_list(step.get("source_block_ids")):
