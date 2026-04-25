@@ -5,6 +5,7 @@ import tempfile
 from types import SimpleNamespace
 
 from registry.native_runtime_profile_sync import (
+    NativeRuntimeProfileSyncError,
     NativeRuntimeProfileConfig,
     _default_live_budget_window,
     _default_sync_conn,
@@ -136,6 +137,45 @@ def test_live_candidates_filter_by_provider_slug_not_display_name() -> None:
 
     assert candidates[0].provider_name == "Anthropic (CLI)"
     assert candidates[0].provider_slug == "anthropic"
+
+
+def test_live_candidates_names_provider_visibility_drift() -> None:
+    class _CandidateConn:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, query: str, *args: object) -> list[dict[str, object]]:
+            self.calls += 1
+            if self.calls == 1:
+                assert "candidate.provider_slug = ANY" in query
+                assert args[0] == ["openai"]
+                assert args[1] == ["composer-2"]
+                return []
+            assert "WHERE model_slug = ANY" in query
+            assert args[0] == ["composer-2"]
+            return [
+                {
+                    "provider_slug": "cursor",
+                    "model_slug": "composer-2",
+                }
+            ]
+
+    try:
+        _live_candidates_sync(
+            _CandidateConn(),
+            _config(
+                provider_names=("openai",),
+                allowed_models=("composer-2",),
+            ),
+        )
+    except NativeRuntimeProfileSyncError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected provider visibility drift to fail closed")
+
+    assert "allowed_models not visible through provider_names [openai]" in message
+    assert "composer-2 via cursor" in message
+    assert "Add the provider slug to provider_names" in message
 
 
 def test_latest_budget_window_sync_synthesizes_default_when_missing() -> None:

@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from runtime.workflow_validation import (
     _preflight_deterministic_builders,
     _preflight_provider_admissions,
     _preflight_provider_availability,
+    _preflight_runtime_profile_route_admission,
     _preflight_workdir_drift,
     _preflight_workflow_id_collision,
 )
@@ -241,6 +243,78 @@ def test_provider_admission_ignores_non_agent_jobs() -> None:
     conn = _FakeConn([])
 
     assert _preflight_provider_admissions(spec, pg_conn=conn) == []
+
+
+# ----- Runtime-profile route admission checks ----------------------------
+
+
+def test_runtime_profile_route_admission_accepts_admitted_candidate(monkeypatch) -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "adapter_type": "llm_task",
+        "agent": "cursor_local/composer-2",
+    }])
+
+    monkeypatch.setattr(
+        "registry.native_runtime_profile_sync.default_native_runtime_profile_ref",
+        lambda _conn: "scratch_agent",
+    )
+    monkeypatch.setattr(
+        "registry.runtime_profile_admission.load_admitted_runtime_profile_candidates",
+        lambda _conn, runtime_profile_ref: (
+            SimpleNamespace(provider_slug="cursor", model_slug="composer-2"),
+        ),
+    )
+
+    warnings = _preflight_runtime_profile_route_admission(
+        spec,
+        pg_conn=_FakeConn([]),
+        agent_resolution_details=[{
+            "label": "agent_step",
+            "requested_slug": "cursor_local/composer-2",
+            "resolved_slug": "cursor/composer-2",
+            "status": "aliased",
+        }],
+    )
+
+    assert warnings == []
+
+
+def test_runtime_profile_route_admission_blocks_unadmitted_candidate(monkeypatch) -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "adapter_type": "llm_task",
+        "agent": "cursor_local/composer-2",
+    }])
+
+    monkeypatch.setattr(
+        "registry.native_runtime_profile_sync.default_native_runtime_profile_ref",
+        lambda _conn: "scratch_agent",
+    )
+    monkeypatch.setattr(
+        "registry.runtime_profile_admission.load_admitted_runtime_profile_candidates",
+        lambda _conn, runtime_profile_ref: (
+            SimpleNamespace(provider_slug="openai", model_slug="gpt-5.4"),
+        ),
+    )
+
+    warnings = _preflight_runtime_profile_route_admission(
+        spec,
+        pg_conn=_FakeConn([]),
+        agent_resolution_details=[{
+            "label": "agent_step",
+            "requested_slug": "cursor_local/composer-2",
+            "resolved_slug": "cursor/composer-2",
+            "status": "aliased",
+        }],
+    )
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "runtime_profile_candidate_not_admitted"
+    assert warnings[0]["severity"] == "error"
+    assert warnings[0]["runtime_profile_ref"] == "scratch_agent"
+    assert warnings[0]["selected_slug"] == "cursor/composer-2"
+    assert warnings[0]["admitted_candidate_slugs"] == ["openai/gpt-5.4"]
 
 
 # ----- Provider availability checks --------------------------------------

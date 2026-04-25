@@ -90,6 +90,17 @@ interface AtlasPayload {
   detail?: string;
 }
 
+interface AtlasGraphEvent {
+  authority_id?: string;
+  captured_at?: string;
+  changed_paths?: string[];
+  event_type?: string;
+  node_id?: string;
+  run_id?: string;
+  source_ids?: string[];
+  workflow_id?: string;
+}
+
 interface AreaSignal {
   slug: string;
   title: string;
@@ -131,8 +142,9 @@ interface SemanticModel {
   semanticObjectsByArea: Map<string, SemanticObject[]>;
 }
 
-const ATLAS_POLL_MS = 30_000;
 const ATLAS_GRAPH_TIMEOUT_MS = 15_000;
+const ATLAS_GRAPH_STREAM_PATH = '/api/atlas/graph/stream';
+const ATLAS_LIVE_MARK_MS = 4200;
 const MAX_OVERVIEW_DEPENDENCIES = 34;
 const MAX_FOCUS_DEPENDENCIES = 7;
 const MAX_FOCUS_OBJECTS = 10;
@@ -331,11 +343,68 @@ function outcomeLine(data: AtlasElementData, dependencyCount: number) {
   return 'Data dictionary object; use it to understand what this area owns.';
 }
 
+function atlasPayloadSourceIds(payload: AtlasPayload | null) {
+  const ids = new Set<string>();
+  if (!payload) return ids;
+  payload.nodes.forEach((node) => {
+    [
+      node.data.id,
+      node.data.original_id,
+      node.data.area,
+      node.data.source,
+      node.data.target,
+      node.data.route_ref,
+      node.data.binding_revision,
+      node.data.decision_ref,
+    ].forEach((value) => {
+      if (value) ids.add(value);
+    });
+  });
+  payload.edges.forEach((edge) => {
+    [
+      edge.data.id,
+      edge.data.original_id,
+      edge.data.source,
+      edge.data.target,
+      edge.data.area,
+      edge.data.route_ref,
+      edge.data.binding_revision,
+      edge.data.decision_ref,
+    ].forEach((value) => {
+      if (value) ids.add(value);
+    });
+  });
+  payload.areas.forEach((area) => {
+    ids.add(area.slug);
+    ids.add(areaId(area.slug));
+  });
+  return ids;
+}
+
+function atlasEventSourceIds(event: AtlasGraphEvent) {
+  return [
+    ...(event.source_ids || []),
+    ...(event.changed_paths || []),
+    event.workflow_id,
+    event.run_id,
+    event.node_id,
+    event.authority_id,
+  ].filter((value): value is string => Boolean(value));
+}
+
+function atlasEventHitsPayload(event: AtlasGraphEvent, payload: AtlasPayload | null) {
+  const graphIds = atlasPayloadSourceIds(payload);
+  return atlasEventSourceIds(event).some((sourceId) => graphIds.has(sourceId));
+}
+
 function useAtlasGraph() {
   const [payload, setPayload] = useState<AtlasPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState(Date.now());
+  const [changedSourceIds, setChangedSourceIds] = useState<Set<string>>(() => new Set());
+  const payloadRef = useRef<AtlasPayload | null>(null);
+  const liveMarkTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -351,6 +420,7 @@ function useAtlasGraph() {
       if (!response.ok || !body?.ok) {
         throw new Error(body?.detail || body?.error || `Atlas graph request failed with HTTP ${response.status}`);
       }
+      payloadRef.current = body;
       setPayload(body);
       setLastRefresh(Date.now());
     } catch (err) {
@@ -371,11 +441,39 @@ function useAtlasGraph() {
   }, [refresh]);
 
   useEffect(() => {
-    const id = window.setInterval(() => { refresh(true); }, ATLAS_POLL_MS);
-    return () => window.clearInterval(id);
+    if (typeof window === 'undefined' || typeof window.EventSource !== 'function') return undefined;
+    const source = new window.EventSource(ATLAS_GRAPH_STREAM_PATH);
+    source.onmessage = (event) => {
+      try {
+        const graphEvent = JSON.parse(event.data) as AtlasGraphEvent;
+        if (!atlasEventHitsPayload(graphEvent, payloadRef.current)) return;
+        const sourceIds = atlasEventSourceIds(graphEvent);
+        setChangedSourceIds(new Set(sourceIds));
+        void refresh(true);
+        if (liveMarkTimerRef.current !== null) {
+          window.clearTimeout(liveMarkTimerRef.current);
+        }
+        liveMarkTimerRef.current = window.setTimeout(() => {
+          setChangedSourceIds(new Set());
+          liveMarkTimerRef.current = null;
+        }, ATLAS_LIVE_MARK_MS);
+      } catch {
+        // Ignore malformed stream payloads; the graph payload remains authoritative.
+      }
+    };
+    source.onerror = () => {
+      // EventSource owns reconnect; keep the last authoritative graph visible.
+    };
+    return () => {
+      source.close();
+      if (liveMarkTimerRef.current !== null) {
+        window.clearTimeout(liveMarkTimerRef.current);
+        liveMarkTimerRef.current = null;
+      }
+    };
   }, [refresh]);
 
-  return { payload, loading, error, refresh, lastRefresh };
+  return { payload, loading, error, refresh, lastRefresh, changedSourceIds };
 }
 
 function buildSemanticModel(payload: AtlasPayload): SemanticModel {
@@ -592,6 +690,7 @@ function buildElements(
   mode: AtlasViewMode,
   focusArea: string | null,
   selectedId: string | null,
+  changedSourceIds: Set<string> = new Set(),
 ): ElementDefinition[] {
   if (mode === 'overview' || !focusArea) {
     const areaIndex = new Map(model.areas.map((area, index) => [area.slug, index]));
@@ -612,7 +711,7 @@ function buildElements(
         signal_stale: area.staleCount,
       },
       position: areaPosition(area, areaIndex.get(area.slug) || 0, total),
-      classes: 'area-node area-overview',
+      classes: `area-node area-overview ${changedSourceIds.has(area.slug) || changedSourceIds.has(areaId(area.slug)) ? 'atlas-live-changed' : ''}`,
     }));
 
     const edges = model.dependencies.slice(0, MAX_OVERVIEW_DEPENDENCIES).map((dep) => ({
@@ -713,7 +812,7 @@ function buildElements(
         signal_activity: area.activityScore,
       },
       position: outerAreaPosition(area, focusArea, index, outerAreas.length),
-      classes: `area-node area-outer ${focusDeps.some((dep) => dep.sourceArea === area.slug || dep.targetArea === area.slug) ? 'dependency-source' : ''}`,
+      classes: `area-node area-outer ${focusDeps.some((dep) => dep.sourceArea === area.slug || dep.targetArea === area.slug) ? 'dependency-source' : ''} ${changedSourceIds.has(area.slug) || changedSourceIds.has(areaId(area.slug)) ? 'atlas-live-changed' : ''}`,
     })),
   ] as ElementDefinition[];
 
@@ -732,7 +831,7 @@ function buildElements(
         display_size: clamp(26 + Math.sqrt(object.rank) * 0.9, 32, 54),
       },
       position,
-      classes: `semantic-object role-${object.role} class-${classRole(object.role)} ${labelled ? 'labelled-object' : ''} ${object.node.id === selectedId ? 'selected-object' : ''}`,
+      classes: `semantic-object role-${object.role} class-${classRole(object.role)} ${labelled ? 'labelled-object' : ''} ${object.node.id === selectedId ? 'selected-object' : ''} ${changedSourceIds.has(object.node.id) || changedSourceIds.has(objectId(object.node.id)) ? 'atlas-live-changed' : ''}`,
     };
   }) as ElementDefinition[];
 
@@ -989,6 +1088,19 @@ const atlasStyles = [
     },
   },
   {
+    selector: 'node.atlas-live-changed',
+    style: {
+      'border-color': '#ffffff',
+      'border-opacity': 1,
+      'border-width': 4,
+      'shadow-blur': 28,
+      'shadow-color': '#f3efe6',
+      'shadow-opacity': 0.34,
+      'text-opacity': 1,
+      'z-index': 14,
+    },
+  },
+  {
     selector: 'node.hover',
     style: {
       'background-opacity': 0.13,
@@ -1049,7 +1161,7 @@ const atlasStyles = [
 ];
 
 export function AtlasPage() {
-  const { payload, loading, error, refresh, lastRefresh } = useAtlasGraph();
+  const { payload, loading, error, refresh, lastRefresh, changedSourceIds } = useAtlasGraph();
   const graphRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
   const transientClearTimerRef = useRef<number | null>(null);
@@ -1064,8 +1176,8 @@ export function AtlasPage() {
   const selectedNode = selectedId && model ? model.nodeById.get(selectedId) || null : null;
   const selectedEdgeItems = useMemo(() => (model ? selectedEdges(model, selectedId) : []), [model, selectedId]);
   const elements = useMemo(() => (
-    model ? buildElements(model, viewMode, focusArea, selectedId) : []
-  ), [focusArea, model, selectedId, viewMode]);
+    model ? buildElements(model, viewMode, focusArea, selectedId, changedSourceIds) : []
+  ), [changedSourceIds, focusArea, model, selectedId, viewMode]);
 
   const focusSignal = focusArea && model ? model.areaSignals.get(focusArea) || null : null;
   const visibleObjectCount = elements.filter((element) => element.data?.node_kind === 'object').length;

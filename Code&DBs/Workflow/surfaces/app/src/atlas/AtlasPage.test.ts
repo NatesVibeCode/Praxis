@@ -18,6 +18,19 @@ function readAtlasCss() {
   return readFileSync(cssPath, 'utf8');
 }
 
+function readAtlasSource() {
+  const candidates = [
+    join(process.cwd(), 'src/atlas/AtlasPage.tsx'),
+    join(process.cwd(), 'surfaces/app/src/atlas/AtlasPage.tsx'),
+    join(process.cwd(), 'Code&DBs/Workflow/surfaces/app/src/atlas/AtlasPage.tsx'),
+  ];
+  const sourcePath = candidates.find((candidate) => existsSync(candidate));
+  if (!sourcePath) {
+    throw new Error(`Could not locate AtlasPage.tsx from ${process.cwd()}`);
+  }
+  return readFileSync(sourcePath, 'utf8');
+}
+
 function makePayload() {
   return {
     ok: true,
@@ -97,6 +110,18 @@ describe('AtlasPage', () => {
     expect(elements.filter((element) => element.data?.node_kind === 'area')).toHaveLength(2);
     expect(elements.some((element) => element.data?.node_kind === 'object')).toBe(false);
     expect(elements.some((element) => element.classes === 'overview-dependency')).toBe(true);
+  });
+
+  it('marks graph changes from the event stream instead of interval polling', () => {
+    const model = buildSemanticModel(makePayload() as never);
+    const elements = buildElements(model, 'overview', null, null, new Set(['authority']));
+    const changed = elements.find((element) => element.data?.id === 'area::authority');
+    const source = readAtlasSource();
+
+    expect(changed?.classes).toContain('atlas-live-changed');
+    expect(source).toContain("new window.EventSource(ATLAS_GRAPH_STREAM_PATH)");
+    expect(source).not.toContain('ATLAS_POLL_MS');
+    expect(source).not.toContain('window.setInterval(() => { refresh(true); }');
   });
 
   it('keeps the narrow-width responsive layout contract in the stylesheet', () => {

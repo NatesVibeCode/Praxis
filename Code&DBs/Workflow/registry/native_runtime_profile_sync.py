@@ -725,11 +725,18 @@ def _live_candidates_sync(
     }
     missing = [model for model in config.allowed_models if model not in candidates]
     if missing:
+        drift_rows = conn.execute(
+            """
+            SELECT model_slug, provider_slug
+            FROM provider_model_candidates
+            WHERE model_slug = ANY($1::text[])
+              AND status = 'active'
+            ORDER BY model_slug, provider_slug
+            """,
+            missing,
+        )
         raise NativeRuntimeProfileSyncError(
-            (
-                f"{config.runtime_profile_ref} has no active provider_model_candidates for "
-                f"{', '.join(missing)}"
-            ),
+            _missing_live_candidate_message(config, missing, drift_rows),
         )
     return tuple(candidates[model] for model in config.allowed_models)
 
@@ -780,13 +787,55 @@ async def _live_candidates_async(
     }
     missing = [model for model in config.allowed_models if model not in candidates]
     if missing:
+        drift_rows = await conn.fetch(
+            """
+            SELECT model_slug, provider_slug
+            FROM provider_model_candidates
+            WHERE model_slug = ANY($1::text[])
+              AND status = 'active'
+            ORDER BY model_slug, provider_slug
+            """,
+            missing,
+        )
         raise NativeRuntimeProfileSyncError(
-            (
-                f"{config.runtime_profile_ref} has no active provider_model_candidates for "
-                f"{', '.join(missing)}"
-            ),
+            _missing_live_candidate_message(config, missing, drift_rows),
         )
     return tuple(candidates[model] for model in config.allowed_models)
+
+
+def _missing_live_candidate_message(
+    config: NativeRuntimeProfileConfig,
+    missing_models: list[str],
+    drift_rows: object,
+) -> str:
+    providers_by_model: dict[str, list[str]] = {}
+    for row in drift_rows or []:
+        model_slug = str(_row_get(row, "model_slug", "") or "").strip()
+        provider_slug = str(_row_get(row, "provider_slug", "") or "").strip()
+        if not model_slug or not provider_slug:
+            continue
+        providers_by_model.setdefault(model_slug, [])
+        if provider_slug not in providers_by_model[model_slug]:
+            providers_by_model[model_slug].append(provider_slug)
+
+    visible_providers = ", ".join(config.provider_names)
+    outside_visibility = [
+        f"{model} via {', '.join(providers_by_model[model])}"
+        for model in missing_models
+        if providers_by_model.get(model)
+    ]
+    if outside_visibility:
+        return (
+            f"{config.runtime_profile_ref} has allowed_models not visible through "
+            f"provider_names [{visible_providers}]: "
+            f"{'; '.join(outside_visibility)}. Add the provider slug to "
+            "provider_names or remove the model from allowed_models."
+        )
+
+    return (
+        f"{config.runtime_profile_ref} has no active provider_model_candidates for "
+        f"{', '.join(missing_models)} within provider_names [{visible_providers}]"
+    )
 
 
 def _live_route_states_sync(
