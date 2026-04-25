@@ -220,7 +220,108 @@ def _run_admission_gate(
                 "detail": f"fallback_template_ref {command.fallback_template_ref} is not registered as experience_template",
             })
 
+    # Check 3 — field-access grants. Opt-in via render_hint.field_grants:
+    # {slot_name: [pill_field_ref, ...]}. Each declared field must be reachable
+    # from the slot's pill_type_ref via has_field, optionally inherited through
+    # subtype_of edges. Templates that don't declare field_grants pass this
+    # check silently (the success scope_note flags the deferred check), so the
+    # debt resolves template-by-template as authors opt in.
+    field_grants_violations = _check_field_access_grants(pg, command)
+    violations.extend(field_grants_violations)
+
     return violations
+
+
+def _check_field_access_grants(
+    pg: Any,
+    command: SurfaceTemplateRegisterCommand,
+) -> list[dict[str, Any]]:
+    """Verify every declared render_hint.field_grants entry is reachable from
+    its slot's pill_type via has_field + subtype_of*.
+
+    No declaration → no check (debt deferred for that template).
+    Declaration present but missing slot → declared_for_unknown_slot.
+    Declaration present, field unreachable → field_not_granted.
+    """
+    render_hint = command.render_hint or {}
+    field_grants = render_hint.get("field_grants")
+    if not isinstance(field_grants, dict) or not field_grants:
+        return []
+
+    slot_pill_types: dict[str, str] = {
+        s.slot_name: s.pill_type_ref
+        for s in command.slot_consumes
+        if s.pill_type_ref
+    }
+
+    violations: list[dict[str, Any]] = []
+    for slot_name, raw_fields in field_grants.items():
+        if slot_name not in slot_pill_types:
+            violations.append({
+                "check": "field_grant_for_unknown_slot",
+                "slot": slot_name,
+                "detail": (
+                    f"render_hint.field_grants references slot '{slot_name}' "
+                    "but no slot_consumes entry exists with that slot_name"
+                ),
+            })
+            continue
+        if not isinstance(raw_fields, list):
+            violations.append({
+                "check": "field_grant_not_list",
+                "slot": slot_name,
+                "detail": f"render_hint.field_grants[{slot_name!r}] must be a list of pill_field refs",
+            })
+            continue
+
+        slot_pill_type = slot_pill_types[slot_name]
+        granted_fields = _granted_fields_for_pill_type(pg, slot_pill_type)
+        for field_ref in raw_fields:
+            if not isinstance(field_ref, str) or not field_ref.strip():
+                continue
+            if field_ref not in granted_fields:
+                violations.append({
+                    "check": "field_not_granted",
+                    "slot": slot_name,
+                    "field_ref": field_ref,
+                    "pill_type_ref": slot_pill_type,
+                    "detail": (
+                        f"slot '{slot_name}' bound to pill_type {slot_pill_type} "
+                        f"does not grant field {field_ref} via has_field + subtype_of*; "
+                        "either declare a more specific pill_type for the slot, or "
+                        "drop the field from render_hint.field_grants"
+                    ),
+                    "repair_actions": [
+                        {"action": "register_has_field_edge", "from_pill_type": slot_pill_type, "field_ref": field_ref},
+                        {"action": "tighten_slot_pill_type", "slot": slot_name, "current": slot_pill_type, "field_ref": field_ref},
+                    ],
+                })
+    return violations
+
+
+def _granted_fields_for_pill_type(pg: Any, pill_type_ref: str) -> set[str]:
+    """All pill_field refs reachable from pill_type_ref via has_field, including
+    inherited fields up the subtype_of chain. One recursive CTE per call.
+    """
+    rows = pg.execute(
+        """
+        WITH RECURSIVE ancestors AS (
+            SELECT $1::text AS ancestor
+            UNION ALL
+            SELECT e.target_id
+              FROM ancestors a
+              JOIN memory_edges e
+                ON e.source_id = a.ancestor
+               AND e.relation_type = 'subtype_of'
+        )
+        SELECT DISTINCT e.target_id AS field_ref
+          FROM memory_edges e
+          JOIN ancestors a ON a.ancestor = e.source_id
+         WHERE e.relation_type = 'has_field'
+        """,
+        pill_type_ref,
+    )
+    return {row["field_ref"] for row in rows}
 
 
 def handle_surface_template_register(
@@ -343,15 +444,27 @@ def handle_surface_template_register(
     if command.framework_ref:
         _upsert_edge(command.framework_ref, command.template_ref, "includes", 1.0)
 
-    return {
+    field_grants_declared = bool(
+        isinstance(command.render_hint, dict)
+        and command.render_hint.get("field_grants")
+    )
+    result: dict[str, Any] = {
         "ok": True,
         "template_ref": command.template_ref,
         "edges_written": edges_written,
         "admission_gate": "surface.template.register",
-        "scope_note": (
-            "Template landed through operation_catalog_gateway; "
-            "legal_templates projection picks it up on next read via the "
-            "typed graph walk. Field-access check (policy-gate #3) still "
-            "deferred until a later packet wires slot-aware field grants."
-        ),
+        "field_grants_validated": field_grants_declared,
     }
+    if not field_grants_declared:
+        # Author hasn't opted into field-access verification yet. Note the
+        # deferral so observers can audit the gap; the check itself is now
+        # in place (see _check_field_access_grants) and runs the moment a
+        # template declares render_hint.field_grants.
+        result["scope_note"] = (
+            "Template landed through operation_catalog_gateway; "
+            "legal_templates projection picks it up on next read. "
+            "render_hint.field_grants not declared on this template, so "
+            "field-access admission ran in opt-in mode (no fields to check). "
+            "Declare render_hint.field_grants to remove this note."
+        )
+    return result
