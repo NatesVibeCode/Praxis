@@ -10,6 +10,7 @@ Known emitters (wiring lands packet-by-packet):
 - ``runtime.spec_compiler.UnresolvedStageError``
 - ``runtime.spec_compiler.UnresolvedWriteScopeError``
 - ``runtime.spec_compiler._compute_verification_gaps`` entries
+- ``runtime.build_authority`` typed build issues
 - future: Moon composer + ``compose_plan_from_intent`` type-flow errors
 
 Payload shape (matches ``payload_keys`` declared in migration 226):
@@ -282,9 +283,64 @@ def emit_typed_gaps_for_verification_gaps(
     return emitted
 
 
+def emit_typed_gaps_for_build_issues(
+    conn: Any,
+    issues: list[dict[str, Any]] | None,
+    *,
+    source_ref: str | None = None,
+) -> int:
+    """Promote build-authority typed issues to ``typed_gap.created`` events.
+
+    ``runtime.build_authority`` remains a pure projection builder, so it
+    exposes typed gap metadata on each issue. Callers with a live connection
+    use this helper to persist the conceptual event. Non-typed issues are
+    ignored; malformed typed issues fall back to a generic build-authority gap
+    instead of disappearing.
+    """
+    emitted = 0
+    for issue in issues or ():
+        if not isinstance(issue, dict):
+            continue
+        typed_gap = issue.get("typed_gap")
+        if not isinstance(typed_gap, dict):
+            gate_rule = issue.get("gate_rule")
+            typed_gap = gate_rule if isinstance(gate_rule, dict) and gate_rule.get("gap_kind") else None
+        if not isinstance(typed_gap, dict):
+            continue
+        context = typed_gap.get("context") if isinstance(typed_gap.get("context"), dict) else {}
+        event_context = {
+            **context,
+            "issue_id": issue.get("issue_id"),
+            "issue_kind": issue.get("kind"),
+            "node_id": issue.get("node_id") or context.get("node_id"),
+            "label": issue.get("label"),
+            "summary": issue.get("summary"),
+        }
+        gap_id = emit_typed_gap(
+            conn,
+            gap_kind=str(typed_gap.get("gap_kind") or "build_authority"),
+            missing_type=str(typed_gap.get("missing_type") or "build_authority_gap"),
+            reason_code=str(typed_gap.get("reason_code") or "build_authority.typed_gap"),
+            legal_repair_actions=[
+                str(action)
+                for action in (
+                    typed_gap.get("legal_repair_actions")
+                    if isinstance(typed_gap.get("legal_repair_actions"), list)
+                    else []
+                )
+            ],
+            source_ref=source_ref,
+            context=event_context,
+        )
+        if gap_id:
+            emitted += 1
+    return emitted
+
+
 __all__ = [
     "emit_typed_gap",
     "emit_typed_gaps_for_compile_errors",
+    "emit_typed_gaps_for_build_issues",
     "emit_typed_gaps_for_type_flow_errors",
     "emit_typed_gaps_for_verification_gaps",
 ]

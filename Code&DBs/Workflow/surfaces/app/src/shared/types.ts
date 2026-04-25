@@ -108,6 +108,7 @@ export interface BuildIssue {
   summary?: string;
   severity?: string;
   gate_rule?: Record<string, unknown>;
+  typed_gap?: Record<string, unknown>;
 }
 
 export interface BindingTarget {

@@ -29,6 +29,15 @@ class _FakeConn:
         return []
 
 
+class _RecordingCompileConn(_FakeConn):
+    def __init__(self) -> None:
+        self.events: list[tuple[str, tuple]] = []
+
+    def execute(self, query: str, *args):
+        self.events.append((query, args))
+        return super().execute(query, *args)
+
+
 class _WorkflowCompileConn(_FakeConn):
     def execute(self, query: str, *args):
         if "FROM workflow_jobs" in query:
@@ -1193,6 +1202,47 @@ def test_compile_prose_connector_flow_surfaces_external_research_and_blocking_in
         command["id"] == "fill_blocking_inputs"
         for command in definition["surface_manifest"]["surface_now"]["commands"]
     )
+
+
+def test_compile_prose_connector_blockers_emit_typed_gap_events(monkeypatch) -> None:
+    conn = _RecordingCompileConn()
+    monkeypatch.setattr(compiler, "_get_connection", lambda: conn)
+    monkeypatch.setattr(
+        compiler,
+        "load_compile_index_snapshot",
+        lambda conn, **kwargs: _compile_index_snapshot(
+            catalog=[],
+            integrations=[],
+            object_types=[],
+            capabilities=compiler._build_capability_catalog([]),
+            route_hints=(),
+        ),
+    )
+    monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
+
+    prose = (
+        "I want to be able to 1) capture the application UI, "
+        "2) research the API docs with Brave, "
+        "3) record the docs and plan the connector, "
+        "4) build a basic connector to the common objects."
+    )
+
+    result = compiler.compile_prose(prose, conn=conn)
+
+    typed_gap_inserts = [
+        args
+        for sql, args in conn.events
+        if "INSERT INTO system_events" in sql and args[0] == "typed_gap.created"
+    ]
+    assert len(typed_gap_inserts) == 5
+    payloads = [json.loads(args[3]) for args in typed_gap_inserts]
+    assert {payload["gap_kind"] for payload in payloads} == {"workflow_input"}
+    assert {
+        payload["context"]["input_label"]
+        for payload in payloads
+    } == set(result["definition"]["execution_setup"]["constraints"]["blocking_inputs"])
+    assert all(issue["kind"] == "typed_gap" for issue in result["build_blockers"])
+    assert all("Provide" not in issue["label"] for issue in result["build_blockers"])
 
 
 def test_compile_prose_connector_intake_flow_uses_suggested_inputs_without_blocking(monkeypatch) -> None:

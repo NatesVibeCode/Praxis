@@ -250,3 +250,77 @@ def test_build_authority_blocks_incomplete_hardened_execution_routes() -> None:
             "gate_rule": {"required_field": "execution_setup.phases.agent_route"},
         }
     ]
+
+
+def test_build_authority_surfaces_blocking_inputs_as_typed_gaps() -> None:
+    definition = {
+        "type": "operating_model",
+        "draft_flow": [
+            {
+                "id": "step-001",
+                "title": "Build connector",
+                "summary": "Build a connector.",
+                "depends_on": [],
+                "order": 1,
+            }
+        ],
+        "execution_setup": {
+            "constraints": {
+                "blocking_inputs": [
+                    "Authentication setup and credential shape",
+                ]
+            }
+        },
+        "definition_revision": "def_typed_input_gap",
+    }
+
+    bundle = build_authority_bundle(definition)
+
+    assert bundle["projection_status"]["state"] == "blocked"
+    assert bundle["build_issues"] == [
+        {
+            "issue_id": "issue:typed-gap:blocking-input:1",
+            "kind": "typed_gap",
+            "node_id": "step-001",
+            "binding_id": None,
+            "label": "Resolve typed input gap",
+            "summary": (
+                "Workflow input gap 'Authentication setup and credential shape' needs a source "
+                "authority, producer node, or narrowed requirement before execution."
+            ),
+            "severity": "blocking",
+            "gate_rule": {
+                "gap_kind": "workflow_input",
+                "missing_type": "workflow_input",
+                "reason_code": "workflow.blocking_input.missing",
+                "legal_repair_actions": [
+                    "resolve_from_context",
+                    "add_producer_node",
+                    "bind_source_authority",
+                    "remove_requirement",
+                ],
+                "context": {
+                    "input_label": "Authentication setup and credential shape",
+                    "node_id": "step-001",
+                    "requirement_ref": "execution_setup.constraints.blocking_inputs[0]",
+                },
+            },
+            "typed_gap": {
+                "gap_kind": "workflow_input",
+                "missing_type": "workflow_input",
+                "reason_code": "workflow.blocking_input.missing",
+                "legal_repair_actions": [
+                    "resolve_from_context",
+                    "add_producer_node",
+                    "bind_source_authority",
+                    "remove_requirement",
+                ],
+                "context": {
+                    "input_label": "Authentication setup and credential shape",
+                    "node_id": "step-001",
+                    "requirement_ref": "execution_setup.constraints.blocking_inputs[0]",
+                },
+            },
+        }
+    ]
+    assert "Provide" not in bundle["build_issues"][0]["label"]

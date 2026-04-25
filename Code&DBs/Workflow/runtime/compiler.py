@@ -464,12 +464,13 @@ def _finalize_compile_result(
         for issue in authority_bundle["build_issues"]
         if _as_text(issue.get("severity")) == "blocking"
     ]
+    workflow_id = _as_text(hydrated_definition.get("workflow_id")) or ""
+    definition_revision = _as_text(hydrated_definition.get("definition_revision")) or ""
 
     # Emit compilation event to the service bus
     if conn is not None:
         try:
             from runtime.event_log import emit, CHANNEL_BUILD_STATE, EVENT_COMPILATION
-            workflow_id = _as_text(hydrated_definition.get("workflow_id")) or ""
             emit(
                 conn,
                 channel=CHANNEL_BUILD_STATE,
@@ -485,6 +486,16 @@ def _finalize_compile_result(
             )
         except Exception:
             pass  # compilation itself must not fail because of event log
+        try:
+            from runtime.typed_gap_events import emit_typed_gaps_for_build_issues
+
+            emit_typed_gaps_for_build_issues(
+                conn,
+                blocking_issues,
+                source_ref=f"compile:{workflow_id or definition_revision or 'unknown'}",
+            )
+        except Exception:
+            pass  # typed gap emission is observability, not compile control flow
 
     enriched_ledger = _enrich_binding_ledger(authority_bundle["binding_ledger"], conn)
     candidate_resolution_manifest = build_candidate_resolution_manifest(

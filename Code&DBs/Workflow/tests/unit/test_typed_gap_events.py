@@ -375,6 +375,64 @@ def test_emit_typed_gaps_for_type_flow_errors_empty_returns_zero():
     assert conn.events == []
 
 
+def test_emit_typed_gaps_for_build_issues_promotes_typed_issue():
+    from runtime.typed_gap_events import emit_typed_gaps_for_build_issues
+
+    conn = _RecordingConn()
+    emitted = emit_typed_gaps_for_build_issues(
+        conn,
+        [
+            {
+                "issue_id": "issue:typed-gap:blocking-input:1",
+                "kind": "typed_gap",
+                "node_id": "step-001",
+                "label": "Resolve typed input gap",
+                "summary": "Workflow input gap needs source authority.",
+                "typed_gap": {
+                    "gap_kind": "workflow_input",
+                    "missing_type": "workflow_input",
+                    "reason_code": "workflow.blocking_input.missing",
+                    "legal_repair_actions": ["add_producer_node"],
+                    "context": {
+                        "input_label": "Authentication setup",
+                        "node_id": "step-001",
+                    },
+                },
+            }
+        ],
+        source_ref="compile:wf_alpha",
+    )
+
+    assert emitted == 1
+    payload = _captured_payload(conn)
+    assert payload["gap_kind"] == "workflow_input"
+    assert payload["missing_type"] == "workflow_input"
+    assert payload["reason_code"] == "workflow.blocking_input.missing"
+    assert payload["legal_repair_actions"] == ["add_producer_node"]
+    assert payload["source_ref"] == "compile:wf_alpha"
+    assert payload["context"]["issue_id"] == "issue:typed-gap:blocking-input:1"
+    assert payload["context"]["input_label"] == "Authentication setup"
+
+
+def test_emit_typed_gaps_for_build_issues_ignores_non_typed_issues():
+    from runtime.typed_gap_events import emit_typed_gaps_for_build_issues
+
+    conn = _RecordingConn()
+    emitted = emit_typed_gaps_for_build_issues(
+        conn,
+        [
+            {
+                "issue_id": "issue:missing-route:step-001",
+                "kind": "missing_route",
+                "gate_rule": {"required_field": "execution_setup.phases.agent_route"},
+            }
+        ],
+    )
+
+    assert emitted == 0
+    assert conn.events == []
+
+
 def test_emit_typed_gap_gap_id_format():
     """gap_id is 'typed_gap.' + 16 hex chars."""
     conn = _RecordingConn()

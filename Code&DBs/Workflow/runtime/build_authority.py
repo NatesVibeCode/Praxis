@@ -16,6 +16,12 @@ _TRIGGER_MANUAL_ROUTE = "trigger"
 _TRIGGER_SCHEDULE_ROUTE = "trigger/schedule"
 _TRIGGER_WEBHOOK_ROUTE = "trigger/webhook"
 _WEBHOOK_TRIGGER_EVENT_TYPE = "db.webhook_events.insert"
+_BLOCKING_INPUT_REPAIR_ACTIONS = [
+    "resolve_from_context",
+    "add_producer_node",
+    "bind_source_authority",
+    "remove_requirement",
+]
 
 
 def _json_clone(value: Any) -> Any:
@@ -414,16 +420,31 @@ def _collect_issues(
     for index, item in enumerate(blocking_inputs, start=1):
         if not default_node_id:
             continue
+        typed_gap = {
+            "gap_kind": "workflow_input",
+            "missing_type": "workflow_input",
+            "reason_code": "workflow.blocking_input.missing",
+            "legal_repair_actions": _BLOCKING_INPUT_REPAIR_ACTIONS,
+            "context": {
+                "input_label": item,
+                "node_id": default_node_id,
+                "requirement_ref": f"execution_setup.constraints.blocking_inputs[{index - 1}]",
+            },
+        }
         issues.append(
             {
-                "issue_id": f"issue:blocking-input:{index}",
-                "kind": "blocking_input",
+                "issue_id": f"issue:typed-gap:blocking-input:{index}",
+                "kind": "typed_gap",
                 "node_id": default_node_id,
                 "binding_id": None,
-                "label": f"Provide {item}",
-                "summary": f"The workflow needs {item} before it can plan or run cleanly.",
+                "label": "Resolve typed input gap",
+                "summary": (
+                    f"Workflow input gap '{item}' needs a source authority, producer node, "
+                    "or narrowed requirement before execution."
+                ),
                 "severity": "blocking",
-                "gate_rule": {"required_input": item},
+                "gate_rule": typed_gap,
+                "typed_gap": typed_gap,
             }
         )
 
