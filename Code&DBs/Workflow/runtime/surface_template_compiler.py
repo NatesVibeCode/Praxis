@@ -44,45 +44,59 @@ _INTENT_ENTITY_TYPE = "intent"
 _PILL_TYPE_ENTITY_TYPE = "pill_type"
 
 
-def _lattice_depth(pg: Any, pill_ref: str) -> int:
-    """Edges from ``pill_ref`` up to the lattice root via ``subtype_of``."""
-    depth = 0
-    cursor = pill_ref
-    visited: set[str] = set()
-    while True:
-        if cursor in visited:  # cycle guard, should not happen in a DAG
-            break
-        visited.add(cursor)
-        row = pg.fetchrow(
-            "SELECT target_id FROM memory_edges WHERE source_id = $1 AND relation_type = 'subtype_of' LIMIT 1",
-            cursor,
+def _load_ancestor_chains(pg: Any, refs: list[str]) -> dict[str, dict[str, int]]:
+    """Recursive CTE: walk the subtype_of DAG once for a batch of starting refs.
+
+    Returns ``{start: {ancestor: depth}}`` where each start carries depth=0
+    on itself and an entry for every ancestor reachable through subtype_of
+    edges, with the hop distance as the value. Replaces the per-call
+    ``_lattice_depth`` + ``_is_subtype_of`` Python N+1 walks with a single
+    query — measurable round-trip reduction (was O(K*S*D), now O(1)).
+
+    Both lookups derive from the same chain map:
+      lattice_depth(ref)         -> max(chains[ref].values())
+      is_subtype(pill, slot_t)   -> slot_t in chains[pill]
+    """
+    deduped = sorted({r for r in refs if isinstance(r, str) and r})
+    if not deduped:
+        return {}
+    rows = pg.execute(
+        """
+        WITH RECURSIVE ancestors AS (
+            SELECT id AS start, id AS ancestor, 0 AS depth
+              FROM unnest($1::text[]) AS s(id)
+            UNION ALL
+            SELECT a.start, e.target_id, a.depth + 1
+              FROM ancestors a
+              JOIN memory_edges e
+                ON e.source_id = a.ancestor
+               AND e.relation_type = 'subtype_of'
         )
-        if row is None:
-            break
-        cursor = row["target_id"]
-        depth += 1
-    return depth
+        SELECT start, ancestor, depth
+          FROM ancestors
+        """,
+        deduped,
+    )
+    chains: dict[str, dict[str, int]] = {ref: {} for ref in deduped}
+    for row in rows:
+        start = row["start"]
+        ancestor = row["ancestor"]
+        depth = int(row["depth"])
+        existing = chains[start].get(ancestor)
+        # In a DAG with multiple paths, keep the SHORTEST distance — matches
+        # the per-step walk semantics of the previous _is_subtype_of helper.
+        if existing is None or depth < existing:
+            chains[start][ancestor] = depth
+    return chains
 
 
-def _is_subtype_of(pg: Any, candidate_ref: str, target_ref: str) -> bool:
-    """True iff ``candidate_ref`` is ``target_ref`` or reaches it via subtype_of*."""
-    if candidate_ref == target_ref:
-        return True
-    cursor = candidate_ref
-    visited: set[str] = set()
-    while True:
-        if cursor in visited:
-            return False
-        visited.add(cursor)
-        row = pg.fetchrow(
-            "SELECT target_id FROM memory_edges WHERE source_id = $1 AND relation_type = 'subtype_of' LIMIT 1",
-            cursor,
-        )
-        if row is None:
-            return False
-        cursor = row["target_id"]
-        if cursor == target_ref:
-            return True
+def _lattice_depth_from_chain(chain: dict[str, int]) -> int:
+    """Hops from the seed up to the root (deepest ancestor in its chain)."""
+    return max(chain.values()) if chain else 0
+
+
+def _is_subtype_from_chain(chain: dict[str, int], target_ref: str) -> bool:
+    return target_ref in chain
 
 
 def _template_slots(pg: Any, template_ref: str) -> list[dict[str, Any]]:
@@ -131,8 +145,18 @@ def _fetch_template(pg: Any, template_ref: str) -> dict[str, Any] | None:
     }
 
 
-def _score_template(pg: Any, template: dict[str, Any], pill_refs: list[str]) -> dict[str, Any] | None:
-    """Admission + specificity scoring.
+def _score_template(
+    pg: Any,
+    template: dict[str, Any],
+    pill_refs: list[str],
+    *,
+    chains: dict[str, dict[str, int]],
+) -> dict[str, Any] | None:
+    """Admission + specificity scoring against a precomputed ancestor map.
+
+    ``chains`` is the result of one batch ``_load_ancestor_chains`` call
+    covering every pill_ref + slot_type relevant to this dispatch. Replaces
+    per-slot N+1 walks with O(1) dict lookups.
 
     Returns None when any slot can't bind (template is illegal for these
     pills). Slot binding is positional by ordinal — pill at ordinal i must
@@ -151,9 +175,11 @@ def _score_template(pg: Any, template: dict[str, Any], pill_refs: list[str]) -> 
     specificity = 0
     bound_slots: list[dict[str, Any]] = []
     for slot, pill_ref in zip(required_slots, pill_refs):
-        if not _is_subtype_of(pg, pill_ref, slot["slot_type"]):
+        pill_chain = chains.get(pill_ref) or {}
+        if not _is_subtype_from_chain(pill_chain, slot["slot_type"]):
             return None  # illegal — pill doesn't satisfy slot type
-        depth = _lattice_depth(pg, slot["slot_type"])
+        slot_chain = chains.get(slot["slot_type"]) or {}
+        depth = _lattice_depth_from_chain(slot_chain)
         specificity += depth
         bound_slots.append({
             "slot_name": slot["slot_name"],
@@ -394,6 +420,22 @@ def legal_templates_reducer(
         result["typed_gap"] = _typed_gap_for_no_match(intent_ref, pill_refs, [])
         return result
 
+    # Pull every candidate's consumes edges in one query so we know all slot
+    # types up-front; then walk the subtype DAG once for {pills + slot_types}
+    # via a recursive CTE — replaces per-slot N+1 walks with O(1) dict lookups.
+    candidate_template_refs = [row["template_ref"] for row in candidates]
+    consumes_rows = list(pg.execute(
+        """
+        SELECT source_id AS template_ref, target_id AS slot_type
+          FROM memory_edges
+         WHERE source_id = ANY($1::text[])
+           AND (relation_type = 'consumes' OR relation_type LIKE 'consumes:%')
+        """,
+        candidate_template_refs,
+    ))
+    slot_types = {row["slot_type"] for row in consumes_rows if row["slot_type"].startswith("pill_type.")}
+    chains = _load_ancestor_chains(pg, list({*pill_refs, *slot_types}))
+
     # Score each candidate.
     scored: list[dict[str, Any]] = []
     for row in candidates:
@@ -402,7 +444,7 @@ def legal_templates_reducer(
         template = _fetch_template(pg, template_ref)
         if template is None:
             continue
-        scoring = _score_template(pg, template, pill_refs)
+        scoring = _score_template(pg, template, pill_refs, chains=chains)
         if scoring is None:
             # Illegal candidate — tracked in the response for debuggability.
             scored.append({
