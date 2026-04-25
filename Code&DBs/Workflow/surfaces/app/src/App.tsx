@@ -3,7 +3,7 @@ import type { HistoryMode } from './dashboard/operatingModelSurfaceState';
 import { APP_CONFIG } from './config';
 import type { PraxisOpenTabDetail } from './praxis/events';
 import { ManifestBundleView } from './praxis/ManifestBundleView';
-import { getSeedBundle, seedBundles } from './praxis/seedBundles';
+import { useSeedBundles } from './hooks/useSeedBundles';
 import { LauncherFrontdoor } from './launcher/LauncherFrontdoor';
 import {
   type BuildView,
@@ -464,10 +464,13 @@ export function AppShell() {
   const activeContext = activeSurface.context;
   const isBuildMode = state.activeTabId === 'build';
 
+  const { seeds: seedBundles } = useSeedBundles();
+
   const createSeedTab = useCallback(async (seedId: string) => {
     const seed = seedBundles.find((candidate) => candidate.id === seedId);
-    const bundle = getSeedBundle(seedId);
-    if (!seed || !bundle) return;
+    if (!seed) return;
+    // Deep-clone so the user's new tab doesn't mutate the in-memory seed.
+    const bundle = JSON.parse(JSON.stringify(seed.bundle));
     setCreatingSeedId(seedId);
     try {
       const response = await fetch('/api/manifests/save-as', {
@@ -490,7 +493,7 @@ export function AppShell() {
     } finally {
       setCreatingSeedId(null);
     }
-  }, [openManifest]);
+  }, [openManifest, seedBundles]);
 
   const commandMenuSections = useMemo<MenuSection[]>(() => {
     const createItems = [
@@ -527,7 +530,7 @@ export function AppShell() {
       { id: 'create', title: 'Create', items: createItems },
       { id: 'navigate', title: 'Navigate', items: navigateItems },
     ];
-  }, [activateTab, chatOpen, createSeedTab, creatingSeedId, openBuild, openDashboardCosts, setChatOpen, state]);
+  }, [activateTab, chatOpen, createSeedTab, creatingSeedId, openBuild, openDashboardCosts, seedBundles, setChatOpen, state]);
 
   const renderActiveTab = () => {
     if (activeSurface.category === 'static' && activeSurface.id === 'dashboard' && state.dashboardDetail === 'costs') {

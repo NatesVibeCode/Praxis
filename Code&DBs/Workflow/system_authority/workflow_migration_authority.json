@@ -240,7 +240,12 @@
     "233_operation_catalog_surface_template_register.sql",
     "234_register_plan_operations.sql",
     "235_plan_orchestration_gateway_handlers.sql",
-    "236_operation_catalog_surface_action_performed.sql"
+    "236_operation_catalog_surface_action_performed.sql",
+    "237_semantic_predicate_catalog.sql",
+    "238_backfill_empty_semantic_predicate_allowlists.sql",
+    "239_register_operation_atomic_helper.sql",
+    "240_register_operation_atomic_helper_event_required_default.sql",
+    "241_app_manifests_workspace_seed_bundles.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5799,6 +5804,29 @@
       {"object_type": "row", "object_name": "authority_object_registry.operation.surface.action.performed"},
       {"object_type": "row", "object_name": "data_dictionary_objects.operation.surface.action.performed"},
       {"object_type": "row", "object_name": "data_dictionary_objects.event.surface.action.performed"}
+    ],
+    "237_semantic_predicate_catalog.sql": [
+      {"object_type": "table", "object_name": "semantic_predicate_catalog"}
+    ],
+    "238_backfill_empty_semantic_predicate_allowlists.sql": [
+      {"object_type": "row", "object_name": "semantic_predicates.architecture_policy"},
+      {"object_type": "row", "object_name": "semantic_predicates.delivery_plan"},
+      {"object_type": "row", "object_name": "semantic_predicates.is_part_of"},
+      {"object_type": "row", "object_name": "semantic_predicates.sourced_from_bug"},
+      {"object_type": "row", "object_name": "semantic_predicates.sourced_from_idea"},
+      {"object_type": "row", "object_name": "semantic_predicates.governed_by_decision_ref"},
+      {"object_type": "row", "object_name": "semantic_predicates.touches_repo_path"}
+    ],
+    "239_register_operation_atomic_helper.sql": [
+      {"object_type": "function", "object_name": "register_operation_atomic"}
+    ],
+    "240_register_operation_atomic_helper_event_required_default.sql": [
+      {"object_type": "function", "object_name": "register_operation_atomic"}
+    ],
+    "241_app_manifests_workspace_seed_bundles.sql": [
+      {"object_type": "row", "object_name": "app_manifests.seed.workspace.blank"},
+      {"object_type": "row", "object_name": "app_manifests.seed.workspace.entity"},
+      {"object_type": "row", "object_name": "app_manifests.seed.workspace.workflow_review"}
     ]
   },
   "policy_buckets": {
@@ -6043,7 +6071,12 @@
       "233_operation_catalog_surface_template_register.sql",
       "234_register_plan_operations.sql",
       "235_plan_orchestration_gateway_handlers.sql",
-      "236_operation_catalog_surface_action_performed.sql"
+      "236_operation_catalog_surface_action_performed.sql",
+      "237_semantic_predicate_catalog.sql",
+      "238_backfill_empty_semantic_predicate_allowlists.sql",
+      "239_register_operation_atomic_helper.sql",
+      "240_register_operation_atomic_helper_event_required_default.sql",
+      "241_app_manifests_workspace_seed_bundles.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
