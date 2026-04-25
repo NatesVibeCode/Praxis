@@ -213,6 +213,33 @@ def _install_submit_stub(monkeypatch: pytest.MonkeyPatch, handler):
     monkeypatch.setattr(runtime_pkg, "workflow", workflow_pkg, raising=False)
     monkeypatch.setattr(workflow_pkg, "unified", unified_module, raising=False)
 
+    # runtime.triggers now routes launches through runtime.control_commands.
+    # submit_workflow_command rather than calling submit_workflow_inline
+    # directly, so also patch that surface.  Adapt the bus-style signature
+    # to the legacy stub signature the existing tests use.
+    control_commands_module = importlib.import_module("runtime.control_commands")
+
+    def _bus_stub(
+        conn,
+        *,
+        inline_spec=None,
+        spec_path=None,
+        run_id=None,
+        parent_run_id=None,
+        trigger_depth=None,
+        **_kwargs,
+    ):
+        spec_dict = dict(inline_spec) if inline_spec is not None else {}
+        return handler(
+            conn,
+            spec_dict,
+            run_id=run_id,
+            parent_run_id=parent_run_id,
+            trigger_depth=trigger_depth if trigger_depth is not None else 0,
+        )
+
+    monkeypatch.setattr(control_commands_module, "submit_workflow_command", _bus_stub)
+
 
 def test_evaluate_triggers_emits_depth_exceeded_event(caplog):
     conn = _Conn()
