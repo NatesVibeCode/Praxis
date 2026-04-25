@@ -1520,6 +1520,13 @@ def _packet_to_job(
         verify_refs=list(compiled.verify_refs) if compiled.verify_refs else None,
         read_scope=list(packet.read) if packet.read else None,
     )
+    from runtime.workflow_type_contracts import route_type_contract
+
+    type_contract = route_type_contract(
+        agent,
+        title=label,
+        summary=packet.description,
+    )
     job: dict[str, Any] = {
         "label": label,
         "agent": agent,
@@ -1527,6 +1534,14 @@ def _packet_to_job(
         "task_type": packet.stage,
         "write_scope": list(packet.write),
         "workdir": workdir,
+        # Typed contract derived from agent route + label + description so
+        # workers and graph projections see machine-readable consumes/
+        # produces alongside the prompt. Without this, runtime jobs were
+        # typeless and downstream gates / data_dictionary_lineage / typed_gap
+        # surfacing had nothing to bind to (BUG-C6EE740C chain).
+        "consumes": list(type_contract["consumes"]),
+        "consumes_any": list(type_contract["consumes_any"]),
+        "produces": list(type_contract["produces"]),
     }
     if packet.read:
         job["read_scope"] = list(packet.read)
