@@ -245,7 +245,8 @@
     "238_backfill_empty_semantic_predicate_allowlists.sql",
     "239_register_operation_atomic_helper.sql",
     "240_register_operation_atomic_helper_event_required_default.sql",
-    "241_app_manifests_workspace_seed_bundles.sql"
+    "241_app_manifests_workspace_seed_bundles.sql",
+    "242_workflow_type_token_data_dictionary_objects.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5827,6 +5828,9 @@
       {"object_type": "row", "object_name": "app_manifests.seed.workspace.blank"},
       {"object_type": "row", "object_name": "app_manifests.seed.workspace.entity"},
       {"object_type": "row", "object_name": "app_manifests.seed.workspace.workflow_review"}
+    ],
+    "242_workflow_type_token_data_dictionary_objects.sql": [
+      {"object_type": "row", "object_name": "data_dictionary_objects.workflow_type_tokens"}
     ]
   },
   "policy_buckets": {
@@ -6076,7 +6080,8 @@
       "238_backfill_empty_semantic_predicate_allowlists.sql",
       "239_register_operation_atomic_helper.sql",
       "240_register_operation_atomic_helper_event_required_default.sql",
-      "241_app_manifests_workspace_seed_bundles.sql"
+      "241_app_manifests_workspace_seed_bundles.sql",
+      "242_workflow_type_token_data_dictionary_objects.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

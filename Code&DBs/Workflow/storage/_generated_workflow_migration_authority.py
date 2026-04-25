@@ -251,7 +251,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '238_backfill_empty_semantic_predicate_allowlists.sql',
  '239_register_operation_atomic_helper.sql',
  '240_register_operation_atomic_helper_event_required_default.sql',
- '241_app_manifests_workspace_seed_bundles.sql')
+ '241_app_manifests_workspace_seed_bundles.sql',
+ '242_workflow_type_token_data_dictionary_objects.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -519,7 +520,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '238_backfill_empty_semantic_predicate_allowlists.sql',
  '239_register_operation_atomic_helper.sql',
  '240_register_operation_atomic_helper_event_required_default.sql',
- '241_app_manifests_workspace_seed_bundles.sql')
+ '241_app_manifests_workspace_seed_bundles.sql',
+ '242_workflow_type_token_data_dictionary_objects.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -766,7 +768,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '238_backfill_empty_semantic_predicate_allowlists.sql',
                '239_register_operation_atomic_helper.sql',
                '240_register_operation_atomic_helper_event_required_default.sql',
-               '241_app_manifests_workspace_seed_bundles.sql'),
+               '241_app_manifests_workspace_seed_bundles.sql',
+               '242_workflow_type_token_data_dictionary_objects.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -1037,6 +1040,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '239_register_operation_atomic_helper.sql': 'canonical',
  '240_register_operation_atomic_helper_event_required_default.sql': 'canonical',
  '241_app_manifests_workspace_seed_bundles.sql': 'canonical',
+ '242_workflow_type_token_data_dictionary_objects.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -3110,7 +3114,9 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                                   ('row',
                                                    'app_manifests.seed.workspace.entity'),
                                                   ('row',
-                                                   'app_manifests.seed.workspace.workflow_review'))}
+                                                   'app_manifests.seed.workspace.workflow_review')),
+ '242_workflow_type_token_data_dictionary_objects.sql': (('row',
+                                                          'data_dictionary_objects.workflow_type_tokens'),)}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -4716,7 +4722,9 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
  ('241_app_manifests_workspace_seed_bundles.sql',
   (('row', 'app_manifests.seed.workspace.blank'),
    ('row', 'app_manifests.seed.workspace.entity'),
-   ('row', 'app_manifests.seed.workspace.workflow_review'))))
+   ('row', 'app_manifests.seed.workspace.workflow_review'))),
+ ('242_workflow_type_token_data_dictionary_objects.sql',
+  (('row', 'data_dictionary_objects.workflow_type_tokens'),)))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'100': ('100_adapter_config_authority.sql',
          '100_task_type_profile_scope_defaults.sql',
