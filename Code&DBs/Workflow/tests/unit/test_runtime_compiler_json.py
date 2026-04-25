@@ -1017,27 +1017,16 @@ def test_compile_prose_emits_research_toolchains_from_runtime_catalog(monkeypatc
     assert "research/fan-out" in slugs
     assert "tool/recruiter/company_intel" in slugs
     assert definition["execution_setup"]["method"]["key"] == "seed_fanout_synthesize"
-    assert definition["execution_setup"]["constraints"]["briefing_fields"] == [
-        "Research topic, company, or question to investigate",
-        "Comparison set or entities in scope",
-        "Scope boundaries and decision the research should support",
-        "Freshness window or time horizon",
-        "Required primary sources or source restrictions",
-        "Output format or deliverable expectation",
-    ]
+    # architecture-policy::compile::retrieval-is-the-filter-no-template-
+    # fallbacks (2026-04-25): briefing_fields + blocking_inputs are empty
+    # because the keyword-gated template was deleted. Retrieval is the
+    # filter; no canned research-inputs list.
+    assert definition["execution_setup"]["constraints"]["briefing_fields"] == []
     assert definition["execution_setup"]["constraints"]["blocking_inputs"] == []
     assert definition["execution_setup"]["budget_policy"]["fanout_workers"] == 4
     assert definition["surface_manifest"]["surface_now"]["approaches"][0]["label"] == "Seed research plan"
     assert any(
-        command["id"] == "fill_briefing_fields"
-        for command in definition["surface_manifest"]["surface_now"]["commands"]
-    )
-    assert any(
         decision["choice"] == "seed_fanout_synthesize"
-        for decision in definition["build_receipt"]["decisions"]
-    )
-    assert any(
-        decision["choice"] == "suggested_inputs_emitted"
         for decision in definition["build_receipt"]["decisions"]
     )
     assert "jobs" not in result
@@ -1132,7 +1121,30 @@ def test_compile_prose_promotes_workflow_cues_to_staged_execution(monkeypatch) -
     )
 
 
-def test_compile_prose_connector_flow_surfaces_external_research_and_blocking_inputs(monkeypatch) -> None:
+def test_compile_prose_connector_keyword_prose_does_not_emit_template_fallback(monkeypatch) -> None:
+    """architecture-policy::compile::retrieval-is-the-filter-no-template-
+    fallbacks (2026-04-25). BUG-3330D2CD retired the keyword-gated constant
+    functions infer_blocking_inputs / infer_briefing_fields / connector_flow_
+    self_scaffolds_inputs that used to emit the same hardcoded 5-item list
+    (Target application / Official API docs / Authentication / Persistence /
+    Common object) whenever prose contained any of (connector, api docs,
+    common objects, application, docs). That template preempted definition_
+    graph's prose-grounded capability nodes in the Moon build_graph render.
+
+    This test pins the new contract: connector-keyword prose produces
+    empty blocking_inputs AND empty briefing_fields, no 'fill_blocking_
+    inputs' or 'fill_briefing_fields' surface commands, no typed_gap.
+    created events keyed to the template inputs, and no 'blocking_inputs_
+    required' build_receipt decision. Retrieval is the filter; if
+    retrieval finds nothing, a retrieval.no_match typed_gap fires (future
+    commit). We no longer fabricate inputs from keyword presence.
+
+    Exercises every keyword-hit path the four retired tests used to pin:
+      - explicit connector / api docs / common objects flow
+      - intake flow with self-scaffolding signals
+      - synonym coverage (SaaS, developer portal, reference docs, bridge)
+    """
+
     monkeypatch.setattr(compiler, "_get_connection", lambda: _FakeConn())
     monkeypatch.setattr(
         compiler,
@@ -1147,192 +1159,68 @@ def test_compile_prose_connector_flow_surfaces_external_research_and_blocking_in
     )
     monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
 
-    prose = (
-        "I want to be able to 1) capture the application UI, "
-        "2) research the API docs with Brave, "
-        "3) record the docs and plan the connector, "
-        "4) build a basic connector to the common objects."
-    )
-
-    result = compiler.compile_prose(prose, conn=_FakeConn())
-    definition = result["definition"]
-    setup = definition["execution_setup"]
-    phases = setup["phases"]
-
-    assert setup["method"]["key"] == "staged_execution"
-    assert setup["method"]["label"] == "Staged Execution"
-    assert "research/gemini-cli" in [capability["slug"] for capability in definition["capabilities"]]
-    assert "research/local-knowledge" not in [capability["slug"] for capability in definition["capabilities"]]
-    assert setup["constraints"]["blocking_inputs"] == [
+    template_items = {
         "Target application or applications in scope",
         "Official API docs entrypoint or outbound internet research target",
         "Authentication setup and credential shape",
         "Persistence contract for captured docs and connector state",
         "Common object scope and target field mappings",
-    ]
-    assert setup["constraints"]["briefing_fields"] == setup["constraints"]["blocking_inputs"]
-    assert [phase["title"] for phase in phases] == [
-        "capture the application UI",
-        "research the API docs with Brave",
-        "record the docs and plan the connector",
-        "build a basic connector to the common objects",
-    ]
-    assert [phase["role_label"] for phase in phases] == [
-        "Intake",
-        "Research",
-        "Plan",
-        "Build",
-    ]
-    assert phases[1]["required_inputs"] == [
-        "Target application or applications in scope",
-        "Official API docs entrypoint or outbound internet research target",
-        "Authentication setup and credential shape",
-    ]
-    assert phases[2]["persistence_targets"] == [
-        "source-backed docs notes",
-        "connector configuration and object mappings",
-    ]
-    assert phases[2]["handoff_target"] == "build a basic connector to the common objects"
-    assert "blocking_inputs_required" in [decision["choice"] for decision in definition["build_receipt"]["decisions"]]
-    assert any(
-        gap.startswith("Blocking briefing inputs are still missing:")
-        for gap in definition["build_receipt"]["data_gaps"]
-    )
-    assert any(
-        command["id"] == "fill_blocking_inputs"
-        for command in definition["surface_manifest"]["surface_now"]["commands"]
-    )
+    }
 
-
-def test_compile_prose_connector_blockers_emit_typed_gap_events(monkeypatch) -> None:
-    conn = _RecordingCompileConn()
-    monkeypatch.setattr(compiler, "_get_connection", lambda: conn)
-    monkeypatch.setattr(
-        compiler,
-        "load_compile_index_snapshot",
-        lambda conn, **kwargs: _compile_index_snapshot(
-            catalog=[],
-            integrations=[],
-            object_types=[],
-            capabilities=compiler._build_capability_catalog([]),
-            route_hints=(),
-        ),
-    )
-    monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
-
-    prose = (
+    # Case (a) — explicit connector prose that previously triggered the template.
+    prose_a = (
         "I want to be able to 1) capture the application UI, "
         "2) research the API docs with Brave, "
         "3) record the docs and plan the connector, "
         "4) build a basic connector to the common objects."
     )
-
-    result = compiler.compile_prose(prose, conn=conn)
-
-    typed_gap_inserts = [
-        args
-        for sql, args in conn.events
-        if "INSERT INTO system_events" in sql and args[0] == "typed_gap.created"
-    ]
-    assert len(typed_gap_inserts) == 5
-    payloads = [json.loads(args[3]) for args in typed_gap_inserts]
-    assert {payload["gap_kind"] for payload in payloads} == {"workflow_input"}
-    assert {
-        payload["context"]["input_label"]
-        for payload in payloads
-    } == set(result["definition"]["execution_setup"]["constraints"]["blocking_inputs"])
-    assert all(issue["kind"] == "typed_gap" for issue in result["build_blockers"])
-    assert all("Provide" not in issue["label"] for issue in result["build_blockers"])
-
-
-def test_compile_prose_connector_intake_flow_uses_suggested_inputs_without_blocking(monkeypatch) -> None:
-    monkeypatch.setattr(compiler, "_get_connection", lambda: _FakeConn())
-    monkeypatch.setattr(
-        compiler,
-        "load_compile_index_snapshot",
-        lambda conn, **kwargs: _compile_index_snapshot(
-            catalog=[],
-            integrations=[],
-            object_types=[],
-            capabilities=compiler._build_capability_catalog([]),
-            route_hints=(),
-        ),
-    )
-    monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
-
-    prose = (
+    # Case (b) — self-scaffolding intake flow that previously emitted the
+    # template via briefing_fields but suppressed blocking_inputs.
+    prose_b = (
         "Im going to feed you an application name, "
         "We will need to search the web via fan out research and Brave to find the docs for that application's API, "
         "bring them back and store them in the db, "
         "then we need to make a plan for a first pass skinny integration for this connector to Praxis, "
         "then that needs to get created and tested until it works."
     )
-
-    result = compiler.compile_prose(prose, conn=_FakeConn())
-    definition = result["definition"]
-    setup = definition["execution_setup"]
-    phases = setup["phases"]
-
-    assert setup["method"]["key"] == "staged_execution"
-    assert setup["constraints"]["briefing_fields"] == [
-        "Target application or applications in scope",
-        "Official API docs entrypoint or outbound internet research target",
-        "Authentication setup and credential shape",
-        "Persistence contract for captured docs and connector state",
-        "Common object scope and target field mappings",
-    ]
-    assert setup["constraints"]["blocking_inputs"] == []
-    assert [phase["title"] for phase in phases] == [
-        "Im going to feed you an application name",
-        "We will need to search the web via fan out research and Brave to find the docs for that application's API, bring them back and store them in the db",
-        "then we need to make a plan for a first pass skinny integration for this connector to Praxis",
-        "then that needs to get created and tested until it works",
-    ]
-    assert any(
-        command["id"] == "fill_briefing_fields"
-        for command in definition["surface_manifest"]["surface_now"]["commands"]
-    )
-    assert not any(
-        command["id"] == "fill_blocking_inputs"
-        for command in definition["surface_manifest"]["surface_now"]["commands"]
-    )
-    assert result["build_state"] == "ready"
-    assert result["build_blockers"] == []
-
-
-def test_compile_prose_connector_synonyms_stay_buildable_without_exact_magic_words(monkeypatch) -> None:
-    monkeypatch.setattr(compiler, "_get_connection", lambda: _FakeConn())
-    monkeypatch.setattr(
-        compiler,
-        "load_compile_index_snapshot",
-        lambda conn, **kwargs: _compile_index_snapshot(
-            catalog=[],
-            integrations=[],
-            object_types=[],
-            capabilities=compiler._build_capability_catalog([]),
-            route_hints=(),
-        ),
-    )
-    monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
-
-    prose = (
+    # Case (c) — synonym coverage (SaaS / developer portal / reference docs / bridge).
+    prose_c = (
         "Once I give you a SaaS name, inspect that product's developer portal or reference docs, "
         "record the findings in the database, sketch a lean Praxis bridge, implement the adapter, "
         "and verify it with QA coverage until it works."
     )
 
-    result = compiler.compile_prose(prose, conn=_FakeConn())
-    definition = result["definition"]
-    setup = definition["execution_setup"]
-
-    assert setup["method"]["key"] == "staged_execution"
-    assert setup["constraints"]["blocking_inputs"] == []
-    assert setup["constraints"]["briefing_fields"] == [
-        "Target application or applications in scope",
-        "Official API docs entrypoint or outbound internet research target",
-        "Authentication setup and credential shape",
-        "Persistence contract for captured docs and connector state",
-        "Common object scope and target field mappings",
-    ]
-    assert result["build_state"] == "ready"
-    assert result["build_blockers"] == []
+    for label, prose in (("a_connector", prose_a), ("b_intake", prose_b), ("c_synonyms", prose_c)):
+        conn = _RecordingCompileConn()
+        monkeypatch.setattr(compiler, "_get_connection", lambda conn=conn: conn)
+        result = compiler.compile_prose(prose, conn=conn)
+        definition = result["definition"]
+        setup = definition["execution_setup"]
+        # Core contract: both constraint lists are empty.
+        assert setup["constraints"]["blocking_inputs"] == [], f"{label}: blocking_inputs leaked template content"
+        assert setup["constraints"]["briefing_fields"] == [], f"{label}: briefing_fields leaked template content"
+        # No template-derived surface commands.
+        command_ids = {
+            command["id"]
+            for command in definition.get("surface_manifest", {}).get("surface_now", {}).get("commands", [])
+            if isinstance(command, dict) and command.get("id")
+        }
+        assert "fill_blocking_inputs" not in command_ids, f"{label}: fill_blocking_inputs command leaked"
+        assert "fill_briefing_fields" not in command_ids, f"{label}: fill_briefing_fields command leaked"
+        # No 'blocking_inputs_required' build_receipt decision.
+        decision_choices = {
+            decision.get("choice")
+            for decision in definition.get("build_receipt", {}).get("decisions", [])
+            if isinstance(decision, dict)
+        }
+        assert "blocking_inputs_required" not in decision_choices, f"{label}: blocking_inputs_required decision leaked"
+        # No typed_gap.created events carrying the template input_label strings.
+        typed_gap_labels = {
+            json.loads(args[3]).get("context", {}).get("input_label")
+            for sql, args in conn.events
+            if "INSERT INTO system_events" in sql and args[0] == "typed_gap.created"
+        }
+        assert template_items.isdisjoint(typed_gap_labels), f"{label}: typed_gap event carried template input_label"
+        # Staged-execution decision is still reachable if prose implies it —
+        # this test does not pin method.key because that heuristic is not
+        # being deleted here; only the template content is.
