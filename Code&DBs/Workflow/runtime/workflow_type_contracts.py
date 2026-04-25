@@ -96,6 +96,24 @@ _ROUTE_CONTRACTS: tuple[tuple[tuple[str, ...], dict[str, tuple[str, ...]]], ...]
         },
     ),
     (
+        ("build", "implement", "develop", "code", "edit", "refactor", "stage", "execute"),
+        {
+            "consumes": (),
+            "consumes_any": (
+                "research_findings",
+                "evidence_pack",
+                "analysis_result",
+                "draft",
+                "architecture_plan",
+                "validated_input",
+                "input_text",
+                "diagnosis",
+                "review_result",
+            ),
+            "produces": ("code_change", "diff", "execution_receipt"),
+        },
+    ),
+    (
         ("debug", "diagnose", "failure", "bug"),
         {
             "consumes": (),
@@ -259,6 +277,37 @@ def capability_type_contract(capability: Mapping[str, Any]) -> dict[str, list[st
         "consumes_any": declared["consumes_any"] or ([] if has_declared_inputs else list(inferred["consumes_any"])),
         "produces": declared["produces"] or list(inferred["produces"]),
     }
+
+
+def route_type_contract(
+    route: str,
+    *,
+    title: str | None = None,
+    summary: str | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, list[str]]:
+    """Return the typed contract for an agent route.
+
+    Used by the surface compiler (compiler_output_builders.make_execution_phase
+    and friends) to attach typed ``consumes`` / ``consumes_any`` / ``produces``
+    to phases that previously only carried the route literal (``auto/build``,
+    ``auto/review``, etc). Without this, downstream graph nodes inherit no
+    type contract and Moon Composer cannot validate type-flow before commit
+    (BUG-C6EE740C / BUG-5DD67C2A / BUG-99B9DC7E / BUG-2729F8B7).
+
+    Resolution: ``extra`` overrides take precedence (declared contract from
+    the catalog), otherwise the route + title + summary are searched against
+    ``_ROUTE_CONTRACTS`` for inferred coverage. Falls back to
+    ``produces=("result",)`` so unresolved routes still emit a typed shape.
+    """
+    payload: dict[str, Any] = {"route": route}
+    if title:
+        payload["title"] = title
+    if summary:
+        payload["summary"] = summary
+    if extra:
+        payload.update(dict(extra))
+    return capability_type_contract(payload)
 
 
 def node_produced_types(node: object) -> list[str]:

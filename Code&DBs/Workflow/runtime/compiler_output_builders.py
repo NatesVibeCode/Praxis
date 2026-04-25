@@ -535,7 +535,10 @@ def make_execution_phase(
     outputs: list[str],
     fanout_count: int | None = None,
 ) -> dict[str, Any]:
+    from runtime.workflow_type_contracts import route_type_contract
+
     route_target = route_catalog.get(agent_route, {})
+    type_contract = route_type_contract(agent_route, title=title, summary=purpose)
     phase = {
         "id": phase_id,
         "kind": kind,
@@ -552,6 +555,14 @@ def make_execution_phase(
         "timeout_seconds": timeout_seconds,
         "requires_citations": requires_citations,
         "outputs": outputs,
+        # Typed contract derived from agent_route + title + purpose so the
+        # phase carries machine-readable consumes/produces alongside the
+        # human-readable outputs list. Closes the typed-node gap that left
+        # Moon Composer nodes with prose-only contracts (BUG-C6EE740C and
+        # the data-dictionary / gates / Provide-X chain it gates).
+        "consumes": type_contract["consumes"],
+        "consumes_any": type_contract["consumes_any"],
+        "produces": type_contract["produces"],
     }
     if step_id:
         phase["step_id"] = step_id
