@@ -73,7 +73,7 @@ def test_workflow_history_reads_from_metrics_view(monkeypatch) -> None:
     monkeypatch.setattr(
         workflow_status,
         "get_workflow_metrics_view",
-        lambda: SimpleNamespace(recent_workflows=lambda limit=20: fake_rows[:limit]),
+        lambda: SimpleNamespace(recent_workflows=lambda limit=20, days=None: fake_rows[:limit]),
     )
 
     history = workflow_status.WorkflowHistory(max_size=10)
@@ -111,7 +111,7 @@ def test_workflow_history_reports_degraded_source_when_metrics_view_fails(monkey
     monkeypatch.setattr(
         workflow_status.WorkflowHistory,
         "_recent_workflows_from_runs",
-        lambda self, limit: _raise(),
+        lambda self, limit, days=None: _raise(),
     )
 
     summary = history.summary()

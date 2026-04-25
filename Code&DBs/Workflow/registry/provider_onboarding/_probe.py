@@ -63,7 +63,7 @@ def _http_get_json(
     *,
     headers: Mapping[str, str],
     timeout_seconds: int,
-) -> dict[str, Any]:
+) -> Any:
     return _http_get_json_impl(url, headers=headers, timeout_seconds=timeout_seconds)
 
 
@@ -72,10 +72,12 @@ def _http_get_json_impl(
     *,
     headers: Mapping[str, str],
     timeout_seconds: int,
-) -> dict[str, Any]:
+) -> Any:
+    merged_headers = {"User-Agent": "Praxis-Engine/1.0"}
+    merged_headers.update(dict(headers))
     request = urllib.request.Request(
         url,
-        headers=dict(headers),
+        headers=merged_headers,
         method="GET",
     )
     try:
@@ -95,8 +97,6 @@ def _http_get_json_impl(
         data = json.loads(payload)
     except (json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError(f"invalid JSON response from {url}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise RuntimeError(f"expected JSON object from {url}")
     return data
 
 
@@ -227,10 +227,18 @@ def _discover_api_models_impl(
             headers={"Authorization": f"Bearer {api_key}"},
             timeout_seconds=timeout_seconds,
         )
+        # OpenAI shape: {"data": [{"id": ...}]}.
+        # Together shape: [{"id": ...}, ...] (bare array).
+        if isinstance(data, dict):
+            entries = data.get("data", [])
+        elif isinstance(data, list):
+            entries = data
+        else:
+            raise RuntimeError(f"expected JSON object or array from {models_url}")
         return _normalize_unique(
             [
                 str(item.get("id") or "").strip()
-                for item in data.get("data", [])
+                for item in entries
                 if isinstance(item, dict)
             ]
         )

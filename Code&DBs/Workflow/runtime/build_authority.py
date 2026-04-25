@@ -23,6 +23,16 @@ _BLOCKING_INPUT_REPAIR_ACTIONS = [
     "remove_requirement",
 ]
 
+# Honors architecture-policy::compile::retrieval-is-the-filter-no-template-
+# fallbacks (2026-04-25). When semantic retrieval over the operator prose
+# finds zero capability matches in the catalog, the compiler emits a single
+# honest typed gap rather than substituting a canned template.
+_RETRIEVAL_NO_MATCH_REPAIR_ACTIONS = [
+    "add_integration_reference_to_prose",
+    "pick_capability_from_catalog",
+    "narrow_workflow_scope",
+]
+
 
 def _json_clone(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
@@ -377,6 +387,79 @@ def _merge_binding_ledger(
     return [_json_clone(entry) for entry in ordered]
 
 
+def _definition_graph_capability_nodes(definition: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract capability nodes from the kernel-built definition_graph.
+
+    definition_graph is the authoritative semantic-retrieval projection
+    (built by runtime/definition_compile_kernel.build_definition_graph).
+    Capability nodes carry the prose-grounded catalog matches; the build
+    projection reads them directly instead of keyword-filtering a template.
+    """
+    definition_graph = definition.get("definition_graph") if isinstance(definition, dict) else None
+    if not isinstance(definition_graph, dict):
+        return []
+    nodes = definition_graph.get("nodes")
+    if not isinstance(nodes, list):
+        return []
+    return [node for node in nodes if isinstance(node, dict) and _as_text(node.get("kind")) == "capability"]
+
+
+def _collect_retrieval_gaps(definition: dict[str, Any]) -> list[dict[str, Any]]:
+    """When semantic retrieval finds no capability matches, emit one honest
+    typed gap instead of a canned template.
+
+    Honors architecture-policy::compile::retrieval-is-the-filter-no-template-
+    fallbacks (2026-04-25). Empty retrieval is a signal: the operator must
+    add an @integration reference, pick a capability from the catalog, or
+    narrow the scope. Fabricating a scaffold hides that signal.
+    """
+    definition_graph = definition.get("definition_graph") if isinstance(definition, dict) else None
+    if not isinstance(definition_graph, dict):
+        # No definition_graph at all — this is a pre-migration bundle; stay
+        # silent (preserves backwards compatibility with legacy definitions).
+        return []
+    capability_nodes = _definition_graph_capability_nodes(definition)
+    if capability_nodes:
+        return []
+
+    ordered_steps = sorted(
+        [step for step in definition.get("draft_flow", []) if isinstance(step, dict)],
+        key=lambda step: int(step.get("order") or 0),
+    )
+    default_node_id = _as_text(ordered_steps[0].get("id")) if ordered_steps else None
+    if not default_node_id:
+        default_node_id = "workflow:root"
+
+    typed_gap = {
+        "gap_kind": "retrieval_match",
+        "missing_type": "capability_match",
+        "reason_code": "retrieval.no_match",
+        "legal_repair_actions": _RETRIEVAL_NO_MATCH_REPAIR_ACTIONS,
+        "context": {
+            "node_id": default_node_id,
+            "requirement_ref": "definition_graph.capability_nodes",
+        },
+    }
+    return [
+        {
+            "issue_id": "issue:typed-gap:retrieval.no_match",
+            "kind": "typed_gap",
+            "node_id": default_node_id,
+            "binding_id": None,
+            "label": "No catalog match",
+            "summary": (
+                "Semantic retrieval found zero capability matches for this prose. "
+                "The compiler will not fabricate a scaffold — add an @integration "
+                "or @action reference, pick a capability from the catalog, or "
+                "narrow the scope so retrieval can ground the workflow."
+            ),
+            "severity": "blocking",
+            "gate_rule": typed_gap,
+            "typed_gap": typed_gap,
+        }
+    ]
+
+
 def _collect_issues(
     definition: dict[str, Any],
     binding_ledger: list[dict[str, Any]],
@@ -391,6 +474,10 @@ def _collect_issues(
         key=lambda step: int(step.get("order") or 0),
     )
     default_node_id = _as_text(ordered_steps[0].get("id")) if ordered_steps else None
+
+    # Emit a typed-gap issue when semantic retrieval returned zero
+    # capabilities for the operator prose. One honest signal, no template.
+    issues.extend(_collect_retrieval_gaps(definition))
 
     for binding in binding_ledger:
         state = _as_text(binding.get("state"))

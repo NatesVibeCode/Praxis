@@ -218,6 +218,33 @@ def test_queue_worker_command_uses_extracted_worker_loop(monkeypatch) -> None:
     assert str(observed["worker_id"]).startswith("workflow-worker-")
 
 
+def test_queue_worker_command_supports_concurrency_alias(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(workflow_commands, "_workflow_runtime_conn", lambda: "fake-conn")
+    monkeypatch.setattr(
+        worker_loop,
+        "run_worker_loop",
+        lambda conn, repo_root, *, poll_interval=2.0, worker_id=None, max_local_concurrent=None: (
+            observed.update(
+                {
+                    "max_local_concurrent": max_local_concurrent,
+                }
+            )
+        ),
+    )
+    stdout = StringIO()
+
+    assert workflow_commands._queue_command(
+        ["worker", "--concurrency", "5"],
+        stdout=stdout,
+    ) == 0
+    assert observed["max_local_concurrent"] == 5
+    assert '"max_concurrent": 5' in stdout.getvalue()
+    assert '"concurrency_source": "cli"' in stdout.getvalue()
+
+
+
 def test_queue_worker_command_uses_resource_concurrency_when_unset(monkeypatch) -> None:
     observed: dict[str, object] = {}
 

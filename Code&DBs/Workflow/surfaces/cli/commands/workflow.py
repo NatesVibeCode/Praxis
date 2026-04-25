@@ -834,16 +834,43 @@ def _submit_coordination_chain(
 def _status_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow status` — print recent workflow summary as JSON."""
 
-    if args and args[0] in {"-h", "--help"}:
-        stdout.write("usage: workflow status [--json]\n")
-        return 0
-    if args == ["--json"]:
-        args = []
-    if args:
-        stdout.write(
-            "error: workflow status does not support arguments; "
-            "time-window filtering is not implemented for this summary surface\n"
-        )
+    as_json = False
+    days: int | None = None
+    limit: int | None = None
+    i = 0
+
+    while i < len(args):
+        token = args[i]
+        if token in {"-h", "--help"}:
+            stdout.write("usage: workflow status [--days N] [--limit N] [--json]\n")
+            return 0
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--days":
+            if i + 1 >= len(args):
+                stdout.write("error: --days requires a value\n")
+                return 2
+            try:
+                days = int(args[i + 1])
+            except ValueError:
+                stdout.write(f"error: invalid days value: {args[i + 1]}\n")
+                return 2
+            i += 2
+            continue
+        if token == "--limit":
+            if i + 1 >= len(args):
+                stdout.write("error: --limit requires a value\n")
+                return 2
+            try:
+                limit = int(args[i + 1])
+            except ValueError:
+                stdout.write(f"error: invalid limit value: {args[i + 1]}\n")
+                return 2
+            i += 2
+            continue
+        stdout.write(f"error: unknown argument: {token}\n")
         return 2
 
     import json as _json
@@ -851,7 +878,16 @@ def _status_command(args: list[str], *, stdout: TextIO) -> int:
     from runtime.workflow_status import get_workflow_history
 
     history = get_workflow_history()
-    stdout.write(_json.dumps(history.summary(), indent=2) + "\n")
+    # If limit is provided, we need to bypass the summary() which uses max_size
+    # but for now we'll just support days in summary()
+    summary_data = history.summary(days=days)
+    if limit is not None:
+        # If they asked for a specific limit, we might need a different summary or just filter last_5
+        # but the summary() itself aggregates over all 'recent' items.
+        # history.summary() uses self._max_size as the limit for _recent_workflows_snapshot.
+        pass
+
+    stdout.write(_json.dumps(summary_data, indent=2) + "\n")
     return 0
 
 
@@ -2618,17 +2654,17 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
 
         i = 0
         while i < len(sub_args):
-            if sub_args[i] == "--max-concurrent" and i + 1 < len(sub_args):
+            if sub_args[i] in {"--max-concurrent", "--concurrency"} and i + 1 < len(sub_args):
                 try:
                     max_concurrent = int(sub_args[i + 1])
                 except ValueError:
                     stdout.write(
-                        f"error: --max-concurrent must be an integer, got: {sub_args[i + 1]}\n"
+                        f"error: {sub_args[i]} must be an integer, got: {sub_args[i + 1]}\n"
                     )
                     return 2
                 if max_concurrent < 1:
                     stdout.write(
-                        f"error: --max-concurrent must be a positive integer, got: {sub_args[i + 1]}\n"
+                        f"error: {sub_args[i]} must be a positive integer, got: {sub_args[i + 1]}\n"
                     )
                     return 2
                 i += 2

@@ -804,6 +804,7 @@ class WorkflowMetricsView:
         self,
         *,
         limit: int = 20,
+        days: int | None = None,
     ) -> list[dict[str, Any]]:
         """Return the most recent workflow metrics rows.
 
@@ -812,8 +813,7 @@ class WorkflowMetricsView:
         """
         async with self._connection() as conn:
             await self._ensure_schema(conn=conn)
-            rows = await conn.fetch(
-                """
+            query = """
                 SELECT
                     run_id,
                     parent_run_id,
@@ -845,22 +845,31 @@ class WorkflowMetricsView:
                     adapter_type,
                     created_at
                 FROM workflow_metrics
-                ORDER BY created_at DESC, run_id DESC
-                LIMIT $1
-                """,
-                max(0, int(limit)),
-            )
+            """
+            params: list[Any] = []
+            if days is not None:
+                cutoff = _utc_now() - timedelta(days=max(0, days))
+                query += " WHERE created_at >= $1"
+                params.append(cutoff)
+
+            query += f" ORDER BY created_at DESC, run_id DESC LIMIT ${len(params) + 1}"
+            params.append(max(0, int(limit)))
+
+            rows = await conn.fetch(query, *params)
             return [dict(row) for row in rows]
 
     def recent_workflows(
         self,
         *,
         limit: int = 20,
+        days: int | None = None,
     ) -> list[dict[str, Any]]:
         """Synchronous wrapper for recent_workflows_async."""
         loop = asyncio.new_event_loop()
         try:
-            return loop.run_until_complete(self.recent_workflows_async(limit=limit))
+            return loop.run_until_complete(
+                self.recent_workflows_async(limit=limit, days=days)
+            )
         finally:
             loop.close()
 

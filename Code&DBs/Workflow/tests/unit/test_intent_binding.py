@@ -15,6 +15,7 @@ from runtime.intent_binding import (
     BoundIntent,
     BoundPill,
     ProposedPillScaffold,
+    SuggestedPillCandidate,
     UnboundCandidate,
     bind_data_pills,
     commit_proposed_pill,
@@ -28,6 +29,17 @@ class _StubConn:
 def _install_dictionary(monkeypatch, catalog: dict[str, list[dict[str, object]] | None]) -> None:
     """Wire a fake data-dictionary authority keyed by object_kind."""
 
+    def _fake_list_object_kinds(conn, **_kwargs):
+        return [
+            {
+                "object_kind": object_kind,
+                "label": object_kind.replace("_", " ").title(),
+                "category": "workflow",
+                "summary": f"{object_kind.replace('_', ' ')} authority object",
+            }
+            for object_kind in catalog
+        ]
+
     def _fake_describe_object(conn, *, object_kind, **_kwargs):
         if object_kind not in catalog:
             raise RuntimeError(f"unknown object_kind {object_kind!r}")
@@ -38,6 +50,7 @@ def _install_dictionary(monkeypatch, catalog: dict[str, list[dict[str, object]] 
             "entries_by_source": {},
         }
 
+    monkeypatch.setattr(intent_binding, "list_object_kinds", _fake_list_object_kinds)
     monkeypatch.setattr(intent_binding, "describe_object", _fake_describe_object)
 
 
@@ -72,6 +85,31 @@ def test_bind_data_pills_returns_bound_pill_for_exact_match(monkeypatch) -> None
     assert pill.source == "auto"
     assert result.ambiguous == []
     assert result.unbound == []
+
+
+def test_bind_data_pills_binds_namespaced_object_kind(monkeypatch) -> None:
+    _install_dictionary(
+        monkeypatch,
+        {
+            "tool:praxis_connector": [
+                {
+                    "field_path": "app_name",
+                    "field_kind": "text",
+                    "source": "auto",
+                    "display_order": 20,
+                }
+            ],
+        },
+    )
+
+    result = bind_data_pills(
+        "Confirm tool:praxis_connector.app_name before building the integration.",
+        conn=_StubConn(),
+    )
+
+    assert len(result.bound) == 1
+    assert result.bound[0].object_kind == "tool:praxis_connector"
+    assert result.bound[0].field_path == "app_name"
 
 
 def test_bind_data_pills_marks_unknown_object_kind_as_unbound(monkeypatch) -> None:
@@ -338,6 +376,93 @@ def test_bind_data_pills_warns_when_no_refs_present(monkeypatch) -> None:
     assert any("no object.field references" in w for w in result.warnings)
 
 
+def test_bind_data_pills_suggests_candidates_from_loose_prose(monkeypatch) -> None:
+    _install_dictionary(
+        monkeypatch,
+        {
+            "integrations": [
+                {
+                    "field_path": "app_name",
+                    "field_kind": "text",
+                    "label": "App name",
+                    "description": "Name of the application or product being integrated.",
+                    "source": "auto",
+                    "display_order": 1,
+                },
+                {
+                    "field_path": "app_domain",
+                    "field_kind": "text",
+                    "label": "App domain",
+                    "description": "Primary web domain for the app or service.",
+                    "source": "auto",
+                    "display_order": 2,
+                },
+                {
+                    "field_path": "auth_type",
+                    "field_kind": "text",
+                    "label": "Authentication type",
+                    "description": "OAuth, API key, bearer token, or other credential style.",
+                    "source": "auto",
+                },
+            ],
+            "workflow_steps": [
+                {
+                    "field_path": "step_name",
+                    "field_kind": "text",
+                    "label": "Workflow step name",
+                    "description": "Plan, search, retrieve, evaluate, or build stage.",
+                    "source": "auto",
+                }
+            ],
+        },
+    )
+
+    result = bind_data_pills(
+        (
+            "A repeatable workflow where we feed in an app name or app domain, "
+            "search and retrieve docs, evaluate auth, then build a custom integration."
+        ),
+        conn=_StubConn(),
+    )
+
+    assert result.bound == []
+    assert result.unbound == []
+    assert result.ambiguous == []
+    assert any("no object.field references" in w for w in result.warnings)
+    assert all(isinstance(candidate, SuggestedPillCandidate) for candidate in result.suggested)
+    refs = {candidate.ref for candidate in result.suggested}
+    assert "integrations.app_name" in refs
+    assert "integrations.app_domain" in refs
+    assert "integrations.auth_type" in refs
+    assert any(candidate.confidence in {"medium", "high"} for candidate in result.suggested)
+
+
+def test_bind_data_pills_can_disable_suggestions(monkeypatch) -> None:
+    _install_dictionary(
+        monkeypatch,
+        {
+            "integrations": [
+                {
+                    "field_path": "app_domain",
+                    "field_kind": "text",
+                    "label": "App domain",
+                    "description": "Primary domain for an application integration.",
+                    "source": "auto",
+                }
+            ]
+        },
+    )
+
+    result = bind_data_pills(
+        "Use the app domain to build an integration.",
+        conn=_StubConn(),
+        suggest=False,
+    )
+
+    assert result.suggested == []
+    assert any("no object.field references" in w for w in result.warnings)
+
+
 def test_bind_data_pills_rejects_empty_intent(monkeypatch) -> None:
     _install_dictionary(monkeypatch, {})
 
@@ -374,5 +499,6 @@ def test_bound_intent_to_dict_round_trips() -> None:
         ],
     )
     payload = bound_intent.to_dict()
+    assert payload["suggested"] == []
     assert payload["bound"][0]["object_kind"] == "users"
     assert payload["bound"][0]["field_path"] == "email"

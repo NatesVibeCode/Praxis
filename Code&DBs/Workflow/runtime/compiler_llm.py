@@ -16,7 +16,7 @@ from runtime.definition_compile_kernel import split_sentences as _kernel_split_s
 
 logger = logging.getLogger(__name__)
 
-_APP_COMPILE_TASK_ROUTE = "auto/build"
+_APP_COMPILE_TASK_ROUTE = "auto/compile"
 _LOW_VALUE_DUPLICATE_WORD_RE = re.compile(
     r"\b(?P<word>a|an|and|or|the|of|to|in|on|for|with|by|from)\b(?:\s+\b(?P=word)\b)+",
     re.IGNORECASE,
@@ -117,7 +117,7 @@ def build_llm_context(
     effective_route_hints = route_hints or route_hints_cache
     available_routes = ", ".join(
         dict.fromkeys(route for _, route in effective_route_hints)
-    ) or "auto/build"
+    ) or _APP_COMPILE_TASK_ROUTE
 
     sections = [
         "Available integrations:",
@@ -154,12 +154,12 @@ def call_llm_compile(prose: str, context: str, *, conn: Any = None, hydrate_env:
     """Compile prose via direct HTTP call to the task_type_routing primary.
 
     This is the Praxis app's "Describe it" compile path. It resolves the
-    primary llm_task route for `auto/build` from `task_type_routing`
+    primary llm_task route for `auto/compile` from `task_type_routing`
     authority (not the workflow runtime_profile) and calls that provider's
     HTTP endpoint directly. Keeping resolution in the DB means a single
     `task_type_routing` row flip retargets the compile engine without
-    editing code — and confines paid providers to this app surface instead
-    of leaking into background workflow jobs.
+    editing code — and confines paid providers to this app compile surface
+    instead of leaking into background workflow jobs or CLI build routes.
     """
     del conn, get_connection  # unused — compile does not submit a workflow job
     if hydrate_env is not None:
@@ -194,53 +194,76 @@ INPUT:
 OUTPUT (JSON only, no markdown fences, no other text):
 {{"title":"short title","prose":"the compiled prose with @/#/{{}} references","authority":"","sla":{{}},"capabilities":["research/local-knowledge"]}}"""
 
-    provider_slug, model_slug = _resolve_app_compile_route()
-    endpoint = resolve_api_endpoint(provider_slug, model_slug)
-    if not endpoint:
-        raise RuntimeError(
-            f"no registered endpoint for {provider_slug}/{model_slug}"
-        )
-    protocol_family = resolve_api_protocol_family(provider_slug)
-    if not protocol_family:
-        raise RuntimeError(
-            f"no registered protocol_family for {provider_slug}"
-        )
+    last_error: Exception | None = None
+    for provider_slug, model_slug in _resolve_app_compile_routes():
+        try:
+            endpoint = resolve_api_endpoint(provider_slug, model_slug)
+            if not endpoint:
+                raise RuntimeError(
+                    f"no registered endpoint for {provider_slug}/{model_slug}"
+                )
+            protocol_family = resolve_api_protocol_family(provider_slug)
+            if not protocol_family:
+                raise RuntimeError(
+                    f"no registered protocol_family for {provider_slug}"
+                )
 
-    env = dict(os.environ)
-    api_key: str | None = None
-    for env_var in resolve_api_key_env_vars(provider_slug):
-        candidate = resolve_secret(env_var, env=env)
-        if candidate and candidate.strip():
-            api_key = candidate.strip()
-            break
-    if not api_key:
-        raise RuntimeError(
-            f"no API key available for {provider_slug} (tried Keychain + env)"
-        )
+            env = dict(os.environ)
+            api_key: str | None = None
+            for env_var in resolve_api_key_env_vars(provider_slug):
+                candidate = resolve_secret(env_var, env=env)
+                if candidate and candidate.strip():
+                    api_key = candidate.strip()
+                    break
+            if not api_key:
+                raise RuntimeError(
+                    f"no API key available for {provider_slug} (tried Keychain + env)"
+                )
 
-    request = LLMRequest(
-        endpoint_uri=str(endpoint),
-        api_key=api_key,
-        provider_slug=provider_slug,
-        model_slug=model_slug,
-        messages=({"role": "user", "content": prompt},),
-        protocol_family=str(protocol_family),
-        timeout_seconds=int(compiler_llm_timeout_seconds()),
-    )
-    response = call_llm(request)
-    logger.debug("Compile response (%d chars): %.300s", len(response.content), response.content)
-    return parse_compile_response(response.content, prose)
+            request = LLMRequest(
+                endpoint_uri=str(endpoint),
+                api_key=api_key,
+                provider_slug=provider_slug,
+                model_slug=model_slug,
+                messages=({"role": "user", "content": prompt},),
+                protocol_family=str(protocol_family),
+                timeout_seconds=int(compiler_llm_timeout_seconds()),
+            )
+            response = call_llm(request)
+            logger.debug("Compile response (%d chars): %.300s", len(response.content), response.content)
+            return parse_compile_response(response.content, prose)
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "Compile route failed for %s/%s; trying next route if available: %s",
+                provider_slug,
+                model_slug,
+                exc,
+            )
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"task_type_routing returned no llm_task routes for {_APP_COMPILE_TASK_ROUTE!r}")
 
 
 def _resolve_app_compile_route() -> tuple[str, str]:
-    """Pick the primary API-backed route for the compile task_type.
+    """Pick the primary API-backed route for the compile task_type."""
+    routes = _resolve_app_compile_routes()
+    if not routes:
+        raise RuntimeError(
+            f"task_type_routing returned no decisions for {_APP_COMPILE_TASK_ROUTE!r}"
+        )
+    return routes[0]
 
-    Uses `TaskTypeRouter.resolve_failover_chain(_APP_COMPILE_TASK_ROUTE)`
-    with no runtime_profile_ref, so resolution pulls straight from
-    `task_type_routing` (where explicit operator rows like migration 175
-    pin the app's preferred engine at rank=1). The first `llm_task`
-    adapter in the chain wins — CLI-backed routes are skipped because
-    compile must hit HTTP, not spawn a subprocess.
+
+def _resolve_app_compile_routes() -> list[tuple[str, str]]:
+    """Return explicit API-backed routes for the compile task_type.
+
+    App compile is an explicit API exception lane. It first reads
+    `task_type_routing.task_type='compile'` rows with `route_source='explicit'`
+    so broad auto-routing cannot leak CLI build or unrelated API fallback
+    models into Moon's prose-to-definition compiler. If a fresh clone has no
+    explicit compile rows yet, it falls back to TaskTypeRouter as a bootstrap
+    compatibility path.
     """
     import importlib
 
@@ -251,16 +274,41 @@ def _resolve_app_compile_route() -> tuple[str, str]:
 
     pool = get_workflow_pool()
     pg = SyncPostgresConnection(pool)
+    try:
+        explicit_rows = pg.fetch(
+            """
+            SELECT provider_slug, model_slug
+              FROM task_type_routing
+             WHERE task_type = 'compile'
+               AND permitted = true
+               AND route_source = 'explicit'
+             ORDER BY rank ASC, updated_at DESC
+            """
+        )
+    except Exception:
+        explicit_rows = []
+    explicit_routes = [
+        (str(row["provider_slug"]), str(row["model_slug"]))
+        for row in explicit_rows or []
+        if str(row.get("provider_slug") or "").strip()
+        and str(row.get("model_slug") or "").strip()
+    ]
+    if explicit_routes:
+        return explicit_routes
+
     router = TaskTypeRouter(pg)
     chain = router.resolve_failover_chain(_APP_COMPILE_TASK_ROUTE)
     if not isinstance(chain, list) or not chain:
         raise RuntimeError(
             f"task_type_routing returned no decisions for {_APP_COMPILE_TASK_ROUTE!r}"
         )
+    routes: list[tuple[str, str]] = []
     for decision in chain:
         adapter_type = str(getattr(decision, "adapter_type", "") or "").strip().lower()
         if adapter_type == "llm_task":
-            return str(decision.provider_slug), str(decision.model_slug)
+            routes.append((str(decision.provider_slug), str(decision.model_slug)))
+    if routes:
+        return routes
     raise RuntimeError(
         f"task_type_routing has no llm_task-backed primary for {_APP_COMPILE_TASK_ROUTE!r}"
     )

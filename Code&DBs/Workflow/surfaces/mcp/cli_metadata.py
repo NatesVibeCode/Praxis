@@ -1097,15 +1097,16 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         tier="stable",
         recommended_alias="bind-pills",
         when_to_use=(
-            "Extract and validate object.field data-pill references from prose intent "
-            "against the data dictionary authority. Layer 1 (Bind) of the planning stack "
-            "— call BEFORE decomposing intent into packets so every field ref is known "
-            "to exist."
+            "Suggest likely object.field data-pill candidates from loose prose and "
+            "validate explicit references against the data dictionary authority. "
+            "Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent "
+            "into packets so every field ref is either confirmed or surfaced as a "
+            "candidate to confirm."
         ),
         when_not_to_use=(
-            "Do not use it to infer missing references. This tool matches explicit "
-            "object.field spans only; loose prose like \"the user's name\" returns no "
-            "bound pills, and that's honest."
+            "Do not treat suggestions as bound authority. Suggested pills are candidates; "
+            "confirmed packet compilation still needs explicit object.field refs or a "
+            "caller approval step."
         ),
         risks={"default": "read"},
         examples=[
@@ -1118,6 +1119,64 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 {
                     "intent": "Look at users.email and orders.total_cents.",
                     "object_kinds": ["users"],
+                },
+            ),
+        ],
+    ),
+    "praxis_suggest_plan_atoms": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="suggest-atoms",
+        when_to_use=(
+            "Free prose (any length, no markers, no order) should yield candidate "
+            "data pills, candidate step types, and candidate input parameters as "
+            "three independent suggestion streams. Layer 0 (Suggest) of the "
+            "planning stack — call when the prose has no explicit step markers "
+            "and the downstream LLM author needs atoms to plan from."
+        ),
+        when_not_to_use=(
+            "Do not use this to launch, order, or commit. It returns suggestions; "
+            "an LLM author or operator still has to compose them into a packet "
+            "list. For prose that already has explicit markers, call "
+            "praxis_decompose_intent for ordered steps instead."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Atoms from a free-prose integration request",
+                {
+                    "intent": (
+                        "A repeatable workflow where we feed in an app name or "
+                        "app domain and it gets broken up into multiple steps to "
+                        "plan search, retrieve, evaluate and then attempt to "
+                        "build a custom integration for an application."
+                    )
+                },
+            ),
+        ],
+    ),
+    "praxis_recognize_intent": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="recognize-intent",
+        when_to_use=(
+            "Extract source-ordered user-stated spans, match them to data "
+            "dictionary/tool authority, and surface authority-backed prerequisite "
+            "suggestions before compile or compose turns anything into a workflow."
+        ),
+        when_not_to_use=(
+            "Do not use this as a planner or launcher. It does not reorder user "
+            "intent, invent confirmed steps, or create a runnable spec."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Recognize a messy integration workflow request",
+                {
+                    "intent": (
+                        "Feed in an app name or app domain, plan search retrieve "
+                        "evaluate and build a custom integration."
+                    )
                 },
             ),
         ],

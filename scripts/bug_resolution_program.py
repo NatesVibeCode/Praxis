@@ -52,13 +52,6 @@ DEFAULT_CHAIN_OUTPUT = (
 if str(WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_ROOT))
 
-from runtime.bug_resolution_program import (  # noqa: E402
-    build_coordination_payload,
-    build_workflow_chain_payload,
-    materialize_packet_specs,
-    utc_now_iso,
-)
-
 
 def _call_tool(command: str, handler, params: Mapping[str, Any]) -> dict[str, Any]:
     try:
@@ -89,10 +82,15 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def _default_program_id() -> str:
+    from runtime.bug_resolution_program import utc_now_iso
     return f"bug_resolution_program_{utc_now_iso()[:10].replace('-', '')}"
 
 
 def _freeze_command(args: argparse.Namespace) -> int:
+    from runtime.bug_resolution_program import (
+        build_coordination_payload,
+        utc_now_iso,
+    )
     from surfaces.mcp.tools.bugs import tool_praxis_bugs
     from surfaces.mcp.tools.operator import (
         tool_praxis_orient,
@@ -156,6 +154,8 @@ def _freeze_command(args: argparse.Namespace) -> int:
 
 
 def _materialize_packets_command(args: argparse.Namespace) -> int:
+    from runtime.bug_resolution_program import materialize_packet_specs
+
     coordination_path = Path(args.coordination).resolve()
     template_path = Path(args.template).resolve()
     output_dir = Path(args.output_dir).resolve()
@@ -196,6 +196,11 @@ def _materialize_packets_command(args: argparse.Namespace) -> int:
 
 
 def _materialize_chain_command(args: argparse.Namespace) -> int:
+    from runtime.bug_resolution_program import (
+        build_workflow_chain_payload,
+        materialize_packet_specs,
+    )
+
     coordination_path = Path(args.coordination).resolve()
     template_path = Path(args.template).resolve()
     packet_output_dir = Path(args.packet_output_dir).resolve()

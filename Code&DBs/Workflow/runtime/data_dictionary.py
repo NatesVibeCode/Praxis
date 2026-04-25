@@ -34,6 +34,7 @@ _ALLOWED_CATEGORIES = frozenset({
     "decision", "receipt", "tool", "object", "command", "event",
     "projection", "service_bus_channel", "feedback_stream", "definition",
     "runtime_target",
+    "gate", "stage", "capability", "plan_field",
 })
 _ALLOWED_FIELD_KINDS = frozenset({
     "text", "number", "boolean", "enum", "json", "date", "datetime",

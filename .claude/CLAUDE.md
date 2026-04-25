@@ -172,6 +172,18 @@ Curated high-frequency aliases stay flat:
 
 The registry/integration projection is a read model. Tool truth lives in `Code&DBs/Workflow/surfaces/mcp/catalog.py`.
 
+## Provider Execution Boundary
+
+Operator standing order:
+
+- **CLI is the provider execution lane for every use case, always.** Use CLI/provider execution unless the operator explicitly says otherwise.
+- **API is opt-in only.** Do not use API routes merely because a UI/app surface could use them, or because CLI seems inconvenient.
+- **Always label provider-routing discussion as CLI or API.** Do not describe a route change, provider choice, or model swap without naming which lane it affects.
+- **Do not convert general work to API routing by implication.** A UI compile/chat exception is not permission to make API the default elsewhere.
+- **Direct DeepSeek API remains research-only** unless the operator explicitly changes that policy. DeepSeek through OpenRouter is still API and must be explicitly requested.
+
+Standing-order row: `architecture-policy::provider-routing::cli-default-api-exception`.
+
 ## Search Before Building
 
 Before writing new infrastructure, search first:

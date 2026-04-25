@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_project_plan_budget, praxis_compose_and_launch, praxis_plan_lifecycle."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_launch_plan, praxis_bind_data_pills, praxis_suggest_plan_atoms, praxis_recognize_intent, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_project_plan_budget, praxis_compose_and_launch, praxis_plan_lifecycle."""
 from __future__ import annotations
 
 import json
@@ -2166,17 +2166,17 @@ def tool_praxis_approve_proposed_plan(params: dict) -> dict:
 
 
 def tool_praxis_bind_data_pills(params: dict) -> dict:
-    """Extract and validate data-pill references from prose intent.
+    """Suggest and validate data-pill references from prose intent.
 
-    Layer 1 (Bind) of the planning stack: takes prose, returns the
-    ``object.field`` references that resolve to real rows in the data
-    dictionary authority. Deterministic (no LLM). Honest about scope —
-    only finds explicit ``object.field`` spans. Loose-prose binding
-    ("user's first name") is not attempted; wrap with an LLM extractor if
-    that path is needed.
+    Layer 1 (Bind) of the planning stack: takes prose, suggests likely
+    ``object.field`` candidates from loose language, and validates explicit
+    ``object.field`` references against the data dictionary authority.
+    Deterministic (no LLM): suggestions are advisory, while bound refs are
+    confirmed authority matches.
 
     Returns a BoundIntent payload with three splits the caller confirms
     before decomposing intent into packets:
+      - suggested: likely pills inferred from dictionary text + synonyms
       - bound: pills that resolved to a real field (with type + provenance)
       - ambiguous: pills that matched multiple rows (caller disambiguates)
       - unbound: pills that looked like refs but did not resolve (caller
@@ -2192,6 +2192,18 @@ def tool_praxis_bind_data_pills(params: dict) -> dict:
             "error": "object_kinds must be a list of strings when provided",
             "reason_code": "object_kinds.invalid",
         }
+    suggest = params.get("suggest", True)
+    if not isinstance(suggest, bool):
+        return {"ok": False, "error": "suggest must be a boolean", "reason_code": "suggest.invalid"}
+    suggestion_limit = params.get("suggestion_limit", 20)
+    try:
+        suggestion_limit = int(suggestion_limit)
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error": "suggestion_limit must be an integer",
+            "reason_code": "suggestion_limit.invalid",
+        }
 
     try:
         pg_conn = _subs.get_pg_conn()
@@ -2205,9 +2217,196 @@ def tool_praxis_bind_data_pills(params: dict) -> dict:
     try:
         from runtime.intent_binding import bind_data_pills
 
-        result = bind_data_pills(intent, conn=pg_conn, object_kinds=object_kinds)
+        result = bind_data_pills(
+            intent,
+            conn=pg_conn,
+            object_kinds=object_kinds,
+            suggest=suggest,
+            suggestion_limit=suggestion_limit,
+        )
     except Exception as exc:
         return _structured_runtime_error(exc, action="bind_data_pills")
+
+    payload = result.to_dict()
+    payload["ok"] = True
+    return payload
+
+
+def tool_praxis_compose_plan_via_llm(params: dict) -> dict:
+    """End-to-end LLM-authored compile for free prose with no markers.
+
+    Chains Layer 0 (suggest_plan_atoms) → Layer 0.5 (synthesize_skeleton)
+    → Layer 4 (parallel section author via DeepSeek-via-OpenRouter under
+    current task_type_routing for auto/compile) → Layer 5 (validate
+    authored packets against plan_field schema).
+
+    Returns the full pipeline trace (atoms / skeleton / authored / validation)
+    so failures surface where they happen. When ok=true, plan_packets is
+    a launch-ready list ready for praxis_launch_plan.
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str):
+        return {"ok": False, "error": "intent must be a string", "reason_code": "intent.invalid"}
+
+    concurrency = params.get("concurrency", 20)
+    try:
+        concurrency = max(1, min(20, int(concurrency)))
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error": "concurrency must be an integer between 1 and 20",
+            "reason_code": "concurrency.invalid",
+        }
+
+    plan_name = params.get("plan_name")
+    why = params.get("why")
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    try:
+        from runtime.compose_plan_via_llm import compose_plan_via_llm
+
+        result = compose_plan_via_llm(
+            intent,
+            conn=pg_conn,
+            plan_name=plan_name if isinstance(plan_name, str) else None,
+            why=why if isinstance(why, str) else None,
+            concurrency=concurrency,
+        )
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="compose_plan_via_llm")
+
+    return result.to_dict()
+
+
+def tool_praxis_synthesize_skeleton(params: dict) -> dict:
+    """Build a deterministic SkeletalPlan from prose intent.
+
+    Layer 0.5 (Synthesize) of the planning stack: chains the atoms
+    suggester (Layer 0) into the deterministic dependency synthesizer.
+    Reads stage / gate / capability rows from the data dictionary
+    (registered by migration 247) and returns one SkeletalPacket per
+    high-confidence stage clause, with depends_on / consumes / produces
+    floors / capability floors / scaffolded gates wired by stage I/O,
+    pill mutation graph, and explicit ordering cues.
+
+    Honest scope: never fills prompts, picks agents, writes write_scope
+    globs, or chooses intra-stage semantic ordering. Those stay with
+    the per-section LLM author.
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str):
+        return {"ok": False, "error": "intent must be a string", "reason_code": "intent.invalid"}
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    try:
+        from runtime.intent_dependency import synthesize_skeleton
+        from runtime.intent_suggestion import suggest_plan_atoms
+
+        atoms = suggest_plan_atoms(intent, conn=pg_conn)
+        skeleton = synthesize_skeleton(atoms, conn=pg_conn)
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="synthesize_skeleton")
+
+    payload = skeleton.to_dict()
+    payload["atoms"] = atoms.to_dict()
+    payload["ok"] = True
+    return payload
+
+
+def tool_praxis_suggest_plan_atoms(params: dict) -> dict:
+    """Suggest pills, step types, and parameters from free prose.
+
+    Layer 0 (Suggest) of the planning stack: takes prose with no marker
+    requirement and returns three independent suggestion streams the
+    downstream LLM author (or operator) composes into a workflow:
+
+      - pills: data-pill candidates from the data dictionary authority
+        (suggested + bound + ambiguous + unbound, via bind_data_pills)
+      - step_types: candidate stage labels keyed to clause spans, with
+        confidence and capability hints (verb- and phrase-pattern based)
+      - parameters: workflow inputs detected from
+        ``feed in X`` / ``given X`` / ``takes X`` / ``accepts X`` patterns
+
+    Deterministic — no LLM call. No order, count, or final stage is
+    produced. Suggestions are advisory; the LLM author picks ordering
+    and final shape.
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str):
+        return {"ok": False, "error": "intent must be a string", "reason_code": "intent.invalid"}
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    try:
+        from runtime.intent_suggestion import suggest_plan_atoms
+
+        result = suggest_plan_atoms(intent, conn=pg_conn)
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="suggest_plan_atoms")
+
+    payload = result.to_dict()
+    payload["ok"] = True
+    return payload
+
+
+def tool_praxis_recognize_intent(params: dict) -> dict:
+    """Extract user-stated spans and match them to Praxis authority.
+
+    This is intentionally not a planner. It preserves source order, returns
+    candidate authority matches, and suggests missing prerequisite work only
+    when matched authority text justifies that suggestion.
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str):
+        return {"ok": False, "error": "intent must be a string", "reason_code": "intent.invalid"}
+    match_limit = params.get("match_limit", 5)
+    try:
+        match_limit = int(match_limit)
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error": "match_limit must be an integer",
+            "reason_code": "match_limit.invalid",
+        }
+
+    try:
+        pg_conn = _subs.get_pg_conn()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "reason_code": "postgres.authority.unavailable",
+        }
+
+    try:
+        from runtime.intent_recognition import recognize_intent
+
+        result = recognize_intent(intent, conn=pg_conn, match_limit=match_limit)
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="recognize_intent")
 
     payload = result.to_dict()
     payload["ok"] = True
@@ -2822,19 +3021,18 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_bind_data_pills,
         {
             "description": (
-                "Layer 1 (Bind) of the planning stack: extract and validate "
-                "``object.field`` data-pill references from prose intent against the "
-                "data dictionary authority. Deterministic — matches explicit "
-                "``snake_case.field_path`` spans in the prose; does not infer loose "
-                "references like \"the user's name.\" Returns bound / ambiguous / "
-                "unbound splits the caller confirms before decomposing intent into "
-                "packets.\n\n"
+                "Layer 1 (Bind) of the planning stack: suggest likely data pills "
+                "from loose prose and validate explicit ``object.field`` references "
+                "against the data dictionary authority. Deterministic — suggestions "
+                "come from dictionary text plus the shared synonym lexicon; bound refs "
+                "still require explicit ``object_kind.field_path`` spans. Returns "
+                "suggested / bound / ambiguous / unbound splits the caller confirms "
+                "before decomposing intent into packets.\n\n"
                 "USE WHEN: you have prose intent and want to confirm every field ref "
-                "you're about to build packets around actually exists in authority.\n\n"
-                "DO NOT USE TO: infer missing references. If the prose only says \"fix "
-                "the user's name,\" this tool returns nothing bound — that's honest; "
-                "the caller needs to decide which field is meant and write it "
-                "explicitly.\n\n"
+                "you're about to build packets around actually exists in authority, "
+                "or when messy prose should surface candidate pills to confirm.\n\n"
+                "DO NOT TREAT SUGGESTIONS AS BOUND AUTHORITY: the caller still needs "
+                "to confirm a suggested pill before downstream packet compilation.\n\n"
                 "EXAMPLE: praxis_bind_data_pills(intent='Update users.first_name "
                 "whenever users.email changes.')"
             ),
@@ -2852,6 +3050,176 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "Optional allowlist of object kinds. References outside this "
                             "list resolve as unbound with reason='object_kind_not_allowlisted'."
                         ),
+                    },
+                    "suggest": {
+                        "type": "boolean",
+                        "description": (
+                            "When true, also return likely candidate pills from loose prose."
+                        ),
+                    },
+                    "suggestion_limit": {
+                        "type": "integer",
+                        "description": "Maximum number of suggested candidates to return.",
+                    },
+                },
+                "required": ["intent"],
+            },
+        },
+    ),
+    "praxis_compose_plan_via_llm": (
+        tool_praxis_compose_plan_via_llm,
+        {
+            "description": (
+                "End-to-end LLM-authored compile for free prose. Chains Layer 0 "
+                "atoms → Layer 0.5 skeleton (deterministic depends_on / floors / "
+                "gate scaffolds from data dictionary rows) → Layer 4 parallel "
+                "section author (DeepSeek via OpenRouter under the current "
+                "task_type_routing for auto/compile) → Layer 5 validation "
+                "(every required plan_field set, no placeholders, no dropped "
+                "floors, no workspace-root write_scope).\n\n"
+                "USE WHEN: prose has no explicit step markers and you want the "
+                "LLM to author a launch-ready plan with menu-level detail "
+                "(prompts, write_scope globs, gate params, parameter bindings).\n\n"
+                "DO NOT USE TO: launch directly. The result is a packet list; "
+                "pass to praxis_launch_plan to translate + submit.\n\n"
+                "EXAMPLE: praxis_compose_plan_via_llm(intent='A repeatable "
+                "workflow where we feed in an app name or app domain and it "
+                "gets broken up into multiple steps to plan search, retrieve, "
+                "evaluate and then attempt to build a custom integration.')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Free prose — any length, no marker requirement.",
+                    },
+                    "plan_name": {
+                        "type": "string",
+                        "description": "Optional plan name carried into notes.",
+                    },
+                    "why": {
+                        "type": "string",
+                        "description": "Optional rationale carried into notes.",
+                    },
+                    "concurrency": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum parallel cluster authors per wave (1-20, "
+                            "default 20). Cluster author dispatches one LLM call "
+                            "per stage cluster in topological waves; the cap is "
+                            "applied per wave but workers spin up only as needed "
+                            "(a 3-cluster wave uses 3 workers, not 20)."
+                        ),
+                        "default": 20,
+                    },
+                },
+                "required": ["intent"],
+            },
+        },
+    ),
+    "praxis_synthesize_skeleton": (
+        tool_praxis_synthesize_skeleton,
+        {
+            "description": (
+                "Layer 0.5 (Synthesize) of the planning stack: takes free prose, "
+                "runs the atoms suggester, then builds a deterministic SkeletalPlan "
+                "with depends_on / consumes / produces / capabilities / gates "
+                "wired from stage I/O contracts + pill mutation graph + explicit "
+                "ordering cues. Reads stage / gate / capability rows registered "
+                "by migration 247.\n\n"
+                "USE WHEN: you want the deterministic edges that connect packets "
+                "before handing the skeleton to a per-section LLM author. The "
+                "skeleton fills ~70% of the dependency graph so the LLM only "
+                "has to author intra-stage semantic edges, not the cross-packet "
+                "structure.\n\n"
+                "DO NOT USE TO: launch, fill prompts, pick agents, or assign "
+                "write_scope globs. Those stay with the LLM author.\n\n"
+                "EXAMPLE: praxis_synthesize_skeleton(intent='A repeatable workflow "
+                "where we feed in an app name or app domain and it gets broken up "
+                "into multiple steps to plan search, retrieve, evaluate and then "
+                "attempt to build a custom integration for an application.')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Free prose — atoms + skeleton are derived from it.",
+                    },
+                },
+                "required": ["intent"],
+            },
+        },
+    ),
+    "praxis_suggest_plan_atoms": (
+        tool_praxis_suggest_plan_atoms,
+        {
+            "description": (
+                "Layer 0 (Suggest) of the planning stack: takes free prose — any "
+                "length, no markers, no order — and returns three independent "
+                "suggestion streams the downstream LLM author composes into a "
+                "workflow.\n\n"
+                "RETURNS:\n"
+                "  - pills: data-pill candidates from the data dictionary authority "
+                "(suggested + bound + ambiguous + unbound)\n"
+                "  - step_types: clause-keyed stage candidates (build/fix/research/"
+                "review/test) with confidence + capability hints\n"
+                "  - parameters: workflow inputs detected from 'feed in X' / 'given X' "
+                "/ 'takes X' / 'accepts X' patterns\n\n"
+                "USE WHEN: prose has no explicit step markers and you want atoms "
+                "to feed an LLM author (or Moon/operator) so they can pick order, "
+                "count, prompts, and final stages with the right materials in hand. "
+                "This is the no-markers cousin of praxis_decompose_intent and the "
+                "whole-prose superset of praxis_bind_data_pills.\n\n"
+                "DO NOT USE TO: launch a workflow, pick ordering, or commit pills. "
+                "All three streams are advisory until a downstream layer authors "
+                "concrete packets.\n\n"
+                "EXAMPLE: praxis_suggest_plan_atoms(intent='A repeatable workflow "
+                "where we feed in an app name or app domain and it gets broken up "
+                "into multiple steps to plan search, retrieve, evaluate and then "
+                "attempt to build a custom integration for an application.')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": (
+                            "Free prose — any length, no marker requirement. "
+                            "Suggestions are extracted from clause spans."
+                        ),
+                    },
+                },
+                "required": ["intent"],
+            },
+        },
+    ),
+    "praxis_recognize_intent": (
+        tool_praxis_recognize_intent,
+        {
+            "description": (
+                "Recognize what the user actually wrote before compile/compose. "
+                "Extracts source-ordered spans, matches them to data dictionary/tool "
+                "authority, returns ambiguity/gaps, and suggests prerequisite steps "
+                "only when matched authority contracts justify them. This is not a "
+                "planner and does not emit a runnable workflow spec.\n\n"
+                "USE WHEN: messy prose needs to be understood before compilation, "
+                "especially when the user mentioned pills, tools, operations, or "
+                "research/integration work without exact object.field syntax.\n\n"
+                "DO NOT USE TO: reorder, invent, or launch work. Treat suggested "
+                "items as candidates until confirmed."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Natural language user intent to recognize.",
+                    },
+                    "match_limit": {
+                        "type": "integer",
+                        "description": "Maximum candidate matches to keep per extracted span.",
                     },
                 },
                 "required": ["intent"],

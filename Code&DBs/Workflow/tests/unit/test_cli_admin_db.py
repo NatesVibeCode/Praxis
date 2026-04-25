@@ -43,3 +43,42 @@ def test_compile_command_uses_cli_db_authority_when_available(monkeypatch) -> No
     assert captured["intent_dict"]["description"] == "Add retry logic"
     payload = json.loads(stdout.getvalue())
     assert payload["name"] == "compiled-spec"
+
+
+def test_compile_description_without_write_runs_intent_recognition(monkeypatch) -> None:
+    sentinel = object()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(admin_commands, "cli_sync_conn", lambda: sentinel)
+
+    class _FakeRecognition:
+        def to_dict(self):
+            return {
+                "intent": "do research",
+                "extracted": [{"text": "research"}],
+                "matched": [],
+                "suggested": [],
+                "gaps": [],
+                "warnings": [],
+            }
+
+    def _fake_recognize_intent(intent, *, conn):
+        captured["intent"] = intent
+        captured["conn"] = conn
+        return _FakeRecognition()
+
+    monkeypatch.setattr("runtime.intent_recognition.recognize_intent", _fake_recognize_intent)
+
+    stdout = StringIO()
+    exit_code = admin_commands._compile_command(
+        ["--description", "do research"],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert captured["conn"] is sentinel
+    assert captured["intent"] == "do research"
+    payload = json.loads(stdout.getvalue())
+    assert payload["kind"] == "intent_recognition"
+    assert payload["ok"] is True
+    assert payload["extracted"] == [{"text": "research"}]

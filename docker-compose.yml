@@ -208,11 +208,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command:
-      - sh
-      - -c
-      - |
-        if [ -n "$${PRAXIS_WORKER_MAX_PARALLEL:-}" ]; then
-          exec python3 -m surfaces.cli.main queue worker --max-concurrent "$${PRAXIS_WORKER_MAX_PARALLEL}"
-        fi
-        exec python3 -m surfaces.cli.main queue worker
+      - python3
+      - -m
+      - surfaces.cli.main
+      - queue
+      - worker
     restart: unless-stopped

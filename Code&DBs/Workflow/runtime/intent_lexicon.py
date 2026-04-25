@@ -10,6 +10,21 @@ _SPACE_RE = re.compile(r"\s+")
 _CONCEPTS: tuple[dict[str, tuple[str, ...]], ...] = (
     {
         "matches": (
+            "app",
+            "apps",
+            "application",
+            "applications",
+            "app name",
+            "app domain",
+            "domain",
+            "company domain",
+            "service",
+            "product",
+        ),
+        "expands_to": ("app", "application", "domain", "service", "product"),
+    },
+    {
+        "matches": (
             "connector",
             "integration",
             "adapter",

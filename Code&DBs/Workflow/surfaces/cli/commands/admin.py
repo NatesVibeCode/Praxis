@@ -10,8 +10,10 @@ from surfaces.cli._db import cli_sync_conn
 def _compile_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle ``workflow compile [intent.json|--description DESC --write FILE --stage STAGE]``.
 
-    Takes minimal intent (description, write files, stage) and produces a
-    fully-contexted workflow spec that can be run directly.
+    Takes minimal executable intent (description, write files, stage) and
+    produces a fully-contexted workflow spec that can be run directly. When
+    only ``--description`` is provided, compile performs intent recognition:
+    source-ordered spans, authority matches, prerequisite suggestions, gaps.
 
     Usage:
         workflow compile --description "Add retry logic" --write runtime/workflow/unified.py --stage build
@@ -27,15 +29,15 @@ def _compile_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(
             "usage: workflow compile [intent-file | --description DESC --write FILES --stage STAGE]\n"
             "\n"
-            "Compile minimal intent into a workflow spec.\n"
+            "Compile minimal intent into a workflow spec, or recognize free-form intent.\n"
             "\n"
             "Positional argument:\n"
             "  intent-file          path to a JSON intent file\n"
             "\n"
             "Options (alternative to intent-file):\n"
             "  --description TEXT   task description (required)\n"
-            "  --write FILES        comma-separated list of files to write (required)\n"
-            "  --stage STAGE        build|fix|review|test|research (required)\n"
+            "  --write FILES        comma-separated list of files to write (required for spec output)\n"
+            "  --stage STAGE        build|fix|review|test|research (required for spec output)\n"
             "  --read FILES         comma-separated list of files to read (optional)\n"
             "  --label LABEL        custom label (optional, auto-generated if omitted)\n"
             "  --timeout SECS       timeout in seconds (default: 300)\n"
@@ -141,6 +143,19 @@ def _compile_command(args: list[str], *, stdout: TextIO) -> int:
             conn = cli_sync_conn()
         except Exception:
             conn = None
+
+        if intent_dict.get("description") and not intent_dict.get("write") and not intent_dict.get("stage"):
+            if conn is None:
+                stdout.write("error: WORKFLOW_DATABASE_URL authority is required for intent recognition\n")
+                return 1
+            from runtime.intent_recognition import recognize_intent
+
+            recognition = recognize_intent(str(intent_dict["description"]), conn=conn)
+            payload = recognition.to_dict()
+            payload["kind"] = "intent_recognition"
+            payload["ok"] = True
+            stdout.write(_json.dumps(payload, indent=2) + "\n")
+            return 0
 
         spec, warnings = compile_spec(intent_dict, conn=conn)
     except ValueError as exc:

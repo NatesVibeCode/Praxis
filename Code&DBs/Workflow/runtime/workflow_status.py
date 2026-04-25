@@ -196,17 +196,20 @@ class WorkflowHistory:
         items.reverse()
         return tuple(items[:limit])
 
-    def _recent_workflows_from_metrics(self, limit: int) -> tuple["WorkflowResult", ...]:
+    def _recent_workflows_from_metrics(
+        self, limit: int, days: int | None = None
+    ) -> tuple["WorkflowResult", ...]:
         metrics_view = get_workflow_metrics_view()
-        rows = metrics_view.recent_workflows(limit=limit)
+        rows = metrics_view.recent_workflows(limit=limit, days=days)
         return tuple(_workflow_result_from_metric_row(row) for row in rows)
 
-    def _recent_workflows_from_runs(self, limit: int) -> tuple["WorkflowResult", ...]:
+    def _recent_workflows_from_runs(
+        self, limit: int, days: int | None = None
+    ) -> tuple["WorkflowResult", ...]:
         from storage.postgres import ensure_postgres_available
 
         conn = ensure_postgres_available()
-        rows = conn.execute(
-            """SELECT run_id,
+        query = """SELECT run_id,
                       workflow_id,
                       current_state,
                       terminal_reason_code,
@@ -216,15 +219,23 @@ class WorkflowHistory:
                       request_envelope->>'name' AS spec_name,
                       request_envelope->>'parent_run_id' AS parent_run_id
                FROM public.workflow_runs
-               ORDER BY requested_at DESC, run_id DESC
-               LIMIT $1""",
-            max(0, int(limit)),
-        )
+               """
+        params: list[Any] = []
+        if days is not None:
+            cutoff = _utc_now() - timedelta(days=max(0, days))
+            query += " WHERE requested_at >= $1"
+            params.append(cutoff)
+
+        query += f" ORDER BY requested_at DESC, run_id DESC LIMIT ${len(params) + 1}"
+        params.append(max(0, int(limit)))
+
+        rows = conn.execute(query, *params)
         return tuple(_workflow_result_from_run_row(row) for row in (rows or []))
 
     def _recent_workflows_snapshot(
         self,
         limit: int = 20,
+        days: int | None = None,
     ) -> tuple[tuple["WorkflowResult", ...], dict[str, Any]]:
         """Return recent workflows plus the authority state used to assemble them."""
         bounded_limit = max(0, int(limit))
@@ -240,7 +251,9 @@ class WorkflowHistory:
         metrics_query_failed = False
         metrics_query_error: str | None = None
         try:
-            for result in self._recent_workflows_from_metrics(limit=max(bounded_limit, self._max_size)):
+            for result in self._recent_workflows_from_metrics(
+                limit=max(bounded_limit, self._max_size), days=days
+            ):
                 if result.run_id:
                     recent[result.run_id] = result
         except Exception as exc:
@@ -251,7 +264,9 @@ class WorkflowHistory:
         run_history_included = False
         if not recent:
             try:
-                for result in self._recent_workflows_from_runs(limit=bounded_limit):
+                for result in self._recent_workflows_from_runs(
+                    limit=bounded_limit, days=days
+                ):
                     if result.run_id:
                         recent[result.run_id] = result
                         run_history_included = True
@@ -262,11 +277,16 @@ class WorkflowHistory:
                         f"{type(exc).__name__}: {exc}"
                     )
                 else:
-                    metrics_query_error = f"workflow_runs fallback {type(exc).__name__}: {exc}"
+                    metrics_query_error = (
+                        f"workflow_runs fallback {type(exc).__name__}: {exc}"
+                    )
 
         fallback_included = False
+        fallback_cutoff = _utc_now() - timedelta(days=days) if days is not None else None
         for result in self._fallback_recent_workflows(limit=self._max_size):
             if not result.run_id:
+                continue
+            if fallback_cutoff and result.finished_at < fallback_cutoff:
                 continue
             current = recent.get(result.run_id)
             if current is None or result.finished_at >= current.finished_at:
@@ -297,19 +317,23 @@ class WorkflowHistory:
             "metrics_query_failed": metrics_query_failed,
         }
 
-    def recent_workflows(self, limit: int = 20) -> tuple["WorkflowResult", ...]:
+    def recent_workflows(
+        self, limit: int = 20, days: int | None = None
+    ) -> tuple["WorkflowResult", ...]:
         """Return the most recent workflow results, newest-first.
 
         Durable metrics are queried first. The in-process fallback buffer is
         merged in only when it contains newer results that have not yet been
         persisted.
         """
-        recent, _ = self._recent_workflows_snapshot(limit=limit)
+        recent, _ = self._recent_workflows_snapshot(limit=limit, days=days)
         return recent
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self, days: int | None = None) -> dict[str, Any]:
         """Compact summary suitable for CLI / JSON rendering."""
-        recent, snapshot = self._recent_workflows_snapshot(limit=self._max_size)
+        recent, snapshot = self._recent_workflows_snapshot(
+            limit=self._max_size, days=days
+        )
         total = len(recent)
         succeeded = sum(1 for r in recent if r.status == "succeeded")
         failed = total - succeeded
@@ -340,7 +364,7 @@ class WorkflowHistory:
             for result in recent[:5]
         ]
 
-        return {
+        summary_payload = {
             "total_workflows": total,
             "succeeded": succeeded,
             "failed": failed,
@@ -352,6 +376,9 @@ class WorkflowHistory:
             "workflow_history_error": snapshot["workflow_history_error"],
             "metrics_query_failed": snapshot["metrics_query_failed"],
         }
+        if days is not None:
+            summary_payload["time_window_days"] = days
+        return summary_payload
 
 
 _WORKFLOW_HISTORY = WorkflowHistory()
