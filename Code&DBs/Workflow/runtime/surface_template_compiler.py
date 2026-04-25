@@ -297,14 +297,14 @@ def _render_config_for_action_rail(
             {
                 "label": "Approve",
                 "variant": "primary",
-                "endpoint": "/api/surface/action",
-                "body": {**context, "action_ref": approve_ref, "caller_ref": "surface.compose.button_row"},
+                "operation": "surface.action.performed",
+                "input": {**context, "action_ref": approve_ref, "caller_ref": "surface.compose.button_row"},
             },
             {
                 "label": "Reject",
                 "variant": "danger",
-                "endpoint": "/api/surface/action",
-                "body": {**context, "action_ref": reject_ref, "caller_ref": "surface.compose.button_row"},
+                "operation": "surface.action.performed",
+                "input": {**context, "action_ref": reject_ref, "caller_ref": "surface.compose.button_row"},
             },
         ],
     }

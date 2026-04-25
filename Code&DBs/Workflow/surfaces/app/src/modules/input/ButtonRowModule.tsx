@@ -5,8 +5,15 @@ import { world } from '../../world';
 interface ActionConfig {
   label: string;
   variant?: 'primary' | 'danger' | 'default';
-  endpoint?: string;
-  body?: Record<string, unknown>;
+  /**
+   * Canonical typed dispatch: fires {operation, input} through /api/operate
+   * so every click lands in operation_catalog_gateway, produces a receipt,
+   * and emits the command's event. Enforces the filed standing order
+   * architecture-policy::platform-architecture::conceptual-events-register-
+   * through-operation-catalog-registry at the UI layer.
+   */
+  operation?: string;
+  input?: Record<string, unknown>;
   worldWrite?: { path: string; value: any };
   createObject?: { typeId: string; defaults?: Record<string, unknown> };
 }
@@ -51,17 +58,19 @@ export const ButtonRowModule: React.FC<QuadrantProps> = ({ config: rawConfig }) 
       return;
     }
 
-    if (action.endpoint) {
+    if (action.operation) {
       setLoadingAction(index);
       try {
-        const init: RequestInit = { method: 'POST' };
-        if (action.body !== undefined) {
-          init.headers = { 'Content-Type': 'application/json' };
-          init.body = JSON.stringify(action.body);
-        }
-        const res = await fetch(action.endpoint, init);
+        const res = await fetch('/api/operate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            operation: action.operation,
+            input: action.input ?? {},
+          }),
+        });
         if (!res.ok) {
-          console.error(`Action POST ${action.endpoint} failed: ${res.status} ${res.statusText}`);
+          console.error(`Action ${action.operation} failed: ${res.status} ${res.statusText}`);
         }
       } catch (err) {
         console.error('Action error:', err);
