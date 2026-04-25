@@ -241,6 +241,7 @@ def _compile_bundle(
     if "action_rail" in slot_order and action_rail_module:
         anchor = slot_to_anchor.get("action_rail", "C1")
         span = slot_to_span.get("action_rail", "4x1")
+        action_rail_actions = render_hint.get("action_rail_actions") or []
         quadrants[anchor] = {
             "module": action_rail_module,
             "span": span,
@@ -248,6 +249,7 @@ def _compile_bundle(
                 template_ref=template["template_ref"],
                 intent_ref=intent_ref,
                 pill_refs=pill_refs or [],
+                declared_actions=action_rail_actions,
             ),
         }
 
@@ -302,38 +304,66 @@ def _render_config_for_action_rail(
     template_ref: str,
     intent_ref: str | None,
     pill_refs: list[str],
+    declared_actions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Compile a ButtonRowModule config that POSTs typed context to the
-    surface action endpoint. Matches ButtonRowModule's ActionConfig shape:
-    label, variant, endpoint, body.
+    """Compile a ButtonRowModule config from the template's declared actions.
+
+    The template owns its action set via ``render_hint.action_rail_actions``;
+    each declared action carries ``{label, variant?, action_ref}``. The
+    compiler weaves the typed dispatch context (intent_ref, template_ref,
+    pill_refs, caller_ref) into each button's input. No domain string is
+    parsed from intent_ref — the template controls the action_ref directly.
+
+    Falls back to a generic Approve/Reject pair only when the template did
+    not declare action_rail_actions, deriving action_ref from the intent's
+    domain so legacy templates without explicit declarations still ship a
+    meaningful default.
     """
     context = {
         "intent_ref": intent_ref,
         "template_ref": template_ref,
         "pill_refs": pill_refs,
     }
-    # Derive a domain action prefix from the intent when available so the
-    # receipt's action_ref remains typed (e.g. "intent.invoice_approval"
-    # becomes "invoice_approval.approve").
-    domain = (intent_ref or "intent.surface").split(".", 1)[-1] if intent_ref else "surface"
-    approve_ref = f"{domain}.approve"
-    reject_ref = f"{domain}.reject"
-    return {
-        "actions": [
+    actions: list[dict[str, Any]] = []
+    declared = list(declared_actions or [])
+    if declared:
+        for raw in declared:
+            if not isinstance(raw, dict):
+                continue
+            label = str(raw.get("label") or "").strip()
+            action_ref = str(raw.get("action_ref") or "").strip()
+            if not label or not action_ref:
+                continue
+            variant = raw.get("variant") if raw.get("variant") in ("primary", "danger", "default") else "default"
+            actions.append({
+                "label": label,
+                "variant": variant,
+                "operation": "surface.action.performed",
+                "input": {
+                    **context,
+                    "action_ref": action_ref,
+                    "caller_ref": "surface.compose.button_row",
+                },
+            })
+    if not actions:
+        # Legacy fallback for templates that haven't declared action_rail_actions
+        # yet. Subsequent template registrations should always declare them.
+        domain = (intent_ref or "intent.surface").split(".", 1)[-1] if intent_ref else "surface"
+        actions = [
             {
                 "label": "Approve",
                 "variant": "primary",
                 "operation": "surface.action.performed",
-                "input": {**context, "action_ref": approve_ref, "caller_ref": "surface.compose.button_row"},
+                "input": {**context, "action_ref": f"{domain}.approve", "caller_ref": "surface.compose.button_row"},
             },
             {
                 "label": "Reject",
                 "variant": "danger",
                 "operation": "surface.action.performed",
-                "input": {**context, "action_ref": reject_ref, "caller_ref": "surface.compose.button_row"},
+                "input": {**context, "action_ref": f"{domain}.reject", "caller_ref": "surface.compose.button_row"},
             },
-        ],
-    }
+        ]
+    return {"actions": actions}
 
 
 def _typed_gap_for_no_match(intent_ref: str, pill_refs: list[str], candidates: list[str]) -> dict[str, Any]:
