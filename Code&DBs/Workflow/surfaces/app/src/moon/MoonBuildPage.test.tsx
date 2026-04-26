@@ -218,7 +218,7 @@ describe('MoonBuildPage', () => {
     expect(await screen.findByText(/describe the workflow/i)).toBeInTheDocument();
     expect(screen.getByText(/authority it should trust/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/scrape gmail/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /build workflow/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /compose workflow/i })).toBeDisabled();
   });
 
   test('applies the yielding detail-dock class when the detail panel is opened on a populated graph', () => {
@@ -283,7 +283,7 @@ describe('MoonBuildPage', () => {
     fireEvent.change(screen.getByRole('textbox'), {
       target: { value: 'Build a workflow from this prompt' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /build workflow/i }));
+    fireEvent.click(screen.getByRole('button', { name: /compose workflow/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Request timed out after 45s');
   });

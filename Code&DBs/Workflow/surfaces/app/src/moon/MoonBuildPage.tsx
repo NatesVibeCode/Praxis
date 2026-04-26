@@ -1932,23 +1932,40 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     )}
                     <div className="moon-compose__actions">
                       <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !state.compileProse.trim()}>
-                        {compiling ? 'Building...' : 'Build workflow'}
+                        {compiling ? 'Composing... (synthesis + 20 parallel forks)' : 'Compose workflow'}
                       </button>
                       <button
                         type="button"
                         className="moon-compose__secondary-link"
                         onClick={() => dispatch({ type: 'EMPTY_PICK_TRIGGER' })}
-                        style={{ marginLeft: 16, background: 'none', border: 'none', color: 'var(--fg3)', cursor: 'pointer', fontSize: 13, textDecoration: 'underline' }}
+                        disabled={compiling}
+                        style={{ marginLeft: 16, background: 'none', border: 'none', color: 'var(--fg3)', cursor: compiling ? 'not-allowed' : 'pointer', fontSize: 13, textDecoration: 'underline', opacity: compiling ? 0.4 : 1 }}
                       >
-                        or choose a trigger manually
+                        or build from scratch (skip LLM)
                       </button>
                     </div>
+                    {compiling && (
+                      <div className="moon-compose__progress" aria-live="polite" style={{
+                        marginTop: 16,
+                        padding: '12px 16px',
+                        border: '1px solid var(--moon-border, rgba(255,255,255,0.15))',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        color: 'var(--fg3)',
+                      }}>
+                        <div style={{ fontWeight: 500, marginBottom: 4 }}>LLM compile gates running</div>
+                        <div>1. Synthesis — Together V4-Pro decomposing intent into ~20 packet seeds (≈30s)</div>
+                        <div>2. Fork-out — 20 parallel author calls, prefix-cached (≈2-3 min)</div>
+                        <div>3. Pill triage + validation</div>
+                        <div style={{ marginTop: 6, opacity: 0.7 }}>Nothing renders until all gates pass.</div>
+                      </div>
+                    )}
                     {state.compileError && (
                       <div className="moon-compose__error" role="alert">
                         {state.compileError}
                       </div>
                     )}
-                    <div className="moon-compose__shortcut">Press Ctrl/Cmd+Enter to build.</div>
+                    <div className="moon-compose__shortcut">Press Ctrl/Cmd+Enter to compose.</div>
                   </div>
                 )}
               </div>

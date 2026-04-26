@@ -1036,19 +1036,48 @@ def mutate_workflow_build(
         enable_llm_raw = body.get("enable_llm")
         if enable_llm_raw is not None and not isinstance(enable_llm_raw, bool):
             raise WorkflowRuntimeBoundaryError("enable_llm must be a boolean")
-        from runtime.compiler import compile_prose
+        full_compose_raw = body.get("enable_full_compose")
+        if full_compose_raw is not None and not isinstance(full_compose_raw, bool):
+            raise WorkflowRuntimeBoundaryError("enable_full_compose must be a boolean")
+        # Default to the full synthesis + N fork-out compose path. Single-call
+        # compile is opt-out via enable_full_compose=false; nothing surfaces in
+        # the build canvas until the LLM compile gates have run.
+        use_full_compose = full_compose_raw if isinstance(full_compose_raw, bool) else True
 
-        compile_result = compile_prose(
-            prose,
-            title=title or None,
-            enable_llm=enable_llm_raw if isinstance(enable_llm_raw, bool) else None,
-            conn=conn,
-        )
-        compiled_definition = compile_result.get("definition")
-        if not isinstance(compiled_definition, dict):
-            raise WorkflowRuntimeBoundaryError("bootstrap did not produce a definition")
-        definition = _json_clone(compiled_definition)
-        definition["workflow_id"] = workflow_id
+        if use_full_compose:
+            from runtime.compose_plan_via_llm import compose_plan_via_llm
+            from runtime.compose_plan_to_definition import packets_to_definition
+
+            compose_result = compose_plan_via_llm(
+                prose,
+                conn=conn,
+                plan_name=title,
+                concurrency=20,
+            )
+            if not compose_result.ok:
+                raise WorkflowRuntimeBoundaryError(
+                    f"compose_plan_via_llm failed ({compose_result.reason_code or 'unknown'}): "
+                    f"{compose_result.error or 'no error message'}"
+                )
+            definition = packets_to_definition(
+                workflow_id=workflow_id,
+                intent=prose,
+                compose_result=compose_result,
+            )
+        else:
+            from runtime.compiler import compile_prose
+
+            compile_result = compile_prose(
+                prose,
+                title=title or None,
+                enable_llm=enable_llm_raw if isinstance(enable_llm_raw, bool) else None,
+                conn=conn,
+            )
+            compiled_definition = compile_result.get("definition")
+            if not isinstance(compiled_definition, dict):
+                raise WorkflowRuntimeBoundaryError("bootstrap did not produce a definition")
+            definition = _json_clone(compiled_definition)
+            definition["workflow_id"] = workflow_id
     elif subpath == "progressive":
         definition = _apply_progressive_build_step(
             definition,

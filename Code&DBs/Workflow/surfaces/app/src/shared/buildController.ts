@@ -95,13 +95,19 @@ async function _ensureWorkflowId(
 
 export async function compileDefinition(
   prose: string,
-  opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'>,
+  opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'> & { fullCompose?: boolean },
 ): Promise<BuildPayload> {
   const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, { definition: {} });
+  // Default to the full compose path: synthesis + 20 parallel fork-out
+  // author calls. The build canvas renders nothing until this returns —
+  // operator standing order feedback_autonomous_first_no_review_gates +
+  // feedback_fanout_by_work_volume.
+  const enableFullCompose = opts?.fullCompose !== false;
   return postBuildMutation(workflowId, 'bootstrap', {
     prose,
     title: opts?.title,
     enable_llm: true,
+    enable_full_compose: enableFullCompose,
   });
 }
 
@@ -236,9 +242,16 @@ export async function postBuildMutation(
   subpath: string,
   body: Record<string, unknown>,
 ): Promise<BuildPayload> {
+  // Full compose path runs synthesis (~30s) + 20 parallel fork-out author
+  // calls (~3 min wall-clock). Single-call compile fits the 45s budget;
+  // give bootstrap-with-full-compose a 6 min ceiling so the LLM compile
+  // gates can finish before the canvas renders anything.
+  const isBootstrap = subpath === 'bootstrap';
+  const fullCompose = isBootstrap && body['enable_full_compose'] !== false;
+  const timeoutMs = fullCompose ? 360000 : (isBootstrap ? 45000 : 25000);
   return _fetchJson(`/api/workflows/${workflowId}/build/${subpath}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, { timeoutMs: subpath === 'bootstrap' ? 45000 : 25000 });
+  }, { timeoutMs });
 }
