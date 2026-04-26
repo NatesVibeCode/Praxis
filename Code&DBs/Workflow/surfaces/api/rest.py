@@ -3470,6 +3470,39 @@ async def platform_overview_get(request: Request) -> Response:
 async def projection_get(request: Request, projection_ref: str) -> Response:
     return await _route_to_handler(request)
 
+@app.get("/api/shell/routes")
+async def shell_routes_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/shell/state/stream")
+def shell_state_stream(request: Request, session: str = Query(...), after: str | None = Query(default=None)) -> StreamingResponse:
+    """Stream session-scoped shell-navigation events from authority_events.
+
+    Backs surfaces/app/src/shell/useShellState.ts subscription. Filters to the
+    five shell event types and the per-tab session_aggregate_ref so multiple
+    browser tabs do not cross-talk. Cursor + last-event-id resume mirror the
+    atlas_graph_stream pattern.
+    """
+    from .handlers.shell_state_stream_handler import stream_shell_state_events
+
+    subsystems = _ensure_shared_subsystems(app)
+    if subsystems is None:
+        raise HTTPException(status_code=503, detail="shared subsystems unavailable")
+    session_aggregate_ref = (session or "").strip()
+    if not session_aggregate_ref:
+        raise HTTPException(status_code=400, detail="session query parameter is required")
+    cursor = (after or request.headers.get("last-event-id") or "").strip() or None
+
+    return StreamingResponse(
+        stream_shell_state_events(subsystems, session=session_aggregate_ref, after=cursor),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 @app.get("/api/workflow-templates")
 async def workflow_templates_get(request: Request) -> Response:
     return await _route_to_handler(request)

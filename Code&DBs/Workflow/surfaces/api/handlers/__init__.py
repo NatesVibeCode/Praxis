@@ -69,6 +69,7 @@ def _route_state() -> dict[str, object]:
         INTEGRATIONS_PUT_ROUTES,
     )
     from .moon_pickers import MOON_PICKERS_GET_ROUTES
+    from .shell_routes_handler import SHELL_ROUTES_GET_ROUTES
     from .workflow_admin import ADMIN_GET_ROUTES, ADMIN_POST_ROUTES, ADMIN_ROUTES
     from .workflow_mcp import MCP_POST_ROUTES
     from .workflow_notify import NOTIFY_GET_ROUTES, NOTIFY_POST_ROUTES, NOTIFY_ROUTES
@@ -121,6 +122,7 @@ def _route_state() -> dict[str, object]:
             *QUERY_PUT_ROUTES,
         ],
         "get": [
+            *SHELL_ROUTES_GET_ROUTES,
             *MOON_PICKERS_GET_ROUTES,
             *QUERY_GET_ROUTES,
             *DATA_DICTIONARY_LINEAGE_GET_ROUTES,

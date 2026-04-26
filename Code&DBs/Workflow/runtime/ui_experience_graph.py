@@ -115,11 +115,6 @@ SHELL_RELATIONSHIPS: tuple[dict[str, str], ...] = (
 
 KNOWN_WEAKNESSES: tuple[dict[str, str], ...] = (
     {
-        "scope": "shell navigation",
-        "problem": "shell navigation state still needs a generated React adapter from ui_shell_route_registry",
-        "recommended_change": "generate shell route adapters from DB registry instead of keeping a hand-authored TypeScript route map",
-    },
-    {
         "scope": "dashboard actions",
         "problem": "dashboard button contracts are mostly source-code and audit-doc derived",
         "recommended_change": "register dashboard action contracts beside Moon surface_catalog rows",

@@ -1,31 +1,28 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { HistoryMode } from './dashboard/operatingModelSurfaceState';
 import { APP_CONFIG } from './config';
-import type { PraxisOpenTabDetail } from './praxis/events';
-import { ManifestBundleView } from './praxis/ManifestBundleView';
 import { useSeedBundles } from './hooks/useSeedBundles';
 import { LauncherFrontdoor } from './launcher/LauncherFrontdoor';
 import {
   type BuildView,
-  buildShellUrl,
-  closeDynamicTab,
+  composeShellId,
   createDefaultShellState,
   manifestEditorShellId,
   manifestTabShellId,
-  parseShellHistoryPayload,
-  parseShellLocationState,
   runDetailShellId,
   upsertDynamicTab,
   type DynamicTab,
-  type ShellHistoryPayload,
   type ShellState,
 } from './shell/state';
 import { isLauncherRoute } from './shell/routes';
 import {
-  buildShellNavigationItems,
-  buildShellTabs,
-  resolveActiveShellSurface,
-} from './shell/surfaceRegistry';
+  buildPath,
+  buildPathForSurface,
+  interpolateLabel,
+  matchPath,
+  resolveComponent,
+  type RouteRegistryRow,
+} from './shell/routeRegistry';
+import { useShellState } from './shell/useShellState';
 import { MenuPanel, type MenuSection } from './menu';
 import './styles/app-shell.css';
 
@@ -65,61 +62,6 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error:
   }
 }
 
-const Dashboard = React.lazy(() =>
-  import('./dashboard/Dashboard').then(m => ({ default: m.Dashboard })).catch(() => ({
-    default: () => <SurfaceFallback title="Overview unavailable." copy="The dashboard failed to load." />
-  }))
-);
-
-const CostsPanel = React.lazy(() =>
-  import('./dashboard/CostsPanel').then(m => ({ default: m.CostsPanel })).catch(() => ({
-    default: () => <SurfaceFallback title="Cost summary unavailable." copy="The cost surface failed to load." />
-  }))
-);
-
-const ManifestCatalogPage = React.lazy(() =>
-  import('./praxis/ManifestCatalogPage').then(m => ({ default: m.ManifestCatalogPage })).catch(() => ({
-    default: () => <SurfacePlaceholder title="Manifest catalog loading..." />
-  }))
-);
-
-
-const MoonBuildPage = React.lazy(() =>
-  import('./moon/MoonBuildPage').then(m => ({ default: m.MoonBuildPage })).catch(() => ({
-    default: () => <SurfacePlaceholder title="Moon Build loading..." />
-  }))
-);
-
-const RunDetailView = React.lazy(() =>
-  import('./dashboard/RunDetailView').then(m => ({ default: m.RunDetailView })).catch(() => ({
-    default: () => <SurfacePlaceholder title="Run detail view loading..." />
-  }))
-);
-
-const ChatPanel = React.lazy(() =>
-  import('./dashboard/ChatPanel').then(m => ({ default: m.ChatPanel })).catch(() => ({
-    default: (_props: { open: boolean; onClose: () => void }) => <></>
-  }))
-);
-
-const ManifestEditorPage = React.lazy(() =>
-  import('./grid/ManifestEditorPage').then(m => ({ default: m.ManifestEditorPage })).catch(() => ({
-    default: () => <SurfacePlaceholder title="Manifest editor loading..." />
-  }))
-);
-
-const SurfaceComposeView = React.lazy(() =>
-  import('./praxis/SurfaceComposeView').then(m => ({ default: m.SurfaceComposeView })).catch(() => ({
-    default: () => <SurfaceFallback title="Compose surface unavailable." copy="The compose view failed to load." />
-  }))
-);
-
-const AtlasPage = React.lazy(() =>
-  import('./atlas/AtlasPage').then(m => ({ default: m.AtlasPage })).catch(() => ({
-    default: () => <SurfaceFallback title="Atlas unavailable." copy="The atlas surface failed to load." />
-  }))
-);
-
 function SurfacePlaceholder({ title }: { title: string }) {
   return (
     <div className="app-shell__fallback">
@@ -139,11 +81,6 @@ function SurfaceFallback({ title, copy }: { title: string; copy: string }) {
   );
 }
 
-function initialShellPayload(): ShellHistoryPayload {
-  return parseShellHistoryPayload(window.history.state)
-    ?? parseShellLocationState(window.location.search, window.location.pathname);
-}
-
 interface BuildDraftGuardState {
   dirty: boolean;
   message: string | null;
@@ -154,106 +91,310 @@ interface ShellTransitionOptions {
 }
 
 export function AppShell() {
-  const initialPayload = initialShellPayload();
-  const [state, setState] = useState<ShellState>(initialPayload.shellState);
-  const [chatOpen, setChatOpen] = useState(initialPayload.chatOpen);
+  const { state, routes, sessionAggregateRef, ready, dispatch } = useShellState();
+  const [chatOpen, setChatOpen] = useState(false);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [creatingSeedId, setCreatingSeedId] = useState<string | null>(null);
   const [buildDraftGuard, setBuildDraftGuard] = useState<BuildDraftGuardState>({ dirty: false, message: null });
   const commandButtonRef = useRef<HTMLButtonElement | null>(null);
   const stateRef = useRef(state);
-  const chatOpenRef = useRef(chatOpen);
   const buildDraftGuardRef = useRef(buildDraftGuard);
-
-  const syncHistory = useCallback((nextState: ShellState, nextChatOpen: boolean, historyMode: HistoryMode) => {
-    const payload: ShellHistoryPayload = { shellState: nextState, chatOpen: nextChatOpen };
-    const url = buildShellUrl(nextState, nextChatOpen);
-    if (historyMode === 'replace') {
-      window.history.replaceState(payload, '', url);
-      return;
-    }
-    window.history.pushState(payload, '', url);
-  }, []);
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
-
-  useEffect(() => {
-    chatOpenRef.current = chatOpen;
-  }, [chatOpen]);
-
   useEffect(() => {
     buildDraftGuardRef.current = buildDraftGuard;
   }, [buildDraftGuard]);
 
-  const commitShellState = useCallback((nextState: ShellState, historyMode: HistoryMode) => {
-    syncHistory(nextState, chatOpenRef.current, historyMode);
-    setState(nextState);
-  }, [syncHistory]);
+  const shouldBlockBuildDraftExit = useCallback(
+    (
+      currentState: ShellState,
+      nextState: Partial<ShellState>,
+      options?: ShellTransitionOptions,
+    ): boolean => {
+      if (options?.bypassBuildDraftGuard) return false;
+      const draft = buildDraftGuardRef.current;
+      if (!draft.dirty || currentState.activeTabId !== 'build') return false;
 
-  const restoreCurrentHistoryEntry = useCallback(() => {
-    const currentState = stateRef.current;
-    const currentChatOpen = chatOpenRef.current;
-    const payload: ShellHistoryPayload = { shellState: currentState, chatOpen: currentChatOpen };
-    const url = buildShellUrl(currentState, currentChatOpen);
-    window.history.pushState(payload, '', url);
-  }, []);
+      const stayingOnSameBuilder =
+        nextState.activeTabId === 'build'
+        && (nextState.buildWorkflowId === undefined || nextState.buildWorkflowId === currentState.buildWorkflowId)
+        && (nextState.buildIntent === undefined || nextState.buildIntent === currentState.buildIntent)
+        && (nextState.builderSeed === undefined || nextState.builderSeed === currentState.builderSeed)
+        && (nextState.buildView === undefined || nextState.buildView === currentState.buildView);
+      if (stayingOnSameBuilder) return false;
 
-  const shouldBlockBuildDraftExit = useCallback((
-    currentState: ShellState,
-    nextState: ShellState,
-    options?: ShellTransitionOptions,
-  ): boolean => {
-    if (options?.bypassBuildDraftGuard) return false;
-    const draft = buildDraftGuardRef.current;
-    if (!draft.dirty || currentState.activeTabId !== 'build') return false;
+      const confirmed = window.confirm(
+        draft.message || 'This draft workflow is not saved yet. Leave anyway?',
+      );
 
-    const stayingOnSameBuilder =
-      nextState.activeTabId === 'build'
-      && nextState.buildWorkflowId === currentState.buildWorkflowId
-      && nextState.buildIntent === currentState.buildIntent
-      && nextState.builderSeed === currentState.builderSeed
-      && nextState.buildView === currentState.buildView;
+      void dispatch('shell.draft.guard.consulted', {
+        decision: confirmed ? 'leave' : 'stay',
+        source_route_id: currentState.activeRouteId,
+        target_route_id: typeof nextState.activeRouteId === 'string'
+          ? nextState.activeRouteId
+          : currentState.activeRouteId,
+        draft_message: draft.message || '',
+        caller_ref: 'shell.app_shell.draft_guard',
+      });
 
-    if (stayingOnSameBuilder) return false;
-
-    return !window.confirm(
-      draft.message || 'This draft workflow is not saved yet. Leave anyway?',
-    );
-  }, []);
+      return !confirmed;
+    },
+    [dispatch],
+  );
 
   const handleBuildDraftStateChange = useCallback((draft: { dirty: boolean; message?: string | null }) => {
     const nextMessage = draft.message ?? null;
-    setBuildDraftGuard((current) => (
+    setBuildDraftGuard((current) =>
       current.dirty === draft.dirty && current.message === nextMessage
         ? current
-        : { dirty: draft.dirty, message: nextMessage }
-    ));
+        : { dirty: draft.dirty, message: nextMessage },
+    );
   }, []);
 
-  useEffect(() => {
-    syncHistory(state, chatOpen, 'replace');
-  }, [chatOpen, state, syncHistory]);
-
-  useEffect(() => {
-    const onPopState = (event: PopStateEvent) => {
-      const payload = parseShellHistoryPayload(event.state)
-        ?? parseShellLocationState(window.location.search, window.location.pathname);
-      const currentState = stateRef.current;
-      if (shouldBlockBuildDraftExit(currentState, payload.shellState)) {
-        restoreCurrentHistoryEntry();
+  const openSurface = useCallback(
+    async (
+      routeId: string,
+      args: {
+        slotValues?: Record<string, string | string[]>;
+        diff?: Partial<ShellState>;
+        reason?: 'click' | 'keyboard' | 'event_bus' | 'history_pop' | 'deep_link';
+        callerRef?: string;
+        bypassBuildDraftGuard?: boolean;
+      } = {},
+    ) => {
+      const current = stateRef.current;
+      const diff: Partial<ShellState> = {
+        ...args.diff,
+        activeRouteId: routeId,
+      };
+      if (shouldBlockBuildDraftExit(current, diff, { bypassBuildDraftGuard: args.bypassBuildDraftGuard })) {
         return;
       }
-      setState(payload.shellState);
-      setChatOpen(payload.chatOpen);
+      await dispatch(
+        'shell.surface.opened',
+        {
+          route_id: routeId,
+          slot_values: args.slotValues || {},
+          shell_state_diff: diff,
+          reason: args.reason || 'click',
+          caller_ref: args.callerRef || 'shell.app_shell',
+        },
+        diff,
+      );
+    },
+    [dispatch, shouldBlockBuildDraftExit],
+  );
+
+  // Tab strip activation — picks the canonical route for a static surface.
+  const activateStaticSurface = useCallback(
+    async (
+      surfaceName: 'dashboard' | 'build' | 'manifests' | 'atlas',
+      args: { bypassBuildDraftGuard?: boolean } = {},
+    ) => {
+      const row = routes.find((r) => r.surface_name === surfaceName && r.is_canonical_for_surface);
+      const routeId = row?.route_id || `route.app.${surfaceName}`;
+      await openSurface(routeId, {
+        diff: {
+          activeTabId: surfaceName,
+          dashboardDetail: null,
+          moonRunId: null,
+        },
+        callerRef: `shell.tab_strip.${surfaceName}`,
+        bypassBuildDraftGuard: args.bypassBuildDraftGuard,
+      });
+    },
+    [openSurface, routes],
+  );
+
+  const openDashboardCosts = useCallback(async () => {
+    // Costs is a drill-in on the dashboard surface, not a separate top-level
+    // route. activeRouteId stays at route.app.dashboard so the chrome shows
+    // 'Control plane'; renderActiveTab inspects dashboardDetail to swap in
+    // the CostsPanel component.
+    await openSurface('route.app.dashboard', {
+      diff: { activeTabId: 'dashboard', dashboardDetail: 'costs', moonRunId: null },
+      callerRef: 'shell.dashboard.cost_drill_in',
+    });
+  }, [openSurface]);
+
+  const openBuild = useCallback(
+    async (opts: {
+      workflowId?: string | null;
+      intent?: string | null;
+      seed?: unknown;
+      view?: BuildView;
+      bypassBuildDraftGuard?: boolean;
+    } = {}) => {
+      const slotValues: Record<string, string | string[]> = {};
+      if (opts.workflowId) slotValues.workflow = opts.workflowId;
+      if (opts.intent) slotValues.intent = opts.intent;
+      await openSurface('route.app.workflow', {
+        slotValues,
+        diff: {
+          activeTabId: 'build',
+          buildWorkflowId: opts.workflowId ?? null,
+          buildIntent: opts.intent ?? null,
+          builderSeed: opts.seed ?? null,
+          buildView: opts.view ?? stateRef.current.buildView,
+          moonRunId: null,
+          dashboardDetail: null,
+        },
+        callerRef: 'shell.app_shell.open_build',
+        bypassBuildDraftGuard: opts.bypassBuildDraftGuard,
+      });
+    },
+    [openSurface],
+  );
+
+  const openRunDetail = useCallback(
+    async (runId: string) => {
+      await openSurface('route.app.run', {
+        slotValues: { run_id: runId },
+        diff: {
+          activeTabId: 'build',
+          buildView: 'moon',
+          moonRunId: runId,
+          dashboardDetail: null,
+        },
+        callerRef: 'shell.app_shell.open_run_detail',
+      });
+    },
+    [openSurface],
+  );
+
+  const openManifest = useCallback(
+    async (manifestId: string, manifestTabId?: string | null) => {
+      const normalizedTabId = manifestTabId || 'main';
+      const dynamicId = manifestTabShellId(manifestId, normalizedTabId);
+      const nextTab: DynamicTab = {
+        id: dynamicId,
+        kind: 'manifest',
+        label: normalizedTabId === 'main' ? manifestId : `${manifestId} · ${normalizedTabId}`,
+        closable: true,
+        manifestId,
+        manifestTabId: normalizedTabId,
+      };
+      await openSurface('route.app.manifest', {
+        slotValues: { manifest_id: manifestId, manifest_tab_id: normalizedTabId },
+        diff: {
+          activeTabId: dynamicId,
+          dynamicTabs: upsertDynamicTab(stateRef.current.dynamicTabs, nextTab),
+          dashboardDetail: null,
+        },
+        callerRef: 'shell.app_shell.open_manifest',
+      });
+    },
+    [openSurface],
+  );
+
+  const openManifestEditor = useCallback(
+    async (manifestId: string) => {
+      const dynamicId = manifestEditorShellId(manifestId);
+      const nextTab: DynamicTab = {
+        id: dynamicId,
+        kind: 'manifest-editor',
+        label: `Edit ${manifestId}`,
+        closable: true,
+        manifestId,
+      };
+      await openSurface('route.app.manifest_editor', {
+        slotValues: { manifest_id: manifestId },
+        diff: {
+          activeTabId: dynamicId,
+          dynamicTabs: upsertDynamicTab(stateRef.current.dynamicTabs, nextTab),
+          dashboardDetail: null,
+        },
+        callerRef: 'shell.app_shell.open_manifest_editor',
+      });
+    },
+    [openSurface],
+  );
+
+  const openCompose = useCallback(
+    async (intent: string, pillRefs: readonly string[] = []) => {
+      const dynamicId = composeShellId(intent, pillRefs);
+      const labelPills = pillRefs.length > 0
+        ? ` · ${pillRefs.length} pill${pillRefs.length === 1 ? '' : 's'}`
+        : '';
+      const nextTab: DynamicTab = {
+        id: dynamicId,
+        kind: 'compose',
+        label: `Compose ${intent}${labelPills}`,
+        closable: true,
+        intent,
+        pillRefs: [...pillRefs],
+      };
+      await openSurface('route.app.compose', {
+        slotValues: { intent, pill_refs: [...pillRefs] },
+        diff: {
+          activeTabId: dynamicId,
+          dynamicTabs: upsertDynamicTab(stateRef.current.dynamicTabs, nextTab),
+          dashboardDetail: null,
+        },
+        callerRef: 'shell.app_shell.open_compose',
+      });
+    },
+    [openSurface],
+  );
+
+  const closeTab = useCallback(
+    async (tabId: string) => {
+      const current = stateRef.current;
+      const remaining = current.dynamicTabs.filter((tab) => tab.id !== tabId);
+      const fallbackTabId =
+        current.activeTabId === tabId
+          ? remaining[remaining.length - 1]?.id || 'dashboard'
+          : current.activeTabId;
+      const fallbackRouteId =
+        fallbackTabId === 'dashboard' ? 'route.app.dashboard' : current.activeRouteId;
+
+      await dispatch(
+        'shell.tab.closed',
+        {
+          dynamic_tab_id: tabId,
+          fallback_route_id: fallbackRouteId,
+          caller_ref: 'shell.tab_strip.close_button',
+        },
+        {
+          dynamicTabs: remaining,
+          activeTabId: fallbackTabId,
+          activeRouteId: fallbackRouteId,
+        },
+      );
+    },
+    [dispatch],
+  );
+
+  // popstate → fire history.popped + matching surface.opened
+  useEffect(() => {
+    if (!ready) return undefined;
+    const onPopState = () => {
+      const match = matchPath(window.location.pathname, window.location.search);
+      const targetRouteId = match?.route_id || 'route.app.dashboard';
+      const slotValues = match?.slot_values || {};
+
+      void dispatch('shell.history.popped', {
+        target_route_id: targetRouteId,
+        slot_values: slotValues,
+        caller_ref: 'shell.history.popstate',
+      });
+
+      void openSurface(targetRouteId, {
+        slotValues,
+        reason: 'history_pop',
+        callerRef: 'shell.history.popstate',
+        bypassBuildDraftGuard: true,
+      });
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [restoreCurrentHistoryEntry, shouldBlockBuildDraftExit]);
+  }, [dispatch, openSurface, ready]);
 
+  // beforeunload protection for dirty build draft
   useEffect(() => {
-    if (!(state.activeTabId === 'build' && buildDraftGuard.dirty)) return;
+    if (!(state.activeTabId === 'build' && buildDraftGuard.dirty)) return undefined;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
@@ -262,164 +403,7 @@ export function AppShell() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [buildDraftGuard.dirty, state.activeTabId]);
 
-  const activateTab = useCallback((tabId: string, historyMode: HistoryMode = 'push', options?: ShellTransitionOptions) => {
-    const current = stateRef.current;
-    // Clearing moonRunId on any tab switch: the run view is URL-addressable
-    // via /app/run/:id; leaving the surface exits run mode.
-    const nextState: ShellState = {
-      ...current,
-      activeTabId: tabId,
-      moonRunId: null,
-      dashboardDetail: null,
-    };
-    if (tabId === 'build' && !current.buildWorkflowId) {
-      nextState.buildView = 'moon';
-    }
-    if (shouldBlockBuildDraftExit(current, nextState, options)) return;
-    commitShellState(nextState, historyMode);
-  }, [commitShellState, shouldBlockBuildDraftExit]);
-
-  const openDashboardCosts = useCallback(() => {
-    const current = stateRef.current;
-    const nextState: ShellState = {
-      ...current,
-      activeTabId: 'dashboard',
-      dashboardDetail: 'costs',
-      moonRunId: null,
-    };
-    commitShellState(nextState, 'push');
-  }, [commitShellState]);
-
-  const openBuild = useCallback((opts?: {
-    workflowId?: string | null;
-    intent?: string | null;
-    seed?: unknown;
-    view?: BuildView;
-  }, historyMode: HistoryMode = 'push', options?: ShellTransitionOptions) => {
-    const current = stateRef.current;
-    const nextState: ShellState = {
-      ...current,
-      activeTabId: 'build',
-      buildWorkflowId: opts?.workflowId ?? null,
-      buildIntent: opts?.intent ?? null,
-      builderSeed: opts?.seed ?? null,
-      buildView: opts?.view ?? current.buildView,
-      moonRunId: null,
-      dashboardDetail: null,
-    };
-    if (shouldBlockBuildDraftExit(current, nextState, options)) return;
-    commitShellState(nextState, historyMode);
-  }, [commitShellState, shouldBlockBuildDraftExit]);
-
-  const openEditModel = useCallback((workflowId: string | null, historyMode: HistoryMode = 'push') => {
-    openBuild({ workflowId, intent: null, seed: null, view: 'moon' }, historyMode);
-  }, [openBuild]);
-
-  const openRunDetail = useCallback((runId: string, historyMode: HistoryMode = 'push') => {
-    // Moon owns run rendering — route into the static build surface with
-    // moonRunId set rather than creating a legacy run-detail dynamic tab.
-    const current = stateRef.current;
-    const nextState: ShellState = {
-      ...current,
-      activeTabId: 'build',
-      buildView: 'moon',
-      moonRunId: runId,
-      dashboardDetail: null,
-    };
-    if (shouldBlockBuildDraftExit(current, nextState)) return;
-    commitShellState(nextState, historyMode);
-  }, [commitShellState, shouldBlockBuildDraftExit]);
-
-  const openManifest = useCallback((manifestId: string, manifestTabId?: string | null, historyMode: HistoryMode = 'push') => {
-    const normalizedTabId = manifestTabId || 'main';
-    const nextTab: DynamicTab = {
-      id: manifestTabShellId(manifestId, normalizedTabId),
-      kind: 'manifest',
-      label: normalizedTabId === 'main' ? manifestId : `${manifestId} · ${normalizedTabId}`,
-      closable: true,
-      manifestId,
-      manifestTabId: normalizedTabId,
-    };
-    const current = stateRef.current;
-    const nextState: ShellState = {
-      ...current,
-      activeTabId: nextTab.id,
-      dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
-      dashboardDetail: null,
-    };
-    if (shouldBlockBuildDraftExit(current, nextState)) return;
-    commitShellState(nextState, historyMode);
-  }, [commitShellState, shouldBlockBuildDraftExit]);
-
-  const openManifestEditor = useCallback((manifestId: string, historyMode: HistoryMode = 'push') => {
-    const nextTab: DynamicTab = {
-      id: manifestEditorShellId(manifestId),
-      kind: 'manifest-editor',
-      label: `Edit ${manifestId}`,
-      closable: true,
-      manifestId,
-    };
-    const current = stateRef.current;
-    const nextState: ShellState = {
-      ...current,
-      activeTabId: nextTab.id,
-      dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
-      dashboardDetail: null,
-    };
-    if (shouldBlockBuildDraftExit(current, nextState)) return;
-    commitShellState(nextState, historyMode);
-  }, [commitShellState, shouldBlockBuildDraftExit]);
-
-  const closeTab = useCallback((tabId: string, historyMode: HistoryMode = 'push') => {
-    const current = stateRef.current;
-    const resolved = closeDynamicTab(current.dynamicTabs, current.activeTabId, tabId);
-    const nextState: ShellState = {
-      ...current,
-      dynamicTabs: resolved.dynamicTabs,
-      activeTabId: resolved.activeTabId,
-      dashboardDetail: null,
-    };
-    if (shouldBlockBuildDraftExit(current, nextState)) return;
-    commitShellState(nextState, historyMode);
-  }, [commitShellState, shouldBlockBuildDraftExit]);
-
-  useEffect(() => {
-    const onOpenTab = (event: Event) => {
-      const detail = (event as CustomEvent<PraxisOpenTabDetail>).detail;
-      if (!detail) return;
-      if (detail.kind === 'build') {
-        openBuild({
-          workflowId: detail.workflowId ?? null,
-          intent: detail.intent ?? null,
-          seed: null,
-          view: 'moon',
-        });
-        return;
-      }
-      if (detail.kind === 'manifest' && detail.manifestId) {
-        openManifest(detail.manifestId, detail.tabId ?? 'main');
-        return;
-      }
-      if (detail.kind === 'manifest-editor' && detail.manifestId) {
-        openManifestEditor(detail.manifestId);
-        return;
-      }
-      if (detail.kind === 'run-detail' && detail.runId) {
-        openRunDetail(detail.runId);
-        return;
-      }
-      if (detail.kind === 'edit-model') {
-        openEditModel(detail.workflowId ?? null);
-      }
-    };
-    window.addEventListener('praxis-open-tab', onOpenTab as EventListener);
-    window.addEventListener('helm-open-tab', onOpenTab as EventListener);
-    return () => {
-      window.removeEventListener('praxis-open-tab', onOpenTab as EventListener);
-      window.removeEventListener('helm-open-tab', onOpenTab as EventListener);
-    };
-  }, [openBuild, openEditModel, openManifest, openManifestEditor, openRunDetail]);
-
+  // Keyboard shortcuts — bind from registry rows + chat/menu toggles
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
@@ -428,14 +412,20 @@ export function AppShell() {
           event.preventDefault();
           setChatOpen((open) => !open);
           setCommandMenuOpen(false);
+          return;
         }
         if (key === 'k' && event.shiftKey) {
           event.preventDefault();
           setCommandMenuOpen((open) => !open);
+          return;
         }
-        if (key === 'n') {
+        // Look for a matching keyboard_shortcut in the registry.
+        const shortcut = `${event.metaKey || event.ctrlKey ? 'ctrl+' : ''}${key}`;
+        const row = routes.find((r) => (r.keyboard_shortcut || '').toLowerCase() === shortcut);
+        if (row && row.surface_name === 'build') {
           event.preventDefault();
-          openBuild({ workflowId: null, intent: null, seed: null, view: 'moon' });
+          void openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' });
+          return;
         }
       }
       if (event.key === 'Escape') {
@@ -451,49 +441,68 @@ export function AppShell() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [chatOpen, commandMenuOpen, openBuild]);
+  }, [chatOpen, commandMenuOpen, openBuild, routes]);
 
-  const activeDynamicTab = useMemo(
-    () => state.dynamicTabs.find((tab) => tab.id === state.activeTabId) || null,
-    [state.activeTabId, state.dynamicTabs],
+  const activeRow = useMemo(
+    () => routes.find((r) => r.route_id === state.activeRouteId) || null,
+    [routes, state.activeRouteId],
   );
-  const activeSurface = useMemo(
-    () => resolveActiveShellSurface(state, activeDynamicTab),
-    [activeDynamicTab, state],
-  );
-  const activeContext = activeSurface.context;
+
+  const activeContext = useMemo(() => {
+    if (!activeRow) {
+      return { label: 'Surface tab', detail: 'Loading…' };
+    }
+    return {
+      label: activeRow.context_label || activeRow.tab_kind_label || 'Surface',
+      detail: interpolateLabel(activeRow.context_detail_template, {
+        ...state,
+        config: { tagline: APP_CONFIG.tagline },
+      }),
+    };
+  }, [activeRow, state]);
+
   const isBuildMode = state.activeTabId === 'build';
 
   const { seeds: seedBundles } = useSeedBundles();
 
-  const createSeedTab = useCallback(async (seedId: string) => {
-    const seed = seedBundles.find((candidate) => candidate.id === seedId);
-    if (!seed) return;
-    // Deep-clone so the user's new tab doesn't mutate the in-memory seed.
-    const bundle = JSON.parse(JSON.stringify(seed.bundle));
-    setCreatingSeedId(seedId);
-    try {
-      const response = await fetch('/api/manifests/save-as', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: seed.label,
-          description: seed.description,
-          manifest: bundle,
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.id) {
-        throw new Error(payload?.error || `Failed to create ${seed.label}`);
+  const createSeedTab = useCallback(
+    async (seedId: string) => {
+      const seed = seedBundles.find((candidate) => candidate.id === seedId);
+      if (!seed) return;
+      const bundle = JSON.parse(JSON.stringify(seed.bundle));
+      setCreatingSeedId(seedId);
+      try {
+        const response = await fetch('/api/manifests/save-as', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: seed.label,
+            description: seed.description,
+            manifest: bundle,
+          }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.id) {
+          throw new Error(payload?.error || `Failed to create ${seed.label}`);
+        }
+        await openManifest(payload.id, 'main');
+        setCommandMenuOpen(false);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setCreatingSeedId(null);
       }
-      openManifest(payload.id, 'main');
-      setCommandMenuOpen(false);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setCreatingSeedId(null);
-    }
-  }, [openManifest, seedBundles]);
+    },
+    [openManifest, seedBundles],
+  );
+
+  const tabStripRows = useMemo(
+    () =>
+      [...routes]
+        .filter((r) => r.tab_strip_position !== null && r.status === 'ready')
+        .sort((a, b) => (a.tab_strip_position ?? 0) - (b.tab_strip_position ?? 0)),
+    [routes],
+  );
 
   const commandMenuSections = useMemo<MenuSection[]>(() => {
     const createItems = [
@@ -503,7 +512,9 @@ export function AppShell() {
         description: 'Describe what you want first, then refine the generated graph.',
         keywords: ['builder', 'workflow', 'moon', 'new', 'blank', 'describe', 'compose'],
         shortcut: 'Ctrl+N',
-        onSelect: () => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' }),
+        onSelect: () => {
+          void openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' });
+        },
       },
       ...seedBundles.map((seed) => ({
         id: `seed:${seed.id}`,
@@ -519,110 +530,82 @@ export function AppShell() {
       })),
     ];
 
-    const navigateItems = buildShellNavigationItems({
-      state,
-      chatOpen,
-      activateTab,
-      setChatOpen,
-    });
+    const navigateItems = tabStripRows.map((row) => ({
+      id: `navigate:${row.route_id}`,
+      label: interpolateLabel(row.tab_label_template, state) || row.surface_name,
+      description: interpolateLabel(row.nav_description_template, state) || '',
+      keywords: row.nav_keywords || [],
+      selected: state.activeRouteId === row.route_id,
+      onSelect: () => {
+        void activateStaticSurface(row.surface_name as 'dashboard' | 'build' | 'manifests' | 'atlas');
+      },
+    }));
+
+    const chatItem = {
+      id: 'navigate:chat',
+      label: chatOpen ? 'Close Chat' : 'Open Chat',
+      description: 'Toggle the side chat surface.',
+      keywords: ['chat', 'assistant', 'conversation'],
+      shortcut: 'Ctrl+K',
+      selected: chatOpen,
+      onSelect: () => setChatOpen((open) => !open),
+    };
+
+    const dynamicItems = state.dynamicTabs.map((tab) => ({
+      id: `tab:${tab.id}`,
+      label: tab.label,
+      description: 'Open the surface tab.',
+      keywords: ['tab', tab.kind, tab.label],
+      selected: state.activeTabId === tab.id,
+      onSelect: () => {
+        void openSurface(routeIdForDynamicTab(tab), {
+          diff: { activeTabId: tab.id },
+          callerRef: 'shell.command_menu.dynamic_tab',
+        });
+      },
+    }));
 
     return [
       { id: 'create', title: 'Create', items: createItems },
-      { id: 'navigate', title: 'Navigate', items: navigateItems },
+      { id: 'navigate', title: 'Navigate', items: [...navigateItems, chatItem, ...dynamicItems] },
     ];
-  }, [activateTab, chatOpen, createSeedTab, creatingSeedId, openBuild, openDashboardCosts, seedBundles, setChatOpen, state]);
+  }, [activateStaticSurface, chatOpen, createSeedTab, creatingSeedId, openBuild, openSurface, seedBundles, state, tabStripRows]);
+
+  const ChatPanel = useMemo(
+    () =>
+      React.lazy(() =>
+        import('./dashboard/ChatPanel').then((m) => ({ default: m.ChatPanel })).catch(() => ({
+          default: (_props: { open: boolean; onClose: () => void }) => <></>,
+        })),
+      ),
+    [],
+  );
 
   const renderActiveTab = () => {
-    if (activeSurface.category === 'static' && activeSurface.id === 'dashboard' && state.dashboardDetail === 'costs') {
-      return (
-        <CostsPanel
-          onBack={() => activateTab('dashboard')}
-          onViewRun={(runId: string) => openRunDetail(runId)}
-        />
-      );
+    if (!ready || !activeRow) {
+      return <SurfacePlaceholder title="Loading workspace..." />;
     }
-
-    if (activeSurface.category === 'static' && activeSurface.id === 'dashboard') {
-      return (
-        <Dashboard
-          onEditWorkflow={(id: string) => openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' })}
-          onEditModel={(id: string) => openEditModel(id)}
-          onViewRun={(runId: string) => openRunDetail(runId)}
-          onNewWorkflow={() => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' })}
-          onChat={() => setChatOpen(true)}
-          onDescribe={() => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' })}
-          onOpenCosts={openDashboardCosts}
-        />
-      );
+    const effectiveRouteId =
+      activeRow.route_id === 'route.app.dashboard' && state.dashboardDetail === 'costs'
+        ? 'route.app.dashboard_costs'
+        : activeRow.route_id;
+    const Component = resolveComponent(effectiveRouteId);
+    if (!Component) {
+      return <SurfaceFallback title="Surface unavailable" copy={`No component bound for ${effectiveRouteId}.`} />;
     }
-
-    if (activeSurface.category === 'static' && activeSurface.id === 'build') {
-      return (
-        <MoonBuildPage
-          workflowId={state.buildWorkflowId}
-          runId={state.moonRunId}
-          onBack={() => activateTab('dashboard')}
-          onWorkflowCreated={(wfId) => openBuild(
-            { workflowId: wfId, intent: null, seed: null, view: 'moon' },
-            'push',
-            { bypassBuildDraftGuard: true },
-          )}
-          onEditWorkflow={(wfId) => openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon' })}
-          onViewRun={(runId) => openRunDetail(runId)}
-          onDraftStateChange={handleBuildDraftStateChange}
-          initialMode={state.buildIntent === '__compose__' || (!state.buildWorkflowId && !state.moonRunId) ? 'compose' : undefined}
-        />
-      );
-    }
-
-    if (activeSurface.category === 'static' && activeSurface.id === 'manifests') {
-      return (
-        <ManifestCatalogPage
-          onOpenManifest={(manifestId) => openManifest(manifestId)}
-          onEditManifest={(manifestId) => openManifestEditor(manifestId)}
-        />
-      );
-    }
-
-    if (activeSurface.category === 'static' && activeSurface.id === 'atlas') {
-      return <AtlasPage />;
-    }
-
-    if (activeSurface.category === 'dynamic' && activeSurface.kind === 'run-detail' && activeSurface.dynamicTab.runId) {
-      return (
-        <RunDetailView
-          runId={activeSurface.dynamicTab.runId}
-          onBack={() => activateTab('dashboard')}
-        />
-      );
-    }
-
-    if (activeSurface.category === 'dynamic' && activeSurface.kind === 'manifest' && activeSurface.dynamicTab.manifestId) {
-      return (
-        <ManifestBundleView
-          manifestId={activeSurface.dynamicTab.manifestId}
-          tabId={activeSurface.dynamicTab.manifestTabId}
-        />
-      );
-    }
-
-    if (activeSurface.category === 'dynamic' && activeSurface.kind === 'manifest-editor' && activeSurface.dynamicTab.manifestId) {
-      return <ManifestEditorPage manifestId={activeSurface.dynamicTab.manifestId} />;
-    }
-
-    if (activeSurface.category === 'dynamic' && activeSurface.kind === 'compose') {
-      return (
-        <SurfaceComposeView
-          intent={activeSurface.dynamicTab.intent}
-          pillRefs={activeSurface.dynamicTab.pillRefs}
-        />
-      );
-    }
-
-    return <SurfaceFallback title="No tab selected" copy="Select a tab to continue." />;
+    const props = renderPropsForRoute(effectiveRouteId, state, {
+      activateStaticSurface,
+      openBuild,
+      openRunDetail,
+      openManifest,
+      openManifestEditor,
+      openCompose,
+      openDashboardCosts,
+      setChatOpen,
+      handleBuildDraftStateChange,
+    });
+    return <Component {...props} />;
   };
-
-  const tabs = useMemo(() => buildShellTabs(state), [state]);
 
   return (
     <React.Suspense fallback={<SurfacePlaceholder title="Loading workspace..." />}>
@@ -640,8 +623,36 @@ export function AppShell() {
 
           <div className="app-shell__nav">
             <div className="app-shell__tabstrip" role="tablist" aria-label="Praxis views">
-              {tabs.map((tab) => {
-                const active = tab.id === state.activeTabId;
+              {tabStripRows.map((row) => {
+                const surface = row.surface_name as 'dashboard' | 'build' | 'manifests' | 'atlas';
+                const active = state.activeTabId === surface;
+                return (
+                  <div
+                    key={row.route_id}
+                    className={`app-shell__tab ${active ? 'app-shell__tab--active' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => {
+                        void activateStaticSurface(surface);
+                      }}
+                      className="app-shell__tab-button"
+                    >
+                      <span className="app-shell__tab-glyph" aria-hidden="true">
+                        {(row.tab_kind_label || row.surface_name).slice(0, 1)}
+                      </span>
+                      <span className="app-shell__tab-copy">
+                        <span className="app-shell__tab-kind">{row.tab_kind_label || row.surface_name}</span>
+                        <span className="app-shell__tab-label">{interpolateLabel(row.tab_label_template, state)}</span>
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+              {state.dynamicTabs.map((tab) => {
+                const active = state.activeTabId === tab.id;
                 return (
                   <div
                     key={tab.id}
@@ -651,7 +662,12 @@ export function AppShell() {
                       type="button"
                       role="tab"
                       aria-selected={active}
-                      onClick={() => activateTab(tab.id)}
+                      onClick={() => {
+                        void openSurface(routeIdForDynamicTab(tab), {
+                          diff: { activeTabId: tab.id },
+                          callerRef: 'shell.tab_strip.dynamic',
+                        });
+                      }}
                       className="app-shell__tab-button"
                     >
                       <span className="app-shell__tab-glyph" aria-hidden="true">{tab.kind.slice(0, 1)}</span>
@@ -660,16 +676,16 @@ export function AppShell() {
                         <span className="app-shell__tab-label">{tab.label}</span>
                       </span>
                     </button>
-                    {tab.closable && (
-                      <button
-                        type="button"
-                        aria-label={`Close ${tab.label}`}
-                        onClick={() => closeTab(tab.id)}
-                        className="app-shell__tab-close"
-                      >
-                        <span className="app-shell__tab-close-icon" aria-hidden="true" />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      aria-label={`Close ${tab.label}`}
+                      onClick={() => {
+                        void closeTab(tab.id);
+                      }}
+                      className="app-shell__tab-close"
+                    >
+                      <span className="app-shell__tab-close-icon" aria-hidden="true" />
+                    </button>
                   </div>
                 );
               })}
@@ -724,6 +740,101 @@ export function AppShell() {
   );
 }
 
+function routeIdForDynamicTab(tab: DynamicTab): string {
+  switch (tab.kind) {
+    case 'manifest': return 'route.app.manifest';
+    case 'manifest-editor': return 'route.app.manifest_editor';
+    case 'compose': return 'route.app.compose';
+    case 'run-detail': return 'route.app.run_detail_legacy';
+    default: return 'route.app.dashboard';
+  }
+}
+
+interface RenderPropHelpers {
+  activateStaticSurface: (surface: 'dashboard' | 'build' | 'manifests' | 'atlas') => Promise<void>;
+  openBuild: (opts?: { workflowId?: string | null; intent?: string | null; seed?: unknown; view?: BuildView; bypassBuildDraftGuard?: boolean }) => Promise<void>;
+  openRunDetail: (runId: string) => Promise<void>;
+  openManifest: (manifestId: string, manifestTabId?: string | null) => Promise<void>;
+  openManifestEditor: (manifestId: string) => Promise<void>;
+  openCompose: (intent: string, pillRefs?: readonly string[]) => Promise<void>;
+  openDashboardCosts: () => Promise<void>;
+  setChatOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  handleBuildDraftStateChange: (draft: { dirty: boolean; message?: string | null }) => void;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderPropsForRoute(routeId: string, state: ShellState, helpers: RenderPropHelpers): any {
+  const onBack = () => helpers.activateStaticSurface('dashboard');
+  switch (routeId) {
+    case 'route.app.dashboard':
+      return {
+        onEditWorkflow: (id: string) => helpers.openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' }),
+        onEditModel: (id: string) => helpers.openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' }),
+        onViewRun: (runId: string) => helpers.openRunDetail(runId),
+        onNewWorkflow: () => helpers.openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' }),
+        onChat: () => helpers.setChatOpen(true),
+        onDescribe: () => helpers.openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' }),
+        onOpenCosts: () => helpers.openDashboardCosts(),
+      };
+    case 'route.app.dashboard_costs':
+      return {
+        onBack,
+        onViewRun: (runId: string) => helpers.openRunDetail(runId),
+      };
+    case 'route.app.workflow':
+    case 'route.app.build.legacy':
+    case 'route.app.run':
+      return {
+        workflowId: state.buildWorkflowId,
+        runId: state.moonRunId,
+        onBack,
+        onWorkflowCreated: (wfId: string) =>
+          helpers.openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon', bypassBuildDraftGuard: true }),
+        onEditWorkflow: (wfId: string) => helpers.openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon' }),
+        onViewRun: (runId: string) => helpers.openRunDetail(runId),
+        onDraftStateChange: helpers.handleBuildDraftStateChange,
+        initialMode:
+          state.buildIntent === '__compose__' || (!state.buildWorkflowId && !state.moonRunId)
+            ? 'compose'
+            : undefined,
+      };
+    case 'route.app.manifests':
+      return {
+        onOpenManifest: (manifestId: string) => helpers.openManifest(manifestId),
+        onEditManifest: (manifestId: string) => helpers.openManifestEditor(manifestId),
+      };
+    case 'route.app.atlas':
+      return {};
+    case 'route.app.run_detail_legacy': {
+      const tab = state.dynamicTabs.find((t) => t.id === state.activeTabId);
+      return {
+        runId: tab?.runId,
+        onBack,
+      };
+    }
+    case 'route.app.manifest': {
+      const tab = state.dynamicTabs.find((t) => t.id === state.activeTabId);
+      return {
+        manifestId: tab?.manifestId,
+        tabId: tab?.manifestTabId,
+      };
+    }
+    case 'route.app.manifest_editor': {
+      const tab = state.dynamicTabs.find((t) => t.id === state.activeTabId);
+      return { manifestId: tab?.manifestId };
+    }
+    case 'route.app.compose': {
+      const tab = state.dynamicTabs.find((t) => t.id === state.activeTabId);
+      return {
+        intent: tab?.intent,
+        pillRefs: tab?.pillRefs,
+      };
+    }
+    default:
+      return {};
+  }
+}
+
 export function App() {
   const [showLauncher, setShowLauncher] = useState(() => isLauncherRoute());
 
@@ -741,3 +852,8 @@ export function App() {
     </AppErrorBoundary>
   );
 }
+
+// Re-exports retained for any callers reaching directly into App for type inference.
+export type { ShellState } from './shell/state';
+export { buildPath, buildPathForSurface, matchPath };
+export { createDefaultShellState };
