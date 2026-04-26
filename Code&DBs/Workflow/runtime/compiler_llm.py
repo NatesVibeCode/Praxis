@@ -255,14 +255,18 @@ def _resolve_app_compile_route() -> tuple[str, str]:
     return routes[0]
 
 
-def _resolve_app_compile_routes() -> list[tuple[str, str]]:
-    """Return explicit API-backed routes for the compile task_type.
+def resolve_matrix_gated_routes(
+    task_type: str,
+    *,
+    transport_type: str = "API",
+    adapter_type: str = "llm_task",
+) -> list[tuple[str, str]]:
+    """Return matrix-gated routes for a task_type, ordered by task_type_routing rank.
 
-    App compile is an explicit API exception lane. It first reads
-    `effective_private_provider_job_catalog` so breakers, transport admission,
-    credential availability, runtime-profile admission, and catalog removals
-    mechanically remove routes before the compiler sees them. `task_type_routing`
-    is joined only for explicit compile intent and rank ordering.
+    Reads `effective_private_provider_job_catalog` (the ON-only view of the
+    private_model_access_control_matrix) and joins task_type_routing for rank
+    ordering. The matrix is the ON/OFF authority; route_source is lineage only
+    and is not consulted here.
     """
     from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
     from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
@@ -274,7 +278,7 @@ def _resolve_app_compile_routes() -> list[tuple[str, str]]:
         or default_native_runtime_profile_ref(pg)
     )
     try:
-        explicit_rows = pg.fetch(
+        rows = pg.fetch(
             """
             SELECT catalog.provider_slug, catalog.model_slug
               FROM effective_private_provider_job_catalog AS catalog
@@ -283,30 +287,46 @@ def _resolve_app_compile_routes() -> list[tuple[str, str]]:
                AND route.provider_slug = catalog.provider_slug
                AND route.model_slug = catalog.model_slug
              WHERE catalog.runtime_profile_ref = $1
-               AND catalog.job_type = 'compile'
-               AND catalog.transport_type = 'API'
-               AND catalog.adapter_type = 'llm_task'
+               AND catalog.job_type = $2
+               AND catalog.transport_type = $3
+               AND catalog.adapter_type = $4
                AND route.permitted IS TRUE
-               AND route.route_source = 'explicit'
              ORDER BY route.rank ASC, route.updated_at DESC, catalog.provider_slug, catalog.model_slug
             """,
             runtime_profile_ref,
+            task_type,
+            transport_type,
+            adapter_type,
         )
     except Exception as exc:
         raise RuntimeError(
-            "effective provider job catalog could not resolve compile routes "
+            f"effective provider job catalog could not resolve {task_type} routes "
             f"for runtime_profile_ref={runtime_profile_ref!r}: {exc}"
         ) from exc
-    explicit_routes = [
+    return [
         (str(row["provider_slug"]), str(row["model_slug"]))
-        for row in explicit_rows or []
+        for row in rows or []
         if str(row.get("provider_slug") or "").strip()
         and str(row.get("model_slug") or "").strip()
     ]
-    if explicit_routes:
-        return explicit_routes
+
+
+def _resolve_app_compile_routes() -> list[tuple[str, str]]:
+    """Return matrix-gated API routes for the compile task_type."""
+    routes = resolve_matrix_gated_routes("compile")
+    if routes:
+        return routes
+    from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
+    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+
+    pool = get_workflow_pool()
+    pg = SyncPostgresConnection(pool)
+    runtime_profile_ref = (
+        os.environ.get("PRAXIS_RUNTIME_PROFILE_REF", "").strip()
+        or default_native_runtime_profile_ref(pg)
+    )
     raise RuntimeError(
-        "effective provider job catalog returned no runnable explicit API compile "
+        "effective provider job catalog returned no runnable API compile "
         f"routes for runtime_profile_ref={runtime_profile_ref!r}"
     )
 

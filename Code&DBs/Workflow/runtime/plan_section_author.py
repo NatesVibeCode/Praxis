@@ -292,34 +292,12 @@ def _coerce_packet_response(
 
 
 def _resolve_routes_for_task_type(task_type: str) -> list[tuple[str, str]]:
-    """Return route list for any task_type, ordered by rank."""
-    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+    """Return matrix-gated routes for a task_type, ordered by rank."""
+    from runtime.compiler_llm import resolve_matrix_gated_routes, _resolve_app_compile_routes
 
-    pool = get_workflow_pool()
-    pg = SyncPostgresConnection(pool)
-    try:
-        rows = pg.fetch(
-            """
-            SELECT provider_slug, model_slug
-              FROM task_type_routing
-             WHERE task_type = $1
-               AND permitted = true
-               AND route_source = 'explicit'
-             ORDER BY rank ASC, updated_at DESC
-            """,
-            task_type,
-        )
-    except Exception:
-        rows = []
-    routes = [
-        (str(row["provider_slug"]), str(row["model_slug"]))
-        for row in rows or []
-        if str(row.get("provider_slug") or "").strip()
-        and str(row.get("model_slug") or "").strip()
-    ]
+    routes = resolve_matrix_gated_routes(task_type)
     if routes:
         return routes
-    from runtime.compiler_llm import _resolve_app_compile_routes
     return _resolve_app_compile_routes()
 
 

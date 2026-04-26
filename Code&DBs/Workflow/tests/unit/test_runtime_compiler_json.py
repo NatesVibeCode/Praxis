@@ -273,7 +273,7 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
     )
 
     assert "effective_private_provider_job_catalog" in captured["catalog_query"]
-    assert captured["catalog_args"] == ("nate-private",)
+    assert captured["catalog_args"] == ("nate-private", "compile", "API", "llm_task")
     assert captured["endpoint_provider"] == "sample-broker"
     assert captured["endpoint_model"] == "vendor/some-model"
     assert captured["protocol_provider"] == "sample-broker"
@@ -376,7 +376,7 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
     )
 
     assert "effective_private_provider_job_catalog" in captured["catalog_query"]
-    assert captured["catalog_args"] == ("nate-private",)
+    assert captured["catalog_args"] == ("nate-private", "compile", "API", "llm_task")
     assert captured["calls"] == [
         ("openrouter", "deepseek/deepseek-v4-flash"),
         ("openrouter", "deepseek/deepseek-v4-pro"),
