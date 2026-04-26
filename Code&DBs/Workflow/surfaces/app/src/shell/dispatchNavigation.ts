@@ -43,7 +43,7 @@ export interface DispatchArgs {
 
 export async function dispatchShellNavigation(args: DispatchArgs): Promise<DispatchResult> {
   const body = {
-    operation_name: args.operation,
+    operation: args.operation,
     input: args.input,
     mode: 'command',
   };

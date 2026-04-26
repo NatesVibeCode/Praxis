@@ -135,7 +135,12 @@ def _surface_name_for_route(route_id: str | None) -> str | None:
 
 
 def _shell_event_payload(row: Any) -> dict[str, Any]:
-    payload = row.get("event_payload") if isinstance(row, dict) else getattr(row, "event_payload", None)
+    # asyncpg Record supports __getitem__ but is not a dict. Indexing is the
+    # universal access path; fall through to None on KeyError.
+    try:
+        payload = row["event_payload"]
+    except (KeyError, TypeError):
+        payload = None
     if isinstance(payload, str):
         import json
         try:
@@ -215,7 +220,10 @@ def _reduce_ui_shell_state(subs: Any, *, source_ref: str, **kwargs: Any) -> dict
 
     state = _default_shell_state()
     for row in rows or []:
-        event_type = row.get("event_type") if isinstance(row, dict) else row["event_type"]
+        try:
+            event_type = row["event_type"]
+        except (KeyError, TypeError):
+            continue
         payload = _shell_event_payload(row)
         state = _fold_shell_event(state, str(event_type), payload)
     return state

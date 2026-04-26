@@ -5,9 +5,12 @@ fires through ``operation_catalog_gateway`` with its own receipt and
 ``authority_events`` row, honoring architecture-policy::platform-architecture::
 conceptual-events-register-through-operation-catalog-registry.
 
-The handlers are intentionally thin: validate + normalize + return dict.
-The gateway owns receipt insertion and event emission as a side-effect of
-dispatch (event_required=TRUE on the operation_catalog_registry row).
+Handlers emit the ``authority_events`` row themselves (rather than relying on
+the gateway's generic event-shape) because the ``ui_shell_state.live``
+reducer needs the full input payload — specifically ``session_aggregate_ref``
+plus the route_id / slot_values / shell_state_diff — to fold per-browser-tab
+state. The gateway sees ``authority_event_ids`` in the handler result and
+links them to the receipt without double-emitting.
 
 Aggregate scope is ``session_aggregate_ref`` — a per-browser-tab UUID that
 the React shell stores in sessionStorage. The ``ui_shell_state.live``
@@ -16,13 +19,18 @@ each tab has an independent live state.
 """
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 
 _NavReason = Literal["click", "keyboard", "event_bus", "history_pop", "deep_link"]
 _DraftDecision = Literal["leave", "stay"]
+
+_AUTHORITY_DOMAIN_REF = "authority.surface_catalog"
 
 
 def _normalize(value: str | None, *, default: str = "") -> str:
@@ -34,6 +42,46 @@ def _normalize(value: str | None, *, default: str = "") -> str:
 
 def _normalize_caller(caller_ref: str | None) -> str:
     return _normalize(caller_ref, default="shell.unknown")
+
+
+def _emit_event(
+    subsystems: Any,
+    *,
+    event_type: str,
+    operation_ref: str,
+    aggregate_ref: str,
+    payload: dict[str, Any],
+) -> str:
+    """Insert an authority_events row with the full input payload.
+
+    Returns the event_id so the handler can hand it back through
+    ``authority_event_ids`` and the gateway skips its own emission.
+    """
+    conn = subsystems.get_pg_conn()
+    event_id = str(uuid4())
+    enriched = dict(payload)
+    enriched.setdefault("emitted_at", datetime.now(timezone.utc).isoformat())
+    conn.execute(
+        """
+        INSERT INTO authority_events (
+            event_id,
+            authority_domain_ref,
+            aggregate_ref,
+            event_type,
+            event_payload,
+            operation_ref,
+            emitted_by
+        ) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7)
+        """,
+        event_id,
+        _AUTHORITY_DOMAIN_REF,
+        aggregate_ref,
+        event_type,
+        json.dumps(enriched, sort_keys=True, default=str),
+        operation_ref,
+        "shell_navigation_handler",
+    )
+    return event_id
 
 
 # 1. shell.surface.opened ------------------------------------------------------
@@ -59,10 +107,7 @@ def handle_shell_surface_opened(
     command: ShellSurfaceOpenedCommand,
     subsystems: Any,
 ) -> dict[str, Any]:
-    del subsystems  # gateway owns receipt + event persistence
-
-    return {
-        "ok": True,
+    payload = {
         "session_aggregate_ref": _normalize(command.session_aggregate_ref),
         "route_id": _normalize(command.route_id),
         "slot_values": dict(command.slot_values),
@@ -70,6 +115,14 @@ def handle_shell_surface_opened(
         "reason": command.reason,
         "caller_ref": _normalize_caller(command.caller_ref),
     }
+    event_id = _emit_event(
+        subsystems,
+        event_type="surface.opened",
+        operation_ref="shell-surface-opened",
+        aggregate_ref=payload["session_aggregate_ref"],
+        payload=payload,
+    )
+    return {"ok": True, "authority_event_ids": [event_id], **payload}
 
 
 # 2. shell.tab.closed ----------------------------------------------------------
@@ -92,15 +145,20 @@ def handle_shell_tab_closed(
     command: ShellTabClosedCommand,
     subsystems: Any,
 ) -> dict[str, Any]:
-    del subsystems
-
-    return {
-        "ok": True,
+    payload = {
         "session_aggregate_ref": _normalize(command.session_aggregate_ref),
         "dynamic_tab_id": _normalize(command.dynamic_tab_id),
         "fallback_route_id": _normalize(command.fallback_route_id, default="route.app.dashboard"),
         "caller_ref": _normalize_caller(command.caller_ref),
     }
+    event_id = _emit_event(
+        subsystems,
+        event_type="tab.closed",
+        operation_ref="shell-tab-closed",
+        aggregate_ref=payload["session_aggregate_ref"],
+        payload=payload,
+    )
+    return {"ok": True, "authority_event_ids": [event_id], **payload}
 
 
 # 3. shell.draft.guard.consulted ----------------------------------------------
@@ -124,10 +182,7 @@ def handle_shell_draft_guard_consulted(
     command: ShellDraftGuardConsultedCommand,
     subsystems: Any,
 ) -> dict[str, Any]:
-    del subsystems
-
-    return {
-        "ok": True,
+    payload = {
         "session_aggregate_ref": _normalize(command.session_aggregate_ref),
         "decision": command.decision,
         "source_route_id": _normalize(command.source_route_id),
@@ -135,6 +190,14 @@ def handle_shell_draft_guard_consulted(
         "draft_message": _normalize(command.draft_message),
         "caller_ref": _normalize_caller(command.caller_ref),
     }
+    event_id = _emit_event(
+        subsystems,
+        event_type="draft.guard.consulted",
+        operation_ref="shell-draft-guard-consulted",
+        aggregate_ref=payload["session_aggregate_ref"],
+        payload=payload,
+    )
+    return {"ok": True, "authority_event_ids": [event_id], **payload}
 
 
 # 4. shell.history.popped -----------------------------------------------------
@@ -157,15 +220,20 @@ def handle_shell_history_popped(
     command: ShellHistoryPoppedCommand,
     subsystems: Any,
 ) -> dict[str, Any]:
-    del subsystems
-
-    return {
-        "ok": True,
+    payload = {
         "session_aggregate_ref": _normalize(command.session_aggregate_ref),
         "target_route_id": _normalize(command.target_route_id),
         "slot_values": dict(command.slot_values),
         "caller_ref": _normalize_caller(command.caller_ref),
     }
+    event_id = _emit_event(
+        subsystems,
+        event_type="history.popped",
+        operation_ref="shell-history-popped",
+        aggregate_ref=payload["session_aggregate_ref"],
+        payload=payload,
+    )
+    return {"ok": True, "authority_event_ids": [event_id], **payload}
 
 
 # 5. shell.session.bootstrapped -----------------------------------------------
@@ -188,14 +256,19 @@ def handle_shell_session_bootstrapped(
     command: ShellSessionBootstrappedCommand,
     subsystems: Any,
 ) -> dict[str, Any]:
-    del subsystems
-
-    return {
-        "ok": True,
+    payload = {
         "session_aggregate_ref": _normalize(command.session_aggregate_ref),
         "initial_route_id": _normalize(command.initial_route_id, default="route.app.dashboard"),
         "deep_link_search": _normalize(command.deep_link_search),
     }
+    event_id = _emit_event(
+        subsystems,
+        event_type="session.bootstrapped",
+        operation_ref="shell-session-bootstrapped",
+        aggregate_ref=payload["session_aggregate_ref"],
+        payload=payload,
+    )
+    return {"ok": True, "authority_event_ids": [event_id], **payload}
 
 
 __all__ = [
