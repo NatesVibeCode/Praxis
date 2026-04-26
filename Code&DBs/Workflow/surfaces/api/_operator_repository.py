@@ -16,11 +16,17 @@ import asyncpg
 from runtime.instance import (
     NativeWorkflowInstance,
     resolve_native_instance,
+    resolve_native_instance_from_connection,
 )
 from runtime.work_item_assessment import WorkItemAssessmentRecord, assess_work_items
 from runtime.work_item_clustering import cluster_bug_items, cluster_roadmap_items
 from runtime.work_item_workflow_bindings import WorkItemWorkflowBindingRecord
-from storage.postgres import connect_workflow_database
+from storage.postgres import (
+    SyncPostgresConnection,
+    connect_workflow_database,
+    get_workflow_pool,
+)
+from surfaces._workflow_database import workflow_database_env_for_repo
 from ._payload_contract import optional_text, require_text
 from ._operator_helpers import _json_compatible, _normalize_as_of, _now, _run_async
 
@@ -1757,7 +1763,13 @@ class NativeOperatorQueryFrontdoor:
         env: Mapping[str, str] | None,
     ) -> tuple[Mapping[str, str], NativeWorkflowInstance]:
         source = env if env is not None else os.environ
-        return source, resolve_native_instance(env=source)
+        resolved_source = dict(source)
+        resolved_source.update(workflow_database_env_for_repo(_repo_root(), env=source))
+        conn = SyncPostgresConnection(get_workflow_pool(env=resolved_source))
+        return resolved_source, resolve_native_instance_from_connection(
+            conn,
+            env=resolved_source,
+        )
 
     async def _fetch_issue_records(
         self,

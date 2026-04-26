@@ -244,6 +244,116 @@ def _provider_refs_from_jobs(
     return refs
 
 
+def _runtime_profile_ref_from_spec(spec, *, pg_conn) -> str | None:
+    raw_snapshot = getattr(spec, "_raw", {})
+    if isinstance(raw_snapshot, Mapping):
+        runtime_profile_ref = raw_snapshot.get("runtime_profile_ref")
+        if isinstance(runtime_profile_ref, str) and runtime_profile_ref.strip():
+            return runtime_profile_ref.strip()
+    runtime_profile_ref = getattr(spec, "runtime_profile_ref", None)
+    if isinstance(runtime_profile_ref, str) and runtime_profile_ref.strip():
+        return runtime_profile_ref.strip()
+
+    try:
+        from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
+
+        return default_native_runtime_profile_ref(pg_conn)
+    except Exception:
+        return None
+
+
+def _selected_agent_slugs(
+    spec,
+    *,
+    agent_resolution_details: list[dict[str, Any]] | None = None,
+) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    details_by_label = {
+        str(detail.get("label") or "?"): str(detail.get("resolved_slug") or "").strip()
+        for detail in agent_resolution_details or []
+    }
+    for job in getattr(spec, "jobs", ()) or ():
+        label = str(job.get("label") or "?")
+        raw_agent = str(job.get("agent") or "").strip()
+        resolved_slug = details_by_label.get(label) or raw_agent
+        provider_slug = _provider_slug_from_agent(resolved_slug)
+        if provider_slug:
+            selected[label] = resolved_slug
+    return selected
+
+
+def _preflight_runtime_profile_route_admission(
+    spec,
+    *,
+    pg_conn,
+    agent_resolution_details: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Confirm direct provider/model routes are admitted by the runtime profile."""
+
+    selected = _selected_agent_slugs(
+        spec,
+        agent_resolution_details=agent_resolution_details,
+    )
+    if not selected:
+        return []
+
+    runtime_profile_ref = _runtime_profile_ref_from_spec(spec, pg_conn=pg_conn)
+    if not runtime_profile_ref:
+        return [{
+            "kind": "runtime_profile_admission_unavailable",
+            "severity": "warning",
+            "label": None,
+            "message": "could not resolve a runtime profile for provider/model admission preflight",
+        }]
+
+    try:
+        projection_rows = pg_conn.execute(
+            """
+            SELECT provider_slug, model_slug
+            FROM runtime_profile_admitted_routes
+            WHERE runtime_profile_ref = $1
+            """,
+            runtime_profile_ref,
+        )
+    except Exception as exc:
+        return [{
+            "kind": "runtime_profile_admitted_routes_projection_unavailable",
+            "severity": "error",
+            "label": None,
+            "message": (
+                f"could not read admitted-route projection for runtime profile "
+                f"{runtime_profile_ref!r}: {type(exc).__name__}: {exc}"
+            ),
+        }]
+
+    admitted_slugs: set[str] = set()
+    for row in projection_rows or []:
+        item = _row_mapping(row)
+        provider_slug = str(item.get("provider_slug") or "").strip()
+        model_slug = str(item.get("model_slug") or "").strip()
+        if provider_slug and model_slug:
+            admitted_slugs.add(f"{provider_slug}/{model_slug}")
+    warnings: list[dict[str, Any]] = []
+    for label, selected_slug in sorted(selected.items()):
+        if selected_slug in admitted_slugs:
+            continue
+        warnings.append({
+            "kind": "runtime_profile_candidate_not_admitted",
+            "severity": "error",
+            "label": label,
+            "message": (
+                f"job '{label}' selects {selected_slug!r}, but runtime profile "
+                f"{runtime_profile_ref!r} does not admit that provider/model. "
+                "Run provider onboarding sync or fix provider_names/allowed_models "
+                "authority before submitting."
+            ),
+            "runtime_profile_ref": runtime_profile_ref,
+            "selected_slug": selected_slug,
+            "admitted_candidate_slugs": sorted(admitted_slugs),
+        })
+    return warnings
+
+
 def _preflight_provider_availability(
     spec,
     *,
@@ -733,6 +843,13 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
     preflight_warnings.extend(verification_preflight_errors)
     preflight_warnings.extend(_preflight_deterministic_builders(spec))
     preflight_warnings.extend(_preflight_provider_admissions(spec, pg_conn=pg_conn))
+    preflight_warnings.extend(
+        _preflight_runtime_profile_route_admission(
+            spec,
+            pg_conn=pg_conn,
+            agent_resolution_details=details,
+        )
+    )
     preflight_warnings.extend(
         _preflight_provider_availability(
             spec,

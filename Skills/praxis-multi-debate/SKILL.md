@@ -5,6 +5,14 @@ description: "Praxis durable debate coordination skill. Use when several debates
 
 # Praxis Multi-Debate
 
+## Current Surface Docs
+
+- MCP/catalog reference: `docs/MCP.md`
+- CLI reference: `docs/CLI.md`
+- API route reference: `docs/API.md`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
+
 ## Application Metadata
 
 | Application | Name | Description |

@@ -191,14 +191,27 @@ def test_validator_findings_have_legal_repair_actions_as_list():
 
 
 class _EventCaptureConn:
-    """Captures system_events INSERTs for emit_typed_gap verification."""
+    """Captures all INSERTs for emit_typed_gap verification.
+
+    ``events`` filters to system_events writes only — kept stable for
+    legacy count-based assertions after typed_gap_events landed dual-write
+    to authority_events as part of the Phase 2 CQRS migration.
+    """
 
     def __init__(self) -> None:
-        self.events: list[tuple[str, tuple]] = []
+        self.all_writes: list[tuple[str, tuple]] = []
 
     def execute(self, sql: str, *args):
-        self.events.append((sql, args))
+        self.all_writes.append((sql, args))
         return []
+
+    @property
+    def events(self) -> list[tuple[str, tuple]]:
+        return [
+            (sql, args)
+            for sql, args in self.all_writes
+            if "INSERT INTO system_events" in sql
+        ]
 
 
 def test_emit_typed_gaps_for_findings_returns_emitted_count():

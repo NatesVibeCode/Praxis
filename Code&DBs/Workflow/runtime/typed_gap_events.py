@@ -45,16 +45,19 @@ def emit_typed_gap(
 ) -> str | None:
     """Emit a ``typed_gap.created`` event and return the generated gap_id.
 
-    Writes through ``runtime.system_events.emit_system_event`` (observability
-    path). Formal operation_receipt-backed emission follows when the
-    emitting call sites register as operations in operation_catalog_registry
-    per architecture-policy::platform-architecture::conceptual-events-
-    register-through-operation-catalog-registry.
+    Dual-writes during the CQRS transition:
+      1. ``authority_events`` — canonical CQRS stream (authority_event_contracts
+         row registered in migration 226). New consumers read here. Per
+         architecture-policy::event-architecture::authority-events-canonical-
+         source-for-receipt-backed-conceptual-events filed 2026-04-24.
+      2. ``runtime.system_events.emit_system_event`` — sidecar observability
+         path. Existing consumers (Moon observability, replay tooling) still
+         read here. Removed once they migrate.
 
-    Best-effort: returns ``None`` on emission failure (module import or
-    per-call exception). Callers that care about durability check the
-    return value; callers that don't can ignore it — the observable
-    effect at the surface level is the same.
+    Best-effort: returns ``None`` if BOTH writes fail (module import or
+    per-call exception on every path). A failure on one path does not
+    block the other — the gap is still surfaced through the surviving
+    stream.
     """
     gap_id = f"typed_gap.{uuid.uuid4().hex[:16]}"
     payload: dict[str, Any] = {
@@ -66,21 +69,89 @@ def emit_typed_gap(
         "source_ref": None if source_ref is None else str(source_ref),
         "context": dict(context or {}),
     }
+    authority_event_written = _write_typed_gap_to_authority_events(
+        conn,
+        gap_id=gap_id,
+        payload=payload,
+        source_ref=source_ref,
+    )
+    sidecar_written = False
     try:
         from runtime.system_events import emit_system_event
     except Exception:
-        return None
-    try:
-        emit_system_event(
-            conn,
-            event_type="typed_gap.created",
-            source_id=gap_id,
-            source_type="typed_gap",
-            payload=payload,
-        )
-    except Exception:
+        emit_system_event = None  # type: ignore[assignment]
+    if emit_system_event is not None:
+        try:
+            emit_system_event(
+                conn,
+                event_type="typed_gap.created",
+                source_id=gap_id,
+                source_type="typed_gap",
+                payload=payload,
+            )
+            sidecar_written = True
+        except Exception:
+            sidecar_written = False
+    if not authority_event_written and not sidecar_written:
         return None
     return gap_id
+
+
+def _write_typed_gap_to_authority_events(
+    conn: Any,
+    *,
+    gap_id: str,
+    payload: dict[str, Any],
+    source_ref: str | None,
+) -> bool:
+    """Write the typed_gap.created event directly to authority_events.
+
+    operation_ref is set to the source_ref (the calling operation, e.g.
+    'compose_plan_from_intent:smoke_test') when provided; otherwise the
+    synthetic 'typed_gap.emit' fallback so the foreign key constraint on
+    operation_ref still validates against operation_catalog_registry-style
+    refs. receipt_id is left NULL — gap emission is not gateway-dispatched
+    today; that follow-up is the second half of CQRS migration.
+    """
+    try:
+        import json as _json
+    except Exception:
+        return False
+    operation_ref = (source_ref or "typed_gap.emit").strip() or "typed_gap.emit"
+    try:
+        execute = getattr(conn, "execute", None)
+        if execute is None:
+            return False
+        execute(
+            """
+            INSERT INTO authority_events (
+                event_id,
+                authority_domain_ref,
+                aggregate_ref,
+                event_type,
+                event_payload,
+                operation_ref,
+                emitted_by
+            ) VALUES (
+                gen_random_uuid(),
+                $1,
+                $2,
+                $3,
+                $4::jsonb,
+                $5,
+                $6
+            )
+            """,
+            "authority.workflow_runs",
+            gap_id,
+            "typed_gap.created",
+            _json.dumps(payload, sort_keys=True, default=str),
+            operation_ref,
+            "typed_gap_helper",
+        )
+        return True
+    except Exception:
+        return False
 
 
 def emit_typed_gaps_for_compile_errors(

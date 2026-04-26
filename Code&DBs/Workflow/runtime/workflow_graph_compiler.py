@@ -412,6 +412,72 @@ def _graph_adapter_type(job: Mapping[str, Any]) -> str:
     )
 
 
+def _provider_uses_cli_transport(
+    provider: str | None,
+    model: str | None,
+    conn: "SyncPostgresConnection | None",
+) -> bool:
+    """True iff provider_model_candidates carries a non-empty cli_config.cmd_template.
+
+    Mirrors the rule registry/agent_config.py uses to set
+    ExecutionTransport.cli on the AgentConfig. Centralising the check at
+    compile time lets the graph compiler emit cli_llm nodes for
+    subscription-auth CLI providers (codex, claude, gemini) without
+    threading the full AgentRegistry load through every caller.
+    """
+    if conn is None or not provider or not model:
+        return False
+    try:
+        rows = conn.execute(
+            """SELECT cli_config FROM provider_model_candidates
+               WHERE provider_slug = $1 AND model_slug = $2 AND status = 'active'
+               ORDER BY priority ASC, created_at DESC LIMIT 1""",
+            provider,
+            model,
+        )
+    except Exception:
+        return False
+    if not rows:
+        return False
+    raw = rows[0].get("cli_config") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(raw, Mapping):
+        return False
+    template = raw.get("cmd_template")
+    return bool(template)
+
+
+def _select_graph_adapter_type(
+    job: Mapping[str, Any],
+    *,
+    conn: "SyncPostgresConnection | None",
+) -> str:
+    """Return adapter_type, upgrading inferred llm_task to cli_llm when the
+    requested provider/model is registered as a CLI transport.
+
+    Spec authors who write `agent: openai/gpt-5-codex` (or any provider
+    whose provider_model_candidates row carries a cli_config.cmd_template)
+    get cli_llm dispatch automatically. Without the upgrade the inferred
+    llm_task default would route through the HTTP API path, which fails
+    fast for subscription-auth CLIs that have no env-var credentials.
+
+    Explicit adapter_type from the spec is honoured as-is.
+    """
+    inferred = _graph_adapter_type(job)
+    if inferred != "llm_task":
+        return inferred
+    if _as_text(job.get("adapter_type")):
+        return inferred
+    provider, model = _provider_and_model(job.get("agent"))
+    if _provider_uses_cli_transport(provider, model, conn):
+        return "cli_llm"
+    return inferred
+
+
 def _graph_regular_job_supported(job: Mapping[str, Any]) -> None:
     integration_id = str(job.get("integration_id") or "").strip().lower()
     integration_action = str(job.get("integration_action") or "").strip().lower()
@@ -541,10 +607,11 @@ def _compile_single_prompt_dispatch_graph(
     state: _CompileState,
     *,
     job: Mapping[str, Any],
+    conn: "SyncPostgresConnection | None" = None,
 ) -> None:
     label = _job_label(job, fallback="run")
     display_name = _display_name(job, fallback=label)
-    adapter_type = _graph_adapter_type(job)
+    adapter_type = _select_graph_adapter_type(job, conn=conn)
     if adapter_type not in {"cli_llm", "llm_task"}:
         raise GraphWorkflowCompileError(
             "workflow.graph_job_unsupported",
@@ -684,6 +751,7 @@ def _compile_nested_sequence(
     owner_node_id: str,
     scope_label: str,
     template_owner_node_id: str | None,
+    conn: "SyncPostgresConnection | None" = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if not jobs:
         raise GraphWorkflowCompileError(
@@ -710,7 +778,7 @@ def _compile_nested_sequence(
             )
         label_to_node_id[nested_label] = actual_node_id
         ordered.append((nested_job, nested_label, actual_node_id))
-        adapter_type = _graph_adapter_type(nested_job)
+        adapter_type = _select_graph_adapter_type(nested_job, conn=conn)
         state.add_node(
             node_id=actual_node_id,
             adapter_type=adapter_type,
@@ -824,7 +892,7 @@ def compile_graph_workflow_request(
                 "single-job graph submission requires a prompt-backed cli_llm/llm_task job or a concrete provider/model route",
                 details={"label": top_level_jobs[0].get("label")},
             )
-        _compile_single_prompt_dispatch_graph(state, job=top_level_jobs[0])
+        _compile_single_prompt_dispatch_graph(state, job=top_level_jobs[0], conn=conn)
     else:
         top_label_to_node_id: dict[str, str] = {}
         top_level_by_label: dict[str, Mapping[str, Any]] = {}
@@ -842,7 +910,7 @@ def compile_graph_workflow_request(
         for index, job in enumerate(top_level_jobs, start=1):
             label = _job_label(job, fallback=f"job_{index}")
             display_name = _display_name(job, fallback=label)
-            adapter_type = _graph_adapter_type(job)
+            adapter_type = _select_graph_adapter_type(job, conn=conn)
             if adapter_type != "control_operator":
                 _graph_regular_job_supported(job)
             inputs: dict[str, Any]
@@ -925,6 +993,7 @@ def compile_graph_workflow_request(
                         owner_node_id=label,
                         scope_label=branch_name,
                         template_owner_node_id=None,
+                        conn=conn,
                     )
                     for root_id in roots:
                         state.add_edge(
@@ -954,6 +1023,7 @@ def compile_graph_workflow_request(
                     owner_node_id=label,
                     scope_label="template",
                     template_owner_node_id=label,
+                    conn=conn,
                 )
                 continue
 

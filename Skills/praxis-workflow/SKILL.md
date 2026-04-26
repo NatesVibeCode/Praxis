@@ -5,6 +5,14 @@ description: "Praxis workflow execution skill. Use to author, validate, run, ins
 
 # Praxis Workflow
 
+## Current Surface Docs
+
+- MCP/catalog reference: `docs/MCP.md`
+- CLI reference: `docs/CLI.md`
+- API route reference: `docs/API.md`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
+
 Use this skill when the task is to author, validate, launch, inspect, or repair workflow execution in Praxis.
 
 ## Authority

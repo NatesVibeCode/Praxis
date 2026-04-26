@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from runtime.embedding_service import EmbeddingService
 
 from runtime import bug_evidence as _bug_evidence
+from runtime import proof_timeline as _proof_timeline
 from runtime.bug_evidence import (
     ALLOWED_EVIDENCE_KINDS as _ALLOWED_EVIDENCE_KINDS,
     ALLOWED_EVIDENCE_ROLES as _ALLOWED_EVIDENCE_ROLES,
@@ -34,6 +35,7 @@ from runtime.payload_coercion import json_object as _json_object, json_list as _
 _BUG_BLAST_RADIUS_WINDOW_SQL = "7 days"
 _TAG_VALUE_PATTERN = re.compile(r"[^a-z0-9._:/-]+")
 _VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
+_BUG_FILING_FALLBACK_DECISION_PREFIX = "decision.bug_tracker.filing"
 
 
 def _bug_evidence_repository(conn: "SyncPostgresConnection"):
@@ -45,6 +47,18 @@ def _bug_evidence_repository(conn: "SyncPostgresConnection"):
 def _normalize_tag_value(value: object) -> str:
     text = _TAG_VALUE_PATTERN.sub("-", str(value or "").strip().lower())
     return text.strip("-") or "none"
+
+
+def _normalize_bug_decision_ref(
+    decision_ref: object,
+    *,
+    source_kind: object,
+) -> str:
+    explicit = str(decision_ref or "").strip()
+    if explicit:
+        return explicit
+    source = _normalize_tag_value(source_kind)
+    return f"{_BUG_FILING_FALLBACK_DECISION_PREFIX}.{source}.implicit"
 
 
 def _parse_resume_context_column(raw: Any) -> dict[str, Any]:
@@ -155,6 +169,7 @@ class BugSeverity(enum.Enum):
 class BugStatus(enum.Enum):
     OPEN = "OPEN"
     IN_PROGRESS = "IN_PROGRESS"
+    FIX_PENDING_VERIFICATION = "FIX_PENDING_VERIFICATION"
     FIXED = "FIXED"
     WONT_FIX = "WONT_FIX"
     DEFERRED = "DEFERRED"
@@ -574,12 +589,9 @@ class BugTracker:
         return _bug_evidence.shared_signature_fields(current_signature, candidate_signature)
 
     def _historical_fix_evidence(self, bug_id: str) -> dict[str, Any]:
-        evidence_links = self.list_evidence(bug_id)
-        return _bug_evidence.historical_fix_evidence(
-            self._conn,
-            bug_id,
-            evidence_links,
-            load_verification_rows_fn=self._load_verification_rows,
+        return _proof_timeline.historical_fix_evidence(
+            bug_id=bug_id,
+            query_rows_fn=self._query_rows_with_error,
         )
 
     def _build_historical_fixes(
@@ -725,7 +737,10 @@ class BugTracker:
         normalized_tags = tuple(str(tag).strip() for tag in tags if str(tag).strip())
         tags_str = ",".join(normalized_tags)
         normalized_source_kind = source_kind.strip() or "dispatch"
-        normalized_decision_ref = decision_ref.strip()
+        normalized_decision_ref = _normalize_bug_decision_ref(
+            decision_ref,
+            source_kind=normalized_source_kind,
+        )
         normalized_source_issue_id = str(source_issue_id or "").strip() or None
         self._validate_bug_provenance(
             discovered_in_run_id=discovered_in_run_id,
@@ -826,11 +841,30 @@ class BugTracker:
         row = self._conn.fetchrow("SELECT * FROM bugs WHERE bug_id = $1", bug_id)
         return self._row_to_bug(row) if row else None
 
-    def update_status(self, bug_id: str, new_status: BugStatus) -> Bug | None:
+    def update_status(
+        self,
+        bug_id: str,
+        new_status: BugStatus,
+        *,
+        resolution_summary: str | None = None,
+    ) -> Bug | None:
         now = self._now()
+        summary = str(resolution_summary or "").strip() or None
         rows = self._conn.execute(
-            "UPDATE bugs SET status = $1, updated_at = $2 WHERE bug_id = $3 RETURNING *",
-            new_status.value, now, bug_id,
+            """
+            UPDATE bugs
+               SET status = $1,
+                   resolved_at = CASE WHEN $1 = ANY($5::text[]) THEN resolved_at ELSE NULL END,
+                   resolution_summary = COALESCE($4, resolution_summary),
+                   updated_at = $2
+             WHERE bug_id = $3
+             RETURNING *
+            """,
+            new_status.value,
+            now,
+            bug_id,
+            summary,
+            sorted(status.value for status in _RESOLVED_STATUSES),
         )
         return self._row_to_bug(rows[0]) if rows else None
 
@@ -931,39 +965,18 @@ class BugTracker:
         self,
         bug_id: str,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        evidence_rows, evidence_error = self._list_evidence_with_error(
-            bug_id,
-            evidence_role=EVIDENCE_ROLE_VALIDATES_FIX,
+        timeline, timeline_error = _proof_timeline.bug_proof_timeline(
+            bug_id=bug_id,
+            query_rows_fn=self._query_rows_with_error,
         )
-        if evidence_error:
-            return [], evidence_error
-        verification_refs = tuple(
-            sorted(
-                str(row.get("evidence_ref") or "").strip()
-                for row in evidence_rows
-                if str(row.get("evidence_kind") or "") == "verification_run"
-                and str(row.get("evidence_ref") or "").strip()
-            )
-        )
-        if not verification_refs:
-            return [], None
-        verification_rows, verification_error = self._load_verification_rows(
-            "verification_runs",
-            "verification_run_id",
-            verification_refs,
-        )
-        if verification_error:
-            return [], f"verification_runs.query_failed:{verification_error}"
-        return (
-            [
-                row
-                for row in evidence_rows
-                if str(row.get("evidence_kind") or "") == "verification_run"
-                and _verification_passed(
-                    verification_rows.get(str(row.get("evidence_ref") or ""), {}).get("status")
-                )
-            ],
-            None,
+        if timeline_error:
+            return [], timeline_error
+        return _proof_timeline.passed_validates_fix_entries(timeline), None
+
+    def proof_timeline(self, bug_id: str) -> tuple[list[dict[str, Any]], str | None]:
+        return _proof_timeline.bug_proof_timeline(
+            bug_id=bug_id,
+            query_rows_fn=self._query_rows_with_error,
         )
 
     def _link_evidence_if_missing(
@@ -1834,7 +1847,13 @@ class BugTracker:
         )
         return response
 
-    def resolve(self, bug_id: str, status: BugStatus) -> Bug | None:
+    def resolve(
+        self,
+        bug_id: str,
+        status: BugStatus,
+        *,
+        resolution_summary: str | None = None,
+    ) -> Bug | None:
         if status not in _RESOLVED_STATUSES:
             raise ValueError(
                 f"resolve() status must be one of {[s.value for s in _RESOLVED_STATUSES]}, got {status.value}"
@@ -1842,6 +1861,15 @@ class BugTracker:
         bug = self.get(bug_id)
         if bug is None:
             return None
+        normalized_summary = str(resolution_summary or "").strip()
+        if (
+            bug.status in _RESOLVED_STATUSES
+            and bug.status != status
+            and not normalized_summary
+        ):
+            raise ValueError(
+                "terminal-to-terminal bug status changes require a superseding resolution summary"
+            )
         if status == BugStatus.FIXED:
             proof_rows, proof_error = self._passed_validates_fix_evidence_with_error(bug_id)
             if proof_error:
@@ -1854,8 +1882,20 @@ class BugTracker:
                 )
         now = self._now()
         rows = self._conn.execute(
-            "UPDATE bugs SET status = $1, resolved_at = $2, updated_at = $3 WHERE bug_id = $4 RETURNING *",
-            status.value, now, now, bug_id,
+            """
+            UPDATE bugs
+               SET status = $1,
+                   resolved_at = $2,
+                   resolution_summary = COALESCE($5, resolution_summary),
+                   updated_at = $3
+             WHERE bug_id = $4
+             RETURNING *
+            """,
+            status.value,
+            now,
+            now,
+            bug_id,
+            normalized_summary or None,
         )
         return self._row_to_bug(rows[0]) if rows else None
 
@@ -2185,6 +2225,29 @@ class BugTracker:
         )
         if packet_ready_error:
             stats_errors.append(f"packet_ready_count.query_failed:{packet_ready_error}")
+        replay_ready_count, replay_ready_error = self._query_scalar_with_error(
+            f"""
+            SELECT COUNT(DISTINCT b.bug_id)
+              FROM bugs AS b
+              JOIN receipts AS r
+                ON NULLIF(BTRIM(r.receipt_id), '') IS NOT NULL
+               AND NULLIF(BTRIM(r.run_id), '') IS NOT NULL
+               AND (
+                    r.receipt_id = b.discovered_in_receipt_id
+                 OR EXISTS (
+                        SELECT 1
+                          FROM bug_evidence_links AS bel
+                         WHERE bel.bug_id = b.bug_id
+                           AND bel.evidence_role = 'observed_in'
+                           AND bel.evidence_kind = 'receipt'
+                           AND bel.evidence_ref = r.receipt_id
+                    )
+               )
+             WHERE {bug_status_sql_in_literal("open", column="b.status")}
+            """
+        )
+        if replay_ready_error:
+            stats_errors.append(f"replay_ready_count.query_failed:{replay_ready_error}")
         fix_verified_count, fix_verified_error = self._query_scalar_with_error(
             """
             SELECT COUNT(DISTINCT bel.bug_id)
@@ -2222,11 +2285,11 @@ class BugTracker:
             open_count=open_count,
             mttr_hours=mttr_hours,
             packet_ready_count=packet_ready_count,
-            replay_ready_count=packet_ready_count,
+            replay_ready_count=replay_ready_count,
             replay_blocked_count=(
                 None
-                if packet_ready_count is None
-                else max(open_count - int(packet_ready_count), 0)
+                if replay_ready_count is None
+                else max(open_count - int(replay_ready_count), 0)
             ),
             fix_verified_count=fix_verified_count,
             underlinked_count=underlinked_count,
@@ -2260,7 +2323,10 @@ async def afile_bug(
     normalized_category = BugTracker._normalize_category(category, default=BugCategory.OTHER)
     normalized_tags = tuple(str(tag).strip() for tag in tags if str(tag).strip())
     normalized_source_kind = source_kind.strip() or "dispatch"
-    normalized_decision_ref = decision_ref.strip()
+    normalized_decision_ref = _normalize_bug_decision_ref(
+        decision_ref,
+        source_kind=normalized_source_kind,
+    )
     normalized_source_issue_id = str(source_issue_id or "").strip() or None
     initial_resume = resume_context if isinstance(resume_context, dict) else {}
 

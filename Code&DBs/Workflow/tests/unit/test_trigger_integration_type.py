@@ -360,7 +360,7 @@ class TestWorkflowTriggerCompat:
             "payload": {"trigger_depth": 0},
         }
 
-        with patch("runtime.workflow.unified.submit_workflow_inline") as mock_submit:
+        with patch("runtime.control_commands.submit_workflow_command") as mock_submit:
             mock_submit.return_value = {"run_id": "r-new"}
             with patch("runtime.operating_model_planner.current_compiled_spec") as mock_spec:
                 mock_spec.return_value = {"name": "test", "jobs": [{"label": "j1", "prompt": "do thing"}]}

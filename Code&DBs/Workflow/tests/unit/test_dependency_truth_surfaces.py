@@ -310,7 +310,11 @@ def test_orient_projects_mandatory_authority_envelope(monkeypatch) -> None:
     assert runtime_binding["workspace"]["repo_root"] == "/repo"
 
     state_semantics = primitive_contracts["state_semantics"]["bug"]
-    assert state_semantics["open_statuses"] == ["OPEN", "IN_PROGRESS"]
+    assert state_semantics["open_statuses"] == [
+        "OPEN",
+        "IN_PROGRESS",
+        "FIX_PENDING_VERIFICATION",
+    ]
     assert state_semantics["resolved_statuses"] == ["FIXED", "WONT_FIX", "DEFERRED"]
     assert state_semantics["status_predicates"]["IN_PROGRESS"]["is_open"] is True
     assert state_semantics["status_predicates"]["WONT_FIX"]["is_resolved"] is True
@@ -409,7 +413,11 @@ def test_primitive_contract_helpers_are_secret_safe_and_predicate_backed() -> No
     assert redact_url("postgresql://user:pass@db.local:5432/praxis?sslmode=require") == (
         "postgresql://user:***@db.local:5432/praxis"
     )
-    assert bug_open_status_values() == ("OPEN", "IN_PROGRESS")
+    assert bug_open_status_values() == (
+        "OPEN",
+        "IN_PROGRESS",
+        "FIX_PENDING_VERIFICATION",
+    )
     assert bug_resolved_status_values() == ("FIXED", "WONT_FIX", "DEFERRED")
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
+from surfaces.api import _operator_repository as operator_repository
 from surfaces.api._operator_repository import NativeOperatorQueryFrontdoor
 
 
@@ -39,3 +40,54 @@ def test_roadmap_semantic_neighbors_do_not_fallback_to_embeddings_when_semantics
     assert "semantic_assertions" in conn.queries[0]
     assert "embedding" not in conn.queries[0]
     assert "<=>" not in conn.queries[0]
+
+
+def test_query_frontdoor_resolves_repo_database_authority_before_native_instance(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeInstance:
+        def to_contract(self) -> dict[str, str]:
+            return {"praxis_instance_name": "praxis"}
+
+    def _workflow_database_env_for_repo(repo_root, *, env):
+        captured["repo_root"] = repo_root
+        captured["incoming_env"] = dict(env)
+        return {
+            "WORKFLOW_DATABASE_URL": "postgresql://resolved/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "test",
+            "PATH": "/bin",
+        }
+
+    def _get_workflow_pool(*, env):
+        captured["pool_env"] = dict(env)
+        return object()
+
+    def _resolve_native_instance_from_connection(conn, *, env):
+        captured["conn"] = conn
+        captured["resolved_env"] = dict(env)
+        return _FakeInstance()
+
+    monkeypatch.setattr(
+        operator_repository,
+        "workflow_database_env_for_repo",
+        _workflow_database_env_for_repo,
+    )
+    monkeypatch.setattr(
+        operator_repository,
+        "get_workflow_pool",
+        _get_workflow_pool,
+    )
+    monkeypatch.setattr(
+        operator_repository,
+        "resolve_native_instance_from_connection",
+        _resolve_native_instance_from_connection,
+    )
+
+    source, instance = NativeOperatorQueryFrontdoor()._resolve_instance(env={"PATH": "/bin"})
+
+    assert instance.to_contract() == {"praxis_instance_name": "praxis"}
+    assert source["WORKFLOW_DATABASE_URL"] == "postgresql://resolved/praxis"
+    assert captured["incoming_env"] == {"PATH": "/bin"}
+    assert captured["resolved_env"]["WORKFLOW_DATABASE_URL"] == "postgresql://resolved/praxis"

@@ -382,7 +382,7 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
         raise ValueError(
             "usage: workflow native-operator roadmap-write "
             "--title <title> --brief <intent_brief> [--template <template>] "
-            "[--priority <p1|p2>] [--parent <roadmap_item_id>] [--slug <slug>] "
+            "[--priority <p0|p1|p2|p3>] [--parent <roadmap_item_id>] [--slug <slug>] "
             "[--depends-on <roadmap_item_id>]... [--source-bug <bug_id>] "
             "[--registry-path <repo_relative_path>]... "
             "[--decision-ref <ref>] [--item-kind <capability|initiative>] "

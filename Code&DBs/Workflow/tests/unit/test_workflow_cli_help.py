@@ -117,7 +117,7 @@ def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
     assert "file               File a new bug" in rendered
     assert "duplicate_check <query>" in rendered
     assert "attach_evidence    Attach canonical evidence to a bug" in rendered
-    assert "resolve            Mark an existing bug fixed, deferred, or won't-fix; FIXED may run verifier proof" in rendered
+    assert "resolve            Mark a bug fixed, fix-pending-verification, deferred, or won't-fix" in rendered
     assert "--category S       Filing category: SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER" in rendered
 
 

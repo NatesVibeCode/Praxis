@@ -44,7 +44,13 @@ describe('moon compose authority', () => {
     expect(summary.warning).toBe('Partial authority snapshot');
   });
 
-  it('keeps compile text anchored to workflow and Atlas authority', () => {
+  it('returns only the operator prose plus optional trigger annotation', () => {
+    // BUG-C6EE740C: the previous behavior prepended 8 lines of system
+    // context onto the user's prose, and those lines were getting compiled
+    // INTO the workflow as prose-shaped nodes. Now the function returns
+    // only what the operator typed, optionally annotated with the selected
+    // trigger label. Authority/freshness/build-control diagnostics live in
+    // the backend system prompt, not in the operator's input.
     const prose = buildAuthorityCompileProse({
       prose: 'Research leads and route good ones to sales.',
       triggerLabel: 'Manual',
@@ -57,11 +63,27 @@ describe('moon compose authority', () => {
       },
     });
 
-    expect(prose).toContain('Build this as a Praxis workflow graph');
-    expect(prose).toContain('Workflow authority: Praxis.db surface catalog.');
-    expect(prose).toContain('Atlas freshness: fresh.');
-    expect(prose).toContain('Selected trigger: Manual.');
-    expect(prose).toContain('Operator request:\nResearch leads and route good ones to sales.');
+    expect(prose).not.toContain('Build this as a Praxis workflow graph');
+    expect(prose).not.toContain('Workflow authority:');
+    expect(prose).not.toContain('Atlas freshness:');
+    expect(prose).not.toContain('Available builder controls:');
+    expect(prose).not.toContain('Operator request:');
+    expect(prose).toBe('Research leads and route good ones to sales.\n\nSelected trigger: Manual');
+  });
+
+  it('returns only the operator prose when no trigger is selected', () => {
+    const prose = buildAuthorityCompileProse({
+      prose: 'Research leads and route good ones to sales.',
+      summary: {
+        status: 'ready',
+        buildControlCount: 4,
+        atlasFreshness: 'fresh',
+        sourceAuthority: 'Praxis.db surface catalog',
+        warning: null,
+      },
+    });
+
+    expect(prose).toBe('Research leads and route good ones to sales.');
   });
 
   it('can read a direct payload when the gateway envelope is absent', () => {

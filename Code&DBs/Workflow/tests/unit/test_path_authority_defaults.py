@@ -88,3 +88,15 @@ def test_path_authority_surfaces_do_not_bake_host_specific_defaults() -> None:
         "scripts/bootstrap"
     )
     assert "postgresql://localhost:5432/praxis" not in _read("scripts/bootstrap")
+
+
+def test_ui_experience_and_indexer_paths_use_registry_authority() -> None:
+    ui_graph = _read("Code&DBs/Workflow/runtime/ui_experience_graph.py")
+    module_indexer = _read("Code&DBs/Workflow/runtime/module_indexer.py")
+
+    assert "Code&DBs/Workflow/surfaces/app/src" not in ui_graph
+    assert "Code&DBs/Workflow/runtime/atlas_graph.py" not in ui_graph
+    assert "ui_surface_file_anchor_registry" in ui_graph
+    assert "module_index_subdirs" in module_indexer
+    assert '"Code&DBs/Workflow/runtime"' not in module_indexer
+    assert '"Code&DBs/Workflow/surfaces"' not in module_indexer

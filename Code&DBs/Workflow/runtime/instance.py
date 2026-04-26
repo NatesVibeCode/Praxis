@@ -262,6 +262,46 @@ def resolve_native_instance(
             details={"message": str(exc)},
         ) from exc
 
+    return _native_instance_from_config(
+        config,
+        env=source,
+        resolved_config_path=resolved_config_path,
+    )
+
+
+def resolve_native_instance_from_connection(
+    conn: Any,
+    *,
+    env: Mapping[str, str] | None = None,
+    config_path: str | Path | None = None,
+) -> NativeWorkflowInstance:
+    """Resolve the native instance using an already-authorized Postgres connection."""
+
+    source = env if env is not None else os.environ
+    resolved_config_path = _resolve_config_path(config_path=config_path, env=source)
+    _assert_repo_local_native_contract(source)
+    try:
+        config = resolve_native_runtime_profile_config(conn=conn)
+    except NativeRuntimeProfileSyncError as exc:
+        raise _fail(
+            "native_instance.profile_unknown",
+            "native runtime profile authority is missing or invalid",
+            details={"message": str(exc)},
+        ) from exc
+
+    return _native_instance_from_config(
+        config,
+        env=source,
+        resolved_config_path=resolved_config_path,
+    )
+
+
+def _native_instance_from_config(
+    config: Any,
+    *,
+    env: Mapping[str, str],
+    resolved_config_path: Path,
+) -> NativeWorkflowInstance:
     repo_root = Path(config.repo_root).resolve()
     workdir = Path(config.workdir).resolve()
     receipts_dir = Path(config.receipts_dir).resolve()
@@ -286,22 +326,22 @@ def resolve_native_instance(
     _assert_under_repo(topology_dir, repo_root=repo_root, field_name="topology_dir")
 
     _assert_expected_text(
-        source,
+        env,
         env_name=PRAXIS_RUNTIME_PROFILE_ENV,
         actual_value=config.runtime_profile_ref,
     )
     _assert_expected_text(
-        source,
+        env,
         env_name=PRAXIS_INSTANCE_NAME_ENV,
         actual_value=config.instance_name,
     )
     _assert_expected_path(
-        source,
+        env,
         env_name=PRAXIS_RECEIPTS_DIR_ENV,
         actual_path=receipts_dir,
     )
     _assert_expected_path(
-        source,
+        env,
         env_name=PRAXIS_TOPOLOGY_DIR_ENV,
         actual_path=topology_dir,
     )
@@ -382,4 +422,5 @@ __all__ = [
     "NativeInstanceResolutionError",
     "native_instance_contract",
     "resolve_native_instance",
+    "resolve_native_instance_from_connection",
 ]

@@ -37,19 +37,29 @@ if ! command -v security >/dev/null 2>&1; then
 fi
 
 # Enumerate services under account="praxis". dump-keychain prints entries
-# in a multi-line format; we pair svce with its immediately-following acct.
+# as multi-line blocks separated by "keychain:" headers; svce and acct
+# can appear in either order within a block, so collect both per-entry
+# and emit only when acct == "praxis".
 services=$(security dump-keychain 2>/dev/null \
   | awk '
+      function flush() {
+        if (svce != "" && acct == "praxis") print svce
+        svce=""; acct=""
+      }
+      /^keychain:/ { flush() }
       /"svce"<blob>=/ {
-        sub(/.*"svce"<blob>="/, "")
-        sub(/"$/, "")
-        svce=$0
-        next
+        line=$0
+        sub(/.*"svce"<blob>="/, "", line)
+        sub(/"$/, "", line)
+        svce=line
       }
-      /"acct"<blob>="praxis"/ {
-        if (svce != "") print svce
-        svce=""
+      /"acct"<blob>=/ {
+        line=$0
+        sub(/.*"acct"<blob>="/, "", line)
+        sub(/"$/, "", line)
+        acct=line
       }
+      END { flush() }
     ' \
   | sort -u)
 

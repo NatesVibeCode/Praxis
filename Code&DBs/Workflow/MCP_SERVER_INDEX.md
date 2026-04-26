@@ -12,7 +12,9 @@ Key files:
 - `surfaces/mcp/protocol.py` — JSON-RPC transport and MCP notifications
 - `surfaces/mcp/catalog.py` — shared MCP tool catalog authority for `surfaces/mcp/tools/`
 - `surfaces/mcp/tools/workflow.py` — async workflow contract
-- `docs/MCP.md` — generated tool reference from the shared catalog metadata
+- `docs/MCP.md` — generated MCP tool reference from the shared catalog metadata
+- `docs/CLI.md` — generated CLI entrypoint reference from the same catalog metadata
+- `docs/API.md` — generated HTTP route reference from the live FastAPI route catalog
 - `surfaces/cli/main.py` — canonical CLI frontdoor for `workflow ...`
 
 ## Workflow Contract
@@ -36,6 +38,7 @@ The same catalog-backed inventory is visible from the terminal:
 - `workflow tools search <text> [--exact]`
 - `workflow tools describe <tool>`
 - `workflow tools call <tool> --input-json '{...}'`
+- `workflow routes --json`
 - each subcommand also accepts `--help`
 
 Curated read-mostly aliases remain flat:

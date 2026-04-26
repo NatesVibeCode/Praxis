@@ -75,24 +75,20 @@ export function summarizeComposeAuthority(
 }
 
 export function buildAuthorityCompileProse(input: ComposeAuthorityInput): string {
+  // BUG-C6EE740C fix: previously this function prepended 8 lines of system
+  // context ("Build this as a Praxis workflow graph...", "Workflow authority:
+  // ...", "Atlas freshness: ...", etc.) onto the operator's prose before
+  // sending to the compiler. The backend compile_prose has its own system
+  // prompt with the full catalog and routing rules; the prepended meta-prose
+  // got compiled INTO the workflow as prose-shaped nodes (system instructions
+  // became workflow nodes). Now this function returns ONLY the operator's
+  // prose, optionally annotated with the selected trigger label as the
+  // operator typed it. All authority/freshness/build-control diagnostics
+  // belong in the system prompt, not the user's input.
   const prose = input.prose.trim();
   const trigger = input.triggerLabel?.trim();
-  const summary = input.summary;
-  const authority = summary?.sourceAuthority || 'Praxis workflow build authority';
-  const atlasFreshness = summary?.atlasFreshness || 'unknown';
-  const controlCount = summary?.buildControlCount;
-
-  const lines = [
-    'Build this as a Praxis workflow graph, not as loose prose.',
-    `Workflow authority: ${authority}.`,
-    `Atlas freshness: ${atlasFreshness}.`,
-    controlCount === null ? null : `Available builder controls: ${controlCount}.`,
-    trigger ? `Selected trigger: ${trigger}.` : null,
-    'Use explicit nodes, edges, inputs, outputs, route intent, release conditions, and verification points.',
-    'Prefer small progressive units that can be inspected, released through the workflow engine, and represented in Atlas.',
-    'Operator request:',
-    prose,
-  ];
-
-  return lines.filter((line): line is string => Boolean(line)).join('\n');
+  if (trigger) {
+    return `${prose}\n\nSelected trigger: ${trigger}`;
+  }
+  return prose;
 }

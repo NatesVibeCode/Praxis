@@ -59,11 +59,26 @@
   color: var(--moon-fg-muted);
   pointer-events: none;
   max-width: 22ch;
-  white-space: normal;
+  /* Clamp to 2 lines with ellipsis so long prose titles can not collide
+     with neighboring nodes / edges / chips (BUG-FA546993). The non-webkit
+     fallback uses overflow-wrap so older browsers still wrap predictably. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
   word-break: normal;
   overflow-wrap: break-word;
   opacity: 0.86;
   transition: opacity 200ms ease, color 200ms ease;
+}
+
+/* Hover reveals the full label when truncated — drops the line-clamp so
+   the operator can read long titles without losing the compact layout. */
+.moon-graph-node:hover .moon-graph-node__label {
+  -webkit-line-clamp: unset;
+  display: block;
+  white-space: normal;
 }
 
 .moon-graph-node:hover .moon-graph-node__label {

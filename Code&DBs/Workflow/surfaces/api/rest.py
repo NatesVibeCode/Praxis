@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,7 +35,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, Security
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -1749,6 +1750,168 @@ def atlas_graph() -> JSONResponse:
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
             "Pragma": "no-cache",
+        },
+    )
+
+
+_ATLAS_GRAPH_STREAM_SLEEP_S = 1.0
+_ATLAS_GRAPH_STREAM_KEEPALIVE_S = 15.0
+
+
+def _atlas_graph_stream_cursor(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
+
+
+def _atlas_graph_event_source_ids(envelope: object, row: Any) -> list[str]:
+    row_data = dict(row)
+    if isinstance(envelope, str):
+        try:
+            envelope = json.loads(envelope)
+        except json.JSONDecodeError:
+            envelope = {}
+    if not isinstance(envelope, dict):
+        envelope = {}
+    payload = envelope.get("payload")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    source_ids = {
+        row_data.get("workflow_id"),
+        row_data.get("run_id"),
+        row_data.get("request_id"),
+        envelope.get("workflow_id"),
+        envelope.get("run_id"),
+        envelope.get("request_id"),
+        envelope.get("node_id"),
+        payload.get("workflow_id"),
+        payload.get("run_id"),
+        payload.get("job_label"),
+        payload.get("node_id"),
+        payload.get("submission_id"),
+    }
+    for key in ("changed_paths", "artifact_refs", "primary_paths"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            source_ids.update(item for item in value if isinstance(item, str))
+    return sorted(str(item).strip() for item in source_ids if str(item or "").strip())
+
+
+def _atlas_graph_event_payload(row: Any) -> dict[str, Any]:
+    row_data = dict(row)
+    envelope = row_data.get("envelope")
+    if isinstance(envelope, str):
+        try:
+            envelope_obj = json.loads(envelope)
+        except json.JSONDecodeError:
+            envelope_obj = {}
+    elif isinstance(envelope, dict):
+        envelope_obj = envelope
+    else:
+        envelope_obj = {}
+    payload = envelope_obj.get("payload") if isinstance(envelope_obj, dict) else {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    captured_at = _atlas_graph_stream_cursor(row_data.get("captured_at"))
+    return {
+        "authority_table": row_data.get("authority_table"),
+        "authority_id": row_data.get("authority_id"),
+        "envelope_kind": row_data.get("envelope_kind"),
+        "workflow_id": row_data.get("workflow_id"),
+        "run_id": row_data.get("run_id"),
+        "request_id": row_data.get("request_id"),
+        "event_type": envelope_obj.get("event_type") if isinstance(envelope_obj, dict) else None,
+        "reason_code": envelope_obj.get("reason_code") if isinstance(envelope_obj, dict) else None,
+        "node_id": envelope_obj.get("node_id") if isinstance(envelope_obj, dict) else None,
+        "evidence_seq": row_data.get("evidence_seq"),
+        "transition_seq": row_data.get("transition_seq"),
+        "captured_at": captured_at,
+        "authority_recorded_at": _atlas_graph_stream_cursor(row_data.get("authority_recorded_at")),
+        "source_ids": _atlas_graph_event_source_ids(envelope_obj, row_data),
+        "changed_paths": payload.get("changed_paths") if isinstance(payload.get("changed_paths"), list) else [],
+        "artifact_refs": payload.get("artifact_refs") if isinstance(payload.get("artifact_refs"), list) else [],
+    }
+
+
+def _atlas_graph_outbox_rows(conn: Any, *, after_captured_at: str | None, limit: int = 50) -> list[Any]:
+    return conn.fetch(
+        """
+        SELECT
+            authority_table,
+            authority_id,
+            envelope_kind,
+            workflow_id,
+            run_id,
+            request_id,
+            evidence_seq,
+            transition_seq,
+            authority_recorded_at,
+            captured_at,
+            envelope
+        FROM workflow_outbox
+        WHERE ($1::timestamptz IS NULL OR captured_at > $1::timestamptz)
+        ORDER BY captured_at ASC, authority_table ASC, authority_id ASC
+        LIMIT $2
+        """,
+        after_captured_at,
+        limit,
+    )
+
+
+@app.get("/api/atlas/graph/stream")
+def atlas_graph_stream(request: Request, after: str | None = Query(default=None)) -> StreamingResponse:
+    """Stream Atlas-relevant committed workflow evidence from the DB outbox."""
+    subsystems = _ensure_shared_subsystems(app)
+    if subsystems is None:
+        raise HTTPException(status_code=503, detail="shared subsystems unavailable")
+
+    def _stream():
+        conn = subsystems.get_pg_conn()
+        cursor = _atlas_graph_stream_cursor(after or request.headers.get("last-event-id"))
+        if cursor is None:
+            cursor = _atlas_graph_stream_cursor(
+                conn.fetchval("SELECT MAX(captured_at) FROM workflow_outbox")
+            )
+
+        last_keepalive = time.monotonic()
+        while True:
+            rows = _atlas_graph_outbox_rows(conn, after_captured_at=cursor)
+            if rows:
+                for row in rows:
+                    payload = _atlas_graph_event_payload(row)
+                    cursor = payload.get("captured_at") or cursor
+                    yield f"id: {cursor}\n"
+                    yield f"data: {json.dumps(jsonable_encoder(payload), sort_keys=True)}\n\n"
+                last_keepalive = time.monotonic()
+                continue
+
+            now = time.monotonic()
+            if now - last_keepalive >= _ATLAS_GRAPH_STREAM_KEEPALIVE_S:
+                yield ": keepalive\n\n"
+                last_keepalive = now
+            time.sleep(_ATLAS_GRAPH_STREAM_SLEEP_S)
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         },
     )
 

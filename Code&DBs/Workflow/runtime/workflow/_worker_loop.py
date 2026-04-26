@@ -243,6 +243,12 @@ def _advance_background_workflow_chains(conn: "SyncPostgresConnection") -> int:
     return advance_workflow_chains(conn)
 
 
+def _evaluate_ready_specs(conn: "SyncPostgresConnection") -> int:
+    from runtime.workflow.ready_specs import evaluate_ready_specs
+
+    return evaluate_ready_specs(conn)
+
+
 def _list_ready_graph_runs(
     conn: "SyncPostgresConnection",
     *,
@@ -468,6 +474,13 @@ def run_worker_loop(
                 logger.info("Trigger evaluator fired %d workflow(s)", fired)
         except Exception as exc:
             logger.warning("Trigger evaluation failed: %s", exc, exc_info=True)
+
+        try:
+            ready_fired = _evaluate_ready_specs(conn)
+            if ready_fired:
+                logger.info("Ready-spec evaluator fired %d workflow(s)", ready_fired)
+        except Exception as exc:
+            logger.warning("Ready-spec evaluation failed: %s", exc, exc_info=True)
 
         try:
             advanced = _advance_background_workflow_chains(conn)

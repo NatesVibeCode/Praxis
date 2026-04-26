@@ -5,6 +5,14 @@ description: "Praxis-adjacent recruiter discovery skill. Use for ATS-backed job 
 
 # Praxis Job Finding Two Pass
 
+## Current Surface Docs
+
+- MCP/catalog reference: `docs/MCP.md`
+- CLI reference: `docs/CLI.md`
+- API route reference: `docs/API.md`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
+
 Use this skill for recruiter discovery work.
 
 ## Mission

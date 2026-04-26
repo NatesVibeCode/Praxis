@@ -141,6 +141,7 @@ def test_operation_query_roadmap_tree_dispatch(monkeypatch: Any) -> None:
     assert captured["root_roadmap_item_id"] == "roadmap_item.test.root"
     assert captured["semantic_neighbor_limit"] == 5
     assert captured["include_completed_nodes"] is True
+    assert captured["env"] == {"WORKFLOW_DATABASE_URL": "postgresql://example/praxis"}
 
     captured.clear()
     result = handle_query_roadmap_tree(

@@ -165,6 +165,22 @@ class TestStatusTransitions:
         assert updated is not None
         assert updated.status == BugStatus.IN_PROGRESS
 
+    def test_update_status_can_mark_fix_pending_verification(
+        self,
+        tracker: BugTracker,
+        sample_bug: Bug,
+    ):
+        updated = tracker.update_status(
+            sample_bug.bug_id,
+            BugStatus.FIX_PENDING_VERIFICATION,
+            resolution_summary="Fix landed; waiting for verifier proof.",
+        )
+
+        assert updated is not None
+        assert updated.status == BugStatus.FIX_PENDING_VERIFICATION
+        assert updated.resolved_at is None
+        assert updated.resolution_summary == "Fix landed; waiting for verifier proof."
+
     def test_update_missing_returns_none(self, tracker: BugTracker):
         assert tracker.update_status("BUG-NOPE", BugStatus.OPEN) is None
 
@@ -197,12 +213,86 @@ class TestResolve:
         assert resolved is not None
         assert resolved.status == BugStatus.DEFERRED
 
+    def test_terminal_to_terminal_changes_require_superseding_summary(
+        self,
+        tracker: BugTracker,
+        sample_bug: Bug,
+    ):
+        _link_validates_fix_evidence(tracker, sample_bug.bug_id)
+        fixed = tracker.resolve(
+            sample_bug.bug_id,
+            BugStatus.FIXED,
+            resolution_summary="Verifier proved the fix.",
+        )
+        assert fixed is not None
+        assert fixed.status == BugStatus.FIXED
+
+        with pytest.raises(ValueError, match="superseding resolution summary"):
+            tracker.resolve(sample_bug.bug_id, BugStatus.DEFERRED)
+
+        deferred = tracker.resolve(
+            sample_bug.bug_id,
+            BugStatus.DEFERRED,
+            resolution_summary="Superseded: the original bug still needs manifest support.",
+        )
+        assert deferred is not None
+        assert deferred.status == BugStatus.DEFERRED
+        assert (
+            deferred.resolution_summary
+            == "Superseded: the original bug still needs manifest support."
+        )
+
+    def test_terminal_to_terminal_guard_does_not_depend_on_database_fixture(self):
+        now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
+
+        class _TerminalBugConn:
+            def fetchrow(self, query: str, *params: object):
+                assert "SELECT * FROM bugs" in query
+                assert params == ("BUG-TERMINAL",)
+                return {
+                    "bug_id": "BUG-TERMINAL",
+                    "bug_key": "bug_terminal",
+                    "title": "Terminal transition guard",
+                    "severity": "P2",
+                    "status": "FIXED",
+                    "priority": "P2",
+                    "category": "RUNTIME",
+                    "description": "Terminal transitions need superseding context.",
+                    "summary": "Terminal transitions need superseding context.",
+                    "opened_at": now,
+                    "updated_at": now,
+                    "resolved_at": now,
+                    "created_at": now,
+                    "filed_by": "test",
+                    "assigned_to": None,
+                    "tags": "",
+                    "source_kind": "manual",
+                    "discovered_in_run_id": None,
+                    "discovered_in_receipt_id": None,
+                    "owner_ref": None,
+                    "source_issue_id": None,
+                    "decision_ref": "decision.test",
+                    "resolution_summary": "Original verifier passed.",
+                    "resume_context": {},
+                }
+
+            def execute(self, query: str, *params: object):
+                raise AssertionError("guard should fail before mutating terminal status")
+
+        tracker = BugTracker(_TerminalBugConn())
+
+        with pytest.raises(ValueError, match="superseding resolution summary"):
+            tracker.resolve("BUG-TERMINAL", BugStatus.DEFERRED)
+
     def test_resolve_rejects_invalid_status(self, tracker: BugTracker, sample_bug: Bug):
         with pytest.raises(ValueError, match="resolve"):
             tracker.resolve(sample_bug.bug_id, BugStatus.OPEN)
 
         with pytest.raises(ValueError, match="resolve"):
             tracker.resolve(sample_bug.bug_id, BugStatus.IN_PROGRESS)
+
+        with pytest.raises(ValueError, match="resolve"):
+            tracker.resolve(sample_bug.bug_id, BugStatus.FIX_PENDING_VERIFICATION)
 
     def test_resolve_fixed_requires_validates_fix_evidence(
         self,
@@ -575,9 +665,14 @@ class TestStats:
 
         def _query_scalar_with_error(query: str, *params: object):
             if "FROM bugs AS b" in query and "discovered_in_run_id IS NOT NULL" in query:
-                if "UPPER(b.status) IN ('OPEN', 'IN_PROGRESS')" in query:
+                if (
+                    "UPPER(b.status) IN "
+                    "('OPEN', 'IN_PROGRESS', 'FIX_PENDING_VERIFICATION')" in query
+                ):
                     return 1, None
                 return 5, None
+            if "JOIN receipts AS r" in query:
+                return 0, None
             return original(query, *params)
 
         monkeypatch.setattr(tracker, "_query_scalar_with_error", _query_scalar_with_error)
@@ -586,8 +681,30 @@ class TestStats:
 
         assert stats.open_count >= 2
         assert stats.packet_ready_count == 1
+        assert stats.replay_ready_count == 0
+        assert stats.replay_blocked_count == stats.open_count
+
+    def test_stats_counts_replay_ready_from_explicit_receipt_context(
+        self,
+        tracker: BugTracker,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        original = tracker._query_scalar_with_error
+
+        def _query_scalar_with_error(query: str, *params: object):
+            if "FROM bugs AS b" in query and "discovered_in_run_id IS NOT NULL" in query:
+                return 3, None
+            if "JOIN receipts AS r" in query:
+                return 1, None
+            return original(query, *params)
+
+        monkeypatch.setattr(tracker, "_query_scalar_with_error", _query_scalar_with_error)
+
+        stats = tracker.stats()
+
+        assert stats.packet_ready_count == 3
         assert stats.replay_ready_count == 1
-        assert stats.replay_blocked_count == stats.open_count - 1
+        assert stats.replay_blocked_count == max(stats.open_count - 1, 0)
 
 
 # ── MTTR ───────────────────────────────────────────────────────────────
