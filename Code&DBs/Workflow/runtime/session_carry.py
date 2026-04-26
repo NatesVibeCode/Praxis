@@ -346,10 +346,15 @@ def build_interaction_pack(
         max_items=max_items,
     )
     if effective_provider_job_catalog is not None:
-        sections = _filter_sections_for_effective_catalog(
+        kept_sections, stripped_items = _filter_sections_for_effective_catalog(
             sections,
             effective_provider_job_catalog=effective_provider_job_catalog,
         )
+        if stripped_items:
+            annotated = tuple(f"[blocked route] {item}" for item in stripped_items)
+            kept_sections = dict(kept_sections)
+            kept_sections["risks"] = kept_sections.get("risks", ()) + annotated
+        sections = kept_sections
     if not any(sections.values()):
         return None
 
@@ -391,7 +396,7 @@ def filter_pack_for_effective_provider_catalog(
     effective_provider_job_catalog: Sequence[Mapping[str, Any] | Any],
 ) -> CarryForwardPack:
     """Remove stale provider/model routing guidance from a carry-forward pack."""
-    sections = _filter_sections_for_effective_catalog(
+    kept_sections, stripped_items = _filter_sections_for_effective_catalog(
         {
             "decisions": list(pack.decisions),
             "open_questions": list(pack.open_questions),
@@ -402,15 +407,19 @@ def filter_pack_for_effective_provider_catalog(
         },
         effective_provider_job_catalog=effective_provider_job_catalog,
     )
+    if stripped_items:
+        annotated = tuple(f"[blocked route] {item}" for item in stripped_items)
+        kept_sections = dict(kept_sections)
+        kept_sections["risks"] = kept_sections.get("risks", ()) + annotated
     filtered = CarryForwardPack(
         pack_id=pack.pack_id,
         objective=pack.objective,
-        decisions=tuple(sections["decisions"]),
-        open_questions=tuple(sections["open_questions"]),
-        constraints=tuple(sections["constraints"]),
-        risks=tuple(sections["risks"]),
-        artifacts=tuple(sections["artifacts"]),
-        next_actions=tuple(sections["next_actions"]),
+        decisions=tuple(kept_sections["decisions"]),
+        open_questions=tuple(kept_sections["open_questions"]),
+        constraints=tuple(kept_sections["constraints"]),
+        risks=tuple(kept_sections["risks"]),
+        artifacts=tuple(kept_sections["artifacts"]),
+        next_actions=tuple(kept_sections["next_actions"]),
         created_at=pack.created_at,
         token_estimate=0,
     )
@@ -492,16 +501,25 @@ def _filter_sections_for_effective_catalog(
     sections: Mapping[str, Sequence[str]],
     *,
     effective_provider_job_catalog: Sequence[Mapping[str, Any] | Any],
-) -> dict[str, Tuple[str, ...]]:
+) -> tuple[dict[str, Tuple[str, ...]], Tuple[str, ...]]:
+    """Returns (kept_sections, stripped_items).
+
+    stripped_items is a flat tuple of items removed because their route hints
+    are not admitted by the effective catalog.  Callers may surface these as
+    annotated risk entries so agents can see that a provider disappeared due to
+    catalog/circuit state rather than context loss.
+    """
     policy = _catalog_policy(effective_provider_job_catalog)
-    return {
-        key: tuple(
-            item
-            for item in values
-            if _carry_item_allowed_by_catalog(str(item), policy)
-        )
-        for key, values in sections.items()
-    }
+    kept: dict[str, list[str]] = {key: [] for key in sections}
+    stripped: list[str] = []
+    for key, values in sections.items():
+        for item in values:
+            text = str(item)
+            if _carry_item_allowed_by_catalog(text, policy):
+                kept[key].append(text)
+            else:
+                stripped.append(text)
+    return {key: tuple(vals) for key, vals in kept.items()}, tuple(stripped)
 
 
 def _catalog_policy(

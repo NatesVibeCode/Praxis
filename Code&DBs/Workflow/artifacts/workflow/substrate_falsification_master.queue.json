@@ -1,0 +1,125 @@
+{
+  "name": "substrate-falsification-master",
+  "outcome_goal": "Build the substrate-thesis falsification chain end-to-end so the long-tail compression hypothesis is decided by data, not opinion. Anchor decision: decision.2026-04-26.system-of-record-for-ai-mediated-work-substrate. Five sprints land: A1 stub authority resolver (resolve_authority over hardcoded rules emitting field_authority_resolved authority_events) plus operation-row registration; A3 five-conflict fixture pack with parametrized pytest; C1 workflow_run_metrics table plus compile/gate/rebind counter wiring; C2 pure-Python bug_resolution baseline that imports zero Praxis runtime modules and emits a comparable JSON receipt; C3 compression harness that runs N iterations of each path, computes medians, and emits a comparison.completed authority event; C4 part 1 executes the demo with N=10; C4 part 2 reads the compression_factor and autonomously files one of three operator_decisions (success / narrowed-scope / thesis-pivot, where pivot also supersedes the substrate decision and retires the six linked roadmap items). All writes go through praxis tools (operator_decisions, operator_write, operation_catalog_gateway). DB authority resolved through workflow registry, never a hardcoded DSN.",
+  "task_type": "build",
+  "agent": "anthropic/claude-sonnet-4-6",
+  "workdir": ".",
+  "authoring_contract": {"artifact_kind": "code"},
+  "acceptance_contract": {
+    "verify_refs": [
+      "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/runtime/test_authority_resolver.py' -v",
+      "praxis workflow tools call praxis_audit_primitive --input-json '{\"primitive\":\"authority_events\",\"filter\":{\"event_type\":\"comparison.completed\"},\"limit\":1}' --yes",
+      "praxis workflow tools call praxis_operator_decisions --input-json '{\"action\":\"list\",\"decision_kind\":\"architecture_policy\"}' --yes"
+    ]
+  },
+  "anti_requirements": [
+    "No raw SQL command-line invocations or hardcoded DSN strings in any new file. DB authority is resolved through the workflow registry and the praxis tool surfaces (praxis_query, praxis_audit_primitive, praxis_operator_decisions, praxis_operator_write).",
+    "No imports from runtime/, adapters/, registry/, or memory/ inside the C2 hand-coded baseline. The fairness of the compression demo depends on the baseline being a minimal honest reference with zero Praxis primitives.",
+    "No human-review gates anywhere in the chain. All branches in C4 part 2 must auto-resolve via operator_decisions writes (per autonomous-first standing order).",
+    "No promotion of the authority resolver to the data-driven A2 primitive within this workflow. A2 is gated on the C4 outcome and lives outside this run.",
+    "No cartridge packaging work (B1-B4) within this workflow. Cartridge is gated on C4 ≥10x and lives in a separate workflow.",
+    "No reshape of receipt_meta — that table is frozen per migration_authority. New counters live on a new workflow_run_metrics table.",
+    "No new gap table for sub-threshold authority resolutions. Use the existing typed_gap mechanism via _insert_authority_event."
+  ],
+  "jobs": [
+    {
+      "sprint": 1,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "A1 — Authority resolver stub. Create runtime/authority_resolver.py exposing a Resolution dataclass (winning_source, confidence, evidence, reasoning, sub_threshold) and resolve_authority(object_kind, field_path, moment, context) -> Resolution. Resolver mirrors the MatchStrategy/MatchResult/MatchStep shape from memory/entity_resolver.py:14-178 — REUSE the pattern, do not recreate. Pick winner from a hardcoded rules table in runtime/authority_resolver_rules.py with at least 6 (object_kind, field_path) entries spanning all three source kinds (system_of_record, prior_workflow_output, human_on_call). Cover at least 2 (object_kind, field_path) pairs that bug_resolution_program touches. Each resolution writes one authority_events row of event_type='field_authority_resolved' via the existing _insert_authority_event path in runtime/operation_catalog_gateway.py:345-390 — do not create a new event-emission path. Sub-threshold confidence emits event_type='field_authority_human_gate' through the same gateway. Idempotency: deterministic UUIDv5 in idempotency_key keyed by (object_kind, field_path, moment, input_hash). Write a new migration in Code&DBs/Databases/migrations/workflow/ at the next available number registering the field_authority_resolved operation row in operation_catalog_registry; use migration 248 as template and the register_operation_atomic helper from migration 239. Register the new migration in system_authority/workflow_migration_authority.json. Boundaries: do NOT modify intent_binding.py, do NOT add columns to authority_events or integration_registry, do NOT wire predicate-driven thresholds, do NOT read authority_events history as a source kind — those are deferred to A2."
+      },
+      "context_sections": [
+        "memory/entity_resolver.py",
+        "runtime/operation_catalog_gateway.py",
+        "../Databases/migrations/workflow/200_cqrs_authority_kernel.sql",
+        "../Databases/migrations/workflow/166_data_dictionary_authority.sql",
+        "../Databases/migrations/workflow/239_register_operation_atomic_helper.sql",
+        "../Databases/migrations/workflow/248_register_plan_authoring_operations.sql",
+        "../artifacts/workflow/bug_resolution_program_packet_template_20260423.queue.json",
+        "system_authority/workflow_migration_authority.json"
+      ]
+    },
+    {
+      "sprint": 1,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "C1 — Workflow run metrics. Add a new migration in Code&DBs/Databases/migrations/workflow/ creating a workflow_run_metrics table keyed by run_id with three INT counter columns (compile_iterations, gate_confirmations, rebind_count) defaulting to 0, plus created_at and updated_at timestamps. Pattern after migration 021_receipt_meta_telemetry.sql. Register the new migration in system_authority/workflow_migration_authority.json. Extend runtime/compile_observability.py:CompileRunTrace (around line 74) to accumulate compile_iterations and rebind_count and UPSERT to workflow_run_metrics on trace finalize. In runtime/operations/commands/plan_orchestration.py increment gate_confirmations on each approval-gate-satisfied event and UPSERT. Add a new query module under runtime/operations/queries/ following an existing pattern that surfaces the three counters per run for run-status reads. Counter writes must be UPSERT (idempotent on re-run). Auto-resolved approval gates count as 1 confirmation per the autonomous-first standing order. Boundaries: additive only — do NOT reshape existing receipt_meta columns; the new counters live on the new table, NOT as new columns on receipt_meta. Independent of A1; runs in parallel."
+      },
+      "context_sections": [
+        "runtime/compile_observability.py",
+        "runtime/operations/commands/plan_orchestration.py",
+        "storage/migrations.py",
+        "system_authority/workflow_migration_authority.json",
+        "../Databases/migrations/workflow/021_receipt_meta_telemetry.sql"
+      ]
+    },
+    {
+      "sprint": 1,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "C2 — Hand-coded pure-Python bug-resolution baseline. This is the comparison denominator and the fairness invariant of the falsification gate. Write Code&DBs/Workflow/scripts/baseline/__init__.py (empty), scripts/baseline/bug_resolution_baseline.py, and the two fixtures (scripts/baseline/fixtures/bug_resolution_input.json + expected_outputs.json). Script implements the same 3-stage shape as bug_resolution_program — plan (parse + lock scope), execute (implement + reason), verify+resolve (record outcome) — and emits a JSON receipt sidecar with wall_ms, stage_breakdown[plan|execute|verify], input_tokens, output_tokens, iteration_count, model, provider_slug, is_warmup. Use the SAME provider/model that Praxis selects for bug_resolution_program task_type=build rank=1 (resolve via praxis_query). Anthropic CLI models invoke through the claude binary via subprocess (per decision.2026-04-20.anthropic-cli-only-restored); OpenRouter models call the OpenRouter HTTPS API with the OPENROUTER_API_KEY from macOS Keychain (service=praxis). Token counts come from the provider response, not estimated. Same retry policy as Praxis path. First iteration tagged is_warmup=true. Bug fixture is one open packet copied from artifacts/workflow/bug_resolution_program/bug_resolution_program_chain_20260423.json. Boundaries (CRITICAL): ZERO imports from runtime/, adapters/, registry/, memory/ — only the provider SDK plus stdlib (plus subprocess if Anthropic CLI). ZERO use of Praxis primitives — no data pills, no caching, no event emission, no operation_catalog. Implements exactly the 3-stage shape, no more, no less."
+      },
+      "context_sections": [
+        "../artifacts/workflow/bug_resolution_program_packet_template_20260423.queue.json",
+        "../artifacts/workflow/bug_resolution_program/bug_resolution_program_chain_20260423.json",
+        "scripts/prove_e2e.py"
+      ]
+    },
+    {
+      "sprint": 2,
+      "task_type": "test",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "A3 — Five-conflict fixture pack and parametrized pytest. Write Code&DBs/Workflow/tests/runtime/test_authority_resolver.py and five fixtures under tests/runtime/fixtures/authority_conflicts/ named conflict_1.json through conflict_5.json. Cover: (1) SoR vs prior workflow output where the workflow wins on moment recency, (2) two SoRs disagreeing on the same field, tiebreak by rule-table ordinal, (3) human_on_call overrides stale SoR within TTL, (4) prior workflow output stale beyond TTL falls back to SoR, (5) all sources sub-threshold and routes to human-gate (asserts event_type='field_authority_human_gate' row written). Each fixture JSON contains inputs (object_kind, field_path, moment_iso, candidates list with source/value/timestamp/confidence) and expected (winning_source, confidence_floor, sub_threshold, expected_event_type, reasoning_must_contain). pytest is parametrized — five test cases, one per fixture. Each fixture uses deterministic moment and idempotency keys so re-runs are byte-identical. Verification: pytest 5/5 pass; afterward authority_events shows at least 5 field_authority_resolved + at least 1 field_authority_human_gate via praxis_audit_primitive."
+      },
+      "context_sections": [
+        "runtime/authority_resolver.py",
+        "runtime/authority_resolver_rules.py",
+        "memory/entity_resolver.py"
+      ]
+    },
+    {
+      "sprint": 2,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "C3 — Compression harness. Write a new migration registering the comparison.completed event_type in operation_catalog_registry via the register_operation_atomic helper (pattern after migration 248) and register the migration in system_authority/workflow_migration_authority.json. Write Code&DBs/Workflow/scripts/compression_demo.py — invoked as `python3 scripts/compression_demo.py --n 10 --emit-receipt`, refuses if --n < 3, reads fixture from scripts/baseline/fixtures/bug_resolution_input.json. For each iteration: (a) Praxis path invokes LaunchPlanCommand against artifacts/workflow/bug_resolution_program_packet_template_20260423.queue.json and reads receipts via Praxis runtime modules (LaunchReceipt, receipt_store, workflow_run_metrics) — NEVER raw SQL; (b) baseline path subprocess-calls scripts/baseline/bug_resolution_baseline.py and reads its receipt JSON. First iteration of each path tagged is_warmup=true and discarded from medians. Compute medians and p90s for wall_ms, tokens_total, iteration_count. Compute compression_factor = median(praxis.wall_ms) / median(baseline.wall_ms) (lower = Praxis faster, target ≤ 0.0333 = 1/30). Emit comparison.completed via the existing gateway _insert_authority_event path. Add runtime/operations/queries/comparison_results.py exposing the latest comparison.completed parsed payload. Stub authority resolver A1 must be importable; abort with a clear error if missing. Boundaries: harness does NOT modify either path; reads go through Praxis runtime modules; iteration uses unique iteration_id suffix in the input fixture so each is a fresh run."
+      },
+      "context_sections": [
+        "scripts/prove_e2e.py",
+        "runtime/operations/commands/plan_orchestration.py",
+        "runtime/operation_catalog_gateway.py",
+        "../artifacts/workflow/bug_resolution_program_packet_template_20260423.queue.json",
+        "../Databases/migrations/workflow/239_register_operation_atomic_helper.sql",
+        "scripts/baseline/bug_resolution_baseline.py"
+      ]
+    },
+    {
+      "sprint": 3,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "C4 part 1 — Execute the compression demo. Not a build job; a measurement job. Confirm A3 pytest is green, confirm migrations applied via storage/migrations.py, run `python3 scripts/compression_demo.py --n 10 --emit-receipt`, confirm a comparison.completed event landed in authority_events via praxis_audit_primitive, and print the compression_factor and per-metric medians as the final stdout line in the form 'compression_factor=<float>'. Failure modes: A3 tests failing aborts the job; migration apply failing aborts; compression_demo.py erroring captures stderr and treats as job failure (so C4 part 2 will not fire); comparison.completed missing from DB after script success is also a job failure. No new files written by this job."
+      },
+      "context_sections": [
+        "scripts/compression_demo.py",
+        "tests/runtime/test_authority_resolver.py"
+      ]
+    },
+    {
+      "sprint": 4,
+      "task_type": "code_generation",
+      "authoring_contract": {
+        "artifact_kind": "code",
+        "summary": "C4 part 2 — Build resolver script and file the autonomous decision. Write Code&DBs/Workflow/scripts/compression_demo_resolve.py that reads the latest comparison.completed event via the praxis runtime query module (NOT raw SQL), branches on compression_factor, and files the appropriate operator_decision through the praxis tool surfaces. Three branches: (1) factor ≤ 1/30 → emit comparison.success receipt and update roadmap_item.long.tail.build.cost.compression.demo.wedge.falsification.test lifecycle to completed via praxis_operator_write retire/update; (2) 1/30 < factor ≤ 1/10 → file new operator_decision decision.YYYY-MM-DD.long-tail-narrowed-scope (architecture_policy, scope=product_architecture, rationale references receipt event_id) and mark same roadmap item completed; (3) factor > 1/10 → file decision.YYYY-MM-DD.long-tail-thesis-pivot, supersede decision.2026-04-26.system-of-record-for-ai-mediated-work-substrate (set effective_to=now() via the operator_decisions surface), and mark all six substrate-decision-linked roadmap items lifecycle=retired via operator_write. After writing the script, apply any new migrations and run `python3 scripts/compression_demo_resolve.py`. Confirm a long-tail-(success|narrowed-scope|thesis-pivot) decision exists in the operator_decisions list and that the roadmap item lifecycle reflects the resolution. Idempotent on re-run with same receipt (skip if decision_key already exists). Decision text TEMPLATED — do not editorialize. Supersession ONLY on the <10x branch. ALL writes through praxis tools — NEVER raw SQL. ALL branches autonomous — NO human-review prompts."
+      },
+      "context_sections": [
+        "scripts/compression_demo.py",
+        "runtime/operation_catalog_gateway.py"
+      ]
+    }
+  ]
+}

@@ -30,6 +30,11 @@ def _workflow_cli():
     return workflow_cli
 
 
+def _parse_args(parser, args: list[str], *, stdout: TextIO):
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+        return parser.parse_args(args)
+
+
 def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
     from surfaces.mcp.tools.workflow import tool_praxis_workflow
 
@@ -859,12 +864,13 @@ def _validate_command(args: list[str], *, stdout: TextIO) -> int:
     parser.add_argument("spec", help="Path to the .queue.json spec file")
 
     try:
-        parsed = parser.parse_args(args)
+        parsed = _parse_args(parser, args, stdout=stdout)
     except SystemExit as exc:
         return exc.code
 
     from surfaces.cli import workflow_cli
-    return workflow_cli.cmd_validate(parsed)
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+        return workflow_cli.cmd_validate(parsed)
 
 
 def _stream_command(args: list[str], *, stdout: TextIO) -> int:
@@ -877,12 +883,13 @@ def _stream_command(args: list[str], *, stdout: TextIO) -> int:
     parser.add_argument("--poll-interval", type=float, default=2.0, help="Poll interval in seconds")
 
     try:
-        parsed = parser.parse_args(args)
+        parsed = _parse_args(parser, args, stdout=stdout)
     except SystemExit as exc:
         return exc.code
 
     from surfaces.cli import workflow_cli
-    return workflow_cli.cmd_stream(parsed)
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+        return workflow_cli.cmd_stream(parsed)
 
 
 def _chain_status_command(args: list[str], *, stdout: TextIO) -> int:
@@ -2277,12 +2284,13 @@ def _retry_command(args: list[str], *, stdout: TextIO) -> int:
     parser.add_argument("label", help="Job label to retry")
 
     try:
-        parsed = parser.parse_args(args)
+        parsed = _parse_args(parser, args, stdout=stdout)
     except SystemExit as exc:
         return exc.code
 
     from surfaces.cli import workflow_cli
-    return workflow_cli.cmd_retry(parsed)
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+        return workflow_cli.cmd_retry(parsed)
 
 
 def _cancel_command(args: list[str], *, stdout: TextIO) -> int:
@@ -2293,12 +2301,13 @@ def _cancel_command(args: list[str], *, stdout: TextIO) -> int:
     parser.add_argument("run_id", help="Workflow run id to cancel")
 
     try:
-        parsed = parser.parse_args(args)
+        parsed = _parse_args(parser, args, stdout=stdout)
     except SystemExit as exc:
         return exc.code
 
     from surfaces.cli import workflow_cli
-    return workflow_cli.cmd_cancel(parsed)
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+        return workflow_cli.cmd_cancel(parsed)
 
 
 def _repair_command(args: list[str], *, stdout: TextIO) -> int:
@@ -2309,12 +2318,13 @@ def _repair_command(args: list[str], *, stdout: TextIO) -> int:
     parser.add_argument("run_id", help="Workflow run id to repair")
 
     try:
-        parsed = parser.parse_args(args)
+        parsed = _parse_args(parser, args, stdout=stdout)
     except SystemExit as exc:
         return exc.code
 
     from surfaces.cli import workflow_cli
-    return workflow_cli.cmd_repair(parsed)
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+        return workflow_cli.cmd_repair(parsed)
 
 
 def _work_command(args: list[str], *, stdout: TextIO) -> int:

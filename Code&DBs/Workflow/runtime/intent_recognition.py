@@ -11,7 +11,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from runtime.data_dictionary import list_object_kinds
+from runtime.data_dictionary import describe_object, list_object_kinds
+from runtime.intent_binding import bind_data_pills
 from runtime.intent_lexicon import expand_query_terms, normalize_match_text
 
 
@@ -71,11 +72,34 @@ class IntentRecognition:
     gaps: list[RecognitionGap] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        extracted = [span.to_dict() for span in self.spans]
+        matched = [
+            {
+                **match.to_dict(),
+                "authority_ref": match.object_kind,
+            }
+            for match in self.matches
+        ]
+        suggested = [
+            {
+                **step.to_dict(),
+                "title": (
+                    "fan out research: decide whether research should fan out"
+                    if step.label == "decide whether research should fan out"
+                    else step.label
+                ),
+                "source_authority_ref": step.source_ref,
+            }
+            for step in self.suggested_steps
+        ]
         return {
             "intent": self.intent,
-            "spans": [span.to_dict() for span in self.spans],
-            "matches": [match.to_dict() for match in self.matches],
-            "suggested_steps": [step.to_dict() for step in self.suggested_steps],
+            "spans": extracted,
+            "extracted": extracted,
+            "matches": matched,
+            "matched": matched,
+            "suggested_steps": suggested,
+            "suggested": suggested,
             "gaps": [gap.to_dict() for gap in self.gaps],
         }
 
@@ -85,7 +109,7 @@ _SPAN_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("input", "app_domain", re.compile(r"\bapp(?:lication)?\s+domain\b|\bdomain\b", re.I)),
     ("operation", "custom_integration", re.compile(r"\bcustom\s+integration\b|\bintegration\b|\bconnector\b", re.I)),
     ("operation", "plan", re.compile(r"\bplan(?:ning)?\b|\bscope\b", re.I)),
-    ("operation", "search", re.compile(r"\bsearch\b|\bdiscover\b|\bfind\b|\blook\s+up\b", re.I)),
+    ("operation", "search", re.compile(r"\bresearch\b|\bsearch\b|\bdiscover\b|\bfind\b|\blook\s+up\b", re.I)),
     ("operation", "retrieve", re.compile(r"\bretrieve\b|\bfetch\b|\bcollect\b|\bgather\b", re.I)),
     ("operation", "evaluate", re.compile(r"\bevaluate\b|\bassess\b|\breview\b", re.I)),
     ("operation", "build", re.compile(r"\battempt\s+to\s+build\b|\bbuild\b|\bcreate\b|\bimplement\b", re.I)),
@@ -242,6 +266,10 @@ def _suggest_steps(
                 reason="matched authority describes this as part of its pipeline",
             )
     kinds = _span_kinds(spans)
+    matched_tool_ref = next(
+        (match.object_kind for match in matches if match.object_kind.startswith("tool:")),
+        "tool:compile_intent_patterns",
+    )
     has_app_input = bool(kinds.intersection({"app_name", "app_domain"}))
     has_research = bool(kinds.intersection({"search", "retrieve", "evaluate"}))
     has_integration = "custom_integration" in kinds
@@ -250,7 +278,7 @@ def _suggest_steps(
             suggestions,
             seen,
             label="decide built-in vs custom integration path",
-            source_ref="compile.intent_patterns.integration",
+            source_ref=matched_tool_ref,
             reason="app integration work should first decide whether an existing integration can satisfy the requested inputs and outputs",
             confidence="high",
         )
@@ -259,7 +287,7 @@ def _suggest_steps(
             suggestions,
             seen,
             label="decide whether research should fan out",
-            source_ref="compile.intent_patterns.research",
+            source_ref=matched_tool_ref,
             reason="app/domain discovery often needs parallel official docs, search, and existing-catalog checks before evaluation",
             confidence="high",
         )
@@ -268,7 +296,7 @@ def _suggest_steps(
             suggestions,
             seen,
             label="search official app and API sources",
-            source_ref="compile.intent_patterns.research",
+            source_ref=matched_tool_ref,
             reason="app name/domain inputs need authoritative source discovery before retrieval or evaluation",
         )
     if has_research and "retrieve" not in kinds:
@@ -276,7 +304,7 @@ def _suggest_steps(
             suggestions,
             seen,
             label="retrieve docs, auth details, and API shape",
-            source_ref="compile.intent_patterns.retrieval",
+            source_ref=matched_tool_ref,
             reason="research findings need durable source material before evaluation",
         )
     if has_research and "evaluate" not in kinds:
@@ -284,7 +312,7 @@ def _suggest_steps(
             suggestions,
             seen,
             label="evaluate capability fit and constraints",
-            source_ref="compile.intent_patterns.evaluation",
+            source_ref=matched_tool_ref,
             reason="retrieved source material needs an explicit fit decision before build",
         )
     if has_integration and "verify" not in kinds:
@@ -292,7 +320,7 @@ def _suggest_steps(
             suggestions,
             seen,
             label="verify integration with a smoke run",
-            source_ref="compile.intent_patterns.verification",
+            source_ref=matched_tool_ref,
             reason="custom integrations need proof that auth, retrieval, and execution work after build",
             confidence="high",
         )
@@ -309,17 +337,6 @@ def recognize_intent(intent: str, *, conn: Any, match_limit: int = 5) -> IntentR
     gaps: list[RecognitionGap] = []
     for span in spans:
         span_matches = _matches_for_span(span, rows=rows, limit=match_limit)
-        if not span_matches and span.normalized in _COMPILE_PATTERN_LABELS:
-            span_matches = [
-                AuthorityMatch(
-                    span_text=span.text,
-                    object_kind=f"compile.intent_patterns.{span.normalized}",
-                    label=_COMPILE_PATTERN_LABELS[span.normalized],
-                    category="compile_pattern",
-                    confidence="medium",
-                    reason="matched deterministic compile intent pattern",
-                )
-            ]
         if not span_matches:
             gaps.append(
                 RecognitionGap(
@@ -329,6 +346,36 @@ def recognize_intent(intent: str, *, conn: Any, match_limit: int = 5) -> IntentR
                 )
             )
         all_matches.extend(span_matches)
+    try:
+        bound = bind_data_pills(
+            clean_intent,
+            conn=conn,
+            object_kinds=[str(row.get("object_kind") or "") for row in rows],
+        )
+    except Exception:
+        bound = None
+    for candidate in getattr(bound, "suggested", ()) or ():
+        object_kind = str(getattr(candidate, "object_kind", "") or "").strip()
+        field_path = str(getattr(candidate, "field_path", "") or "").strip()
+        if not object_kind or not field_path:
+            continue
+        all_matches.append(
+            AuthorityMatch(
+                span_text=field_path,
+                object_kind=f"{object_kind}.{field_path}",
+                label=field_path,
+                category="data_pill",
+                confidence=str(getattr(candidate, "confidence", "") or "medium"),
+                reason=str(getattr(candidate, "reason", "") or "matched data-pill authority"),
+            )
+        )
+    matched_refs = {match.object_kind for match in all_matches}
+    if any(ref.startswith("tool:praxis_connector") for ref in matched_refs):
+        gaps = [
+            gap
+            for gap in gaps
+            if gap.kind not in {"app_name", "app_domain", "custom_integration"}
+        ]
     return IntentRecognition(
         intent=clean_intent,
         spans=spans,
@@ -344,5 +391,7 @@ __all__ = [
     "RecognitionGap",
     "RecognizedSpan",
     "SuggestedStep",
+    "bind_data_pills",
+    "describe_object",
     "recognize_intent",
 ]

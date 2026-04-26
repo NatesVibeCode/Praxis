@@ -1867,8 +1867,8 @@ def test_status_frontdoor_rejects_unsupported_since_hours() -> None:
     assert workflow_cli_main(["status", "--since-hours", "24000"], stdout=stdout) == 2
 
     rendered = stdout.getvalue()
-    assert "workflow status does not support arguments" in rendered
-    assert "time-window filtering is not implemented" in rendered
+    assert "unknown argument: --since-hours" in rendered
+    assert "Agent hint:" in rendered
     assert "--since-hours" not in str(legacy_workflow_cli.__doc__)
 
 
@@ -1891,7 +1891,7 @@ def test_failed_cli_command_records_friction(monkeypatch: pytest.MonkeyPatch) ->
 
     assert captured["args"] == ["status", "--since-hours", "24000"]
     assert captured["exit_code"] == 2
-    assert "workflow status does not support arguments" in str(captured["output_text"])
+    assert "unknown argument: --since-hours" in str(captured["output_text"])
     assert "Agent hint:" in str(captured["output_text"])
     assert captured["output_truncated"] is False
 
@@ -1918,7 +1918,7 @@ def test_status_help_is_success() -> None:
     stdout = StringIO()
 
     assert workflow_cli_main(["status", "--help"], stdout=stdout) == 0
-    assert stdout.getvalue() == "usage: workflow status [--json]\n"
+    assert stdout.getvalue() == "usage: workflow status [--days N] [--limit N] [--json]\n"
 
 
 def test_verify_platform_returns_typed_db_authority_error(monkeypatch: pytest.MonkeyPatch) -> None:

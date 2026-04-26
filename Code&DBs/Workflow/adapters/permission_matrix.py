@@ -73,9 +73,6 @@ PERMISSION_MODE_RANK: dict[NormalizedPermissionMode, int] = {
 }
 
 
-SUPPORTED_CLI_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "gemini"})
-
-
 # API-backed providers that talk to an HTTP chat-completions endpoint rather
 # than spawning a local CLI. Permission modes for these do not map to argv
 # flags — the API has no tool sandbox to toggle, no approval prompts to
@@ -177,6 +174,9 @@ _MATRIX: dict[str, dict[NormalizedPermissionMode, tuple[str, ...]]] = {
     "codex":  _CODEX_MATRIX,
     "gemini": _GEMINI_MATRIX,
 }
+
+
+SUPPORTED_CLI_PROVIDERS: frozenset[str] = frozenset(_MATRIX)
 
 
 def api_permission_prompt_suffix(

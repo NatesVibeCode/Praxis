@@ -444,6 +444,40 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_synthesize_skeleton": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Synthesize a workflow skeleton from recognized intent atoms before "
+            "materializing or launching the workflow."
+        ),
+        when_not_to_use=(
+            "Do not use it as the launch authority; use praxis_compile for draft "
+            "state and praxis_workflow for execution."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example("Synthesize a skeleton", {"intent": "Build a connector workflow from app docs and smoke-test it"}),
+        ],
+    ),
+    "praxis_compose_plan_via_llm": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Compose a bounded plan statement from synthesized workflow atoms "
+            "when deterministic skeletons need one LLM planning pass."
+        ),
+        when_not_to_use=(
+            "Do not use it for execution or provider routing; it is a compile "
+            "planning helper."
+        ),
+        risks={"default": "launch"},
+        examples=[
+            _example("Compose a plan", {"intent": "Build a connector workflow", "plan_name": "connector-build", "concurrency": 4}),
+        ],
+    ),
     "praxis_manifest_generate": _tool(
         surface="planning",
         tier="advanced",

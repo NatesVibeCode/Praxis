@@ -151,7 +151,11 @@ def record_provider_outcome(
     """
     from ._shared import ROUTING_METRICS_FROZEN
 
-    breakers = _circuit_breakers()
+    try:
+        breakers = _circuit_breakers()
+    except Exception as exc:
+        logger.warning("Circuit breaker outcome recorder unavailable: %s", exc)
+        return
     if not breakers:
         return
     row = conn.execute(

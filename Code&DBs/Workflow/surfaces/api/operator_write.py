@@ -3730,12 +3730,7 @@ class OperatorControlFrontdoor:
         normalized_approval_tag = (
             _optional_text(approval_tag, field_name="approval_tag")
             or existing_approval_tag
-            or (
-                str(parent_acceptance.get("approval_tag")).strip()
-                if isinstance(parent_acceptance.get("approval_tag"), str)
-                and str(parent_acceptance.get("approval_tag")).strip()
-                else _default_approval_tag(now)
-            )
+            or _default_approval_tag(now)
         )
         if approval_tag is None and existing_approval_tag is None:
             auto_fixes.append(f"approval_tag generated: {normalized_approval_tag}")

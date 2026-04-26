@@ -270,7 +270,8 @@
     "258_register_shell_navigation_commands.sql",
     "259_register_ui_shell_state_projection.sql",
     "260_provider_control_plane_query.sql",
-    "261_data_dictionary_query_category.sql"
+    "261_data_dictionary_query_category.sql",
+    "261_provider_control_plane_snapshot.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6173,16 +6174,66 @@
         "object_name": "data_dictionary_objects.workflow_type_tokens"
       }
     ],
-    "243_deepseek_v4_pro_primary_build_engine.sql": [],
-    "244_openrouter_api_payg_lane_open.sql": [],
-    "245_compile_task_type_route.sql": [],
-    "246_deepseek_compile_only_no_build_route.sql": [],
-    "247_workflow_plumbing_data_dictionary_objects.sql": [],
-    "248_register_plan_authoring_operations.sql": [],
-    "249_plan_section_author_route.sql": [],
-    "250_plan_section_author_cross_provider_failover.sql": [],
-    "251_register_together_direct_provider.sql": [],
-    "252_plan_section_author_together_primary.sql": [],
+    "243_deepseek_v4_pro_primary_build_engine.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.243_deepseek_v4_pro_primary_build_engine.sql"
+      }
+    ],
+    "244_openrouter_api_payg_lane_open.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.244_openrouter_api_payg_lane_open.sql"
+      }
+    ],
+    "245_compile_task_type_route.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.245_compile_task_type_route.sql"
+      }
+    ],
+    "246_deepseek_compile_only_no_build_route.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.246_deepseek_compile_only_no_build_route.sql"
+      }
+    ],
+    "247_workflow_plumbing_data_dictionary_objects.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.247_workflow_plumbing_data_dictionary_objects.sql"
+      }
+    ],
+    "248_register_plan_authoring_operations.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.248_register_plan_authoring_operations.sql"
+      }
+    ],
+    "249_plan_section_author_route.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.249_plan_section_author_route.sql"
+      }
+    ],
+    "250_plan_section_author_cross_provider_failover.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.250_plan_section_author_cross_provider_failover.sql"
+      }
+    ],
+    "251_register_together_direct_provider.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.251_register_together_direct_provider.sql"
+      }
+    ],
+    "252_plan_section_author_together_primary.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.252_plan_section_author_together_primary.sql"
+      }
+    ],
     "243_runtime_profile_admitted_routes_projection.sql": [
       {
         "object_type": "table",
@@ -6257,8 +6308,18 @@
         "object_name": "compile_health"
       }
     ],
-    "253_plan_synthesis_and_fork_author_routes.sql": [],
-    "254_restore_cli_default_for_build_and_plan_section_author.sql": [],
+    "253_plan_synthesis_and_fork_author_routes.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.253_plan_synthesis_and_fork_author_routes.sql"
+      }
+    ],
+    "254_restore_cli_default_for_build_and_plan_section_author.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.254_restore_cli_default_for_build_and_plan_section_author.sql"
+      }
+    ],
     "255_private_provider_job_catalog.sql": [
       {
         "object_type": "table",
@@ -6515,6 +6576,96 @@
       {
         "object_type": "constraint",
         "object_name": "data_dictionary_objects.data_dictionary_objects_category_check"
+      }
+    ],
+    "261_provider_control_plane_snapshot.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.circuit_breakers"
+      },
+      {
+        "object_type": "table",
+        "object_name": "provider_circuit_breaker_state"
+      },
+      {
+        "object_type": "index",
+        "object_name": "provider_circuit_breaker_state_runtime_idx"
+      },
+      {
+        "object_type": "view",
+        "object_name": "effective_provider_circuit_breaker_state"
+      },
+      {
+        "object_type": "table",
+        "object_name": "private_provider_control_plane_snapshot"
+      },
+      {
+        "object_type": "index",
+        "object_name": "private_provider_control_plane_snapshot_effective_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "private_provider_control_plane_snapshot_provider_idx"
+      },
+      {
+        "object_type": "view",
+        "object_name": "effective_private_provider_control_plane"
+      },
+      {
+        "object_type": "view",
+        "object_name": "effective_private_provider_job_catalog"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_provider_control_plane_snapshot"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_provider_job_catalog"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.provider_circuit_breaker_state"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.private_provider_control_plane_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_registry.projection.circuit_breakers"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_registry.projection.private_provider_control_plane_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_contracts.projection_contract.circuit_breakers"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_contracts.projection_contract.private_provider_control_plane_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_state.projection.circuit_breakers"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_state.projection.private_provider_job_catalog"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_state.projection.private_provider_control_plane_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.provider_circuit_breaker_state"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.private_provider_control_plane_snapshot"
       }
     ]
   },
@@ -6790,7 +6941,8 @@
       "258_register_shell_navigation_commands.sql",
       "259_register_ui_shell_state_projection.sql",
       "260_provider_control_plane_query.sql",
-      "261_data_dictionary_query_category.sql"
+      "261_data_dictionary_query_category.sql",
+      "261_provider_control_plane_snapshot.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -6943,6 +7095,10 @@
     "245": [
       "245_compile_run_trace.sql",
       "245_compile_task_type_route.sql"
+    ],
+    "261": [
+      "261_data_dictionary_query_category.sql",
+      "261_provider_control_plane_snapshot.sql"
     ]
   }
 }

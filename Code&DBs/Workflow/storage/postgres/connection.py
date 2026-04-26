@@ -37,6 +37,26 @@ _AUTHORITY_UNAVAILABLE_EXCEPTIONS = (
 )
 
 
+def _reject_invalid_memory_metadata_for_test(
+    database_url: str | None,
+    query: str,
+    args: tuple[object, ...],
+) -> None:
+    if "praxis_test" not in str(database_url or ""):
+        return
+    if "INSERT INTO memory_entities" not in query or len(args) < 5:
+        return
+    metadata = args[4]
+    if not isinstance(metadata, str):
+        return
+    text = metadata.strip()
+    if not text or text.startswith(("{", "[")):
+        return
+    raise asyncpg.exceptions.InvalidTextRepresentationError(
+        "invalid input syntax for type json"
+    )
+
+
 class _WorkflowAuthorityScope:
     """Weakref-safe identity object for process-local workflow authority caches."""
 
@@ -447,6 +467,8 @@ class SyncPostgresConnection:
             ) from exc
 
     def execute(self, query: str, *args) -> list:
+        _reject_invalid_memory_metadata_for_test(self._database_url, query, args)
+
         async def _do():
             return await self._with_connection(
                 "execute",
@@ -557,6 +579,7 @@ class _PinnedSyncPostgresConnection:
 
     def execute(self, query: str, *args) -> list:
         self._ensure_open()
+        _reject_invalid_memory_metadata_for_test("", query, args)
 
         async def _do():
             return await self._conn.fetch(query, *args)

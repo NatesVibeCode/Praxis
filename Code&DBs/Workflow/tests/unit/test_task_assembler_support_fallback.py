@@ -3,6 +3,31 @@ from __future__ import annotations
 from runtime import task_assembler, task_type_router
 
 
+def _admitted_transport_rows(provider_slugs, adapter_types):
+    return [
+        {
+            "provider_slug": provider_slug,
+            "adapter_type": adapter_type,
+            "admitted_by_policy": True,
+            "policy_reason": "",
+            "decision_ref": "test.provider_transport_admitted",
+        }
+        for provider_slug in provider_slugs
+        for adapter_type in adapter_types
+    ]
+
+
+def _lane_policy_rows(provider_slugs):
+    return [
+        {
+            "provider_slug": provider_slug,
+            "allowed_adapter_types": ["cli_llm", "llm_task"],
+            "overridable": True,
+        }
+        for provider_slug in provider_slugs
+    ]
+
+
 class _FakeAssemblerConn:
     def execute(self, query: str, *args):
         if "FROM integration_registry" in query:
@@ -130,6 +155,12 @@ class _FakeRouterConn:
                     "consecutive_internal_failures": 0,
                 }
             ]
+        if "FROM provider_lane_policy" in query:
+            return _lane_policy_rows(["openai"])
+        if "FROM provider_transport_admissions" in query:
+            return _admitted_transport_rows(args[0], args[1])
+        if "FROM heartbeat_probe_snapshots" in query:
+            return []
         return []
 
 
@@ -208,12 +239,12 @@ def test_pre_suggest_includes_workflow_registry_matches():
 
 
 def test_task_type_router_resolves_auto_support(monkeypatch):
-    monkeypatch.setattr(task_type_router, "resolve_default_adapter_type", lambda provider_slug=None: "cli")
+    monkeypatch.setattr(task_type_router, "resolve_default_adapter_type", lambda provider_slug=None: "cli_llm")
     monkeypatch.setattr(
         task_type_router,
         "_resolve_route_economics",
         lambda **kwargs: {
-            "adapter_type": "cli",
+            "adapter_type": "cli_llm",
             "billing_mode": "owned_compute",
             "budget_bucket": "native",
             "effective_marginal_cost": 0.0,

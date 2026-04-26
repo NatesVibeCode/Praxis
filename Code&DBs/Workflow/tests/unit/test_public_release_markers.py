@@ -11,10 +11,6 @@ _ALLOWED_MARKERS = {
         "Nate-private Anthropic direct API block; public builds must use "
         "registry/profile authority for ANTHROPIC_API_KEY users."
     ),
-    "adapters/provider_transport.py": (
-        "Nate-private CLI-only Anthropic profile; public builds must restore "
-        "direct API admission through provider profiles."
-    ),
     "runtime/onboarding/probes_provider.py": (
         "Nate-private Anthropic onboarding probe; public builds must probe "
         "direct API credentials when that profile is admitted."

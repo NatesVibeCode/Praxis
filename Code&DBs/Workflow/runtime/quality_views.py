@@ -235,7 +235,7 @@ class QualityViewMaterializer:
         )
         if row is None:
             return None
-        return _rollup_from_json(json.loads(row["data"]))
+        return _rollup_from_json(_json_value(row["data"]))
 
     def get_agent_profile(
         self, agent_slug: str, window: QualityWindow, window_start: datetime
@@ -246,7 +246,7 @@ class QualityViewMaterializer:
         )
         if row is None:
             return None
-        return _profile_from_json(json.loads(row["data"]))
+        return _profile_from_json(_json_value(row["data"]))
 
     def get_failure_catalog(self, limit: int = 20) -> list[FailureCatalogEntry]:
         rows = self._conn.execute(
@@ -258,8 +258,8 @@ class QualityViewMaterializer:
                 failure_code=r["failure_code"],
                 count=r["count"],
                 last_seen=_parse_ts(r["last_seen"]),
-                example_job_labels=tuple(json.loads(r["examples"])),
-                owning_agents=tuple(json.loads(r["agents"])),
+                example_job_labels=tuple(_json_value(r["examples"])),
+                owning_agents=tuple(_json_value(r["agents"])),
             )
             for r in rows
         ]
@@ -271,7 +271,7 @@ class QualityViewMaterializer:
         )
         if row is None:
             return None
-        return _rollup_from_json(json.loads(row["data"]))
+        return _rollup_from_json(_json_value(row["data"]))
 
     # ------------------------------------------------------------------
     # Internal persistence helpers
@@ -333,6 +333,12 @@ def _parse_ts(s) -> datetime:
     if isinstance(s, datetime):
         return s
     return datetime.fromisoformat(s)
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
 
 
 def _window_start(window: QualityWindow, ts: datetime) -> datetime:

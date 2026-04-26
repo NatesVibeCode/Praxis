@@ -118,7 +118,10 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "243_runtime_profile_admitted_routes_projection.sql" in filenames
     assert "244_ui_surface_file_anchor_registry.sql" in filenames
     assert "245_compile_run_trace.sql" in filenames
-    assert filenames[-1] == "245_compile_run_trace.sql"
+    assert "260_provider_control_plane_query.sql" in filenames
+    assert "261_data_dictionary_query_category.sql" in filenames
+    assert "261_provider_control_plane_snapshot.sql" in filenames
+    assert filenames[-1] == "261_provider_control_plane_snapshot.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:

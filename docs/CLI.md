@@ -31,13 +31,15 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 | `praxis workflow health` | `praxis_health` | `operations` | `read` | Run a full preflight before workflow launch or when the platform feels degraded. |
 | `praxis workflow query` | `praxis_query` | `query` | `read` | Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use. |
 | `praxis workflow approve-plan` | `praxis_approve_proposed_plan` | `workflow` | `read` | Approve a ProposedPlan so launch_approved can submit it. Wraps the proposal with approved_by + timestamp + hash; the hash binds the approval to the exact spec_dict so tampering between approve and launch fails closed. |
-| `praxis workflow bind-pills` | `praxis_bind_data_pills` | `workflow` | `read` | Extract and validate object.field data-pill references from prose intent against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is known to exist. |
+| `praxis workflow bind-pills` | `praxis_bind_data_pills` | `workflow` | `read` | Suggest likely object.field data-pill candidates from loose prose and validate explicit references against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is either confirmed or surfaced as a candidate to confirm. |
+| `praxis workflow compile` | `praxis_compile` | `workflow` | `read`, `write` | Shared CQRS compile front door for MCP/CLI/API parity. Use action='preview' to recognize messy prose without mutation, or action='materialize' to create or update draft workflow build state. |
 | `praxis workflow compose-plan` | `praxis_compose_plan` | `workflow` | `read` | Turn prose intent with explicit step markers into a ProposedPlan in one call — chains Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview). Compose with approve-plan + launch-plan(approved_plan=...) for the full approval-gated flow. |
 | `praxis workflow decompose` | `praxis_decompose_intent` | `workflow` | `read` | Split prose intent into ordered steps by parsing explicit markers (numbered lists, bulleted lists, or first/then/finally ordering). Layer 2 (Decompose) of the planning stack — call before turning steps into PlanPackets. |
 | `praxis workflow launch-plan` | `praxis_launch_plan` | `workflow` | `write` | Translate an already-planned packet list into a workflow spec and submit it (or preview first with preview_only=true). This is the layer-5 translation primitive — caller still owns upstream planning (extract data pills, decompose prose, reorder by data-flow, author per-step prompts). |
 | `praxis workflow plan-history` | `praxis_plan_lifecycle` | `workflow` | `read` | Read every plan.* event for one workflow_id in chronological order — composed, approved, launched, or blocked. The Q-side read of the planning stack's CQRS pattern. |
 | `praxis workflow project-budget` | `praxis_project_plan_budget` | `workflow` | `read` | Estimate token budgets for a ProposedPlan before approving. Honest projection — prompt tokens are char-based, output tokens are a per-stage upper bound, no USD cost. |
 | `praxis workflow ship-intent` | `praxis_compose_and_launch` | `workflow` | `launch` | End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt in one call. For trusted automation (CI, scripts, experienced operators). Fails closed by default on unresolved routes, unbound pills, or budget-cap overrun. |
+| `praxis workflow suggest-atoms` | `praxis_suggest_plan_atoms` | `workflow` | `read` | Free prose (any length, no markers, no order) should yield candidate data pills, candidate step types, and candidate input parameters as three independent suggestion streams. Layer 0 (Suggest) of the planning stack — call when the prose has no explicit step markers and the downstream LLM author needs atoms to plan from. |
 
 ## Full Catalog Entrypoints
 
@@ -193,15 +195,19 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 
 | Entrypoint | Tool | Tier | Selector | Risks |
 | --- | --- | --- | --- | --- |
+| `praxis workflow tools call praxis_compose_plan_via_llm` | `praxis_compose_plan_via_llm` | `advanced` | - | `launch` |
 | `praxis workflow tools call praxis_connector` | `praxis_connector` | `advanced` | action: build, list, get, register, verify | `launch`, `read`, `write` |
+| `praxis workflow tools call praxis_synthesize_skeleton` | `praxis_synthesize_skeleton` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_wave` | `praxis_wave` | `advanced` | action: observe, start, next, record | `launch`, `read`, `write` |
 | `praxis workflow tools call praxis_workflow` | `praxis_workflow` | `advanced` | action: run, spawn, preview, status, inspect, claim, acknowledge, cancel, list, notifications, retry, repair, chain | `launch`, `read`, `write` |
 | `praxis workflow tools call praxis_workflow_validate` | `praxis_workflow_validate` | `advanced` | - | `read` |
 | `praxis workflow approve-plan` | `praxis_approve_proposed_plan` | `stable` | - | `read` |
 | `praxis workflow bind-pills` | `praxis_bind_data_pills` | `stable` | - | `read` |
+| `praxis workflow compile` | `praxis_compile` | `stable` | action: preview, materialize | `read`, `write` |
 | `praxis workflow compose-plan` | `praxis_compose_plan` | `stable` | - | `read` |
 | `praxis workflow decompose` | `praxis_decompose_intent` | `stable` | - | `read` |
 | `praxis workflow launch-plan` | `praxis_launch_plan` | `stable` | - | `write` |
 | `praxis workflow plan-history` | `praxis_plan_lifecycle` | `stable` | - | `read` |
 | `praxis workflow project-budget` | `praxis_project_plan_budget` | `stable` | - | `read` |
 | `praxis workflow ship-intent` | `praxis_compose_and_launch` | `stable` | - | `launch` |
+| `praxis workflow suggest-atoms` | `praxis_suggest_plan_atoms` | `stable` | - | `read` |

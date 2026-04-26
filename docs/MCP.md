@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 85 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 89 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -89,13 +89,17 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_submit_research_result` | `submissions` | `session` | - | `session` | Submit a sealed research result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_approve_proposed_plan` | `workflow` | `stable` | `workflow approve-plan` | `read` | Approve a ProposedPlan so launch_approved can submit it. Takes the ProposedPlan payload from praxis_launch_plan(preview_only=true), wraps it with approved_by + timestamp + hash, and returns an ApprovedPlan. The hash binds the approval to the exact spec_dict — tampering between approve and launch fails closed at launch time. |
 | `praxis_bind_data_pills` | `workflow` | `stable` | `workflow bind-pills` | `read` | Layer 1 (Bind) of the planning stack: extract and validate ``object.field`` data-pill references from prose intent against the data dictionary authority. Deterministic — matches explicit ``snake_case.field_path`` spans in the prose; does not infer loose references like "the user's name." Returns bound / ambiguous / unbound splits the caller confirms before decomposing intent into packets. |
+| `praxis_compile` | `workflow` | `stable` | `workflow compile` | `read`, `write` | Shared CQRS compile front door. Query side action='preview' recognizes messy prose, matches spans to authority, returns suggestions and gaps, and does not mutate state. Command side action='materialize' creates or updates a draft workflow through the canonical workflow build mutation. |
 | `praxis_compose_and_launch` | `workflow` | `stable` | `workflow ship-intent` | `launch` | End-to-end: prose intent → compose → approve → launch in one call. Compose the ProposedPlan through Layers 2 → 1 → 5, wrap with an explicit approval record (approved_by + hash), and submit through the CQRS control-command bus. |
 | `praxis_compose_plan` | `workflow` | `stable` | `workflow compose-plan` | `read` | Chain Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview) in one call. Takes prose intent with explicit step markers, returns a ProposedPlan ready for approval and launch. |
+| `praxis_compose_plan_via_llm` | `workflow` | `advanced` | - | `launch` | End-to-end LLM compile: atoms → skeleton → ONE synthesis LLM call (few-sentence plan statement) → N parallel fork-out author calls (each shares the synthesis as cached prefix) → validate. |
 | `praxis_connector` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Build API connectors for third-party applications. One call stamps a workflow spec and launches a 4-job pipeline (discover API → map objects → build client → review). |
 | `praxis_decompose_intent` | `workflow` | `stable` | `workflow decompose` | `read` | Layer 2 (Decompose) of the planning stack: split prose intent into ordered steps by parsing explicit step markers (numbered lists, bulleted lists, or first/then/finally ordering). Deterministic — does NOT do free-prose semantic decomposition. |
 | `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
 | `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | Q-side of the planning stack: read every plan.* system_event for one workflow_id in order. Pair with praxis_compose_and_launch / praxis_approve_proposed_plan / praxis_launch_plan on the C side. |
 | `praxis_project_plan_budget` | `workflow` | `stable` | `workflow project-budget` | `read` | Estimate prompt + output token budgets for every job in a ProposedPlan. Honest: prompt tokens are char-based (len / 4), output tokens are a conservative per-stage estimate. No USD cost — real cost depends on the resolved model at run time, which is the right place to surface it. |
+| `praxis_suggest_plan_atoms` | `workflow` | `stable` | `workflow suggest-atoms` | `read` | Layer 0 (Suggest): free prose → pills + step types + parameters. Deterministic; no LLM call; no order or count produced. |
+| `praxis_synthesize_skeleton` | `workflow` | `advanced` | - | `read` | Layer 0.5 (Synthesize): atoms + skeleton with deterministic depends_on, consumes/produces/capabilities floors, scaffolded gates from data dictionary. |
 | `praxis_wave` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Manage execution waves — groups of jobs with dependency ordering. Waves track which jobs are runnable (all dependencies met) and which are blocked. |
 | `praxis_workflow` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
 | `praxis_workflow_validate` | `workflow` | `advanced` | - | `read` | Dry-run a workflow spec to check for errors before executing it. Returns whether the spec is valid, how many jobs it contains, and which agents each job resolves to. |
@@ -1779,8 +1783,8 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow bind-pills`
 - CLI schema help: `workflow tools describe praxis_bind_data_pills`
-- When to use: Extract and validate object.field data-pill references from prose intent against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is known to exist.
-- When not to use: Do not use it to infer missing references. This tool matches explicit object.field spans only; loose prose like "the user's name" returns no bound pills, and that's honest.
+- When to use: Suggest likely object.field data-pill candidates from loose prose and validate explicit references against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is either confirmed or surfaced as a candidate to confirm.
+- When not to use: Do not treat suggestions as bound authority. Suggested pills are candidates; confirmed packet compilation still needs explicit object.field refs or a caller approval step.
 - Recommended alias: `workflow bind-pills`
 - Selector: none
 - Required args: `intent`
@@ -1790,6 +1794,29 @@ Example input:
 ```json
 {
   "intent": "Update users.first_name whenever users.email changes."
+}
+```
+
+#### `praxis_compile`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:compile`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow compile`
+- CLI schema help: `workflow tools describe praxis_compile`
+- When to use: Shared CQRS compile front door for MCP/CLI/API parity. Use action='preview' to recognize messy prose without mutation, or action='materialize' to create or update draft workflow build state.
+- When not to use: Do not use it to launch a workflow run. Materialized workflow state still needs the normal approval and launch path.
+- Recommended alias: `workflow compile`
+- Selector: `action`; default `preview`; values `preview`, `materialize`
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "action": "preview",
+  "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration."
 }
 ```
 
@@ -1839,6 +1866,29 @@ Example input:
   "intent": "1. Add a timezone column to users.\n2. Backfill existing rows with UTC.\n3. Update the profile UI to expose the field.",
   "plan_name": "timezone_rollout",
   "why": "Operator requested personalization support."
+}
+```
+
+#### `praxis_compose_plan_via_llm`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `launches-work`
+- Risks: `launch`
+- CLI entrypoint: `workflow tools call praxis_compose_plan_via_llm`
+- CLI schema help: `workflow tools describe praxis_compose_plan_via_llm`
+- When to use: Compose a bounded plan statement from synthesized workflow atoms when deterministic skeletons need one LLM planning pass.
+- When not to use: Do not use it for execution or provider routing; it is a compile planning helper.
+- Selector: none
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "intent": "Build a connector workflow",
+  "plan_name": "connector-build",
+  "concurrency": 4
 }
 ```
 
@@ -1967,6 +2017,49 @@ Example input:
     },
     "preview": {}
   }
+}
+```
+
+#### `praxis_suggest_plan_atoms`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:suggest-atoms`
+- Risks: `read`
+- CLI entrypoint: `workflow suggest-atoms`
+- CLI schema help: `workflow tools describe praxis_suggest_plan_atoms`
+- When to use: Free prose (any length, no markers, no order) should yield candidate data pills, candidate step types, and candidate input parameters as three independent suggestion streams. Layer 0 (Suggest) of the planning stack — call when the prose has no explicit step markers and the downstream LLM author needs atoms to plan from.
+- When not to use: Do not use this to launch, order, or commit. It returns suggestions; an LLM author or operator still has to compose them into a packet list. For prose that already has explicit markers, call praxis_decompose_intent for ordered steps instead.
+- Recommended alias: `workflow suggest-atoms`
+- Selector: none
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "intent": "A repeatable workflow where we feed in an app name or app domain and it gets broken up into multiple steps to plan search, retrieve, evaluate and then attempt to build a custom integration for an application."
+}
+```
+
+#### `praxis_synthesize_skeleton`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_synthesize_skeleton`
+- CLI schema help: `workflow tools describe praxis_synthesize_skeleton`
+- When to use: Synthesize a workflow skeleton from recognized intent atoms before materializing or launching the workflow.
+- When not to use: Do not use it as the launch authority; use praxis_compile for draft state and praxis_workflow for execution.
+- Selector: none
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "intent": "Build a connector workflow from app docs and smoke-test it"
 }
 ```
 

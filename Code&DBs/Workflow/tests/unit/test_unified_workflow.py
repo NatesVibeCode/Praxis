@@ -4405,7 +4405,7 @@ def test_select_claim_route_prefers_healthy_task_type_candidate() -> None:
                         "provider_ref": "provider.openai",
                         "source_refs": [],
                         "projected_at": None,
-                        "projection_ref": "projection.private_provider_job_catalog",
+                        "projection_ref": "projection.private_provider_control_plane_snapshot",
                     },
                     {
                         "runtime_profile_ref": "nate-private",
@@ -4422,7 +4422,7 @@ def test_select_claim_route_prefers_healthy_task_type_candidate() -> None:
                         "provider_ref": "provider.anthropic",
                         "source_refs": [],
                         "projected_at": None,
-                        "projection_ref": "projection.private_provider_job_catalog",
+                        "projection_ref": "projection.private_provider_control_plane_snapshot",
                     },
                 ]
             if "FROM registry_runtime_profile_authority" in query:

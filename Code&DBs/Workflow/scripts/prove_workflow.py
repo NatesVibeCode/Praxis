@@ -39,7 +39,7 @@ PROVIDERS = [
     },
     {
         "provider_slug": "google",
-        "model_slug": "gemini-2.5-flash",
+        "model_slug": "gemini-3.1-pro",
         "task": "Add a `greet_group` function that takes a list of names and greets them all.",
     },
 ]

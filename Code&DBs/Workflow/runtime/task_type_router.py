@@ -25,6 +25,7 @@ from registry.runtime_profile_admission import (
     RuntimeProfileAdmittedCandidate,
     load_admitted_runtime_profile_candidates,
 )
+from .provider_authority import ProviderAuthorityError, provider_authority_fail
 from .route_authority_snapshot import (
     RouteAuthoritySnapshot,
     get_route_authority_snapshot,
@@ -86,8 +87,17 @@ _ROUTE_HEALTH_CONFIG_FAILURE_CATEGORIES = frozenset(
 )
 
 
-class TaskRouteAuthorityError(RuntimeError):
+class TaskRouteAuthorityError(ProviderAuthorityError):
     """Raised when required task routing authority is missing from Postgres."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str = "provider_authority.task_route_unavailable",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(reason_code=reason_code, message=message, details=details)
 
 @dataclass(frozen=True)
 class TaskRoutePolicy:
@@ -881,8 +891,11 @@ class TaskTypeRouter:
                 sorted(provider_slugs),
             )
         except Exception as exc:
-            logger.warning("provider usage availability unavailable during routing: %s", exc)
-            return set()
+            raise provider_authority_fail(
+                "provider_authority.provider_usage_unavailable",
+                f"provider usage availability unavailable during routing: {exc}",
+                provider_slugs=sorted(provider_slugs),
+            ) from exc
         unavailable: set[str] = set()
         for row in rows or []:
             provider_slug = str(row.get("subject_id") or "").strip().lower()
@@ -1233,7 +1246,9 @@ class TaskTypeRouter:
         from runtime.lane_policy import admit_adapter_type, load_provider_lane_policies
         policies = load_provider_lane_policies(self._conn)
         if not policies:
-            return rows
+            raise TaskRouteAuthorityError(
+                f"auto/{task_type}: provider lane policy authority returned no rows"
+            )
         kept: list[dict[str, Any]] = []
         rejected: list[str] = []
         for row in rows:
@@ -1308,9 +1323,9 @@ class TaskTypeRouter:
         but without this filter the route is emitted anyway and the worker
         hits Anthropic with an invalid HTTP key, collapsing on 401.
 
-        If provider_transport_admissions is missing entirely (fresh clone
-        before migrations), the filter is a no-op — fail open so we don't
-        break non-provider-admitted environments.
+        If provider_transport_admissions is unavailable, the filter fails
+        closed. Missing policy authority must not emit runnable provider
+        routes.
         """
         if not rows:
             return rows
@@ -1325,11 +1340,15 @@ class TaskTypeRouter:
                     self, provider_slug
                 )
             except Exception:
-                # Unknown adapter means we can't decide admission — pass through.
+                logger.warning(
+                    "AUTO ROUTE BLOCKED: auto/%s provider %s has no resolvable default adapter",
+                    task_type,
+                    provider_slug,
+                )
                 adapter_by_provider[provider_slug] = ""
         adapter_types = sorted({a for a in adapter_by_provider.values() if a})
         if not adapter_types:
-            return rows
+            return []
         try:
             admission_rows = self._conn.execute(
                 _PROVIDER_TRANSPORT_ADMISSION_SQL,
@@ -1338,10 +1357,12 @@ class TaskTypeRouter:
             )
         except PostgresError as exc:
             if getattr(exc, "sqlstate", None) == _UNDEFINED_TABLE_SQLSTATE:
-                logger.debug(
-                    "provider_transport_admissions table missing; skipping admission filter"
-                )
-                return rows
+                raise provider_authority_fail(
+                    "provider_authority.transport_admissions_missing",
+                    "provider_transport_admissions table missing; blocking provider routes",
+                    table_name="provider_transport_admissions",
+                    task_type=task_type,
+                ) from exc
             raise
         admission_index: dict[tuple[str, str], dict[str, Any]] = {
             (str(r["provider_slug"]), str(r["adapter_type"])): dict(r)
@@ -1356,12 +1377,14 @@ class TaskTypeRouter:
                 continue
             admission = admission_index.get((provider_slug, adapter_type))
             if admission is None:
-                # No row at all — we don't assume denial; pass through and let
-                # preflight / downstream handlers surface the missing-admission
-                # case. The goal of this filter is to block explicitly-denied
-                # admissions, not invent them.
-                kept.append(row)
-                continue
+                raise provider_authority_fail(
+                    "provider_authority.transport_admission_missing",
+                    "provider_transport_admissions has no row for provider/adapter",
+                    task_type=task_type,
+                    provider_slug=provider_slug,
+                    model_slug=str(row["model_slug"]),
+                    adapter_type=adapter_type,
+                )
             if bool(admission.get("admitted_by_policy")):
                 kept.append(row)
                 continue

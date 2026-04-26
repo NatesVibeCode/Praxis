@@ -58,6 +58,7 @@ class WorkflowCLIExecutionAdapter(BaseNodeAdapter):
     """Delegate `cli_llm` graph nodes to the canonical workflow CLI backend."""
 
     executor_type = "adapter.cli_llm"
+    _prefer_docker = True
 
     def execute(
         self,

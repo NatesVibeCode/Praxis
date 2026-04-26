@@ -215,11 +215,15 @@ def workflow_database_status(
 
         readiness = _run_sync(_inspect())
         missing_set = set(readiness.missing_relations)
+        structural_schema_bootstrapped = not any(
+            getattr(item, "object_type", "") != "row"
+            for item in getattr(readiness, "missing_objects", ())
+        )
         readiness_requirements = dict(workflow_compile_authority_readiness_requirements())
         return _ExplicitWorkflowDatabaseStatus(
             database_url=resolve_workflow_database_url(env=resolved_env),
             database_reachable=True,
-            schema_bootstrapped=readiness.is_bootstrapped,
+            schema_bootstrapped=structural_schema_bootstrapped,
             missing_schema_objects=tuple(readiness.missing_relations),
             compile_artifact_authority_ready=all(
                 table not in missing_set

@@ -418,6 +418,22 @@ def _collect_retrieval_gaps(definition: dict[str, Any]) -> list[dict[str, Any]]:
         # No definition_graph at all — this is a pre-migration bundle; stay
         # silent (preserves backwards compatibility with legacy definitions).
         return []
+    compile_provenance = (
+        definition.get("compile_provenance")
+        if isinstance(definition.get("compile_provenance"), dict)
+        else {}
+    )
+    semantic_retrieval = (
+        compile_provenance.get("semantic_retrieval")
+        if isinstance(compile_provenance.get("semantic_retrieval"), dict)
+        else {}
+    )
+    if _as_text(semantic_retrieval.get("mode")) != "semantic":
+        # A materialized graph is not evidence that semantic retrieval ran.
+        # Saved drafts, imported build records, and legacy definitions may get
+        # a definition_graph during projection. Only compiler output with an
+        # explicit semantic retrieval attempt can honestly report no matches.
+        return []
     capability_nodes = _definition_graph_capability_nodes(definition)
     if capability_nodes:
         return []

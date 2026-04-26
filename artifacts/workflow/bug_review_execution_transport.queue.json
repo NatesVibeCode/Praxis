@@ -1,0 +1,14 @@
+{
+  "name": "bug_review_execution_transport",
+  "queue_id": "bug_review_exec_transport_001",
+  "phase": "review",
+  "outcome_goal": "Validate framing/scope of 30 Execution & transport authority bugs in Praxis.db; flag suspect writeups; produce ranked tackle plan.",
+  "jobs": [
+    {
+      "label": "review_execution_transport_bugs",
+      "agent": "auto/review",
+      "timeout": 1800,
+      "prompt": "You are reviewing a group of bugs in Praxis.db that may have been filed by lower-tier models. The operator is worried that some writeups are misleading or scoped wrong, and that following them blindly could cause a builder to ship the wrong fix. Validate each bug before treating it as authoritative.\n\nGroup: Execution & transport authority (30 bugs; P1=16, P2=14)\nBug IDs:\nBUG-080157FE BUG-0C0C55B1 BUG-1E77345E BUG-268ECD3F BUG-4C7E2290 BUG-90E70AA6 BUG-A5FE235C BUG-AA7CA63D BUG-AF7C1773 BUG-B0BCB286 BUG-C0E107A6 BUG-D3C6352B BUG-DFC8607C BUG-EEE3E88E BUG-F9FD6AC3 BUG-FD42FE1D BUG-07771B2A BUG-121B5049 BUG-17601F93 BUG-22C9EC03 BUG-2529D366 BUG-65964DC8 BUG-8D8C5256 BUG-8DB03A36 BUG-91A91284 BUG-9229A265 BUG-AA6AC4E0 BUG-F8C9F5B5 BUG-2907B68C BUG-D2ED53B4\n\nFor each bug:\n1. Read it: `praxis workflow bugs history <BUG-ID> --json`\n2. Read referenced code paths if any are cited (cat/grep/rg against the repo root)\n3. Judge:\n   - Is the title accurate to the underlying problem?\n   - Is the scope coherent (one defect, one symptom \u2014 not a grab bag)?\n   - Are file/function references real and current?\n   - Is the proposed direction sane, or would it cause a builder to misbuild?\n   - Is severity (P1/P2) calibrated?\n\nClassify each bug into ONE of:\n- VALID \u2014 accurate writeup, ready to assign\n- NEEDS_REWRITE \u2014 real bug but writeup misleads (say what's wrong + suggested rewrite in 1 line)\n- SUSPECT \u2014 may not be real, duplicates existing work, or pre-fixed (say why)\n- DUPLICATE_OF <BUG-ID> \u2014 semantic duplicate within this group\n\nThen produce a tackle plan:\n- Order by build sequence (dependencies first; cheap-and-isolated before deep refactors)\n- Group bugs that should ship as one PR\n- Flag bugs that look like load-bearing architecture and deserve a debate before code\n\nOutput format (concise, no narrative filler):\n\n## Validation Table\n| BUG-ID | Class | One-line verdict |\n\n## Tackle Plan\n1. <bundle-name> \u2014 bugs: [...] \u2014 rationale: <one line>\n2. ...\n\n## Flags\n- bugs needing operator decision before any build (and why, one line each)\n\nUse Praxis CLI tools, not generic web search. Read code when bug references are unclear. Don't trust titles alone \u2014 the whole point is to catch where a low-tier filer wrote a confusing title.\n\nSubmit your review as the job result; do not call praxis_submit_code_change since this is review-only."
+    }
+  ]
+}

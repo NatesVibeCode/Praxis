@@ -415,6 +415,19 @@ class _IsolatedSyncPostgresConnection:
         self._closed = False
 
     def execute(self, query: str, *args) -> list:
+        if (
+            "INSERT INTO memory_entities" in query
+            and len(args) >= 5
+            and isinstance(args[4], str)
+            and args[4].strip()
+            and not args[4].lstrip().startswith(("{", "["))
+        ):
+            import asyncpg
+
+            raise asyncpg.exceptions.InvalidTextRepresentationError(
+                "invalid input syntax for type json"
+            )
+
         async def _do():
             return await self._conn.fetch(query, *args)
 

@@ -23,12 +23,15 @@ from enum import Enum
 from typing import Any
 
 from runtime._workflow_database import resolve_runtime_database_url
+from runtime.provider_authority import provider_authority_fail
 from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 
 from .failure_classifier import classify_failure
 
 _log = logging.getLogger(__name__)
 _OVERRIDE_CACHE_TTL_S = 2.0
+_CIRCUIT_BREAKER_PROJECTION_REF = "projection.circuit_breakers"
+_CONTROL_PLANE_PROJECTION_REF = "projection.private_provider_control_plane_snapshot"
 
 def _require_cb_config() -> tuple[int, float]:
     """Read circuit breaker values from authoritative config."""
@@ -42,6 +45,44 @@ def _require_cb_config() -> tuple[int, float]:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _authority_conn() -> SyncPostgresConnection | None:
+    database_url = resolve_runtime_database_url(required=False)
+    if database_url is None:
+        return None
+    return SyncPostgresConnection(
+        get_workflow_pool(env={"WORKFLOW_DATABASE_URL": database_url})
+    )
+
+
+def _touch_projection_state(conn: SyncPostgresConnection, projection_ref: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO authority_projection_state (
+            projection_ref,
+            last_refreshed_at,
+            freshness_status,
+            error_code,
+            error_detail,
+            updated_at
+        ) VALUES (
+            $1,
+            now(),
+            'fresh',
+            NULL,
+            NULL,
+            now()
+        )
+        ON CONFLICT (projection_ref) DO UPDATE
+        SET last_refreshed_at = EXCLUDED.last_refreshed_at,
+            freshness_status = EXCLUDED.freshness_status,
+            error_code = NULL,
+            error_detail = NULL,
+            updated_at = now()
+        """,
+        projection_ref,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -409,6 +450,133 @@ class CircuitBreakerRegistry:
             half_open_max_calls=self._half_open_max_calls,
         )
 
+    def _load_runtime_state(self, provider_slug: str) -> dict[str, Any] | None:
+        conn = _authority_conn()
+        if conn is None:
+            return None
+        try:
+            return conn.fetchrow(
+                """
+                SELECT
+                    provider_slug,
+                    runtime_state,
+                    failure_count,
+                    success_count,
+                    failure_threshold,
+                    recovery_timeout_s,
+                    half_open_max_calls,
+                    last_failure_at,
+                    opened_at,
+                    half_open_after,
+                    half_open_calls
+                FROM provider_circuit_breaker_state
+                WHERE provider_slug = $1
+                """,
+                provider_slug,
+            )
+        except Exception as exc:
+            raise provider_authority_fail(
+                "provider_authority.circuit_breaker_state_unavailable",
+                f"provider circuit breaker state unavailable: {exc}",
+                provider_slug=provider_slug,
+            ) from exc
+
+    def _hydrate_breaker(self, breaker: CircuitBreaker, row: dict[str, Any] | None) -> None:
+        if not row:
+            return
+        runtime_state = str(row.get("runtime_state") or "").strip().upper() or CircuitState.CLOSED.value
+        with breaker._lock:
+            breaker._state = CircuitState(runtime_state)
+            breaker._failure_count = int(row.get("failure_count") or 0)
+            breaker._success_count = int(row.get("success_count") or 0)
+            breaker.failure_threshold = int(row.get("failure_threshold") or breaker.failure_threshold)
+            breaker.recovery_timeout_s = float(row.get("recovery_timeout_s") or breaker.recovery_timeout_s)
+            breaker.half_open_max_calls = int(row.get("half_open_max_calls") or breaker.half_open_max_calls)
+            breaker._last_failure_at = row.get("last_failure_at")
+            breaker._opened_at = row.get("opened_at")
+            breaker._half_open_after = row.get("half_open_after")
+            breaker._half_open_calls = int(row.get("half_open_calls") or 0)
+
+    def _persist_breaker_state(self, breaker: CircuitBreaker) -> None:
+        conn = _authority_conn()
+        if conn is None:
+            return
+        with breaker._lock:
+            payload = {
+                "provider_slug": breaker.provider_slug,
+                "runtime_state": breaker._state.value,
+                "failure_count": breaker._failure_count,
+                "success_count": breaker._success_count,
+                "failure_threshold": breaker.failure_threshold,
+                "recovery_timeout_s": breaker.recovery_timeout_s,
+                "half_open_max_calls": breaker.half_open_max_calls,
+                "last_failure_at": breaker._last_failure_at,
+                "opened_at": breaker._opened_at,
+                "half_open_after": breaker._half_open_after,
+                "half_open_calls": breaker._half_open_calls,
+            }
+        try:
+            conn.execute(
+                """
+                INSERT INTO provider_circuit_breaker_state (
+                    provider_slug,
+                    runtime_state,
+                    failure_count,
+                    success_count,
+                    failure_threshold,
+                    recovery_timeout_s,
+                    half_open_max_calls,
+                    last_failure_at,
+                    opened_at,
+                    half_open_after,
+                    half_open_calls,
+                    updated_at,
+                    projected_at,
+                    projection_ref
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now(), $12
+                )
+                ON CONFLICT (provider_slug) DO UPDATE
+                SET runtime_state = EXCLUDED.runtime_state,
+                    failure_count = EXCLUDED.failure_count,
+                    success_count = EXCLUDED.success_count,
+                    failure_threshold = EXCLUDED.failure_threshold,
+                    recovery_timeout_s = EXCLUDED.recovery_timeout_s,
+                    half_open_max_calls = EXCLUDED.half_open_max_calls,
+                    last_failure_at = EXCLUDED.last_failure_at,
+                    opened_at = EXCLUDED.opened_at,
+                    half_open_after = EXCLUDED.half_open_after,
+                    half_open_calls = EXCLUDED.half_open_calls,
+                    updated_at = now(),
+                    projected_at = now(),
+                    projection_ref = EXCLUDED.projection_ref
+                """,
+                payload["provider_slug"],
+                payload["runtime_state"],
+                payload["failure_count"],
+                payload["success_count"],
+                payload["failure_threshold"],
+                payload["recovery_timeout_s"],
+                payload["half_open_max_calls"],
+                payload["last_failure_at"],
+                payload["opened_at"],
+                payload["half_open_after"],
+                payload["half_open_calls"],
+                _CIRCUIT_BREAKER_PROJECTION_REF,
+            )
+            _touch_projection_state(conn, _CIRCUIT_BREAKER_PROJECTION_REF)
+            conn.execute(
+                "SELECT refresh_private_provider_control_plane_snapshot(NULL)"
+            )
+        except Exception as exc:
+            raise provider_authority_fail(
+                "provider_authority.circuit_breaker_state_persist_failed",
+                f"provider circuit breaker state persist failed: {exc}",
+                provider_slug=breaker.provider_slug,
+                projection_ref=_CIRCUIT_BREAKER_PROJECTION_REF,
+                downstream_projection_ref=_CONTROL_PLANE_PROJECTION_REF,
+            ) from exc
+
     def get(self, provider_slug: str) -> CircuitBreaker:
         """Return the breaker for a provider, creating one if needed."""
         normalized_provider_slug = provider_slug.strip().lower()
@@ -416,6 +584,10 @@ class CircuitBreakerRegistry:
             breaker = self._breakers.get(normalized_provider_slug)
             if breaker is None:
                 breaker = self._make_breaker(normalized_provider_slug)
+                self._hydrate_breaker(
+                    breaker,
+                    self._load_runtime_state(normalized_provider_slug),
+                )
                 self._breakers[normalized_provider_slug] = breaker
             return breaker
 
@@ -496,8 +668,10 @@ class CircuitBreakerRegistry:
         try:
             overrides = self._query_manual_overrides()
         except Exception as exc:
-            _log.warning("circuit_breaker overrides unavailable: %s", exc)
-            overrides = {}
+            raise provider_authority_fail(
+                "provider_authority.circuit_breaker_manual_overrides_unavailable",
+                f"circuit_breaker manual overrides unavailable: {exc}",
+            ) from exc
         with self._override_lock:
             self._manual_overrides = dict(overrides)
             self._manual_override_cache_until = now + _OVERRIDE_CACHE_TTL_S
@@ -528,6 +702,7 @@ class CircuitBreakerRegistry:
             breaker.record_success()
         else:
             breaker.record_failure(failure_code=failure_code)
+        self._persist_breaker_state(breaker)
 
     def allow_request(self, provider_slug: str) -> bool:
         """Check whether the provider's circuit allows a request."""
@@ -535,7 +710,12 @@ class CircuitBreakerRegistry:
         override = self._manual_override_map().get(normalized_provider_slug)
         if override is not None:
             return override.override_state != CircuitState.OPEN
-        return self.get(normalized_provider_slug).allow_request()
+        breaker = self.get(normalized_provider_slug)
+        previous_state = breaker.state
+        allowed = breaker.allow_request()
+        if breaker.state != previous_state:
+            self._persist_breaker_state(breaker)
+        return allowed
 
     def all_states(self) -> dict[str, dict[str, Any]]:
         """Return a summary dict for every known breaker."""

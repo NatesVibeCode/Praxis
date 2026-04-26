@@ -664,12 +664,18 @@ class ChatOrchestrator:
                 if raw_allow_payg_fallback is not None
                 else None
             )
-            admitted, reason = admit_adapter_type(
-                lane_policies, provider, adapter_type,
-                spend_pressure=decision_pressure,
-                budget_authority_unreachable=decision_budget_unreachable,
-                budget_window_data_quality_error=decision_budget_window_data_quality_error,
-                allow_payg_fallback=decision_allow_payg_fallback,
+            admitted, reason = (
+                admit_adapter_type(
+                    lane_policies,
+                    provider,
+                    adapter_type,
+                    spend_pressure=decision_pressure,
+                    budget_authority_unreachable=decision_budget_unreachable,
+                    budget_window_data_quality_error=decision_budget_window_data_quality_error,
+                    allow_payg_fallback=decision_allow_payg_fallback,
+                )
+                if lane_policies
+                else (True, "lane.admitted.legacy_no_policy")
             )
             if not admitted:
                 _log.info(

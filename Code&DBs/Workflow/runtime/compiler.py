@@ -370,7 +370,10 @@ def _compile_prose_inner(
         definition=definition,
         unresolved=unresolved,
     )
-    definition["compile_provenance"] = compile_provenance
+    definition["compile_provenance"] = {
+        **compile_provenance,
+        "semantic_retrieval": dict(semantic_retrieval),
+    }
 
     # Persist artifact
     if conn is not None:

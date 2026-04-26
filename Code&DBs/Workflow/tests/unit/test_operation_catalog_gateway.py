@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from pydantic import BaseModel
 
 import runtime.operation_catalog_gateway as gateway
+from runtime.provider_authority import ProviderAuthorityError
 
 
 class _ExampleCommand(BaseModel):
@@ -316,6 +317,50 @@ def test_aexecute_operation_from_subsystems_awaits_async_handlers(monkeypatch) -
     assert result["operation_receipt"]["operation_name"] == "semantic_assertions.list"
     assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
     assert conn.transaction_commits == 1
+
+
+def test_gateway_preserves_typed_reason_code_and_details(monkeypatch) -> None:
+    binding = SimpleNamespace(
+        operation_ref="operator.query_example",
+        operation_name="operator.query_example",
+        source_kind="operation_query",
+        operation_kind="query",
+        command_class=_ExampleCommand,
+        handler=lambda _command, _subsystems: (_ for _ in ()).throw(
+            ProviderAuthorityError(
+                reason_code="provider_authority.transport_admission_missing",
+                message="provider transport admission missing",
+                details={"provider_slug": "openai", "adapter_type": "llm_task"},
+            )
+        ),
+        authority_ref="authority.example_query",
+        projection_ref="projection.example_query",
+        posture="observe",
+        idempotency_policy="read_only",
+        binding_revision="binding.operation.query_example.20260416",
+        decision_ref="decision.operation.query_example.20260416",
+    )
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.query_example",
+        payload={"value": "query"},
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "provider_authority.transport_admission_missing"
+    assert result["details"] == {"provider_slug": "openai", "adapter_type": "llm_task"}
 
 
 def test_command_receipt_event_persistence_rolls_back_as_one_proof_write(monkeypatch) -> None:

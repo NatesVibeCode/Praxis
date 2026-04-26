@@ -8,10 +8,35 @@ from runtime.task_type_router import TaskTypeRouter
 from runtime.task_type_router import TaskRouteAuthorityError
 
 
+def _admitted_transport_rows(provider_slugs, adapter_types):
+    return [
+        {
+            "provider_slug": provider_slug,
+            "adapter_type": adapter_type,
+            "admitted_by_policy": True,
+            "policy_reason": "",
+            "decision_ref": "test.provider_transport_admitted",
+        }
+        for provider_slug in provider_slugs
+        for adapter_type in adapter_types
+    ]
+
+
+def _lane_policy_rows(provider_slugs):
+    return [
+        {
+            "provider_slug": provider_slug,
+            "allowed_adapter_types": ["cli_llm", "llm_task"],
+            "overridable": True,
+        }
+        for provider_slug in provider_slugs
+    ]
+
+
 def _passthrough_economics(**kwargs):
     budget_authority = kwargs.get("budget_authority")
     return {
-        "adapter_type": kwargs.get("adapter_type") or "cli",
+        "adapter_type": kwargs.get("adapter_type") or "cli_llm",
         "billing_mode": "owned_compute",
         "budget_bucket": "test",
         "effective_marginal_cost": float(kwargs.get("raw_cost_per_m_tokens") or 0.0),
@@ -28,7 +53,7 @@ def _stub_router_provider_defaults(monkeypatch):
     monkeypatch.setitem(
         TaskTypeRouter.__init__.__globals__,
         "resolve_default_adapter_type",
-        lambda provider_slug=None: "cli",
+        lambda provider_slug=None: "cli_llm",
     )
     monkeypatch.setitem(
         TaskTypeRouter._build_profile_task_rows.__globals__,
@@ -85,8 +110,10 @@ class _FakeConn:
         if "FROM task_type_route_eligibility" in sql:
             return []
         if "FROM provider_lane_policy" in sql:
-            return []
+            return _lane_policy_rows(["openai", "anthropic", "google", "deepseek"])
         if "FROM provider_transport_admissions" in sql:
+            return _admitted_transport_rows(params[0], params[1])
+        if "FROM heartbeat_probe_snapshots" in sql:
             return []
         if "provider_budget_windows" in sql:
             return []
@@ -221,8 +248,10 @@ class _CatalogProfileConn:
         if "FROM task_type_route_eligibility" in sql:
             return []
         if "FROM provider_lane_policy" in sql:
-            return []
+            return _lane_policy_rows(["openai", "anthropic", "google", "deepseek"])
         if "FROM provider_transport_admissions" in sql:
+            return _admitted_transport_rows(params[0], params[1])
+        if "FROM heartbeat_probe_snapshots" in sql:
             return []
         if "provider_budget_windows" in sql:
             return [{
@@ -471,7 +500,7 @@ def test_explicit_slug_uses_runtime_profile_budget_authority(monkeypatch) -> Non
                 provider_slug=kwargs.get("provider_slug"),
             )
         return {
-            "adapter_type": kwargs.get("adapter_type") or "cli",
+            "adapter_type": kwargs.get("adapter_type") or "cli_llm",
             "billing_mode": "owned_compute",
             "budget_bucket": "test",
             "effective_marginal_cost": float(kwargs.get("raw_cost_per_m_tokens") or 0.0),

@@ -54,7 +54,13 @@ ALTER TABLE memory_entities
         'authority_domain',
         'cutover_gate',
         'workflow_class',
-        'schedule_definition'
+        'schedule_definition',
+        'layout_shape',
+        'pill_type',
+        'pill_field',
+        'experience_template',
+        'surface_framework',
+        'intent'
     ]));
 
 ALTER TABLE memory_edges
@@ -81,7 +87,19 @@ ALTER TABLE memory_edges
         'parent_of',
         'resolves_bug',
         'implements_build',
-        'belongs_to_area'
+        'belongs_to_area',
+        'subtype_of',
+        'has_field',
+        'uses_shape',
+        'consumes',
+        'consumes:right',
+        'consumes:action_rail',
+        'includes',
+        'targets_template',
+        'preferred_theme',
+        'uses_theme',
+        'declares',
+        'emits'
     ]));
 
 COMMIT;

@@ -4,6 +4,10 @@ Backs the source-ref, handoff-target, persistence-target, integration-provider,
 and payload-field pickers in Moon. All endpoints are GET and return compact
 lists Moon renders as ``<datalist>`` suggestions so free-text fields become
 pickable without forcing strict validation.
+
+Integration provider suggestions are derived from ``integration_registry`` (grouped
+by ``provider``) and exclude rows whose provider slug matches an **OPEN** entry in
+``effective_provider_circuit_breaker_state``.
 """
 
 from __future__ import annotations
@@ -11,20 +15,6 @@ from __future__ import annotations
 from typing import Any
 
 from ._shared import RouteEntry, _exact, _query_params
-
-
-KNOWN_INTEGRATION_PROVIDERS: list[dict[str, str]] = [
-    {"value": "http", "label": "HTTP (generic)"},
-    {"value": "stripe", "label": "Stripe"},
-    {"value": "slack", "label": "Slack"},
-    {"value": "github", "label": "GitHub"},
-    {"value": "linear", "label": "Linear"},
-    {"value": "notion", "label": "Notion"},
-    {"value": "twilio", "label": "Twilio"},
-    {"value": "sendgrid", "label": "SendGrid"},
-    {"value": "openai", "label": "OpenAI"},
-    {"value": "anthropic", "label": "Anthropic"},
-]
 
 
 KNOWN_PAYLOAD_FIELDS: list[dict[str, str]] = [
@@ -123,20 +113,35 @@ def _handle_authorities(request: Any, path: str) -> None:
 
 def _handle_integration_providers(request: Any, path: str) -> None:
     del path
-    providers = list(KNOWN_INTEGRATION_PROVIDERS)
     try:
         pg = request.subsystems.get_pg_conn()
         rows = pg.fetch(
-            "SELECT DISTINCT provider FROM integration_registry WHERE provider IS NOT NULL ORDER BY provider"
+            """
+            SELECT ir.provider, min(ir.name) AS name
+            FROM integration_registry ir
+            LEFT JOIN effective_provider_circuit_breaker_state b
+              ON lower(btrim(b.provider_slug)) = lower(btrim(ir.provider))
+            WHERE ir.provider IS NOT NULL
+              AND btrim(ir.provider) <> ''
+              AND (
+                  b.provider_slug IS NULL
+                  OR COALESCE(b.effective_state, 'CLOSED') <> 'OPEN'
+              )
+            GROUP BY ir.provider
+            ORDER BY ir.provider
+            """
         )
-        known = {p["value"] for p in providers}
-        for r in rows:
-            p = str(r["provider"] or "").strip()
-            if p and p not in known:
-                providers.append({"value": p, "label": p})
-                known.add(p)
-    except Exception:
-        pass
+    except Exception as exc:
+        request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
+        return
+    providers: list[dict[str, str]] = []
+    for r in rows:
+        p = str(r["provider"] or "").strip()
+        if not p:
+            continue
+        name = str(r.get("name") or "").strip()
+        label = f"{name} ({p})" if name else p
+        providers.append({"value": p, "label": label})
     request._send_json(200, {"providers": providers, "count": len(providers)})
 
 

@@ -33,6 +33,7 @@ from adapters.permission_matrix import (
     API_PROVIDERS,
     NormalizedPermissionMode,
     PermissionMatrixError,
+    SUPPORTED_CLI_PROVIDERS,
     api_permission_prompt_suffix,
     is_permission_step_up,
     translate_permission_flags,
@@ -757,12 +758,22 @@ def _claude_permission_mode(env: dict[str, str] | None = None) -> str:
 
 
 def _cli_provider(value: str | None = None, env: dict[str, str] | None = None) -> str:
-    """Single-provider stub: all chat now flows through DeepSeek V4 Pro via OpenRouter.
-
-    Provider field is kept for compat with old session rows but no longer
-    drives dispatch. Always returns "deepseek-v4-pro" regardless of input.
-    """
-    return "deepseek-v4-pro"
+    source = env if env is not None else os.environ
+    provider = str(value or source.get(_CLI_PROVIDER_ENV) or "claude").strip().lower()
+    allowed = SUPPORTED_CLI_PROVIDERS | API_PROVIDERS
+    if provider not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Unsupported agent provider. Supported providers: "
+                    + ", ".join(sorted(allowed))
+                ),
+                "error_code": "agent_provider_unsupported",
+                "provider": provider,
+            },
+        )
+    return provider
 
 
 def _codex_sandbox(env: dict[str, str] | None = None) -> str:
@@ -913,15 +924,7 @@ def _thread_id_from_events(events: list[dict[str, Any]], fallback: str) -> str:
 def _openrouter_model(env: dict[str, str] | None = None) -> str:
     source = env if env is not None else os.environ
     model = str(source.get(_OPENROUTER_MODEL_ENV) or "").strip()
-    if not model:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": f"{_OPENROUTER_MODEL_ENV} is not set",
-                "error_code": "openrouter_model_missing",
-            },
-        )
-    return model
+    return model or "qwen/qwen3-coder"
 
 
 def _openrouter_messages(

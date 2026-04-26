@@ -858,6 +858,14 @@ def _extract_data_dictionary_table(question: str) -> str | None:
     return None
 
 
+def _data_dictionary_lookup_table_name(table_ref: str | None) -> str | None:
+    if not table_ref:
+        return None
+    if table_ref.startswith("public."):
+        return table_ref.removeprefix("public.")
+    return table_ref
+
+
 def _has_data_dictionary_intent(question: str) -> bool:
     normalized = _normalized_query(question)
     if _query_is(normalized, _DATA_DICTIONARY_QUERIES):
@@ -899,7 +907,7 @@ def _data_dictionary(subs: Any, question: str) -> dict:
         subs,
         operation_name="operator.data_dictionary",
         payload={
-            "table_name": str(table_name) if table_name else None,
+            "table_name": _data_dictionary_lookup_table_name(str(table_name) if table_name else None),
             "include_relationships": True,
         },
     )

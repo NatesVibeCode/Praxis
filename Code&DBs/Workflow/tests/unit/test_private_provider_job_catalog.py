@@ -42,7 +42,7 @@ def test_effective_provider_job_catalog_reads_effective_view_only() -> None:
                 "provider_ref": "provider.anthropic",
                 "source_refs": ["table.task_type_routing"],
                 "projected_at": "2026-04-26T00:00:00Z",
-                "projection_ref": "projection.private_provider_job_catalog",
+                "projection_ref": "projection.private_provider_control_plane_snapshot",
             }
         ]
     )
@@ -118,7 +118,7 @@ def test_submission_gate_allows_provider_model_present_in_effective_catalog() ->
                     "provider_ref": "provider.anthropic",
                     "source_refs": [],
                     "projected_at": None,
-                    "projection_ref": "projection.private_provider_job_catalog",
+                    "projection_ref": "projection.private_provider_control_plane_snapshot",
                 }
             ]
         ),

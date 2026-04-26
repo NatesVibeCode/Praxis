@@ -15,10 +15,10 @@
   ],
   "verify": [
     {
-      "command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest -q 'Code&DBs/Workflow/tests/integration/test_bounded_burnin_proof.py'"
+      "command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' python3 -m pytest -q '/Users/nate/Praxis/Code&DBs/Workflow/tests/integration/test_bounded_burnin_proof.py'"
     },
     {
-      "command": "cd '/Users/nate/Praxis' && ./scripts/validate-queue.sh'/Users/nate/Praxis/artifacts/workflow/DAGW23C_bounded_burnin_proof.queue.json'"
+      "command": "cd '/Users/nate/Praxis' && ./scripts/validate-queue.sh '/Users/nate/Praxis/artifacts/workflow/DAGW23C_bounded_burnin_proof.queue.json'"
     }
   ]
 }

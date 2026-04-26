@@ -59,3 +59,52 @@ def test_handle_webhook_sources_only_suggests_live_routed_endpoints() -> None:
         "count": 1,
     }
     assert len(pg.queries) == 1
+
+
+class _FakePgIntegrationProviders:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.queries: list[str] = []
+
+    def fetch(self, query: str, *args):
+        del args
+        self.queries.append(query)
+        normalized = " ".join(query.split())
+        assert "FROM integration_registry" in normalized
+        assert "GROUP BY ir.provider" in normalized
+        assert "effective_provider_circuit_breaker_state" in normalized
+        return list(self.rows)
+
+
+def test_handle_integration_providers_reads_registry_only() -> None:
+    pg = _FakePgIntegrationProviders(
+        [
+            {"provider": "dag", "name": "DAG Dispatch"},
+            {"provider": "http", "name": "Webhook"},
+        ]
+    )
+    request = _FakeRequest(pg)
+
+    moon_pickers._handle_integration_providers(request, "/api/moon/pickers/integration-providers")
+
+    assert request.status_code == 200
+    assert request.body == {
+        "providers": [
+            {"value": "dag", "label": "DAG Dispatch (dag)"},
+            {"value": "http", "label": "Webhook (http)"},
+        ],
+        "count": 2,
+    }
+
+
+def test_handle_integration_providers_db_error_returns_500() -> None:
+    class _BrokenPg:
+        def fetch(self, *_a, **_k):
+            raise RuntimeError("db down")
+
+    request = _FakeRequest(_BrokenPg())
+    moon_pickers._handle_integration_providers(request, "/api/moon/pickers/integration-providers")
+
+    assert request.status_code == 500
+    assert request.body is not None
+    assert "error" in request.body

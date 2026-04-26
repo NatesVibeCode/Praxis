@@ -63,6 +63,12 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     """Run health probes, return preflight + operator snapshot + lane recommendation."""
     hs_mod = _subs.get_health_mod()
 
+    def _static_probe(**kwargs: Any) -> Any:
+        probe_cls = getattr(hs_mod, "StaticHealthProbe", None)
+        if probe_cls is None:
+            from runtime.health import StaticHealthProbe as probe_cls
+        return probe_cls(**kwargs)
+
     # Mirror the admin health handler so MCP and /orient expose one probe truth.
     probes: list[Any] = []
     db_url = workflow_database_url_for_repo(REPO_ROOT, env=workflow_database_env())
@@ -73,7 +79,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     surface_usage_recorder = surface_usage_recorder_health()
     if surface_usage_recorder.get("authority_ready") is False:
         probes.append(
-            hs_mod.StaticHealthProbe(
+            _static_probe(
                 name="surface_usage_recorder",
                 passed=False,
                 message=f"surface usage recorder degraded: {surface_usage_recorder.get('last_error') or 'unknown error'}",
@@ -81,10 +87,29 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
                 details=surface_usage_recorder,
             )
         )
-    transport_support = query_transport_support(
-        health_mod=hs_mod,
-        pg=_subs.get_pg_conn(),
-    )
+    try:
+        transport_support = query_transport_support(
+            health_mod=hs_mod,
+            pg=_subs.get_pg_conn(),
+        )
+    except Exception as exc:
+        transport_support_error = f"{type(exc).__name__}: {exc}"
+        transport_support = {
+            "default_provider_slug": "",
+            "default_adapter_type": "",
+            "registered_providers": [],
+            "providers": [],
+            "support_basis": f"unavailable:{transport_support_error}",
+        }
+        probes.append(
+            _static_probe(
+                name="transport_support",
+                passed=False,
+                message=f"transport support unavailable: {transport_support_error}",
+                status="failed",
+                details={"error": transport_support_error},
+            )
+        )
     transport_support_summary = build_transport_support_summary(transport_support)
     try:
         provider_registry = provider_registry_health()
@@ -97,7 +122,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
             "fallback_active": False,
         }
         probes.append(
-            hs_mod.StaticHealthProbe(
+            _static_probe(
                 name="provider_registry",
                 passed=False,
                 message=f"provider registry load failed: {provider_registry_error}",

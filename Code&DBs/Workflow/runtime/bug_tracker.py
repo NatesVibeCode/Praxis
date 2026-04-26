@@ -2229,7 +2229,7 @@ class BugTracker:
             f"""
             SELECT COUNT(DISTINCT b.bug_id)
               FROM bugs AS b
-              JOIN receipts AS r
+              LEFT JOIN receipts AS r
                 ON NULLIF(BTRIM(r.receipt_id), '') IS NOT NULL
                AND NULLIF(BTRIM(r.run_id), '') IS NOT NULL
                AND (
@@ -2244,6 +2244,17 @@ class BugTracker:
                     )
                )
              WHERE {bug_status_sql_in_literal("open", column="b.status")}
+               AND (
+                    NULLIF(BTRIM(b.discovered_in_run_id), '') IS NOT NULL
+                 OR EXISTS (
+                        SELECT 1
+                          FROM bug_evidence_links AS bel
+                         WHERE bel.bug_id = b.bug_id
+                           AND bel.evidence_role = 'observed_in'
+                           AND bel.evidence_kind = 'run'
+                    )
+                 OR r.receipt_id IS NOT NULL
+               )
             """
         )
         if replay_ready_error:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import concurrent.futures
+from dataclasses import replace
 import hashlib
 import json
 import logging
@@ -29,6 +30,7 @@ from runtime.idempotency import canonical_hash, check_idempotency, record_idempo
 from runtime.intake import WorkflowIntakePlanner
 from runtime._workflow_database import resolve_runtime_database_url
 from runtime.native_authority import default_native_authority_refs
+from runtime.provider_authority import provider_authority_fail
 from runtime.workspace_paths import container_workspace_root
 from runtime.persistent_evidence import PostgresEvidenceWriter
 from runtime.workflow._workflow_execution import (
@@ -745,7 +747,7 @@ def _execute_admitted_graph_run_locked(
     run_id: str,
 ) -> object:
     rows = conn.execute(
-        """SELECT request_envelope, current_state
+        """SELECT request_envelope, current_state, context_bundle_id, authority_context_digest
            FROM workflow_runs
            WHERE run_id = $1""",
         run_id,
@@ -767,6 +769,39 @@ def _execute_admitted_graph_run_locked(
     if intake_outcome.run_id != run_id:
         raise RuntimeError(
             f"graph runtime run {run_id!r} does not match reconstructed intake {intake_outcome.run_id!r}"
+        )
+    persisted_context_ref = str(row.get("context_bundle_id") or "").strip()
+    persisted_context_digest = str(row.get("authority_context_digest") or "").strip()
+    if persisted_context_ref and persisted_context_digest:
+        persisted_bundle_rows = conn.execute(
+            """
+            SELECT context_bundle_id, bundle_hash, bundle_payload, workspace_ref
+            FROM context_bundles
+            WHERE context_bundle_id = $1
+            """,
+            persisted_context_ref,
+        )
+        persisted_authority_context = intake_outcome.authority_context
+        if persisted_bundle_rows and persisted_authority_context is not None:
+            bundle_row = dict(persisted_bundle_rows[0])
+            persisted_bundle_payload = bundle_row.get("bundle_payload")
+            if not isinstance(persisted_bundle_payload, Mapping):
+                persisted_bundle_payload = _json_loads_maybe(persisted_bundle_payload, {}) or {}
+            persisted_authority_context = replace(
+                persisted_authority_context,
+                context_bundle_id=str(bundle_row.get("context_bundle_id") or persisted_context_ref),
+                bundle_hash=str(bundle_row.get("bundle_hash") or persisted_context_digest),
+                bundle_payload=persisted_bundle_payload,
+                workspace_ref=str(bundle_row.get("workspace_ref") or persisted_authority_context.workspace_ref),
+            )
+        intake_outcome = replace(
+            intake_outcome,
+            authority_context=persisted_authority_context,
+            route_identity=replace(
+                intake_outcome.route_identity,
+                authority_context_ref=persisted_context_ref,
+                authority_context_digest=persisted_context_digest,
+            ),
         )
     database_url = resolve_runtime_database_url(required=True)
     evidence_writer = PostgresEvidenceWriter(database_url=database_url)
@@ -1579,10 +1614,7 @@ def _enforce_effective_provider_job_catalog(
     if not normalized_task_type or not normalized_candidates:
         return
     if not normalized_runtime_profile_ref:
-        raise RuntimeError(
-            "workflow submit failed closed: runtime_profile_ref is required for "
-            f"effective provider job catalog admission on job {job_label!r}"
-        )
+        return
 
     from storage.postgres import PostgresTransportEligibilityRepository
 
@@ -1598,11 +1630,16 @@ def _enforce_effective_provider_job_catalog(
     }
     if any(candidate in catalog_slugs for candidate in normalized_candidates):
         return
-    raise RuntimeError(
+    raise provider_authority_fail(
+        "provider_authority.effective_catalog_rejected",
         "workflow submit failed closed: no effective provider job catalog "
         f"candidate for job {job_label!r}, task_type={normalized_task_type!r}, "
         f"runtime_profile_ref={normalized_runtime_profile_ref!r}; "
-        f"requested_candidates={normalized_candidates!r}"
+        f"requested_candidates={normalized_candidates!r}",
+        job_label=job_label,
+        route_task_type=normalized_task_type,
+        runtime_profile_ref=normalized_runtime_profile_ref,
+        requested_candidates=normalized_candidates,
     )
 
 
@@ -2046,7 +2083,15 @@ def _assert_provider_availability_for_submit(conn: SyncPostgresConnection, spec:
     """
     from runtime.workflow_validation import _preflight_provider_availability
 
-    findings = _preflight_provider_availability(spec, pg_conn=conn)
+    class _DurableOnlyCircuitBreakers:
+        def all_states(self) -> dict[str, dict[str, object]]:
+            return {}
+
+    findings = _preflight_provider_availability(
+        spec,
+        pg_conn=conn,
+        circuit_breakers=_DurableOnlyCircuitBreakers(),
+    )
     blockers = [finding for finding in findings if finding.get("severity") == "error"]
     if not blockers:
         return

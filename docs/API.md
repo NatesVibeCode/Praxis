@@ -30,7 +30,7 @@ If it disagrees with runtime output, trust `praxis workflow routes --json` and r
 
 ## All Routes
 
-Public route count: `8`. All route count: `217`.
+Public route count: `8`. All route count: `220`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -60,6 +60,7 @@ Public route count: `8`. All route count: `217`.
 | `POST` | `/api/checkpoints` | `internal` | - | checkpoints_post |
 | `GET` | `/api/checkpoints/{checkpoint_id}` | `internal` | - | checkpoints_detail_get |
 | `POST` | `/api/checkpoints/{checkpoint_id}/approve` | `internal` | - | checkpoints_approve_post |
+| `POST` | `/api/compile/preview` | `internal` | - | compile_preview_post |
 | `GET` | `/api/costs` | `internal` | - | Return the cost summary from the Postgres-backed cost tracker. |
 | `GET` | `/api/dashboard` | `internal` | - | dashboard_get |
 | `GET` | `/api/data-dictionary` | `internal` | - | data_dictionary_list_get |
@@ -184,8 +185,9 @@ Public route count: `8`. All route count: `217`.
 | `GET` | `/api/scope` | `internal` | - | Resolve read scope, blast radius, and test scope for write-scope files. |
 | `GET` | `/api/search` | `internal` | - | search_get |
 | `GET` | `/api/setup/graph` | `internal` | - | setup_graph_get |
+| `GET` | `/api/shell/routes` | `internal` | - | shell_routes_get |
+| `GET` | `/api/shell/state/stream` | `internal` | - | Stream session-scoped shell-navigation events from authority_events. |
 | `GET` | `/api/source-options` | `internal` | - | source_options_get |
-| `POST` | `/api/surface/action` | `internal` | - | surface_action_post |
 | `GET` | `/api/templates` | `internal` | - | templates_get |
 | `POST` | `/api/trigger/{rest_of_path:path}` | `internal` | - | trigger_post |
 | `GET` | `/api/trust` | `internal` | - | Return ELO-based trust scores for all (provider, model) pairs. |
@@ -218,6 +220,7 @@ Public route count: `8`. All route count: `217`.
 | `POST` | `/bugs` | `internal` | - | bugs_post |
 | `GET` | `/console` | `internal` | - | Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE). |
 | `GET` | `/console/` | `internal` | - | Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE). |
+| `GET` | `/console/vendor/{name}` | `internal` | - | Serve inlined JS dependencies for the operator console (dev-only). |
 | `POST` | `/constraints` | `internal` | - | constraints_post |
 | `POST` | `/decompose` | `internal` | - | decompose_post |
 | `POST` | `/friction` | `internal` | - | friction_post |

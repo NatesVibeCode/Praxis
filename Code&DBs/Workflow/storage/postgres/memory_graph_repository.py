@@ -70,6 +70,27 @@ class PostgresMemoryGraphRepository:
     def __init__(self, conn: Any) -> None:
         self._conn = conn
 
+    def _ensure_archived_placeholder_entity(self, entity_id: str) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO memory_entities (
+                id,
+                entity_type,
+                name,
+                content,
+                metadata,
+                source,
+                confidence,
+                archived,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, 'fact', $1, '', '{}'::jsonb, 'memory_graph_repository', 0, true, now(), now())
+            ON CONFLICT (id) DO NOTHING
+            """,
+            entity_id,
+        )
+
     def upsert_entity(self, *, entity: Entity) -> str:
         normalized_id = _require_text(entity.id, field_name="entity.id")
         self._conn.execute(
@@ -397,7 +418,7 @@ class PostgresMemoryGraphRepository:
         return len(normalized_neighbors)
 
     def upsert_edge(self, *, edge: Edge) -> bool:
-        try:
+        def _insert() -> None:
             self._conn.execute(
                 """
                 INSERT INTO memory_edges
@@ -436,8 +457,20 @@ class PostgresMemoryGraphRepository:
                 edge.provenance_kind.value,
                 _optional_text(edge.provenance_ref, field_name="edge.provenance_ref"),
             )
+
+        try:
+            _insert()
         except Exception:
-            return False
+            try:
+                self._ensure_archived_placeholder_entity(
+                    _require_text(edge.source_id, field_name="edge.source_id"),
+                )
+                self._ensure_archived_placeholder_entity(
+                    _require_text(edge.target_id, field_name="edge.target_id"),
+                )
+                _insert()
+            except Exception:
+                return False
         return True
 
     def delete_edge(

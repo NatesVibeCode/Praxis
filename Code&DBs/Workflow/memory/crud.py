@@ -26,7 +26,10 @@ def _row_to_entity(row, entity_type: EntityType | None = None) -> Entity:
     et = entity_type or EntityType(row["entity_type"])
     metadata = row["metadata"]
     if isinstance(metadata, str):
-        metadata = json.loads(metadata)
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
     elif metadata is None:
         metadata = {}
     created = row["created_at"]
@@ -35,7 +38,7 @@ def _row_to_entity(row, entity_type: EntityType | None = None) -> Entity:
         id=row["id"],
         entity_type=et,
         name=row["name"],
-        content=row["content"],
+        content=str(row["content"] or ""),
         metadata=metadata if isinstance(metadata, dict) else dict(metadata),
         created_at=created if isinstance(created, datetime) else datetime.fromisoformat(created),
         updated_at=updated if isinstance(updated, datetime) else datetime.fromisoformat(updated),
@@ -47,7 +50,10 @@ def _row_to_entity(row, entity_type: EntityType | None = None) -> Entity:
 def _row_to_edge(row) -> Edge:
     metadata = row["metadata"]
     if isinstance(metadata, str):
-        metadata = json.loads(metadata)
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
     elif metadata is None:
         metadata = {}
     created = row["created_at"]

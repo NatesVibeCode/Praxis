@@ -1,0 +1,14 @@
+{
+  "name": "bug_review_contract_security",
+  "queue_id": "bug_review_contract_security_001",
+  "phase": "review",
+  "outcome_goal": "Validate framing/scope of 18 Contract & security bugs in Praxis.db with extra rigor; flag any that propose tightening that breaks legitimate flow or are security theater; produce ranked tackle plan.",
+  "jobs": [
+    {
+      "label": "review_contract_security_bugs",
+      "agent": "auto/review",
+      "timeout": 1800,
+      "prompt": "You are reviewing a group of bugs in Praxis.db that may have been filed by lower-tier models. The operator is worried that some writeups are misleading or scoped wrong, and that following them blindly could cause a builder to ship the wrong fix. Validate each bug before treating it as authoritative.\n\nGroup: Contract & security (18 bugs; P1=5, P2=13)\nBug IDs:\nBUG-2337DB51 BUG-25224975 BUG-25829630 BUG-2CF335E3 BUG-BF734C00 BUG-24F87D0F BUG-34C2F2DA BUG-419EDA6D BUG-6AB79F3B BUG-76A0519D BUG-AAE46E22 BUG-ABBEFC6F BUG-AD855F0C BUG-DDFA8F9E BUG-EBE6B0E1 BUG-EE65C154 BUG-FF008A47 BUG-1879A498\n\nFor each bug:\n1. Read it: `praxis workflow bugs history <BUG-ID> --json`\n2. Read referenced code paths (cat/grep/rg against the repo root)\n3. Judge with EXTRA rigor since these are CONTRACT or SECURITY bugs:\n   - Is the contract claim real (does the code actually violate or lack the claimed contract)?\n   - For security bugs: is the threat model real, or theater (e.g., flagging defense-in-depth where there's no actual attack surface)?\n   - Are file/function references real and current?\n   - Does the proposed fix cause a worse problem (e.g., overly strict validation that breaks legitimate flow)?\n   - Is severity calibrated?\n\nClassify each bug into ONE of:\n- VALID \u2014 accurate writeup, ready to assign\n- NEEDS_REWRITE \u2014 real bug but writeup misleads (say what + suggested rewrite in 1 line)\n- SUSPECT \u2014 may not be real, duplicates existing work, pre-fixed, or theater (say why)\n- DUPLICATE_OF <BUG-ID> \u2014 semantic duplicate within this group\n\nThen produce a tackle plan:\n- Order by build sequence \u2014 security-real-and-exploitable first, contract-strictness-debatable last\n- Group bugs that should ship as one PR\n- Flag any bug that would tighten contracts in a way that breaks legitimate flow (operator decision needed)\n\nOutput format (concise, no narrative filler):\n\n## Validation Table\n| BUG-ID | Class | One-line verdict |\n\n## Tackle Plan\n1. <bundle-name> \u2014 bugs: [...] \u2014 rationale: <one line>\n2. ...\n\n## Flags\n- bugs needing operator decision before any build (and why)\n- bugs where the security claim looks like theater (and why)\n\nUse Praxis CLI tools, not generic web search. Read the actual code, don't infer from titles.\n\nSubmit your review as the job result; do not call praxis_submit_code_change since this is review-only."
+    }
+  ]
+}

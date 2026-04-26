@@ -42,16 +42,19 @@
       "sandbox_profile_ref": "sandbox_profile.praxis.default",
       "model_profile_id": "model_profile.praxis.default",
       "provider_policy_id": "provider_policy.praxis.default",
-      "provider_name": "openai",
-      "provider_names": ["openai", "anthropic", "google"],
-      "allowed_models": [
-        "gpt-5.4",
-        "claude-opus-4-7",
-        "claude-sonnet-4-6",
-        "gemini-3.1-pro-preview",
-        "gpt-5.4-mini",
-        "gemini-3-flash-preview"
-      ],
+      "provider_selection_authority_ref": "projection.private_provider_job_catalog",
+      "bootstrap_seed_projection": {
+        "provider_name": "openai",
+        "provider_names": ["openai", "anthropic", "google"],
+        "allowed_models": [
+          "gpt-5.4",
+          "claude-opus-4-7",
+          "claude-sonnet-4-6",
+          "gemini-3.1-pro-preview",
+          "gpt-5.4-mini",
+          "gemini-3-flash-preview"
+        ]
+      },
       "repo_root": ".",
       "workdir": ".",
       "receipts_dir": "artifacts/runtime_receipts",

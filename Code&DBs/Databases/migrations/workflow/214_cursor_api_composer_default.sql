@@ -152,7 +152,8 @@ INSERT INTO model_profile_candidate_bindings (
     now(),
     NULL,
     now()
-) ON CONFLICT (model_profile_candidate_binding_id) DO UPDATE SET
+) ON CONFLICT ON CONSTRAINT model_profile_candidate_bindings_unique_window DO UPDATE SET
+    model_profile_candidate_binding_id = EXCLUDED.model_profile_candidate_binding_id,
     model_profile_id = EXCLUDED.model_profile_id,
     candidate_ref = EXCLUDED.candidate_ref,
     binding_role = EXCLUDED.binding_role,

@@ -68,25 +68,25 @@ def test_lane_policy_raises_when_chain_fully_rejected(patch_loader) -> None:
         TaskTypeRouter._apply_lane_policy(_FakeRouter(), "chat", rows)
 
 
-def test_lane_policy_fails_open_when_no_policy_table(patch_loader) -> None:
-    """Empty policies dict (e.g. migration not applied) must not narrow."""
+def test_lane_policy_fails_closed_when_no_policy_rows(patch_loader) -> None:
+    """Empty policies dict means there is no provider lane authority."""
     patch_loader({})
     rows = [
         {"provider_slug": "anthropic", "model_slug": "claude", "adapter_type": "llm_task"},
         {"provider_slug": "unknown", "model_slug": "x", "adapter_type": "cli_llm"},
     ]
-    kept = TaskTypeRouter._apply_lane_policy(_FakeRouter(), "chat", rows)
-    assert kept == rows
+    with pytest.raises(TaskRouteAuthorityError, match="provider lane policy authority"):
+        TaskTypeRouter._apply_lane_policy(_FakeRouter(), "chat", rows)
 
 
-def test_lane_policy_fails_open_for_unlisted_provider(patch_loader) -> None:
-    """Provider not in the seeded policies keeps its rows."""
+def test_lane_policy_fails_closed_for_unlisted_provider(patch_loader) -> None:
+    """Provider not in the seeded policies is not runnable."""
     patch_loader(_policies_dict())
     rows = [
         {"provider_slug": "cursor", "model_slug": "auto", "adapter_type": "cli_llm"},
     ]
-    kept = TaskTypeRouter._apply_lane_policy(_FakeRouter(), "chat", rows)
-    assert kept == rows
+    with pytest.raises(TaskRouteAuthorityError, match="rejected by provider lane policy"):
+        TaskTypeRouter._apply_lane_policy(_FakeRouter(), "chat", rows)
 
 
 def test_lane_policy_passes_empty_rows_through(patch_loader) -> None:

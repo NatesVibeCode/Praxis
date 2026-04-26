@@ -330,7 +330,7 @@ def test_bounded_burnin_proof_repeats_bounded_native_default_runs_truthfully() -
         },
         {
             "command": (
-                f"cd '{_root}' && ./scripts/validate-queue.sh"
+                f"cd '{_root}' && ./scripts/validate-queue.sh "
                 f"'{_root}/artifacts/workflow/"
                 "DAGW23C_bounded_burnin_proof.queue.json'"
             )
@@ -355,7 +355,7 @@ def test_bounded_burnin_proof_repeats_bounded_native_default_runs_truthfully() -
     assert "burn_in_shared_terminal_reason_code: runtime.workflow_succeeded" in surface
     assert "burn_in_shared_node_order: node_0,node_1" in surface
     assert queue_payload["verify"][1]["command"] == (
-        f"cd '{_root}' && ./scripts/validate-queue.sh"
+        f"cd '{_root}' && ./scripts/validate-queue.sh "
         f"'{_root}/artifacts/workflow/"
         "DAGW23C_bounded_burnin_proof.queue.json'"
     )

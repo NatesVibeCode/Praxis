@@ -65,7 +65,7 @@ class _ClaimConn:
                     "provider_ref": "provider.openai",
                     "source_refs": [],
                     "projected_at": None,
-                    "projection_ref": "projection.private_provider_job_catalog",
+                    "projection_ref": "projection.private_provider_control_plane_snapshot",
                 },
                 {
                     "runtime_profile_ref": "nate-private",
@@ -82,7 +82,7 @@ class _ClaimConn:
                     "provider_ref": "provider.anthropic",
                     "source_refs": [],
                     "projected_at": None,
-                    "projection_ref": "projection.private_provider_job_catalog",
+                    "projection_ref": "projection.private_provider_control_plane_snapshot",
                 },
             ]
         if "FROM registry_runtime_profile_authority" in query:

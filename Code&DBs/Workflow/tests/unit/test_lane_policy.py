@@ -69,11 +69,11 @@ def test_admit_unknown_adapter_type_rejected() -> None:
     assert reason == "lane.rejected.unknown_adapter"
 
 
-def test_admit_unknown_provider_fails_open() -> None:
-    """No policy row for a provider means no gate constraint (pre-seed)."""
+def test_admit_unknown_provider_fails_closed() -> None:
+    """No policy row for a provider means no authority to run it."""
     admitted, reason = admit_adapter_type(_policies(), "unlisted", "llm_task")
-    assert admitted is True
-    assert reason == "lane.admitted.no_policy"
+    assert admitted is False
+    assert reason == "lane.rejected.no_policy"
 
 
 def test_admit_case_insensitive_adapter_type() -> None:
@@ -102,9 +102,11 @@ def test_load_parses_rows_into_policies() -> None:
     assert result["openai"].overridable is True
 
 
-def test_load_returns_empty_when_table_missing() -> None:
-    result = load_provider_lane_policies(_StubConn([], raise_undefined=True))
-    assert result == {}
+def test_load_raises_when_table_missing() -> None:
+    import pytest
+
+    with pytest.raises(RuntimeError, match="provider_lane_policy table missing"):
+        load_provider_lane_policies(_StubConn([], raise_undefined=True))
 
 
 def test_admit_llm_task_refused_when_budget_exhausted() -> None:

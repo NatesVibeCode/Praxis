@@ -818,6 +818,8 @@ class _FakePGConn:
         self._fail_zone_lookup = fail_zone_lookup
 
     def execute(self, sql: str, *args):
+        if "authority_operation_receipts" in sql:
+            return []
         if "FROM receipts" in sql:
             return self._receipt_rows
         if "FROM failure_category_zones" in sql:
@@ -845,6 +847,8 @@ class _FakePGConn:
 
     def fetchrow(self, sql: str, *args):
         normalized = " ".join(sql.split())
+        if "FROM authority_operation_receipts" in normalized:
+            return None
         if "FROM operation_catalog_registry" in normalized and "operation_name = $1" in normalized:
             return self._OPERATION_ROWS.get(str(args[0]))
         if "FROM operation_catalog_registry" in normalized and "operation_ref = $1" in normalized:
@@ -854,6 +858,16 @@ class _FakePGConn:
                     return row
             return None
         raise AssertionError(f"Unexpected fetchrow SQL in test stub: {sql}")
+
+    def transaction(self):
+        class _Transaction:
+            def __enter__(_self):
+                return self
+
+            def __exit__(_self, exc_type, exc, tb):
+                return None
+
+        return _Transaction()
 
 
 # ---------------------------------------------------------------------------
@@ -1535,6 +1549,7 @@ class TestDagOperatorView:
         assert result["returned_count"] >= 1
 
     def test_operator_graph_view_returns_direct_payload(self, monkeypatch):
+        server._subs._pg_conn = _FakePGConn()
         captured: dict[str, object] = {}
 
         class _Conn:

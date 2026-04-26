@@ -850,7 +850,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "  backfill_replay    Backfill replay provenance for bugs\n"
             "  attach_evidence    Attach canonical evidence to a bug\n"
             "  patch_resume       Update a bug's resume context\n"
-            "  resolve            Mark an existing bug fixed, deferred, or won't-fix; FIXED may run verifier proof\n"
+            "  resolve            Mark a bug fixed, fix-pending-verification, deferred, or won't-fix\n"
             "\n"
             "  --status S         Filter: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
             "  --severity S       Filter: P0, P1, P2, P3\n"

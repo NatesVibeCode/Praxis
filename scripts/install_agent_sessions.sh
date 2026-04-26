@@ -17,7 +17,7 @@ HOST="${PRAXIS_AGENT_SESSIONS_HOST:-127.0.0.1}"
 PORT="${PRAXIS_AGENT_SESSIONS_PORT:-8421}"
 PYTHON_BIN="${PRAXIS_PYTHON_BIN:-$(command -v python3 || true)}"
 LAUNCHD_PATH="${PRAXIS_LAUNCHD_PATH:-/opt/homebrew/bin:/usr/local/bin:$(getconf PATH 2>/dev/null || printf '/usr/bin:/bin:/usr/sbin:/sbin')}"
-CLI_PROVIDER="${PRAXIS_AGENT_CLI_PROVIDER:-codex}"
+CLI_PROVIDER="${PRAXIS_AGENT_CLI_PROVIDER:-claude}"
 CODEX_SANDBOX="${PRAXIS_AGENT_CODEX_SANDBOX:-workspace-write}"
 DATABASE_URL="${WORKFLOW_DATABASE_URL:-}"
 

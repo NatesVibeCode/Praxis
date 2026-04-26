@@ -16,8 +16,8 @@ that provides only the two attributes the method depends on
 wiring lives in ``_resolve_chain`` and ``_resolve_profile_chain`` but
 is not under test here — those are integration paths with their own
 suites. What this file pins is: given a denied row, the filter drops
-the candidate; given a missing table, the filter fails open; given
-admitted rows, the filter is a pass-through.
+the candidate; given missing admission authority, the filter fails
+closed; given admitted rows, the filter is a pass-through.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from typing import Any
 import asyncpg
 import pytest
 
+from runtime.provider_authority import ProviderAuthorityError
 from runtime.task_type_router import (
     TaskTypeRouter,
     _PROVIDER_TRANSPORT_ADMISSION_SQL,
@@ -201,30 +202,30 @@ def test_admitted_admission_keeps_candidate():
     assert kept == rows
 
 
-def test_missing_admission_row_passes_through():
-    """If no row exists at all for (provider, adapter), the filter does
-    not invent denial. Downstream preflight is the authority on missing
-    rows — the filter's contract is 'block explicit denials'."""
+def test_missing_admission_row_fails_closed():
+    """If no row exists at all for (provider, adapter), the filter blocks
+    that candidate by hard-stopping route selection. Missing admission
+    authority is not permission."""
     conn = _FakeConn([])  # no rows at all
     router = _RouterShim(conn)
     rows = [
         {"provider_slug": "openai", "model_slug": "gpt-5"},
         {"provider_slug": "anthropic", "model_slug": "claude-opus-4-6"},
     ]
-    kept = _call_filter(router, "review", rows)
-    assert len(kept) == 2
+    with pytest.raises(ProviderAuthorityError, match="provider_transport_admissions has no row"):
+        _call_filter(router, "review", rows)
 
 
 # --------------------------------------------------------- resilience cases
 
 
-def test_missing_admissions_table_fails_open():
-    """Fresh-clone / pre-migration environments won't have the table.
-    The filter must be a no-op rather than a hard failure."""
+def test_missing_admissions_table_fails_closed():
+    """Fresh-clone / pre-migration environments must not emit provider
+    candidates until the admission table exists."""
     router = _RouterShim(_MissingTableConn())
     rows = [{"provider_slug": "openai", "model_slug": "gpt-5"}]
-    kept = _call_filter(router, "review", rows)
-    assert kept == rows
+    with pytest.raises(ProviderAuthorityError, match="provider_transport_admissions table missing"):
+        _call_filter(router, "review", rows)
 
 
 def test_non_undefined_table_errors_propagate():
@@ -276,7 +277,7 @@ def test_provider_usage_failed_snapshot_drops_candidate():
     assert _call_availability_filter(router, "build", rows) == []
 
 
-def test_provider_usage_availability_query_failure_fails_open():
+def test_provider_usage_availability_query_failure_fails_closed():
     class _MissingHeartbeatConn:
         def execute(self, sql: str, *params):
             raise RuntimeError("heartbeat table missing")
@@ -284,7 +285,8 @@ def test_provider_usage_availability_query_failure_fails_open():
     router = _RouterShim(_MissingHeartbeatConn())
     rows = [{"provider_slug": "openai", "model_slug": "gpt-5.4"}]
 
-    assert _call_availability_filter(router, "build", rows) == rows
+    with pytest.raises(Exception, match="provider usage availability unavailable"):
+        _call_availability_filter(router, "build", rows)
 
 
 # --------------------------------------------------- SQL payload contract
@@ -303,7 +305,8 @@ def test_filter_queries_only_needed_providers_and_adapters():
         {"provider_slug": "openai", "model_slug": "gpt-5"},
         {"provider_slug": "anthropic", "model_slug": "claude-opus-4-6"},
     ]
-    _call_filter(router, "review", rows)
+    with pytest.raises(ProviderAuthorityError, match="provider_transport_admissions has no row"):
+        _call_filter(router, "review", rows)
     assert len(conn.calls) == 1
     (params, _) = conn.calls[0]
     provider_slugs_arg, adapter_types_arg = params

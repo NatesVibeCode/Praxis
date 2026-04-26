@@ -470,6 +470,18 @@ async def _seed_sandbox_profiles(
     return tuple(seeded)
 
 
+def _bootstrap_provider_projection(profile: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Seed-only provider projection for legacy native profile rows."""
+
+    projection = profile.get("bootstrap_seed_projection")
+    if projection is None:
+        return profile
+    return _require_mapping(
+        projection,
+        field_name="runtime_profile.bootstrap_seed_projection",
+    )
+
+
 async def _seed_runtime_profiles(
     conn: Any,
     config: Mapping[str, Any],
@@ -570,16 +582,16 @@ async def _seed_runtime_profiles(
                 field_name=f"{profile_ref}.instance_name",
             ),
             _require_text(
-                profile.get("provider_name"),
-                field_name=f"{profile_ref}.provider_name",
+                _bootstrap_provider_projection(profile).get("provider_name"),
+                field_name=f"{profile_ref}.bootstrap_seed_projection.provider_name",
             ),
             _json_text_array(
-                profile.get("provider_names"),
-                field_name=f"{profile_ref}.provider_names",
+                _bootstrap_provider_projection(profile).get("provider_names"),
+                field_name=f"{profile_ref}.bootstrap_seed_projection.provider_names",
             ),
             _json_text_array(
-                profile.get("allowed_models"),
-                field_name=f"{profile_ref}.allowed_models",
+                _bootstrap_provider_projection(profile).get("allowed_models"),
+                field_name=f"{profile_ref}.bootstrap_seed_projection.allowed_models",
             ),
             _require_text(profile.get("receipts_dir"), field_name=f"{profile_ref}.receipts_dir"),
             _require_text(profile.get("topology_dir"), field_name=f"{profile_ref}.topology_dir"),

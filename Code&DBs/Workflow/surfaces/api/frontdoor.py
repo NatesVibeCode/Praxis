@@ -512,7 +512,11 @@ def _submission_from_outcome(
         finished_at=None,
         last_event_id=None,
     )
-    return WorkflowAdmissionSubmission(decision=decision_write, run=run_write)
+    return WorkflowAdmissionSubmission(
+        decision=decision_write,
+        run=run_write,
+        authority_context=outcome.authority_context,
+    )
 
 
 def _load_sync_status(

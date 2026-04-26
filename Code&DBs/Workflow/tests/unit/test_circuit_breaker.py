@@ -6,6 +6,13 @@ from datetime import datetime, timezone
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _disable_durable_breaker_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    from runtime import circuit_breaker as circuit_breaker_module
+
+    monkeypatch.setattr(circuit_breaker_module, "_authority_conn", lambda: None)
+
+
 def test_circuit_breaker_registry_is_initialized_lazily(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -14,6 +21,7 @@ def test_circuit_breaker_registry_is_initialized_lazily(
     from runtime import circuit_breaker as circuit_breaker_module
 
     module = importlib.reload(circuit_breaker_module)
+    monkeypatch.setattr(module, "_authority_conn", lambda: None)
     calls: list[str] = []
 
     def _fake_require_cb_config() -> tuple[int, float]:
@@ -39,13 +47,14 @@ def test_unified_workflow_reload_does_not_require_database_url_on_import(
     from runtime import circuit_breaker as circuit_breaker_module
     from runtime.workflow import unified as unified_module
 
-    importlib.reload(circuit_breaker_module)
+    module = importlib.reload(circuit_breaker_module)
+    monkeypatch.setattr(module, "_authority_conn", lambda: None)
     module = importlib.reload(unified_module)
 
     assert callable(module._circuit_breakers)
 
 
-def test_unified_workflow_circuit_breaker_gate_degrades_without_database_url(
+def test_unified_workflow_circuit_breaker_gate_fails_closed_without_database_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
@@ -64,7 +73,8 @@ def test_unified_workflow_circuit_breaker_gate_degrades_without_database_url(
         ),
     )
 
-    assert module._circuit_breakers() is None
+    with pytest.raises(RuntimeError, match="circuit breaker gate unavailable"):
+        module._circuit_breakers()
 
 
 def test_manual_force_open_override_blocks_requests() -> None:
@@ -142,6 +152,7 @@ def test_query_manual_overrides_uses_latest_event_and_reset_clears_prior_overrid
     from runtime import circuit_breaker as circuit_breaker_module
 
     module = importlib.reload(circuit_breaker_module)
+    monkeypatch.setattr(module, "_authority_conn", lambda: None)
     registry = module.CircuitBreakerRegistry(failure_threshold=3, recovery_timeout_s=45.0)
 
     now = datetime(2026, 4, 15, 19, 0, tzinfo=timezone.utc)

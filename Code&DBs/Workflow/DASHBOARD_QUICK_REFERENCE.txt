@@ -26,7 +26,7 @@ REPLACES:
   workflow circuits          (circuit states)
   workflow leaderboard       (agent rankings)
 
-SAMPLE OUTPUT:
+SAMPLE OUTPUT (illustrative only — query live dashboard for actual state):
   === Praxis Engine Dashboard ===
   System: HEALTHY | 42 runs | 95% pass rate | $3.21 total cost
 

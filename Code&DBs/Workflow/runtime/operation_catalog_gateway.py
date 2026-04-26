@@ -224,6 +224,18 @@ def _projection_freshness(result: Any) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
+def _error_code_for_exception(exc: Exception) -> str:
+    reason_code = getattr(exc, "reason_code", None)
+    if isinstance(reason_code, str) and reason_code.strip():
+        return reason_code.strip()
+    return type(exc).__name__
+
+
+def _error_details_for_exception(exc: Exception) -> dict[str, Any] | None:
+    details = getattr(exc, "details", None)
+    return dict(details) if isinstance(details, Mapping) else None
+
+
 def _result_authority_event_ids(result: Any) -> list[str]:
     if not isinstance(result, Mapping):
         return []
@@ -631,6 +643,8 @@ async def aexecute_operation_binding(
     try:
         result = await _await_handler_result(binding.handler(command, subsystems))
     except Exception as exc:
+        error_code = _error_code_for_exception(exc)
+        error_details = _error_details_for_exception(exc)
         _persist_operation_outcome(
             conn,
             binding,
@@ -640,14 +654,17 @@ async def aexecute_operation_binding(
             idempotency_key=idempotency_key,
             started_ns=started_ns,
             execution_status="failed",
-            error_code=type(exc).__name__,
+            error_code=error_code,
             error_detail=str(exc),
         )
-        return {
+        failure = {
             "ok": False,
             "error": str(exc),
-            "error_code": type(exc).__name__,
+            "error_code": error_code,
         }
+        if error_details:
+            failure["details"] = error_details
+        return failure
     receipt = _persist_operation_outcome(
         conn,
         binding,
@@ -704,6 +721,8 @@ def execute_operation_binding(
         if inspect.isawaitable(result):
             result = _run_awaitable_sync(result)
     except Exception as exc:
+        error_code = _error_code_for_exception(exc)
+        error_details = _error_details_for_exception(exc)
         _persist_operation_outcome(
             conn,
             binding,
@@ -713,14 +732,17 @@ def execute_operation_binding(
             idempotency_key=idempotency_key,
             started_ns=started_ns,
             execution_status="failed",
-            error_code=type(exc).__name__,
+            error_code=error_code,
             error_detail=str(exc),
         )
-        return {
+        failure = {
             "ok": False,
             "error": str(exc),
-            "error_code": type(exc).__name__,
+            "error_code": error_code,
         }
+        if error_details:
+            failure["details"] = error_details
+        return failure
     receipt = _persist_operation_outcome(
         conn,
         binding,

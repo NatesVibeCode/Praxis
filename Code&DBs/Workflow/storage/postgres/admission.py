@@ -67,6 +67,7 @@ class WorkflowAdmissionSubmission:
 
     decision: WorkflowAdmissionDecisionWrite
     run: WorkflowRunWrite
+    authority_context: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)

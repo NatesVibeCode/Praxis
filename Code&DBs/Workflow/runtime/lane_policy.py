@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING
 
 from asyncpg import PostgresError
 
+from .provider_authority import provider_authority_fail
+
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
 
@@ -41,7 +43,7 @@ class ProviderLanePolicy:
 def load_provider_lane_policies(
     conn: "SyncPostgresConnection",
 ) -> dict[str, ProviderLanePolicy]:
-    """Load all provider lane policies. Returns empty dict if table absent."""
+    """Load all provider lane policies."""
     try:
         rows = conn.execute(
             """SELECT provider_slug, allowed_adapter_types, overridable
@@ -49,7 +51,11 @@ def load_provider_lane_policies(
         )
     except PostgresError as exc:
         if getattr(exc, "sqlstate", None) == _UNDEFINED_TABLE_SQLSTATE:
-            return {}
+            raise provider_authority_fail(
+                "provider_authority.provider_lane_policy_missing",
+                "provider_lane_policy table missing",
+                table_name="provider_lane_policy",
+            ) from exc
         raise
     out: dict[str, ProviderLanePolicy] = {}
     for row in rows or []:
@@ -107,7 +113,7 @@ def admit_adapter_type(
                                           target so admission refuses the
                                           metered route (closes
                                           BUG-2A950857)
-    - ``lane.admitted.no_policy``       — no policy row, fail open (pre-seed)
+    - ``lane.rejected.no_policy``       — no policy row; fail closed
 
     ``spend_pressure`` is a hard gate for ``llm_task`` only: when the
     provider's paid-API budget window is exhausted (``high``), the route is
@@ -163,7 +169,7 @@ def admit_adapter_type(
 
     policy = policies.get(provider_slug)
     if policy is None:
-        return True, "lane.admitted.no_policy"
+        return False, "lane.rejected.no_policy"
     if normalized in policy.allowed_adapter_types:
         return True, "lane.admitted"
     return False, "lane.rejected.not_allowed"

@@ -525,9 +525,24 @@ def _create_capability_endpoint(
             return JSONResponse(_json_response_payload(jsonable_encoder(result)))
         except Exception as e:
             if isinstance(e, (RequestValidationError, ValidationError)):
-                return JSONResponse({"error": f"Validation Error: {e}"}, status_code=400)
+                return _problem_response(
+                    request,
+                    status_code=400,
+                    title="Validation Error",
+                    detail=str(e),
+                    error_code="validation_error",
+                )
             logger.error("Command failure: %s", e, exc_info=True)
-            return JSONResponse({"error": str(e)}, status_code=500)
+            details = getattr(e, "details", None)
+            extra = {"details": details} if isinstance(details, dict) else None
+            return _problem_response(
+                request,
+                status_code=500,
+                title="Capability Execution Failed",
+                detail=str(e),
+                error_code=getattr(e, "reason_code", "capability_execution_failed"),
+                extra=extra,
+            )
 
     return endpoint
 

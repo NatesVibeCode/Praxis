@@ -17,6 +17,7 @@ from adapters.deterministic import DeterministicExecutionControl, DeterministicT
 from adapters.http_transport import HTTPTransportCancelled
 from adapters.llm_client import LLMClientError, LLMRequest, call_llm, call_llm_streaming
 from adapters.llm_task import LLMTaskAdapter
+from adapters.provider_types import ProviderCLIProfile
 
 
 @contextmanager
@@ -209,7 +210,33 @@ def test_llm_task_adapter_returns_cancelled_when_http_request_is_interrupted(
         }
     ).encode("utf-8")
     control = DeterministicExecutionControl()
-    profiles = {profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES}
+    profiles = {
+        "openai": ProviderCLIProfile(
+            provider_slug="openai",
+            binary="codex",
+            default_model="gpt-5.4",
+            api_endpoint="https://example.test/v1/chat/completions",
+            api_protocol_family="openai_chat_completions",
+            api_key_env_vars=("OPENAI_API_KEY",),
+            adapter_economics={
+                "llm_task": {
+                    "billing_mode": "metered_api",
+                    "budget_bucket": "openai_api_payg",
+                    "effective_marginal_cost": 1.0,
+                    "prefer_prepaid": False,
+                    "allow_payg_fallback": True,
+                }
+            },
+            lane_policies={
+                "llm_task": {
+                    "admitted_by_policy": True,
+                    "execution_topology": "direct_http",
+                    "transport_kind": "http",
+                    "policy_reason": "test fixture",
+                }
+            },
+        )
+    }
 
     with _slow_http_server(response_body=response_body) as (url, started):
         monkeypatch.setattr(llm_task_mod, "resolve_api_endpoint", lambda *_args, **_kwargs: url)

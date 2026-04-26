@@ -280,15 +280,10 @@ def execute_job(
     agent_slug = job.get("resolved_agent") or job["agent_slug"]
     run_id = job["run_id"]
 
-    # Circuit breaker gate: if the provider is tripped, skip to failover immediately
-    # Skip for integration jobs (they don't use LLM providers)
+    # Provider slug is used by the API-only circuit breaker gate after transport
+    # is resolved. CLI/MCP routes are subscription/local transports and must not
+    # be blocked by API cost breakers.
     provider_slug = agent_slug.split("/")[0] if "/" in agent_slug else agent_slug
-    circuit_breakers = _circuit_breakers()
-    if provider_slug != "integration" and circuit_breakers and not circuit_breakers.allow_request(provider_slug):
-        logger.warning("Circuit breaker OPEN for %s — skipping to failover", provider_slug)
-        complete_job(conn, job_id, status="failed", error_code="rate_limited",
-                     duration_ms=0, stdout_preview=f"Circuit breaker open for {provider_slug}")
-        return
 
     mark_running(conn, job_id)
     start = time.monotonic()
@@ -617,6 +612,44 @@ def execute_job(
                 execution_bundle=execution_bundle,
             )
         elif transport_kind == "api":
+            circuit_breakers = None
+            if provider_slug != "integration":
+                try:
+                    circuit_breakers = _circuit_breakers()
+                except Exception as exc:
+                    logger.error("Circuit breaker gate unavailable for %s: %s", provider_slug, exc)
+                    complete_job(
+                        conn,
+                        job_id,
+                        status="failed",
+                        error_code="circuit_breaker.unavailable",
+                        duration_ms=int((time.monotonic() - start) * 1000),
+                        stdout_preview=str(exc),
+                    )
+                    return
+                if circuit_breakers is None:
+                    message = f"Circuit breaker gate returned no registry for {provider_slug}"
+                    logger.error(message)
+                    complete_job(
+                        conn,
+                        job_id,
+                        status="failed",
+                        error_code="circuit_breaker.unavailable",
+                        duration_ms=int((time.monotonic() - start) * 1000),
+                        stdout_preview=message,
+                    )
+                    return
+                if not circuit_breakers.allow_request(provider_slug):
+                    logger.warning("Circuit breaker OPEN for %s — blocking API execution", provider_slug)
+                    complete_job(
+                        conn,
+                        job_id,
+                        status="failed",
+                        error_code="rate_limited",
+                        duration_ms=int((time.monotonic() - start) * 1000),
+                        stdout_preview=f"Circuit breaker open for {provider_slug}",
+                    )
+                    return
             # Resolve reasoning effort from task_type_routing for this agent + task type.
             # Falls back to provider_model_candidates default if no task-type-specific row.
             _reasoning_effort: str | None = None

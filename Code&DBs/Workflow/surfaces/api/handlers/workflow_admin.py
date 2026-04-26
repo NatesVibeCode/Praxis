@@ -868,6 +868,12 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     hs_mod = subs.get_health_mod()
     dependency_truth = dependency_truth_report(scope="all")
 
+    def _static_probe(**kwargs: Any) -> Any:
+        probe_cls = getattr(hs_mod, "StaticHealthProbe", None)
+        if probe_cls is None:
+            from runtime.health import StaticHealthProbe as probe_cls
+        return probe_cls(**kwargs)
+
     db_url = _workflow_env(subs)["WORKFLOW_DATABASE_URL"]
     probes: list[Any] = [
         hs_mod.PostgresProbe(db_url),
@@ -877,7 +883,7 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     surface_usage_recorder = surface_usage_recorder_health()
     if surface_usage_recorder.get("authority_ready") is False:
         probes.append(
-            hs_mod.StaticHealthProbe(
+            _static_probe(
                 name="surface_usage_recorder",
                 passed=False,
                 message=f"surface usage recorder degraded: {surface_usage_recorder.get('last_error') or 'unknown error'}",
@@ -913,7 +919,7 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                 "fallback_active": False,
             }
             probes.append(
-                hs_mod.StaticHealthProbe(
+                _static_probe(
                     name="provider_registry",
                     passed=False,
                     message=f"provider registry load failed: {provider_registry_error}",

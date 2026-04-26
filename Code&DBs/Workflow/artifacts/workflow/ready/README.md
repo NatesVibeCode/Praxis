@@ -35,6 +35,9 @@ VALUES ('my-spec', 'Code&DBs/Workflow/artifacts/workflow/ready/my_spec.queue.jso
 The launcher now honors `scheduled_at`: rows stay staged until they are due,
 then the script fires them in order.
 
+Database authority is resolved through `WORKFLOW_DATABASE_URL`; do not bake a
+machine-local DSN into ready specs or launcher docs.
+
 ## Inspect
 
 ```bash

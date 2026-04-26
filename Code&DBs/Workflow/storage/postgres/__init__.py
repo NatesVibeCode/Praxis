@@ -117,6 +117,12 @@ from .transport_eligibility_repository import (
     EffectiveProviderJobCatalogRow,
     PostgresTransportEligibilityRepository,
 )
+from .provider_control_plane_repository import (
+    PostgresProviderControlPlaneRepository,
+    ProjectionFreshnessRecord,
+    ProviderCircuitStateRow,
+    ProviderControlPlaneSnapshotRow,
+)
 from .verification_repository import PostgresVerificationRepository
 from .work_item_closeout_repository import PostgresWorkItemCloseoutRepository
 from .workflow_runtime_repository import (
@@ -160,6 +166,7 @@ __all__ = [
     "PostgresSchemaError",
     "PostgresStorageError",
     "PostgresSubscriptionRepository",
+    "PostgresProviderControlPlaneRepository",
     "PostgresTaskRouteEligibilityRepository",
     "PostgresTransportEligibilityRepository",
     "PostgresTaskTypeRoutingRepository",
@@ -207,6 +214,9 @@ __all__ = [
     "DEFAULT_PROVIDER_CONCURRENCY_LIMITS",
     "DEFAULT_PROVIDER_COST_WEIGHT",
     "EffectiveProviderJobCatalogRow",
+    "ProjectionFreshnessRecord",
+    "ProviderCircuitStateRow",
+    "ProviderControlPlaneSnapshotRow",
     "shutdown_workflow_pool",
     "VectorFilter",
     "ExecutionPacketRecord",

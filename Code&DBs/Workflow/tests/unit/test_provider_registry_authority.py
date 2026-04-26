@@ -127,6 +127,7 @@ def test_default_provider_slug_raises_without_configured_priority_provider(monke
 
 def test_transport_no_longer_exposes_orphaned_default_provider_helper() -> None:
     assert not hasattr(provider_transport, "builtin_default_provider_slug")
+    assert not hasattr(provider_transport, "BUILTIN_PROVIDER_PROFILES")
 
 
 def test_provider_transport_probe_fails_when_runtime_registry_lacks_adapter(monkeypatch) -> None:

@@ -77,13 +77,13 @@ def test_emit_system_event_call_sites_use_the_canonical_keywords() -> None:
         ("runtime/scheduler.py", 262),
         ("runtime/scheduler.py", 278),
         ("runtime/spec_compiler.py", 788),
-        ("runtime/typed_gap_events.py", 73),
-        ("runtime/workflow/_worker_loop.py", 309),
-        ("runtime/workflow/_worker_loop.py", 316),
+        ("runtime/typed_gap_events.py", 85),
+        ("runtime/workflow/_worker_loop.py", 315),
+        ("runtime/workflow/_worker_loop.py", 322),
         ("runtime/workflow/_workflow_state.py", 337),
         ("runtime/workflow/_workflow_state.py", 344),
         ("runtime/workflow_chain.py", 381),
-        ("surfaces/mcp/tools/health.py", 323),
+        ("surfaces/mcp/tools/health.py", 348),
     ]
     observed_call_sites: list[tuple[str, int]] = []
 

@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from authority.transport_eligibility import load_transport_eligibility_authority
-from storage.postgres import PostgresTransportEligibilityRepository
+from storage.postgres import (
+    PostgresProviderControlPlaneRepository,
+    PostgresTransportEligibilityRepository,
+)
 from ._operator_repository import (
     NativeOperatorQueryError,
     NativeOperatorQueryFrontdoor,
@@ -74,6 +77,170 @@ class TransportSupportFrontdoor:
 
 
 _DEFAULT_TRANSPORT_SUPPORT_FRONTDOOR = TransportSupportFrontdoor()
+
+
+@dataclass(slots=True)
+class ProviderControlPlaneFrontdoor:
+    """Thin repo-local frontdoor for provider control-plane read models."""
+
+    repository_factory: Callable[[Any], Any] | None = None
+
+    def _resolve_repository_factory(self) -> Callable[[Any], Any]:
+        if self.repository_factory is not None:
+            return self.repository_factory
+        return PostgresProviderControlPlaneRepository
+
+    def query_provider_control_plane(
+        self,
+        *,
+        pg: Any,
+        runtime_profile_ref: str,
+        provider_slug: str | None = None,
+        job_type: str | None = None,
+        transport_type: str | None = None,
+        model_slug: str | None = None,
+    ) -> dict[str, Any]:
+        repository = self._resolve_repository_factory()(pg)
+        rows = repository.list_provider_control_plane_rows(
+            runtime_profile_ref=runtime_profile_ref,
+            provider_slug=provider_slug,
+            job_type=job_type,
+            transport_type=transport_type,
+            model_slug=model_slug,
+        )
+        freshness = repository.get_projection_freshness(
+            "projection.private_provider_control_plane_snapshot"
+        )
+        return {
+            "control_plane": "operator.provider_control_plane",
+            "runtime_profile_ref": runtime_profile_ref,
+            "filters": {
+                "provider_slug": provider_slug,
+                "job_type": job_type,
+                "transport_type": transport_type,
+                "model_slug": model_slug,
+            },
+            "rows": [
+                {
+                    "runtime_profile_ref": row.runtime_profile_ref,
+                    "job_type": row.job_type,
+                    "transport_type": row.transport_type,
+                    "adapter_type": row.adapter_type,
+                    "provider_slug": row.provider_slug,
+                    "model_slug": row.model_slug,
+                    "model_version": row.model_version,
+                    "cost_structure": row.cost_structure,
+                    "cost_metadata": dict(row.cost_metadata),
+                    "capability_state": row.capability_state,
+                    "is_runnable": row.is_runnable,
+                    "breaker_state": row.breaker_state,
+                    "manual_override_state": row.manual_override_state,
+                    "primary_removal_reason_code": row.primary_removal_reason_code,
+                    "removal_reasons": [dict(item) for item in row.removal_reasons],
+                    "candidate_ref": row.candidate_ref,
+                    "provider_ref": row.provider_ref,
+                    "source_refs": list(row.source_refs),
+                    "projected_at": (
+                        row.projected_at.isoformat()
+                        if hasattr(row.projected_at, "isoformat")
+                        else row.projected_at
+                    ),
+                    "projection_ref": row.projection_ref,
+                }
+                for row in rows
+            ],
+            "projection_freshness": {
+                "projection_ref": freshness.projection_ref,
+                "freshness_status": freshness.freshness_status,
+                "last_refreshed_at": (
+                    freshness.last_refreshed_at.isoformat()
+                    if hasattr(freshness.last_refreshed_at, "isoformat")
+                    else freshness.last_refreshed_at
+                ),
+                "error_code": freshness.error_code,
+                "error_detail": freshness.error_detail,
+            },
+            "levers": {
+                "commands": [
+                    "operator.circuit_override",
+                    "operator.task_route_eligibility",
+                ],
+                "queries": [
+                    "operator.circuit_states",
+                    "operator.circuit_history",
+                    "operator.provider_control_plane",
+                ],
+            },
+        }
+
+    def query_circuit_states(
+        self,
+        *,
+        pg: Any,
+        provider_slug: str | None = None,
+    ) -> dict[str, Any]:
+        repository = self._resolve_repository_factory()(pg)
+        rows = repository.list_provider_circuit_states(provider_slug=provider_slug)
+        freshness = repository.get_projection_freshness("projection.circuit_breakers")
+        return {
+            "circuits": {
+                row.provider_slug: {
+                    "provider_slug": row.provider_slug,
+                    "state": row.effective_state,
+                    "runtime_state": row.runtime_state,
+                    "manual_override": (
+                        None
+                        if row.manual_override_state is None
+                        else {
+                            "override_state": row.manual_override_state,
+                            "rationale": row.manual_override_reason,
+                        }
+                    ),
+                    "failure_count": row.failure_count,
+                    "success_count": row.success_count,
+                    "failure_threshold": row.failure_threshold,
+                    "recovery_timeout_s": row.recovery_timeout_s,
+                    "half_open_max_calls": row.half_open_max_calls,
+                    "last_failure_at": (
+                        row.last_failure_at.isoformat()
+                        if hasattr(row.last_failure_at, "isoformat")
+                        else row.last_failure_at
+                    ),
+                    "opened_at": (
+                        row.opened_at.isoformat()
+                        if hasattr(row.opened_at, "isoformat")
+                        else row.opened_at
+                    ),
+                    "half_open_after": (
+                        row.half_open_after.isoformat()
+                        if hasattr(row.half_open_after, "isoformat")
+                        else row.half_open_after
+                    ),
+                    "half_open_calls": row.half_open_calls,
+                    "updated_at": (
+                        row.updated_at.isoformat()
+                        if hasattr(row.updated_at, "isoformat")
+                        else row.updated_at
+                    ),
+                    "projection_ref": row.projection_ref,
+                }
+                for row in rows
+            },
+            "projection_freshness": {
+                "projection_ref": freshness.projection_ref,
+                "freshness_status": freshness.freshness_status,
+                "last_refreshed_at": (
+                    freshness.last_refreshed_at.isoformat()
+                    if hasattr(freshness.last_refreshed_at, "isoformat")
+                    else freshness.last_refreshed_at
+                ),
+                "error_code": freshness.error_code,
+                "error_detail": freshness.error_detail,
+            },
+        }
+
+
+_DEFAULT_PROVIDER_CONTROL_PLANE_FRONTDOOR = ProviderControlPlaneFrontdoor()
 
 
 def build_transport_support_summary(
@@ -160,6 +327,7 @@ __all__ = [
     "OperatorRoadmapTreeSnapshot",
     "OperatorWorkflowRunObservabilitySummary",
     "OperatorWorkItemCloseoutRecommendationRecord",
+    "ProviderControlPlaneFrontdoor",
     "load_native_self_hosted_smoke_contract",
     "TransportSupportFrontdoor",
     "build_transport_support_summary",

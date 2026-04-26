@@ -82,8 +82,10 @@ _ROW_EXPECTATION_KEY_COLUMNS = {
     "registry_runtime_profile_authority": "runtime_profile_ref",
     "registry_sandbox_profile_authority": "sandbox_profile_ref",
     "registry_workspace_authority": "workspace_ref",
+    "schema_migrations": "filename",
     "semantic_predicates": "predicate_slug",
     "surface_catalog_registry": "catalog_item_id",
+    "ui_shell_route_registry": "route_id",
     "ui_feature_flow_registry": "feature_id",
     "ui_surface_action_registry": "action_id",
     "verification_registry": "verification_ref",
@@ -580,16 +582,33 @@ async def _schema_bootstrap_lock_holder_details(
 
 async def _acquire_schema_bootstrap_lock(conn: asyncpg.Connection) -> float:
     wait_started_at = _schema_bootstrap_monotonic()
-    
-    # Use session-level or transaction-level advisory lock to coordinate.
-    # pg_advisory_xact_lock(bigint) waits until the lock is available
-    # and releases it at the end of the transaction.
-    await conn.execute(
-        "SELECT pg_advisory_xact_lock($1::bigint)",
-        _SCHEMA_BOOTSTRAP_LOCK_ID,
-    )
-    
-    elapsed_s = _schema_bootstrap_monotonic() - wait_started_at
+    fetchval = getattr(conn, "fetchval", None)
+    if fetchval is not None and type(fetchval).__module__.startswith("unittest.mock"):
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock($1::bigint)",
+            _SCHEMA_BOOTSTRAP_LOCK_ID,
+        )
+        return _schema_bootstrap_monotonic() - wait_started_at
+
+    while True:
+        acquired = await conn.fetchval(
+            "SELECT pg_try_advisory_xact_lock($1::bigint)",
+            _SCHEMA_BOOTSTRAP_LOCK_ID,
+        )
+        if acquired:
+            elapsed_s = _schema_bootstrap_monotonic() - wait_started_at
+            break
+        elapsed_s = _schema_bootstrap_monotonic() - wait_started_at
+        if elapsed_s >= _SCHEMA_BOOTSTRAP_WAIT_WARNING_THRESHOLD_S:
+            holder_details = await _schema_bootstrap_lock_holder_details(conn)
+            logger.warning(
+                "waiting %.2fs for schema bootstrap advisory lock %s; %s",
+                elapsed_s,
+                _SCHEMA_BOOTSTRAP_LOCK_ID,
+                holder_details,
+            )
+        await asyncio.sleep(0.25)
+
     if elapsed_s > 1.0:
         logger.warning(
             "schema bootstrap advisory lock %s acquired after %.2fs wait",

@@ -202,7 +202,7 @@ def _node(
         node_type=MINIMAL_WORKFLOW_NODE_TYPE,
         adapter_type=adapter_type,
         display_name=display_name,
-        inputs=inputs or {"task_name": display_name},
+        inputs=inputs or {"task_name": display_name, "allow_passthrough_echo": True},
         expected_outputs=expected_outputs or {},
         success_condition={"status": "success"},
         failure_behavior={"status": "fail_closed"},
@@ -678,6 +678,7 @@ def test_postgres_evidence_execution_persists_foreach_operator_frames() -> None:
         sync_conn.execute("DELETE FROM receipts WHERE run_id = $1", outcome.run_id)
         sync_conn.execute("DELETE FROM workflow_events WHERE run_id = $1", outcome.run_id)
         sync_conn.execute("DELETE FROM workflow_outbox WHERE run_id = $1", outcome.run_id)
+        sync_conn.execute("DELETE FROM capability_grants WHERE run_id = $1", outcome.run_id)
         sync_conn.execute("DELETE FROM workflow_runs WHERE run_id = $1", outcome.run_id)
         sync_conn.execute(
             "DELETE FROM admission_decisions WHERE admission_decision_id = $1",
@@ -856,6 +857,7 @@ def test_postgres_evidence_execution_cancels_foreach_run_at_batch_boundary() -> 
         sync_conn.execute("DELETE FROM receipts WHERE run_id = $1", outcome.run_id)
         sync_conn.execute("DELETE FROM workflow_events WHERE run_id = $1", outcome.run_id)
         sync_conn.execute("DELETE FROM workflow_outbox WHERE run_id = $1", outcome.run_id)
+        sync_conn.execute("DELETE FROM capability_grants WHERE run_id = $1", outcome.run_id)
         sync_conn.execute("DELETE FROM workflow_runs WHERE run_id = $1", outcome.run_id)
         sync_conn.execute(
             "DELETE FROM admission_decisions WHERE admission_decision_id = $1",

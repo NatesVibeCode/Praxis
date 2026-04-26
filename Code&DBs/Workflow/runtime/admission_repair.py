@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+from hashlib import sha256
+import json
 from typing import Any, Protocol
 
 from runtime.admission_evidence import (
@@ -111,6 +113,7 @@ def _bootstrap_submission(
             finished_at=None,
             last_event_id=None,
         ),
+        authority_context=submission.authority_context,
     )
 
 
@@ -160,6 +163,110 @@ def _timeline_state(timeline: tuple[Any, ...]) -> str | None:
     return None
 
 
+def _canonical_hash(payload: Mapping[str, Any]) -> str:
+    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return sha256(payload_json.encode("utf-8")).hexdigest()
+
+
+async def _persist_submission_context_bundle(
+    conn: _RepairConnection,
+    submission: WorkflowAdmissionSubmission,
+) -> None:
+    bundle = submission.authority_context
+    if bundle is None:
+        return
+    bundle_payload = getattr(bundle, "bundle_payload", None)
+    if not isinstance(bundle_payload, Mapping):
+        return
+    runtime_profile_payload = bundle_payload.get("runtime_profile")
+    workspace_payload = bundle_payload.get("workspace")
+    if not isinstance(runtime_profile_payload, Mapping) or not isinstance(workspace_payload, Mapping):
+        return
+    context_bundle_id = str(getattr(bundle, "context_bundle_id", "") or "").strip()
+    if not context_bundle_id:
+        return
+    source_decision_refs = list(getattr(bundle, "source_decision_refs", ()) or ())
+    resolved_at = getattr(bundle, "resolved_at", None) or submission.decision.decided_at
+    sandbox_profile_ref = str(
+        getattr(bundle, "sandbox_profile_ref", None)
+        or runtime_profile_payload.get("sandbox_profile_ref")
+        or getattr(bundle, "runtime_profile_ref", "")
+    )
+    await conn.execute(
+        """
+        INSERT INTO context_bundles (
+            context_bundle_id,
+            workflow_id,
+            run_id,
+            workspace_ref,
+            runtime_profile_ref,
+            model_profile_id,
+            provider_policy_id,
+            bundle_version,
+            bundle_hash,
+            bundle_payload,
+            source_decision_refs,
+            resolved_at,
+            sandbox_profile_ref
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13)
+        ON CONFLICT (context_bundle_id) DO NOTHING
+        """,
+        context_bundle_id,
+        str(getattr(bundle, "workflow_id", "") or submission.run.workflow_id),
+        str(getattr(bundle, "run_id", "") or submission.run.run_id),
+        str(getattr(bundle, "workspace_ref", "") or workspace_payload.get("workspace_ref") or ""),
+        str(getattr(bundle, "runtime_profile_ref", "") or runtime_profile_payload.get("runtime_profile_ref") or ""),
+        str(getattr(bundle, "model_profile_id", "") or runtime_profile_payload.get("model_profile_id") or ""),
+        str(getattr(bundle, "provider_policy_id", "") or runtime_profile_payload.get("provider_policy_id") or ""),
+        int(getattr(bundle, "bundle_version", 1) or 1),
+        str(getattr(bundle, "bundle_hash", "") or submission.run.authority_context_digest),
+        json.dumps(dict(bundle_payload), sort_keys=True, default=str),
+        json.dumps(source_decision_refs, sort_keys=True, default=str),
+        resolved_at,
+        sandbox_profile_ref,
+    )
+    anchors = (
+        (
+            "registry_workspace_authority",
+            str(getattr(bundle, "workspace_ref", "") or workspace_payload.get("workspace_ref") or ""),
+            dict(workspace_payload),
+            0,
+        ),
+        (
+            "registry_runtime_profile_authority",
+            str(getattr(bundle, "runtime_profile_ref", "") or runtime_profile_payload.get("runtime_profile_ref") or ""),
+            dict(runtime_profile_payload),
+            1,
+        ),
+    )
+    for anchor_kind, anchor_ref, anchor_payload, position_index in anchors:
+        if not anchor_ref:
+            continue
+        await conn.execute(
+            """
+            INSERT INTO context_bundle_anchors (
+                context_bundle_anchor_id,
+                context_bundle_id,
+                anchor_ref,
+                anchor_kind,
+                content_hash,
+                anchor_payload,
+                position_index,
+                anchored_at
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+            ON CONFLICT (context_bundle_id, anchor_kind, anchor_ref) DO NOTHING
+            """,
+            f"context_bundle_anchor:{context_bundle_id}:{anchor_kind}:{anchor_ref}",
+            context_bundle_id,
+            anchor_ref,
+            anchor_kind,
+            _canonical_hash(anchor_payload),
+            json.dumps(anchor_payload, sort_keys=True, default=str),
+            position_index,
+            resolved_at,
+        )
+
+
 async def repair_or_seed_submission_evidence(
     conn: _RepairConnection,
     *,
@@ -201,6 +308,7 @@ async def repair_or_seed_submission_evidence(
                     },
                 )
 
+        await _persist_submission_context_bundle(conn, submission)
         if existing_row is None:
             await persist_workflow_admission(conn, submission=bootstrap_submission)
         elif not (

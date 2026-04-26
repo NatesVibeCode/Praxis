@@ -227,20 +227,43 @@ def _provider_refs_from_jobs(
     spec,
     *,
     agent_resolution_details: list[dict[str, Any]] | None = None,
+    pg_conn: Any | None = None,
 ) -> dict[str, set[str]]:
+    """Map provider_slug -> set of job labels that route through that provider.
+
+    When pg_conn is supplied, jobs whose (provider, model) is registered with a
+    non-empty cli_config.cmd_template are EXCLUDED from the refs. The graph
+    compiler upgrades those jobs from llm_task to cli_llm at compile time
+    (commit 91955353), so they do not consume the API lane and the
+    provider-availability breaker should not block them.
+    """
     refs: dict[str, set[str]] = {}
+
+    def _record(label: str, agent_slug: str) -> None:
+        provider_slug = _provider_slug_from_agent(agent_slug)
+        if not provider_slug:
+            return
+        if pg_conn is not None:
+            model_slug = ""
+            if "/" in agent_slug:
+                _provider, _, _rest = agent_slug.partition("/")
+                model_slug = _rest.strip()
+            try:
+                from runtime.workflow_graph_compiler import _provider_uses_cli_transport
+
+                if _provider_uses_cli_transport(provider_slug, model_slug, pg_conn):
+                    return
+            except Exception:
+                pass
+        refs.setdefault(provider_slug, set()).add(label)
+
     for job in getattr(spec, "jobs", ()) or ():
         label = str(job.get("label") or "?")
-        provider_slug = _provider_slug_from_agent(str(job.get("agent") or ""))
-        if provider_slug:
-            refs.setdefault(provider_slug, set()).add(label)
+        _record(label, str(job.get("agent") or ""))
 
     for detail in agent_resolution_details or []:
         label = str(detail.get("label") or "?")
-        resolved_slug = str(detail.get("resolved_slug") or "")
-        provider_slug = _provider_slug_from_agent(resolved_slug)
-        if provider_slug:
-            refs.setdefault(provider_slug, set()).add(label)
+        _record(label, str(detail.get("resolved_slug") or ""))
     return refs
 
 
@@ -373,6 +396,7 @@ def _preflight_provider_availability(
     provider_refs = _provider_refs_from_jobs(
         spec,
         agent_resolution_details=agent_resolution_details,
+        pg_conn=pg_conn,
     )
     if not provider_refs:
         return warnings
@@ -447,7 +471,7 @@ def _preflight_provider_availability(
         except Exception as exc:
             warnings.append({
                 "kind": "provider_circuit_query_failed",
-                "severity": "warning",
+                "severity": "error",
                 "label": None,
                 "message": (
                     "could not check circuit-breaker state: "
@@ -462,7 +486,7 @@ def _preflight_provider_availability(
         except Exception as exc:
             warnings.append({
                 "kind": "provider_circuit_query_failed",
-                "severity": "warning",
+                "severity": "error",
                 "label": None,
                 "message": (
                     "could not check circuit-breaker state: "
