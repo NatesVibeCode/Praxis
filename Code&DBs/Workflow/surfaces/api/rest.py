@@ -1405,7 +1405,14 @@ async def _dispatch_standard_route(request: Request) -> Response:
         return JSONResponse({"error": f"Invalid JSON: {exc}"}, status_code=400)
 
     try:
-        result = handler(subsystems, body)
+        # Sync handlers must not block the asyncio event loop. Run them in a
+        # worker thread so concurrent async routes (e.g. /api/health, the MCP
+        # bridge) keep responding while the handler does sync DB work.
+        import asyncio
+        if asyncio.iscoroutinefunction(handler):
+            result = await handler(subsystems, body)
+        else:
+            result = await asyncio.to_thread(handler, subsystems, body)
         _record_api_route_usage(
             subsystems,
             path=path,
@@ -4154,95 +4161,101 @@ def get_receipt(receipt_id: str) -> dict[str, Any]:
 # Operations endpoints
 # ---------------------------------------------------------------------------
 
-def _health_db_snapshot(*, timeout_s: float = 2.0) -> tuple[list[dict[str, Any]], str]:
-    """Fast health probe that does not depend on shared API subsystems."""
+async def _health_db_snapshot_async(*, timeout_s: float = 2.0) -> tuple[list[dict[str, Any]], str]:
+    """Fast async health probe — no threadpool, no shared subsystems."""
     statement_timeout_ms = max(1, int(timeout_s * 1000))
+    import asyncpg
 
-    async def _collect() -> tuple[list[dict[str, Any]], str]:
-        import asyncpg
+    from storage.postgres.connection import resolve_workflow_database_url
 
-        from storage.postgres.connection import resolve_workflow_database_url
+    checks: list[dict[str, Any]] = []
+    overall = "healthy"
+    database_url = resolve_workflow_database_url()
+    conn = await asyncpg.connect(
+        database_url,
+        timeout=timeout_s,
+        command_timeout=timeout_s,
+    )
+    try:
+        await conn.execute(f"SET statement_timeout = {statement_timeout_ms}")
+        await conn.fetchval("SELECT 1")
+        checks.append({"name": "postgres", "ok": True})
 
-        checks: list[dict[str, Any]] = []
-        overall = "healthy"
-        database_url = resolve_workflow_database_url()
-        conn = await asyncpg.connect(
-            database_url,
-            timeout=timeout_s,
-            command_timeout=timeout_s,
+        active = int(
+            await conn.fetchval(
+                "SELECT count(*) FROM workflow_jobs WHERE heartbeat_at > now() - interval '5 minutes'"
+            )
+            or 0
         )
-        try:
-            await conn.execute(f"SET statement_timeout = {statement_timeout_ms}")
-            await conn.fetchval("SELECT 1")
-            checks.append({"name": "postgres", "ok": True})
+        recent_claims = int(
+            await conn.fetchval(
+                "SELECT count(*) FROM workflow_jobs WHERE claimed_at > now() - interval '10 minutes'"
+            )
+            or 0
+        )
+        ready_cnt = int(
+            await conn.fetchval("SELECT count(*) FROM workflow_jobs WHERE status = 'ready'") or 0
+        )
+        worker_alive = active > 0 or recent_claims > 0 or ready_cnt == 0
+        checks.append(
+            {
+                "name": "worker",
+                "ok": worker_alive,
+                "active_jobs": active,
+                "ready_jobs": ready_cnt,
+            }
+        )
+        if not worker_alive:
+            overall = "degraded"
 
-            active = int(
-                await conn.fetchval(
-                    "SELECT count(*) FROM workflow_jobs WHERE heartbeat_at > now() - interval '5 minutes'"
-                )
-                or 0
-            )
-            recent_claims = int(
-                await conn.fetchval(
-                    "SELECT count(*) FROM workflow_jobs WHERE claimed_at > now() - interval '10 minutes'"
-                )
-                or 0
-            )
-            ready_cnt = int(
-                await conn.fetchval("SELECT count(*) FROM workflow_jobs WHERE status = 'ready'") or 0
-            )
-            worker_alive = active > 0 or recent_claims > 0 or ready_cnt == 0
-            checks.append(
-                {
-                    "name": "worker",
-                    "ok": worker_alive,
-                    "active_jobs": active,
-                    "ready_jobs": ready_cnt,
-                }
-            )
-            if not worker_alive:
-                overall = "degraded"
+        row = await conn.fetchrow(
+            """
+            SELECT count(*) as total,
+                   count(*) FILTER (WHERE status = 'succeeded') as passed,
+                   count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) as failed
+            FROM workflow_jobs
+            WHERE created_at > now() - interval '24 hours'
+            """
+        )
+        total = int(row["total"]) if row else 0
+        passed = int(row["passed"]) if row else 0
+        failed = int(row["failed"]) if row else 0
+        pass_rate = round(passed / total, 3) if total > 0 else 1.0
+        checks.append(
+            {
+                "name": "workflow",
+                "ok": True,
+                "total": total,
+                "passed": passed,
+                "failed": failed,
+                "pass_rate": pass_rate,
+            }
+        )
+        return checks, overall
+    finally:
+        await conn.close()
 
-            row = await conn.fetchrow(
-                """
-                SELECT count(*) as total,
-                       count(*) FILTER (WHERE status = 'succeeded') as passed,
-                       count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) as failed
-                FROM workflow_jobs
-                WHERE created_at > now() - interval '24 hours'
-                """
-            )
-            total = int(row["total"]) if row else 0
-            passed = int(row["passed"]) if row else 0
-            failed = int(row["failed"]) if row else 0
-            pass_rate = round(passed / total, 3) if total > 0 else 1.0
-            checks.append(
-                {
-                    "name": "workflow",
-                    "ok": True,
-                    "total": total,
-                    "passed": passed,
-                    "failed": failed,
-                    "pass_rate": pass_rate,
-                }
-            )
-            return checks, overall
-        finally:
-            await conn.close()
 
+def _health_db_snapshot(*, timeout_s: float = 2.0) -> tuple[list[dict[str, Any]], str]:
+    """Sync wrapper retained for non-async callers; new code should call _health_db_snapshot_async."""
     try:
         from storage.postgres.connection import _run_sync
 
-        return _run_sync(_collect())
+        return _run_sync(_health_db_snapshot_async(timeout_s=timeout_s))
     except Exception as exc:
         return ([{"name": "postgres", "ok": False, "error": str(exc)[:200]}], "unhealthy")
 
 
 @app.get("/api/health")
-def health_check_endpoint() -> Any:
+async def health_check_endpoint() -> Any:
     """Platform health from bounded Postgres probes."""
     now = datetime.now(timezone.utc)
-    checks, overall = _health_db_snapshot()
+    try:
+        checks, overall = await _health_db_snapshot_async()
+    except Exception as exc:
+        checks = [{"name": "postgres", "ok": False, "error": str(exc)[:200]}]
+        overall = "unhealthy"
+
     if overall == "unhealthy":
         return JSONResponse(status_code=503, content={
             "status": overall, "checks": checks, "timestamp": now.isoformat(),
@@ -4330,13 +4343,15 @@ def get_operate_catalog() -> dict[str, Any]:
 
 
 @app.post("/api/operate")
-def post_operate(
+async def post_operate(
     body: OperateRequest,
     x_workflow_token: str | None = Header(default=None, alias="X-Workflow-Token"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
     """Call one catalog-backed operator operation through the unified gateway."""
-    status_code, payload = execute_operate_request(
+    import asyncio
+    status_code, payload = await asyncio.to_thread(
+        execute_operate_request,
         body,
         header_workflow_token=x_workflow_token,
         header_idempotency_key=idempotency_key,
