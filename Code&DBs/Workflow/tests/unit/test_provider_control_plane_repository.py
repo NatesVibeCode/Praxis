@@ -27,6 +27,15 @@ class FakeConn:
                     "model_version": "claude-opus-4-7",
                     "cost_structure": "subscription_included",
                     "cost_metadata": {"billing_mode": "subscription_included"},
+                    "credential_availability_state": "missing",
+                    "credential_sources": ["ANTHROPIC_API_KEY"],
+                    "credential_observations": [
+                        {
+                            "credential_ref": "ANTHROPIC_API_KEY",
+                            "status": "failed",
+                            "source_kind": "env",
+                        }
+                    ],
                     "capability_state": "removed",
                     "is_runnable": False,
                     "breaker_state": "OPEN",
@@ -93,6 +102,9 @@ def test_repository_reads_control_plane_snapshot_rows() -> None:
     row = rows[0]
     assert row.provider_slug == "anthropic"
     assert row.breaker_state == "OPEN"
+    assert row.credential_availability_state == "missing"
+    assert row.credential_sources == ("ANTHROPIC_API_KEY",)
+    assert row.credential_observations[0]["credential_ref"] == "ANTHROPIC_API_KEY"
     assert row.primary_removal_reason_code == "circuit_breaker.open"
     assert row.removal_reasons[0]["reason_code"] == "circuit_breaker.open"
 

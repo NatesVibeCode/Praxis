@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import runtime.sandbox_runtime as sandbox_runtime
 from runtime.sandbox_runtime import _OPENAI_AUTH_SEED_PATH
 from runtime.workflow.agent_packet import AgentPacket, build_sandbox_spec
 
@@ -9,6 +10,20 @@ AUTH_HOME = Path("/tmp/praxis-auth-home")
 
 
 def test_openai_sandbox_spec_bootstraps_auth_as_root_then_drops_privileges(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sandbox_runtime,
+        "_load_cli_auth_catalog",
+        lambda: sandbox_runtime._CliAuthCatalog(
+            mount_specs=(
+                sandbox_runtime._CliAuthMountSpec(
+                    provider_slug="openai",
+                    host_relative_path=".codex/auth.json",
+                    container_path=_OPENAI_AUTH_SEED_PATH,
+                ),
+            ),
+            home_tmpfs_dirs=(".codex",),
+        ),
+    )
     monkeypatch.setattr(
         "runtime.sandbox_runtime.os.path.isfile",
         lambda path: path.endswith(".codex/auth.json"),

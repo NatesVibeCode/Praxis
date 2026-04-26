@@ -199,23 +199,6 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
             ),
         )
 
-    class _StubDecision(SimpleNamespace):
-        pass
-
-    class _StubRouter:
-        def __init__(self, pg):
-            captured["router_pg"] = pg
-
-        def resolve_failover_chain(self, slug):
-            captured["router_slug"] = slug
-            return [
-                _StubDecision(
-                    provider_slug="sample-broker",
-                    model_slug="vendor/some-model",
-                    adapter_type="llm_task",
-                ),
-            ]
-
     def _fake_endpoint(provider, model):
         captured["endpoint_provider"] = provider
         captured["endpoint_model"] = model
@@ -240,6 +223,16 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
         def __init__(self, pool):
             captured["conn_pool"] = pool
 
+        def fetch(self, query, *args):
+            captured["catalog_query"] = " ".join(str(query).split())
+            captured["catalog_args"] = args
+            return [
+                {
+                    "provider_slug": "sample-broker",
+                    "model_slug": "vendor/some-model",
+                }
+            ]
+
     monkeypatch.setitem(
         sys.modules,
         "adapters.llm_client",
@@ -261,16 +254,16 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
     )
     monkeypatch.setitem(
         sys.modules,
-        "runtime.task_type_router",
-        SimpleNamespace(TaskTypeRouter=_StubRouter),
-    )
-    monkeypatch.setitem(
-        sys.modules,
         "storage.postgres.connection",
         SimpleNamespace(
             SyncPostgresConnection=_FakeSyncConn,
             get_workflow_pool=_fake_get_pool,
         ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "registry.native_runtime_profile_sync",
+        SimpleNamespace(default_native_runtime_profile_ref=lambda _pg: "nate-private"),
     )
 
     result = compiler._call_llm_compile(
@@ -279,7 +272,8 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
         conn=_WorkflowCompileConn(),
     )
 
-    assert captured["router_slug"] == "auto/compile"
+    assert "effective_private_provider_job_catalog" in captured["catalog_query"]
+    assert captured["catalog_args"] == ("nate-private",)
     assert captured["endpoint_provider"] == "sample-broker"
     assert captured["endpoint_model"] == "vendor/some-model"
     assert captured["protocol_provider"] == "sample-broker"
@@ -312,28 +306,6 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
             ),
         )
 
-    class _StubDecision(SimpleNamespace):
-        pass
-
-    class _StubRouter:
-        def __init__(self, pg):
-            captured["router_pg"] = pg
-
-        def resolve_failover_chain(self, slug):
-            captured["router_slug"] = slug
-            return [
-                _StubDecision(
-                    provider_slug="openrouter",
-                    model_slug="deepseek/deepseek-v4-flash",
-                    adapter_type="llm_task",
-                ),
-                _StubDecision(
-                    provider_slug="openrouter",
-                    model_slug="deepseek/deepseek-v4-pro",
-                    adapter_type="llm_task",
-                ),
-            ]
-
     def _fake_endpoint(provider, model):
         return "https://broker.example/v1/chat/completions"
 
@@ -349,6 +321,20 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
     class _FakeSyncConn:
         def __init__(self, pool):
             captured["conn_pool"] = pool
+
+        def fetch(self, query, *args):
+            captured["catalog_query"] = " ".join(str(query).split())
+            captured["catalog_args"] = args
+            return [
+                {
+                    "provider_slug": "openrouter",
+                    "model_slug": "deepseek/deepseek-v4-flash",
+                },
+                {
+                    "provider_slug": "openrouter",
+                    "model_slug": "deepseek/deepseek-v4-pro",
+                },
+            ]
 
     monkeypatch.setitem(
         sys.modules,
@@ -371,16 +357,16 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
     )
     monkeypatch.setitem(
         sys.modules,
-        "runtime.task_type_router",
-        SimpleNamespace(TaskTypeRouter=_StubRouter),
-    )
-    monkeypatch.setitem(
-        sys.modules,
         "storage.postgres.connection",
         SimpleNamespace(
             SyncPostgresConnection=_FakeSyncConn,
             get_workflow_pool=lambda: object(),
         ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "registry.native_runtime_profile_sync",
+        SimpleNamespace(default_native_runtime_profile_ref=lambda _pg: "nate-private"),
     )
 
     result = compiler._call_llm_compile(
@@ -389,7 +375,8 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
         conn=_WorkflowCompileConn(),
     )
 
-    assert captured["router_slug"] == "auto/compile"
+    assert "effective_private_provider_job_catalog" in captured["catalog_query"]
+    assert captured["catalog_args"] == ("nate-private",)
     assert captured["calls"] == [
         ("openrouter", "deepseek/deepseek-v4-flash"),
         ("openrouter", "deepseek/deepseek-v4-pro"),

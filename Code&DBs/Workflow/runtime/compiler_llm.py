@@ -259,34 +259,44 @@ def _resolve_app_compile_routes() -> list[tuple[str, str]]:
     """Return explicit API-backed routes for the compile task_type.
 
     App compile is an explicit API exception lane. It first reads
-    `task_type_routing.task_type='compile'` rows with `route_source='explicit'`
-    so broad auto-routing cannot leak CLI build or unrelated API fallback
-    models into Moon's prose-to-definition compiler. If a fresh clone has no
-    explicit compile rows yet, it falls back to TaskTypeRouter as a bootstrap
-    compatibility path.
+    `effective_private_provider_job_catalog` so breakers, transport admission,
+    credential availability, runtime-profile admission, and catalog removals
+    mechanically remove routes before the compiler sees them. `task_type_routing`
+    is joined only for explicit compile intent and rank ordering.
     """
-    import importlib
-
-    router_mod = importlib.import_module(f"{__package__}.task_type_router")
-    TaskTypeRouter = router_mod.TaskTypeRouter
-
     from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+    from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
 
     pool = get_workflow_pool()
     pg = SyncPostgresConnection(pool)
+    runtime_profile_ref = (
+        os.environ.get("PRAXIS_RUNTIME_PROFILE_REF", "").strip()
+        or default_native_runtime_profile_ref(pg)
+    )
     try:
         explicit_rows = pg.fetch(
             """
-            SELECT provider_slug, model_slug
-              FROM task_type_routing
-             WHERE task_type = 'compile'
-               AND permitted = true
-               AND route_source = 'explicit'
-             ORDER BY rank ASC, updated_at DESC
-            """
+            SELECT catalog.provider_slug, catalog.model_slug
+              FROM effective_private_provider_job_catalog AS catalog
+              JOIN task_type_routing AS route
+                ON route.task_type = catalog.job_type
+               AND route.provider_slug = catalog.provider_slug
+               AND route.model_slug = catalog.model_slug
+             WHERE catalog.runtime_profile_ref = $1
+               AND catalog.job_type = 'compile'
+               AND catalog.transport_type = 'API'
+               AND catalog.adapter_type = 'llm_task'
+               AND route.permitted IS TRUE
+               AND route.route_source = 'explicit'
+             ORDER BY route.rank ASC, route.updated_at DESC, catalog.provider_slug, catalog.model_slug
+            """,
+            runtime_profile_ref,
         )
-    except Exception:
-        explicit_rows = []
+    except Exception as exc:
+        raise RuntimeError(
+            "effective provider job catalog could not resolve compile routes "
+            f"for runtime_profile_ref={runtime_profile_ref!r}: {exc}"
+        ) from exc
     explicit_routes = [
         (str(row["provider_slug"]), str(row["model_slug"]))
         for row in explicit_rows or []
@@ -295,22 +305,9 @@ def _resolve_app_compile_routes() -> list[tuple[str, str]]:
     ]
     if explicit_routes:
         return explicit_routes
-
-    router = TaskTypeRouter(pg)
-    chain = router.resolve_failover_chain(_APP_COMPILE_TASK_ROUTE)
-    if not isinstance(chain, list) or not chain:
-        raise RuntimeError(
-            f"task_type_routing returned no decisions for {_APP_COMPILE_TASK_ROUTE!r}"
-        )
-    routes: list[tuple[str, str]] = []
-    for decision in chain:
-        adapter_type = str(getattr(decision, "adapter_type", "") or "").strip().lower()
-        if adapter_type == "llm_task":
-            routes.append((str(decision.provider_slug), str(decision.model_slug)))
-    if routes:
-        return routes
     raise RuntimeError(
-        f"task_type_routing has no llm_task-backed primary for {_APP_COMPILE_TASK_ROUTE!r}"
+        "effective provider job catalog returned no runnable explicit API compile "
+        f"routes for runtime_profile_ref={runtime_profile_ref!r}"
     )
 
 

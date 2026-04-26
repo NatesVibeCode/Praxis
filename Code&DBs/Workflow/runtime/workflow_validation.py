@@ -150,14 +150,15 @@ def _preflight_provider_admissions(spec, *, pg_conn) -> list[dict[str, Any]]:
                 str(item.get("policy_reason") or ""),
             )
     except Exception as exc:
-        # Don't fail preflight on DB hiccup — that's not what this check is
-        # for. Surface a non-fatal warning so the operator knows the gate
-        # couldn't be evaluated.
         warnings.append({
             "kind": "provider_admission_query_failed",
-            "severity": "warning",
+            "severity": "error",
             "label": None,
-            "message": f"could not check provider_transport_admissions: {type(exc).__name__}: {exc}",
+            "message": (
+                "could not check provider_transport_admissions; provider "
+                "transport admission authority is unavailable: "
+                f"{type(exc).__name__}: {exc}"
+            ),
         })
         return warnings
 
@@ -424,10 +425,11 @@ def _preflight_provider_availability(
     except Exception as exc:
         warnings.append({
             "kind": "provider_availability_query_failed",
-            "severity": "warning",
+            "severity": "error",
             "label": None,
             "message": (
-                "could not check provider_usage heartbeat snapshots: "
+                "could not check provider_usage heartbeat snapshots; provider "
+                "availability authority is unavailable: "
                 f"{type(exc).__name__}: {exc}"
             ),
         })
@@ -463,6 +465,37 @@ def _preflight_provider_availability(
             "message": message,
         })
 
+    durable_circuit_states: dict[str, dict[str, Any]] = {}
+    try:
+        raw_circuit_rows = pg_conn.execute(
+            """
+            SELECT
+                provider_slug,
+                effective_state AS state,
+                runtime_state,
+                manual_override_state,
+                manual_override_reason
+            FROM effective_provider_circuit_breaker_state
+            WHERE provider_slug = ANY($1::text[])
+            """,
+            provider_slugs,
+        )
+        for row in raw_circuit_rows or ():
+            item = _row_mapping(row)
+            provider_slug = str(item.get("provider_slug") or "").strip().lower()
+            if provider_slug:
+                durable_circuit_states[provider_slug] = item
+    except Exception as exc:
+        warnings.append({
+            "kind": "provider_circuit_query_failed",
+            "severity": "error",
+            "label": None,
+            "message": (
+                "could not check durable circuit-breaker authority: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        })
+
     if circuit_breakers is None:
         try:
             from runtime.circuit_breaker import get_circuit_breakers
@@ -480,9 +513,12 @@ def _preflight_provider_availability(
             })
             circuit_breakers = None
 
+    states = dict(durable_circuit_states)
     if circuit_breakers is not None:
         try:
-            states = circuit_breakers.all_states()
+            runtime_states = circuit_breakers.all_states()
+            for provider_slug, state in runtime_states.items():
+                states.setdefault(str(provider_slug).strip().lower(), state)
         except Exception as exc:
             warnings.append({
                 "kind": "provider_circuit_query_failed",
@@ -493,10 +529,22 @@ def _preflight_provider_availability(
                     f"{type(exc).__name__}: {exc}"
                 ),
             })
-            states = {}
+            states = dict(durable_circuit_states)
         for provider_slug in provider_slugs:
             state = _row_mapping(states.get(provider_slug))
+            manual_state = str(state.get("manual_override_state") or "").upper()
             if str(state.get("state") or "").upper() != "OPEN":
+                if manual_state != "OPEN":
+                    continue
+            if manual_state == "OPEN":
+                state = {
+                    **state,
+                    "manual_override": {
+                        "override_state": "OPEN",
+                        "rationale": state.get("manual_override_reason") or "",
+                    },
+                }
+            if str(state.get("state") or "").upper() != "OPEN" and manual_state != "OPEN":
                 continue
             labels = ", ".join(sorted(provider_refs[provider_slug])[:5])
             override = state.get("manual_override")

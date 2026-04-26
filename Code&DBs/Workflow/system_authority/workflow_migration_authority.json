@@ -272,7 +272,8 @@
     "260_provider_control_plane_query.sql",
     "261_data_dictionary_query_category.sql",
     "261_provider_control_plane_snapshot.sql",
-    "262_together_compile_primary.sql"
+    "262_together_compile_primary.sql",
+    "263_provider_cli_auth_mount_catalog.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6669,7 +6670,74 @@
         "object_name": "data_dictionary_objects.private_provider_control_plane_snapshot"
       }
     ],
-    "262_together_compile_primary.sql": []
+    "262_together_compile_primary.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_cli_profiles.together"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_lane_policy.together"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_transport_admissions.provider_transport_admission.together.llm_task"
+      },
+      {
+        "object_type": "row",
+        "object_name": "registry_native_runtime_profile_authority.together_compile_allowlist"
+      },
+      {
+        "object_type": "row",
+        "object_name": "registry_sandbox_profile_authority.TOGETHER_API_KEY"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_model_candidates.candidate.together.deepseek-v4-pro"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_model_candidates.candidate.together.deepseek-v3.2"
+      },
+      {
+        "object_type": "row",
+        "object_name": "runtime_profile_admitted_routes.candidate.together.deepseek-v4-pro"
+      },
+      {
+        "object_type": "row",
+        "object_name": "runtime_profile_admitted_routes.candidate.together.deepseek-v3.2"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.compile|together|deepseek-ai/DeepSeek-V4-Pro"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.compile|together|deepseek-ai/DeepSeek-V3.2"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_state.projection.private_provider_job_catalog"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_state.projection.private_provider_control_plane_snapshot"
+      }
+    ],
+    "263_provider_cli_auth_mount_catalog.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_transport_admissions.provider_transport_admission.openai.cli_llm"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_transport_admissions.provider_transport_admission.anthropic.cli_llm"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_transport_admissions.provider_transport_admission.google.cli_llm"
+      }
+    ]
   },
   "policy_buckets": {
     "canonical": [
@@ -6945,7 +7013,8 @@
       "260_provider_control_plane_query.sql",
       "261_data_dictionary_query_category.sql",
       "261_provider_control_plane_snapshot.sql",
-      "262_together_compile_primary.sql"
+      "262_together_compile_primary.sql",
+      "263_provider_cli_auth_mount_catalog.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

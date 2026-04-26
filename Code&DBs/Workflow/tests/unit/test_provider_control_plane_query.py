@@ -30,6 +30,9 @@ class _FakeConn:
                     "model_version": "claude-opus-4-7",
                     "cost_structure": "subscription_included",
                     "cost_metadata": {"billing_mode": "subscription_included"},
+                    "credential_availability_state": "available",
+                    "credential_sources": ["ambient_cli_session"],
+                    "credential_observations": [],
                     "capability_state": "runnable",
                     "is_runnable": True,
                     "breaker_state": "CLOSED",
@@ -52,6 +55,15 @@ class _FakeConn:
                     "model_version": "gpt-5.4",
                     "cost_structure": "metered_api",
                     "cost_metadata": {"billing_mode": "metered_api"},
+                    "credential_availability_state": "missing",
+                    "credential_sources": ["OPENAI_API_KEY"],
+                    "credential_observations": [
+                        {
+                            "credential_ref": "OPENAI_API_KEY",
+                            "status": "failed",
+                            "source_kind": "env",
+                        }
+                    ],
                     "capability_state": "removed",
                     "is_runnable": False,
                     "breaker_state": "OPEN",
@@ -155,6 +167,8 @@ def test_provider_control_plane_returns_projected_snapshot_payload() -> None:
     assert payload["rows"][0]["provider_slug"] == "anthropic"
     assert payload["rows"][0]["capability_state"] == "runnable"
     assert payload["rows"][0]["is_runnable"] is True
+    assert payload["rows"][0]["credential_availability_state"] == "available"
+    assert payload["rows"][0]["credential_sources"] == ["ambient_cli_session"]
     assert payload["rows"][0]["projection_ref"] == "projection.private_provider_control_plane_snapshot"
     assert "operator.circuit_override" in payload["levers"]["commands"]
 
@@ -170,6 +184,8 @@ def test_provider_control_plane_surfaces_structured_removal_reasons() -> None:
     openai_row = [row for row in payload["rows"] if row["provider_slug"] == "openai"][0]
     assert openai_row["capability_state"] == "removed"
     assert openai_row["is_runnable"] is False
+    assert openai_row["credential_availability_state"] == "missing"
+    assert openai_row["credential_sources"] == ["OPENAI_API_KEY"]
     assert openai_row["breaker_state"] == "OPEN"
     assert openai_row["primary_removal_reason_code"] == "provider_transport.policy_denied"
     assert [reason["reason_code"] for reason in openai_row["removal_reasons"]] == [

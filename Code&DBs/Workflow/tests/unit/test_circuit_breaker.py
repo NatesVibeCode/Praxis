@@ -216,3 +216,22 @@ def test_query_manual_overrides_uses_latest_event_and_reset_clears_prior_overrid
 
     assert "openai" not in overrides
     assert overrides["anthropic"].override_state == module.CircuitState.CLOSED
+
+
+def test_manual_override_query_fails_closed_without_database_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from runtime import circuit_breaker as circuit_breaker_module
+    from runtime.provider_authority import ProviderAuthorityError
+
+    module = importlib.reload(circuit_breaker_module)
+    monkeypatch.setattr(module, "_authority_conn", lambda: None)
+    monkeypatch.setattr(
+        module,
+        "resolve_runtime_database_url",
+        lambda required=False: (_ for _ in ()).throw(RuntimeError("WORKFLOW_DATABASE_URL missing")),
+    )
+    registry = module.CircuitBreakerRegistry(failure_threshold=3, recovery_timeout_s=45.0)
+
+    with pytest.raises(ProviderAuthorityError, match="manual overrides unavailable"):
+        registry.allow_request("openai")

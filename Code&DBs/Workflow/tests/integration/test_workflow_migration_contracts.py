@@ -121,7 +121,9 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "260_provider_control_plane_query.sql" in filenames
     assert "261_data_dictionary_query_category.sql" in filenames
     assert "261_provider_control_plane_snapshot.sql" in filenames
-    assert filenames[-1] == "261_provider_control_plane_snapshot.sql"
+    assert "262_together_compile_primary.sql" in filenames
+    assert "263_provider_cli_auth_mount_catalog.sql" in filenames
+    assert filenames[-1] == "263_provider_cli_auth_mount_catalog.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -140,6 +142,24 @@ def test_every_manifest_migration_has_expected_object_contract() -> None:
             missing_contracts.append(entry.filename)
 
     assert missing_contracts == []
+
+
+def test_together_compile_primary_declares_full_control_plane_authority() -> None:
+    objects = workflow_migration_expected_objects("262_together_compile_primary.sql")
+    names = {item.object_name for item in objects}
+    assert "provider_cli_profiles.together" in names
+    assert "provider_lane_policy.together" in names
+    assert "provider_transport_admissions.provider_transport_admission.together.llm_task" in names
+    assert "registry_native_runtime_profile_authority.together_compile_allowlist" in names
+    assert "registry_sandbox_profile_authority.TOGETHER_API_KEY" in names
+    assert "provider_model_candidates.candidate.together.deepseek-v4-pro" in names
+    assert "provider_model_candidates.candidate.together.deepseek-v3.2" in names
+    assert "runtime_profile_admitted_routes.candidate.together.deepseek-v4-pro" in names
+    assert "runtime_profile_admitted_routes.candidate.together.deepseek-v3.2" in names
+    assert "task_type_routing.compile|together|deepseek-ai/DeepSeek-V4-Pro" in names
+    assert "task_type_routing.compile|together|deepseek-ai/DeepSeek-V3.2" in names
+    assert "authority_projection_state.projection.private_provider_job_catalog" in names
+    assert "authority_projection_state.projection.private_provider_control_plane_snapshot" in names
 
 
 def test_claim_lease_proposal_runtime_expected_objects_are_registered() -> None:

@@ -279,6 +279,17 @@ def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
             else []
         ),
     )
+    monkeypatch.setattr(
+        "adapters.docker_runner._cli_home_tmpfs_flags",
+        lambda: [
+            "--tmpfs",
+            f"{CONTAINER_HOME}/.claude:uid=1100,gid=1100,mode=755",
+            "--tmpfs",
+            f"{CONTAINER_HOME}/.codex:uid=1100,gid=1100,mode=755",
+            "--tmpfs",
+            f"{CONTAINER_HOME}/.gemini:uid=1100,gid=1100,mode=755",
+        ],
+    )
     monkeypatch.setattr("adapters.docker_runner.subprocess.Popen", _FakePopen)
 
     result = run_in_docker(

@@ -82,9 +82,11 @@ _ROW_EXPECTATION_KEY_COLUMNS = {
     "registry_runtime_profile_authority": "runtime_profile_ref",
     "registry_sandbox_profile_authority": "sandbox_profile_ref",
     "registry_workspace_authority": "workspace_ref",
+    "runtime_profile_admitted_routes": "candidate_ref",
     "schema_migrations": "filename",
     "semantic_predicates": "predicate_slug",
     "surface_catalog_registry": "catalog_item_id",
+    "task_type_routing": "task_type|provider_slug|model_slug",
     "ui_shell_route_registry": "route_id",
     "ui_feature_flow_registry": "feature_id",
     "ui_surface_action_registry": "action_id",
@@ -103,6 +105,21 @@ _BOOTSTRAP_BASELINE_ANCHOR_OBJECTS = (
     WorkflowMigrationExpectedObject(object_type="table", object_name="system_events"),
     WorkflowMigrationExpectedObject(object_type="table", object_name="maintenance_policies"),
 )
+
+
+def _parse_task_type_routing_row_key(row_key: str) -> tuple[str, str, str] | None:
+    task_type, sep, rest = row_key.partition("|")
+    if not sep:
+        return None
+    provider_slug, sep, model_slug = rest.partition("|")
+    if not sep:
+        return None
+    task_type = task_type.strip()
+    provider_slug = provider_slug.strip()
+    model_slug = model_slug.strip()
+    if not task_type or not provider_slug or not model_slug:
+        return None
+    return task_type, provider_slug, model_slug
 
 logger = logging.getLogger(__name__)
 
@@ -514,6 +531,31 @@ async def _workflow_expected_object_exists(
         table_name, _, row_key = object_name.partition(".")
         if not table_name or not row_key:
             return False
+        if table_name == "task_type_routing":
+            parsed = _parse_task_type_routing_row_key(row_key)
+            if parsed is None:
+                return False
+            table_exists = await conn.fetchval(
+                "SELECT to_regclass($1::text) IS NOT NULL",
+                f"public.{table_name}",
+            )
+            if not table_exists:
+                return False
+            task_type, provider_slug, model_slug = parsed
+            row = await conn.fetchrow(
+                """
+                SELECT 1
+                FROM task_type_routing
+                WHERE task_type = $1
+                  AND provider_slug = $2
+                  AND model_slug = $3
+                LIMIT 1
+                """,
+                task_type,
+                provider_slug,
+                model_slug,
+            )
+            return row is not None
         key_column = _ROW_EXPECTATION_KEY_COLUMNS.get(table_name)
         if key_column is None:
             return False
@@ -1116,6 +1158,36 @@ async def inspect_workflow_schema(
             continue
         row_expectations_by_table.setdefault(table_name, []).append((row_key, item))
     for table_name, entries in row_expectations_by_table.items():
+        if table_name == "task_type_routing":
+            table_exists = await conn.fetchval(
+                "SELECT to_regclass($1::text) IS NOT NULL",
+                f"public.{table_name}",
+            )
+            if not table_exists:
+                row_missing_objects.extend(item for _row_key, item in entries)
+                continue
+            for row_key, item in entries:
+                parsed = _parse_task_type_routing_row_key(row_key)
+                if parsed is None:
+                    row_missing_objects.append(item)
+                    continue
+                task_type, provider_slug, model_slug = parsed
+                row = await conn.fetchrow(
+                    """
+                    SELECT 1
+                    FROM task_type_routing
+                    WHERE task_type = $1
+                      AND provider_slug = $2
+                      AND model_slug = $3
+                    LIMIT 1
+                    """,
+                    task_type,
+                    provider_slug,
+                    model_slug,
+                )
+                if row is None:
+                    row_missing_objects.append(item)
+            continue
         key_column = _ROW_EXPECTATION_KEY_COLUMNS.get(table_name)
         if key_column is None:
             row_missing_objects.extend(item for _row_key, item in entries)

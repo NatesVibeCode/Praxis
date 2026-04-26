@@ -31,6 +31,37 @@ CONTAINER_HOME = str(container_home())
 OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
 
 
+def _test_cli_auth_catalog() -> sandbox_runtime._CliAuthCatalog:
+    return sandbox_runtime._CliAuthCatalog(
+        mount_specs=(
+            sandbox_runtime._CliAuthMountSpec(
+                provider_slug="openai",
+                host_relative_path=".codex/auth.json",
+                container_path=sandbox_runtime._OPENAI_AUTH_SEED_PATH,
+            ),
+            sandbox_runtime._CliAuthMountSpec(
+                provider_slug="anthropic",
+                host_relative_path=".claude.json",
+                container_path=f"{CONTAINER_HOME}/.claude.json",
+            ),
+            sandbox_runtime._CliAuthMountSpec(
+                provider_slug="google",
+                host_relative_path=".gemini/oauth_creds.json",
+                container_path=f"{CONTAINER_HOME}/.gemini/oauth_creds.json",
+            ),
+        ),
+        home_tmpfs_dirs=(".claude", ".codex", ".gemini"),
+    )
+
+
+def _patch_cli_auth_catalog(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sandbox_runtime,
+        "_load_cli_auth_catalog",
+        _test_cli_auth_catalog,
+    )
+
+
 class _RecordingProvider:
     provider_name = "fake"
 
@@ -115,6 +146,7 @@ class _ArtifactStore:
 
 
 def test_cli_auth_volume_flags_use_explicit_host_home(monkeypatch) -> None:
+    _patch_cli_auth_catalog(monkeypatch)
     monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", AUTH_HOME)
     monkeypatch.setattr(
         sandbox_runtime.os.path,
@@ -137,6 +169,7 @@ def test_cli_auth_volume_flags_use_explicit_host_home(monkeypatch) -> None:
 
 
 def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypatch) -> None:
+    _patch_cli_auth_catalog(monkeypatch)
     monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", AUTH_HOME)
     monkeypatch.setattr(sandbox_runtime.os.path, "expanduser", lambda value: "/root" if value == "~" else value)
     monkeypatch.setattr(
@@ -160,6 +193,7 @@ def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypat
 
 
 def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) -> None:
+    _patch_cli_auth_catalog(monkeypatch)
     monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", AUTH_HOME)
     monkeypatch.setattr(
         sandbox_runtime.os.path,
@@ -1221,6 +1255,7 @@ def test_docker_local_reads_image_from_env_per_exec(monkeypatch, tmp_path) -> No
 def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path) -> None:
     docker_cmds: list[list[str]] = []
 
+    _patch_cli_auth_catalog(monkeypatch)
     monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
     monkeypatch.setattr("runtime.sandbox_runtime._docker_image_available", lambda image: True)
     monkeypatch.setattr(

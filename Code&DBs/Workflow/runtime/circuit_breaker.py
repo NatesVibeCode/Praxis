@@ -604,9 +604,7 @@ class CircuitBreakerRegistry:
             return (self._manual_override_epoch, self._manual_override_last_refreshed_at)
 
     def _query_manual_overrides(self) -> dict[str, ManualCircuitOverride]:
-        database_url = resolve_runtime_database_url(required=False)
-        if database_url is None:
-            return {}
+        database_url = resolve_runtime_database_url(required=True)
         conn = SyncPostgresConnection(
             get_workflow_pool(env={"WORKFLOW_DATABASE_URL": database_url})
         )

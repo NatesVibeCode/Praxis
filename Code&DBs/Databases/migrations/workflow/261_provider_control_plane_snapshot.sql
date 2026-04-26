@@ -133,6 +133,10 @@ CREATE TABLE IF NOT EXISTS private_provider_control_plane_snapshot (
     model_version TEXT NOT NULL DEFAULT '',
     cost_structure TEXT NOT NULL CHECK (btrim(cost_structure) <> ''),
     cost_metadata JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(cost_metadata) = 'object'),
+    credential_availability_state TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (credential_availability_state IN ('available', 'missing', 'not_required', 'unknown')),
+    credential_sources JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(credential_sources) = 'array'),
+    credential_observations JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(credential_observations) = 'array'),
     capability_state TEXT NOT NULL CHECK (capability_state IN ('runnable', 'removed')),
     is_runnable BOOLEAN NOT NULL,
     breaker_state TEXT NOT NULL CHECK (breaker_state IN ('CLOSED', 'OPEN', 'HALF_OPEN')),
@@ -165,6 +169,9 @@ SELECT
     model_version,
     cost_structure,
     cost_metadata,
+    credential_availability_state,
+    credential_sources,
+    credential_observations,
     capability_state,
     is_runnable,
     breaker_state,
@@ -220,7 +227,39 @@ BEGIN
         SELECT *
         FROM effective_provider_circuit_breaker_state
     ),
-    projected_rows AS (
+    latest_credential_observations AS (
+        SELECT DISTINCT ON (lower(btrim(details ->> 'provider_slug')), subject_id)
+            lower(btrim(details ->> 'provider_slug')) AS provider_slug,
+            subject_id,
+            status,
+            summary,
+            details,
+            captured_at
+        FROM heartbeat_probe_snapshots
+        WHERE probe_kind = 'credential_expiry'
+          AND details ? 'provider_slug'
+          AND NULLIF(btrim(details ->> 'provider_slug'), '') IS NOT NULL
+        ORDER BY lower(btrim(details ->> 'provider_slug')), subject_id, captured_at DESC
+    ),
+    credential_rows AS (
+        SELECT
+            provider_slug,
+            bool_or(status = 'ok') AS has_available_credential,
+            bool_or(status IN ('failed', 'degraded')) AS has_missing_credential,
+            jsonb_agg(
+                jsonb_build_object(
+                    'credential_ref', subject_id,
+                    'status', status,
+                    'summary', summary,
+                    'source_kind', details ->> 'source_kind',
+                    'captured_at', captured_at
+                )
+                ORDER BY captured_at DESC, subject_id
+            ) AS credential_observations
+        FROM latest_credential_observations
+        GROUP BY provider_slug
+    ),
+    projected_base AS (
         SELECT
             catalog.runtime_profile_ref,
             catalog.job_type,
@@ -232,33 +271,80 @@ BEGIN
             catalog.cost_structure,
             catalog.cost_metadata,
             CASE
-                WHEN catalog.availability_state = 'available'
-                 AND COALESCE(breaker.effective_state, 'CLOSED') <> 'OPEN'
+                WHEN COALESCE(transport.credential_sources, '[]'::jsonb) ? 'ambient_cli_session'
+                THEN 'available'
+                WHEN jsonb_array_length(COALESCE(transport.credential_sources, '[]'::jsonb)) = 0
+                THEN 'unknown'
+                WHEN COALESCE(credentials.has_available_credential, false)
+                THEN 'available'
+                WHEN COALESCE(credentials.has_missing_credential, false)
+                THEN 'missing'
+                ELSE 'unknown'
+            END AS credential_availability_state,
+            COALESCE(transport.credential_sources, '[]'::jsonb) AS credential_sources,
+            COALESCE(credentials.credential_observations, '[]'::jsonb) AS credential_observations,
+            catalog.availability_state,
+            catalog.reason_code,
+            COALESCE(breaker.effective_state, 'CLOSED') AS effective_breaker_state,
+            NULLIF(breaker.manual_override_state, '') AS manual_override_state,
+            breaker.manual_override_reason,
+            catalog.candidate_ref,
+            catalog.provider_ref,
+            catalog.source_refs
+        FROM catalog_rows AS catalog
+        LEFT JOIN breaker_rows AS breaker
+          ON breaker.provider_slug = catalog.provider_slug
+        LEFT JOIN provider_transport_admissions AS transport
+          ON transport.provider_slug = catalog.provider_slug
+         AND transport.adapter_type = catalog.adapter_type
+        LEFT JOIN credential_rows AS credentials
+          ON credentials.provider_slug = catalog.provider_slug
+    ),
+    projected_rows AS (
+        SELECT
+            runtime_profile_ref,
+            job_type,
+            transport_type,
+            adapter_type,
+            provider_slug,
+            model_slug,
+            model_version,
+            cost_structure,
+            cost_metadata,
+            credential_availability_state,
+            credential_sources,
+            credential_observations,
+            CASE
+                WHEN availability_state = 'available'
+                 AND effective_breaker_state <> 'OPEN'
+                 AND credential_availability_state <> 'missing'
                 THEN 'runnable'
                 ELSE 'removed'
             END AS capability_state,
             (
-                catalog.availability_state = 'available'
-                AND COALESCE(breaker.effective_state, 'CLOSED') <> 'OPEN'
+                availability_state = 'available'
+                AND effective_breaker_state <> 'OPEN'
+                AND credential_availability_state <> 'missing'
             ) AS is_runnable,
-            COALESCE(breaker.effective_state, 'CLOSED') AS breaker_state,
-            NULLIF(breaker.manual_override_state, '') AS manual_override_state,
+            effective_breaker_state AS breaker_state,
+            manual_override_state,
             CASE
-                WHEN catalog.availability_state <> 'available' THEN catalog.reason_code
-                WHEN COALESCE(breaker.effective_state, 'CLOSED') = 'OPEN' THEN 'circuit_breaker.open'
+                WHEN availability_state <> 'available' THEN reason_code
+                WHEN effective_breaker_state = 'OPEN' THEN 'circuit_breaker.open'
+                WHEN credential_availability_state = 'missing' THEN 'credential.missing'
                 ELSE NULL
             END AS primary_removal_reason_code,
             (
                 CASE
-                    WHEN catalog.availability_state <> 'available'
+                    WHEN availability_state <> 'available'
                     THEN jsonb_build_array(
                         jsonb_build_object(
-                            'reason_code', catalog.reason_code,
+                            'reason_code', reason_code,
                             'source_ref', 'projection.private_provider_job_catalog',
                             'details', jsonb_build_object(
-                                'availability_state', catalog.availability_state,
-                                'adapter_type', catalog.adapter_type,
-                                'transport_type', catalog.transport_type
+                                'availability_state', availability_state,
+                                'adapter_type', adapter_type,
+                                'transport_type', transport_type
                             )
                         )
                     )
@@ -266,38 +352,60 @@ BEGIN
                 END
                 ||
                 CASE
-                    WHEN COALESCE(breaker.effective_state, 'CLOSED') = 'OPEN'
+                    WHEN effective_breaker_state = 'OPEN'
                     THEN jsonb_build_array(
                         jsonb_build_object(
                             'reason_code', 'circuit_breaker.open',
                             'source_ref', 'projection.circuit_breakers',
                             'details', jsonb_build_object(
-                                'breaker_state', COALESCE(breaker.effective_state, 'CLOSED'),
-                                'manual_override_state', breaker.manual_override_state,
-                                'manual_override_reason', breaker.manual_override_reason
+                                'breaker_state', effective_breaker_state,
+                                'manual_override_state', manual_override_state,
+                                'manual_override_reason', manual_override_reason
+                            )
+                        )
+                    )
+                    ELSE '[]'::jsonb
+                END
+                ||
+                CASE
+                    WHEN credential_availability_state = 'missing'
+                    THEN jsonb_build_array(
+                        jsonb_build_object(
+                            'reason_code', 'credential.missing',
+                            'source_ref', 'projection.credential_availability',
+                            'details', jsonb_build_object(
+                                'credential_sources', credential_sources,
+                                'credential_observations', credential_observations
                             )
                         )
                     )
                     ELSE '[]'::jsonb
                 END
             ) AS removal_reasons,
-            catalog.candidate_ref,
-            catalog.provider_ref,
+            candidate_ref,
+            provider_ref,
             (
-                catalog.source_refs
+                source_refs
                 ||
                 CASE
-                    WHEN COALESCE(breaker.effective_state, 'CLOSED') = 'OPEN'
+                    WHEN effective_breaker_state = 'OPEN'
                     THEN jsonb_build_array(
                         'table.provider_circuit_breaker_state',
                         'table.operator_decisions'
                     )
                     ELSE '[]'::jsonb
                 END
+                ||
+                CASE
+                    WHEN credential_availability_state <> 'unknown'
+                    THEN jsonb_build_array(
+                        'table.provider_transport_admissions',
+                        'table.heartbeat_probe_snapshots'
+                    )
+                    ELSE '[]'::jsonb
+                END
             ) AS source_refs
-        FROM catalog_rows AS catalog
-        LEFT JOIN breaker_rows AS breaker
-          ON breaker.provider_slug = catalog.provider_slug
+        FROM projected_base
     )
     INSERT INTO private_provider_control_plane_snapshot (
         runtime_profile_ref,
@@ -309,6 +417,9 @@ BEGIN
         model_version,
         cost_structure,
         cost_metadata,
+        credential_availability_state,
+        credential_sources,
+        credential_observations,
         capability_state,
         is_runnable,
         breaker_state,
@@ -331,6 +442,9 @@ BEGIN
         model_version,
         cost_structure,
         cost_metadata,
+        credential_availability_state,
+        credential_sources,
+        credential_observations,
         capability_state,
         is_runnable,
         breaker_state,
@@ -349,6 +463,9 @@ BEGIN
         model_version = EXCLUDED.model_version,
         cost_structure = EXCLUDED.cost_structure,
         cost_metadata = EXCLUDED.cost_metadata,
+        credential_availability_state = EXCLUDED.credential_availability_state,
+        credential_sources = EXCLUDED.credential_sources,
+        credential_observations = EXCLUDED.credential_observations,
         capability_state = EXCLUDED.capability_state,
         is_runnable = EXCLUDED.is_runnable,
         breaker_state = EXCLUDED.breaker_state,
@@ -694,7 +811,7 @@ INSERT INTO authority_projection_contracts (
     'projection.private_provider_control_plane_snapshot',
     'authority.provider_onboarding',
     'table',
-    'private_provider_job_catalog,provider_circuit_breaker_state,operator_decisions',
+    'private_provider_job_catalog,provider_transport_admissions,heartbeat_probe_snapshots,provider_circuit_breaker_state,operator_decisions',
     'table.public.private_provider_control_plane_snapshot',
     'projection_freshness.default',
     FALSE,
@@ -762,7 +879,7 @@ INSERT INTO data_dictionary_objects (
     'private_provider_control_plane_snapshot',
     'Private provider control plane snapshot',
     'projection',
-    'Private-instance CQRS read model with transport, provider, model, model version, cost structure, breaker state, structured removal reasons, and runnable capability state.',
+    'Private-instance CQRS read model with transport, provider, model, model version, cost structure, credential availability, breaker state, structured removal reasons, and runnable capability state.',
     jsonb_build_object(
         'source', 'migration.261_provider_control_plane_snapshot',
         'projection_ref', 'projection.private_provider_control_plane_snapshot'
@@ -816,7 +933,7 @@ COMMENT ON TABLE provider_circuit_breaker_state IS
     'Durable provider circuit-breaker runtime state. Effective operator-visible state is exposed through effective_provider_circuit_breaker_state.';
 
 COMMENT ON TABLE private_provider_control_plane_snapshot IS
-    'Private-instance provider control-plane snapshot with breaker state, structured removal reasons, and runnable capability projection.';
+    'Private-instance provider control-plane snapshot with credential availability, breaker state, structured removal reasons, and runnable capability projection.';
 
 COMMENT ON VIEW effective_private_provider_control_plane IS
     'Runnable provider control-plane rows only. This is the effective private control-plane capability surface.';

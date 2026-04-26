@@ -45,7 +45,16 @@ INSERT INTO provider_cli_profiles (
     '[]'::jsonb,
     '[]'::jsonb,
     300,
-    jsonb_build_object('llm_task', jsonb_build_object('allow_payg_fallback', true)),
+    jsonb_build_object(
+        'llm_task',
+        jsonb_build_object(
+            'allow_payg_fallback', true,
+            'prefer_prepaid', false,
+            'billing_mode', 'metered_api',
+            'budget_bucket', 'together_api_payg',
+            'effective_marginal_cost', 1.0
+        )
+    ),
     'stdin'
 )
 ON CONFLICT (provider_slug) DO UPDATE SET

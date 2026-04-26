@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from functools import lru_cache
 from datetime import datetime, timezone
 from posixpath import normpath
 from pathlib import Path
@@ -73,28 +74,18 @@ _CLI_AGENT_UID = 1100
 _CLI_AGENT_GID = 1100
 _OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
 
-# CLI auth files to mount read-only into Docker containers.
-# Each entry: (provider slugs, host_path_relative_to_home, container_path).
-# Container paths target the configured container home because the ephemeral CLI container
-# runs as uid 1100 (praxis-agent), which is required for claude's
-# --permission-mode bypassPermissions (blocked under root).
-_CLI_AUTH_MOUNTS: tuple[tuple[frozenset[str], str, str], ...] = (
-    # Host OpenAI auth files are normally mode 0600 and owned by the macOS
-    # operator uid, so a uid-1100 container cannot read them directly. Mount
-    # the file at a root-only seed path; the Docker command bootstraps it into
-    # the writable praxis-agent home and then drops privileges before running
-    # the CLI.
-    (frozenset({"openai"}), ".codex/auth.json", _OPENAI_AUTH_SEED_PATH),
-    # Claude Code reads OAuth tokens from ~/.claude/.credentials.json on Linux
-    # (the Keychain equivalent on macOS). The .claude.json file alongside it is
-    # session/projects state — useful but not sufficient for auth. Mount both.
-    (frozenset({"anthropic"}), ".claude/.credentials.json", f"{_SANDBOX_HOME}/.claude/.credentials.json"),
-    (frozenset({"anthropic"}), ".claude.json", f"{_SANDBOX_HOME}/.claude.json"),
-    (frozenset({"google", "gemini"}), ".gemini/oauth_creds.json", f"{_SANDBOX_HOME}/.gemini/oauth_creds.json"),
-    (frozenset({"google", "gemini"}), ".gemini/google_accounts.json", f"{_SANDBOX_HOME}/.gemini/google_accounts.json"),
-    (frozenset({"google", "gemini"}), ".gemini/settings.json", f"{_SANDBOX_HOME}/.gemini/settings.json"),
-)
-_CLI_HOME_TMPFS_DIRS: tuple[str, ...] = (".claude", ".codex", ".gemini")
+
+@dataclass(frozen=True, slots=True)
+class _CliAuthMountSpec:
+    provider_slug: str
+    host_relative_path: str
+    container_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class _CliAuthCatalog:
+    mount_specs: tuple[_CliAuthMountSpec, ...]
+    home_tmpfs_dirs: tuple[str, ...]
 
 
 def _cli_auth_home() -> str:
@@ -271,25 +262,118 @@ def _provider_slug(metadata: Mapping[str, Any] | None) -> str | None:
     return raw or None
 
 
+def _jsonb_array(value: object) -> tuple[object, ...]:
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return ()
+    if not isinstance(parsed, Sequence) or isinstance(parsed, (str, bytes, bytearray)):
+        return ()
+    return tuple(parsed)
+
+
+def _container_auth_mount_path(payload: Mapping[str, object]) -> str | None:
+    seed_name = str(payload.get("container_seed_filename") or "").strip()
+    if seed_name:
+        return str(container_auth_seed_dir() / _normalize_relative_path(seed_name, field_name="container_seed_filename"))
+    relative_path = str(payload.get("container_relative_path") or "").strip()
+    if relative_path:
+        return str(_SANDBOX_HOME / _normalize_relative_path(relative_path, field_name="container_relative_path"))
+    return None
+
+
+def _auth_catalog_from_rows(rows: Sequence[Mapping[str, object]]) -> _CliAuthCatalog:
+    mount_specs: list[_CliAuthMountSpec] = []
+    tmpfs_dirs: list[str] = []
+    for row in rows:
+        provider_slug = str(row.get("provider_slug") or "").strip().lower()
+        if not provider_slug:
+            continue
+        for raw_dir in _jsonb_array(row.get("cli_home_tmpfs_dirs")):
+            try:
+                tmpfs_dir = _normalize_relative_path(raw_dir, field_name="cli_home_tmpfs_dirs")
+            except RuntimeError:
+                continue
+            if tmpfs_dir not in tmpfs_dirs:
+                tmpfs_dirs.append(tmpfs_dir)
+        for raw_mount in _jsonb_array(row.get("auth_mounts")):
+            if not isinstance(raw_mount, Mapping):
+                continue
+            try:
+                host_relative_path = _normalize_relative_path(
+                    raw_mount.get("host_relative_path"),
+                    field_name="auth_mounts.host_relative_path",
+                )
+                container_path = _container_auth_mount_path(raw_mount)
+            except RuntimeError:
+                continue
+            if not container_path:
+                continue
+            mount_specs.append(
+                _CliAuthMountSpec(
+                    provider_slug=provider_slug,
+                    host_relative_path=host_relative_path,
+                    container_path=container_path,
+                )
+            )
+    return _CliAuthCatalog(
+        mount_specs=tuple(mount_specs),
+        home_tmpfs_dirs=tuple(tmpfs_dirs),
+    )
+
+
+@lru_cache(maxsize=1)
+def _load_cli_auth_catalog() -> _CliAuthCatalog:
+    try:
+        from runtime._workflow_database import resolve_runtime_database_url
+        from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+
+        database_url = resolve_runtime_database_url(required=False)
+        if not database_url:
+            return _CliAuthCatalog((), ())
+        conn = SyncPostgresConnection(
+            get_workflow_pool(env={"WORKFLOW_DATABASE_URL": str(database_url)})
+        )
+        rows = conn.execute(
+            """
+            SELECT
+                provider_slug,
+                probe_contract -> 'auth_mounts' AS auth_mounts,
+                probe_contract -> 'cli_home_tmpfs_dirs' AS cli_home_tmpfs_dirs
+            FROM provider_transport_admissions
+            WHERE adapter_type = 'cli_llm'
+              AND status = 'active'
+              AND admitted_by_policy IS TRUE
+              AND probe_contract ? 'auth_mounts'
+            ORDER BY provider_slug
+            """
+        )
+    except Exception:
+        return _CliAuthCatalog((), ())
+    return _auth_catalog_from_rows(tuple(dict(row) for row in rows or ()))
+
+
 def _cli_auth_volume_flags(*, provider_slug: str | None = None) -> list[str]:
     """Return docker -v flags for CLI auth files that exist on the host."""
     home = _cli_auth_home()
     probe_homes = _cli_auth_probe_homes()
     flags: list[str] = []
     normalized_provider = str(provider_slug or "").strip().lower()
-    for providers, rel_path, container_path in _CLI_AUTH_MOUNTS:
-        if normalized_provider and normalized_provider not in providers:
+    for spec in _load_cli_auth_catalog().mount_specs:
+        if normalized_provider and normalized_provider != spec.provider_slug:
             continue
-        host_path = os.path.join(home, rel_path)
-        if any(os.path.isfile(os.path.join(probe_home, rel_path)) for probe_home in probe_homes):
-            flags.extend(["-v", f"{host_path}:{container_path}:ro"])
+        host_path = os.path.join(home, spec.host_relative_path)
+        if any(os.path.isfile(os.path.join(probe_home, spec.host_relative_path)) for probe_home in probe_homes):
+            flags.extend(["-v", f"{host_path}:{spec.container_path}:ro"])
     return flags
 
 
 def _cli_home_tmpfs_flags(*, uid: int = _CLI_AGENT_UID, gid: int = _CLI_AGENT_GID) -> list[str]:
     """Return writable CLI home dirs for non-root Docker CLI execution."""
     flags: list[str] = []
-    for home_subdir in _CLI_HOME_TMPFS_DIRS:
+    for home_subdir in _load_cli_auth_catalog().home_tmpfs_dirs:
         flags.extend(
             [
                 "--tmpfs",

@@ -230,8 +230,7 @@ def test_provider_admission_db_failure_is_non_fatal_warning() -> None:
 
     assert len(warnings) == 1
     assert warnings[0]["kind"] == "provider_admission_query_failed"
-    # DB-level preflight outages must not block submission.
-    assert warnings[0]["severity"] == "warning"
+    assert warnings[0]["severity"] == "error"
 
 
 def test_provider_admission_ignores_non_agent_jobs() -> None:
@@ -394,7 +393,39 @@ def test_provider_availability_blocks_open_circuit_breaker() -> None:
     assert "operator forced outage" in warnings[0]["message"]
 
 
-def test_provider_availability_query_failure_is_warning() -> None:
+def test_provider_availability_blocks_durable_open_circuit_breaker() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "agent": "openai/gpt-5.4",
+    }])
+
+    class _Conn:
+        def execute(self, query: str, *_args):
+            if "FROM heartbeat_probe_snapshots" in query:
+                return []
+            if "FROM effective_provider_circuit_breaker_state" in query:
+                return [{
+                    "provider_slug": "openai",
+                    "state": "OPEN",
+                    "runtime_state": "CLOSED",
+                    "manual_override_state": "OPEN",
+                    "manual_override_reason": "operator force-open",
+                }]
+            raise AssertionError(f"unexpected query: {query}")
+
+    warnings = _preflight_provider_availability(
+        spec,
+        pg_conn=_Conn(),
+        circuit_breakers=_FakeCircuitBreakers(),
+    )
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "provider_circuit_open"
+    assert warnings[0]["severity"] == "error"
+    assert "operator force-open" in warnings[0]["message"]
+
+
+def test_provider_availability_query_failure_is_error() -> None:
     spec = _FakeSpec(jobs=[{
         "label": "agent_step",
         "agent": "openai/gpt-5.4",
@@ -406,9 +437,36 @@ def test_provider_availability_query_failure_is_warning() -> None:
         circuit_breakers=_FakeCircuitBreakers(),
     )
 
+    assert {warning["kind"] for warning in warnings} == {
+        "provider_availability_query_failed",
+        "provider_circuit_query_failed",
+    }
+    assert all(warning["severity"] == "error" for warning in warnings)
+
+
+def test_provider_circuit_query_failure_is_error() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "agent": "openai/gpt-5.4",
+    }])
+
+    class _Conn:
+        def execute(self, query: str, *_args):
+            if "FROM heartbeat_probe_snapshots" in query:
+                return []
+            if "FROM effective_provider_circuit_breaker_state" in query:
+                raise RuntimeError("circuit projection missing")
+            raise AssertionError(f"unexpected query: {query}")
+
+    warnings = _preflight_provider_availability(
+        spec,
+        pg_conn=_Conn(),
+        circuit_breakers=_FakeCircuitBreakers(),
+    )
+
     assert len(warnings) == 1
-    assert warnings[0]["kind"] == "provider_availability_query_failed"
-    assert warnings[0]["severity"] == "warning"
+    assert warnings[0]["kind"] == "provider_circuit_query_failed"
+    assert warnings[0]["severity"] == "error"
 
 
 # ----- workflow_id collision check ---------------------------------------

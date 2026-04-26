@@ -131,6 +131,11 @@ class ProviderControlPlaneFrontdoor:
                     "model_version": row.model_version,
                     "cost_structure": row.cost_structure,
                     "cost_metadata": dict(row.cost_metadata),
+                    "credential_availability_state": row.credential_availability_state,
+                    "credential_sources": list(row.credential_sources),
+                    "credential_observations": [
+                        dict(item) for item in row.credential_observations
+                    ],
                     "capability_state": row.capability_state,
                     "is_runnable": row.is_runnable,
                     "breaker_state": row.breaker_state,

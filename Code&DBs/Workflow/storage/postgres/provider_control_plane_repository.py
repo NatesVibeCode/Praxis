@@ -50,6 +50,9 @@ class ProviderControlPlaneSnapshotRow:
     model_version: str
     cost_structure: str
     cost_metadata: Mapping[str, Any]
+    credential_availability_state: str
+    credential_sources: tuple[str, ...]
+    credential_observations: tuple[Mapping[str, Any], ...]
     capability_state: str
     is_runnable: bool
     breaker_state: str
@@ -164,6 +167,9 @@ class PostgresProviderControlPlaneRepository:
                 model_version,
                 cost_structure,
                 cost_metadata,
+                credential_availability_state,
+                credential_sources,
+                credential_observations,
                 capability_state,
                 is_runnable,
                 breaker_state,
@@ -226,11 +232,17 @@ def _provider_control_plane_snapshot_row(
     row: Mapping[str, Any],
 ) -> ProviderControlPlaneSnapshotRow:
     removal_reasons_raw = row.get("removal_reasons") or ()
+    credential_sources_raw = row.get("credential_sources") or ()
+    credential_observations_raw = row.get("credential_observations") or ()
     source_refs_raw = row.get("source_refs") or ()
     normalized_removal_reasons: list[Mapping[str, Any]] = []
     for item in removal_reasons_raw:
         if isinstance(item, Mapping):
             normalized_removal_reasons.append(dict(item))
+    normalized_credential_observations: list[Mapping[str, Any]] = []
+    for item in credential_observations_raw:
+        if isinstance(item, Mapping):
+            normalized_credential_observations.append(dict(item))
     return ProviderControlPlaneSnapshotRow(
         runtime_profile_ref=str(row["runtime_profile_ref"]),
         job_type=str(row["job_type"]),
@@ -241,6 +253,9 @@ def _provider_control_plane_snapshot_row(
         model_version=str(row.get("model_version") or ""),
         cost_structure=str(row["cost_structure"]),
         cost_metadata=dict(row.get("cost_metadata") or {}),
+        credential_availability_state=str(row.get("credential_availability_state") or "unknown"),
+        credential_sources=tuple(str(item) for item in credential_sources_raw),
+        credential_observations=tuple(normalized_credential_observations),
         capability_state=str(row["capability_state"]),
         is_runnable=bool(row.get("is_runnable")),
         breaker_state=str(row["breaker_state"]),
