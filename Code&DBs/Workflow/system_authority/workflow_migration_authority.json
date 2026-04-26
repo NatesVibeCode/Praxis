@@ -276,7 +276,8 @@
     "263_provider_cli_auth_mount_catalog.sql",
     "264_operator_decision_scope_clamp.sql",
     "264_plan_section_author_together_flash.sql",
-    "265_plan_section_author_drop_v32.sql"
+    "265_plan_section_author_drop_v32.sql",
+    "266_private_api_compile_only_allowlist.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6757,6 +6758,20 @@
         "object_type": "row",
         "object_name": "task_type_routing.plan_section_author.together.deepseek-ai/DeepSeek-V4-Pro"
       }
+    ],
+    "266_private_api_compile_only_allowlist.sql": [
+      {
+        "object_type": "table",
+        "object_name": "private_provider_api_job_allowlist"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_provider_job_catalog"
+      },
+      {
+        "object_type": "row",
+        "object_name": "private_provider_api_job_allowlist.compile.together.deepseek-ai/DeepSeek-V4-Pro"
+      }
     ]
   },
   "policy_buckets": {
@@ -7037,7 +7052,8 @@
       "263_provider_cli_auth_mount_catalog.sql",
       "264_operator_decision_scope_clamp.sql",
       "264_plan_section_author_together_flash.sql",
-      "265_plan_section_author_drop_v32.sql"
+      "265_plan_section_author_drop_v32.sql",
+      "266_private_api_compile_only_allowlist.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
