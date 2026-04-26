@@ -586,10 +586,11 @@ def _catalog_gate_denial_for_candidates(
            ORDER BY
              CASE
                WHEN reason_code IN (
-                 'control_panel.transport_turned_off',
+                 'control_panel.model_access_method_turned_off',
                  'private_api_job_policy.not_allowed'
                ) THEN 0
-               ELSE 1
+               WHEN reason_code = 'control_panel.transport_turned_off' THEN 1
+               ELSE 2
              END,
              transport_type,
              provider_slug,
@@ -604,6 +605,7 @@ def _catalog_gate_denial_for_candidates(
     reason_code = str(row.get("reason_code") or "provider_catalog.route_denied")
     operator_message = str(row.get("operator_message") or "").strip()
     if operator_message and reason_code in {
+        "control_panel.model_access_method_turned_off",
         "control_panel.transport_turned_off",
         "private_api_job_policy.not_allowed",
     }:

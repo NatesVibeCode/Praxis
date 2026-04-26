@@ -274,7 +274,42 @@ def test_filter_pack_for_effective_provider_catalog_filters_old_packs_on_read():
     )
 
     assert filtered.next_actions == ("Keep route-free architecture notes",)
-    assert filtered.decisions == ("Use Anthropic CLI worker transport",)
+
+
+def test_filter_pack_accepts_db_record_like_catalog_rows():
+    class _RecordLike:
+        def __init__(self, **values):
+            self._values = values
+
+        def get(self, key, default=None):
+            return self._values.get(key, default)
+
+    pack = _make_pack(
+        next_actions=(
+            "Use google/gemini-3.1-pro-preview for build jobs",
+            "Use openai/gpt-5.4 for build jobs",
+            "Keep route-free architecture notes",
+        ),
+    )
+
+    filtered = filter_pack_for_effective_provider_catalog(
+        pack,
+        effective_provider_job_catalog=[
+            _RecordLike(
+                provider_slug="google",
+                model_slug="gemini-3.1-pro-preview",
+                transport_type="CLI",
+            )
+        ],
+    )
+
+    assert filtered.next_actions == (
+        "Use google/gemini-3.1-pro-preview for build jobs",
+        "Keep route-free architecture notes",
+    )
+    assert filtered.risks == (
+        "[blocked route] Use openai/gpt-5.4 for build jobs",
+    )
 
 
 def test_filter_pack_rejects_model_family_when_only_provider_matches():

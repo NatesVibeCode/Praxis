@@ -285,7 +285,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '265_plan_section_author_drop_v32.sql',
  '266_private_api_compile_only_allowlist.sql',
  '266_drop_openrouter_auto.sql',
- '267_provider_transport_control_panel_policy.sql')
+ '267_provider_transport_control_panel_policy.sql',
+ '269_model_access_method_control_panel_denials.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -587,7 +588,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '265_plan_section_author_drop_v32.sql',
  '266_drop_openrouter_auto.sql',
  '266_private_api_compile_only_allowlist.sql',
- '267_provider_transport_control_panel_policy.sql')
+ '267_provider_transport_control_panel_policy.sql',
+ '269_model_access_method_control_panel_denials.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -868,7 +870,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '265_plan_section_author_drop_v32.sql',
                '266_private_api_compile_only_allowlist.sql',
                '266_drop_openrouter_auto.sql',
-               '267_provider_transport_control_panel_policy.sql'),
+               '267_provider_transport_control_panel_policy.sql',
+               '269_model_access_method_control_panel_denials.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -1173,6 +1176,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '266_private_api_compile_only_allowlist.sql': 'canonical',
  '266_drop_openrouter_auto.sql': 'canonical',
  '267_provider_transport_control_panel_policy.sql': 'canonical',
+ '269_model_access_method_control_panel_denials.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -3559,7 +3563,13 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                                      ('function',
                                                       'refresh_private_provider_job_catalog'),
                                                      ('row',
-                                                      'runtime_profile_admitted_routes.together.deepseek-v4-pro'))}
+                                                      'runtime_profile_admitted_routes.together.deepseek-v4-pro')),
+ '269_model_access_method_control_panel_denials.sql': (('table',
+                                                        'private_provider_model_access_denials'),
+                                                       ('view',
+                                                        'provider_transport_gate_denials'),
+                                                       ('function',
+                                                        'refresh_private_provider_job_catalog'))}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -5380,7 +5390,11 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'private_provider_transport_control_policy'),
    ('view', 'provider_transport_gate_denials'),
    ('function', 'refresh_private_provider_job_catalog'),
-   ('row', 'runtime_profile_admitted_routes.together.deepseek-v4-pro'))))
+   ('row', 'runtime_profile_admitted_routes.together.deepseek-v4-pro'))),
+ ('269_model_access_method_control_panel_denials.sql',
+  (('table', 'private_provider_model_access_denials'),
+   ('view', 'provider_transport_gate_denials'),
+   ('function', 'refresh_private_provider_job_catalog'))))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_task_type_route_eligibility.sql'),
  '024': ('024_authority_checkpoints.sql', '024_task_type_routing.sql'),

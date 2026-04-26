@@ -279,7 +279,8 @@
     "265_plan_section_author_drop_v32.sql",
     "266_private_api_compile_only_allowlist.sql",
     "266_drop_openrouter_auto.sql",
-    "267_provider_transport_control_panel_policy.sql"
+    "267_provider_transport_control_panel_policy.sql",
+    "269_model_access_method_control_panel_denials.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6793,6 +6794,20 @@
         "object_type": "row",
         "object_name": "runtime_profile_admitted_routes.together.deepseek-v4-pro"
       }
+    ],
+    "269_model_access_method_control_panel_denials.sql": [
+      {
+        "object_type": "table",
+        "object_name": "private_provider_model_access_denials"
+      },
+      {
+        "object_type": "view",
+        "object_name": "provider_transport_gate_denials"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_provider_job_catalog"
+      }
     ]
   },
   "policy_buckets": {
@@ -7076,7 +7091,8 @@
       "265_plan_section_author_drop_v32.sql",
       "266_private_api_compile_only_allowlist.sql",
       "266_drop_openrouter_auto.sql",
-      "267_provider_transport_control_panel_policy.sql"
+      "267_provider_transport_control_panel_policy.sql",
+      "269_model_access_method_control_panel_denials.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

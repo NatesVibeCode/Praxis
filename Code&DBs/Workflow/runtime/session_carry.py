@@ -555,6 +555,9 @@ def _catalog_policy(
 def _catalog_row_text(row: Mapping[str, Any] | Any, key: str) -> str:
     if isinstance(row, Mapping):
         return str(row.get(key) or "").strip()
+    getter = getattr(row, "get", None)
+    if callable(getter):
+        return str(getter(key) or "").strip()
     return str(getattr(row, key, "") or "").strip()
 
 
