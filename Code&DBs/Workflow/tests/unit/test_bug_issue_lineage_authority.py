@@ -91,6 +91,21 @@ class _AsyncRecordingBugConn:
         self.insert_query: str | None = None
         self.insert_params: tuple[object, ...] | None = None
 
+    def transaction(self):
+        # Production code wraps the bug-tracker insert in `async with conn.transaction():`
+        # for atomicity. Provide a no-op async context manager so the fake honors
+        # that contract.
+        outer = self
+
+        class _Tx:
+            async def __aenter__(self_inner):
+                return outer
+
+            async def __aexit__(self_inner, exc_type, exc, tb):
+                return False
+
+        return _Tx()
+
     async def execute(self, query: str, *params: object):
         self.insert_query = query
         self.insert_params = params
