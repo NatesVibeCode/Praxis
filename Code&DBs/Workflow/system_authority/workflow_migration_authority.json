@@ -277,7 +277,9 @@
     "264_operator_decision_scope_clamp.sql",
     "264_plan_section_author_together_flash.sql",
     "265_plan_section_author_drop_v32.sql",
-    "266_private_api_compile_only_allowlist.sql"
+    "266_private_api_compile_only_allowlist.sql",
+    "266_drop_openrouter_auto.sql",
+    "267_private_api_control_panel_policy.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6772,7 +6774,9 @@
         "object_type": "row",
         "object_name": "private_provider_api_job_allowlist.compile.together.deepseek-ai/DeepSeek-V4-Pro"
       }
-    ]
+    ],
+    "266_drop_openrouter_auto.sql": [],
+    "267_private_api_control_panel_policy.sql": []
   },
   "policy_buckets": {
     "canonical": [
@@ -7053,7 +7057,9 @@
       "264_operator_decision_scope_clamp.sql",
       "264_plan_section_author_together_flash.sql",
       "265_plan_section_author_drop_v32.sql",
-      "266_private_api_compile_only_allowlist.sql"
+      "266_private_api_compile_only_allowlist.sql",
+      "266_drop_openrouter_auto.sql",
+      "267_private_api_control_panel_policy.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -7214,6 +7220,10 @@
     "264": [
       "264_operator_decision_scope_clamp.sql",
       "264_plan_section_author_together_flash.sql"
+    ],
+    "266": [
+      "266_drop_openrouter_auto.sql",
+      "266_private_api_compile_only_allowlist.sql"
     ]
   }
 }

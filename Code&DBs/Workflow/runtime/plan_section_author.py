@@ -246,10 +246,16 @@ def _coerce_packet_response(
         gates_out.append(gate.to_dict())
 
     write_raw = parsed.get("write")
-    if isinstance(write_raw, list):
+    if isinstance(write_raw, list) and write_raw:
         write = [str(item) for item in write_raw]
     else:
-        write = []
+        # Deterministic write-scope floor (2026-04-26): the validator rejects
+        # empty write and rejects workspace-root scopes. Without a floor here,
+        # every fork-author response that omits "write" lands as 2 errors per
+        # packet (plan_field.required_missing + plan_field.workspace_root).
+        # Stage-and-label scoped artifacts/ path satisfies both constraints
+        # deterministically without burning an LLM round-trip.
+        write = [f"artifacts/{target.stage}/{target.label}/"]
 
     return AuthoredPacket(
         label=target.label, stage=target.stage,

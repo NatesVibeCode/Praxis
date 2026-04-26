@@ -283,7 +283,9 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '264_operator_decision_scope_clamp.sql',
  '264_plan_section_author_together_flash.sql',
  '265_plan_section_author_drop_v32.sql',
- '266_private_api_compile_only_allowlist.sql')
+ '266_private_api_compile_only_allowlist.sql',
+ '266_drop_openrouter_auto.sql',
+ '267_private_api_control_panel_policy.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -583,7 +585,9 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '264_operator_decision_scope_clamp.sql',
  '264_plan_section_author_together_flash.sql',
  '265_plan_section_author_drop_v32.sql',
- '266_private_api_compile_only_allowlist.sql')
+ '266_drop_openrouter_auto.sql',
+ '266_private_api_compile_only_allowlist.sql',
+ '267_private_api_control_panel_policy.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -862,7 +866,9 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '264_operator_decision_scope_clamp.sql',
                '264_plan_section_author_together_flash.sql',
                '265_plan_section_author_drop_v32.sql',
-               '266_private_api_compile_only_allowlist.sql'),
+               '266_private_api_compile_only_allowlist.sql',
+               '266_drop_openrouter_auto.sql',
+               '267_private_api_control_panel_policy.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -1165,6 +1171,8 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '264_plan_section_author_together_flash.sql': 'canonical',
  '265_plan_section_author_drop_v32.sql': 'canonical',
  '266_private_api_compile_only_allowlist.sql': 'canonical',
+ '266_drop_openrouter_auto.sql': 'canonical',
+ '267_private_api_control_panel_policy.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -3542,7 +3550,9 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                                 ('function',
                                                  'refresh_private_provider_job_catalog'),
                                                 ('row',
-                                                 'private_provider_api_job_allowlist.compile.together.deepseek-ai/DeepSeek-V4-Pro'))}
+                                                 'private_provider_api_job_allowlist.compile.together.deepseek-ai/DeepSeek-V4-Pro')),
+ '266_drop_openrouter_auto.sql': (),
+ '267_private_api_control_panel_policy.sql': ()}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -5357,7 +5367,9 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'private_provider_api_job_allowlist'),
    ('function', 'refresh_private_provider_job_catalog'),
    ('row',
-    'private_provider_api_job_allowlist.compile.together.deepseek-ai/DeepSeek-V4-Pro'))))
+    'private_provider_api_job_allowlist.compile.together.deepseek-ai/DeepSeek-V4-Pro'))),
+ ('266_drop_openrouter_auto.sql', ()),
+ ('267_private_api_control_panel_policy.sql', ()))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_task_type_route_eligibility.sql'),
  '024': ('024_authority_checkpoints.sql', '024_task_type_routing.sql'),
@@ -5408,5 +5420,6 @@ WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_t
  '261': ('261_data_dictionary_query_category.sql',
          '261_provider_control_plane_snapshot.sql'),
  '264': ('264_operator_decision_scope_clamp.sql',
-         '264_plan_section_author_together_flash.sql')}
+         '264_plan_section_author_together_flash.sql'),
+ '266': ('266_drop_openrouter_auto.sql', '266_private_api_compile_only_allowlist.sql')}
 
