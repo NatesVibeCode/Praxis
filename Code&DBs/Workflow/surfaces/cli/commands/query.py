@@ -859,7 +859,8 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "  --all              Include resolved bugs (default: open only)\n"
             "  --open-only        Limit list output to open bugs; accepted for agent-friendly parity\n"
             "  --body TEXT        Alias for --description on filing and duplicate checks\n"
-            "  --dry-run          With file: validate and show preview; do not insert a bug\n"
+            "  --dry-run, --preview\n"
+            "                     With file: validate and show preview; do not insert a bug\n"
             "\n"
             "  Examples:\n"
             "    workflow bugs list --severity P1\n"
@@ -945,7 +946,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             as_json = True
             i += 1
             continue
-        if token == "--dry-run":
+        if token in {"--dry-run", "--preview"}:
             params["dry_run"] = True
             i += 1
             continue

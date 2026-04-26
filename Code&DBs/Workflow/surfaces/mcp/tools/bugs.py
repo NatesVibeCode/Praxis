@@ -278,6 +278,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": "When true with action=file, validate inputs and return a preview payload without inserting a bug row.",
                         "default": False,
                     },
+                    "preview": {
+                        "type": "boolean",
+                        "description": "Alias for dry_run on action=file.",
+                        "default": False,
+                    },
                     "source_kind": {"type": "string", "description": "Provenance source for file actions."},
                     "filed_by": {"type": "string", "description": "Caller identity for file actions."},
                     "decision_ref": {"type": "string", "description": "Decision reference for file actions."},

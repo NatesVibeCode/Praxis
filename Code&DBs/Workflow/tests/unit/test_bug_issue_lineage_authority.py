@@ -260,6 +260,26 @@ def test_file_bug_payload_dry_run_skips_insert() -> None:
     assert payload["preview"]["title"] == "Preview only"
 
 
+def test_file_bug_payload_preview_flag_aliases_dry_run() -> None:
+    class _FakeBugTracker:
+        def file_bug(self, **_kwargs):
+            raise AssertionError("no insert")
+
+        def search(self, *_a, **_k):
+            return []
+
+    payload = bug_contract.file_bug_payload(
+        bt=_FakeBugTracker(),
+        bt_mod=_FakeBugTrackerMod(),
+        body={"title": "Alias probe", "preview": True, "category": "OTHER"},
+        serialize_bug=_bug_to_dict,
+        filed_by_default="workflow_api",
+        source_kind_default="workflow_api",
+    )
+    assert payload["dry_run"] is True
+    assert payload["filed"] is False
+
+
 def test_list_and_search_payloads_apply_source_issue_filter() -> None:
     captured: dict[str, dict[str, object]] = {}
     bug = _sample_bug()

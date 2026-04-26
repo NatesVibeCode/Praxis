@@ -791,6 +791,12 @@ def _submit_submission(
             "measured workspace changes escaped the declared write scope",
             details={"paths": out_of_scope, "write_scope": list(write_scope)},
         )
+    if not changed_paths:
+        raise WorkflowSubmissionServiceError(
+            "workflow_submission.phantom_ship",
+            "submission claims completion but no files were changed on disk",
+            details={"run_id": normalized_run_id, "job_label": normalized_job_label},
+        )
 
     comparison_status, comparison_report = _comparison_result(
         declared_operations=normalized_declared_operations,

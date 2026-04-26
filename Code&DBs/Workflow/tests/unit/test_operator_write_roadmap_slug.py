@@ -160,3 +160,20 @@ def test_roadmap_write_update_mode_reuses_existing_identity_and_allows_reparenti
     assert preview["normalized_payload"]["root_phase_order"] == "33.6"
     assert preview["preview"]["roadmap_items"][0]["roadmap_item_id"] == existing_item_id
     assert preview["preview"]["roadmap_items"][0]["parent_roadmap_item_id"] == parent_item_id
+
+
+def test_normalize_roadmap_priority_accepts_p0_through_p3() -> None:
+    assert operator_write._normalize_roadmap_priority("p0") == "p0"
+    assert operator_write._normalize_roadmap_priority("P0") == "p0"
+    assert operator_write._normalize_roadmap_priority("p3") == "p3"
+    assert operator_write._normalize_roadmap_priority("P3") == "p3"
+
+
+def test_auto_promoted_bug_priority_tracks_severity_ladder() -> None:
+    assert operator_write._auto_promoted_bug_priority("P0") == "p0"
+    assert operator_write._auto_promoted_bug_priority("CRITICAL") == "p0"
+    assert operator_write._auto_promoted_bug_priority("P1") == "p1"
+    assert operator_write._auto_promoted_bug_priority("HIGH") == "p1"
+    assert operator_write._auto_promoted_bug_priority("P2") == "p2"
+    assert operator_write._auto_promoted_bug_priority("P3") == "p3"
+    assert operator_write._auto_promoted_bug_priority(None) == "p2"

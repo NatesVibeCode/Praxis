@@ -220,7 +220,7 @@ def file_bug_payload(
     title = str(body.get("title") or "").strip()
     if not title:
         raise ValueError("title is required to file a bug")
-    dry_run = bool(body.get("dry_run"))
+    dry_run = bool(body.get("dry_run") or body.get("preview"))
     category = parse_category(bt_mod, body.get("category")) or bt_mod.BugCategory.OTHER
     resume_ctx = body.get("resume_context")
     if resume_ctx is not None and not isinstance(resume_ctx, dict):
