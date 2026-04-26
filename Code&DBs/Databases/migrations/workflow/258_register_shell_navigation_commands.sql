@@ -97,10 +97,10 @@ SELECT register_operation_atomic(
 );
 
 -- 6. Event contracts --------------------------------------------------------
--- One row per event_type. aggregate_ref_policy='session_aggregate_ref' means
--- each event row's aggregate_ref column should be set from the
--- session_aggregate_ref payload field — so the projection reducer can group
--- by browser-tab session.
+-- One row per event_type. aggregate_ref_policy='entity_ref' (the
+-- per-browser-tab session UUID is the entity); each event row's aggregate_ref
+-- column reads from the session_aggregate_ref payload field so the projection
+-- reducer can group by browser-tab session.
 
 INSERT INTO authority_event_contracts (
     event_contract_ref,
@@ -121,7 +121,7 @@ INSERT INTO authority_event_contracts (
         'surface.opened',
         'authority.surface_catalog',
         'runtime.operations.commands.shell_navigation_commands.ShellSurfaceOpenedCommand',
-        'session_aggregate_ref',
+        'entity_ref',
         '["runtime.surface_projections.reduce_ui_shell_state"]'::jsonb,
         '["ui_shell_state.live"]'::jsonb,
         TRUE,
@@ -145,7 +145,7 @@ INSERT INTO authority_event_contracts (
         'tab.closed',
         'authority.surface_catalog',
         'runtime.operations.commands.shell_navigation_commands.ShellTabClosedCommand',
-        'session_aggregate_ref',
+        'entity_ref',
         '["runtime.surface_projections.reduce_ui_shell_state"]'::jsonb,
         '["ui_shell_state.live"]'::jsonb,
         TRUE,
@@ -167,7 +167,7 @@ INSERT INTO authority_event_contracts (
         'draft.guard.consulted',
         'authority.surface_catalog',
         'runtime.operations.commands.shell_navigation_commands.ShellDraftGuardConsultedCommand',
-        'session_aggregate_ref',
+        'entity_ref',
         '[]'::jsonb,
         '[]'::jsonb,
         TRUE,
@@ -191,7 +191,7 @@ INSERT INTO authority_event_contracts (
         'history.popped',
         'authority.surface_catalog',
         'runtime.operations.commands.shell_navigation_commands.ShellHistoryPoppedCommand',
-        'session_aggregate_ref',
+        'entity_ref',
         '[]'::jsonb,
         '[]'::jsonb,
         TRUE,
@@ -213,7 +213,7 @@ INSERT INTO authority_event_contracts (
         'session.bootstrapped',
         'authority.surface_catalog',
         'runtime.operations.commands.shell_navigation_commands.ShellSessionBootstrappedCommand',
-        'session_aggregate_ref',
+        'entity_ref',
         '["runtime.surface_projections.reduce_ui_shell_state"]'::jsonb,
         '["ui_shell_state.live"]'::jsonb,
         TRUE,
