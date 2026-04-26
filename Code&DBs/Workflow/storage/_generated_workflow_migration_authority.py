@@ -279,7 +279,9 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '261_data_dictionary_query_category.sql',
  '261_provider_control_plane_snapshot.sql',
  '262_together_compile_primary.sql',
- '263_provider_cli_auth_mount_catalog.sql')
+ '263_provider_cli_auth_mount_catalog.sql',
+ '264_operator_decision_scope_clamp.sql',
+ '264_plan_section_author_together_flash.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -575,7 +577,9 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '261_data_dictionary_query_category.sql',
  '261_provider_control_plane_snapshot.sql',
  '262_together_compile_primary.sql',
- '263_provider_cli_auth_mount_catalog.sql')
+ '263_provider_cli_auth_mount_catalog.sql',
+ '264_operator_decision_scope_clamp.sql',
+ '264_plan_section_author_together_flash.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -850,7 +854,9 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '261_data_dictionary_query_category.sql',
                '261_provider_control_plane_snapshot.sql',
                '262_together_compile_primary.sql',
-               '263_provider_cli_auth_mount_catalog.sql'),
+               '263_provider_cli_auth_mount_catalog.sql',
+               '264_operator_decision_scope_clamp.sql',
+               '264_plan_section_author_together_flash.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -1149,6 +1155,8 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '261_provider_control_plane_snapshot.sql': 'canonical',
  '262_together_compile_primary.sql': 'canonical',
  '263_provider_cli_auth_mount_catalog.sql': 'canonical',
+ '264_operator_decision_scope_clamp.sql': 'canonical',
+ '264_plan_section_author_together_flash.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -3513,7 +3521,12 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                              ('row',
                                               'provider_transport_admissions.provider_transport_admission.anthropic.cli_llm'),
                                              ('row',
-                                              'provider_transport_admissions.provider_transport_admission.google.cli_llm'))}
+                                              'provider_transport_admissions.provider_transport_admission.google.cli_llm')),
+ '264_operator_decision_scope_clamp.sql': (),
+ '264_plan_section_author_together_flash.sql': (('row',
+                                                 'task_type_routing.plan_section_author.together.deepseek-ai/DeepSeek-V3.2'),
+                                                ('row',
+                                                 'task_type_routing.plan_section_author.together.deepseek-ai/DeepSeek-V4-Pro'))}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -5315,7 +5328,12 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
    ('row',
     'provider_transport_admissions.provider_transport_admission.anthropic.cli_llm'),
    ('row',
-    'provider_transport_admissions.provider_transport_admission.google.cli_llm'))))
+    'provider_transport_admissions.provider_transport_admission.google.cli_llm'))),
+ ('264_operator_decision_scope_clamp.sql', ()),
+ ('264_plan_section_author_together_flash.sql',
+  (('row', 'task_type_routing.plan_section_author.together.deepseek-ai/DeepSeek-V3.2'),
+   ('row',
+    'task_type_routing.plan_section_author.together.deepseek-ai/DeepSeek-V4-Pro'))))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_task_type_route_eligibility.sql'),
  '024': ('024_authority_checkpoints.sql', '024_task_type_routing.sql'),
@@ -5364,5 +5382,7 @@ WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_t
          '244_ui_surface_file_anchor_registry.sql'),
  '245': ('245_compile_run_trace.sql', '245_compile_task_type_route.sql'),
  '261': ('261_data_dictionary_query_category.sql',
-         '261_provider_control_plane_snapshot.sql')}
+         '261_provider_control_plane_snapshot.sql'),
+ '264': ('264_operator_decision_scope_clamp.sql',
+         '264_plan_section_author_together_flash.sql')}
 
