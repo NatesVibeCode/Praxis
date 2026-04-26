@@ -1152,11 +1152,15 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       const provenance = (result as any)?.definition?.compose_provenance;
       if (provenance && provenance.ok === false) {
         const reason = provenance.reason_code || 'unknown';
-        const findings = (provenance.validation?.findings || []) as Array<{ severity?: string; message?: string }>;
+        const findings = (provenance.validation?.findings || []) as Array<{ severity?: string; label?: string; field?: string; code?: string; detail?: string }>;
         const errorFindings = findings
           .filter((f) => f.severity === 'error')
-          .slice(0, 3)
-          .map((f) => `• ${f.message || ''}`)
+          .slice(0, 5)
+          .map((f) => {
+            const where = [f.label, f.field].filter(Boolean).join('.');
+            const why = f.detail || f.code || '';
+            return where ? `• ${where}: ${why}` : `• ${why}`;
+          })
           .filter(Boolean)
           .join('\n');
         const summary = errorFindings

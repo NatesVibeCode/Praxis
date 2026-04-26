@@ -1048,11 +1048,17 @@ def mutate_workflow_build(
             from runtime.compose_plan_via_llm import compose_plan_via_llm
             from runtime.compose_plan_to_definition import packets_to_definition
 
+            # Lowered from 20 to 5 (2026-04-26): Together's per-account rate
+            # limit fires at concurrency=20, sending forks through the failover
+            # chain to OpenRouter v4-flash which is *also* rate-limited
+            # upstream. 5-way fan-out still gets the prefix-cache benefit
+            # without overwhelming Together. Bump back to 20 once the operator
+            # account tier is raised, or wire request-level retry-with-backoff.
             compose_result = compose_plan_via_llm(
                 prose,
                 conn=conn,
                 plan_name=title,
-                concurrency=20,
+                concurrency=5,
             )
             # Always translate — even on failure. The translator carries
             # compose_provenance (synthesis usage, validation findings,

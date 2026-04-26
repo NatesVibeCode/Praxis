@@ -162,14 +162,24 @@ def compose_plan_via_llm(
 
     validation = validate_authored_plan(authored, skeleton=skeleton, conn=conn)
 
-    if authored.errors:
+    # Partial-success policy (2026-04-26, autonomous-first standing order):
+    # if the majority of packets authored cleanly, drop the failed ones and
+    # continue. Wholesale failure only when every packet failed. The user
+    # gets a usable plan with the majority decomposition; failed packets
+    # surface as warnings on compose_provenance.
+    total_attempted = len(authored.packets) + len(authored.errors)
+    if authored.errors and len(authored.packets) == 0:
         return ComposeViaLLMResult(
             ok=False, intent=intent, atoms=atoms, skeleton=skeleton,
             synthesis=synthesis, authored=authored, validation=validation,
             pill_triage=pill_triage,
             reason_code="fork_author.failed",
-            error=f"{len(authored.errors)} packet(s) failed authoring",
+            error=f"{len(authored.errors)} of {total_attempted} packet(s) failed authoring",
             notes=notes,
+        )
+    if authored.errors:
+        notes.append(
+            f"fork_author partial: {len(authored.errors)} of {total_attempted} packet(s) failed; continuing with the {len(authored.packets)} successful packets",
         )
 
     if not validation.passed:
