@@ -61,6 +61,11 @@ services:
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
       PRAXIS_API_RELOAD: "0"
+      # Enable the LLM compile path (DeepSeek V4-Pro via OpenRouter per
+      # migrations 243+246). When unset, runtime/compiler.py falls through to
+      # the deterministic compile that leaves typed slugs unresolved and the
+      # builder lands the user on a workflow with empty bindings/imports.
+      WORKFLOW_COMPILER_ENABLE_LLM: ${WORKFLOW_COMPILER_ENABLE_LLM:-1}
       PRAXIS_OPERATOR_DEV_MODE: ${PRAXIS_OPERATOR_DEV_MODE:-0}
       PRAXIS_API_TOKEN: ${PRAXIS_API_TOKEN:-}
       PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
