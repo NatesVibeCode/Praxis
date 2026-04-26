@@ -85,6 +85,8 @@ class _ClaimConn:
                     "projection_ref": "projection.private_provider_control_plane_snapshot",
                 },
             ]
+        if "FROM provider_transport_gate_denials" in query:
+            return []
         if "FROM registry_runtime_profile_authority" in query:
             return []
         if "GROUP BY 1" in query:
@@ -143,6 +145,59 @@ def test_select_claim_route_uses_unblocked_candidate_when_one_remains() -> None:
     selected = _select_claim_route(conn, _job())
 
     assert selected == "anthropic/claude-sonnet-4-6"
+
+
+def test_select_claim_route_surfaces_control_panel_transport_denial() -> None:
+    """When the catalog blocks a transport at the control panel, the upstream
+    error must carry the operator message instead of a stale model-specific
+    explanation.
+    """
+
+    class _ControlPanelConn(_ClaimConn):
+        def execute(self, query: str, *args):
+            if "FROM effective_private_provider_job_catalog" in query:
+                return []
+            if "FROM provider_transport_gate_denials" in query:
+                return [
+                    {
+                        "runtime_profile_ref": "nate-private",
+                        "job_type": "build",
+                        "transport_type": "API",
+                        "adapter_type": "llm_task",
+                        "provider_slug": "together",
+                        "model_slug": "deepseek-ai/DeepSeek-V4-Pro",
+                        "reason_code": "control_panel.transport_turned_off",
+                        "source_refs": [
+                            "table.private_provider_transport_control_policy"
+                        ],
+                        "default_posture": "deny_unless_allowlisted",
+                        "operator_message": (
+                            "this Model Access method has been turned off on purpose "
+                            "at the control panel either for this specific task type, "
+                            "or more broadly, consult the control panel and do not "
+                            "turn it on without confirming with the user even if you "
+                            "think that will help you complete your task."
+                        ),
+                        "decision_ref": "decision.private-api-control-panel",
+                    }
+                ]
+            return super().execute(query, *args)
+
+    conn = _ControlPanelConn(blocked_slugs=())
+
+    with pytest.raises(ClaimRouteBlockedError) as excinfo:
+        _select_claim_route(conn, _job())
+
+    err = excinfo.value
+    assert err.reason_code == "control_panel.transport_turned_off"
+    assert str(err) == (
+        "this Model Access method has been turned off on purpose at the control "
+        "panel either for this specific task type, or more broadly, consult the "
+        "control panel and do not turn it on without confirming with the user "
+        "even if you think that will help you complete your task."
+    )
+    assert err.details["transport_type"] == "API"
+    assert err.details["decision_ref"] == "decision.private-api-control-panel"
 
 
 def test_claim_one_fails_closed_on_all_blocked(monkeypatch) -> None:

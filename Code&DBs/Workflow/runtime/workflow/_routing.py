@@ -65,11 +65,13 @@ class ClaimRouteBlockedError(RuntimeError):
         *,
         blocked_candidates: tuple[str, ...] = (),
         task_type: str = "",
+        details: dict[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.reason_code = reason_code
         self.blocked_candidates = tuple(blocked_candidates)
         self.task_type = task_type
+        self.details = dict(details or {})
 
 
 def _record_task_route_outcome(
@@ -555,6 +557,78 @@ def _effective_catalog_route_candidates(
     return [candidate for candidate in candidates if candidate in catalog_slugs]
 
 
+def _catalog_gate_denial_for_candidates(
+    conn: SyncPostgresConnection,
+    *,
+    runtime_profile_ref: str | None,
+    task_type: str,
+    candidates: list[str],
+) -> dict[str, object] | None:
+    """Return the most specific catalog denial for an empty effective set."""
+    if not runtime_profile_ref or not task_type or not candidates:
+        return None
+    rows = conn.execute(
+        """SELECT runtime_profile_ref,
+                  job_type,
+                  transport_type,
+                  adapter_type,
+                  provider_slug,
+                  model_slug,
+                  reason_code,
+                  source_refs,
+                  default_posture,
+                  operator_message,
+                  decision_ref
+           FROM provider_transport_gate_denials
+           WHERE runtime_profile_ref = $1
+             AND job_type = $2
+             AND (provider_slug || '/' || model_slug) = ANY($3::text[])
+           ORDER BY
+             CASE
+               WHEN reason_code IN (
+                 'control_panel.transport_turned_off',
+                 'private_api_job_policy.not_allowed'
+               ) THEN 0
+               ELSE 1
+             END,
+             transport_type,
+             provider_slug,
+             model_slug""",
+        runtime_profile_ref,
+        task_type,
+        candidates,
+    )
+    if not rows:
+        return None
+    row = dict(rows[0])
+    reason_code = str(row.get("reason_code") or "provider_catalog.route_denied")
+    operator_message = str(row.get("operator_message") or "").strip()
+    if operator_message and reason_code in {
+        "control_panel.transport_turned_off",
+        "private_api_job_policy.not_allowed",
+    }:
+        message = operator_message
+    else:
+        message = (
+            "effective provider job catalog admitted no candidates "
+            f"for task_type={task_type!r}; claim refused"
+        )
+    return {
+        "reason_code": reason_code,
+        "message": message,
+        "runtime_profile_ref": row.get("runtime_profile_ref"),
+        "job_type": row.get("job_type"),
+        "transport_type": row.get("transport_type"),
+        "adapter_type": row.get("adapter_type"),
+        "provider_slug": row.get("provider_slug"),
+        "model_slug": row.get("model_slug"),
+        "default_posture": row.get("default_posture"),
+        "operator_message": operator_message or None,
+        "decision_ref": row.get("decision_ref"),
+        "source_refs": list(row.get("source_refs") or ()),
+    }
+
+
 def _task_route_candidate_meta(
     conn: SyncPostgresConnection,
     *,
@@ -608,6 +682,20 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
             candidates=candidates,
         )
         if not catalog_candidates:
+            denial = _catalog_gate_denial_for_candidates(
+                conn,
+                runtime_profile_ref=runtime_profile_ref,
+                task_type=route_task_type,
+                candidates=candidates,
+            )
+            if denial:
+                raise ClaimRouteBlockedError(
+                    str(denial["reason_code"]),
+                    str(denial["message"]),
+                    blocked_candidates=tuple(sorted(candidates)),
+                    task_type=route_task_type,
+                    details=denial,
+                )
             raise ClaimRouteBlockedError(
                 "routing.no_effective_provider_job_catalog_candidate",
                 (
