@@ -1054,7 +1054,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt "
             "in one call. For trusted automation (CI, scripts, experienced "
             "operators). Fails closed by default on unresolved routes, unbound "
-            "pills, or budget-cap overrun."
+            "pills, or invalid approvals."
         ),
         when_not_to_use=(
             "Do not use it for untrusted input or when the caller needs to inspect "
@@ -1073,35 +1073,8 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     ),
                     "approved_by": "nate@praxis",
                     "plan_name": "timezone_rollout",
-                    "budget_cap_tokens": 150000,
                 },
             ),
-        ],
-    ),
-    "praxis_project_plan_budget": _tool(
-        surface="workflow",
-        tier="stable",
-        recommended_alias="project-budget",
-        when_to_use=(
-            "Estimate token budgets for a ProposedPlan before approving. Honest "
-            "projection — prompt tokens are char-based, output tokens are a "
-            "per-stage upper bound, no USD cost."
-        ),
-        when_not_to_use=(
-            "Do not use it to enforce a hard budget cap silently. Projection is "
-            "for the caller to read and decide."
-        ),
-        risks={"default": "read"},
-        examples=[
-            _example(
-                "Project budget for a compose-plan output",
-                {
-                    "proposed": {
-                        "spec_dict": {"name": "...", "jobs": []},
-                        "preview": {},
-                    }
-                },
-            )
         ],
     ),
     "praxis_compose_plan": _tool(

@@ -16,13 +16,22 @@ from runtime.health_map import HealthMapper
 from runtime.trend_detector import TrendDirection
 
 
-def _bug(*, bug_id: str, title: str, severity: str, status: str, category: str):
+def _bug(
+    *,
+    bug_id: str,
+    title: str,
+    severity: str,
+    status: str,
+    category: str,
+    source_kind: str = "",
+):
     return SimpleNamespace(
         bug_id=bug_id,
         title=title,
         severity=SimpleNamespace(value=severity),
         status=SimpleNamespace(value=status),
         category=SimpleNamespace(value=category),
+        source_kind=source_kind,
     )
 
 
@@ -205,6 +214,170 @@ def test_build_bug_scoreboard_surfaces_recurring_and_under_observed_bugs(tmp_pat
     assert tracker.list_bugs_calls[0]["open_only"] is False
     assert tracker.failure_packet_calls
     assert all(call["allow_backfill"] is False for call in tracker.failure_packet_calls)
+
+
+def test_build_bug_triage_packet_classifies_machine_action_buckets(tmp_path: Path) -> None:
+    class _Tracker:
+        def __init__(self) -> None:
+            self._bugs = [
+                _bug(
+                    bug_id="BUG-LIVE",
+                    title="Runtime validation command fails",
+                    severity="P1",
+                    status="OPEN",
+                    category="RUNTIME",
+                ),
+                _bug(
+                    bug_id="BUG-EVIDENCE",
+                    title="Backlog row missing receipt context",
+                    severity="P2",
+                    status="OPEN",
+                    category="EVIDENCE",
+                ),
+                _bug(
+                    bug_id="BUG-PROJECTION",
+                    title="Projection freshness readback is stale",
+                    severity="P2",
+                    status="OPEN",
+                    category="OBSERVABILITY",
+                ),
+                _bug(
+                    bug_id="BUG-FRICTION",
+                    title="Provider DNS unavailable during setup smoke",
+                    severity="P3",
+                    status="OPEN",
+                    category="PLATFORM",
+                    source_kind="audit",
+                ),
+                _bug(
+                    bug_id="BUG-VERIFY",
+                    title="Implemented pending full verification",
+                    severity="P2",
+                    status="FIX_PENDING_VERIFICATION",
+                    category="VERIFY",
+                ),
+                _bug(
+                    bug_id="BUG-INACTIVE",
+                    title="Historical docs drift",
+                    severity="P3",
+                    status="FIXED",
+                    category="DOCS",
+                ),
+            ]
+            self._packets = {
+                "BUG-LIVE": {
+                    "latest_receipt": {"write_paths": ("runtime/workflow_validation.py",)},
+                    "replay_context": {"ready": True, "reason_code": "bug.replay_ready"},
+                    "observability_state": "complete",
+                    "observability_gaps": (),
+                },
+                "BUG-EVIDENCE": {
+                    "replay_context": {
+                        "ready": False,
+                        "reason_code": "bug.replay_missing_run_context",
+                    },
+                    "observability_state": "degraded",
+                    "observability_gaps": ("bug.evidence_links.missing",),
+                },
+                "BUG-PROJECTION": {
+                    "latest_receipt": {"write_paths": ("observability/read_models.py",)},
+                    "replay_context": {"ready": False},
+                    "observability_state": "complete",
+                    "observability_gaps": (),
+                },
+                "BUG-FRICTION": {
+                    "replay_context": {"ready": False},
+                    "observability_state": "complete",
+                    "observability_gaps": (),
+                },
+                "BUG-VERIFY": {
+                    "resume_context": {
+                        "implementation_status": "implemented_pending_full_verification"
+                    },
+                    "replay_context": {"ready": False},
+                    "observability_state": "complete",
+                    "observability_gaps": (),
+                },
+                "BUG-INACTIVE": {
+                    "replay_context": {"ready": False},
+                    "observability_state": "complete",
+                    "observability_gaps": (),
+                },
+            }
+
+        def list_bugs(self, *args, **kwargs):
+            del args, kwargs
+            return list(self._bugs)
+
+        def failure_packet(self, bug_id: str, *, receipt_limit: int = 1, allow_backfill: bool = True):
+            del receipt_limit, allow_backfill
+            return self._packets[bug_id]
+
+        def stats(self):
+            return SimpleNamespace(errors=(), observability_state="complete")
+
+    payload = observability_mod.build_bug_triage_packet(
+        bug_tracker=_Tracker(),
+        repo_root=tmp_path,
+        limit=10,
+        include_inactive=True,
+    )
+
+    bugs = {item["bug_id"]: item for item in payload["bugs"]}
+    assert payload["view"] == "bug_triage_packet"
+    assert payload["observability_state"] == "complete"
+    assert payload["summary"] == {
+        "live_defect": 1,
+        "evidence_debt": 1,
+        "stale_projection": 1,
+        "platform_friction": 1,
+        "fixed_pending_verification": 1,
+        "inactive": 1,
+    }
+    assert bugs["BUG-LIVE"]["classification"] == "live_defect"
+    assert bugs["BUG-LIVE"]["next_action"] == "fix"
+    assert bugs["BUG-EVIDENCE"]["classification"] == "evidence_debt"
+    assert bugs["BUG-EVIDENCE"]["next_action"] == "collect_evidence"
+    assert bugs["BUG-PROJECTION"]["classification"] == "stale_projection"
+    assert bugs["BUG-PROJECTION"]["next_action"] == "refresh_projection"
+    assert bugs["BUG-FRICTION"]["classification"] == "platform_friction"
+    assert bugs["BUG-FRICTION"]["next_action"] == "defer_or_close"
+    assert bugs["BUG-VERIFY"]["classification"] == "fixed_pending_verification"
+    assert bugs["BUG-VERIFY"]["next_action"] == "verify_fix"
+    assert bugs["BUG-INACTIVE"]["classification"] == "inactive"
+
+
+def test_build_bug_triage_packet_reports_packet_errors_as_evidence_debt(tmp_path: Path) -> None:
+    class _Tracker:
+        def list_bugs(self, *args, **kwargs):
+            del args, kwargs
+            return [
+                _bug(
+                    bug_id="BUG-PACKET",
+                    title="Cannot assemble packet",
+                    severity="P2",
+                    status="OPEN",
+                    category="BUG",
+                )
+            ]
+
+        def failure_packet(self, bug_id: str, *, receipt_limit: int = 1, allow_backfill: bool = True):
+            del bug_id, receipt_limit, allow_backfill
+            raise RuntimeError("packet unavailable")
+
+        def stats(self):
+            return SimpleNamespace(errors=(), observability_state="complete")
+
+    payload = observability_mod.build_bug_triage_packet(
+        bug_tracker=_Tracker(),
+        repo_root=tmp_path,
+    )
+
+    assert payload["observability_state"] == "degraded"
+    assert payload["summary"]["evidence_debt"] == 1
+    assert payload["bugs"][0]["classification"] == "evidence_debt"
+    assert payload["bugs"][0]["reason_codes"] == ["bug.packet_error"]
+    assert payload["errors"][0]["code"] == "bug.packet_error"
 
 
 def test_build_platform_observability_flattens_probe_state() -> None:

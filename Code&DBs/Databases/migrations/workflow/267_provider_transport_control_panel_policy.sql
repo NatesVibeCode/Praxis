@@ -288,6 +288,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- DROP first because Postgres CREATE OR REPLACE VIEW cannot drop or retype
+-- columns relative to the existing view (raises "cannot drop columns from
+-- view" on bootstrap). The view is read-only — dropping it has no data side
+-- effect and the next statement re-creates it idempotently.
+DROP VIEW IF EXISTS provider_transport_gate_denials;
 CREATE OR REPLACE VIEW provider_transport_gate_denials AS
 SELECT
     catalog.runtime_profile_ref,

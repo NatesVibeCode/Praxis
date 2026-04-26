@@ -157,6 +157,38 @@ def test_mcp_operator_catalog_tool_returns_structured_error_when_authority_unava
     }
 
 
+def test_mcp_bug_triage_packet_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"view": "bug_triage_packet"}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_bug_triage_packet(
+        {
+            "limit": 10,
+            "classification": "evidence_debt",
+            "open_only": True,
+            "include_inactive": False,
+        }
+    )
+
+    assert result["view"] == "bug_triage_packet"
+    assert captured["operation_name"] == "operator.bug_triage_packet"
+    assert captured["payload"] == {
+        "limit": 10,
+        "open_only": True,
+        "classification": "evidence_debt",
+        "include_inactive": False,
+    }
+
+
 def test_mcp_operator_ideas_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

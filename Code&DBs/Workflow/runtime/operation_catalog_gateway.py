@@ -364,17 +364,35 @@ def _insert_authority_event(
     output_hash: str,
     idempotency_key: str | None,
     result_status: str | None,
+    custom_payload: Mapping[str, Any] | None = None,
 ) -> str:
+    """Insert one row into ``authority_events``.
+
+    The base payload is a fixed shape (operation_name, input/output hash,
+    result_status, recorded_at) so every event carries the same audit
+    metadata. When the handler returns an ``event_payload`` field, those
+    keys are merged on top so conceptual events can carry decision-
+    relevant fields (e.g. ``compose.experiment.completed`` carries
+    ``config_count`` / ``winning_config_index`` / ``matrix_summary``).
+    Custom keys win on conflict; metadata keys cannot be overridden.
+    """
     event_id = event_id or str(uuid4())
     authority_domain_ref = _binding_value(binding, "authority_domain_ref", binding.authority_ref)
     event_type = _binding_value(binding, "event_type", None) or binding.operation_name.replace(".", "_")
-    payload = {
+    payload: dict[str, Any] = {
         "operation_name": binding.operation_name,
         "input_hash": input_hash,
         "output_hash": output_hash,
         "result_status": result_status,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
+    if isinstance(custom_payload, Mapping):
+        for key, value in custom_payload.items():
+            if key in {"operation_name", "input_hash", "output_hash", "recorded_at"}:
+                # Audit metadata is gateway-owned; ignore handler attempts
+                # to override.
+                continue
+            payload[key] = value
     conn.execute(
         """
         INSERT INTO authority_events (
@@ -454,6 +472,17 @@ def _write_operation_proof(
         event_ids.append(str(uuid4()))
         durable_receipt["event_ids"] = event_ids
 
+    # Conceptual events MAY carry a rich payload from the handler return.
+    # When the result is a Mapping with an ``event_payload`` key, hoist
+    # that dict onto the event row so the event itself carries decision-
+    # relevant data (per architecture-policy::platform-architecture::
+    # conceptual-events-register-through-operation-catalog-registry).
+    custom_event_payload: Mapping[str, Any] | None = None
+    if isinstance(result_payload, Mapping):
+        candidate = result_payload.get("event_payload")
+        if isinstance(candidate, Mapping):
+            custom_event_payload = candidate
+
     if _binding_value(binding, "receipt_required", True):
         _insert_operation_receipt(conn, binding, receipt=durable_receipt, result_payload=result_payload)
     if durable_receipt.get("execution_status") == "completed" and event_ids:
@@ -467,6 +496,7 @@ def _write_operation_proof(
                 output_hash=output_hash or "",
                 idempotency_key=idempotency_key,
                 result_status=result_status,
+                custom_payload=custom_event_payload,
             )
         else:
             _attach_receipt_to_authority_events(

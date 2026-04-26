@@ -156,4 +156,6 @@ def test_cmd_validate_reports_authority_error_when_pg_conn_unavailable(
     assert "=== Spec Validation: FAILED ===" in rendered
     assert "AUTHORITY ERROR" in rendered
     assert "agent authority unavailable" in rendered
+    assert "Remediation:" in rendered
+    assert "Resolve WORKFLOW_DATABASE_URL" in rendered
     assert "Traceback" not in rendered

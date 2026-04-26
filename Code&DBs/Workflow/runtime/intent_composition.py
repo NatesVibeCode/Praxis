@@ -383,10 +383,10 @@ def reorder_packets_by_write_conflicts(
 class ComposeAndLaunchBlocked(ValueError):
     """Raised when compose_and_launch refuses to launch for safety reasons.
 
-    ``reasons`` carries the structured list: unresolved_routes,
-    unbound_pills, budget_exceeded. Callers render the blocked reasons
-    to the operator; fixing any of them requires re-composing or
-    explicitly disabling the check.
+    ``reasons`` carries the structured list: unresolved_routes and
+    unbound_pills. Callers render the blocked reasons to the operator;
+    fixing any of them requires re-composing or explicitly disabling the
+    check.
     """
 
     def __init__(self, reasons: list[dict[str, Any]]) -> None:
@@ -413,7 +413,6 @@ def compose_and_launch(
     default_stage: str = "build",
     refuse_unresolved_routes: bool = True,
     refuse_unbound_pills: bool = True,
-    budget_cap_tokens: int | None = None,
     serialize_scope_conflicts: bool = False,
 ) -> LaunchReceipt:
     """End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt.
@@ -431,8 +430,6 @@ def compose_and_launch(
       - ``refuse_unbound_pills``: block if any packet description
         references an object.field that doesn't exist in the data
         dictionary (typo or hallucination).
-      - ``budget_cap_tokens``: block if the projected total prompt +
-        output tokens exceeds the cap.
 
     ``approved_by`` is required — no anonymous automation. The approval is
     still hash-bound to the exact spec_dict, so any tampering between the
@@ -472,21 +469,6 @@ def compose_and_launch(
                     "kind": "unbound_pills",
                     "count": len(unbound),
                     "detail": list(unbound),
-                }
-            )
-
-    if budget_cap_tokens is not None:
-        from runtime.plan_budget import project_plan_budget
-
-        projection = project_plan_budget(proposed)
-        if projection.total_estimated_tokens > int(budget_cap_tokens):
-            blocked.append(
-                {
-                    "kind": "budget_exceeded",
-                    "cap": int(budget_cap_tokens),
-                    "estimated_total_tokens": projection.total_estimated_tokens,
-                    "estimated_prompt_tokens": projection.total_estimated_prompt_tokens,
-                    "estimated_output_tokens": projection.total_estimated_output_tokens,
                 }
             )
 

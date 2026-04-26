@@ -342,3 +342,38 @@ def test_assess_work_items_uses_roadmap_lifecycle_when_bindings_are_absent() -> 
     assert by_key[("roadmap_item", "roadmap_item.idea")].pipeline_state == "backlog"
     assert by_key[("roadmap_item", "roadmap_item.claimed")].activity_state == "in_progress"
     assert by_key[("roadmap_item", "roadmap_item.claimed")].pipeline_state == "in_progress"
+
+
+def test_assess_work_items_treats_retired_roadmap_items_as_non_actionable() -> None:
+    assessment_time = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+
+    assessments = assess_work_items(
+        bugs=[],
+        roadmap_items=[
+            {
+                "roadmap_item_id": "roadmap_item.retired",
+                "lifecycle": "retired",
+                "registry_paths": [],
+                "updated_at": assessment_time - timedelta(days=2),
+                "completed_at": None,
+                "target_end_at": None,
+            }
+        ],
+        bug_evidence_links={},
+        as_of=assessment_time,
+        repo_root=Path("/tmp"),
+    )
+
+    retired = next(
+        record
+        for record in assessments
+        if record.item_kind == "roadmap_item" and record.item_id == "roadmap_item.retired"
+    )
+
+    assert retired.freshness_state == "fresh"
+    assert retired.resolution_state == "retired"
+    assert retired.activity_state == "retired"
+    assert retired.pipeline_state == "retired"
+    assert retired.suggested_action == "none"
+    assert retired.closeout_state == "none"
+    assert "retired_lifecycle" in retired.reason_codes

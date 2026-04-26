@@ -345,33 +345,6 @@ def test_compose_and_launch_refuses_unbound_pills_by_default(monkeypatch) -> Non
     assert any(entry["kind"] == "unbound_pills" for entry in reasons)
 
 
-def test_compose_and_launch_refuses_over_budget(monkeypatch) -> None:
-    _install_quiet_preview_and_binding(monkeypatch)
-
-    def _forbid_submit(*_args, **_kwargs):
-        raise AssertionError("submit should not run when budget cap is exceeded")
-
-    import runtime.control_commands as control_commands_mod
-
-    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
-
-    # 3 build-stage jobs × 4000 estimated output tokens each = 12000. Cap at
-    # 5000 trips the budget block.
-    with pytest.raises(ComposeAndLaunchBlocked) as exc_info:
-        compose_and_launch(
-            "1. Do one\n2. Do two\n3. Do three",
-            conn=_FakeConn(),
-            approved_by="ci@praxis",
-            budget_cap_tokens=5000,
-        )
-    reasons = exc_info.value.reasons
-    budget_reason = next(
-        entry for entry in reasons if entry["kind"] == "budget_exceeded"
-    )
-    assert budget_reason["cap"] == 5000
-    assert budget_reason["estimated_total_tokens"] > 5000
-
-
 def test_compose_and_launch_requires_approved_by(monkeypatch) -> None:
     _install_quiet_preview_and_binding(monkeypatch)
 
@@ -482,7 +455,23 @@ def test_compose_and_launch_blocked_emits_blocked_event(monkeypatch) -> None:
     _install_quiet_preview_and_binding(monkeypatch)
     events = _install_event_capture(monkeypatch)
 
-    # Force budget cap overrun — 3 build-stage jobs ≈ 12000 output tokens.
+    import runtime.intent_binding as intent_binding_mod
+
+    def _fake_bind_with_unbound(intent, *, conn, object_kinds=None):
+        return intent_binding_mod.BoundIntent(
+            intent=intent,
+            unbound=[
+                intent_binding_mod.UnboundCandidate(
+                    matched_span="users.first_nm",
+                    object_kind="users",
+                    field_path="first_nm",
+                    reason="field_path_not_in_object",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(intent_binding_mod, "bind_data_pills", _fake_bind_with_unbound)
+
     def _forbid_submit(*_args, **_kwargs):
         raise AssertionError("submit should not run when blocked")
 
@@ -492,10 +481,9 @@ def test_compose_and_launch_blocked_emits_blocked_event(monkeypatch) -> None:
 
     with pytest.raises(ComposeAndLaunchBlocked):
         compose_and_launch(
-            "1. One\n2. Two\n3. Three",
+            "1. Copy users.first_nm somewhere\n2. Verify it copied",
             conn=_FakeConn(),
             approved_by="ci@praxis",
-            budget_cap_tokens=500,
         )
 
     ordered_types = [e["event_type"] for e in events]
@@ -505,7 +493,7 @@ def test_compose_and_launch_blocked_emits_blocked_event(monkeypatch) -> None:
     blocked_payload = events[1]["payload"]
     assert blocked_payload["approved_by_attempted"] == "ci@praxis"
     assert any(
-        entry["kind"] == "budget_exceeded"
+        entry["kind"] == "unbound_pills"
         for entry in blocked_payload["blocked_reasons"]
     )
 
@@ -734,14 +722,14 @@ def test_get_plan_lifecycle_handles_jsonb_serialized_as_string() -> None:
                 "id": 1,
                 "event_type": "plan.blocked",
                 "source_id": "plan.alpha",
-                "payload": '{"blocked_reasons": [{"kind": "budget_exceeded"}]}',
+                "payload": '{"blocked_reasons": [{"kind": "unbound_pills"}]}',
                 "created_at": "2026-04-24T10:00:00+00:00",
             }
         ]
     )
     lifecycle = get_plan_lifecycle("plan.alpha", conn=conn)
     assert lifecycle.events[0].event_type == "plan.blocked"
-    assert lifecycle.events[0].payload["blocked_reasons"][0]["kind"] == "budget_exceeded"
+    assert lifecycle.events[0].payload["blocked_reasons"][0]["kind"] == "unbound_pills"
 
 
 def test_get_plan_lifecycle_rejects_empty_workflow_id() -> None:

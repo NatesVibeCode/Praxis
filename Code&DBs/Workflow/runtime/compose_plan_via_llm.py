@@ -105,7 +105,16 @@ def compose_plan_via_llm(
     why: str | None = None,
     concurrency: int = 20,
     hydrate_env: Any | None = None,
+    llm_overrides: dict[str, Any] | None = None,
 ) -> ComposeViaLLMResult:
+    """Compose a plan via the synthesis + fork-author chain.
+
+    ``llm_overrides`` (optional) lets the caller override LLM call knobs on
+    the synthesis + every fork-out for THIS compose run. Honoured keys:
+    provider_slug, model_slug, temperature, max_tokens. The override is
+    applied uniformly to both layers of the chain. Default ``None`` keeps
+    today's behavior (route resolution + per-task default cap of 4096).
+    """
     notes: list[str] = []
 
     atoms = suggest_plan_atoms(intent, conn=conn)
@@ -126,7 +135,8 @@ def compose_plan_via_llm(
     bootstrap_skeleton = synthesize_skeleton(atoms, conn=conn)
 
     synthesis = synthesize_plan_statement(
-        atoms=atoms, skeleton=bootstrap_skeleton, conn=conn, hydrate_env=hydrate_env,
+        atoms=atoms, skeleton=bootstrap_skeleton, conn=conn,
+        hydrate_env=hydrate_env, llm_overrides=llm_overrides,
     )
 
     # If the synthesis call emitted packet seeds, those drive fan-out (work
@@ -151,6 +161,7 @@ def compose_plan_via_llm(
     authored = fork_author_packets(
         atoms=atoms, skeleton=skeleton, synthesis=synthesis,
         conn=conn, concurrency=concurrency, hydrate_env=hydrate_env,
+        llm_overrides=llm_overrides,
     )
 
     # On-demand pill triage: only fires LLM calls when packets disagree.

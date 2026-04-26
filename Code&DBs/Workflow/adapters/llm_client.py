@@ -45,7 +45,17 @@ class LLMClientError(RuntimeError):
         self.status_code = status_code
 
 
-_DEFAULT_MAX_TOKENS = int(os.environ.get("PRAXIS_DEFAULT_MAX_TOKENS", "4096"))
+# Anthropic /v1/messages REQUIRES max_tokens; for that family we fall back to
+# a high ceiling when the caller doesn't set one. OpenAI / Google omit the
+# field entirely when unset, so the provider uses the model's own default.
+# Capping max_tokens at a low number (we used to default to 4096) silently
+# truncates reasoning models like DeepSeek-V4-Pro: chain-of-thought consumes
+# the budget and `content` comes back empty, which then surfaces downstream
+# as a JSON parse error. Default OFF; opt in only when a caller deliberately
+# wants a small-output cap.
+_ANTHROPIC_FALLBACK_MAX_TOKENS = int(
+    os.environ.get("PRAXIS_ANTHROPIC_FALLBACK_MAX_TOKENS", "16384")
+)
 _DEFAULT_HTTP_TIMEOUT = int(os.environ.get("PRAXIS_HTTP_TIMEOUT", "120"))
 _HTTP_RETRIES = int(os.environ.get("PRAXIS_HTTP_RETRIES", "2"))
 _HTTP_RETRY_BACKOFF = (2, 5)  # seconds between retries
@@ -60,7 +70,10 @@ class LLMRequest:
     provider_slug: str
     model_slug: str
     messages: tuple[dict[str, Any], ...]
-    max_tokens: int = _DEFAULT_MAX_TOKENS
+    # None ⇒ omit `max_tokens` from the request body (OpenAI / Google) so the
+    # provider uses the model's natural ceiling. Anthropic family substitutes
+    # `_ANTHROPIC_FALLBACK_MAX_TOKENS` since the API requires the field.
+    max_tokens: int | None = None
     temperature: float = 0.0
     tools: tuple[dict[str, Any], ...] | None = None
     system_prompt: str | None = None
@@ -117,9 +130,13 @@ def _build_openai_body(request: LLMRequest) -> dict[str, Any]:
     body: dict[str, Any] = {
         "model": request.model_slug,
         "messages": messages,
-        "max_tokens": request.max_tokens,
         "temperature": request.temperature,
     }
+    # OpenAI / Together / DeepSeek omit max_tokens when unset, so the provider
+    # uses the model's natural ceiling. Capping at 4096 truncated DeepSeek-V4
+    # reasoning into empty `content`.
+    if request.max_tokens is not None:
+        body["max_tokens"] = request.max_tokens
 
     if request.tools:
         body["tools"] = [
@@ -144,10 +161,17 @@ def _build_anthropic_body(request: LLMRequest) -> dict[str, Any]:
     if request.system_prompt:
         system_parts.insert(0, request.system_prompt)
 
+    # Anthropic /v1/messages REQUIRES max_tokens, so substitute a high fallback
+    # when the caller hasn't picked one.
+    anthropic_max_tokens = (
+        request.max_tokens
+        if request.max_tokens is not None
+        else _ANTHROPIC_FALLBACK_MAX_TOKENS
+    )
     body: dict[str, Any] = {
         "model": request.model_slug,
         "messages": messages,
-        "max_tokens": request.max_tokens,
+        "max_tokens": anthropic_max_tokens,
         "temperature": request.temperature,
     }
 
@@ -193,12 +217,12 @@ def _build_google_body(request: LLMRequest) -> dict[str, Any]:
             }
         )
 
+    generation_config: dict[str, Any] = {"temperature": request.temperature}
+    if request.max_tokens is not None:
+        generation_config["maxOutputTokens"] = request.max_tokens
     body: dict[str, Any] = {
         "contents": contents,
-        "generationConfig": {
-            "maxOutputTokens": request.max_tokens,
-            "temperature": request.temperature,
-        },
+        "generationConfig": generation_config,
     }
 
     if request.system_prompt:

@@ -1,4 +1,13 @@
-"""Tools: praxis_query — the natural-language router."""
+"""Tools: praxis_query — the natural-language entry point.
+
+Today's behavior is unchanged: ``handle_query`` routes the question to
+the right subsystem (status / bugs / discover / receipts / knowledge
+graph). Once Packet C of the search consolidation lands, prefer
+``praxis_search`` for new code paths — it returns the unified federated
+shape with line-context, freshness, and source tags. ``praxis_query``
+remains the fast-path for prose questions where routing matters more
+than ranking.
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -19,6 +28,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_query": (
         tool_praxis_query,
         {
+            "kind": "search",
             "description": (
                 "Ask any question about the system in plain English. This is the best starting point "
                 "when you're unsure which tool to use — it automatically routes your question to the "

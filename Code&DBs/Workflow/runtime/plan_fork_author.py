@@ -44,6 +44,11 @@ class AuthoredPlan:
     errors: list[AuthorError]
     notes: list[str] = field(default_factory=list)
     synthesis: PlanSynthesis | None = None
+    # Total wall-clock for the fan-out: start of first packet submission
+    # → completion of the last packet (success or failure). Useful for
+    # experiment reports — distinguishes "synthesis was slow" from "the
+    # fan-out itself spread out across the rate limit".
+    fork_author_wall_ms: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +56,7 @@ class AuthoredPlan:
             "errors": [e.to_dict() for e in self.errors],
             "notes": list(self.notes),
             "synthesis": self.synthesis.to_dict() if self.synthesis else None,
+            "fork_author_wall_ms": self.fork_author_wall_ms,
         }
 
 
@@ -99,8 +105,22 @@ def _call_fork_llm(
     *,
     pinned_route: tuple[str, str] | None = None,
     hydrate_env: Any | None = None,
-) -> tuple[str, str, str, dict[str, int]]:
-    """If ``pinned_route`` is given, try it only; else iterate the route list."""
+    llm_overrides: dict[str, Any] | None = None,
+) -> tuple[str, str, str, dict[str, int], dict[str, Any]]:
+    """If ``pinned_route`` is given, try it only; else iterate the route list.
+
+    Returns ``(content, provider_slug, model_slug, usage, call_metrics)``.
+    ``call_metrics`` carries non-token-budget observability:
+    ``{latency_ms, finish_reason, content_len, reasoning_len}``. The
+    experiment report surfaces these so an operator can see "leg N hit
+    finish_reason=length at 4096 tokens with content_len=0" without
+    digging into raw responses.
+
+    ``llm_overrides`` honours provider_slug, model_slug, temperature,
+    max_tokens (all optional). When provider+model are both pinned via the
+    override, route resolution is skipped entirely. Mirrors
+    ``plan_synthesis._call_synthesis_llm``.
+    """
     from adapters.keychain import resolve_secret
     from adapters.llm_client import LLMRequest, call_llm
     from registry.provider_execution_registry import (
@@ -112,10 +132,68 @@ def _call_fork_llm(
     if hydrate_env is not None:
         hydrate_env()
 
-    routes = [pinned_route] if pinned_route else _resolve_routes_for_task_type("plan_fork_author")
+    overrides = dict(llm_overrides or {})
+    override_temperature = overrides.get("temperature")
+    override_max_tokens = overrides.get("max_tokens")
+    override_provider = overrides.get("provider_slug")
+    override_model = overrides.get("model_slug")
+
+    from runtime.compiler_llm import resolve_matrix_gated_route_configs
+
+    # Pull the full row config (provider, model, temperature, max_tokens)
+    # from task_type_routing. Migration 276 lifted the LLM knobs into
+    # rows so experiments can inherit them.
+    if override_provider and override_model:
+        route_configs: list[dict[str, Any]] = [{
+            "provider_slug": override_provider,
+            "model_slug": override_model,
+            "temperature": None,
+            "max_tokens": None,
+        }]
+    elif pinned_route is not None:
+        route_configs = [{
+            "provider_slug": pinned_route[0],
+            "model_slug": pinned_route[1],
+            "temperature": None,
+            "max_tokens": None,
+        }]
+    elif override_model and not override_provider:
+        # Look up provider from provider_model_candidates when the
+        # override pins model_slug only. See plan_synthesis for the
+        # rationale and matching pattern.
+        from runtime.compiler_llm import _resolve_provider_for_model
+        all_configs = resolve_matrix_gated_route_configs("plan_fork_author")
+        narrowed = [r for r in all_configs if r["model_slug"] == override_model]
+        if narrowed:
+            route_configs = narrowed
+        else:
+            inferred_provider = _resolve_provider_for_model(override_model)
+            if inferred_provider:
+                route_configs = [{
+                    "provider_slug": inferred_provider,
+                    "model_slug": override_model,
+                    "temperature": None,
+                    "max_tokens": None,
+                }]
+            else:
+                raise RuntimeError(
+                    f"plan_fork_author override pinned model_slug={override_model!r} "
+                    f"but no provider candidate was found in provider_model_candidates"
+                )
+    else:
+        all_configs = resolve_matrix_gated_route_configs("plan_fork_author")
+        if override_provider:
+            route_configs = [r for r in all_configs if r["provider_slug"] == override_provider] or all_configs
+        else:
+            route_configs = all_configs
+
     timeout = int(_section_author_timeout_seconds())
     last_error: Exception | None = None
-    for provider_slug, model_slug in routes:
+    for route_config in route_configs:
+        provider_slug = route_config["provider_slug"]
+        model_slug = route_config["model_slug"]
+        row_temperature = route_config.get("temperature")
+        row_max_tokens = route_config.get("max_tokens")
         try:
             endpoint = resolve_api_endpoint(provider_slug, model_slug)
             if not endpoint:
@@ -134,15 +212,46 @@ def _call_fork_llm(
             if not api_key:
                 raise RuntimeError(f"no API key for {provider_slug}")
 
-            request = LLMRequest(
+            # Resolution priority: explicit override > row value > hardcoded fallback.
+            resolved_max_tokens = (
+                int(override_max_tokens) if override_max_tokens is not None
+                else (int(row_max_tokens) if row_max_tokens is not None else 4096)
+            )
+            resolved_temperature = (
+                float(override_temperature) if override_temperature is not None
+                else (float(row_temperature) if row_temperature is not None else None)
+            )
+            request_kwargs: dict[str, Any] = dict(
                 endpoint_uri=str(endpoint), api_key=api_key,
                 provider_slug=provider_slug, model_slug=model_slug,
                 messages=({"role": "user", "content": prompt},),
                 protocol_family=str(protocol_family),
                 timeout_seconds=timeout, retry_attempts=0,
+                max_tokens=resolved_max_tokens,
             )
+            if resolved_temperature is not None:
+                request_kwargs["temperature"] = resolved_temperature
+            request = LLMRequest(**request_kwargs)
             response = call_llm(request)
-            return response.content, provider_slug, model_slug, dict(response.usage or {})
+            # Pull non-token observability from the raw OpenAI/Anthropic
+            # response shape so callers don't have to re-parse it.
+            choices = (response.raw_response or {}).get("choices") or []
+            first_message = (choices[0] or {}).get("message") if choices else {}
+            finish_reason = (choices[0] or {}).get("finish_reason") if choices else None
+            reasoning_text = (first_message or {}).get("reasoning") or ""
+            call_metrics = {
+                "latency_ms": int(response.latency_ms or 0),
+                "finish_reason": str(finish_reason) if finish_reason else None,
+                "content_len": len(response.content or ""),
+                "reasoning_len": len(reasoning_text),
+            }
+            return (
+                response.content,
+                provider_slug,
+                model_slug,
+                dict(response.usage or {}),
+                call_metrics,
+            )
         except Exception as exc:
             last_error = exc
             logger.warning(
@@ -161,20 +270,43 @@ def _author_one_packet(
     atoms: SuggestedAtoms,
     pinned_route: tuple[str, str] | None,
     hydrate_env: Any | None,
+    llm_overrides: dict[str, Any] | None = None,
 ) -> AuthoredPacket | AuthorError:
+    """Author one packet. Times the full LLM-call+parse round-trip and
+    threads the call metrics (finish_reason, latency_ms, content_len,
+    reasoning_len) onto both the success path (AuthoredPacket) and every
+    failure path (AuthorError) so experiment reports never lose them."""
+    import time
+
     prompt = _build_fork_prompt(
         synthesis=synthesis, target=target, sandbox=sandbox, atoms=atoms,
     )
+    started_ns = time.monotonic_ns()
+    call_metrics: dict[str, Any] = {}
+    provider_slug: str | None = None
+    model_slug: str | None = None
+    usage: dict[str, int] = {}
     try:
-        raw, provider_slug, model_slug, usage = _call_fork_llm(
+        raw, provider_slug, model_slug, usage, call_metrics = _call_fork_llm(
             prompt, pinned_route=pinned_route, hydrate_env=hydrate_env,
+            llm_overrides=llm_overrides,
         )
     except Exception as exc:
+        wall_ms = (time.monotonic_ns() - started_ns) // 1_000_000
         return AuthorError(
             label=target.label, error=str(exc),
             reason_code="fork_author.llm_call_failed", raw_llm_response=None,
+            wall_ms=wall_ms,
+            latency_ms=call_metrics.get("latency_ms"),
+            finish_reason=call_metrics.get("finish_reason"),
+            content_len=call_metrics.get("content_len"),
+            reasoning_len=call_metrics.get("reasoning_len"),
+            provider_slug=provider_slug,
+            model_slug=model_slug,
+            usage=usage or None,
         )
 
+    wall_ms = (time.monotonic_ns() - started_ns) // 1_000_000
     try:
         parsed = json.loads(_strip_json_fences(raw))
     except json.JSONDecodeError as exc:
@@ -182,18 +314,39 @@ def _author_one_packet(
             label=target.label,
             error=f"fork author returned non-JSON: {exc}",
             reason_code="fork_author.parse_failed", raw_llm_response=raw,
+            wall_ms=wall_ms,
+            latency_ms=call_metrics.get("latency_ms"),
+            finish_reason=call_metrics.get("finish_reason"),
+            content_len=call_metrics.get("content_len"),
+            reasoning_len=call_metrics.get("reasoning_len"),
+            provider_slug=provider_slug,
+            model_slug=model_slug,
+            usage=usage or None,
         )
     if not isinstance(parsed, dict):
         return AuthorError(
             label=target.label,
             error=f"fork author returned {type(parsed).__name__}, expected object",
             reason_code="fork_author.shape_invalid", raw_llm_response=raw,
+            wall_ms=wall_ms,
+            latency_ms=call_metrics.get("latency_ms"),
+            finish_reason=call_metrics.get("finish_reason"),
+            content_len=call_metrics.get("content_len"),
+            reasoning_len=call_metrics.get("reasoning_len"),
+            provider_slug=provider_slug,
+            model_slug=model_slug,
+            usage=usage or None,
         )
 
     return _coerce_packet_response(
         target=target, parsed=parsed, raw=raw,
         provider_slug=provider_slug, model_slug=model_slug,
         usage=usage,
+        wall_ms=wall_ms,
+        latency_ms=call_metrics.get("latency_ms"),
+        finish_reason=call_metrics.get("finish_reason"),
+        content_len=call_metrics.get("content_len"),
+        reasoning_len=call_metrics.get("reasoning_len"),
     )
 
 
@@ -205,6 +358,7 @@ def fork_author_packets(
     conn: Any,
     concurrency: int = _DEFAULT_FORK_CONCURRENCY,
     hydrate_env: Any | None = None,
+    llm_overrides: dict[str, Any] | None = None,
 ) -> AuthoredPlan:
     """Fan out N parallel author calls, all sharing the synthesis prefix.
 
@@ -228,9 +382,12 @@ def fork_author_packets(
         notes.append("skeleton has no packets — nothing to author")
         return AuthoredPlan(packets=[], errors=[], notes=notes, synthesis=synthesis)
 
+    import time
+
     successes: list[AuthoredPacket] = []
     failures: list[AuthorError] = []
 
+    fork_started_ns = time.monotonic_ns()
     n_workers = max(1, min(concurrency, len(skeleton.packets)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
         futures = {
@@ -239,6 +396,7 @@ def fork_author_packets(
                 target=target, synthesis=synthesis,
                 sandbox=sandbox, atoms=atoms,
                 pinned_route=pinned_route, hydrate_env=hydrate_env,
+                llm_overrides=llm_overrides,
             ): target.label
             for target in skeleton.packets
         }
@@ -256,10 +414,12 @@ def fork_author_packets(
                 failures.append(result)
             else:
                 successes.append(result)
+    fork_wall_ms = (time.monotonic_ns() - fork_started_ns) // 1_000_000
 
     label_order = {p.label: i for i, p in enumerate(skeleton.packets)}
     successes.sort(key=lambda p: label_order.get(p.label, 999_999))
 
     return AuthoredPlan(
         packets=successes, errors=failures, notes=notes, synthesis=synthesis,
+        fork_author_wall_ms=fork_wall_ms,
     )

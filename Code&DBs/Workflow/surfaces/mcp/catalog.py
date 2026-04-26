@@ -58,6 +58,23 @@ class McpToolDefinition:
         return str(self.metadata.get("description") or "")
 
     @property
+    def kind(self) -> str:
+        """Tool kind label for choice-space narrowing.
+
+        Tools self-declare one of: ``search`` (read-many across sources),
+        ``write`` (mutates state), ``walk`` (graph traversal /
+        run-scoped views), ``analytics`` (aggregations / cost rollups),
+        ``alias`` (deprecated wrapper kept for one window). Defaults to
+        ``write`` when undeclared so unlabeled tools err on the safe
+        side and the LLM doesn't assume read-only.
+        """
+
+        declared = str(self.metadata.get("kind") or "").strip().lower()
+        if declared in {"search", "write", "walk", "analytics", "alias"}:
+            return declared
+        return "write"
+
+    @property
     def input_schema(self) -> dict[str, Any]:
         schema = self.metadata.get("inputSchema")
         return dict(schema) if isinstance(schema, dict) else {}
@@ -409,6 +426,7 @@ class McpToolDefinition:
             "id": self.name,
             "name": self.display_name,
             "description": self.description,
+            "kind": self.kind,
             "provider": "mcp",
             "capabilities": self.capability_rows(),
             "auth_status": "connected",

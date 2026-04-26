@@ -195,6 +195,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_research": (
         tool_praxis_research,
         {
+            "kind": "search",
             "description": (
                 "Search the knowledge graph specifically for research findings and analysis results. "
                 "Lighter-weight than praxis_recall — focused on retrieving prior research.\n\n"

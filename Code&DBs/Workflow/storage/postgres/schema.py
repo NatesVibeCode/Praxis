@@ -121,6 +121,16 @@ def _parse_task_type_routing_row_key(row_key: str) -> tuple[str, str, str] | Non
         return None
     return task_type, provider_slug, model_slug
 
+
+def _parse_private_provider_api_job_allowlist_row_key(
+    row_key: str,
+) -> tuple[str, str, str, str, str] | None:
+    parts = tuple(part.strip() for part in row_key.split("|"))
+    if len(parts) != 5 or any(not part for part in parts):
+        return None
+    runtime_profile_ref, job_type, adapter_type, provider_slug, model_slug = parts
+    return runtime_profile_ref, job_type, adapter_type, provider_slug, model_slug
+
 logger = logging.getLogger(__name__)
 
 
@@ -552,6 +562,37 @@ async def _workflow_expected_object_exists(
                 LIMIT 1
                 """,
                 task_type,
+                provider_slug,
+                model_slug,
+            )
+            return row is not None
+        if table_name == "private_provider_api_job_allowlist":
+            parsed_allowlist = _parse_private_provider_api_job_allowlist_row_key(row_key)
+            if parsed_allowlist is None:
+                return False
+            table_exists = await conn.fetchval(
+                "SELECT to_regclass($1::text) IS NOT NULL",
+                f"public.{table_name}",
+            )
+            if not table_exists:
+                return False
+            runtime_profile_ref, job_type, adapter_type, provider_slug, model_slug = (
+                parsed_allowlist
+            )
+            row = await conn.fetchrow(
+                """
+                SELECT 1
+                FROM private_provider_api_job_allowlist
+                WHERE runtime_profile_ref = $1
+                  AND job_type = $2
+                  AND adapter_type = $3
+                  AND provider_slug = $4
+                  AND model_slug = $5
+                LIMIT 1
+                """,
+                runtime_profile_ref,
+                job_type,
+                adapter_type,
                 provider_slug,
                 model_slug,
             )
@@ -1182,6 +1223,44 @@ async def inspect_workflow_schema(
                     LIMIT 1
                     """,
                     task_type,
+                    provider_slug,
+                    model_slug,
+                )
+                if row is None:
+                    row_missing_objects.append(item)
+            continue
+        if table_name == "private_provider_api_job_allowlist":
+            table_exists = await conn.fetchval(
+                "SELECT to_regclass($1::text) IS NOT NULL",
+                f"public.{table_name}",
+            )
+            if not table_exists:
+                row_missing_objects.extend(item for _row_key, item in entries)
+                continue
+            for row_key, item in entries:
+                parsed_allowlist = _parse_private_provider_api_job_allowlist_row_key(
+                    row_key
+                )
+                if parsed_allowlist is None:
+                    row_missing_objects.append(item)
+                    continue
+                runtime_profile_ref, job_type, adapter_type, provider_slug, model_slug = (
+                    parsed_allowlist
+                )
+                row = await conn.fetchrow(
+                    """
+                    SELECT 1
+                    FROM private_provider_api_job_allowlist
+                    WHERE runtime_profile_ref = $1
+                      AND job_type = $2
+                      AND adapter_type = $3
+                      AND provider_slug = $4
+                      AND model_slug = $5
+                    LIMIT 1
+                    """,
+                    runtime_profile_ref,
+                    job_type,
+                    adapter_type,
                     provider_slug,
                     model_slug,
                 )

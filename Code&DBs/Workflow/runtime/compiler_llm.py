@@ -311,6 +311,130 @@ def resolve_matrix_gated_routes(
     ]
 
 
+def resolve_matrix_gated_route_configs(
+    task_type: str,
+    *,
+    transport_type: str = "API",
+    adapter_type: str = "llm_task",
+) -> list[dict[str, Any]]:
+    """Sibling of :func:`resolve_matrix_gated_routes` that returns the full
+    routing-row config (provider_slug, model_slug, temperature, max_tokens)
+    instead of just (provider, model) tuples. Migration 276 added the
+    temperature + max_tokens columns; call sites that want per-row LLM
+    knobs use this resolver instead of the tuple version. NULL columns
+    surface as ``None`` and the call site is expected to fall back to its
+    own default.
+    """
+    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+    from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
+
+    pool = get_workflow_pool()
+    pg = SyncPostgresConnection(pool)
+    runtime_profile_ref = (
+        os.environ.get("PRAXIS_RUNTIME_PROFILE_REF", "").strip()
+        or default_native_runtime_profile_ref(pg)
+    )
+    try:
+        rows = pg.fetch(
+            """
+            SELECT catalog.provider_slug,
+                   catalog.model_slug,
+                   route.temperature,
+                   route.max_tokens
+              FROM effective_private_provider_job_catalog AS catalog
+              JOIN task_type_routing AS route
+                ON route.task_type = catalog.job_type
+               AND route.provider_slug = catalog.provider_slug
+               AND route.model_slug = catalog.model_slug
+             WHERE catalog.runtime_profile_ref = $1
+               AND catalog.job_type = $2
+               AND catalog.transport_type = $3
+               AND catalog.adapter_type = $4
+               AND route.permitted IS TRUE
+             ORDER BY route.rank ASC, route.updated_at DESC,
+                      catalog.provider_slug, catalog.model_slug
+            """,
+            runtime_profile_ref,
+            task_type,
+            transport_type,
+            adapter_type,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"effective provider job catalog could not resolve {task_type} route "
+            f"configs for runtime_profile_ref={runtime_profile_ref!r}: {exc}"
+        ) from exc
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        provider = str(row["provider_slug"] if "provider_slug" in row else row.get("provider_slug") or "").strip()
+        model = str(row["model_slug"] if "model_slug" in row else row.get("model_slug") or "").strip()
+        if not provider or not model:
+            continue
+        temperature = row["temperature"] if "temperature" in row else row.get("temperature")
+        max_tokens = row["max_tokens"] if "max_tokens" in row else row.get("max_tokens")
+        out.append({
+            "provider_slug": provider,
+            "model_slug": model,
+            "temperature": float(temperature) if temperature is not None else None,
+            "max_tokens": int(max_tokens) if max_tokens is not None else None,
+        })
+    return out
+
+
+def _resolve_provider_for_model(model_slug: str) -> str | None:
+    """Find the provider that hosts ``model_slug`` by querying
+    ``provider_model_candidates``. Used by experiment override resolution
+    when the operator pins ``model_slug`` without ``provider_slug`` —
+    lets a leg name e.g. ``deepseek-ai/DeepSeek-V3`` even if that model
+    isn't in the task_type_routing rows for the work being done.
+
+    Returns the provider_slug from the highest-priority active candidate
+    matching the model, or ``None`` when no candidate is registered.
+    """
+    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+
+    if not model_slug or not isinstance(model_slug, str):
+        return None
+    pool = get_workflow_pool()
+    pg = SyncPostgresConnection(pool)
+    try:
+        row = pg.fetchrow(
+            """
+            SELECT provider_slug
+              FROM provider_model_candidates
+             WHERE model_slug = $1 AND status = 'active'
+             ORDER BY priority ASC, created_at DESC
+             LIMIT 1
+            """,
+            model_slug.strip(),
+        )
+    except Exception as exc:
+        # Best-effort lookup. The caller falls back to route-table
+        # narrowing or a loud error when this returns None.
+        return None
+    if row is None:
+        return None
+    candidate = row["provider_slug"] if "provider_slug" in row else row.get("provider_slug")
+    return str(candidate).strip() if candidate else None
+
+
+def resolve_task_type_config(task_type: str) -> dict[str, Any] | None:
+    """Return the rank-1 row's config for ``task_type`` as a flat dict, or
+    None when no permitted route exists.
+
+    Used by the compose_experiment runner: when an experiment leg names a
+    ``base_task_type``, we look up the row's resolved config and the
+    experiment leg may layer its own deltas on top. The compose call then
+    receives a fully-resolved knob set.
+
+    Shape: ``{provider_slug, model_slug, temperature, max_tokens}``. Any
+    of the values may be ``None`` when the row does not specify them
+    (caller falls back to its own default).
+    """
+    configs = resolve_matrix_gated_route_configs(task_type)
+    return configs[0] if configs else None
+
+
 def _resolve_app_compile_routes() -> list[tuple[str, str]]:
     """Return matrix-gated API routes for the compile task_type."""
     routes = resolve_matrix_gated_routes("compile")

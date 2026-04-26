@@ -232,3 +232,53 @@ def test_replay_ready_bugs_rejects_refresh_backfill() -> None:
         assert "read-only" in str(exc)
     else:  # pragma: no cover - defensive
         raise AssertionError("expected refresh_backfill to fail closed")
+
+
+def test_bug_triage_packet_query_uses_engineering_observability(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    tracker = object()
+    subsystems = SimpleNamespace(get_bug_tracker=lambda: tracker, repo_root="/repo")
+
+    def _fake_build_bug_triage_packet(**kwargs):
+        captured.update(kwargs)
+        return {
+            "view": "bug_triage_packet",
+            "observability_state": "complete",
+            "summary": {"live_defect": 1},
+            "bugs": [{"bug_id": "BUG-1", "classification": "live_defect"}],
+        }
+
+    monkeypatch.setattr(
+        operator_observability,
+        "build_bug_triage_packet",
+        _fake_build_bug_triage_packet,
+    )
+
+    result = operator_observability.handle_query_bug_triage_packet(
+        operator_observability.QueryBugTriagePacket(
+            limit=10,
+            open_only=True,
+            classification="live_defect",
+            include_inactive=False,
+        ),
+        subsystems,
+    )
+
+    assert result["view"] == "bug_triage_packet"
+    assert captured == {
+        "bug_tracker": tracker,
+        "limit": 10,
+        "repo_root": "/repo",
+        "open_only": True,
+        "classification": "live_defect",
+        "include_inactive": False,
+    }
+
+
+def test_bug_triage_packet_rejects_unknown_classification() -> None:
+    try:
+        operator_observability.QueryBugTriagePacket(classification="maybe_bug")
+    except ValueError as exc:
+        assert "classification must be one of" in str(exc)
+    else:  # pragma: no cover - defensive
+        raise AssertionError("expected invalid classification to fail closed")

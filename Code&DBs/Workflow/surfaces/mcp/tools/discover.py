@@ -156,6 +156,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_discover": (
         tool_praxis_discover,
         {
+            "kind": "search",
             "description": (
                 "Find existing code that already does what you need — BEFORE writing new code. "
                 "Uses hybrid retrieval: vector embeddings over AST-extracted behavioral fingerprints "

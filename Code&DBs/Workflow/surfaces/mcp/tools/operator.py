@@ -324,6 +324,40 @@ def tool_praxis_run_lineage(params: dict) -> dict:
     )
 
 
+_RUN_ACTION_OPERATIONS: dict[str, str] = {
+    "status": "operator.run_status",
+    "scoreboard": "operator.run_scoreboard",
+    "graph": "operator.run_graph",
+    "lineage": "operator.run_lineage",
+}
+
+
+def tool_praxis_run(params: dict) -> dict:
+    """Consolidated run-scoped operator view.
+
+    Replaces ``praxis_run_status`` / ``_scoreboard`` / ``_graph`` /
+    ``_lineage`` — those four tools were each a 4-line wrapper around
+    the same gateway dispatch with a different operation_name. The old
+    names continue to work as aliases for one window per the no-shims
+    standing order.
+    """
+
+    action = str(params.get("action") or "status").strip().lower()
+    operation = _RUN_ACTION_OPERATIONS.get(action)
+    if operation is None:
+        return {
+            "ok": False,
+            "error": (
+                f"unknown action '{action}' — supported: "
+                f"{sorted(_RUN_ACTION_OPERATIONS)}"
+            ),
+        }
+    return _execute_catalog_tool(
+        operation_name=operation,
+        payload={"run_id": params.get("run_id")},
+    )
+
+
 def tool_praxis_issue_backlog(params: dict) -> dict:
     """Read the canonical operator issue backlog."""
 
@@ -405,6 +439,33 @@ def tool_praxis_replay_ready_bugs(params: dict) -> dict:
         operation_name=operation_name,
         payload={
             "limit": limit,
+        },
+    )
+
+
+def tool_praxis_bug_triage_packet(params: dict) -> dict:
+    """Read the LLM-oriented bug triage packet."""
+
+    operation_name = "operator.bug_triage_packet"
+    try:
+        limit = _bounded_limit(params, default=50)
+        open_only = _parse_bool(
+            params.get("open_only", _bug_query_default_open_only_backlog()),
+            field_name="open_only",
+        )
+        include_inactive = _parse_bool(
+            params.get("include_inactive", False),
+            field_name="include_inactive",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "limit": limit,
+            "open_only": open_only,
+            "classification": params.get("classification"),
+            "include_inactive": include_inactive,
         },
     )
 
@@ -1180,7 +1241,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_run_status": (
         tool_praxis_run_status,
         {
-            "description": "Read one run-scoped operator status view.",
+            "description": "DEPRECATED ALIAS — use praxis_run(action='status'). Read one run-scoped operator status view.",
+            "kind": "alias",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1203,7 +1265,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_run_scoreboard": (
         tool_praxis_run_scoreboard,
         {
-            "description": "Read one run-scoped cutover scoreboard.",
+            "description": "DEPRECATED ALIAS — use praxis_run(action='scoreboard'). Read one run-scoped cutover scoreboard.",
+            "kind": "alias",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1226,7 +1289,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_run_graph": (
         tool_praxis_run_graph,
         {
-            "description": "Read one run-scoped workflow graph.",
+            "description": "DEPRECATED ALIAS — use praxis_run(action='graph'). Read one run-scoped workflow graph.",
+            "kind": "alias",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1305,10 +1369,47 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "praxis_run": (
+        tool_praxis_run,
+        {
+            "description": (
+                "Consolidated run-scoped view. One tool replaces praxis_run_status, "
+                "praxis_run_scoreboard, praxis_run_graph, praxis_run_lineage — pick "
+                "the view via 'action'. The old four remain as aliases for one "
+                "window per the no-shims standing order."
+            ),
+            "kind": "walk",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Workflow run id."},
+                    "action": {
+                        "type": "string",
+                        "description": "Which view to return.",
+                        "enum": ["status", "scoreboard", "graph", "lineage"],
+                        "default": "status",
+                    },
+                },
+                "required": ["run_id"],
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "One stop for run-scoped status / scoreboard / graph / lineage views.",
+                "when_not_to_use": "Do not use it for cross-domain operator graph (use praxis_graph_projection).",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Run status", "input": {"run_id": "run_123", "action": "status"}},
+                    {"title": "Run graph", "input": {"run_id": "run_123", "action": "graph"}},
+                ],
+            },
+        },
+    ),
     "praxis_run_lineage": (
         tool_praxis_run_lineage,
         {
-            "description": "Read one run-scoped lineage view.",
+            "description": "DEPRECATED ALIAS — use praxis_run(action='lineage'). Read one run-scoped lineage view.",
+            "kind": "alias",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1497,6 +1598,66 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
             "type_contract": {
                 "default": {"consumes": [], "produces": ["praxis.bug.replay_ready_list"]},
+            },
+        },
+    ),
+    "praxis_bug_triage_packet": (
+        tool_praxis_bug_triage_packet,
+        {
+            "description": (
+                "Read a compact LLM-oriented packet that classifies bugs as live defects, "
+                "evidence debt, stale projections, platform friction, fixed-pending-verification, "
+                "or inactive without mutating bug authority."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum rows to return.",
+                        "minimum": 1,
+                        "default": 50,
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "description": "When true, classify only open bug rows by default.",
+                        "default": _bug_query_default_open_only_backlog(),
+                    },
+                    "classification": {
+                        "type": "string",
+                        "description": "Optional triage classification filter.",
+                        "enum": [
+                            "live_defect",
+                            "evidence_debt",
+                            "stale_projection",
+                            "platform_friction",
+                            "fixed_pending_verification",
+                            "inactive",
+                        ],
+                    },
+                    "include_inactive": {
+                        "type": "boolean",
+                        "description": "When true, include fixed, deferred, closed, and retired rows.",
+                        "default": False,
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Let an LLM choose bug work using deterministic evidence/provenance classes.",
+                "when_not_to_use": "Do not use it to resolve, mutate, or backfill bugs.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read bug triage packet", "input": {"limit": 25}},
+                    {
+                        "title": "Read evidence-debt bugs",
+                        "input": {"classification": "evidence_debt", "limit": 25},
+                    },
+                ],
+            },
+            "type_contract": {
+                "default": {"consumes": [], "produces": ["praxis.bug.triage_packet"]},
             },
         },
     ),

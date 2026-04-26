@@ -1012,6 +1012,87 @@ class ModuleIndexer:
                 ),
             }
 
+    def last_indexed_iso(self) -> str | None:
+        """Return ISO timestamp of the most recent indexed_at row, if any.
+
+        Used by praxis_search to attach a freshness signal to every
+        response so callers can see when the index was last refreshed
+        without manual stale_check.
+        """
+
+        try:
+            rows = self._conn.execute(
+                "SELECT MAX(indexed_at) AS latest FROM module_embeddings"
+            )
+        except Exception:
+            return None
+        if not rows:
+            return None
+        try:
+            row = rows[0]
+        except (IndexError, KeyError, TypeError):
+            return None
+        latest = row.get("latest") if hasattr(row, "get") else row["latest"]
+        if latest is None:
+            return None
+        try:
+            return latest.isoformat()
+        except AttributeError:
+            return str(latest)
+
+    def index_paths(
+        self,
+        paths: list[str] | None,
+        *,
+        force: bool = False,
+        stall_budget_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        """Incremental reindex for a specific path subset.
+
+        Thin wrapper over ``index_codebase`` with a stall budget that emits
+        ``typed_gap(reason_code=retrieval.stall)`` if the run exceeds the
+        budget — closes the silent-hang failure mode tracked in
+        BUG-8D8C5256.
+
+        ``paths`` may be ``None`` for a full reindex, or a list of repo-root
+        relative directories/files for an incremental refresh.
+        """
+
+        import time
+
+        from runtime.typed_gap_events import emit_typed_gap
+
+        subdirs = list(paths) if paths else None
+        started = time.monotonic()
+        try:
+            result = self.index_codebase(subdirs=subdirs, force=force)
+        finally:
+            elapsed = time.monotonic() - started
+        if elapsed > stall_budget_seconds:
+            try:
+                emit_typed_gap(
+                    self._conn,
+                    gap_kind="retrieval",
+                    missing_type="module_indexer.index_paths",
+                    reason_code="retrieval.stall",
+                    legal_repair_actions=[
+                        "reduce subdirs scope",
+                        "increase stall_budget_seconds",
+                    ],
+                    source_ref="module_indexer.index_paths",
+                    context={
+                        "subdirs": subdirs,
+                        "elapsed_seconds": round(elapsed, 2),
+                        "stall_budget_seconds": stall_budget_seconds,
+                    },
+                )
+            except Exception:
+                pass
+        if isinstance(result, dict):
+            result = dict(result)
+            result["elapsed_seconds"] = round(elapsed, 2)
+        return result
+
     def stale_check(self, *, sample_limit: int = 50) -> dict[str, Any]:
         """Compare on-disk source against indexed source_hash for every module_path.
 

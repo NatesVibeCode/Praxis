@@ -26,6 +26,36 @@ _OPEN_BUG_STATUSES: frozenset[str] = frozenset(bug_open_status_values())
 
 DEFAULT_SCAN_ROOTS: tuple[str, ...] = ("runtime", "surfaces/api", "surfaces/cli")
 DEFAULT_BUG_PACKET_LIMIT = 100
+BUG_TRIAGE_PACKET_AUTHORITY = "runtime.engineering_observability.build_bug_triage_packet"
+BUG_TRIAGE_CLASSIFICATIONS: frozenset[str] = frozenset(
+    {
+        "live_defect",
+        "evidence_debt",
+        "stale_projection",
+        "platform_friction",
+        "fixed_pending_verification",
+        "inactive",
+    }
+)
+_BUG_TRIAGE_SUMMARY_KEYS: tuple[str, ...] = (
+    "live_defect",
+    "evidence_debt",
+    "stale_projection",
+    "platform_friction",
+    "fixed_pending_verification",
+)
+_INACTIVE_BUG_STATUSES: frozenset[str] = frozenset(
+    {"FIXED", "WONT_FIX", "DEFERRED", "RETIRED", "CLOSED"}
+)
+_FIX_PENDING_STATUSES: frozenset[str] = frozenset({"FIX_PENDING_VERIFICATION"})
+_STABLE_TRIAGE_ACTIONS: dict[str, str] = {
+    "live_defect": "fix",
+    "evidence_debt": "collect_evidence",
+    "stale_projection": "refresh_projection",
+    "platform_friction": "defer_or_close",
+    "fixed_pending_verification": "verify_fix",
+    "inactive": "defer_or_close",
+}
 
 
 def _utcnow() -> datetime:
@@ -167,6 +197,23 @@ def _coerce_list(value: Any) -> list[Any]:
     return []
 
 
+def _coerce_text_blob(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return " ".join(
+            f"{_coerce_text_blob(key)} {_coerce_text_blob(item)}"
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_coerce_text_blob(item) for item in value)
+    return str(value)
+
+
+def _contains_any(haystack: str, needles: Iterable[str]) -> bool:
+    return any(needle in haystack for needle in needles)
+
+
 def _ordered_unique_paths(paths: Iterable[Any], repo_root: Path) -> tuple[str, ...]:
     ordered: list[str] = []
     seen: set[str] = set()
@@ -225,17 +272,24 @@ def _bug_list_item(
     has_regression_after_fix = bool(lifecycle.get("has_regression_after_fix"))
     fix_verified = bool(fix_verification.get("fix_verified"))
     replay_ready = bool(replay_context.get("ready"))
+    replay_reason_code = str(
+        replay_context.get("reason_code")
+        or getattr(bug, "replay_reason_code", "")
+        or ("bug.replay_ready" if replay_ready else "bug.replay_not_ready")
+    )
     return {
         "bug_id": str(getattr(bug, "bug_id", "") or ""),
         "title": str(getattr(bug, "title", "") or ""),
         "severity": _status_value(getattr(bug, "severity", "")) or "unknown",
         "status": _status_value(getattr(bug, "status", "")) or "unknown",
         "category": _status_value(getattr(bug, "category", "")) or "unknown",
+        "source_kind": str(getattr(bug, "source_kind", "") or "").strip() or None,
         "source_issue_id": str(getattr(bug, "source_issue_id", "") or "").strip() or None,
         "recurrence_count": recurrence_count,
         "impacted_run_count": impacted_run_count,
         "has_regression_after_fix": has_regression_after_fix,
         "replay_ready": replay_ready,
+        "replay_reason_code": replay_reason_code,
         "fix_verified": fix_verified,
         "observability_state": str(packet.get("observability_state") or "unknown"),
         "observability_gaps": observability_gaps,
@@ -676,6 +730,368 @@ def build_bug_scoreboard(
     }
 
 
+def _bug_triage_classification(
+    item: dict[str, Any],
+    packet: dict[str, Any],
+    *,
+    packet_error: str | None = None,
+) -> dict[str, Any]:
+    status = str(item.get("status") or "").strip().upper()
+    title = str(item.get("title") or "")
+    category = str(item.get("category") or "")
+    source_kind = str(item.get("source_kind") or "")
+    replay_reason_code = str(item.get("replay_reason_code") or "bug.replay_not_ready")
+    observability_state = str(item.get("observability_state") or "unknown")
+    observability_gaps = tuple(str(gap) for gap in item.get("observability_gaps") or ())
+    file_paths = tuple(str(path) for path in item.get("file_paths") or ())
+    resume_context = _coerce_mapping(packet.get("resume_context"))
+    errors = tuple(_coerce_list(packet.get("errors")))
+    text = " ".join(
+        (
+            title,
+            category,
+            source_kind,
+            replay_reason_code,
+            " ".join(observability_gaps),
+            " ".join(file_paths),
+            _coerce_text_blob(resume_context),
+            _coerce_text_blob(errors),
+        )
+    ).lower()
+    reason_codes: list[str] = []
+
+    if packet_error:
+        reason_codes.append("bug.packet_error")
+        return {
+            "classification": "evidence_debt",
+            "confidence": "high",
+            "reason_codes": tuple(reason_codes),
+            "next_action": _STABLE_TRIAGE_ACTIONS["evidence_debt"],
+        }
+
+    if status in _INACTIVE_BUG_STATUSES:
+        return {
+            "classification": "inactive",
+            "confidence": "high",
+            "reason_codes": ("bug.status_inactive",),
+            "next_action": _STABLE_TRIAGE_ACTIONS["inactive"],
+        }
+
+    if (
+        status in _FIX_PENDING_STATUSES
+        or "pending verification" in text
+        or "implemented_pending_full_verification" in text
+        or "fix_pending_verification" in text
+    ):
+        return {
+            "classification": "fixed_pending_verification",
+            "confidence": "high",
+            "reason_codes": ("bug.fix_pending_verification",),
+            "next_action": _STABLE_TRIAGE_ACTIONS["fixed_pending_verification"],
+        }
+
+    projection_terms = (
+        "projection",
+        "read model",
+        "read_model",
+        "readback",
+        "freshness",
+        "watermark",
+        "stale",
+        "schema drift",
+        "missing column",
+        "materialized",
+    )
+    if _contains_any(text, projection_terms):
+        projection_path_terms = ("projection", "read_model", "observability")
+        confidence = (
+            "high"
+            if _contains_any(" ".join(file_paths).lower(), projection_path_terms)
+            else "medium"
+        )
+        return {
+            "classification": "stale_projection",
+            "confidence": confidence,
+            "reason_codes": ("bug.projection_symptom",),
+            "next_action": _STABLE_TRIAGE_ACTIONS["stale_projection"],
+        }
+
+    evidence_terms = (
+        "missing_run_context",
+        "evidence_links.missing",
+        "receipt.missing",
+        "receipt.inferred_only",
+        "underlinked",
+    )
+    if (
+        observability_state not in {"complete", "unknown"}
+        or observability_gaps
+        or _contains_any(text, evidence_terms)
+    ):
+        reason_codes.extend(observability_gaps or ("bug.evidence_incomplete",))
+        if replay_reason_code != "bug.replay_ready":
+            reason_codes.append(replay_reason_code)
+        return {
+            "classification": "evidence_debt",
+            "confidence": "high",
+            "reason_codes": tuple(dict.fromkeys(reason_codes)),
+            "next_action": _STABLE_TRIAGE_ACTIONS["evidence_debt"],
+        }
+
+    platform_terms = (
+        "environment",
+        "provider",
+        "credential",
+        "keychain",
+        "host unavailable",
+        "dns",
+        "network",
+        "timeout",
+        "bootstrap",
+        "setup",
+        "build churn",
+        "platform",
+        "historical",
+        "docs/",
+        "scripts/",
+        "migration",
+    )
+    if _contains_any(text, platform_terms):
+        return {
+            "classification": "platform_friction",
+            "confidence": "medium",
+            "reason_codes": ("bug.platform_or_build_friction",),
+            "next_action": _STABLE_TRIAGE_ACTIONS["platform_friction"],
+        }
+
+    runtime_terms = (
+        "runtime",
+        "workflow",
+        "validation",
+        "authority",
+        "router",
+        "registry",
+        "api",
+        "mcp",
+        "cli",
+    )
+    if item.get("replay_ready"):
+        return {
+            "classification": "live_defect",
+            "confidence": "high",
+            "reason_codes": ("bug.replay_ready",),
+            "next_action": _STABLE_TRIAGE_ACTIONS["live_defect"],
+        }
+    if file_paths or _contains_any(text, runtime_terms):
+        return {
+            "classification": "live_defect",
+            "confidence": "medium",
+            "reason_codes": ("bug.current_code_path",),
+            "next_action": _STABLE_TRIAGE_ACTIONS["live_defect"],
+        }
+
+    return {
+        "classification": "evidence_debt",
+        "confidence": "low",
+        "reason_codes": ("bug.insufficient_triage_evidence",),
+        "next_action": _STABLE_TRIAGE_ACTIONS["evidence_debt"],
+    }
+
+
+def build_bug_triage_packet(
+    *,
+    bug_tracker: Any | None = None,
+    limit: int = 50,
+    packet_limit: int = DEFAULT_BUG_PACKET_LIMIT,
+    repo_root: str | Path | None = None,
+    open_only: bool = True,
+    classification: str | None = None,
+    include_inactive: bool = False,
+) -> dict[str, Any]:
+    repo_root_path = Path(repo_root).resolve() if repo_root is not None else Path.cwd().resolve()
+    normalized_classification = str(classification or "").strip() or None
+    if normalized_classification and normalized_classification not in BUG_TRIAGE_CLASSIFICATIONS:
+        return {
+            "view": "bug_triage_packet",
+            "authority": BUG_TRIAGE_PACKET_AUTHORITY,
+            "generated_at": _utcnow().isoformat(),
+            "observability_state": "degraded",
+            "summary": {key: 0 for key in _BUG_TRIAGE_SUMMARY_KEYS},
+            "bugs": [],
+            "errors": [
+                {
+                    "code": "bug_triage_packet.invalid_classification",
+                    "detail": normalized_classification,
+                }
+            ],
+        }
+    summary = {key: 0 for key in _BUG_TRIAGE_SUMMARY_KEYS}
+    if include_inactive:
+        summary["inactive"] = 0
+    if bug_tracker is None:
+        return {
+            "view": "bug_triage_packet",
+            "authority": BUG_TRIAGE_PACKET_AUTHORITY,
+            "generated_at": _utcnow().isoformat(),
+            "observability_state": "unavailable",
+            "sources": {"bug_tracker": _source_payload(available=False, mode="unavailable")},
+            "summary": summary,
+            "bugs": [],
+            "count": 0,
+            "returned_count": 0,
+            "limit": max(0, int(limit or 0)),
+        }
+
+    sources: dict[str, dict[str, Any]] = {
+        "bug_tracker": _source_payload(available=True, mode="live")
+    }
+    errors: list[dict[str, str]] = []
+    try:
+        stats = bug_tracker.stats()
+        stats_errors = tuple(str(item) for item in getattr(stats, "errors", ()) or ())
+        if stats_errors:
+            sources["bug_stats"] = _source_payload(
+                available=True,
+                mode="degraded",
+                detail="; ".join(stats_errors[:5]),
+            )
+            errors.extend({"code": "bug.stats_error", "detail": item} for item in stats_errors)
+    except Exception as exc:
+        stats = None
+        sources["bug_stats"] = _source_payload(
+            available=False,
+            mode="degraded",
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+        errors.append({"code": "bug.stats_unavailable", "detail": str(exc)})
+
+    try:
+        scan_limit = max(max(1, int(limit or 50)), packet_limit)
+        bugs = bug_tracker.list_bugs(open_only=bool(open_only), limit=scan_limit)
+    except Exception as exc:
+        return {
+            "view": "bug_triage_packet",
+            "authority": BUG_TRIAGE_PACKET_AUTHORITY,
+            "generated_at": _utcnow().isoformat(),
+            "observability_state": "unavailable",
+            "sources": {
+                **sources,
+                "bug_list": _source_payload(
+                    available=False,
+                    mode="unavailable",
+                    detail=f"{type(exc).__name__}: {exc}",
+                ),
+            },
+            "summary": summary,
+            "bugs": [],
+            "count": 0,
+            "returned_count": 0,
+            "limit": max(0, int(limit or 0)),
+            "errors": [{"code": "bug.list_unavailable", "detail": str(exc)}],
+        }
+
+    rows: list[dict[str, Any]] = []
+    packet_errors: list[str] = []
+    for bug in bugs:
+        packet_error: str | None = None
+        try:
+            packet = bug_tracker.failure_packet(
+                bug.bug_id,
+                receipt_limit=1,
+                allow_backfill=False,
+            ) or {}
+        except Exception as exc:
+            packet = {}
+            packet_error = f"{bug.bug_id}: {type(exc).__name__}: {exc}"
+            packet_errors.append(packet_error)
+        item = _bug_list_item(bug, packet, repo_root=repo_root_path)
+        triage = _bug_triage_classification(item, packet, packet_error=packet_error)
+        item_classification = str(triage["classification"])
+        if item_classification == "inactive" and not include_inactive:
+            continue
+        if normalized_classification and item_classification != normalized_classification:
+            continue
+        if item_classification in summary:
+            summary[item_classification] += 1
+        row = {
+            "bug_id": item["bug_id"],
+            "title": item["title"],
+            "status": item["status"],
+            "severity": item["severity"],
+            "category": item["category"],
+            "source_kind": item["source_kind"],
+            "classification": item_classification,
+            "confidence": triage["confidence"],
+            "reason_codes": list(triage["reason_codes"]),
+            "next_action": triage["next_action"],
+            "replay_ready": item["replay_ready"],
+            "replay_reason_code": item["replay_reason_code"],
+            "observability_state": item["observability_state"],
+            "observability_gaps": list(item["observability_gaps"]),
+            "file_paths": item["file_paths"],
+        }
+        if packet_error:
+            row["packet_error"] = packet_error
+        rows.append(row)
+
+    if packet_errors:
+        sources["bug_packets"] = _source_payload(
+            available=bool(rows),
+            mode="degraded",
+            detail="; ".join(packet_errors[:5]),
+        )
+        errors.extend({"code": "bug.packet_error", "detail": item} for item in packet_errors[:10])
+    else:
+        sources["bug_packets"] = _source_payload(available=bool(bugs), mode="live")
+
+    rows.sort(
+        key=lambda row: (
+            _BUG_TRIAGE_SUMMARY_KEYS.index(row["classification"])
+            if row["classification"] in _BUG_TRIAGE_SUMMARY_KEYS
+            else len(_BUG_TRIAGE_SUMMARY_KEYS),
+            row["bug_id"],
+        )
+    )
+    bounded_limit = max(0, int(limit or 0))
+    limited_rows = rows[:bounded_limit]
+    observability_state = "degraded" if errors else "complete"
+    return {
+        "view": "bug_triage_packet",
+        "authority": BUG_TRIAGE_PACKET_AUTHORITY,
+        "generated_at": _utcnow().isoformat(),
+        "observability_state": observability_state,
+        "sources": sources,
+        "summary": summary,
+        "classification_basis": {
+            "source_authorities": [
+                "bugs",
+                "bug failure packets",
+                "replay_context",
+                "observability_gaps",
+                "operator resume_context",
+            ],
+        },
+        "bugs": limited_rows,
+        "count": len(rows),
+        "returned_count": len(limited_rows),
+        "sampled_count": len(bugs),
+        "limit": bounded_limit,
+        "open_only": bool(open_only),
+        "classification_filter": normalized_classification,
+        "include_inactive": bool(include_inactive),
+        **({"errors": errors} if errors else {}),
+        **(
+            {
+                "stats_observability_state": str(
+                    getattr(stats, "observability_state", "unknown") or "unknown"
+                )
+            }
+            if stats is not None
+            else {}
+        ),
+    }
+
+
 def build_trend_observability(*, limit: int = 5) -> dict[str, Any]:
     """Summarize recent provider trend detection from receipt history."""
 
@@ -828,9 +1244,12 @@ def build_platform_observability(
 
 
 __all__ = [
+    "BUG_TRIAGE_CLASSIFICATIONS",
+    "BUG_TRIAGE_PACKET_AUTHORITY",
     "DEFAULT_BUG_PACKET_LIMIT",
     "DEFAULT_SCAN_ROOTS",
     "build_bug_scoreboard",
+    "build_bug_triage_packet",
     "build_code_hotspots",
     "build_platform_observability",
     "build_trend_observability",

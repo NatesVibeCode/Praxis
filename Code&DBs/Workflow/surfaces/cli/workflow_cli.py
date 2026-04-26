@@ -459,6 +459,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if not result.get("valid", False):
         print()
         print(result.get("error") or "Invalid workflow: one or more agent routes could not be resolved")
+        remediation_hint = str(result.get("remediation_hint") or "").strip()
+        if remediation_hint:
+            print(f"Remediation: {remediation_hint}")
         return 1
 
     return 0

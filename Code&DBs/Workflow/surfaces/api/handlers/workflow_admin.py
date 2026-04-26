@@ -33,6 +33,12 @@ def build_bug_scoreboard(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return _build_bug_scoreboard(*args, **kwargs)
 
 
+def build_bug_triage_packet(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime.engineering_observability import build_bug_triage_packet as _build_bug_triage_packet
+
+    return _build_bug_triage_packet(*args, **kwargs)
+
+
 def build_platform_observability(*args: Any, **kwargs: Any) -> dict[str, Any]:
     from runtime.engineering_observability import (
         build_platform_observability as _build_platform_observability,
@@ -523,9 +529,15 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         engineering_observability = {
             "code_hotspots": {"status": "skipped", "reason": "orient_fast_path"},
             "bug_scoreboard": {"status": "skipped", "reason": "orient_fast_path"},
+            "bug_triage_packet": {"status": "skipped", "reason": "orient_fast_path"},
             "platform_observability": {"status": "skipped", "reason": "orient_fast_path"},
         }
     else:
+        bug_triage_packet = build_bug_triage_packet(
+            bug_tracker=bug_tracker,
+            repo_root=REPO_ROOT,
+            limit=25,
+        )
         engineering_observability = {
             "code_hotspots": build_code_hotspots(
                 repo_root=REPO_ROOT,
@@ -538,6 +550,13 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                 repo_root=REPO_ROOT,
                 limit=10,
             ),
+            "bug_triage_packet": {
+                "view": "bug_triage_digest",
+                "authority": bug_triage_packet.get("authority"),
+                "observability_state": bug_triage_packet.get("observability_state"),
+                "summary": bug_triage_packet.get("summary", {}),
+                "tool_ref": "praxis_bug_triage_packet",
+            },
             "platform_observability": build_platform_observability(
                 platform_payload=health_payload,
             ),

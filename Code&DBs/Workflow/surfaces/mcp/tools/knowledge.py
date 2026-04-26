@@ -295,6 +295,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_recall": (
         tool_praxis_recall,
         {
+            "kind": "search",
             "description": (
                 "Search the platform's knowledge graph for information about modules, functions, "
                 "decisions, patterns, bugs, constraints, people, or any previously ingested content. "

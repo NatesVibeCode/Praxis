@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_compile, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_project_plan_budget, praxis_compose_and_launch, praxis_plan_lifecycle."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_compile, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_compose_and_launch, praxis_plan_lifecycle."""
 from __future__ import annotations
 
 import json
@@ -1836,10 +1836,10 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
     """End-to-end: prose intent → compose → approve → launch in one call.
 
     For trusted automation (CI, scripts, experienced operators). Fails
-    closed by default if any job has unresolved routes, unbound pills,
-    or exceeds an explicit budget cap. approved_by is required — no
-    anonymous automation. Approval is hash-bound to the exact spec_dict
-    so tampering between compose and submit still fails closed.
+    closed by default if any job has unresolved routes or unbound pills.
+    approved_by is required — no anonymous automation. Approval is
+    hash-bound to the exact spec_dict so tampering between compose and
+    submit still fails closed.
     """
     intent = params.get("intent")
     if not isinstance(intent, str) or not intent.strip():
@@ -1871,16 +1871,6 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
     refuse_unbound_pills = params.get("refuse_unbound_pills")
     if refuse_unbound_pills is None:
         refuse_unbound_pills = True
-    budget_cap_tokens = params.get("budget_cap_tokens")
-    if budget_cap_tokens is not None:
-        try:
-            budget_cap_tokens = int(budget_cap_tokens)
-        except (TypeError, ValueError):
-            return {
-                "ok": False,
-                "error": "budget_cap_tokens must be an integer",
-                "reason_code": "budget_cap.invalid",
-            }
 
     try:
         from runtime.intent_composition import (
@@ -1907,7 +1897,6 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
             default_stage=str(params.get("default_stage") or "build"),
             refuse_unresolved_routes=bool(refuse_unresolved_routes),
             refuse_unbound_pills=bool(refuse_unbound_pills),
-            budget_cap_tokens=budget_cap_tokens,
         )
     except DecompositionRequiresLLMError as exc:
         return {
@@ -1945,55 +1934,6 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
         return _structured_runtime_error(exc, action="compose_and_launch")
 
     payload = receipt.to_dict()
-    payload["ok"] = True
-    return payload
-
-
-def tool_praxis_project_plan_budget(params: dict) -> dict:
-    """Project token budgets for a ProposedPlan before launch.
-
-    Honest estimate, not an oracle. Prompt tokens are char-based
-    (len / 4, a standard rough approximation). Output tokens default to
-    a conservative per-stage upper bound. No USD cost — real cost depends
-    on the resolved model's price card at run time.
-    """
-    proposed_payload = params.get("proposed")
-    if not isinstance(proposed_payload, dict):
-        return {
-            "ok": False,
-            "error": (
-                "proposed must be a ProposedPlan dict from "
-                "praxis_launch_plan(preview_only=true) or praxis_compose_plan"
-            ),
-            "reason_code": "proposed.invalid",
-        }
-
-    try:
-        from runtime.plan_budget import project_plan_budget
-        from runtime.spec_compiler import ProposedPlan
-
-        proposed = ProposedPlan(
-            spec_dict=dict(proposed_payload.get("spec_dict") or {}),
-            preview=dict(proposed_payload.get("preview") or {}),
-            warnings=list(proposed_payload.get("warnings") or []),
-            workflow_id=str(proposed_payload.get("workflow_id") or ""),
-            spec_name=str(proposed_payload.get("spec_name") or ""),
-            total_jobs=int(proposed_payload.get("total_jobs") or 0),
-            packet_declarations=list(proposed_payload.get("packet_declarations") or []),
-            binding_summary=dict(proposed_payload.get("binding_summary") or {}),
-            unresolved_routes=list(proposed_payload.get("unresolved_routes") or []),
-        )
-        output_tokens_by_label = params.get("output_tokens_by_label")
-        output_tokens_by_stage = params.get("output_tokens_by_stage")
-        projection = project_plan_budget(
-            proposed,
-            output_tokens_by_label=output_tokens_by_label if isinstance(output_tokens_by_label, dict) else None,
-            output_tokens_by_stage=output_tokens_by_stage if isinstance(output_tokens_by_stage, dict) else None,
-        )
-    except Exception as exc:
-        return _structured_runtime_error(exc, action="project_plan_budget")
-
-    payload = projection.to_dict()
     payload["ok"] = True
     return payload
 
@@ -2343,6 +2283,63 @@ def tool_praxis_compose_plan_via_llm(params: dict) -> dict:
     return result.to_dict()
 
 
+def tool_praxis_compose_experiment(params: dict) -> dict:
+    """Parallel matrix runner: fire N compose_plan_via_llm calls side-by-side
+    with knob variation (model_slug / temperature / max_tokens) and return a
+    ranked comparison report.
+
+    Inputs:
+      - intent (str, required): prose forwarded to every child compose call
+      - configs (list of dicts, required, non-empty): one entry per child
+        run; each may contain {provider_slug, model_slug, temperature,
+        max_tokens}. Missing keys keep task-level defaults.
+      - plan_name (str, optional)
+      - concurrency (int, optional, default 5): per-child fork-out
+      - max_workers (int, optional, default 8): parent fan-out cap
+    """
+    intent = params.get("intent")
+    if not isinstance(intent, str) or not intent.strip():
+        return {"ok": False, "error": "intent must be a non-empty string",
+                "reason_code": "intent.invalid"}
+    configs = params.get("configs")
+    if not isinstance(configs, list) or not configs:
+        return {"ok": False, "error": "configs must be a non-empty list of override dicts",
+                "reason_code": "configs.invalid"}
+    try:
+        concurrency = max(1, min(100, int(params.get("concurrency", 5))))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "concurrency must be an integer 1-100",
+                "reason_code": "concurrency.invalid"}
+    try:
+        max_workers = max(1, min(32, int(params.get("max_workers", 8))))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "max_workers must be an integer 1-32",
+                "reason_code": "max_workers.invalid"}
+    plan_name = params.get("plan_name")
+
+    # Dispatch through the operation gateway so the run produces a parent
+    # receipt + the compose.experiment.completed event automatically. The
+    # gateway resolves the binding via operation_catalog_registry and calls
+    # runtime.operations.commands.compose_experiment_command.handle_compose_experiment.
+    try:
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+        result = execute_operation_from_subsystems(
+            _subs,
+            operation_name="compose_experiment",
+            payload={
+                "intent": intent,
+                "configs": configs,
+                "plan_name": plan_name if isinstance(plan_name, str) else None,
+                "concurrency": concurrency,
+                "max_workers": max_workers,
+                "caller_ref": "mcp.praxis_compose_experiment",
+            },
+        )
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="compose_experiment")
+    return result if isinstance(result, dict) else {"ok": True, "result": result}
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_suggest_plan_atoms": (
         tool_praxis_suggest_plan_atoms,
@@ -2389,6 +2386,66 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "concurrency": {"type": "integer", "default": 20},
                 },
                 "required": ["intent"],
+            },
+        },
+    ),
+    "praxis_compose_experiment": (
+        tool_praxis_compose_experiment,
+        {
+            "description": (
+                "Parallel matrix runner: fire N compose_plan_via_llm calls side-by-side, "
+                "each with a different LLM knob configuration. Returns a ranked report "
+                "(success-first, wall-time-asc). Each child run produces its own "
+                "compose-plan-via-llm receipt + plan.composed event; the matrix run "
+                "produces a parent receipt + a compose.experiment.completed event.\n\n"
+                "TWO CONFIG SHAPES:\n"
+                " 1. base_task_type + overrides (preferred). Inherit from a row in "
+                "    task_type_routing (provider, model, temperature, max_tokens) and "
+                "    layer per-leg deltas. e.g. {base_task_type: 'plan_synthesis', "
+                "    overrides: {temperature: 0.7}}.\n"
+                " 2. flat dict (escape hatch). Specify everything ad-hoc: "
+                "    {model_slug: 'x/y', temperature: 0.7, max_tokens: 4096}.\n\n"
+                "USE WHEN: comparing model/temperature/cap settings on the same intent "
+                "before pinning one in task_type_routing. Inheriting from a base lets "
+                "you say 'test plan_synthesis at higher temp' rather than re-stating "
+                "every knob."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {"type": "string"},
+                    "configs": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "base_task_type": {
+                                    "type": "string",
+                                    "description": "Name of a task_type_routing row to inherit from (provider, model, temperature, max_tokens).",
+                                },
+                                "overrides": {
+                                    "type": "object",
+                                    "properties": {
+                                        "provider_slug": {"type": "string"},
+                                        "model_slug": {"type": "string"},
+                                        "temperature": {"type": "number"},
+                                        "max_tokens": {"type": "integer"},
+                                    },
+                                    "additionalProperties": False,
+                                },
+                                "provider_slug": {"type": "string"},
+                                "model_slug": {"type": "string"},
+                                "temperature": {"type": "number"},
+                                "max_tokens": {"type": "integer"},
+                            },
+                        },
+                    },
+                    "plan_name": {"type": "string"},
+                    "concurrency": {"type": "integer", "default": 5},
+                    "max_workers": {"type": "integer", "default": 8},
+                },
+                "required": ["intent", "configs"],
             },
         },
     ),
@@ -2788,13 +2845,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "USE WHEN: automation (CI, scripts, experienced operators) needs to run "
                 "the full pipeline without stopping for a manual approval tool call. The "
                 "pipeline still fails closed on safety checks: unresolved routes, unbound "
-                "pills, and (if supplied) budget-cap overrun all block the submit.\n\n"
+                "pills, and invalid approvals all block the submit.\n\n"
                 "DO NOT USE TO: skip review for untrusted input. Anonymous approval is "
                 "rejected — approved_by is required. Tampering between compose and "
                 "submit still fails at launch_approved via the spec_dict hash check.\n\n"
                 "EXAMPLE: praxis_compose_and_launch(intent='1. Add timezone column\\n"
-                "2. Backfill UTC\\n3. Update UI', approved_by='ci@praxis', "
-                "budget_cap_tokens=150000)"
+                "2. Backfill UTC\\n3. Update UI', approved_by='ci@praxis')"
             ),
             "inputSchema": {
                 "type": "object",
@@ -2827,61 +2883,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "refuse_unresolved_routes": {"type": "boolean", "default": True},
                     "refuse_unbound_pills": {"type": "boolean", "default": True},
-                    "budget_cap_tokens": {
-                        "type": "integer",
-                        "description": (
-                            "Optional total-token cap. If the projected prompt + output "
-                            "total exceeds this, the submit is refused with "
-                            "reason_code='compose_and_launch.blocked' and blocked_reasons "
-                            "carries the 'budget_exceeded' entry."
-                        ),
-                    },
                 },
                 "required": ["intent", "approved_by"],
-            },
-        },
-    ),
-    "praxis_project_plan_budget": (
-        tool_praxis_project_plan_budget,
-        {
-            "description": (
-                "Estimate prompt + output token budgets for every job in a ProposedPlan. "
-                "Honest: prompt tokens are char-based (len / 4), output tokens are a "
-                "conservative per-stage estimate. No USD cost — real cost depends on the "
-                "resolved model at run time, which is the right place to surface it.\n\n"
-                "USE WHEN: budget is a gating concern and the caller wants to see an "
-                "order-of-magnitude total before approving.\n\n"
-                "DO NOT USE TO: enforce a hard budget cap silently. This is a projection for "
-                "the caller to read and decide; launch still submits unless the caller refuses "
-                "to approve.\n\n"
-                "EXAMPLE: praxis_project_plan_budget(proposed={...ProposedPlan dict...})"
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "proposed": {
-                        "type": "object",
-                        "description": (
-                            "ProposedPlan payload from praxis_launch_plan(preview_only=true) "
-                            "or praxis_compose_plan."
-                        ),
-                    },
-                    "output_tokens_by_label": {
-                        "type": "object",
-                        "description": (
-                            "Optional per-packet output-token override keyed by job label. "
-                            "Wins over the stage-based estimate."
-                        ),
-                    },
-                    "output_tokens_by_stage": {
-                        "type": "object",
-                        "description": (
-                            "Optional per-stage output-token override keyed by stage name "
-                            "(build/fix/review/test/research). Merges on top of built-in defaults."
-                        ),
-                    },
-                },
-                "required": ["proposed"],
             },
         },
     ),

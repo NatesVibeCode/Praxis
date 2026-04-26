@@ -85,6 +85,16 @@ def test_orient_includes_dependency_truth(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         workflow_admin,
+        "build_bug_triage_packet",
+        lambda **kwargs: {
+            "authority": "bug_triage_packet",
+            "observability_state": "complete",
+            "summary": {"live_defect": 1},
+            "kwargs": kwargs,
+        },
+    )
+    monkeypatch.setattr(
+        workflow_admin,
         "build_platform_observability",
         lambda **kwargs: {"authority": "platform_observability", "kwargs": kwargs},
     )
@@ -99,6 +109,13 @@ def test_orient_includes_dependency_truth(monkeypatch) -> None:
     }
     assert result["engineering_observability"]["code_hotspots"]["authority"] == "code_hotspots"
     assert result["engineering_observability"]["bug_scoreboard"]["authority"] == "bug_scoreboard"
+    assert result["engineering_observability"]["bug_triage_packet"] == {
+        "view": "bug_triage_digest",
+        "authority": "bug_triage_packet",
+        "observability_state": "complete",
+        "summary": {"live_defect": 1},
+        "tool_ref": "praxis_bug_triage_packet",
+    }
     assert result["engineering_observability"]["platform_observability"]["authority"] == "platform_observability"
 
 

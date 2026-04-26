@@ -16,13 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 def _section_author_timeout_seconds() -> float:
+    # Wall-clock cap for one LLM call in the synthesis / fork-author chain.
+    # Sized for the generous 50K-token budget on each call: a reasoning model
+    # may legitimately take 5-8 minutes to think through a complex section.
+    # Override via WORKFLOW_SECTION_AUTHOR_TIMEOUT_S (env, seconds).
     raw = os.environ.get("WORKFLOW_SECTION_AUTHOR_TIMEOUT_S", "").strip()
     if not raw:
-        return 180.0
+        return 600.0
     try:
         return max(10.0, float(raw))
     except ValueError:
-        return 180.0
+        return 600.0
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,12 @@ class AuthoredPacket:
     usage: dict[str, int] = field(default_factory=dict)
     proposed_pills: list[dict[str, Any]] = field(default_factory=list)
     pill_audit_local: list[dict[str, Any]] = field(default_factory=list)
+    # Per-packet observability for experiment reporting.
+    wall_ms: int | None = None
+    latency_ms: int | None = None
+    finish_reason: str | None = None
+    content_len: int | None = None
+    reasoning_len: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +79,11 @@ class AuthoredPacket:
             "usage": dict(self.usage),
             "proposed_pills": list(self.proposed_pills),
             "pill_audit_local": list(self.pill_audit_local),
+            "wall_ms": self.wall_ms,
+            "latency_ms": self.latency_ms,
+            "finish_reason": self.finish_reason,
+            "content_len": self.content_len,
+            "reasoning_len": self.reasoning_len,
         }
 
 
@@ -78,11 +93,30 @@ class AuthorError:
     error: str
     reason_code: str
     raw_llm_response: str | None
+    # Per-packet observability — populated even when the call failed so
+    # experiment reports can show "leg 3 failed at 22s after a 4096-token
+    # length-cap loop" rather than just "leg 3 failed".
+    wall_ms: int | None = None
+    latency_ms: int | None = None
+    finish_reason: str | None = None
+    content_len: int | None = None
+    reasoning_len: int | None = None
+    provider_slug: str | None = None
+    model_slug: str | None = None
+    usage: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "label": self.label, "error": self.error,
             "reason_code": self.reason_code, "raw_llm_response": self.raw_llm_response,
+            "wall_ms": self.wall_ms,
+            "latency_ms": self.latency_ms,
+            "finish_reason": self.finish_reason,
+            "content_len": self.content_len,
+            "reasoning_len": self.reasoning_len,
+            "provider_slug": self.provider_slug,
+            "model_slug": self.model_slug,
+            "usage": dict(self.usage) if self.usage else None,
         }
 
 
@@ -215,6 +249,11 @@ def _coerce_packet_response(
     *, target: SkeletalPacket, parsed: dict[str, Any], raw: str,
     provider_slug: str, model_slug: str,
     usage: dict[str, int] | None = None,
+    wall_ms: int | None = None,
+    latency_ms: int | None = None,
+    finish_reason: str | None = None,
+    content_len: int | None = None,
+    reasoning_len: int | None = None,
 ) -> AuthoredPacket:
     def floor_union(llm_value: Any, floor: list[str]) -> list[str]:
         out = list(floor)
@@ -288,6 +327,11 @@ def _coerce_packet_response(
         pill_audit_local=[
             p for p in (parsed.get("pill_audit_local") or []) if isinstance(p, dict)
         ],
+        wall_ms=wall_ms,
+        latency_ms=latency_ms,
+        finish_reason=finish_reason,
+        content_len=content_len,
+        reasoning_len=reasoning_len,
     )
 
 

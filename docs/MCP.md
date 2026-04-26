@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 89 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 91 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -49,11 +49,14 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, memory graph health, and projection freshness (event-log cursors + process-cache refresh lag) with SLA alerts and a read-side circuit-breaker verdict. |
 | `praxis_heartbeat` | `operations` | `advanced` | - | `read`, `write` | Run or check the knowledge graph maintenance cycle. The heartbeat syncs receipts, bugs, constraints, and friction events into the knowledge graph, mines relationships between entities, generates daily/weekly rollups, and archives stale nodes. |
 | `praxis_metrics_reset` | `operations` | `advanced` | - | `write` | Reset observability metrics through explicit operator maintenance authority. |
+| `praxis_model_access_control_matrix` | `operations` | `stable` | - | `read` | Read the live model-access ON/OFF switchboard that drives the private provider catalog. |
 | `praxis_orient` | `operations` | `curated` | `workflow orient` | `read` | Fresh-agent orientation: returns the canonical orient payload (standing orders, authority envelope, tool guidance, recent activity, endpoints, health). The single best first call for any LLM agent or operator waking up cold against Praxis. Delegates to the same authority that serves POST /orient so HTTP and MCP consumers see identical shape. |
+| `praxis_provider_control_plane` | `operations` | `stable` | - | `read` | Read the provider/job/model control-plane matrix through CQRS authority. |
 | `praxis_reload` | `operations` | `advanced` | - | `write` | Clear in-process caches and optionally importlib.reload runtime modules so DB, config, and code changes take effect without restarting the MCP subprocess. |
 | `praxis_semantic_bridges_backfill` | `operations` | `advanced` | - | `write` | Replay semantic bridges from canonical operator authority into semantic assertions. |
 | `praxis_semantic_projection_refresh` | `operations` | `advanced` | - | `write` | Refresh the semantic projection through explicit operator maintenance authority. |
 | `praxis_status_snapshot` | `operations` | `advanced` | - | `read` | Read the canonical workflow status snapshot — pass rate, failure mix, queue depth, and in-flight run summaries from receipt authority. |
+| `praxis_work_assignment_matrix` | `operations` | `stable` | - | `read` | Read the model-tier work assignment matrix through CQRS authority. |
 | `praxis_graph_projection` | `operator` | `advanced` | - | `read` | Read the cross-domain operator graph projection. |
 | `praxis_issue_backlog` | `operator` | `advanced` | - | `read` | Read the canonical operator issue backlog. |
 | `praxis_operator_architecture_policy` | `operator` | `advanced` | - | `write` | Record a durable architecture-policy decision in operator authority. |
@@ -97,7 +100,6 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_decompose_intent` | `workflow` | `stable` | `workflow decompose` | `read` | Layer 2 (Decompose) of the planning stack: split prose intent into ordered steps by parsing explicit step markers (numbered lists, bulleted lists, or first/then/finally ordering). Deterministic — does NOT do free-prose semantic decomposition. |
 | `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
 | `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | Q-side of the planning stack: read every plan.* system_event for one workflow_id in order. Pair with praxis_compose_and_launch / praxis_approve_proposed_plan / praxis_launch_plan on the C side. |
-| `praxis_project_plan_budget` | `workflow` | `stable` | `workflow project-budget` | `read` | Estimate prompt + output token budgets for every job in a ProposedPlan. Honest: prompt tokens are char-based (len / 4), output tokens are a conservative per-stage estimate. No USD cost — real cost depends on the resolved model at run time, which is the right place to surface it. |
 | `praxis_suggest_plan_atoms` | `workflow` | `stable` | `workflow suggest-atoms` | `read` | Layer 0 (Suggest): free prose → pills + step types + parameters. Deterministic; no LLM call; no order or count produced. |
 | `praxis_synthesize_skeleton` | `workflow` | `advanced` | - | `read` | Layer 0.5 (Synthesize): atoms + skeleton with deterministic depends_on, consumes/produces/capabilities floors, scaffolded gates from data dictionary. |
 | `praxis_wave` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Manage execution waves — groups of jobs with dependency ordering. Waves track which jobs are runnable (all dependencies met) and which are blocked. |
@@ -886,6 +888,29 @@ Example input:
 }
 ```
 
+#### `praxis_model_access_control_matrix`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_model_access_control_matrix`
+- CLI schema help: `workflow tools describe praxis_model_access_control_matrix`
+- When to use: Inspect the live ON/OFF model-access switchboard by task type, CLI/API type, provider, model, scope, reason, and operator instruction.
+- When not to use: Do not use it as a mutation surface; it is the read model that drives provider catalog projection.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "runtime_profile_ref": "praxis",
+  "job_type": "compile",
+  "transport_type": "API"
+}
+```
+
 #### `praxis_orient`
 
 - Surface: `operations`
@@ -904,6 +929,27 @@ Example input:
 
 ```json
 {}
+```
+
+#### `praxis_provider_control_plane`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_provider_control_plane`
+- CLI schema help: `workflow tools describe praxis_provider_control_plane`
+- When to use: Inspect the private provider/job/model matrix, including CLI/API type, cost, version, runnable state, breaker state, credential state, and removal reasons.
+- When not to use: Do not use it to change provider access; use circuit/control-panel commands for mutations.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "runtime_profile_ref": "praxis"
+}
 ```
 
 #### `praxis_reload`
@@ -985,6 +1031,27 @@ Example input:
 ```json
 {
   "since_hours": 24
+}
+```
+
+#### `praxis_work_assignment_matrix`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_work_assignment_matrix`
+- CLI schema help: `workflow tools describe praxis_work_assignment_matrix`
+- When to use: Inspect grouped work by audit group, recommended model tier, task type, sequence, and assignment reason.
+- When not to use: Do not use it as the source of provider availability; use praxis_provider_control_plane for access capability.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "open_only": true
 }
 ```
 
@@ -1088,7 +1155,7 @@ Example input:
 - Risks: `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_operator_decisions`
 - CLI schema help: `workflow tools describe praxis_operator_decisions`
-- When to use: List or record durable operator decisions such as architecture policy rows in the canonical operator_decisions table.
+- When to use: List or record durable operator decisions such as architecture policy rows in the canonical operator_decisions table. New records should pass scope_clamp={'applies_to': [...], 'does_not_apply_to': [...]} so downstream surfaces can quote the clamp verbatim instead of paraphrasing rationale; rows omit it default to a 'pending_review' placeholder for the operator to fill in via the Moon Decisions panel.
 - When not to use: Do not use it for roadmap item authoring or cutover-gate admission.
 - Selector: `action`; default `list`; values `list`, `record`
 - Required args: (none)
@@ -1828,7 +1895,7 @@ Example input:
 - Risks: `launch`
 - CLI entrypoint: `workflow ship-intent`
 - CLI schema help: `workflow tools describe praxis_compose_and_launch`
-- When to use: End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt in one call. For trusted automation (CI, scripts, experienced operators). Fails closed by default on unresolved routes, unbound pills, or budget-cap overrun.
+- When to use: End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt in one call. For trusted automation (CI, scripts, experienced operators). Fails closed by default on unresolved routes, unbound pills, or invalid approvals.
 - When not to use: Do not use it for untrusted input or when the caller needs to inspect the ProposedPlan first. Use praxis_compose_plan + praxis_approve_proposed_plan + praxis_launch_plan(approved_plan=...) for the three-step flow.
 - Recommended alias: `workflow ship-intent`
 - Selector: none
@@ -1840,8 +1907,7 @@ Example input:
 {
   "intent": "1. Add a timezone column to users.\n2. Backfill existing rows with UTC.\n3. Update the profile UI to expose the field.",
   "approved_by": "nate@praxis",
-  "plan_name": "timezone_rollout",
-  "budget_cap_tokens": 150000
+  "plan_name": "timezone_rollout"
 }
 ```
 
@@ -1989,34 +2055,6 @@ Example input:
 ```json
 {
   "workflow_id": "plan.deadbeef12345678"
-}
-```
-
-#### `praxis_project_plan_budget`
-
-- Surface: `workflow`
-- Tier: `stable`
-- Badges: `stable`, `workflow`, `alias:project-budget`
-- Risks: `read`
-- CLI entrypoint: `workflow project-budget`
-- CLI schema help: `workflow tools describe praxis_project_plan_budget`
-- When to use: Estimate token budgets for a ProposedPlan before approving. Honest projection — prompt tokens are char-based, output tokens are a per-stage upper bound, no USD cost.
-- When not to use: Do not use it to enforce a hard budget cap silently. Projection is for the caller to read and decide.
-- Recommended alias: `workflow project-budget`
-- Selector: none
-- Required args: `proposed`
-
-Example input:
-
-```json
-{
-  "proposed": {
-    "spec_dict": {
-      "name": "...",
-      "jobs": []
-    },
-    "preview": {}
-  }
 }
 ```
 

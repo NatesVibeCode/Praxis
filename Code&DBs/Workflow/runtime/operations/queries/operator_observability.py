@@ -7,6 +7,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from runtime.engineering_observability import (
+    BUG_TRIAGE_CLASSIFICATIONS,
+    build_bug_triage_packet,
+)
 from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from runtime.quality_views import load_failure_category_zones
 from runtime.queue_admission import (
@@ -159,6 +163,38 @@ class QueryReplayReadyBugs(BaseModel):
                 "replay_ready_bugs is read-only; use maintenance backfill instead"
             )
         return self
+
+
+class QueryBugTriagePacket(BaseModel):
+    limit: int = 50
+    open_only: bool = Field(default_factory=bug_query_default_open_only_backlog)
+    classification: str | None = None
+    include_inactive: bool = False
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _normalize_limit(cls, value: object) -> int:
+        if value in (None, ""):
+            return 50
+        try:
+            return max(1, int(value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be an integer") from exc
+
+    @field_validator("classification", mode="before")
+    @classmethod
+    def _normalize_classification(cls, value: object) -> str | None:
+        if value is None or value == "":
+            return None
+        if not isinstance(value, str):
+            raise ValueError("classification must be a string")
+        normalized = value.strip()
+        if normalized not in BUG_TRIAGE_CLASSIFICATIONS:
+            raise ValueError(
+                "classification must be one of: "
+                + ", ".join(sorted(BUG_TRIAGE_CLASSIFICATIONS))
+            )
+        return normalized
 
 
 class QueryOperatorGraphProjection(BaseModel):
@@ -396,6 +432,20 @@ def handle_query_replay_ready_bugs(
     }
 
 
+def handle_query_bug_triage_packet(
+    query: QueryBugTriagePacket,
+    subsystems: Any,
+) -> dict[str, Any]:
+    return build_bug_triage_packet(
+        bug_tracker=subsystems.get_bug_tracker(),
+        limit=query.limit,
+        repo_root=getattr(subsystems, "repo_root", None),
+        open_only=query.open_only,
+        classification=query.classification,
+        include_inactive=query.include_inactive,
+    )
+
+
 async def handle_query_operator_graph_projection(
     query: QueryOperatorGraphProjection,
     subsystems: Any,
@@ -588,6 +638,7 @@ __all__ = [
     "QueryOperatorGraphProjection",
     "QueryOperatorIssueBacklog",
     "QueryOperatorStatusSnapshot",
+    "QueryBugTriagePacket",
     "QueryReplayReadyBugs",
     "QueryRunScopedOperatorView",
     "QueryUiExperienceGraph",
@@ -595,6 +646,7 @@ __all__ = [
     "handle_query_ui_experience_graph",
     "handle_query_operator_issue_backlog",
     "handle_query_operator_status_snapshot",
+    "handle_query_bug_triage_packet",
     "handle_query_replay_ready_bugs",
     "handle_query_run_graph_view",
     "handle_query_run_lineage_view",

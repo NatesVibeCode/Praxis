@@ -729,6 +729,29 @@ def _preflight_workflow_id_collision(spec, *, pg_conn) -> list[dict[str, Any]]:
 
 
 def _authority_error_result(spec, message: str) -> dict[str, Any]:
+    lowered_message = message.lower()
+    if any(
+        needle in lowered_message
+        for needle in (
+            "gaierror",
+            "nodename nor servname",
+            "name or service not known",
+            "temporary failure in name resolution",
+        )
+    ):
+        remediation_hint = (
+            "The resolved WORKFLOW_DATABASE_URL host is not reachable from this shell. "
+            "Fix the registry/runtime DSN or the DNS/network route for that host, then rerun validate."
+        )
+    elif "workflow_database_url" in lowered_message or "postgresconfigurationerror" in lowered_message:
+        remediation_hint = (
+            "Resolve WORKFLOW_DATABASE_URL from the registry/runtime authority, then rerun validate. "
+            "If the URL came from a repo .env or launcher seed, update that source."
+        )
+    else:
+        remediation_hint = (
+            "Resolve the workflow database authority and rerun validate."
+        )
     summary = spec.summary()
     details: list[dict[str, Any]] = []
     agent_resolution: dict[str, str] = {}
@@ -750,6 +773,7 @@ def _authority_error_result(spec, message: str) -> dict[str, Any]:
         "agent_resolution": agent_resolution,
         "agent_resolution_details": details,
         "error": f"agent authority unavailable: {message}",
+        "remediation_hint": remediation_hint,
     }
 
 

@@ -34,7 +34,7 @@ _RUN_FAILURE_STATES = frozenset(
         "lease_expired",
     }
 )
-_ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed"})
+_ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed", "retired"})
 
 
 def _require_text(value: object, *, field_name: str) -> str:
@@ -659,6 +659,7 @@ def assess_work_items(
             declared_backlog=lifecycle == "idea",
         )
         reason_codes.extend(activity["reason_codes"])
+        activity_state = activity["activity_state"]
         if related_bug is not None and _optional_datetime(
             related_bug.get("resolved_at"),
             field_name="resolved_at",
@@ -682,7 +683,17 @@ def assess_work_items(
         if completed_at is None and updated_at <= assessed_at - timedelta(days=30):
             reason_codes.append("stale_open_roadmap_item")
 
-        if completed_at is not None:
+        if lifecycle == "retired":
+            reason_codes.append("retired_lifecycle")
+            freshness_state = _FRESHNESS_FRESH
+            resolution_state = "retired"
+            confidence = 1.0
+            suggested_action = "none"
+            closeout_state = "none"
+            closeout_action = "none"
+            activity_state = "retired"
+            pipeline_state = "retired"
+        elif completed_at is not None:
             freshness_state = _FRESHNESS_FRESH
             resolution_state = "completed"
             confidence = 1.0
@@ -740,15 +751,15 @@ def assess_work_items(
             pipeline_state = "planned"
 
         if completed_at is None:
-            if activity["activity_state"] == "in_progress":
+            if activity_state == "in_progress":
                 pipeline_state = "in_progress"
-            elif activity["activity_state"] == "stale":
+            elif activity_state == "stale":
                 pipeline_state = "stale_in_progress"
-            elif activity["activity_state"] == "built":
+            elif activity_state == "built":
                 pipeline_state = "built_candidate"
-            elif activity["activity_state"] == "blocked":
+            elif activity_state == "blocked":
                 pipeline_state = "blocked"
-            elif activity["activity_state"] == "backlog":
+            elif activity_state == "backlog":
                 pipeline_state = "backlog"
 
         assessments.append(
@@ -767,7 +778,7 @@ def assess_work_items(
                 closeout_roadmap_item_ids=(
                     (roadmap_item_id,) if closeout_state != "none" else ()
                 ),
-                activity_state=activity["activity_state"],
+                activity_state=activity_state,
                 pipeline_state=pipeline_state,
                 promotion_state=(
                     "promoted_from_bug" if source_bug_id is not None else "none"

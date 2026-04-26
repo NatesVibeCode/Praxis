@@ -1,7 +1,7 @@
-"""Model context window limits and safe budget calculations.
+"""Model context window limits and safe context allocation.
 
 Maps provider/model pairs to their context window sizes and derives
-safe token budgets that leave room for system prompts and responses.
+safe context allowances that leave room for system prompts and responses.
 
 Context windows are authoritative from Postgres
 ``model_profiles.default_parameters->'context_window'``. This module
