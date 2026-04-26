@@ -269,7 +269,8 @@
     "257_ui_shell_route_registry_dynamic_kinds.sql",
     "258_register_shell_navigation_commands.sql",
     "259_register_ui_shell_state_projection.sql",
-    "260_provider_control_plane_query.sql"
+    "260_provider_control_plane_query.sql",
+    "261_data_dictionary_query_category.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6509,6 +6510,12 @@
         "object_type": "row",
         "object_name": "data_dictionary_objects.operation.operator.provider_control_plane"
       }
+    ],
+    "261_data_dictionary_query_category.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "data_dictionary_objects.data_dictionary_objects_category_check"
+      }
     ]
   },
   "policy_buckets": {
@@ -6782,7 +6789,8 @@
       "257_ui_shell_route_registry_dynamic_kinds.sql",
       "258_register_shell_navigation_commands.sql",
       "259_register_ui_shell_state_projection.sql",
-      "260_provider_control_plane_query.sql"
+      "260_provider_control_plane_query.sql",
+      "261_data_dictionary_query_category.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

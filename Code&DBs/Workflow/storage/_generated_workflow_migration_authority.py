@@ -275,7 +275,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '257_ui_shell_route_registry_dynamic_kinds.sql',
  '258_register_shell_navigation_commands.sql',
  '259_register_ui_shell_state_projection.sql',
- '260_provider_control_plane_query.sql')
+ '260_provider_control_plane_query.sql',
+ '261_data_dictionary_query_category.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -567,7 +568,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '257_ui_shell_route_registry_dynamic_kinds.sql',
  '258_register_shell_navigation_commands.sql',
  '259_register_ui_shell_state_projection.sql',
- '260_provider_control_plane_query.sql')
+ '260_provider_control_plane_query.sql',
+ '261_data_dictionary_query_category.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -838,7 +840,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '257_ui_shell_route_registry_dynamic_kinds.sql',
                '258_register_shell_navigation_commands.sql',
                '259_register_ui_shell_state_projection.sql',
-               '260_provider_control_plane_query.sql'),
+               '260_provider_control_plane_query.sql',
+               '261_data_dictionary_query_category.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -1133,6 +1136,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '258_register_shell_navigation_commands.sql': 'canonical',
  '259_register_ui_shell_state_projection.sql': 'canonical',
  '260_provider_control_plane_query.sql': 'canonical',
+ '261_data_dictionary_query_category.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -3409,7 +3413,9 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
  '260_provider_control_plane_query.sql': (('row',
                                            'operation_catalog_registry.operator.provider_control_plane'),
                                           ('row',
-                                           'data_dictionary_objects.operation.operator.provider_control_plane'))}
+                                           'data_dictionary_objects.operation.operator.provider_control_plane')),
+ '261_data_dictionary_query_category.sql': (('constraint',
+                                             'data_dictionary_objects.data_dictionary_objects_category_check'),)}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -5147,7 +5153,9 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
    ('row', 'data_dictionary_objects.projection.ui_shell_state.live'))),
  ('260_provider_control_plane_query.sql',
   (('row', 'operation_catalog_registry.operator.provider_control_plane'),
-   ('row', 'data_dictionary_objects.operation.operator.provider_control_plane'))))
+   ('row', 'data_dictionary_objects.operation.operator.provider_control_plane'))),
+ ('261_data_dictionary_query_category.sql',
+  (('constraint', 'data_dictionary_objects.data_dictionary_objects_category_check'),)))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_task_type_route_eligibility.sql'),
  '024': ('024_authority_checkpoints.sql', '024_task_type_routing.sql'),
