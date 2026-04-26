@@ -271,7 +271,8 @@
     "259_register_ui_shell_state_projection.sql",
     "260_provider_control_plane_query.sql",
     "261_data_dictionary_query_category.sql",
-    "261_provider_control_plane_snapshot.sql"
+    "261_provider_control_plane_snapshot.sql",
+    "262_together_compile_primary.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6667,7 +6668,8 @@
         "object_type": "row",
         "object_name": "data_dictionary_objects.private_provider_control_plane_snapshot"
       }
-    ]
+    ],
+    "262_together_compile_primary.sql": []
   },
   "policy_buckets": {
     "canonical": [
@@ -6942,7 +6944,8 @@
       "259_register_ui_shell_state_projection.sql",
       "260_provider_control_plane_query.sql",
       "261_data_dictionary_query_category.sql",
-      "261_provider_control_plane_snapshot.sql"
+      "261_provider_control_plane_snapshot.sql",
+      "262_together_compile_primary.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
