@@ -50,6 +50,13 @@ class ProviderControlPlaneSnapshotRow:
     model_version: str
     cost_structure: str
     cost_metadata: Mapping[str, Any]
+    control_enabled: bool
+    control_state: str
+    control_scope: str
+    control_is_explicit: bool
+    control_reason_code: str
+    control_decision_ref: str
+    control_operator_message: str
     credential_availability_state: str
     credential_sources: tuple[str, ...]
     credential_observations: tuple[Mapping[str, Any], ...]
@@ -158,36 +165,66 @@ class PostgresProviderControlPlaneRepository:
         rows = self._conn.execute(
             """
             SELECT
-                runtime_profile_ref,
-                job_type,
-                transport_type,
-                adapter_type,
-                provider_slug,
-                model_slug,
-                model_version,
-                cost_structure,
-                cost_metadata,
-                credential_availability_state,
-                credential_sources,
-                credential_observations,
-                capability_state,
-                is_runnable,
-                breaker_state,
-                manual_override_state,
-                primary_removal_reason_code,
-                removal_reasons,
-                candidate_ref,
-                provider_ref,
-                source_refs,
-                projected_at,
-                projection_ref
-            FROM private_provider_control_plane_snapshot
-            WHERE runtime_profile_ref = $1
-              AND ($2::text IS NULL OR job_type = $2)
-              AND ($3::text IS NULL OR transport_type = $3)
-              AND ($4::text IS NULL OR provider_slug = $4)
-              AND ($5::text IS NULL OR model_slug = $5)
-            ORDER BY job_type, transport_type, provider_slug, model_slug, adapter_type
+                snapshot.runtime_profile_ref,
+                snapshot.job_type,
+                snapshot.transport_type,
+                snapshot.adapter_type,
+                snapshot.provider_slug,
+                snapshot.model_slug,
+                snapshot.model_version,
+                snapshot.cost_structure,
+                snapshot.cost_metadata,
+                COALESCE(control.control_enabled, snapshot.is_runnable) AS control_enabled,
+                COALESCE(
+                    control.control_state,
+                    CASE WHEN snapshot.is_runnable THEN 'on' ELSE 'off' END
+                ) AS control_state,
+                COALESCE(control.control_scope, 'projection.private_provider_control_plane_snapshot') AS control_scope,
+                COALESCE(control.control_is_explicit, false) AS control_is_explicit,
+                COALESCE(
+                    control.control_reason_code,
+                    snapshot.primary_removal_reason_code,
+                    'catalog.available'
+                ) AS control_reason_code,
+                COALESCE(
+                    control.control_decision_ref,
+                    'decision.model_access_control.legacy_projection'
+                ) AS control_decision_ref,
+                COALESCE(
+                    control.control_operator_message,
+                    CASE
+                        WHEN snapshot.is_runnable
+                        THEN 'this Model Access method is currently enabled by the control panel.'
+                        ELSE 'this Model Access method has been turned off on purpose at the control panel either for this specific task type, or more broadly, consult the control panel and do not turn it on without confirming with the user even if you think that will help you complete your task.'
+                    END
+                ) AS control_operator_message,
+                snapshot.credential_availability_state,
+                snapshot.credential_sources,
+                snapshot.credential_observations,
+                snapshot.capability_state,
+                snapshot.is_runnable,
+                snapshot.breaker_state,
+                snapshot.manual_override_state,
+                snapshot.primary_removal_reason_code,
+                snapshot.removal_reasons,
+                snapshot.candidate_ref,
+                snapshot.provider_ref,
+                snapshot.source_refs,
+                snapshot.projected_at,
+                snapshot.projection_ref
+            FROM private_provider_control_plane_snapshot AS snapshot
+            LEFT JOIN private_model_access_control_matrix AS control
+              ON control.runtime_profile_ref = snapshot.runtime_profile_ref
+             AND control.job_type = snapshot.job_type
+             AND control.adapter_type = snapshot.adapter_type
+             AND control.provider_slug = snapshot.provider_slug
+             AND control.model_slug = snapshot.model_slug
+            WHERE snapshot.runtime_profile_ref = $1
+              AND ($2::text IS NULL OR snapshot.job_type = $2)
+              AND ($3::text IS NULL OR snapshot.transport_type = $3)
+              AND ($4::text IS NULL OR snapshot.provider_slug = $4)
+              AND ($5::text IS NULL OR snapshot.model_slug = $5)
+            ORDER BY snapshot.job_type, snapshot.transport_type, snapshot.provider_slug, snapshot.model_slug, snapshot.adapter_type
             """,
             normalized_runtime_profile_ref,
             normalized_job_type,
@@ -253,6 +290,13 @@ def _provider_control_plane_snapshot_row(
         model_version=str(row.get("model_version") or ""),
         cost_structure=str(row["cost_structure"]),
         cost_metadata=dict(row.get("cost_metadata") or {}),
+        control_enabled=bool(row.get("control_enabled")),
+        control_state=str(row.get("control_state") or "off"),
+        control_scope=str(row.get("control_scope") or ""),
+        control_is_explicit=bool(row.get("control_is_explicit")),
+        control_reason_code=str(row.get("control_reason_code") or ""),
+        control_decision_ref=str(row.get("control_decision_ref") or ""),
+        control_operator_message=str(row.get("control_operator_message") or ""),
         credential_availability_state=str(row.get("credential_availability_state") or "unknown"),
         credential_sources=tuple(str(item) for item in credential_sources_raw),
         credential_observations=tuple(normalized_credential_observations),

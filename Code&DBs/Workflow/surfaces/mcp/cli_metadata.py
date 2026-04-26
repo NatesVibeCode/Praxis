@@ -140,6 +140,28 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_model_access_control_matrix": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use=(
+            "Inspect the live ON/OFF model-access switchboard by task type, CLI/API type, "
+            "provider, model, scope, reason, and operator instruction."
+        ),
+        when_not_to_use="Do not use it as a mutation surface; it is the read model that drives provider catalog projection.",
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Read compile API control state",
+                {
+                    "runtime_profile_ref": "praxis",
+                    "job_type": "compile",
+                    "transport_type": "API",
+                },
+            ),
+            _example("Read disabled access methods", {"control_state": "off"}),
+        ],
+    ),
     "praxis_work_assignment_matrix": _tool(
         surface="operations",
         tier="stable",

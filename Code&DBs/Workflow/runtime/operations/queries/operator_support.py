@@ -63,6 +63,73 @@ class QueryWorkAssignmentMatrix(BaseModel):
         return parsed
 
 
+class QueryModelAccessControlMatrix(BaseModel):
+    runtime_profile_ref: str = "praxis"
+    job_type: str | None = None
+    transport_type: str | None = None
+    provider_slug: str | None = None
+    model_slug: str | None = None
+    control_state: str | None = None
+    limit: int = 200
+
+    @field_validator("runtime_profile_ref", mode="before")
+    @classmethod
+    def _normalize_runtime_profile_ref(cls, value: object) -> str:
+        if value is None:
+            return "praxis"
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("runtime_profile_ref must be a non-empty string")
+        return value.strip()
+
+    @field_validator("job_type", "provider_slug", "model_slug", mode="before")
+    @classmethod
+    def _normalize_optional_text_filter(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("model-access filters must be non-empty strings when provided")
+        return value.strip()
+
+    @field_validator("transport_type", mode="before")
+    @classmethod
+    def _normalize_transport_type(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("transport_type must be CLI or API when provided")
+        normalized = value.strip().upper()
+        if normalized not in {"CLI", "API"}:
+            raise ValueError("transport_type must be CLI or API")
+        return normalized
+
+    @field_validator("control_state", mode="before")
+    @classmethod
+    def _normalize_control_state(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("control_state must be on or off when provided")
+        normalized = value.strip().lower()
+        if normalized not in {"on", "off"}:
+            raise ValueError("control_state must be on or off")
+        return normalized
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _normalize_model_access_limit(cls, value: object) -> int:
+        if value is None:
+            return 200
+        if isinstance(value, bool):
+            raise ValueError("limit must be an integer")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be an integer") from exc
+        if parsed < 1 or parsed > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        return parsed
+
+
 def handle_query_transport_support(
     query: QueryTransportSupport,
     subsystems: Any,
@@ -191,9 +258,116 @@ def handle_query_work_assignment_matrix(
     }
 
 
+def handle_query_model_access_control_matrix(
+    query: QueryModelAccessControlMatrix,
+    subsystems: Any,
+) -> dict[str, Any]:
+    """Read the live control-panel switchboard for model access."""
+
+    conn = subsystems.get_pg_conn()
+    rows = [
+        _row_dict(row)
+        for row in conn.execute(
+            """
+            SELECT
+                runtime_profile_ref,
+                job_type,
+                transport_type,
+                adapter_type,
+                access_method,
+                provider_slug,
+                model_slug,
+                model_version,
+                cost_structure,
+                cost_metadata,
+                control_enabled,
+                control_state,
+                control_scope,
+                control_is_explicit,
+                control_reason_code,
+                control_operator_message,
+                control_decision_ref,
+                candidate_ref,
+                provider_ref,
+                source_refs,
+                projected_at,
+                projection_ref
+            FROM private_model_access_control_matrix
+            WHERE runtime_profile_ref = $1
+              AND ($2::text IS NULL OR job_type = $2)
+              AND ($3::text IS NULL OR transport_type = $3)
+              AND ($4::text IS NULL OR provider_slug = $4)
+              AND ($5::text IS NULL OR model_slug = $5)
+              AND ($6::text IS NULL OR control_state = $6)
+            ORDER BY job_type, transport_type, provider_slug, model_slug, adapter_type
+            LIMIT $7
+            """,
+            query.runtime_profile_ref,
+            query.job_type,
+            query.transport_type,
+            query.provider_slug,
+            query.model_slug,
+            query.control_state,
+            query.limit,
+        )
+        or ()
+    ]
+
+    by_state: dict[str, int] = {}
+    by_job_type: dict[str, dict[str, int]] = {}
+    by_transport: dict[str, dict[str, int]] = {}
+    for row in rows:
+        state = str(row.get("control_state") or "unknown")
+        job_type = str(row.get("job_type") or "unknown")
+        transport_type = str(row.get("transport_type") or "unknown")
+        by_state[state] = by_state.get(state, 0) + 1
+        job_counts = by_job_type.setdefault(job_type, {})
+        job_counts[state] = job_counts.get(state, 0) + 1
+        transport_counts = by_transport.setdefault(transport_type, {})
+        transport_counts[state] = transport_counts.get(state, 0) + 1
+
+    return {
+        "operation": "operator.model_access_control_matrix",
+        "authority": "view.private_model_access_control_matrix",
+        "filters": {
+            "runtime_profile_ref": query.runtime_profile_ref,
+            "job_type": query.job_type,
+            "transport_type": query.transport_type,
+            "provider_slug": query.provider_slug,
+            "model_slug": query.model_slug,
+            "control_state": query.control_state,
+            "limit": query.limit,
+        },
+        "rows": rows,
+        "count": len(rows),
+        "counts": {
+            "by_control_state": dict(sorted(by_state.items())),
+            "by_job_type": dict(sorted(by_job_type.items())),
+            "by_transport_type": dict(sorted(by_transport.items())),
+        },
+        "columns": [
+            "job_type",
+            "transport_type",
+            "adapter_type",
+            "access_method",
+            "provider_slug",
+            "model_slug",
+            "model_version",
+            "cost_structure",
+            "control_enabled",
+            "control_state",
+            "control_scope",
+            "control_reason_code",
+            "control_decision_ref",
+        ],
+    }
+
+
 __all__ = [
+    "QueryModelAccessControlMatrix",
     "QueryTransportSupport",
     "QueryWorkAssignmentMatrix",
+    "handle_query_model_access_control_matrix",
     "handle_query_transport_support",
     "handle_query_work_assignment_matrix",
 ]

@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from runtime.operations.queries.operator_support import (
+    QueryModelAccessControlMatrix,
     QueryWorkAssignmentMatrix,
+    handle_query_model_access_control_matrix,
     handle_query_work_assignment_matrix,
 )
 
@@ -14,6 +16,63 @@ class _FakeConn:
 
     def execute(self, query: str, *args: Any) -> list[dict[str, Any]]:
         self.calls.append((query, args))
+        if "FROM private_model_access_control_matrix" in query:
+            return [
+                {
+                    "runtime_profile_ref": "praxis",
+                    "job_type": "compile",
+                    "transport_type": "API",
+                    "adapter_type": "llm_task",
+                    "access_method": "API:llm_task",
+                    "provider_slug": "together",
+                    "model_slug": "deepseek-ai/DeepSeek-V4-Pro",
+                    "model_version": "deepseek-ai/DeepSeek-V4-Pro",
+                    "cost_structure": "metered_api",
+                    "cost_metadata": {"billing_mode": "metered_api"},
+                    "control_enabled": True,
+                    "control_state": "on",
+                    "control_scope": "task/provider/model/access_method_allowlist",
+                    "control_is_explicit": True,
+                    "control_reason_code": "private_api_job_policy.allowed",
+                    "control_operator_message": "this Model Access method is currently enabled by the control panel.",
+                    "control_decision_ref": "decision.private_api_compile_only",
+                    "candidate_ref": "candidate.together.deepseek-v4-pro",
+                    "provider_ref": "provider.together",
+                    "source_refs": ["table.private_provider_api_job_allowlist"],
+                    "projected_at": "2026-04-26T00:00:00Z",
+                    "projection_ref": "projection.private_model_access_control_matrix",
+                },
+                {
+                    "runtime_profile_ref": "praxis",
+                    "job_type": "build",
+                    "transport_type": "API",
+                    "adapter_type": "llm_task",
+                    "access_method": "API:llm_task",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4",
+                    "model_version": "gpt-5.4",
+                    "cost_structure": "metered_api",
+                    "cost_metadata": {"billing_mode": "metered_api"},
+                    "control_enabled": False,
+                    "control_state": "off",
+                    "control_scope": "transport_default_deny",
+                    "control_is_explicit": False,
+                    "control_reason_code": "control_panel.transport_turned_off",
+                    "control_operator_message": (
+                        "this Model Access method has been turned off on purpose "
+                        "at the control panel either for this specific task type, "
+                        "or more broadly, consult the control panel and do not "
+                        "turn it on without confirming with the user even if you "
+                        "think that will help you complete your task."
+                    ),
+                    "control_decision_ref": "decision.private_api_control_panel",
+                    "candidate_ref": "candidate.openai.gpt-5.4",
+                    "provider_ref": "provider.openai",
+                    "source_refs": ["table.private_provider_transport_control_policy"],
+                    "projected_at": "2026-04-26T00:00:00Z",
+                    "projection_ref": "projection.private_model_access_control_matrix",
+                },
+            ]
         assert "FROM work_item_assignment_matrix" in query
         return [
             {
@@ -123,4 +182,33 @@ def test_work_assignment_matrix_passes_filters_to_projection_query() -> None:
         "frontier",
         False,
         25,
+    )
+
+
+def test_model_access_control_matrix_returns_counts_and_rows() -> None:
+    conn = _FakeConn()
+
+    payload = handle_query_model_access_control_matrix(
+        QueryModelAccessControlMatrix(
+            runtime_profile_ref="praxis",
+            transport_type="API",
+            limit=50,
+        ),
+        _FakeSubsystems(conn),
+    )
+
+    assert payload["operation"] == "operator.model_access_control_matrix"
+    assert payload["authority"] == "view.private_model_access_control_matrix"
+    assert payload["count"] == 2
+    assert payload["counts"]["by_control_state"] == {"off": 1, "on": 1}
+    assert payload["rows"][0]["control_state"] == "on"
+    assert payload["rows"][1]["control_reason_code"] == "control_panel.transport_turned_off"
+    assert conn.calls[-1][1] == (
+        "praxis",
+        None,
+        "API",
+        None,
+        None,
+        None,
+        50,
     )

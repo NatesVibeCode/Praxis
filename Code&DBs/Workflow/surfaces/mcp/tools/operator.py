@@ -926,6 +926,32 @@ def tool_praxis_provider_control_plane(params: dict) -> dict:
     )
 
 
+def tool_praxis_model_access_control_matrix(params: dict) -> dict:
+    """Read the live ON/OFF switchboard that drives provider catalog projection."""
+
+    try:
+        limit = _bounded_limit(params, default=200, maximum=1000)
+    except ValueError as exc:
+        return _structured_input_error(
+            exc,
+            operation_name="operator.model_access_control_matrix",
+        )
+
+    payload = {
+        "runtime_profile_ref": str(params.get("runtime_profile_ref") or "praxis").strip(),
+        "job_type": str(params.get("job_type") or "").strip() or None,
+        "transport_type": str(params.get("transport_type") or "").strip().upper() or None,
+        "provider_slug": str(params.get("provider_slug") or "").strip().lower() or None,
+        "model_slug": str(params.get("model_slug") or "").strip() or None,
+        "control_state": str(params.get("control_state") or "").strip().lower() or None,
+        "limit": limit,
+    }
+    return _execute_catalog_tool(
+        operation_name="operator.model_access_control_matrix",
+        payload=payload,
+    )
+
+
 def tool_praxis_work_assignment_matrix(params: dict) -> dict:
     """Read the model-tier work assignment matrix through CQRS authority."""
 
@@ -2068,6 +2094,42 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "enum": ["CLI", "API"],
                     },
                     "model_slug": {"type": "string"},
+                },
+            },
+        },
+    ),
+    "praxis_model_access_control_matrix": (
+        tool_praxis_model_access_control_matrix,
+        {
+            "description": (
+                "Read the live model-access ON/OFF switchboard that drives the private provider catalog.\n\n"
+                "USE WHEN: you need to inspect whether a CLI/API access method is enabled or disabled "
+                "for a task type, provider, and model, including scope, reason, and operator instruction."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "runtime_profile_ref": {
+                        "type": "string",
+                        "description": "Runtime profile whose private control matrix should be read.",
+                        "default": "praxis",
+                    },
+                    "job_type": {"type": "string"},
+                    "transport_type": {
+                        "type": "string",
+                        "enum": ["CLI", "API"],
+                    },
+                    "provider_slug": {"type": "string"},
+                    "model_slug": {"type": "string"},
+                    "control_state": {
+                        "type": "string",
+                        "enum": ["on", "off"],
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 200,
+                    },
                 },
             },
         },

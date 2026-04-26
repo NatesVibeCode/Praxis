@@ -283,7 +283,8 @@
     "268_seed_object_type_contact.sql",
     "269_model_access_method_control_panel_denials.sql",
     "270_work_assignment_matrix_cqrs.sql",
-    "271_provider_control_plane_credential_columns.sql"
+    "271_provider_control_plane_credential_columns.sql",
+    "272_model_access_control_matrix.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6869,6 +6870,72 @@
         "object_type": "constraint",
         "object_name": "ppcps_credential_observations_check"
       }
+    ],
+    "272_model_access_control_matrix.sql": [
+      {
+        "object_type": "view",
+        "object_name": "private_model_access_control_matrix"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_provider_job_catalog"
+      },
+      {
+        "object_type": "view",
+        "object_name": "provider_transport_gate_denials"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_model_access_projection_profiles"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_refresh_model_access_task_type_profiles"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_refresh_model_access_task_type_routing"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_refresh_model_access_provider_model_candidates"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_refresh_model_access_provider_cli_profiles"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_refresh_model_access_api_allowlist"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_refresh_model_access_transport_policy"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_refresh_model_access_denials"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.table:private_model_access_control_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.projection.public.private_model_access_control_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.operator.model_access_control_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.operator.model_access_control_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.model_access_control_matrix"
+      }
     ]
   },
   "policy_buckets": {
@@ -7156,7 +7223,8 @@
       "268_seed_object_type_contact.sql",
       "269_model_access_method_control_panel_denials.sql",
       "270_work_assignment_matrix_cqrs.sql",
-      "271_provider_control_plane_credential_columns.sql"
+      "271_provider_control_plane_credential_columns.sql",
+      "272_model_access_control_matrix.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
