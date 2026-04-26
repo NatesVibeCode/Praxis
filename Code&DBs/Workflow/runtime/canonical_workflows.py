@@ -1054,11 +1054,11 @@ def mutate_workflow_build(
                 plan_name=title,
                 concurrency=20,
             )
-            if not compose_result.ok:
-                raise WorkflowRuntimeBoundaryError(
-                    f"compose_plan_via_llm failed ({compose_result.reason_code or 'unknown'}): "
-                    f"{compose_result.error or 'no error message'}"
-                )
+            # Always translate — even on failure. The translator carries
+            # compose_provenance (synthesis usage, validation findings,
+            # pill triage) onto the definition so the React compose panel
+            # can show the user what failed instead of black-holing them
+            # for 3 minutes with "Compilation failed" and an empty canvas.
             definition = packets_to_definition(
                 workflow_id=workflow_id,
                 intent=prose,

@@ -1146,6 +1146,25 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       const result = await compileDefinition(compileProse, {
         workflowId,
       });
+      // Surface compose_provenance failures as compile errors so the user
+      // sees the LLM-gate finding (validation, fork-out, etc.) instead of
+      // an empty canvas. Provenance lives on definition.compose_provenance.
+      const provenance = (result as any)?.definition?.compose_provenance;
+      if (provenance && provenance.ok === false) {
+        const reason = provenance.reason_code || 'unknown';
+        const findings = (provenance.validation?.findings || []) as Array<{ severity?: string; message?: string }>;
+        const errorFindings = findings
+          .filter((f) => f.severity === 'error')
+          .slice(0, 3)
+          .map((f) => `• ${f.message || ''}`)
+          .filter(Boolean)
+          .join('\n');
+        const summary = errorFindings
+          ? `Compose blocked by ${reason} (${findings.length} finding${findings.length === 1 ? '' : 's'}):\n${errorFindings}`
+          : `Compose blocked by ${reason}: ${provenance.error || 'no detail'}`;
+        dispatch({ type: 'COMPILE_ERROR', error: summary });
+        return;
+      }
       // Patch first node with trigger route if trigger was selected
       if (state.selectedTrigger) {
         const graph = (result as any)?.build_graph;
