@@ -280,7 +280,10 @@
     "266_private_api_compile_only_allowlist.sql",
     "266_drop_openrouter_auto.sql",
     "267_provider_transport_control_panel_policy.sql",
-    "269_model_access_method_control_panel_denials.sql"
+    "268_seed_object_type_contact.sql",
+    "269_model_access_method_control_panel_denials.sql",
+    "270_work_assignment_matrix_cqrs.sql",
+    "271_provider_control_plane_credential_columns.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6795,6 +6798,12 @@
         "object_name": "runtime_profile_admitted_routes.together.deepseek-v4-pro"
       }
     ],
+    "268_seed_object_type_contact.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_type:contact"
+      }
+    ],
     "269_model_access_method_control_panel_denials.sql": [
       {
         "object_type": "table",
@@ -6807,6 +6816,58 @@
       {
         "object_type": "function",
         "object_name": "refresh_private_provider_job_catalog"
+      }
+    ],
+    "270_work_assignment_matrix_cqrs.sql": [
+      {
+        "object_type": "view",
+        "object_name": "work_item_assignment_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.table:work_item_assignment_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.view.public.work_item_assignment_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.operator.work_assignment_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.operator.work_assignment_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.work_assignment_matrix"
+      }
+    ],
+    "271_provider_control_plane_credential_columns.sql": [
+      {
+        "object_type": "column",
+        "object_name": "private_provider_control_plane_snapshot.credential_availability_state"
+      },
+      {
+        "object_type": "column",
+        "object_name": "private_provider_control_plane_snapshot.credential_sources"
+      },
+      {
+        "object_type": "column",
+        "object_name": "private_provider_control_plane_snapshot.credential_observations"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "ppcps_credential_state_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "ppcps_credential_sources_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "ppcps_credential_observations_check"
       }
     ]
   },
@@ -7092,7 +7153,10 @@
       "266_private_api_compile_only_allowlist.sql",
       "266_drop_openrouter_auto.sql",
       "267_provider_transport_control_panel_policy.sql",
-      "269_model_access_method_control_panel_denials.sql"
+      "268_seed_object_type_contact.sql",
+      "269_model_access_method_control_panel_denials.sql",
+      "270_work_assignment_matrix_cqrs.sql",
+      "271_provider_control_plane_credential_columns.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

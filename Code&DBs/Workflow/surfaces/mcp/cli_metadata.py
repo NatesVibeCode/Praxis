@@ -118,6 +118,44 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Clear the manual override", {"action": "reset", "provider_slug": "openai"}),
         ],
     ),
+    "praxis_provider_control_plane": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use=(
+            "Inspect the private provider/job/model matrix, including CLI/API type, cost, version, "
+            "runnable state, breaker state, credential state, and removal reasons."
+        ),
+        when_not_to_use="Do not use it to change provider access; use circuit/control-panel commands for mutations.",
+        risks={"default": "read"},
+        examples=[
+            _example("Read the whole provider matrix", {"runtime_profile_ref": "praxis"}),
+            _example(
+                "Read compile API rows",
+                {
+                    "runtime_profile_ref": "praxis",
+                    "job_type": "compile",
+                    "transport_type": "API",
+                },
+            ),
+        ],
+    ),
+    "praxis_work_assignment_matrix": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use=(
+            "Inspect grouped work by audit group, recommended model tier, task type, sequence, "
+            "and assignment reason."
+        ),
+        when_not_to_use="Do not use it as the source of provider availability; use praxis_provider_control_plane for access capability.",
+        risks={"default": "read"},
+        examples=[
+            _example("Read open assignment matrix", {"open_only": True}),
+            _example("Read frontier work", {"recommended_model_tier": "frontier"}),
+            _example("Read one audit group", {"audit_group": "A_provider_catalog_authority"}),
+        ],
+    ),
     "praxis_connector": _tool(
         surface="workflow",
         tier="advanced",

@@ -910,6 +910,50 @@ def tool_praxis_circuits(params: dict) -> dict:
     )
 
 
+def tool_praxis_provider_control_plane(params: dict) -> dict:
+    """Read the provider/job/model access matrix through CQRS authority."""
+
+    payload = {
+        "runtime_profile_ref": str(params.get("runtime_profile_ref") or "praxis").strip(),
+        "provider_slug": str(params.get("provider_slug") or "").strip().lower() or None,
+        "job_type": str(params.get("job_type") or "").strip() or None,
+        "transport_type": str(params.get("transport_type") or "").strip().upper() or None,
+        "model_slug": str(params.get("model_slug") or "").strip() or None,
+    }
+    return _execute_catalog_tool(
+        operation_name="operator.provider_control_plane",
+        payload=payload,
+    )
+
+
+def tool_praxis_work_assignment_matrix(params: dict) -> dict:
+    """Read the model-tier work assignment matrix through CQRS authority."""
+
+    try:
+        limit = _bounded_limit(params, default=100, maximum=500)
+        open_only = (
+            True
+            if "open_only" not in params
+            else _parse_bool(params.get("open_only"), field_name="open_only")
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name="operator.work_assignment_matrix")
+
+    payload = {
+        "status": str(params.get("status") or "").strip() or None,
+        "audit_group": str(params.get("audit_group") or "").strip() or None,
+        "recommended_model_tier": (
+            str(params.get("recommended_model_tier") or "").strip() or None
+        ),
+        "open_only": open_only,
+        "limit": limit,
+    }
+    return _execute_catalog_tool(
+        operation_name="operator.work_assignment_matrix",
+        payload=payload,
+    )
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_orient": (
         tool_praxis_orient,
@@ -1995,6 +2039,64 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "decision_source": {
                         "type": "string",
                         "description": "Source artifact or workflow applying the override.",
+                    },
+                },
+            },
+        },
+    ),
+    "praxis_provider_control_plane": (
+        tool_praxis_provider_control_plane,
+        {
+            "description": (
+                "Read the provider/job/model control-plane matrix through CQRS authority.\n\n"
+                "USE WHEN: you need the visible matrix of job type, transport type, provider, model, "
+                "cost structure, model version, runnable state, credential state, breaker state, "
+                "and removal reasons."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "runtime_profile_ref": {
+                        "type": "string",
+                        "description": "Runtime profile whose private catalog should be read.",
+                        "default": "praxis",
+                    },
+                    "provider_slug": {"type": "string"},
+                    "job_type": {"type": "string"},
+                    "transport_type": {
+                        "type": "string",
+                        "enum": ["CLI", "API"],
+                    },
+                    "model_slug": {"type": "string"},
+                },
+            },
+        },
+    ),
+    "praxis_work_assignment_matrix": (
+        tool_praxis_work_assignment_matrix,
+        {
+            "description": (
+                "Read the model-tier work assignment matrix through CQRS authority.\n\n"
+                "USE WHEN: you need to group bugs/work items by audit group, recommended model tier, "
+                "task type, suggested sequence, and delegation suitability."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                    "audit_group": {"type": "string"},
+                    "recommended_model_tier": {
+                        "type": "string",
+                        "description": "Matches either the exact tier or normalized tier group.",
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "default": True,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 100,
                     },
                 },
             },
