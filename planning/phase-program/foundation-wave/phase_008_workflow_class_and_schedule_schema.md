@@ -4,7 +4,7 @@ Status: execution_ready
 
 Registry authority: [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) phase `8` (`Workflow Class and Schedule Schema`), arc `0-9 define the machine`, status `historical_foundation`, predecessor `7`, closeout sequence `review -> healer -> human_approval`.
 
-Grounding note: this packet is grounded in the current checkout at `/workspace`. The declared platform execution root is `/Users/nate/Praxis`, so repo evidence cites `/workspace` and verification commands target that declared root. The execution shard says compile-authority inputs are ready, while verification coverage is still immature, so this packet stays narrow and proof-first.
+Grounding note: this packet is grounded in the current checkout at `/workspace`. The declared platform execution root is the Praxis repository root, so repo evidence cites `/workspace` and verification commands target that root. The execution shard says compile-authority inputs are ready, while verification coverage is still immature, so this packet stays narrow and proof-first.
 
 ## 1. Objective in repo terms
 
@@ -128,8 +128,8 @@ Grounding note: this packet is grounded in the current checkout at `/workspace`.
 
 ## 7. Verification commands
 
-- `cd /Users/nate/Praxis`
-- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
+- `cd` to the Praxis repository root (the directory that contains `scripts/_workflow_env.sh`)
+- `. ./scripts/_workflow_env.sh && workflow_load_repo_env`
 - `export PYTHONPATH='Code&DBs/Workflow'`
 - `python -m pytest Code\&DBs/Workflow/tests/integration/test_native_scheduler_runtime.py -q`
 - `python -m pytest Code\&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py -q`

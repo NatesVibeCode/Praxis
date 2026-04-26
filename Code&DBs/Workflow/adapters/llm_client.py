@@ -70,6 +70,7 @@ class LLMRequest:
     retry_backoff_seconds: tuple[int, ...] | None = None
     retryable_status_codes: tuple[int, ...] | None = None
     execution_control: DeterministicExecutionControl | None = None
+    cache_static_prefix: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,10 +152,20 @@ def _build_anthropic_body(request: LLMRequest) -> dict[str, Any]:
     }
 
     if system_parts:
-        body["system"] = "\n\n".join(system_parts)
+        joined_system = "\n\n".join(system_parts)
+        if request.cache_static_prefix:
+            body["system"] = [
+                {
+                    "type": "text",
+                    "text": joined_system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        else:
+            body["system"] = joined_system
 
     if request.tools:
-        body["tools"] = [
+        tools_list = [
             {
                 "name": t["name"],
                 "description": t.get("description", ""),
@@ -162,6 +173,9 @@ def _build_anthropic_body(request: LLMRequest) -> dict[str, Any]:
             }
             for t in request.tools
         ]
+        if request.cache_static_prefix and not system_parts and tools_list:
+            tools_list[-1]["cache_control"] = {"type": "ephemeral"}
+        body["tools"] = tools_list
 
     return body
 
@@ -273,10 +287,14 @@ def _parse_openai_response(data: dict[str, Any]) -> tuple[str, dict[str, int], t
         ))
 
     usage = data.get("usage", {})
+    details = usage.get("prompt_tokens_details") or {}
     parsed_usage = {
         "prompt_tokens": usage.get("prompt_tokens", 0),
         "completion_tokens": usage.get("completion_tokens", 0),
         "total_tokens": usage.get("total_tokens", 0),
+        # Cached prefix tokens (OpenAI / Together / DeepSeek prompt cache).
+        # 0 when the provider doesn't report cache hits or the prefix didn't match.
+        "cached_tokens": int(details.get("cached_tokens") or 0),
     }
 
     stop_reason = "tool_use" if finish_reason == "tool_calls" else "end_turn" if finish_reason == "stop" else finish_reason

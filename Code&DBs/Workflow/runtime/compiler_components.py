@@ -177,14 +177,14 @@ def build_capability_catalog(integrations: list[dict[str, Any]]) -> list[dict[st
             "reference_slugs": [],
         },
         {
-            "id": "cap-research-gemini-cli",
-            "slug": "research/gemini-cli",
-            "kind": "cli",
+            "id": "cap-research-external-catalog",
+            "slug": "research/external-catalog",
+            "kind": "catalog_route",
             "title": "Internet docs research",
-            "summary": "Use the Gemini CLI lane for outbound web and official-docs research when local context is not enough.",
-            "description": "Uses the Gemini CLI provider lane exposed by the runtime planner and executor for outbound internet scans, official API docs lookup, and source-backed research passes.",
-            "route": "google/gemini-cli",
-            "engines": ["gemini-cli"],
+            "summary": "Use the effective provider catalog for outbound web and official-docs research when local context is not enough.",
+            "description": "Uses the catalog-selected research lane exposed by the runtime planner and executor for outbound internet scans, official API docs lookup, and source-backed research passes.",
+            "route": "auto/research",
+            "engines": ["effective-provider-catalog"],
             "signals": [
                 "gemini",
                 "cli",
@@ -358,7 +358,7 @@ def infer_capability_slugs(
         selected.append("research/loop")
 
     if has_external_research:
-        selected.append("research/gemini-cli")
+        selected.append("research/external-catalog")
 
     reference_slugs = {_as_text(reference.get("slug")).lower() for reference in references}
     for slug, capability in catalog.items():

@@ -833,7 +833,9 @@ def _run_staleness_query(subs: Any, params: dict) -> dict:
 
 def _extract_data_dictionary_table(question: str) -> str | None:
     lowered = question.lower()
-    table_ref = r"([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)"
+    # Handle optional quotes around schema/table parts
+    part = r"(?:['\"]?[a-z_][a-z0-9_]*['\"]?)"
+    table_ref = rf"({part}(?:\.{part})?)"
     patterns = [
         rf"schema for {table_ref}",
         rf"schema of {table_ref}",
@@ -850,7 +852,9 @@ def _extract_data_dictionary_table(question: str) -> str | None:
     for pattern in patterns:
         match = re.search(pattern, lowered)
         if match:
-            return match.group(1).split(".")[-1]
+            # Return the full captured ref (e.g. "public.workflow_runs"),
+            # stripped of any wrapping quotes or trailing dots/question marks.
+            return match.group(1).replace("'", "").replace("\"", "").rstrip(".?")
     return None
 
 
@@ -859,9 +863,19 @@ def _has_data_dictionary_intent(question: str) -> bool:
     if _query_is(normalized, _DATA_DICTIONARY_QUERIES):
         return True
     if _query_starts_with(normalized, _DATA_DICTIONARY_PREFIXES):
+        # Guard: "which table names" should not route to table lookup for "names"
+        if "table names" in normalized or "which tables" in normalized:
+            return True
         return True
-    if _extract_data_dictionary_table(normalized) is None:
+    
+    extracted = _extract_data_dictionary_table(normalized)
+    if extracted is None:
         return False
+        
+    # Guard: if we extracted "names" from "which table names", it's probably misrouted generic intent
+    if extracted == "names" and "table names" in normalized:
+        return True
+
     return any(marker in normalized for marker in ("schema", "table", "column", "field"))
 
 
@@ -869,12 +883,23 @@ def _data_dictionary(subs: Any, question: str) -> dict:
     """Return browsable data dictionary from CQRS-backed table projections."""
     from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
+    normalized = _normalized_query(question)
+    # If it's a generic question about table names or schemas, return the list instead of a specific table
+    if "table names" in normalized or "which tables" in normalized or _query_is(normalized, _DATA_DICTIONARY_QUERIES):
+        return execute_operation_from_subsystems(
+            subs,
+            operation_name="operator.data_dictionary",
+            payload={
+                "include_relationships": False,
+            },
+        )
+
     table_name = _extract_data_dictionary_table(question)
     return execute_operation_from_subsystems(
         subs,
         operation_name="operator.data_dictionary",
         payload={
-            "table_name": table_name,
+            "table_name": str(table_name) if table_name else None,
             "include_relationships": True,
         },
     )
@@ -1028,20 +1053,41 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
         )
 
     if _query_is(question, _CARRY_FORWARD_QUERIES):
-        from runtime.session_carry import pack_to_summary_dict
+        from runtime.session_carry import (
+            filter_pack_for_effective_provider_catalog,
+            load_effective_provider_job_catalog_for_carry,
+            pack_to_summary_dict,
+        )
 
         mgr = subs.get_session_carry_mgr()
+        try:
+            effective_catalog = load_effective_provider_job_catalog_for_carry(
+                subs.get_pg_conn()
+            )
+        except Exception as exc:
+            return {
+                "error_code": "session_provider_catalog_unavailable",
+                "error": f"provider catalog unavailable for session carry-forward: {exc}",
+            }
         action = body.get("action", "latest")
         if action == "latest":
             pack = mgr.latest()
             if pack is None:
                 return {"message": "No carry-forward packs saved yet."}
+            pack = filter_pack_for_effective_provider_catalog(
+                pack,
+                effective_provider_job_catalog=effective_catalog,
+            )
             return pack_to_summary_dict(pack)
         if action == "validate":
             pack_id = str(body.get("pack_id") or "").strip()
             pack = mgr.latest() if not pack_id else mgr.load(pack_id)
             if pack is None:
                 return {"message": "Pack not found."}
+            pack = filter_pack_for_effective_provider_catalog(
+                pack,
+                effective_provider_job_catalog=effective_catalog,
+            )
             issues = mgr.validate(pack)
             if not issues:
                 return {"valid": True, "pack": pack_to_summary_dict(pack)}

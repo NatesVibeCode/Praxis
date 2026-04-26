@@ -26,14 +26,24 @@ def _save_chat_carry_forward(
     if not objective.strip() or not assistant_content.strip():
         return None
     try:
-        from runtime.session_carry import build_interaction_pack
+        from runtime.session_carry import (
+            build_interaction_pack,
+            load_effective_provider_job_catalog_for_carry,
+        )
 
         manager = subsystems.get_session_carry_mgr()
+        try:
+            effective_catalog = load_effective_provider_job_catalog_for_carry(
+                subsystems.get_pg_conn()
+            )
+        except Exception:
+            return None
         pack = build_interaction_pack(
             manager,
             objective=objective,
             assistant_content=assistant_content,
             tool_results=tool_results or (),
+            effective_provider_job_catalog=effective_catalog,
         )
         if pack is None:
             return None
@@ -178,12 +188,30 @@ def _handle_heartbeat(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 def _handle_session(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     action = body.get("action", "latest")
     mgr = subs.get_session_carry_mgr()
-    from runtime.session_carry import pack_to_summary_dict
+    from runtime.session_carry import (
+        filter_pack_for_effective_provider_catalog,
+        load_effective_provider_job_catalog_for_carry,
+        pack_to_summary_dict,
+    )
+
+    try:
+        effective_catalog = load_effective_provider_job_catalog_for_carry(
+            subs.get_pg_conn()
+        )
+    except Exception as exc:
+        return {
+            "error_code": "session_provider_catalog_unavailable",
+            "error": f"provider catalog unavailable for session carry-forward: {exc}",
+        }
 
     if action == "latest":
         pack = mgr.latest()
         if pack is None:
             return {"message": "No carry-forward packs saved yet."}
+        pack = filter_pack_for_effective_provider_catalog(
+            pack,
+            effective_provider_job_catalog=effective_catalog,
+        )
         return pack_to_summary_dict(pack)
 
     if action == "validate":
@@ -191,6 +219,10 @@ def _handle_session(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         pack = mgr.load(pack_id) if pack_id else mgr.latest()
         if pack is None:
             return {"message": "Pack not found."}
+        pack = filter_pack_for_effective_provider_catalog(
+            pack,
+            effective_provider_job_catalog=effective_catalog,
+        )
         issues = mgr.validate(pack)
         if not issues:
             return {"valid": True, "pack": pack_to_summary_dict(pack)}

@@ -242,6 +242,53 @@ export interface ProgressiveBuildState {
   };
 }
 
+export interface CompilePreviewSpan {
+  text?: string;
+  kind?: string;
+  normalized?: string;
+  start?: number;
+  end?: number;
+}
+
+export interface CompilePreviewMatch {
+  span_text?: string;
+  object_kind?: string;
+  label?: string;
+  category?: string | null;
+  confidence?: string;
+  reason?: string;
+}
+
+export interface CompilePreviewSuggestedStep {
+  label?: string;
+  source_ref?: string;
+  reason?: string;
+  status?: string;
+  confidence?: string;
+}
+
+export interface CompilePreviewGap {
+  span_text?: string;
+  kind?: string;
+  reason?: string;
+}
+
+export interface CompilePreviewPayload {
+  kind?: 'compile_preview';
+  cqrs_role?: 'query';
+  ok?: boolean;
+  intent?: string;
+  input_fingerprint?: string;
+  scope_packet?: {
+    spans?: CompilePreviewSpan[];
+    matches?: CompilePreviewMatch[];
+    suggested_steps?: CompilePreviewSuggestedStep[];
+    gaps?: CompilePreviewGap[];
+  };
+  enough_structure?: boolean;
+  next_actions?: Array<Record<string, unknown>>;
+}
+
 export interface BuildPayload {
   workflow?: { id: string; name: string; description?: string } | null;
   definition: Record<string, unknown>;
@@ -271,6 +318,7 @@ export interface BuildPayload {
   };
   undo_receipt?: BuildUndoReceipt | null;
   progressive_build?: ProgressiveBuildState | null;
+  compile_preview?: CompilePreviewPayload | null;
   mutation_event_id?: number | null;
 }
 

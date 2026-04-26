@@ -1188,7 +1188,7 @@ def load_workflow_batch(
     path: str,
     *,
     variables: dict[str, Any] | None = None,
-) -> tuple[list[RuntimeWorkflowSpec], int]:
+) -> tuple[list[RuntimeWorkflowSpec], int | None]:
     """Load a runtime workflow batch spec from disk."""
 
     _validate_spec_path(path)
@@ -1202,7 +1202,7 @@ def load_workflow_batch(
     if not ok:
         raise WorkflowSpecError(f"Invalid batch spec in {path}:\n  " + "\n  ".join(errors))
 
-    max_parallel = raw.get("max_parallel", 4)
+    max_parallel = raw.get("max_parallel")
     specs = [_raw_to_runtime_workflow_spec(job) for job in raw["jobs"]]
     return specs, max_parallel
 

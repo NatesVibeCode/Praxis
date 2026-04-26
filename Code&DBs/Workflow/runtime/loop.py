@@ -93,7 +93,7 @@ def loop_dispatch(
     *,
     prompt_template: str,
     tier: str = "mid",
-    max_parallel: int = 4,
+    max_parallel: int | None = None,
     label_prefix: str = "loop",
     **spec_kwargs: Any,
 ) -> list[WorkflowResult]:
@@ -140,7 +140,7 @@ def loop_from_completion(
     *,
     prompt_template: str,
     tier: str = "mid",
-    max_parallel: int = 4,
+    max_parallel: int | None = None,
     **spec_kwargs: Any,
 ) -> list[WorkflowResult]:
     """Extract a list from *upstream_completion* and loop.

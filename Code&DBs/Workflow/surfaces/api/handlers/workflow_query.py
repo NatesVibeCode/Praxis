@@ -1568,12 +1568,23 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
     try:
         workflow_id, subpath = _workflow_build_subpath(path)
         pg = request.subsystems.get_pg_conn()
-        result = mutate_workflow_build(
-            pg,
-            workflow_id=workflow_id,
-            subpath=subpath,
-            body=body,
-        )
+        if subpath == "bootstrap":
+            from runtime.compile_cqrs import materialize_workflow
+
+            result = materialize_workflow(
+                str(body.get("prose") or ""),
+                conn=pg,
+                workflow_id=workflow_id,
+                title=body.get("title") if isinstance(body.get("title"), str) else None,
+                enable_llm=body.get("enable_llm") if isinstance(body.get("enable_llm"), bool) else None,
+            )["mutation"]
+        else:
+            result = mutate_workflow_build(
+                pg,
+                workflow_id=workflow_id,
+                subpath=subpath,
+                body=body,
+            )
         request._send_json(
             200,
             build_workflow_build_moment(
@@ -1588,10 +1599,31 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
                 progressive_build=result.get("progressive_build"),
                 undo_receipt=result.get("undo_receipt"),
                 mutation_event_id=result.get("mutation_event_id"),
+                compile_preview=result.get("compile_preview"),
             ),
         )
     except WorkflowRuntimeBoundaryError as exc:
         request._send_json(exc.status_code, {"error": str(exc)})
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_compile_preview_post(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    intent = body.get("intent") or body.get("prose")
+    if not isinstance(intent, str) or not intent.strip():
+        request._send_json(400, {"error": "intent must be a non-empty string"})
+        return
+    try:
+        pg = request.subsystems.get_pg_conn()
+        from runtime.compile_cqrs import preview_compile
+
+        request._send_json(200, preview_compile(intent, conn=pg).to_dict())
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 

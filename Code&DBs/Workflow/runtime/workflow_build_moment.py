@@ -126,6 +126,7 @@ def build_workflow_build_moment(
     progressive_build: dict[str, Any] | None = None,
     undo_receipt: dict[str, Any] | None = None,
     mutation_event_id: int | None = None,
+    compile_preview: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     workflow_id = coerce_text(row.get("id")) or None
     effective_definition = parse_json_field(definition if definition is not None else row.get("definition")) or {}
@@ -226,6 +227,7 @@ def build_workflow_build_moment(
             if isinstance(effective_progressive_build, dict)
             else None
         ),
+        "compile_preview": compile_preview if isinstance(compile_preview, dict) else None,
         "undo_receipt": undo_receipt,
         "mutation_event_id": mutation_event_id,
     }

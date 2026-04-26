@@ -4,7 +4,7 @@ Status: execution_ready
 
 Registry authority: [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) declares phase `10` as `Operator Control Authority`, in arc `10-19 durable state and retrieval`, with predecessor `9`, status `historical_foundation`, and mandatory closeout `review -> healer -> human_approval`.
 
-Grounding note: this packet is grounded in the mounted repo snapshot at `/workspace`. The prompt declares the execution root as `/Users/nate/Praxis`, so repo evidence below is taken from `/workspace` while verification commands target `/Users/nate/Praxis`. The execution shard says `execution_packets_ready=true`, `repo_snapshots_ready=true`, `verification_registry_ready=true`, and `verify_refs_ready=true`, while proof coverage is still effectively unproved (`verification_coverage=0.0`, `fully_proved_verification_coverage=0.0`) and `write_manifest_coverage=0.2579`. The first sprint must therefore add one narrow proof instead of widening Phase 10.
+Grounding note: this packet is grounded in the mounted repo snapshot at `/workspace`. The prompt declares the execution root as the Praxis repository root, so repo evidence below is taken from `/workspace` while verification commands target that same root. The execution shard says `execution_packets_ready=true`, `repo_snapshots_ready=true`, `verification_registry_ready=true`, and `verify_refs_ready=true`, while proof coverage is still effectively unproved (`verification_coverage=0.0`, `fully_proved_verification_coverage=0.0`) and `write_manifest_coverage=0.2579`. The first sprint must therefore add one narrow proof instead of widening Phase 10.
 
 ## 1. Objective in repo terms
 
@@ -120,8 +120,8 @@ Grounding note: this packet is grounded in the mounted repo snapshot at `/worksp
 
 ## 7. Verification commands
 
-- `cd /Users/nate/Praxis`
-- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
+- `cd` to the Praxis repository root (the directory that contains `scripts/_workflow_env.sh`)
+- `. ./scripts/_workflow_env.sh && workflow_load_repo_env`
 - `export PYTHONPATH='Code&DBs/Workflow'`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_native_primary_cutover_gate.py' -q`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_work_item_workflow_bindings.py' -q`

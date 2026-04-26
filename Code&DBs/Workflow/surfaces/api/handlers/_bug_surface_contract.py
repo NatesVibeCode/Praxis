@@ -220,13 +220,65 @@ def file_bug_payload(
     title = str(body.get("title") or "").strip()
     if not title:
         raise ValueError("title is required to file a bug")
+    dry_run = bool(body.get("dry_run"))
     category = parse_category(bt_mod, body.get("category")) or bt_mod.BugCategory.OTHER
     resume_ctx = body.get("resume_context")
     if resume_ctx is not None and not isinstance(resume_ctx, dict):
         raise ValueError("resume_context must be a JSON object when provided")
+    severity = parse_severity(bt_mod, body.get("severity")) or bt_mod.BugSeverity.P2
+    if dry_run:
+        provenance_check = getattr(bt, "_validate_bug_provenance", None)
+        if callable(provenance_check):
+            provenance_check(
+                discovered_in_run_id=_optional_text(body.get("discovered_in_run_id")),
+                discovered_in_receipt_id=_optional_text(body.get("discovered_in_receipt_id")),
+            )
+        similar: list[dict[str, Any]] = []
+        if include_similar_bugs:
+            search = getattr(bt, "search", None)
+            if callable(search):
+                found = search(
+                    title,
+                    limit=5,
+                    open_only=bug_query_default_open_only_list(),
+                )
+                for bug in found:
+                    similar.append(
+                        {
+                            "bug_id": bug.bug_id,
+                            "title": bug.title,
+                            "status": bug.status.value,
+                            "severity": bug.severity.value,
+                        }
+                    )
+        filed_by = str(body.get("filed_by") or filed_by_default).strip() or filed_by_default
+        source_kind = (
+            str(body.get("source_kind") or source_kind_default).strip() or source_kind_default
+        )
+        preview: dict[str, Any] = {
+            "title": title,
+            "severity": severity.value,
+            "category": category.value,
+            "description": str(body.get("description") or ""),
+            "filed_by": filed_by,
+            "source_kind": source_kind,
+            "decision_ref": str(body.get("decision_ref") or "").strip(),
+            "discovered_in_run_id": _optional_text(body.get("discovered_in_run_id")),
+            "discovered_in_receipt_id": _optional_text(body.get("discovered_in_receipt_id")),
+            "owner_ref": _optional_text(body.get("owner_ref")),
+            "source_issue_id": _optional_text(body.get("source_issue_id")),
+            "tags": list(_normalize_tags(body.get("tags")) or ()),
+        }
+        return {
+            "ok": True,
+            "filed": False,
+            "dry_run": True,
+            "preview": preview,
+            "similar_bugs": similar,
+        }
     filed = bt.file_bug(
         title=title,
-        severity=parse_severity(bt_mod, body.get("severity")) or bt_mod.BugSeverity.P2,
+        severity=severity,
         category=category,
         description=str(body.get("description") or ""),
         filed_by=str(body.get("filed_by") or filed_by_default).strip() or filed_by_default,

@@ -206,7 +206,6 @@ def test_provider_transport_probe_fails_supported_api_without_ready_transport(mo
 
 
 def test_workflow_runtime_uses_one_adapter_registry_authority(monkeypatch) -> None:
-    monkeypatch.setattr("adapters.cli_llm.default_provider_slug", lambda: "openai")
     monkeypatch.setattr("adapters.llm_task.default_provider_slug", lambda: "openai")
     monkeypatch.setattr(provider_registry_mod, "default_provider_slug", lambda: "openai")
 

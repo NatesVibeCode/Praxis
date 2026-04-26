@@ -1240,6 +1240,34 @@ def _handle_setup_get(request: Any, path: str) -> None:
         request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
 
 
+def _handle_setup_apply_post(request: Any, path: str) -> None:
+    del path
+    try:
+        body = _read_json_body(request)
+    except Exception as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    approved = bool(body.get("approved", body.get("yes", body.get("apply", False))))
+    gate_ref = body.get("gate_ref", body.get("gate"))
+    apply_ref = body.get("apply_ref")
+
+    try:
+        from runtime.setup_wizard import setup_apply_payload
+
+        payload = setup_apply_payload(
+            approved=approved,
+            gate_ref=gate_ref,
+            apply_ref=apply_ref,
+            repo_root=REPO_ROOT,
+            authority_surface="api",
+        )
+        status_code = 200 if payload.get("ok") else 400
+        request._send_json(status_code, payload)
+    except Exception as exc:
+        request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
+
+
 def _handle_launcher_recover_post(request: Any, path: str) -> None:
     del path
     try:
@@ -1284,6 +1312,7 @@ def _handle_launcher_recover_post(request: Any, path: str) -> None:
 
 ADMIN_POST_ROUTES: list[RouteEntry] = [
     (_exact("/api/launcher/recover"), _handle_launcher_recover_post),
+    (_exact("/api/setup/apply"), _handle_setup_apply_post),
 ]
 
 ADMIN_GET_ROUTES: list[RouteEntry] = [

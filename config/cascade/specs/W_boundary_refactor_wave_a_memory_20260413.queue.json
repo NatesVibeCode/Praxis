@@ -51,7 +51,7 @@
       "write_scope": [
         "Code&DBs/Databases/migrations/workflow/"
       ],
-      "verify_command": "psql postgresql://localhost:5432/praxis -c '\\d retrieval_metrics' && cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && psql \"$WORKFLOW_DATABASE_URL\" -c '\\d retrieval_metrics' && cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "create_memory_telemetry_repository",
@@ -122,7 +122,7 @@
       "depends_on": ["memory_authority_tests"],
       "description": "Resolve BUG-B981792C01F4 and BUG-EB861DA883EF as FIXED once tests are green",
       "outcome_goal": "Both boundary bugs are marked FIXED with a resolution that cites this queue_id",
-      "prompt": "Mark the two linked bugs as FIXED after verifying the grep checks still pass.\n\nRun both of:\n\n```bash\nexport WORKFLOW_DATABASE_URL=\"postgresql://localhost:5432/praxis\"\ncd /Users/nate/Praxis\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-B981792C01F4\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Moved retrieval_metrics DDL to a migration and INSERT/DELETE/SELECT into storage/postgres/memory_telemetry_repository.py in boundary_refactor_wave_a_memory_20260413. Verified no SQL remains in memory/retrieval_telemetry.py.\"\n}' --yes\n\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-EB861DA883EF\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Moved memory_entities + memory_edges writes into storage/postgres/ in boundary_refactor_wave_a_memory_20260413. Verified no INSERT/UPDATE/DELETE remains in memory/crud.py.\"\n}' --yes\n```\n\nOnly run this if both grep-based regression tests from memory_authority_tests pass.",
+      "prompt": "Mark the two linked bugs as FIXED after verifying the grep checks still pass.\n\nRun both of:\n\n```bash\ncd /Users/nate/Praxis\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-B981792C01F4\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Moved retrieval_metrics DDL to a migration and INSERT/DELETE/SELECT into storage/postgres/memory_telemetry_repository.py in boundary_refactor_wave_a_memory_20260413. Verified no SQL remains in memory/retrieval_telemetry.py.\"\n}' --yes\n\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-EB861DA883EF\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Moved memory_entities + memory_edges writes into storage/postgres/ in boundary_refactor_wave_a_memory_20260413. Verified no INSERT/UPDATE/DELETE remains in memory/crud.py.\"\n}' --yes\n```\n\nOnly run this if both grep-based regression tests from memory_authority_tests pass.",
       "read_scope": [],
       "write_scope": [],
       "verify_command": "cd /Users/nate/Praxis && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/memory/crud.py' 'Code&DBs/Workflow/memory/retrieval_telemetry.py'"

@@ -28,8 +28,7 @@ sys.path.insert(0, str(WORKFLOW_ROOT))
 
 from adapters.structured_output import parse_model_output
 from adapters.docker_runner import run_on_host
-from adapters.cli_llm import PROVIDER_PROFILES
-from registry.provider_execution_registry import build_command
+from registry.provider_execution_registry import build_command, get_profile
 from runtime.prompt_renderer import render_prompt, RenderedPrompt
 from runtime.output_writer import apply_structured_output
 
@@ -121,8 +120,8 @@ class RunState(str, Enum):
     _separator("STEP 3: Model execution (stdin/stdout, no filesystem)")
 
     # Verify: no filesystem-granting flags
-    profile = PROVIDER_PROFILES["anthropic"]
-    flags = " ".join(profile.get("base_flags", []))
+    profile = get_profile("anthropic")
+    flags = " ".join(profile.base_flags if profile is not None else ())
     assert "--dangerously-skip-permissions" not in flags, "FAIL: filesystem flag present!"
     assert "--add-dir" not in flags, "FAIL: --add-dir flag present!"
     print(f"Provider flags (verified safe): {flags}")

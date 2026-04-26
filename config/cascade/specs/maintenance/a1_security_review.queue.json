@@ -5,7 +5,7 @@
   "queue_id": "audit-batch-2026-04-20-a1",
   "phase": "maintenance",
   "outcome_goal": "Every high-trust seam has been reviewed via the security-review skill and every finding is either a dedupe-keyed bug or a decision.YYYY-MM-DD.security-review-ack-* row.",
-  "verify_command": "bash -lc \"praxis workflow bugs search security-review-$(date -I) --status OPEN --limit 25 --json | rg '\\\"bug_id\\\"' || psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key LIKE 'decision.%.security-review-ack-%' AND effective_to IS NULL\\\" | rg -v '^0$'\"",
+  "verify_command": "bash -lc \". ./scripts/_workflow_env.sh && workflow_load_repo_env && praxis workflow bugs search security-review-$(date -I) --status OPEN --limit 25 --json | rg '\\\"bug_id\\\"' || psql \"$WORKFLOW_DATABASE_URL\" -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key LIKE 'decision.%.security-review-ack-%' AND effective_to IS NULL\\\" | rg -v '^0$'\"",
   "jobs": [
     {
       "id": "a1_security_review",
@@ -15,7 +15,7 @@
       "task_type": "review",
       "verify_refs": ["verify.audit_batch_20260420.a1_security_review"],
       "prompt": "Run the security-review skill against the high-trust seams. Targets: Code&DBs/Workflow/runtime/sandbox_runtime.py; Code&DBs/Workflow/adapters/docker_runner.py; Code&DBs/Workflow/runtime/workflow/execution_backends.py; Code&DBs/Workflow/runtime/integrations/connector_executor.py; Code&DBs/Workflow/runtime/integrations/webhook.py; Code&DBs/Workflow/runtime/integration_manifest.py; Code&DBs/Workflow/surfaces/api/operator_write.py; Code&DBs/Workflow/surfaces/mcp/tools/operator.py; Code&DBs/Workflow/surfaces/api/rest.py. File a canonical bug per finding with signature security-review-$(date -I)-<category>. If a seam is intentionally accepted, file operator_decisions key decision.2026-04-20.security-review-ack-<category>. Done when every category has either a bug or an ack decision. Transport constraint: use admitted CLI transport only; do not use llm_task, HTTP API routes, Anthropic routes, or deprecated Claude 4.6 slugs.",
-      "verify_command": "bash -lc \"praxis workflow bugs search security-review-$(date -I) --status OPEN --limit 25 --json | rg '\\\"bug_id\\\"' || psql postgresql://localhost:5432/praxis -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key LIKE 'decision.%.security-review-ack-%' AND effective_to IS NULL\\\" | rg -v '^0$'\""
+      "verify_command": "bash -lc \"praxis workflow bugs search security-review-$(date -I) --status OPEN --limit 25 --json | rg '\\\"bug_id\\\"' || psql \"$WORKFLOW_DATABASE_URL\" -tAc \\\"SELECT count(*) FROM operator_decisions WHERE decision_key LIKE 'decision.%.security-review-ack-%' AND effective_to IS NULL\\\" | rg -v '^0$'\""
     }
   ]
 }

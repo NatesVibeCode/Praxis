@@ -7,7 +7,7 @@
     {
       "label": "step1_agent_analyze",
       "agent": "auto/build",
-      "prompt": "## Objective\nAnalyze the top 5 most common dispatch failure error codes from the last 24 hours.\n\nYou have access to a PostgreSQL database at postgresql://nate@127.0.0.1:5432/dag_workflow.\nRun this query:\n\nSELECT last_error_code, COUNT(*) as cnt FROM workflow_jobs WHERE status = 'failed' AND created_at > now() - interval '24 hours' GROUP BY last_error_code ORDER BY cnt DESC LIMIT 5;\n\n## Expected Output\n- error_codes: string[] (the top failure codes)\n- total_failures: number\n- analysis: string (brief explanation of each failure type)\n\n## Done Criteria\n- Query executed successfully\n- All failure codes listed with counts\n- Brief explanation for each code",
+      "prompt": "## Objective\nAnalyze the top 5 most common dispatch failure error codes from the last 24 hours.\n\nYou have access to a PostgreSQL at $WORKFLOW_DATABASE_URL.\nRun this query:\n\nSELECT last_error_code, COUNT(*) as cnt FROM workflow_jobs WHERE status = 'failed' AND created_at > now() - interval '24 hours' GROUP BY last_error_code ORDER BY cnt DESC LIMIT 5;\n\n## Expected Output\n- error_codes: string[] (the top failure codes)\n- total_failures: number\n- analysis: string (brief explanation of each failure type)\n\n## Done Criteria\n- Query executed successfully\n- All failure codes listed with counts\n- Brief explanation for each code",
       "timeout": 120
     },
     {

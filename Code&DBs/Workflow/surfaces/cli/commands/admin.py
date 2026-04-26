@@ -10,15 +10,16 @@ from surfaces.cli._db import cli_sync_conn
 def _compile_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle ``workflow compile [intent.json|--description DESC --write FILE --stage STAGE]``.
 
-    Takes minimal executable intent (description, write files, stage) and
-    produces a fully-contexted workflow spec that can be run directly. When
-    only ``--description`` is provided, compile performs intent recognition:
-    source-ordered spans, authority matches, prerequisite suggestions, gaps.
+    Takes minimal intent (description, write files, stage) and produces a
+    fully-contexted workflow spec that can be run directly. When only a
+    description is provided, uses the shared compile CQRS front door to preview
+    or materialize workflow build state.
 
     Usage:
         workflow compile --description "Add retry logic" --write runtime/workflow/unified.py --stage build
         workflow compile intent.json
         workflow compile --description "..." --write file1.py,file2.py --stage build [--read extra.py] [--timeout 300]
+        workflow compile --description "Build a Gmail review workflow" [--action preview|materialize]
     """
 
     import json as _json
@@ -28,21 +29,27 @@ def _compile_command(args: list[str], *, stdout: TextIO) -> int:
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
             "usage: workflow compile [intent-file | --description DESC --write FILES --stage STAGE]\n"
+            "       workflow compile --description DESC [--action preview|materialize]\n"
             "\n"
-            "Compile minimal intent into a workflow spec, or recognize free-form intent.\n"
+            "Compile minimal intent into a workflow spec, or preview/materialize a workflow from prose.\n"
             "\n"
             "Positional argument:\n"
             "  intent-file          path to a JSON intent file\n"
             "\n"
             "Options (alternative to intent-file):\n"
             "  --description TEXT   task description (required)\n"
-            "  --write FILES        comma-separated list of files to write (required for spec output)\n"
-            "  --stage STAGE        build|fix|review|test|research (required for spec output)\n"
+            "  --write FILES        comma-separated list of files to write (required)\n"
+            "  --stage STAGE        build|fix|review|test|research (required)\n"
             "  --read FILES         comma-separated list of files to read (optional)\n"
             "  --label LABEL        custom label (optional, auto-generated if omitted)\n"
             "  --timeout SECS       timeout in seconds (default: 300)\n"
             "  --max-tokens TOKENS  max tokens (default: 4096)\n"
             "  --temperature TEMP   temperature 0.0-2.0 (default: 0.0)\n"
+            "  --action ACTION      preview|materialize for prose-only compile (default: preview)\n"
+            "  --workflow-id ID     workflow to update when materializing (optional)\n"
+            "  --title TITLE        workflow title when materializing (optional)\n"
+            "  --enable-llm         allow LLM-assisted build materialization\n"
+            "  --no-llm             disable LLM-assisted build materialization\n"
             "  --json               output as JSON (default)\n"
             "\n"
             "Examples:\n"
@@ -132,6 +139,27 @@ def _compile_command(args: list[str], *, stdout: TextIO) -> int:
                         stdout.write(f"error: --temperature must be a float, got {args[i]!r}\n")
                         return 1
                 i += 1
+            elif arg == "--action":
+                i += 1
+                if i < len(args):
+                    intent_dict["action"] = args[i]
+                i += 1
+            elif arg == "--workflow-id":
+                i += 1
+                if i < len(args):
+                    intent_dict["workflow_id"] = args[i]
+                i += 1
+            elif arg == "--title":
+                i += 1
+                if i < len(args):
+                    intent_dict["title"] = args[i]
+                i += 1
+            elif arg == "--enable-llm":
+                intent_dict["enable_llm"] = True
+                i += 1
+            elif arg == "--no-llm":
+                intent_dict["enable_llm"] = False
+                i += 1
             elif arg in {"--json"}:
                 i += 1
             else:
@@ -144,16 +172,29 @@ def _compile_command(args: list[str], *, stdout: TextIO) -> int:
         except Exception:
             conn = None
 
-        if intent_dict.get("description") and not intent_dict.get("write") and not intent_dict.get("stage"):
-            if conn is None:
-                stdout.write("error: WORKFLOW_DATABASE_URL authority is required for intent recognition\n")
-                return 1
-            from runtime.intent_recognition import recognize_intent
+        description = str(intent_dict.get("description") or "").strip()
+        has_legacy_compile_shape = bool(intent_dict.get("write")) or bool(intent_dict.get("stage"))
+        if description and not has_legacy_compile_shape:
+            from runtime.compile_cqrs import materialize_workflow, preview_compile
 
-            recognition = recognize_intent(str(intent_dict["description"]), conn=conn)
-            payload = recognition.to_dict()
-            payload["kind"] = "intent_recognition"
-            payload["ok"] = True
+            action = str(intent_dict.get("action") or "preview").strip() or "preview"
+            if action == "preview":
+                payload = preview_compile(description, conn=conn).to_dict()
+            elif action == "materialize":
+                payload = materialize_workflow(
+                    description,
+                    conn=conn,
+                    workflow_id=str(intent_dict.get("workflow_id") or "").strip() or None,
+                    title=str(intent_dict.get("title") or "").strip() or None,
+                    enable_llm=(
+                        bool(intent_dict["enable_llm"])
+                        if "enable_llm" in intent_dict
+                        else None
+                    ),
+                )
+            else:
+                stdout.write("error: --action must be preview or materialize\n")
+                return 1
             stdout.write(_json.dumps(payload, indent=2) + "\n")
             return 0
 

@@ -419,6 +419,31 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Match an app intent", {"intent": "invoice approval workflow with status tracking"}),
         ],
     ),
+    "praxis_compile": _tool(
+        surface="workflow",
+        tier="stable",
+        recommended_alias="compile",
+        when_to_use=(
+            "Shared CQRS compile front door for MCP/CLI/API parity. Use action='preview' "
+            "to recognize messy prose without mutation, or action='materialize' to create "
+            "or update draft workflow build state."
+        ),
+        when_not_to_use=(
+            "Do not use it to launch a workflow run. Materialized workflow state still "
+            "needs the normal approval and launch path."
+        ),
+        risks={"default": "read", "actions": {"preview": "read", "materialize": "write"}},
+        examples=[
+            _example(
+                "Preview compile scope",
+                {"action": "preview", "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration."},
+            ),
+            _example(
+                "Materialize a draft workflow",
+                {"action": "materialize", "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration.", "title": "Integration builder"},
+            ),
+        ],
+    ),
     "praxis_manifest_generate": _tool(
         surface="planning",
         tier="advanced",

@@ -30,12 +30,30 @@ def tool_praxis_session(params: dict) -> dict:
     """Session carry-forward packs: list, load, validate."""
     action = params.get("action", "latest")
     mgr = _subs.get_session_carry_mgr()
-    from runtime.session_carry import pack_to_summary_dict
+    from runtime.session_carry import (
+        filter_pack_for_effective_provider_catalog,
+        load_effective_provider_job_catalog_for_carry,
+        pack_to_summary_dict,
+    )
+
+    try:
+        effective_catalog = load_effective_provider_job_catalog_for_carry(
+            _subs.get_pg_conn()
+        )
+    except Exception as exc:
+        return {
+            "error_code": "session_provider_catalog_unavailable",
+            "error": f"provider catalog unavailable for session carry-forward: {exc}",
+        }
 
     if action == "latest":
         pack = mgr.latest()
         if pack is None:
             return {"message": "No carry-forward packs saved yet."}
+        pack = filter_pack_for_effective_provider_catalog(
+            pack,
+            effective_provider_job_catalog=effective_catalog,
+        )
         return pack_to_summary_dict(pack)
 
     if action == "validate":
@@ -46,6 +64,10 @@ def tool_praxis_session(params: dict) -> dict:
             pack = mgr.load(pack_id)
         if pack is None:
             return {"message": "Pack not found."}
+        pack = filter_pack_for_effective_provider_catalog(
+            pack,
+            effective_provider_job_catalog=effective_catalog,
+        )
         issues = mgr.validate(pack)
         if not issues:
             return {"valid": True, "pack": pack_to_summary_dict(pack)}

@@ -22,6 +22,7 @@ CarryForwardManager = _sc_mod.CarryForwardManager
 CarryForwardPack = _sc_mod.CarryForwardPack
 SessionCompactor = _sc_mod.SessionCompactor
 build_interaction_pack = _sc_mod.build_interaction_pack
+filter_pack_for_effective_provider_catalog = _sc_mod.filter_pack_for_effective_provider_catalog
 pack_to_summary_dict = _sc_mod.pack_to_summary_dict
 
 
@@ -220,6 +221,121 @@ Open Questions:
         assert "art_123" in pack.artifacts
         assert pack.risks == ("rate_limited",)
         assert pack.open_questions == ("Do we also want a run-completion save path next?",)
+
+
+def test_build_interaction_pack_filters_stale_provider_rollover_guidance():
+    with tempfile.TemporaryDirectory() as td:
+        mgr = CarryForwardManager(td)
+        assistant = """
+Next Actions:
+- Route the worker to anthropic/claude-opus-4-7 for build jobs
+- Route the worker to openrouter/deepseek/deepseek-r3 for build jobs
+- Run focused migration tests
+"""
+
+        pack = build_interaction_pack(
+            mgr,
+            objective="Keep rollover catalog-aware",
+            assistant_content=assistant,
+            effective_provider_job_catalog=[
+                {
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-opus-4-7",
+                    "transport_type": "CLI",
+                }
+            ],
+        )
+
+        assert pack is not None
+        assert pack.next_actions == (
+            "Route the worker to anthropic/claude-opus-4-7 for build jobs",
+            "Run focused migration tests",
+        )
+
+
+def test_filter_pack_for_effective_provider_catalog_filters_old_packs_on_read():
+    pack = _make_pack(
+        next_actions=(
+            "Use Gemini as the default model route",
+            "Keep route-free architecture notes",
+        ),
+        decisions=("Use Anthropic CLI worker transport",),
+    )
+
+    filtered = filter_pack_for_effective_provider_catalog(
+        pack,
+        effective_provider_job_catalog=[
+            {
+                "provider_slug": "anthropic",
+                "model_slug": "claude-opus-4-7",
+                "transport_type": "CLI",
+            }
+        ],
+    )
+
+    assert filtered.next_actions == ("Keep route-free architecture notes",)
+    assert filtered.decisions == ("Use Anthropic CLI worker transport",)
+
+
+def test_filter_pack_rejects_model_family_when_only_provider_matches():
+    pack = _make_pack(
+        next_actions=(
+            "Use OpenAI GPT-5 Codex as the default model route",
+            "Use OpenAI for the primary provider route",
+        ),
+    )
+
+    filtered = filter_pack_for_effective_provider_catalog(
+        pack,
+        effective_provider_job_catalog=[
+            {
+                "provider_slug": "openai",
+                "model_slug": "gpt-5.5",
+                "transport_type": "API",
+            }
+        ],
+    )
+
+    assert filtered.next_actions == ("Use OpenAI for the primary provider route",)
+
+
+def test_filter_pack_fails_closed_when_catalog_is_unavailable_or_empty():
+    pack = _make_pack(
+        decisions=(
+            "Use Anthropic CLI worker transport",
+            "Keep route-free architecture notes",
+        ),
+        next_actions=(
+            "Route via openrouter/deepseek/deepseek-r3",
+            "Run focused tests",
+        ),
+    )
+
+    filtered = filter_pack_for_effective_provider_catalog(
+        pack,
+        effective_provider_job_catalog=[],
+    )
+
+    assert filtered.decisions == ("Keep route-free architecture notes",)
+    assert filtered.next_actions == ("Run focused tests",)
+
+
+def test_filter_pack_ignores_malformed_catalog_rows():
+    pack = _make_pack(
+        next_actions=(
+            "Route via anthropic/claude-opus-4-7",
+            "Run focused tests",
+        ),
+    )
+
+    filtered = filter_pack_for_effective_provider_catalog(
+        pack,
+        effective_provider_job_catalog=[
+            {"provider_slug": "anthropic", "transport_type": "CLI"}
+        ],
+    )
+
+    assert filtered.next_actions == ("Run focused tests",)
 
 
 def test_build_interaction_pack_skips_low_signal_content():

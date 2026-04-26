@@ -40,7 +40,7 @@
   },
   "verify": [
     {
-      "command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' python3 -m pytest -q '/Users/nate/Praxis/Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py'"
+      "command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest -q 'Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py'"
     },
     {
       "command": "cd '/Users/nate/Praxis' && ./scripts/validate-queue.sh'/Users/nate/Praxis/artifacts/workflow/PRAXIS_NATIVE_DEFAULT_PARALLEL_PROOF.queue.json'"

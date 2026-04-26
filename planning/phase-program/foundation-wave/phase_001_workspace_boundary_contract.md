@@ -13,8 +13,8 @@ Authority map:
 
 Grounding note:
 - repo evidence below was read from the mounted checkout at `/workspace`
-- platform execution root for later implementation is `/Users/nate/Praxis`
-- database for later verification is `postgresql://nate@127.0.0.1:5432/praxis`
+- platform execution root for later implementation is the Praxis repository root (the directory that contains `scripts/_workflow_env.sh`)
+- database for later verification: use `WORKFLOW_DATABASE_URL` after `source scripts/_workflow_env.sh && workflow_load_repo_env` at the repository root
 
 ## 1. Objective in repo terms
 
@@ -127,8 +127,8 @@ Grounding note:
 ## 7. Verification commands
 
 ```bash
-cd /Users/nate/Praxis
-export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'
+cd <Praxis repository root>  # contains ./scripts/_workflow_env.sh
+. ./scripts/_workflow_env.sh && workflow_load_repo_env
 export PYTHONPATH='Code&DBs/Workflow'
 python -m pytest 'Code&DBs/Workflow/tests/integration/test_workspace_boundary_contract.py' -q
 python -m pytest 'Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py' -q

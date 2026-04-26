@@ -6,7 +6,7 @@ Registry authority: [planning/phase-program/praxis_0_100_registry.json](/workspa
 
 Grounding note:
 - This packet is grounded in the live checkout at `/workspace`.
-- The supplied platform root for later execution is `/Users/nate/Praxis` with `WORKFLOW_DATABASE_URL=postgresql://nate@127.0.0.1:5432/praxis`; repo evidence below is taken from `/workspace` while verification commands target the declared platform root.
+- The supplied platform root for later execution is the Praxis repository root; run `source scripts/_workflow_env.sh && workflow_load_repo_env` at that root so `WORKFLOW_DATABASE_URL` is set. Repo evidence below is taken from `/workspace` while verification commands target the declared platform root.
 - The execution shard says execution packets, repo snapshots, verification registry, and verify refs are ready, while verification coverage is still `0.0`. This sprint therefore needs one narrow proof on the real outbox bootstrap seam, not a broad notification redesign.
 
 ## 1. Objective in repo terms
@@ -128,8 +128,8 @@ Grounding note:
 ## 7. Verification commands
 
 ```bash
-cd /Users/nate/Praxis
-export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'
+cd <Praxis repository root>  # contains ./scripts/_workflow_env.sh
+. ./scripts/_workflow_env.sh && workflow_load_repo_env
 export PYTHONPATH='Code&DBs/Workflow'
 python -m pytest 'Code&DBs/Workflow/tests/integration/test_workflow_outbox.py' -q
 python -m pytest 'Code&DBs/Workflow/tests/integration/test_subscription_repository.py' -q

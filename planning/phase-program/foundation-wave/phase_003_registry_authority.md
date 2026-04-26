@@ -4,7 +4,7 @@ Status: execution_ready
 
 Registry authority: [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) declares phase `3` as `Registry Authority`, predecessor phase `2`, status `historical_foundation`, and mandatory closeout `review -> healer -> human_approval`.
 
-Grounding note: this packet is grounded in the live checkout at `/workspace` and intended for execution in the declared platform root `/Users/nate/Praxis` against `postgresql://nate@127.0.0.1:5432/praxis`. The execution shard says `execution_packets_ready=true`, `repo_snapshots_ready=true`, `verification_registry_ready=true`, and `verify_refs_ready=true`, but `verification_coverage=0.0` and `fully_proved_verification_coverage=0.0`, so the first sprint must add one narrow proof instead of widening Phase 3.
+Grounding note: this packet is grounded in the live checkout at `/workspace` and intended for execution in the declared Praxis repository root using `WORKFLOW_DATABASE_URL` from `source scripts/_workflow_env.sh && workflow_load_repo_env`. The execution shard says `execution_packets_ready=true`, `repo_snapshots_ready=true`, `verification_registry_ready=true`, and `verify_refs_ready=true`, but `verification_coverage=0.0` and `fully_proved_verification_coverage=0.0`, so the first sprint must add one narrow proof instead of widening Phase 3.
 
 ## 1. Objective in repo terms
 
@@ -144,8 +144,8 @@ Grounding note: this packet is grounded in the live checkout at `/workspace` and
 
 ## 7. Verification commands
 
-- `cd /Users/nate/Praxis`
-- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
+- `cd` to the Praxis repository root (the directory that contains `scripts/_workflow_env.sh`)
+- `. ./scripts/_workflow_env.sh && workflow_load_repo_env`
 - `export PYTHONPATH='Code&DBs/Workflow'`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_registry_authority_path.py' -q`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py' -q`

@@ -162,6 +162,80 @@ def test_mount_capabilities_uses_operation_catalog_when_available(monkeypatch) -
     assert mounted[0].openapi_extra["x-praxis-binding-source"] == "operation_catalog"
     assert mounted[0].name == "workflow_build.mutate"
     assert target_app.state.capabilities_mounted is True
+    assert target_app.state.capabilities_mount_degraded is False
+
+
+def test_mount_capabilities_skips_invalid_bindings_without_losing_valid_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class ValidCommand(BaseModel):
+        body: dict = {}
+
+    definitions = [
+        SimpleNamespace(
+            operation_ref="bad-op",
+            operation_name="bad_operation",
+            http_method="POST",
+            http_path="/api/bad_operation",
+            input_model_ref="runtime.missing.BadCommand",
+            handler_ref="runtime.missing.handle_bad",
+        ),
+        SimpleNamespace(
+            operation_ref="good-op",
+            operation_name="good_operation",
+            http_method="POST",
+            http_path="/api/good_operation",
+            input_model_ref="tests.ValidCommand",
+            handler_ref="tests.handle_good",
+        ),
+    ]
+
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: definitions,
+    )
+
+    def _resolve(definition):
+        if definition.operation_name == "bad_operation":
+            raise rest.OperationBindingResolutionError("missing runtime module")
+        return _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=ValidCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        )
+
+    monkeypatch.setattr(rest, "resolve_http_operation_binding", _resolve)
+
+    rest.mount_capabilities(target_app)
+
+    mounted_paths = [
+        route.path
+        for route in target_app.routes
+        if isinstance(route, APIRoute)
+    ]
+    assert "/api/good_operation" in mounted_paths
+    assert "/api/bad_operation" not in mounted_paths
+    assert target_app.state.capabilities_mounted is True
+    assert target_app.state.capabilities_mount_degraded is True
+    assert target_app.state.capability_mount_errors == [
+        {
+            "operation_ref": "bad-op",
+            "operation_name": "bad_operation",
+            "http_method": "POST",
+            "http_path": "/api/bad_operation",
+            "input_model_ref": "runtime.missing.BadCommand",
+            "handler_ref": "runtime.missing.handle_bad",
+            "error": "missing runtime module",
+        }
+    ]
 
 
 def test_workflow_query_routes_do_not_import_dead_trampoline_modules() -> None:

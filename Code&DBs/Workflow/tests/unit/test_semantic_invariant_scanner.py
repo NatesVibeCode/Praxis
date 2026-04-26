@@ -114,12 +114,12 @@ def test_workflow_launch_invariant_holds_against_live_tree() -> None:
     Mirror the seeded ``workflow_launch.flow_through_command_bus``
     predicate (migration 237) and assert no callsite outside the allowed
     command-bus authority calls the forbidden unified-dispatch entry
-    points.
+    points (submit/retry/cancel submission APIs).
 
     If this test fails, someone re-introduced a direct call to
-    ``submit_workflow_inline`` / ``cancel_run`` / ``cancel_job`` from a
-    domain authority that should be flowing through
-    ``runtime.control_commands.submit_workflow_command`` or
+    ``submit_workflow`` / ``submit_workflow_inline`` / ``retry_job`` /
+    ``cancel_run`` / ``cancel_job`` from a domain authority that should be
+    flowing through ``runtime.control_commands.submit_workflow_command`` or
     ``runtime.control_commands.execute_control_intent``.
     """
 
@@ -128,7 +128,9 @@ def test_workflow_launch_invariant_holds_against_live_tree() -> None:
         "predicate_kind": "invariant",
         "propagation_policy": {
             "forbidden_callsites_outside_command_bus": [
+                "runtime.workflow.unified.submit_workflow",
                 "runtime.workflow.unified.submit_workflow_inline",
+                "runtime.workflow.unified.retry_job",
                 "runtime.workflow.unified.cancel_run",
                 "runtime.workflow.unified.cancel_job",
             ],

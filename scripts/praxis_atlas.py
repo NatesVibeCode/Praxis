@@ -86,6 +86,21 @@ HTML_TEMPLATE = r"""<!doctype html>
   button { background: var(--bg-control); color: var(--text-soft); border: 1px solid var(--border); padding: 6px 10px; border-radius: 7px; font-size: 11px; font-weight: 650; cursor: pointer; }
   button:hover { border-color: var(--border-strong); background: #22283a; color: white; }
   .toolbar { margin-left: auto; display: flex; gap: 6px; }
+  .atlas-offline-banner {
+    background: #442d13;
+    color: #ffd28f;
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid #634522;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: ui-monospace, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .atlas-offline-banner strong { font-weight: 800; }
   .atlas-error-title { color: var(--text); font-weight: 700; margin-bottom: 6px; }
   .atlas-error-copy { max-width: 46ch; line-height: 1.55; text-align: center; }
   @media (max-width: 1040px) {
@@ -100,6 +115,9 @@ HTML_TEMPLATE = r"""<!doctype html>
 <div id="app">
   <header>
     <h1>Praxis System Atlas</h1>
+    <div class="atlas-offline-banner">
+      <strong>OFFLINE EXPORT</strong> — snapshot generated at __GEN_AT__
+    </div>
     <span class="counts" id="counts"></span>
     <span class="hint" id="mode-hint">click an area to expand</span>
     <div class="toolbar">
@@ -802,11 +820,15 @@ document.getElementById('btn-relayout').addEventListener('click', () => {
 
 
 def main() -> None:
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     graph = atlas_graph_read_model.build_graph()
     html = HTML_TEMPLATE.replace(
         "__GRAPH_JSON__", json.dumps(graph, default=str)
     ).replace(
         "__AREA_COLORS__", json.dumps(atlas_graph_read_model.AREA_COLORS)
+    ).replace(
+        "__GEN_AT__", now
     )
     out_dir = REPO_ROOT / "artifacts"
     out_dir.mkdir(exist_ok=True)

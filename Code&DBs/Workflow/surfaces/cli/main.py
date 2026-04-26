@@ -311,90 +311,6 @@ def _lazy_workflow_stdout_command(command_name: str) -> StdoutCommandHandler:
     return _handler
 
 
-def _run_legacy_compat_command(
-    args: list[str],
-    *,
-    stdout: TextIO,
-    prog: str,
-    configure_parser: Callable[[argparse.ArgumentParser], None],
-    runner: Callable[[argparse.Namespace], int],
-) -> int:
-    parser = argparse.ArgumentParser(prog=prog)
-    configure_parser(parser)
-    try:
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
-            parsed = parser.parse_args(args)
-            return runner(parsed)
-    except SystemExit as exc:
-        return int(exc.code)
-
-
-def _generate_command(args: list[str], *, stdout: TextIO) -> int:
-    from . import workflow_cli as legacy_workflow_cli
-
-    def _configure(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("manifest_file", help="Path to the minimal JSON manifest file")
-        parser.add_argument("output", help="Path to the output .queue.json spec file")
-        mode = parser.add_mutually_exclusive_group()
-        mode.add_argument("--strict", action="store_true", help="Fail if the output file already exists")
-        mode.add_argument("--merge", action="store_true", help="Merge with existing output file if it exists")
-
-    return _run_legacy_compat_command(
-        args,
-        stdout=stdout,
-        prog="workflow generate",
-        configure_parser=_configure,
-        runner=legacy_workflow_cli.cmd_generate,
-    )
-
-
-def _validate_command(args: list[str], *, stdout: TextIO) -> int:
-    from . import workflow_cli as legacy_workflow_cli
-
-    def _configure(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("spec", help="Path to .queue.json spec file")
-    return _run_legacy_compat_command(
-        args,
-        stdout=stdout,
-        prog="workflow validate",
-        configure_parser=_configure,
-        runner=legacy_workflow_cli.cmd_validate,
-    )
-
-
-def _stream_command(args: list[str], *, stdout: TextIO) -> int:
-    from . import workflow_cli as legacy_workflow_cli
-
-    def _configure(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("run_id", help="Workflow run id to stream")
-        parser.add_argument("--timeout", type=float, default=None, help="Stop streaming after N seconds")
-        parser.add_argument("--poll-interval", type=float, default=2.0, help="Poll interval in seconds")
-
-    return _run_legacy_compat_command(
-        args,
-        stdout=stdout,
-        prog="workflow stream",
-        configure_parser=_configure,
-        runner=legacy_workflow_cli.cmd_stream,
-    )
-
-
-def _chain_status_command(args: list[str], *, stdout: TextIO) -> int:
-    from . import workflow_cli as legacy_workflow_cli
-
-    def _configure(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("chain_id", nargs="?", help="Optional workflow chain id")
-        parser.add_argument("--limit", type=int, default=20, help="How many recent chains to list")
-
-    return _run_legacy_compat_command(
-        args,
-        stdout=stdout,
-        prog="workflow chain-status",
-        configure_parser=_configure,
-        runner=legacy_workflow_cli.cmd_chain_status,
-    )
-
-
 def _preview_workflow_cli_command(args: list[str], *, stdout: TextIO) -> int:
     forwarded_args = list(args)
     if "--preview-execution" not in forwarded_args:
@@ -488,10 +404,10 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "dictionary": _lazy_args_command(".commands.authority", "_data_dictionary_command"),
         "authority-memory": _lazy_args_command(".commands.authority", "_authority_memory_command"),
         "instances": _lazy_args_command(".commands.operate", "_instances_command"),
-        "generate": _generate_command,
-        "validate": _validate_command,
-        "stream": _stream_command,
-        "chain-status": _chain_status_command,
+        "generate": _lazy_workflow_args_command("_generate_command"),
+        "validate": _lazy_workflow_args_command("_validate_command"),
+        "stream": _lazy_workflow_args_command("_stream_command"),
+        "chain-status": _lazy_workflow_args_command("_chain_status_command"),
         "triggers": _lazy_workflow_args_command("_triggers_command"),
         "records": _lazy_workflow_args_command("_records_command"),
         "repair": _lazy_workflow_args_command("_repair_command"),

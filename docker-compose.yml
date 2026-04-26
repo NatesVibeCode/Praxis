@@ -61,6 +61,8 @@ services:
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
       PRAXIS_API_RELOAD: "0"
+      PRAXIS_OPERATOR_DEV_MODE: ${PRAXIS_OPERATOR_DEV_MODE:-0}
+      PRAXIS_API_TOKEN: ${PRAXIS_API_TOKEN:-}
       PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
       PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
       # Integration secrets hydrated from host Keychain at compose-up time
@@ -76,6 +78,7 @@ services:
       HTTPBIN_DEMO_TOKEN: ${HTTPBIN_DEMO_TOKEN:-}
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
       # Provider auth single-authority: blank stale Anthropic API key so the
       # OAuth subscription rail (CLAUDE_CODE_OAUTH_TOKEN) wins if the bridge
       # ever spawns Anthropic-authenticated calls. See
@@ -83,8 +86,6 @@ services:
       ANTHROPIC_API_KEY: ""
       ANTHROPIC_AUTH_TOKEN: ""
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      PRAXIS_AGENT_CLI_PROVIDER: ${PRAXIS_AGENT_CLI_PROVIDER:-openrouter}
-      PRAXIS_AGENT_OPENROUTER_MODEL: ${PRAXIS_AGENT_OPENROUTER_MODEL:-qwen/qwen3-coder}
       PRAXIS_AGENT_CWD: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
       PRAXIS_AGENT_SESSIONS_RUNNER_URL: ${PRAXIS_AGENT_SESSIONS_RUNNER_URL:-}
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
@@ -195,10 +196,17 @@ services:
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
-      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex:ro
-      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.gemini:/root/.gemini:ro
+      # Codex/Gemini auth dirs mounted read-write: the CLIs need to write
+      # session caches, model caches, and skills dirs at runtime. With :ro
+      # they fail with "Read-only file system" before producing any output.
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.gemini:/root/.gemini
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude.json:/root/.claude.json:ro
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
+      # Cursor CLI auth state (single-file mount, matches .claude.json pattern).
+      # Host is currently not logged in (cursor-agent status -> "Not logged in")
+      # so this mount is a no-op until `cursor-agent login` runs on host.
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.cursor/agent-cli-state.json:/root/.cursor/agent-cli-state.json:ro
       - ${PRAXIS_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:${PRAXIS_DOCKER_SOCKET_PATH:-/var/run/docker.sock}
       # Share host /tmp with worker so sandbox temp dirs (created by the
       # worker via tempfile.mkdtemp) are visible both sides: host-side

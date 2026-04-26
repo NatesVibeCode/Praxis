@@ -4,7 +4,7 @@ Status: execution_ready
 
 Registry authority: [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) phase `6` (`Platform Authority Schema`), status `historical_foundation`, predecessor phase `5`, required closeout sequence `review -> healer -> human_approval`.
 
-Grounding note: this packet is grounded in the mounted repo snapshot at `/workspace`. The platform context names `/Users/nate/Praxis` as the canonical execution root, so evidence below cites the current checkout and verification commands are written for that declared root. The execution shard says execution packets, repo snapshots, verification registry, and verify refs are ready, while verification coverage is still `0.0`, so this packet keeps Phase 6 to one proofable seam only.
+Grounding note: this packet is grounded in the mounted repo snapshot at `/workspace`. The platform context names the Praxis repository root as the canonical execution root, so evidence below cites the current checkout and verification commands are written for that root. The execution shard says execution packets, repo snapshots, verification registry, and verify refs are ready, while verification coverage is still `0.0`, so this packet keeps Phase 6 to one proofable seam only.
 
 ## 1. Objective in repo terms
 
@@ -122,8 +122,8 @@ Grounding note: this packet is grounded in the mounted repo snapshot at `/worksp
 
 ## 7. Verification commands
 
-- `cd /Users/nate/Praxis`
-- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
+- `cd` to the Praxis repository root (the directory that contains `scripts/_workflow_env.sh`)
+- `. ./scripts/_workflow_env.sh && workflow_load_repo_env`
 - `export PYTHONPATH='Code&DBs/Workflow'`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_subscription_repository.py' -q`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py' -q`

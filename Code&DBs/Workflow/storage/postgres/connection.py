@@ -46,6 +46,23 @@ class _WorkflowAuthorityScope:
         self.cache_key = cache_key
 
 
+def default_postgres_host(env: Mapping[str, str] | None = None) -> str:
+    """Return the recommended default host for a direct Postgres connection.
+
+    When running inside a container, returns the Docker internal host unless
+    overridden. When running on the host shell, returns localhost or the host
+    mapping from runtime authority.
+    """
+    source = env if env is not None else os.environ
+    if _running_inside_container(source):
+        return _HOST_DOCKER_INTERNAL
+
+    return (
+        str(source.get(HOST_SHELL_DATABASE_HOST_ENV) or "").strip()
+        or _DEFAULT_HOST_SHELL_DATABASE_HOST
+    )
+
+
 def _normalize_authority_error(
     exc: BaseException,
     *,
@@ -127,10 +144,7 @@ def _normalize_host_shell_database_url(
         return database_url
     if _hostname_resolves(_HOST_DOCKER_INTERNAL):
         return database_url
-    replacement_host = (
-        str(source.get(HOST_SHELL_DATABASE_HOST_ENV) or "").strip()
-        or _DEFAULT_HOST_SHELL_DATABASE_HOST
-    )
+    replacement_host = default_postgres_host(source)
     if not replacement_host or replacement_host.lower() == _HOST_DOCKER_INTERNAL:
         return database_url
     return _replace_database_url_hostname(database_url, replacement_host)
@@ -217,6 +231,13 @@ def resolve_workflow_database_url(
         )
 
     return _normalize_host_shell_database_url(database_url, env=source)
+
+
+def resolve_runtime_database_url(
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Canonical alias for resolve_workflow_database_url."""
+    return resolve_workflow_database_url(env=env)
 
 
 def resolve_workflow_authority_cache_key(

@@ -114,6 +114,7 @@ from .task_route_eligibility_repository import (
     PostgresTaskRouteEligibilityRepository,
 )
 from .transport_eligibility_repository import (
+    EffectiveProviderJobCatalogRow,
     PostgresTransportEligibilityRepository,
 )
 from .verification_repository import PostgresVerificationRepository
@@ -205,6 +206,7 @@ __all__ = [
     "reset_observability_metrics",
     "DEFAULT_PROVIDER_CONCURRENCY_LIMITS",
     "DEFAULT_PROVIDER_COST_WEIGHT",
+    "EffectiveProviderJobCatalogRow",
     "shutdown_workflow_pool",
     "VectorFilter",
     "ExecutionPacketRecord",

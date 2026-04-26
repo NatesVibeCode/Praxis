@@ -2,15 +2,17 @@
 
 ## Context (read this first)
 
+> **DB authority (2026+):** Load `WORKFLOW_DATABASE_URL` from the repo resolver (`source scripts/_workflow_env.sh && workflow_load_repo_env` at the Praxis root). Do not copy legacy loopback Postgres DSN examples from this document—they described a prior **local** Postgres layout and are not portable.
+
 Praxis is about to go public on GitHub. The migration tree at `Code&DBs/Databases/migrations/workflow/` (135 files) has never been tested end-to-end against a truly empty Postgres cluster. Several migrations reference tables that no migration creates, because those tables were originally created ad-hoc (inline Python, legacy squashed migrations, or manual psql) in existing developer DBs. A fresh clone will fail to bootstrap.
 
 A previous Claude session already drafted fixes to five migrations — those edits are currently **uncommitted** in the working tree and should be treated as a starting point, not the final answer. Validate each before keeping.
 
 ## Repo layout
 
-- Working dir: `/Users/nate/Praxis`
+- Working dir: e.g. `…/Praxis` (use your checkout path, not a hardcoded home directory)
 - Migrations: `Code&DBs/Databases/migrations/workflow/` (note the `&` in the path — quote it in shell)
-- Active DB: `postgresql://localhost:5432/praxis` (native Postgres, auto-starts via launchd `com.praxis.postgres`)
+- Active DB: whatever cluster `WORKFLOW_DATABASE_URL` names after you load env (see **DB authority** note above)
 - Env var the code uses: `WORKFLOW_DATABASE_URL`
 - Operator CLI: `workflow` (e.g. `workflow query "status"`)
 - Runtime code that lazily creates tables: `Code&DBs/Workflow/runtime/observability.py:215`
@@ -85,15 +87,18 @@ Currently `Code&DBs/Workflow/runtime/observability.py:215` does `CREATE TABLE IF
 Spin up a throwaway database and run every migration in order:
 
 ```bash
+. ./scripts/_workflow_env.sh && workflow_load_repo_env
 createdb praxis_fresh
-WORKFLOW_DATABASE_URL='postgresql://localhost:5432/praxis_fresh' \
+# Same authority host as WORKFLOW_DATABASE_URL, new database name (adjust if your site uses a different create-db flow):
+FRESH_URL="${WORKFLOW_DATABASE_URL%/*}/praxis_fresh"
+WORKFLOW_DATABASE_URL="$FRESH_URL" \
   <whatever the migrator entry point is — find it; likely a script under Code&DBs/Workflow or invoked via `workflow`>
 ```
 
 Then:
 
 ```bash
-WORKFLOW_DATABASE_URL='postgresql://localhost:5432/praxis_fresh' workflow query "status"
+WORKFLOW_DATABASE_URL="$FRESH_URL" workflow query "status"
 ```
 
 Both must succeed. If a migration fails, fix the root cause — do not add a try/except wrapper. When done:
@@ -115,7 +120,7 @@ These are already modified in the working tree — make sure they still pass aft
 
 ## Constraints
 
-- **Do not touch the user's live DB** (`postgresql://localhost:5432/praxis`). Use throwaway DBs only.
+- **Do not point migration experiments at your live production database name** on the shared authority host. Use a throwaway database name (e.g. `praxis_fresh`) and verify `WORKFLOW_DATABASE_URL` before running DDL.
 - **Do not rename or renumber existing migrations.** Applied versions on live developer DBs must keep matching their file.
 - **Idempotent only.** Every migration must use `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `INSERT ... ON CONFLICT`, etc. Rerunning against a partially-migrated DB must not fail.
 - **No `CREATE INDEX CONCURRENTLY`** if migrations run inside a wrapping transaction (they do — see 106).

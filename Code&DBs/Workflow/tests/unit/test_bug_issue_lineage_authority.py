@@ -226,6 +226,40 @@ def test_file_bug_payload_forwards_source_issue_id_to_tracker() -> None:
     assert payload["bug"]["source_issue_id"] == "issue.dispatch-gap"
 
 
+def test_file_bug_payload_dry_run_skips_insert() -> None:
+    calls: list[str] = []
+
+    class _FakeBugTracker:
+        def file_bug(self, **_kwargs):
+            calls.append("file_bug")
+            raise AssertionError("file_bug should not be called when dry_run is true")
+
+        def search(self, _title, **_kwargs):
+            return []
+
+    payload = bug_contract.file_bug_payload(
+        bt=_FakeBugTracker(),
+        bt_mod=_FakeBugTrackerMod(),
+        body={
+            "title": "Preview only",
+            "dry_run": True,
+            "severity": "P2",
+            "category": "OTHER",
+            "description": "no insert",
+        },
+        serialize_bug=_bug_to_dict,
+        filed_by_default="workflow_api",
+        source_kind_default="workflow_api",
+        include_similar_bugs=True,
+    )
+
+    assert calls == []
+    assert payload["dry_run"] is True
+    assert payload["filed"] is False
+    assert payload["preview"]["severity"] == "P2"
+    assert payload["preview"]["title"] == "Preview only"
+
+
 def test_list_and_search_payloads_apply_source_issue_filter() -> None:
     captured: dict[str, dict[str, object]] = {}
     bug = _sample_bug()

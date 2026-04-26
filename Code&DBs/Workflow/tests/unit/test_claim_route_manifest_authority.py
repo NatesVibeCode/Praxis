@@ -81,7 +81,44 @@ class _ClaimConn:
         if "FROM market_benchmark_metric_registry" in query:
             return []
         if "FROM workflow_runs" in query:
-            return []
+            return [{"runtime_profile_ref": "nate-private"}]
+        if "FROM effective_private_provider_job_catalog" in query:
+            return [
+                {
+                    "runtime_profile_ref": "nate-private",
+                    "job_type": "build",
+                    "transport_type": "CLI",
+                    "adapter_type": "cli_llm",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4",
+                    "model_version": "gpt-5.4",
+                    "cost_structure": "subscription_included",
+                    "cost_metadata": {},
+                    "reason_code": "catalog.available",
+                    "candidate_ref": "cand-openai",
+                    "provider_ref": "provider.openai",
+                    "source_refs": [],
+                    "projected_at": None,
+                    "projection_ref": "projection.private_provider_job_catalog",
+                },
+                {
+                    "runtime_profile_ref": "nate-private",
+                    "job_type": "build",
+                    "transport_type": "CLI",
+                    "adapter_type": "cli_llm",
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-sonnet-4-6",
+                    "model_version": "claude-sonnet-4-6",
+                    "cost_structure": "subscription_included",
+                    "cost_metadata": {},
+                    "reason_code": "catalog.available",
+                    "candidate_ref": "cand-anthropic",
+                    "provider_ref": "provider.anthropic",
+                    "source_refs": [],
+                    "projected_at": None,
+                    "projection_ref": "projection.private_provider_job_catalog",
+                },
+            ]
         if "FROM registry_runtime_profile_authority" in query:
             return []
         if "GROUP BY 1" in query:

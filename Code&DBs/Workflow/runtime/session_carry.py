@@ -45,6 +45,39 @@ _HEADING_TARGETS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("open questions", "questions"), "open_questions"),
     (("risks", "failure modes"), "risks"),
 )
+_PROVIDER_MODEL_SLUG_RE = re.compile(
+    r"\b(?P<slug>[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.:/+-]*)\b",
+    re.IGNORECASE,
+)
+_ROUTE_INTENT_RE = re.compile(
+    r"\b(access|agent|auth|backed|credential|default|dispatch|engine|fallback|failover|key|llm|model|primary|provider|route|subscription|transport|via|worker)\b",
+    re.IGNORECASE,
+)
+_TRANSPORT_HINTS = {"api": "API", "cli": "CLI"}
+_PROVIDER_HINTS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("anthropic",),
+    "claude": ("anthropic",),
+    "sonnet": ("anthropic",),
+    "opus": ("anthropic",),
+    "codex": ("openai",),
+    "gemini": ("google", "gemini"),
+    "openai": ("openai",),
+    "openrouter": ("openrouter",),
+    "deepseek": ("deepseek", "openrouter", "together"),
+}
+_MODEL_FAMILY_HINTS = frozenset(
+    {"claude", "codex", "deepseek", "gemini", "opus", "sonnet"}
+)
+_KNOWN_ROUTE_PREFIXES = {
+    "anthropic",
+    "codex",
+    "deepseek",
+    "gemini",
+    "google",
+    "openai",
+    "openrouter",
+    "together",
+}
 
 
 class SessionCompactor:
@@ -300,6 +333,7 @@ def build_interaction_pack(
     tool_results: Sequence[Mapping[str, Any] | Any] = (),
     max_items: int = 5,
     token_budget: int = 2000,
+    effective_provider_job_catalog: Sequence[Mapping[str, Any] | Any] | None = None,
 ) -> Optional[CarryForwardPack]:
     clean_objective = (objective or "").strip()
     clean_content = (assistant_content or "").strip()
@@ -311,6 +345,11 @@ def build_interaction_pack(
         tool_results=tool_results,
         max_items=max_items,
     )
+    if effective_provider_job_catalog is not None:
+        sections = _filter_sections_for_effective_catalog(
+            sections,
+            effective_provider_job_catalog=effective_provider_job_catalog,
+        )
     if not any(sections.values()):
         return None
 
@@ -324,6 +363,70 @@ def build_interaction_pack(
         next_actions=sections["next_actions"],
     )
     return SessionCompactor().compact(pack, max_tokens=token_budget)
+
+
+def load_effective_provider_job_catalog_for_carry(
+    conn: Any,
+    *,
+    runtime_profile_ref: str | None = None,
+) -> tuple[Any, ...]:
+    """Load the current runtime profile's effective provider catalog for rollover."""
+    target_runtime_profile_ref = str(runtime_profile_ref or "").strip()
+    if not target_runtime_profile_ref:
+        from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
+
+        target_runtime_profile_ref = default_native_runtime_profile_ref(conn)
+    from storage.postgres import PostgresTransportEligibilityRepository
+
+    return PostgresTransportEligibilityRepository(
+        conn
+    ).list_effective_provider_job_catalog(
+        runtime_profile_ref=target_runtime_profile_ref,
+    )
+
+
+def filter_pack_for_effective_provider_catalog(
+    pack: CarryForwardPack,
+    *,
+    effective_provider_job_catalog: Sequence[Mapping[str, Any] | Any],
+) -> CarryForwardPack:
+    """Remove stale provider/model routing guidance from a carry-forward pack."""
+    sections = _filter_sections_for_effective_catalog(
+        {
+            "decisions": list(pack.decisions),
+            "open_questions": list(pack.open_questions),
+            "constraints": list(pack.constraints),
+            "risks": list(pack.risks),
+            "artifacts": list(pack.artifacts),
+            "next_actions": list(pack.next_actions),
+        },
+        effective_provider_job_catalog=effective_provider_job_catalog,
+    )
+    filtered = CarryForwardPack(
+        pack_id=pack.pack_id,
+        objective=pack.objective,
+        decisions=tuple(sections["decisions"]),
+        open_questions=tuple(sections["open_questions"]),
+        constraints=tuple(sections["constraints"]),
+        risks=tuple(sections["risks"]),
+        artifacts=tuple(sections["artifacts"]),
+        next_actions=tuple(sections["next_actions"]),
+        created_at=pack.created_at,
+        token_estimate=0,
+    )
+    compactor = SessionCompactor()
+    return CarryForwardPack(
+        pack_id=filtered.pack_id,
+        objective=filtered.objective,
+        decisions=filtered.decisions,
+        open_questions=filtered.open_questions,
+        constraints=filtered.constraints,
+        risks=filtered.risks,
+        artifacts=filtered.artifacts,
+        next_actions=filtered.next_actions,
+        created_at=filtered.created_at,
+        token_estimate=compactor.estimate_tokens(filtered),
+    )
 
 
 def _extract_interaction_sections(
@@ -383,6 +486,99 @@ def _extract_interaction_sections(
         key: _dedupe_trim(values, max_items=max_items)
         for key, values in sections.items()
     }
+
+
+def _filter_sections_for_effective_catalog(
+    sections: Mapping[str, Sequence[str]],
+    *,
+    effective_provider_job_catalog: Sequence[Mapping[str, Any] | Any],
+) -> dict[str, Tuple[str, ...]]:
+    policy = _catalog_policy(effective_provider_job_catalog)
+    return {
+        key: tuple(
+            item
+            for item in values
+            if _carry_item_allowed_by_catalog(str(item), policy)
+        )
+        for key, values in sections.items()
+    }
+
+
+def _catalog_policy(
+    effective_provider_job_catalog: Sequence[Mapping[str, Any] | Any],
+) -> dict[str, set[str]]:
+    allowed_slugs: set[str] = set()
+    allowed_providers: set[str] = set()
+    allowed_models: set[str] = set()
+    allowed_transports: set[str] = set()
+    for row in effective_provider_job_catalog:
+        provider = _catalog_row_text(row, "provider_slug").lower()
+        model = _catalog_row_text(row, "model_slug").lower()
+        transport = _catalog_row_text(row, "transport_type").upper()
+        if provider:
+            allowed_providers.add(provider)
+        if model:
+            allowed_models.add(model)
+        if provider and model:
+            allowed_slugs.add(f"{provider}/{model}")
+        if transport:
+            allowed_transports.add(transport)
+    route_prefixes = set(_KNOWN_ROUTE_PREFIXES)
+    route_prefixes.update(allowed_providers)
+    return {
+        "allowed_slugs": allowed_slugs,
+        "allowed_providers": allowed_providers,
+        "allowed_models": allowed_models,
+        "allowed_transports": allowed_transports,
+        "route_prefixes": route_prefixes,
+    }
+
+
+def _catalog_row_text(row: Mapping[str, Any] | Any, key: str) -> str:
+    if isinstance(row, Mapping):
+        return str(row.get(key) or "").strip()
+    return str(getattr(row, key, "") or "").strip()
+
+
+def _carry_item_allowed_by_catalog(item: str, policy: Mapping[str, set[str]]) -> bool:
+    text = " ".join(item.strip().split())
+    if not text:
+        return False
+    lowered = text.lower()
+    route_prefixes = policy["route_prefixes"]
+    allowed_slugs = policy["allowed_slugs"]
+    explicit_slugs = [
+        match.group("slug").lower().rstrip(".,;:")
+        for match in _PROVIDER_MODEL_SLUG_RE.finditer(text)
+        if match.group("slug").split("/", 1)[0].lower() in route_prefixes
+    ]
+    if explicit_slugs and any(slug not in allowed_slugs for slug in explicit_slugs):
+        return False
+
+    has_route_intent = bool(_ROUTE_INTENT_RE.search(text))
+    if not has_route_intent:
+        return True
+
+    allowed_providers = policy["allowed_providers"]
+    allowed_models = policy["allowed_models"]
+    for hint, providers in _PROVIDER_HINTS.items():
+        if not re.search(rf"\b{re.escape(hint)}\b", lowered, re.IGNORECASE):
+            continue
+        provider_allowed = any(provider in allowed_providers for provider in providers)
+        model_allowed = any(hint in model for model in allowed_models)
+        if hint in _MODEL_FAMILY_HINTS:
+            if not model_allowed:
+                return False
+            continue
+        if not provider_allowed and not model_allowed:
+            return False
+
+    allowed_transports = policy["allowed_transports"]
+    for hint, transport in _TRANSPORT_HINTS.items():
+        if re.search(rf"\b{re.escape(hint)}\b", lowered, re.IGNORECASE):
+            if transport not in allowed_transports:
+                return False
+    return True
 
 
 def _heading_target(line: str) -> str | None:

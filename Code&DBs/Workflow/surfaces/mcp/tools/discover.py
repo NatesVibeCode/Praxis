@@ -83,6 +83,7 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
 
             clean.append(entry)
 
+        context_warning = None
         if include_interpretive_context:
             try:
                 clean = attach_interpretive_context_to_items(
@@ -96,15 +97,18 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
                         6 if max_context_fields is None else max_context_fields
                     ),
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                context_warning = f"interpretive-context attachment failed: {type(exc).__name__}: {exc}"
 
-        return {
+        payload: dict[str, Any] = {
             "ok": True,
             "query": query,
             "results": clean,
             "count": len(clean),
         }
+        if context_warning:
+            payload["warning"] = context_warning
+        return payload
 
     elif action == "reindex":
         force = params.get("force", False)

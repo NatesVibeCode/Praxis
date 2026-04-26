@@ -9,7 +9,6 @@ import os
 
 import pytest
 
-from adapters.cli_llm import CLILLMAdapter
 import adapters.credentials as credentials_mod
 from adapters.credentials import CredentialResolutionError, resolve_credential
 from adapters.deterministic import AdapterRegistry, DeterministicTaskRequest
@@ -175,91 +174,6 @@ def test_adapter_registry_still_resolves_deterministic_task() -> None:
     registry = AdapterRegistry()
     resolved = registry.resolve(adapter_type="deterministic_task")
     assert resolved.executor_type == "adapter.deterministic_task"
-
-
-def test_adapter_registry_resolves_cli_llm() -> None:
-    cli = CLILLMAdapter()
-    registry = AdapterRegistry(cli_llm_adapter=cli)
-    resolved = registry.resolve(adapter_type="cli_llm")
-    assert isinstance(resolved, _WrappedAdapter)
-    assert resolved._inner is cli
-    assert resolved.executor_type == cli.executor_type
-
-
-def test_cli_adapter_fails_closed_without_prompt() -> None:
-    adapter = CLILLMAdapter()
-    request = DeterministicTaskRequest(
-        node_id="node_0",
-        task_name="missing_prompt",
-        input_payload={},
-        expected_outputs={},
-        dependency_inputs={},
-        execution_boundary_ref="workspace:test",
-    )
-    result = adapter.execute(request=request)
-    assert result.status == "failed"
-    assert result.failure_code == "adapter.input_invalid"
-
-
-def test_cli_adapter_fails_closed_on_unknown_provider() -> None:
-    adapter = CLILLMAdapter(default_provider="nonexistent_provider")
-    request = DeterministicTaskRequest(
-        node_id="node_0",
-        task_name="bad_provider",
-        input_payload={"prompt": "hello"},
-        expected_outputs={},
-        dependency_inputs={},
-        execution_boundary_ref="workspace:test",
-    )
-    result = adapter.execute(request=request)
-    assert result.status == "failed"
-    assert result.failure_code == "cli_adapter.provider_unmapped"
-
-
-def test_cli_adapter_resolves_provider_from_provider_slug() -> None:
-    """Verify provider_slug in input_payload drives CLI selection."""
-    adapter = CLILLMAdapter(default_provider="anthropic")
-    request = DeterministicTaskRequest(
-        node_id="node_0",
-        task_name="provider_test",
-        input_payload={
-            "prompt": "hello",
-            "provider_slug": "nonexistent_provider",
-        },
-        expected_outputs={},
-        dependency_inputs={},
-        execution_boundary_ref="workspace:test",
-    )
-    result = adapter.execute(request=request)
-    # Should fail with provider_unmapped, proving provider_slug was used
-    assert result.status == "failed"
-    assert result.failure_code == "cli_adapter.provider_unmapped"
-
-
-def test_cli_adapter_resolves_provider_from_legacy_cli_hint() -> None:
-    """Verify cli='claude' maps to anthropic provider."""
-    adapter = CLILLMAdapter(default_provider="openai")
-    request = DeterministicTaskRequest(
-        node_id="node_0",
-        task_name="legacy_test",
-        input_payload={
-            "prompt": "hello",
-            "cli": "claude",
-            # binary won't be found in test PATH, but we prove the mapping works
-        },
-        expected_outputs={},
-        dependency_inputs={},
-        execution_boundary_ref="workspace:test",
-    )
-    result = adapter.execute(request=request)
-    # May fail with binary_not_found or succeed — either way proves
-    # the provider was resolved to anthropic (not the default openai)
-    if result.status == "failed":
-        assert result.failure_code in (
-            "cli_adapter.binary_not_found",
-            "cli_adapter.exec_error",
-            "cli_adapter.nonzero_exit",
-        )
 
 
 def test_llm_adapter_calls_real_api() -> None:

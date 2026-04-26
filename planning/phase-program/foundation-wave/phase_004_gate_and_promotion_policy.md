@@ -6,7 +6,7 @@ Registry authority: [planning/phase-program/praxis_0_100_registry.json](/workspa
 
 Grounding note:
 - Repo evidence in this packet was read from the mounted checkout at `/workspace`.
-- The supplied execution root for later work is `/Users/nate/Praxis` with database `postgresql://nate@127.0.0.1:5432/praxis`.
+- The supplied execution root for later work is the Praxis repository root; load the database URL through `source scripts/_workflow_env.sh && workflow_load_repo_env` and use `WORKFLOW_DATABASE_URL`.
 - The execution context shard says `execution_packets_ready=true`, `repo_snapshots_ready=true`, `verification_registry_ready=true`, and `verify_refs_ready=true`, while `fully_proved_verification_coverage=0.0` and `verification_coverage=0.0`. Phase 4 therefore needs one real proof on the live review seam, not more policy description.
 
 ## 1. Objective in repo terms
@@ -122,8 +122,8 @@ Grounding note:
 ## 7. Verification commands
 
 ```bash
-cd /Users/nate/Praxis
-export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'
+cd <Praxis repository root>  # contains ./scripts/_workflow_env.sh
+. ./scripts/_workflow_env.sh && workflow_load_repo_env
 export PYTHONPATH='Code&DBs/Workflow'
 python -m pytest 'Code&DBs/Workflow/tests/integration/test_gate_and_promotion_policy.py' -q
 python -m pytest 'Code&DBs/Workflow/tests/unit/test_workflow_submission_policy.py' -q

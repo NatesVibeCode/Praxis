@@ -11,7 +11,7 @@ Authority map:
 
 Grounding note:
 - This packet is grounded in the mounted repo snapshot at `/workspace`.
-- The declared execution root is `/Users/nate/Praxis`; verification commands target that root exactly.
+- The declared execution root is the Praxis repository root; verification commands target that root exactly.
 - The execution shard says compile inputs are ready, but proof coverage is still effectively unproven: `verification_coverage=0.0`, `fully_proved_verification_coverage=0.0`, `write_manifest_coverage=0.2337`.
 - The repo already contains the schema, storage writer, native frontdoor, and split tests for this phase. The first sprint is therefore a proof-and-repair sprint, not a redesign sprint.
 
@@ -141,8 +141,8 @@ Grounding note:
 
 ## 7. Verification commands
 
-- `cd /Users/nate/Praxis`
-- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
+- `cd` to the Praxis repository root (the directory that contains `scripts/_workflow_env.sh`)
+- `. ./scripts/_workflow_env.sh && workflow_load_repo_env`
 - `export PYTHONPATH='Code&DBs/Workflow'`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_native_frontdoor.py' -q`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py' -q`

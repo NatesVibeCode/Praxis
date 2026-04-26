@@ -243,10 +243,18 @@
     "236_operation_catalog_surface_action_performed.sql",
     "237_semantic_predicate_catalog.sql",
     "238_backfill_empty_semantic_predicate_allowlists.sql",
+    "238_semantic_invariant_scan_operation.sql",
+    "239_primitive_catalog.sql",
     "239_register_operation_atomic_helper.sql",
     "240_register_operation_atomic_helper_event_required_default.sql",
     "241_app_manifests_workspace_seed_bundles.sql",
-    "242_workflow_type_token_data_dictionary_objects.sql"
+    "242_workflow_type_token_data_dictionary_objects.sql",
+    "243_runtime_profile_admitted_routes_projection.sql",
+    "244_ui_surface_file_anchor_registry.sql",
+    "245_compile_run_trace.sql",
+    "253_plan_synthesis_and_fork_author_routes.sql",
+    "254_restore_cli_default_for_build_and_plan_section_author.sql",
+    "255_private_provider_job_catalog.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -5818,6 +5826,38 @@
       {"object_type": "row", "object_name": "semantic_predicates.governed_by_decision_ref"},
       {"object_type": "row", "object_name": "semantic_predicates.touches_repo_path"}
     ],
+    "238_semantic_invariant_scan_operation.sql": [
+      {"object_type": "row", "object_name": "authority_object_registry.operation.semantic_invariant.scan"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.query.semantic_invariant.scan"},
+      {"object_type": "row", "object_name": "operation_catalog_registry.semantic-invariant-scan"}
+    ],
+    "239_primitive_catalog.sql": [
+      {"object_type": "table", "object_name": "primitive_catalog"},
+      {"object_type": "index", "object_name": "primitive_catalog_kind_idx"},
+      {"object_type": "row", "object_name": "operator_decisions.operator_decision.architecture_policy.primitives.catalog_managed"},
+      {"object_type": "row", "object_name": "primitive_catalog.semantic_predicate_catalog"},
+      {"object_type": "row", "object_name": "primitive_catalog.semantic_propagation_engine"},
+      {"object_type": "row", "object_name": "primitive_catalog.semantic_invariant_scanner"},
+      {"object_type": "row", "object_name": "primitive_catalog.semantic_invariant_scan_handler"},
+      {"object_type": "row", "object_name": "primitive_catalog.semantic_equivalence_engine"},
+      {"object_type": "row", "object_name": "primitive_catalog.primitive_catalog"},
+      {"object_type": "row", "object_name": "authority_domains.authority.primitive_catalog"},
+      {"object_type": "row", "object_name": "authority_event_contracts.event_contract.primitive.recorded"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.primitive_catalog"},
+      {"object_type": "row", "object_name": "authority_object_registry.table.public.primitive_catalog"},
+      {"object_type": "row", "object_name": "authority_object_registry.operation.primitive.record"},
+      {"object_type": "row", "object_name": "authority_object_registry.operation.primitive.list"},
+      {"object_type": "row", "object_name": "authority_object_registry.operation.primitive.get"},
+      {"object_type": "row", "object_name": "authority_object_registry.operation.primitive.scan_consistency"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.command.primitive.record"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.query.primitive.list"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.query.primitive.get"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.query.primitive.scan_consistency"},
+      {"object_type": "row", "object_name": "operation_catalog_registry.primitive.record"},
+      {"object_type": "row", "object_name": "operation_catalog_registry.primitive.list"},
+      {"object_type": "row", "object_name": "operation_catalog_registry.primitive.get"},
+      {"object_type": "row", "object_name": "operation_catalog_registry.primitive.scan_consistency"}
+    ],
     "239_register_operation_atomic_helper.sql": [
       {"object_type": "function", "object_name": "register_operation_atomic"}
     ],
@@ -5831,6 +5871,41 @@
     ],
     "242_workflow_type_token_data_dictionary_objects.sql": [
       {"object_type": "row", "object_name": "data_dictionary_objects.workflow_type_tokens"}
+    ],
+    "243_runtime_profile_admitted_routes_projection.sql": [
+      {"object_type": "table", "object_name": "runtime_profile_admitted_routes"},
+      {"object_type": "index", "object_name": "runtime_profile_admitted_routes_slug_idx"},
+      {"object_type": "index", "object_name": "runtime_profile_admitted_routes_projection_idx"},
+      {"object_type": "row", "object_name": "authority_projection_registry.projection.runtime_profile_admitted_routes"},
+      {"object_type": "row", "object_name": "authority_projection_contracts.projection_contract.runtime_profile_admitted_routes"},
+      {"object_type": "row", "object_name": "authority_projection_state.projection.runtime_profile_admitted_routes"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.runtime_profile_admitted_routes"}
+    ],
+    "244_ui_surface_file_anchor_registry.sql": [
+      {"object_type": "table", "object_name": "ui_surface_file_anchor_registry"},
+      {"object_type": "index", "object_name": "ui_surface_file_anchor_registry_surface_order_idx"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.ui_surface_file_anchor_registry"},
+      {"object_type": "row", "object_name": "authority_object_registry.table.public.ui_surface_file_anchor_registry"}
+    ],
+    "245_compile_run_trace.sql": [
+      {"object_type": "table", "object_name": "compile_runs"},
+      {"object_type": "index", "object_name": "compile_runs_started_at_idx"},
+      {"object_type": "index", "object_name": "compile_runs_silent_degradation_idx"},
+      {"object_type": "index", "object_name": "compile_runs_empty_output_idx"},
+      {"object_type": "index", "object_name": "compile_runs_workflow_idx"},
+      {"object_type": "view", "object_name": "compile_health"}
+    ],
+    "253_plan_synthesis_and_fork_author_routes.sql": [],
+    "254_restore_cli_default_for_build_and_plan_section_author.sql": [],
+    "255_private_provider_job_catalog.sql": [
+      {"object_type": "table", "object_name": "private_provider_job_catalog"},
+      {"object_type": "index", "object_name": "private_provider_job_catalog_effective_idx"},
+      {"object_type": "index", "object_name": "private_provider_job_catalog_model_idx"},
+      {"object_type": "view", "object_name": "effective_private_provider_job_catalog"},
+      {"object_type": "function", "object_name": "refresh_private_provider_job_catalog"},
+      {"object_type": "row", "object_name": "authority_object_registry.table.public.private_provider_job_catalog"},
+      {"object_type": "row", "object_name": "authority_projection_registry.projection.private_provider_job_catalog"},
+      {"object_type": "row", "object_name": "data_dictionary_objects.private_provider_job_catalog"}
     ]
   },
   "policy_buckets": {
@@ -6078,10 +6153,18 @@
       "236_operation_catalog_surface_action_performed.sql",
       "237_semantic_predicate_catalog.sql",
       "238_backfill_empty_semantic_predicate_allowlists.sql",
+      "238_semantic_invariant_scan_operation.sql",
+      "239_primitive_catalog.sql",
       "239_register_operation_atomic_helper.sql",
       "240_register_operation_atomic_helper_event_required_default.sql",
       "241_app_manifests_workspace_seed_bundles.sql",
-      "242_workflow_type_token_data_dictionary_objects.sql"
+      "242_workflow_type_token_data_dictionary_objects.sql",
+      "243_runtime_profile_admitted_routes_projection.sql",
+      "244_ui_surface_file_anchor_registry.sql",
+      "245_compile_run_trace.sql",
+      "253_plan_synthesis_and_fork_author_routes.sql",
+      "254_restore_cli_default_for_build_and_plan_section_author.sql",
+      "255_private_provider_job_catalog.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -6198,6 +6281,14 @@
     "093": [
       "093_deepseek_direct_provider.sql",
       "093_memory_exact_duplicate_repair.sql"
+    ],
+    "238": [
+      "238_backfill_empty_semantic_predicate_allowlists.sql",
+      "238_semantic_invariant_scan_operation.sql"
+    ],
+    "239": [
+      "239_primitive_catalog.sql",
+      "239_register_operation_atomic_helper.sql"
     ],
     "094": [
       "094_model_capability_audit.sql",

@@ -217,7 +217,7 @@ def execute_control_operator(
     inbound_edges: Mapping[str, Sequence[WorkflowEdgeContract]],
     completed_nodes: Mapping[str, NodeExecutionRecord],
     execution_boundary_ref: str,
-    max_parallel_nodes: int,
+    max_parallel_nodes: int | None,
     cancel_signal: Any = None,
     execute_graph_fn: _ExecuteGraphFn,
 ) -> tuple[list[NodeExecutionRecord], NodeExecutionRecord]:
@@ -389,7 +389,7 @@ def execute_control_operator(
                     node_results=local_results,
                     execution_order=local_order,
                     execution_boundary_ref=execution_boundary_ref,
-                    max_parallel_nodes=max(1, min(max_parallel_nodes, max_parallel)),
+                    max_parallel_nodes=max(1, max_parallel if max_parallel_nodes is None else min(max_parallel_nodes, max_parallel)),
                     context_accumulator=None,
                 )
                 child_records.extend(local_results)
@@ -528,7 +528,7 @@ def execute_control_operator(
                     node_results=local_results,
                     execution_order=local_order,
                     execution_boundary_ref=execution_boundary_ref,
-                    max_parallel_nodes=max(1, min(max_parallel_nodes, max_parallel)),
+                    max_parallel_nodes=max(1, max_parallel if max_parallel_nodes is None else min(max_parallel_nodes, max_parallel)),
                     context_accumulator=None,
                 )
                 child_records.extend(local_results)

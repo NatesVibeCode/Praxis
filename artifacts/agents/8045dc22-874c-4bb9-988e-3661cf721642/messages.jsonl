@@ -1,0 +1,1 @@
+{"type": "error", "error_code": "agent_cli_failed", "message": "Error: When using --print, --output-format=stream-json requires --verbose"}

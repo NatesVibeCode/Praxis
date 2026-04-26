@@ -843,7 +843,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "  duplicate_check <query>\n"
             "                     Fast title-like duplicate check without replay or cluster enrichment\n"
             "  stats              Bug counts by category/severity/status\n"
-            "  file               File a new bug\n"
+            "  file               File a new bug (use --dry-run to validate without inserting)\n"
             "  history            Show bug history and linked evidence\n"
             "  packet             Show a replay packet for one bug\n"
             "  replay             Replay a bug from canonical evidence\n"
@@ -859,6 +859,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "  --all              Include resolved bugs (default: open only)\n"
             "  --open-only        Limit list output to open bugs; accepted for agent-friendly parity\n"
             "  --body TEXT        Alias for --description on filing and duplicate checks\n"
+            "  --dry-run          With file: validate and show preview; do not insert a bug\n"
             "\n"
             "  Examples:\n"
             "    workflow bugs list --severity P1\n"
@@ -942,6 +943,10 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             continue
         if token == "--json":
             as_json = True
+            i += 1
+            continue
+        if token == "--dry-run":
+            params["dry_run"] = True
             i += 1
             continue
         if token == "--yes":
@@ -1348,7 +1353,7 @@ def _research_command(args: list[str], *, stdout: TextIO) -> int:
             "\n"
             "  Examples:\n"
             "    workflow research 'API auth drift'\n"
-            "    workflow research 'provider routing tradeoffs' --workers 20 --agent deepseek/deepseek-r3\n"
+            "    workflow research 'provider routing tradeoffs' --workers 20 --agent auto/research\n"
             "    workflow research list --json\n"
         )
         return 2
@@ -1356,7 +1361,7 @@ def _research_command(args: list[str], *, stdout: TextIO) -> int:
     action = "run"
     topic_parts: list[str] = []
     workers = 40
-    agent = "deepseek/deepseek-r3"
+    agent = "auto/research"
     threshold = None
     as_json = False
     i = 0

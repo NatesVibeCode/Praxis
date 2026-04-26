@@ -6,7 +6,6 @@ from ._shared import RouteEntry, RouteMatcher, _exact, _prefix, _prefix_suffix
 from . import _query_bugs as _bugs
 from . import _query_handoff as _handoff
 from . import projections as _projections
-from . import surface_actions as _surface_actions
 from . import workflow_query as _handler
 
 
@@ -50,7 +49,7 @@ def _object_type_field_path(candidate: str) -> bool:
 
 QUERY_POST_ROUTES: list[RouteEntry] = [
     (_exact("/query"), _handler._handle_query_post),
-    *_surface_actions.SURFACE_ACTION_POST_ROUTES,
+    (_exact("/api/compile/preview"), _handler._handle_compile_preview_post),
     (_exact("/api/catalog/review-decisions"), _handler._handle_catalog_review_decisions_post),
     (_exact("/api/object-types"), _handler._handle_object_types_post),
     (_object_type_fields_path, _handler._handle_object_fields_post),

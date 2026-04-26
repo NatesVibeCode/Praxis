@@ -772,7 +772,29 @@ class BugTracker:
             vector_query.set_embedding("bugs", "bug_id", bug_id)
 
         row = self._conn.fetchrow("SELECT * FROM bugs WHERE bug_id = $1", bug_id)
-        return self._row_to_bug(row), similar_bugs
+        bug = self._row_to_bug(row)
+        
+        # Automatically link discovery evidence
+        if discovered_in_receipt_id:
+            self.link_evidence(
+                bug_id,
+                evidence_kind="receipt",
+                evidence_ref=discovered_in_receipt_id,
+                evidence_role=_bug_evidence.EVIDENCE_ROLE_DISCOVERED_BY,
+                created_by=filed_by,
+                notes="Discovery receipt captured during bug filing.",
+            )
+        if discovered_in_run_id:
+            self.link_evidence(
+                bug_id,
+                evidence_kind="run",
+                evidence_ref=discovered_in_run_id,
+                evidence_role=_bug_evidence.EVIDENCE_ROLE_DISCOVERED_BY,
+                created_by=filed_by,
+                notes="Discovery run captured during bug filing.",
+            )
+            
+        return bug, similar_bugs
 
     def merge_resume_context(self, bug_id: str, patch: dict[str, Any]) -> Bug | None:
         """Shallow-merge *patch* into bugs.resume_context (jsonb ||)."""
@@ -2257,34 +2279,68 @@ async def afile_bug(
         if exists is None:
             raise ValueError(f"unknown discovered_in_receipt_id: {discovered_in_receipt_id}")
 
-    await conn.execute(
-        """INSERT INTO bugs
-            (bug_id, bug_key, title, severity, status, priority, category, description,
-             summary, source_kind, discovered_in_run_id, discovered_in_receipt_id,
-             owner_ref, source_issue_id, decision_ref, opened_at, resolved_at,
-             created_at, updated_at, filed_by, tags, resume_context)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULL, $17, $18, $19, $20, $21::jsonb)""",
-        bug_id,
-        bug_key,
-        title,
-        normalized_severity.value,
-        BugStatus.OPEN.value,
-        normalized_severity.value,
-        normalized_category.value,
-        description,
-        description[:200],
-        normalized_source_kind,
-        discovered_in_run_id,
-        discovered_in_receipt_id,
-        owner_ref,
-        normalized_source_issue_id,
-        normalized_decision_ref,
-        now,
-        now,
-        now,
-        filed_by,
-        ",".join(normalized_tags),
-        json.dumps(initial_resume, default=str),
-    )
+    async with conn.transaction():
+        await conn.execute(
+            """INSERT INTO bugs
+                (bug_id, bug_key, title, severity, status, priority, category, description,
+                 summary, source_kind, discovered_in_run_id, discovered_in_receipt_id,
+                 owner_ref, source_issue_id, decision_ref, opened_at, resolved_at,
+                 created_at, updated_at, filed_by, tags, resume_context)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULL, $17, $18, $19, $20, $21::jsonb)""",
+            bug_id,
+            bug_key,
+            title,
+            normalized_severity.value,
+            BugStatus.OPEN.value,
+            normalized_severity.value,
+            normalized_category.value,
+            description,
+            description[:200],
+            normalized_source_kind,
+            discovered_in_run_id,
+            discovered_in_receipt_id,
+            owner_ref,
+            normalized_source_issue_id,
+            normalized_decision_ref,
+            now,
+            now,
+            now,
+            filed_by,
+            ",".join(normalized_tags),
+            json.dumps(initial_resume, default=str),
+        )
+
+        # Automatically link discovery evidence
+        if discovered_in_receipt_id:
+            await conn.execute(
+                """INSERT INTO bug_evidence_links
+                    (bug_evidence_link_id, bug_id, evidence_kind, evidence_ref,
+                     evidence_role, created_by, notes, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                f"bug_evidence_link:{uuid.uuid4().hex}",
+                bug_id,
+                "receipt",
+                discovered_in_receipt_id,
+                _bug_evidence.EVIDENCE_ROLE_DISCOVERED_BY,
+                filed_by,
+                "Discovery receipt captured during bug filing.",
+                now,
+            )
+        if discovered_in_run_id:
+            await conn.execute(
+                """INSERT INTO bug_evidence_links
+                    (bug_evidence_link_id, bug_id, evidence_kind, evidence_ref,
+                     evidence_role, created_by, notes, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                f"bug_evidence_link:{uuid.uuid4().hex}",
+                bug_id,
+                "run",
+                discovered_in_run_id,
+                _bug_evidence.EVIDENCE_ROLE_DISCOVERED_BY,
+                filed_by,
+                "Discovery run captured during bug filing.",
+                now,
+            )
+
     row = await conn.fetchrow("SELECT * FROM bugs WHERE bug_id = $1", bug_id)
     return dict(row), []

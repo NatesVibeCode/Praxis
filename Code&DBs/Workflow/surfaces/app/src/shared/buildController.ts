@@ -1,7 +1,7 @@
 // Shared build controller — all API interactions for build state.
 // No React. Pure async functions that take IDs and return typed results.
 
-import type { BuildPayload } from './types';
+import type { BuildPayload, CompilePreviewPayload } from './types';
 
 interface BuildDefinitionRequest {
   workflowId?: string | null;
@@ -103,6 +103,14 @@ export async function compileDefinition(
     title: opts?.title,
     enable_llm: true,
   });
+}
+
+export async function previewCompile(prose: string): Promise<CompilePreviewPayload> {
+  return _fetchJson('/api/compile/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ intent: prose }),
+  }, { timeoutMs: 10000 });
 }
 
 export async function refineDefinition(

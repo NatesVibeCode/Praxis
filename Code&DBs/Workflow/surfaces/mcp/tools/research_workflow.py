@@ -7,7 +7,7 @@ from typing import Any
 from ..subsystems import REPO_ROOT
 
 
-_DEFAULT_WORKER_AGENT = "deepseek/deepseek-r3"
+_DEFAULT_WORKER_AGENT = "auto/research"
 _DEFAULT_WORKER_COUNT = 40
 
 
@@ -246,7 +246,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "One call generates a workflow spec (seed decomposition, N parallel "
                 "research workers via replicate, synthesis) and launches it through the service bus.\n\n"
                 "USE WHEN: you want deep, cited research on a topic from multiple angles. "
-                "The workflow fans out parallel workers (default 40 DeepSeek via OpenRouter) "
+                "The workflow fans out parallel workers through the effective provider catalog "
                 "and synthesizes their findings.\n\n"
                 "EXAMPLES:\n"
                 "  Run research:  praxis_research_workflow(action='run', topic='AI agent architecture patterns')\n"
@@ -293,9 +293,9 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "agent": {
                         "type": "string",
-                        "default": "deepseek/deepseek-r3",
+                        "default": "auto/research",
                         "description": (
-                            "Model slug for worker jobs. Default: deepseek/deepseek-r3 (low tier)."
+                            "Worker route. Default: auto/research through the effective provider catalog."
                         ),
                     },
                     "threshold": {

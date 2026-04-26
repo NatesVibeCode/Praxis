@@ -910,6 +910,53 @@
   text-align: left;
   line-height: 1.6;
 }
+.moon-compose-preview {
+  display: grid;
+  gap: 10px;
+  padding: 4px 0 2px;
+}
+.moon-compose-preview__status {
+  font-size: var(--moon-font-size-xs);
+  color: var(--moon-fg-muted);
+}
+.moon-compose-preview__status--error {
+  color: var(--moon-error);
+}
+.moon-compose-preview__row {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+.moon-compose-preview__label {
+  padding-top: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--moon-fg-muted);
+  text-transform: uppercase;
+}
+.moon-compose-preview__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.moon-compose-preview__chip {
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--moon-white-a16);
+  border-radius: 999px;
+  color: var(--moon-white-a90);
+  background: var(--moon-white-a06);
+  font-size: 12px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.moon-compose-preview__chip--gap {
+  border-color: rgba(255, 93, 112, 0.34);
+  color: var(--moon-error);
+  background: rgba(255, 93, 112, 0.08);
+}
 .moon-compose__shortcut {
   font-size: var(--moon-font-size-xs);
   color: var(--moon-fg-muted);

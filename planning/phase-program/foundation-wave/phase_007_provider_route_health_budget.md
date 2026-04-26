@@ -4,7 +4,7 @@ Status: execution_ready
 
 Registry authority: [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) phase `7` (`Provider Route Health Budget`), status `historical_foundation`, predecessor phase `6`, required closeout sequence `review -> healer -> human_approval`.
 
-Grounding note: this packet is grounded in the mounted repo snapshot at `/workspace`. The execution target named in platform context is `/Users/nate/Praxis`, so evidence cites `/workspace` and verification commands are written for that declared root. The execution shard says packets and repo snapshots are ready while verification coverage remains `0.0`, so this packet keeps Phase 7 to one proofable write seam only.
+Grounding note: this packet is grounded in the mounted repo snapshot at `/workspace`. The execution target named in platform context is the Praxis repository root, so evidence cites `/workspace` and verification commands are written for that root. The execution shard says packets and repo snapshots are ready while verification coverage remains `0.0`, so this packet keeps Phase 7 to one proofable write seam only.
 
 ## 1. Objective in repo terms
 
@@ -145,8 +145,8 @@ Grounding note: this packet is grounded in the mounted repo snapshot at `/worksp
 
 ## 7. Verification commands
 
-- `cd /Users/nate/Praxis`
-- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
+- `cd` to the Praxis repository root (the directory that contains `scripts/_workflow_env.sh`)
+- `. ./scripts/_workflow_env.sh && workflow_load_repo_env`
 - `export PYTHONPATH='Code&DBs/Workflow'`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_provider_route_health_window_write_path.py' -q`
 - `python -m pytest 'Code&DBs/Workflow/tests/integration/test_provider_route_control_tower.py' -q`

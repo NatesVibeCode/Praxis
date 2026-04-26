@@ -1,0 +1,13 @@
+{
+  "name": "workflow_response_opus_test",
+  "queue_id": "workflow_response_opus_test_v1",
+  "phase": "research",
+  "outcome_goal": "End-to-end proof: workflow fires via MCP, claude CLI binary executes via cli_llm dispatch, opus-4-7 produces a real response, output lands on disk. Subscription auth via mounted /root/.claude/.credentials.json. No API spend.",
+  "jobs": [
+    {
+      "label": "opus_response_test",
+      "agent": "anthropic/claude-opus-4-7",
+      "prompt": "Respond in 2-3 paragraphs. Identify which CLI binary is invoking you (look at your runtime environment: claude binary path, mounted credentials at /root/.claude/.credentials.json, your model name from the API metadata you can see). Then answer: 'What's the most surprising thing about the Praxis architecture that an outside engineer wouldn't guess from the code?' Draw on what you can see in /workspace — particularly Code&DBs/Workflow/, .claude/CLAUDE.md, the system_authority/ directory, and any operator_decisions you can read. Write the complete response to /workspace/artifacts/workflow_response_opus_test/output.md (create the directory if needed). End your file with a single line: SIGNED: claude-opus-4-7."
+    }
+  ]
+}

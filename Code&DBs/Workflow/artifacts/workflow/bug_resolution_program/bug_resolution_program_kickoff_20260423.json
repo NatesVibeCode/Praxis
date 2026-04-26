@@ -4437,7 +4437,7 @@
           "evidence": [
             "praxis_bugs stats total=49/open_count=48 on canonical CLI surface",
             "praxis workflow health data dictionary summary reports table:bugs about 49 rows",
-            "AGENTS.md fallback psql postgresql://localhost:5432/praxis returned COUNT(*)=270",
+            "AGENTS.md fallback psql (WORKFLOW_DATABASE_URL after _workflow_env) returned COUNT(*)=270",
             "repo .env database host was not resolvable from host psql in this session"
           ],
           "next_steps": [

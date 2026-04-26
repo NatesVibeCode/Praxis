@@ -8,8 +8,8 @@
 ## Real signals observed
 
 - `praxis workflow run examples/research_pipeline.queue.json` initially failed under the default authority path with `WORKFLOW_DATABASE_URL authority unavailable: InvalidAuthorizationSpecificationError: role "postgres" does not exist`.
-- `pg_isready -d postgresql://nate@127.0.0.1:5432/praxis` reports the database is accepting connections.
-- Re-running with `WORKFLOW_DATABASE_URL=postgresql://nate@127.0.0.1:5432/praxis` submitted the workflow successfully.
+- After `source scripts/_workflow_env.sh && workflow_load_repo_env` at the Praxis root, `pg_isready -d "$WORKFLOW_DATABASE_URL"` reported the database is accepting connections.
+- Re-running with `WORKFLOW_DATABASE_URL` set from that same resolver (not a hand-pasted DSN) submitted the workflow successfully.
 - `praxis workflow tools call praxis_workflow --input-json '{"action":"status","run_id":"workflow_8b04978942c2"}' --yes` shows the authoritative state is still `queued`, with `4 pending`, `0/4` completed, and the health signal `stalled_dependency_wait`.
 - `praxis workflow tools call praxis_workflow --input-json '{"action":"list"}' --yes` confirms the run exists but has not advanced.
 - CQRS is the read/write seam under the repo operator surfaces; query discovery passed through the CQRS-backed surfaces rather than ad hoc scripts.

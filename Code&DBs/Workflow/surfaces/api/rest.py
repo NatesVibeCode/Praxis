@@ -45,7 +45,10 @@ from registry.provider_execution_registry import (
 )
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
-from runtime.operation_catalog_bindings import resolve_http_operation_binding
+from runtime.operation_catalog_bindings import (
+    OperationBindingResolutionError,
+    resolve_http_operation_binding,
+)
 from runtime.operation_catalog_gateway import (
     OperationIdempotencyConflict,
     OperationModeViolation,
@@ -580,8 +583,33 @@ def _capability_routes_from_operation_catalog(target_app: FastAPI) -> list[tuple
         limit=500,
     )
     mounted: list[tuple[Any, str]] = []
+    invalid_bindings: list[dict[str, str]] = []
     for definition in resolved:
-        mounted.append((resolve_http_operation_binding(definition), "operation_catalog"))
+        try:
+            mounted.append((resolve_http_operation_binding(definition), "operation_catalog"))
+        except OperationBindingResolutionError as exc:
+            invalid_bindings.append(
+                {
+                    "operation_ref": str(definition.operation_ref),
+                    "operation_name": str(definition.operation_name),
+                    "http_method": str(definition.http_method),
+                    "http_path": str(definition.http_path),
+                    "input_model_ref": str(definition.input_model_ref),
+                    "handler_ref": str(definition.handler_ref),
+                    "error": str(exc),
+                }
+            )
+    target_app.state.capability_mount_errors = invalid_bindings
+    target_app.state.capabilities_mount_degraded = bool(invalid_bindings)
+    if invalid_bindings:
+        logger.warning(
+            "operation catalog skipped %s invalid capability binding(s): %s",
+            len(invalid_bindings),
+            "; ".join(
+                f"{item['operation_name']} ({item['error']})"
+                for item in invalid_bindings[:10]
+            ),
+        )
     return mounted
 
 
@@ -3279,10 +3307,6 @@ async def platform_overview_get(request: Request) -> Response:
 async def projection_get(request: Request, projection_ref: str) -> Response:
     return await _route_to_handler(request)
 
-@app.post("/api/surface/action")
-async def surface_action_post(request: Request) -> Response:
-    return await _route_to_handler(request)
-
 @app.get("/api/workflow-templates")
 async def workflow_templates_get(request: Request) -> Response:
     return await _route_to_handler(request)
@@ -4119,6 +4143,11 @@ async def catalog_review_decisions_post(request: Request) -> Response:
     return await _route_to_handler(request)
 
 
+@app.post("/api/compile/preview")
+async def compile_preview_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+
 # No catch-all routes — every endpoint is explicitly registered above.
 
 
@@ -4212,6 +4241,29 @@ def operator_console_root() -> Any:
             "Pragma": "no-cache",
         },
     )
+
+
+_OPERATOR_CONSOLE_VENDOR_DIR = Path(__file__).resolve().parents[1] / "console" / "vendor"
+_OPERATOR_CONSOLE_VENDOR_ALLOWLIST = {"react.js", "react-dom.js", "htm.js"}
+
+
+@app.get("/console/vendor/{name}", response_model=None, include_in_schema=False)
+def operator_console_vendor(name: str) -> Any:
+    """Serve inlined JS dependencies for the operator console (dev-only).
+
+    Same gate as the console route. Allowlist prevents path traversal and
+    keeps the surface to the three known runtime libs.
+    """
+    if not _operator_console_enabled():
+        raise HTTPException(status_code=404, detail={"message": "operator console is not enabled"})
+    if name not in _OPERATOR_CONSOLE_VENDOR_ALLOWLIST:
+        raise HTTPException(status_code=404, detail={"message": "vendor asset not allowlisted"})
+    asset_path = _OPERATOR_CONSOLE_VENDOR_DIR / name
+    try:
+        body = asset_path.read_bytes()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail={"message": f"vendor asset unavailable: {exc}"}) from exc
+    return Response(content=body, media_type="application/javascript", headers={"Cache-Control": "public, max-age=3600"})
 
 
 def _apply_route_visibility_policy(target_app: FastAPI | None = None) -> None:

@@ -426,7 +426,7 @@ def run_workflow_parallel(
     if len(specs) == 1:
         return [run_workflow(specs[0])]
 
-    workers = max_workers or min(len(specs), 8)
+    workers = max_workers or len(specs)
     results: dict[int, WorkflowResult] = {}
 
     with ThreadPoolExecutor(max_workers=workers) as pool:

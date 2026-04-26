@@ -94,7 +94,7 @@ def fan_out_dispatch(
     *,
     prompt_template: str,
     tier: str = "mid",
-    max_parallel: int = 4,
+    max_parallel: int | None = None,
     label_prefix: str = "fan",
     **spec_kwargs: Any,
 ) -> list[WorkflowResult]:
@@ -141,7 +141,7 @@ def fan_out_from_completion(
     *,
     prompt_template: str,
     tier: str = "mid",
-    max_parallel: int = 4,
+    max_parallel: int | None = None,
     **spec_kwargs: Any,
 ) -> list[WorkflowResult]:
     """Extract a list from *upstream_completion* and fan out.

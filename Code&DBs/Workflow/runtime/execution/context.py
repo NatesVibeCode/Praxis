@@ -99,7 +99,7 @@ def inject_accumulated_context(
       - ``input_payload.context_sections`` (list of dicts) so that the
         prompt renderer picks it up when the dispatch layer uses it.
       - The ``prompt`` string directly (appended) so that adapters that
-        read the raw prompt (like CLILLMAdapter) also see it.
+        read the raw prompt through the workflow CLI backend also see it.
 
     If the accumulator is empty, returns the original node unchanged.
     """

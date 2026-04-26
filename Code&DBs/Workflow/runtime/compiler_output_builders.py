@@ -27,7 +27,7 @@ def build_execution_setup(
     capability_slugs = [_as_text(capability.get("slug")) for capability in capabilities if isinstance(capability, dict)]
     has_fanout = "research/fan-out" in capability_slugs
     has_local_knowledge = "research/local-knowledge" in capability_slugs
-    has_external_scan = "research/gemini-cli" in capability_slugs or text_has_any(
+    has_external_scan = "research/external-catalog" in capability_slugs or text_has_any(
         compiled_prose,
         "external",
         "web",

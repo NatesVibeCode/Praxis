@@ -40,6 +40,7 @@ __all__ = [
     "_failure_zone_lookup",
     "_task_route_candidate_meta",
     "_blocked_candidates_for_task",
+    "_effective_catalog_route_candidates",
 ]
 
 
@@ -529,6 +530,31 @@ def _blocked_candidates_for_task(
     return {row["slug"] for row in rows or []}
 
 
+def _effective_catalog_route_candidates(
+    conn: SyncPostgresConnection,
+    *,
+    runtime_profile_ref: str | None,
+    task_type: str,
+    candidates: list[str],
+) -> list[str]:
+    """Filter workflow candidates through the private effective provider catalog."""
+    if not runtime_profile_ref or not task_type or not candidates:
+        return []
+    from storage.postgres import PostgresTransportEligibilityRepository
+
+    catalog_rows = PostgresTransportEligibilityRepository(
+        conn
+    ).list_effective_provider_job_catalog(
+        runtime_profile_ref=runtime_profile_ref,
+        job_type=task_type,
+    )
+    catalog_slugs = {
+        f"{row.provider_slug}/{row.model_slug}"
+        for row in catalog_rows
+    }
+    return [candidate for candidate in candidates if candidate in catalog_slugs]
+
+
 def _task_route_candidate_meta(
     conn: SyncPostgresConnection,
     *,
@@ -573,14 +599,38 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
         return str(job.get("agent_slug", ""))
 
     route_task_type = str(job.get("route_task_type") or "").strip()
+    runtime_profile_ref = _runtime_profile_ref_for_run(conn, str(job.get("run_id", "")))
+    if route_task_type:
+        catalog_candidates = _effective_catalog_route_candidates(
+            conn,
+            runtime_profile_ref=runtime_profile_ref,
+            task_type=route_task_type,
+            candidates=candidates,
+        )
+        if not catalog_candidates:
+            raise ClaimRouteBlockedError(
+                "routing.no_effective_provider_job_catalog_candidate",
+                (
+                    "effective provider job catalog admitted no candidates "
+                    f"for task_type={route_task_type!r}; claim refused"
+                ),
+                blocked_candidates=tuple(sorted(candidates)),
+                task_type=route_task_type,
+            )
+        candidates_for_admission = catalog_candidates
+        enforce_runtime_profile = False
+    else:
+        candidates_for_admission = candidates
+        enforce_runtime_profile = False
+
     admitted_candidates, candidate_meta = _db_admitted_route_candidates(
         conn,
         run_id=str(job.get("run_id", "")),
-        candidates=candidates,
-        enforce_runtime_profile=bool(route_task_type),
+        candidates=candidates_for_admission,
+        enforce_runtime_profile=enforce_runtime_profile,
     )
     provider_load = _active_provider_load(conn)
-    available = admitted_candidates or candidates
+    available = admitted_candidates or candidates_for_admission
     if not route_task_type:
         return min(
             available,

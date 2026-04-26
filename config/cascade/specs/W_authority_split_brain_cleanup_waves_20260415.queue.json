@@ -59,7 +59,7 @@
       "write": [
         "Code&DBs/Workflow/surfaces/_workflow_database.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && ! grep -q 'DEFAULT_REPO_LOCAL_DATABASE_URL = \"postgresql://postgres@localhost:5432/praxis\"' Code\\&DBs/Workflow/surfaces/_workflow_database.py && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile Code\\&DBs/Workflow/surfaces/_workflow_database.py"
+      "verify_command": "cd /Users/nate/Praxis && ! grep -qF 'DEFAULT_REPO_LOCAL_DATABASE_URL' Code\\&DBs/Workflow/surfaces/_workflow_database.py && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile Code\\&DBs/Workflow/surfaces/_workflow_database.py"
     },
     {
       "label": "workflow_wrapper_alignment",
@@ -97,7 +97,7 @@
       ],
       "description": "Remove compiler-side implicit database injection and make missing authority fail closed.",
       "outcome_goal": "The compiler no longer writes a localhost test DSN into process env when authority is missing.",
-      "prompt": "Refactor the compiler authority path.\n\nFiles in scope:\n- Code&DBs/Workflow/runtime/compiler.py\n- Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py\n\nRequirements:\n- Remove `_DEFAULT_REPO_LOCAL_DATABASE_URL` as an authority fallback.\n- Remove `_hydrate_env_from_dotenv()` behavior that injects `postgresql://test@localhost:5432/praxis_test` when WORKFLOW_DATABASE_URL is absent.\n- Preserve explicit `.env` loading when it provides a valid explicit authority.\n- Preserve compile-index refresh behavior; this job is only about authority resolution, not compile-index semantics.\n- Rewrite tests so missing authority raises or fails closed instead of blessing fallback env injection.\n\nAcceptance:\n- The compiler cannot resurrect runtime DB authority from a hidden test default.",
+      "prompt": "Refactor the compiler authority path.\n\nFiles in scope:\n- Code&DBs/Workflow/runtime/compiler.py\n- Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py\n\nRequirements:\n- Remove `_DEFAULT_REPO_LOCAL_DATABASE_URL` as an authority fallback.\n- Remove `_hydrate_env_from_dotenv()` behavior that injects a test-only loopback DSN when WORKFLOW_DATABASE_URL is absent.\n- Preserve explicit `.env` loading when it provides a valid explicit authority.\n- Preserve compile-index refresh behavior; this job is only about authority resolution, not compile-index semantics.\n- Rewrite tests so missing authority raises or fails closed instead of blessing fallback env injection.\n\nAcceptance:\n- The compiler cannot resurrect runtime DB authority from a hidden test default.",
       "read": [
         "Code&DBs/Workflow/runtime/compiler.py",
         "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py",

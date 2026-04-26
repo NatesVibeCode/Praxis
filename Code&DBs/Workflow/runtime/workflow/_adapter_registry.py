@@ -10,13 +10,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from adapters import AdapterRegistry, CLILLMAdapter, LLMTaskAdapter, MCPTaskAdapter
+from adapters import AdapterRegistry, LLMTaskAdapter, MCPTaskAdapter
 from adapters.api_task import APITaskAdapter
 from adapters.context_adapter import ContextCompilerAdapter
 from adapters.file_writer_adapter import FileWriterAdapter
 from adapters.output_parser_adapter import OutputParserAdapter
 from adapters.verify_adapter import VerifyAdapter
 from contracts.domain import SUPPORTED_ADAPTER_TYPES
+from .cli_execution_adapter import WorkflowCLIExecutionAdapter
 
 _WORKFLOW_TRANSPORT_ADAPTER_TYPES: tuple[str, ...] = (
     "api_task",
@@ -79,7 +80,7 @@ def build_workflow_adapter_registry(
     registry = AdapterRegistry(
         api_task_adapter=APITaskAdapter() if "api_task" in normalized_adapter_types else None,
         llm_task_adapter=LLMTaskAdapter() if "llm_task" in normalized_adapter_types else None,
-        cli_llm_adapter=CLILLMAdapter() if "cli_llm" in normalized_adapter_types else None,
+        cli_llm_adapter=WorkflowCLIExecutionAdapter() if "cli_llm" in normalized_adapter_types else None,
         mcp_task_adapter=MCPTaskAdapter() if "mcp_task" in normalized_adapter_types else None,
     )
     if "context_compiler" in normalized_adapter_types:

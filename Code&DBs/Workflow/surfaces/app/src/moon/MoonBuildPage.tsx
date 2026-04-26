@@ -1,6 +1,6 @@
 import React, { useReducer, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useBuildPayload } from '../shared/hooks/useBuildPayload';
-import { compileDefinition } from '../shared/buildController';
+import { compileDefinition, previewCompile } from '../shared/buildController';
 import { presentBuild } from './moonBuildPresenter';
 import type { OrbitNode, OrbitEdge, RunJobStatus } from './moonBuildPresenter';
 import { presentRun } from './moonRunPresenter';
@@ -18,7 +18,7 @@ import { MoonEdges, getEdgeGeometry } from './MoonEdges';
 import { useMoonDrag } from './useMoonDrag';
 import { loadCatalog, getCatalog } from './catalog';
 import type { CatalogItem } from './catalog';
-import type { BuildNode, BuildEdge, BuildPayload } from '../shared/types';
+import type { BuildNode, BuildEdge, BuildPayload, CompilePreviewPayload } from '../shared/types';
 import {
   baseConditionFromRelease,
   branchLabel,
@@ -197,6 +197,30 @@ const INITIAL_COMPOSE_AUTHORITY: MoonComposeAuthoritySummary = {
   sourceAuthority: null,
   warning: null,
 };
+
+function compilePreviewChipLabels(preview: CompilePreviewPayload | null): {
+  matched: string[];
+  suggested: string[];
+  gaps: string[];
+} {
+  const spans = preview?.scope_packet?.spans ?? [];
+  const steps = preview?.scope_packet?.suggested_steps ?? [];
+  const gaps = preview?.scope_packet?.gaps ?? [];
+  return {
+    matched: spans
+      .map((span) => span.normalized || span.text)
+      .filter((label): label is string => Boolean(label))
+      .slice(0, 8),
+    suggested: steps
+      .map((step) => step.label)
+      .filter((label): label is string => Boolean(label))
+      .slice(0, 8),
+    gaps: gaps
+      .map((gap) => gap.kind || gap.span_text)
+      .filter((label): label is string => Boolean(label))
+      .slice(0, 6),
+  };
+}
 
 function isTriggerRoute(route?: string): boolean {
   return route === TRIGGER_MANUAL_ROUTE || route === TRIGGER_SCHEDULE_ROUTE || route === TRIGGER_WEBHOOK_ROUTE;
@@ -399,6 +423,9 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const [moonGlowProfile, setMoonGlowProfile] = useState<MoonGlowProfile>(readMoonGlowProfile);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [composeAuthority, setComposeAuthority] = useState<MoonComposeAuthoritySummary>(INITIAL_COMPOSE_AUTHORITY);
+  const [compilePreview, setCompilePreview] = useState<CompilePreviewPayload | null>(null);
+  const [compilePreviewLoading, setCompilePreviewLoading] = useState(false);
+  const [compilePreviewError, setCompilePreviewError] = useState<string | null>(null);
   /**
    * Which node has its branch-family picker open. A node-scoped picker is the
    * single affordance for adding a new outgoing edge from an existing step
@@ -1136,12 +1163,13 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
         workflow: wfId ? { id: wfId, name: (result as any)?.definition?.compiled_prose?.slice(0, 60) || '' } : null,
       };
       setPayload(asPayload);
+      setCompilePreview(result.compile_preview ?? compilePreview);
       if (wfId && onWorkflowCreated) onWorkflowCreated(wfId);
       dispatch({ type: 'COMPILE_SUCCESS' });
     } catch (e: any) {
       dispatch({ type: 'COMPILE_ERROR', error: e.message || 'Compilation failed' });
     }
-  }, [composeAuthority, onWorkflowCreated, setPayload, state.compileProse, state.selectedTrigger, workflowId]);
+  }, [compilePreview, composeAuthority, onWorkflowCreated, setPayload, state.compileProse, state.selectedTrigger, workflowId]);
 
   const handleTriggerSelect = useCallback((item: CatalogItem) => {
     const trigger = {
@@ -1582,6 +1610,40 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
 
   const hasNodes = viewModel.nodes.length > 0;
   const showComposePanel = !hasNodes && state.emptyMode === 'compose';
+  useEffect(() => {
+    const prose = state.compileProse.trim();
+    if (!showComposePanel || prose.length < 3) {
+      setCompilePreview(null);
+      setCompilePreviewError(null);
+      setCompilePreviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setCompilePreviewLoading(true);
+    setCompilePreviewError(null);
+    const timer = window.setTimeout(() => {
+      previewCompile(prose)
+        .then((preview) => {
+          if (!cancelled) setCompilePreview(preview);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setCompilePreview(null);
+          setCompilePreviewError(error instanceof Error ? error.message : 'Preview failed');
+        })
+        .finally(() => {
+          if (!cancelled) setCompilePreviewLoading(false);
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [showComposePanel, state.compileProse]);
+  const compilePreviewLabels = useMemo(
+    () => compilePreviewChipLabels(compilePreview),
+    [compilePreview],
+  );
   const actionOpen = state.openDock === 'action';
   const contextOpen = state.openDock === 'context';
   const releaseOpen = state.releaseOpen;
@@ -1801,6 +1863,52 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       disabled={compiling}
                       autoFocus
                     />
+                    {(compilePreviewLoading || compilePreviewError || compilePreview) && (
+                      <div className="moon-compose-preview" aria-live="polite">
+                        {compilePreviewLoading && (
+                          <div className="moon-compose-preview__status">Reading scope...</div>
+                        )}
+                        {!compilePreviewLoading && compilePreviewError && (
+                          <div className="moon-compose-preview__status moon-compose-preview__status--error">
+                            {compilePreviewError}
+                          </div>
+                        )}
+                        {!compilePreviewLoading && !compilePreviewError && compilePreview && (
+                          <>
+                            {compilePreviewLabels.matched.length > 0 && (
+                              <div className="moon-compose-preview__row">
+                                <div className="moon-compose-preview__label">Matched</div>
+                                <div className="moon-compose-preview__chips">
+                                  {compilePreviewLabels.matched.map((label, index) => (
+                                    <span className="moon-compose-preview__chip" key={`matched-${index}-${label}`}>{label}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {compilePreviewLabels.suggested.length > 0 && (
+                              <div className="moon-compose-preview__row">
+                                <div className="moon-compose-preview__label">Suggested</div>
+                                <div className="moon-compose-preview__chips">
+                                  {compilePreviewLabels.suggested.map((label, index) => (
+                                    <span className="moon-compose-preview__chip" key={`suggested-${index}-${label}`}>{label}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {compilePreviewLabels.gaps.length > 0 && (
+                              <div className="moon-compose-preview__row">
+                                <div className="moon-compose-preview__label">Needs</div>
+                                <div className="moon-compose-preview__chips">
+                                  {compilePreviewLabels.gaps.map((label, index) => (
+                                    <span className="moon-compose-preview__chip moon-compose-preview__chip--gap" key={`gap-${index}-${label}`}>{label}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                     <div className="moon-compose__actions">
                       <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !state.compileProse.trim()}>
                         {compiling ? 'Building...' : 'Build workflow'}

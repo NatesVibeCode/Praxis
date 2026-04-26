@@ -1292,6 +1292,74 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
         provider.destroy_session(session, "completed")
 
 
+def test_docker_local_exec_forwards_anthropic_oauth_token(monkeypatch, tmp_path) -> None:
+    docker_cmds: list[list[str]] = []
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-oauth-token")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "fallback-token")
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_image_available", lambda image: True)
+    monkeypatch.setattr("runtime.sandbox_runtime.os.path.isfile", lambda path: False)
+    monkeypatch.setattr(
+        "runtime.sandbox_runtime.subprocess.Popen",
+        lambda args, **kwargs: (
+            docker_cmds.append(list(args))
+            or type(
+                "_Proc",
+                (),
+                {
+                    "returncode": 0,
+                    "communicate": staticmethod(lambda input=None, timeout=None: ("ok", "")),
+                },
+            )()
+        ),
+    )
+
+    provider = DockerLocalSandboxProvider()
+    session = provider.create_session(
+        type(
+            "Spec",
+            (),
+            {
+                "sandbox_session_id": "sandbox_session:run.alpha:job.claude",
+                "sandbox_group_id": "group:run.alpha",
+                "network_policy": "disabled",
+                "workspace_materialization": "copy",
+                "timeout_seconds": 30,
+                "metadata": {"provider_slug": "anthropic"},
+            },
+        )()
+    )
+
+    try:
+        provider.exec(
+            session,
+            type(
+                "Request",
+                (),
+                {
+                    "command": "claude --print",
+                    "stdin_text": "",
+                    "env": {"PATH": "/usr/bin:/bin"},
+                    "timeout_seconds": 30,
+                    "execution_transport": "cli",
+                    "image": None,
+                },
+            )(),
+        )
+
+        run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
+        env_values = [
+            value
+            for index, value in enumerate(run_cmd)
+            if index > 0 and run_cmd[index - 1] == "-e"
+        ]
+        assert "CLAUDE_CODE_OAUTH_TOKEN=claude-oauth-token" in env_values
+        assert "ANTHROPIC_AUTH_TOKEN=fallback-token" not in env_values
+    finally:
+        provider.destroy_session(session, "completed")
+
+
 def test_docker_local_autobuilds_thin_image_when_missing(monkeypatch, tmp_path) -> None:
     seen: dict[str, str] = {}
 

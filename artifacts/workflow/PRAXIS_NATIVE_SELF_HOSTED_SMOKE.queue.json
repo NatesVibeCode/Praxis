@@ -125,7 +125,7 @@
       ]
     },
     "runtime_env": {
-      "WORKFLOW_DATABASE_URL": "postgresql://nate@localhost:5432/praxis",
+      "WORKFLOW_DATABASE_URL": "postgresql://nate@127.0.0.1:5432/praxis",
       "PRAXIS_RUNTIME_PROFILES_CONFIG": "config/runtime_profiles.json",
       "PRAXIS_RUNTIME_PROFILE": "praxis",
       "PRAXIS_LOCAL_POSTGRES_DATA_DIR": "Code&DBs/Databases/postgres-dev/data"

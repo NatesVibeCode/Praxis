@@ -97,7 +97,7 @@ def _apply_fan_out_if_enabled(last_step, *, completion: str | None, outputs: dic
 
     fan_prompt = getattr(last_step, "fan_out_prompt", None) or last_step.prompt
     fan_tier = last_step.tier or "mid"
-    fan_max = getattr(last_step, "fan_out_max_parallel", 4)
+    fan_max = getattr(last_step, "fan_out_max_parallel", None)
 
     fan_results = fan_out_from_completion(
         completion,

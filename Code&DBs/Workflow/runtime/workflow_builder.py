@@ -103,7 +103,7 @@ class WorkflowStep:
     release_condition: Mapping[str, Any] | None = None
     fan_out: bool = False
     fan_out_prompt: str | None = None
-    fan_out_max_parallel: int = 4
+    fan_out_max_parallel: int | None = None
     scope_source: str = "none"
     scope_strict: bool = True
 

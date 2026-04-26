@@ -823,7 +823,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         inbound_edges: Mapping[str, Sequence[WorkflowEdgeContract]],
         completed_nodes: Mapping[str, NodeExecutionRecord],
         execution_boundary_ref: str,
-        max_parallel_nodes: int,
+        max_parallel_nodes: int | None,
         cancel_signal: RunCancellationSignal,
     ) -> tuple[list[NodeExecutionRecord], NodeExecutionRecord]:
         return execute_control_operator(
@@ -856,7 +856,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         node_results: list[NodeExecutionRecord],
         execution_order: list[str],
         execution_boundary_ref: str,
-        max_parallel_nodes: int,
+        max_parallel_nodes: int | None,
         context_accumulator: ContextAccumulator | None,
         cancel_signal: RunCancellationSignal,
     ) -> _FailureReason | None:
@@ -891,7 +891,8 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             )
             wave_prepared.append((node_id, prepared_node, dep_inputs, adapter, task_request))
 
-        effective_parallelism = max(1, min(max_parallel_nodes, len(wave_prepared)))
+        cap = len(wave_prepared) if max_parallel_nodes is None else min(max_parallel_nodes, len(wave_prepared))
+        effective_parallelism = max(1, cap)
         future_to_node: dict[
             Future[DeterministicTaskResult],
             tuple[
@@ -1020,7 +1021,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         node_results: list[NodeExecutionRecord],
         execution_order: list[str],
         execution_boundary_ref: str,
-        max_parallel_nodes: int,
+        max_parallel_nodes: int | None,
         context_accumulator: ContextAccumulator | None,
         cancel_signal: RunCancellationSignal,
     ) -> _FailureReason | None:
@@ -1279,7 +1280,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         operator_frame_repository: OperatorFrameRepository,
         run_state_reader: RunStateReader | None,
         cancel_signal: RunCancellationSignal,
-        max_parallel_nodes: int,
+        max_parallel_nodes: int | None,
         accumulate_context: bool,
         max_context_tokens: int | None,
     ) -> RunExecutionResult:
@@ -1471,7 +1472,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         *,
         intake_outcome: WorkflowIntakeOutcome,
         evidence_writer: AtomicEvidenceWriter,
-        max_parallel_nodes: int = 4,
+        max_parallel_nodes: int | None = None,
         accumulate_context: bool = True,
         max_context_tokens: int | None = None,
     ) -> RunExecutionResult:
@@ -1601,7 +1602,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         *,
         intake_outcome: WorkflowIntakeOutcome,
         evidence_writer: AtomicEvidenceWriter,
-        max_parallel_nodes: int = 4,
+        max_parallel_nodes: int | None = None,
         accumulate_context: bool = True,
         max_context_tokens: int | None = None,
     ) -> RunExecutionResult:

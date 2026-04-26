@@ -1098,6 +1098,35 @@ def test_handle_workflow_build_post_bootstrap_compiles_into_workflow_build_paylo
     assert status == 200
     assert payload["workflow"]["id"] == "wf_build_bootstrap"
     assert payload["definition"]["workflow_id"] == "wf_build_bootstrap"
+    assert payload["compile_preview"]["cqrs_role"] == "query"
+
+
+def test_handle_compile_preview_post_returns_query_payload(monkeypatch) -> None:
+    class _Preview:
+        def to_dict(self) -> dict[str, Any]:
+            return {
+                "kind": "compile_preview",
+                "cqrs_role": "query",
+                "scope_packet": {"suggested_steps": [{"label": "discover"}]},
+            }
+
+    monkeypatch.setattr("runtime.compile_cqrs.preview_compile", lambda intent, *, conn: _Preview())
+    request = _RequestStub(
+        {"intent": "Build a custom integration"},
+        subsystems=SimpleNamespace(get_pg_conn=lambda: "db"),
+        path="/api/compile/preview",
+    )
+
+    workflow_query._handle_compile_preview_post(request, "/api/compile/preview")
+
+    assert request.sent == (
+        200,
+        {
+            "kind": "compile_preview",
+            "cqrs_role": "query",
+            "scope_packet": {"suggested_steps": [{"label": "discover"}]},
+        },
+    )
 
 
 def test_handle_workflow_build_post_harden_uses_workflow_scoped_build_state() -> None:
@@ -2696,6 +2725,7 @@ def test_handle_workflow_build_post_delegates_to_runtime_owner() -> None:
         progressive_build=runtime_result.get("progressive_build"),
         undo_receipt=runtime_result.get("undo_receipt"),
         mutation_event_id=runtime_result.get("mutation_event_id"),
+        compile_preview=runtime_result.get("compile_preview"),
     )
     assert request.sent is not None
     assert request.sent[0] == 200

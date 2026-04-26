@@ -64,12 +64,35 @@
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module">
-    import React from 'https://esm.sh/react@18.3.1';
-    import ReactDOM from 'https://esm.sh/react-dom@18.3.1/client';
-    import htm from 'https://esm.sh/htm@3.1.1';
-
+  <div id="root">
+    <div id="boot" style="padding:24px;color:#9aa3ad;font-family:-apple-system,monospace;font-size:13px;line-height:1.6">
+      <div style="color:#2dd4bf;font-weight:700;margin-bottom:8px">praxis console</div>
+      <div id="boot-msg">loading runtime…</div>
+      <div id="boot-err" style="color:#ef4444;margin-top:12px;white-space:pre-wrap;display:none"></div>
+    </div>
+  </div>
+  <script>
+    // Unregister any leftover mobile-v1 service worker that may be intercepting fetches.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then((rs) => {
+        for (const r of rs) r.unregister();
+      }).catch(() => {});
+    }
+    window.addEventListener('error', (e) => {
+      const el = document.getElementById('boot-err');
+      if (el) { el.style.display = 'block'; el.textContent = 'JS error: ' + (e.message || e.error || 'unknown') + '\n' + (e.filename || '') + ':' + (e.lineno || ''); }
+    });
+    setTimeout(() => {
+      const msg = document.getElementById('boot-msg');
+      if (msg && document.querySelector('#root .header') === null && document.querySelector('#root .gate-screen') === null) {
+        msg.textContent = 'still loading… vendor scripts may have failed.';
+      }
+    }, 5000);
+  </script>
+  <script src="/console/vendor/react.js"></script>
+  <script src="/console/vendor/react-dom.js"></script>
+  <script src="/console/vendor/htm.js"></script>
+  <script>
     const html = htm.bind(React.createElement);
     const { useState, useEffect, useRef, useCallback } = React;
 
@@ -464,7 +487,7 @@
             disabled=${busy}
           />
           <div class="composer-actions">
-            <div style="color: var(--fg-dim); font-size: 11px;">${provider} · ${mode.replace('_', ' ')}</div>
+            <div style=${{ color: 'var(--fg-dim)', fontSize: '11px' }}>${provider} · ${mode.replace('_', ' ')}</div>
             <button class="primary" onClick=${send} disabled=${busy || !draft.trim()}>${busy ? '…' : 'send'}</button>
           </div>
         </div>
@@ -482,7 +505,26 @@
       return html`<${Chat} token=${token} onLogout=${handleLogout} />`;
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+    class ErrorBoundary extends React.Component {
+      constructor(props) { super(props); this.state = { error: null }; }
+      static getDerivedStateFromError(error) { return { error }; }
+      componentDidCatch(error, info) {
+        try { console.error('[ErrorBoundary]', error && error.message, info && info.componentStack); } catch {}
+      }
+      render() {
+        if (this.state.error) {
+          const msg = (this.state.error && (this.state.error.message || String(this.state.error))) || 'unknown error';
+          const stack = (this.state.error && this.state.error.stack) || '';
+          return React.createElement('pre', {
+            style: { padding: '20px', color: '#ef4444', whiteSpace: 'pre-wrap', fontSize: '12px', fontFamily: 'monospace', background: '#0b0d10', minHeight: '100vh' }
+          }, 'Render crashed:\n\n' + msg + '\n\n' + stack);
+        }
+        return this.props.children;
+      }
+    }
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      html`<${ErrorBoundary}><${App} /><//>`
+    );
   </script>
 </body>
 </html>

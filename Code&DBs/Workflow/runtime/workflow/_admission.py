@@ -1561,6 +1561,51 @@ def _submit_graph_workflow_inline(
 
 # ── Submission ────────────────────────────────────────────────────────
 
+def _enforce_effective_provider_job_catalog(
+    conn: SyncPostgresConnection,
+    *,
+    runtime_profile_ref: str | None,
+    route_task_type: str,
+    failover_chain: list[str],
+    job_label: str,
+) -> None:
+    normalized_runtime_profile_ref = str(runtime_profile_ref or "").strip()
+    normalized_task_type = str(route_task_type or "").strip()
+    normalized_candidates = [
+        str(candidate).strip()
+        for candidate in failover_chain
+        if "/" in str(candidate or "").strip()
+    ]
+    if not normalized_task_type or not normalized_candidates:
+        return
+    if not normalized_runtime_profile_ref:
+        raise RuntimeError(
+            "workflow submit failed closed: runtime_profile_ref is required for "
+            f"effective provider job catalog admission on job {job_label!r}"
+        )
+
+    from storage.postgres import PostgresTransportEligibilityRepository
+
+    catalog_rows = PostgresTransportEligibilityRepository(
+        conn
+    ).list_effective_provider_job_catalog(
+        runtime_profile_ref=normalized_runtime_profile_ref,
+        job_type=normalized_task_type,
+    )
+    catalog_slugs = {
+        f"{row.provider_slug}/{row.model_slug}"
+        for row in catalog_rows
+    }
+    if any(candidate in catalog_slugs for candidate in normalized_candidates):
+        return
+    raise RuntimeError(
+        "workflow submit failed closed: no effective provider job catalog "
+        f"candidate for job {job_label!r}, task_type={normalized_task_type!r}, "
+        f"runtime_profile_ref={normalized_runtime_profile_ref!r}; "
+        f"requested_candidates={normalized_candidates!r}"
+    )
+
+
 def _do_submit_workflow(
     conn: SyncPostgresConnection,
     spec,
@@ -1672,6 +1717,13 @@ def _do_submit_workflow(
             failover_chain = list(route_plan.chain)
         if not failover_chain:
             failover_chain = [agent_slug]
+        _enforce_effective_provider_job_catalog(
+            conn,
+            runtime_profile_ref=runtime_profile_ref,
+            route_task_type=route_task_type,
+            failover_chain=[str(item).strip() for item in failover_chain if str(item).strip()],
+            job_label=str(label),
+        )
 
         initial_status = "pending" if depends_on else "ready"
         max_attempts = int(job.get("max_attempts", 3) or 3)

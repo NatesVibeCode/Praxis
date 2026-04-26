@@ -1,22 +1,4 @@
-"""Layer 5 (Validate): every-field-set + schema-conform check on authored packets.
-
-Reads the plan_field rows from the data dictionary (category='plan_field')
-and confirms every authored packet:
-
-  - has every required field populated (no missing keys, no empty strings,
-    no empty arrays where a value is required)
-  - never contains forbidden placeholders (TBD, TODO, FIXME) inside
-    fields whose plan_field row sets ``forbid_placeholders``
-  - never sets write_scope to workspace root (``["."]`` or ``["./"]``)
-    for plan_field rows with ``forbid_workspace_root=true``
-  - drops nothing from the synthesizer's ``floor_from`` contracts
-    (consumes / produces / capabilities / gates may grow, never shrink)
-  - produces a typed gate scaffold for every required gate the stage
-    contract demanded
-
-Returns ``ValidationFinding`` records the operator (or compose pipeline)
-can fail on. The validator NEVER mutates packets — it reports.
-"""
+"""Layer 5 (Validate): every-field-set + schema-conform check on authored packets."""
 
 from __future__ import annotations
 
@@ -24,7 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from runtime.intent_dependency import SkeletalPlan
-from runtime.plan_section_author import AuthoredPacket, AuthoredPlan
+from runtime.plan_section_author import AuthoredPacket
+from runtime.plan_fork_author import AuthoredPlan
 
 
 _FORBIDDEN_PLACEHOLDERS_DEFAULT: tuple[str, ...] = ("TBD", "TODO", "FIXME", "XXX")
@@ -34,17 +17,14 @@ _FORBIDDEN_PLACEHOLDERS_DEFAULT: tuple[str, ...] = ("TBD", "TODO", "FIXME", "XXX
 class ValidationFinding:
     label: str
     field: str
-    severity: str  # 'error' | 'warning'
+    severity: str
     code: str
     detail: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "label": self.label,
-            "field": self.field,
-            "severity": self.severity,
-            "code": self.code,
-            "detail": self.detail,
+            "label": self.label, "field": self.field,
+            "severity": self.severity, "code": self.code, "detail": self.detail,
         }
 
 
@@ -75,7 +55,6 @@ class ValidationReport:
 
 def _load_plan_field_schema(conn: Any) -> dict[str, dict[str, Any]]:
     from runtime.data_dictionary import DataDictionaryBoundaryError, list_object_kinds
-
     out: dict[str, dict[str, Any]] = {}
     try:
         rows = list_object_kinds(conn, category="plan_field")
@@ -85,10 +64,8 @@ def _load_plan_field_schema(conn: Any) -> dict[str, dict[str, Any]]:
         object_kind = str(row.get("object_kind") or "")
         field_name = object_kind.split(":", 1)[1] if ":" in object_kind else object_kind
         out[field_name] = {
-            "object_kind": object_kind,
-            "label": row.get("label"),
-            "summary": row.get("summary"),
-            "metadata": row.get("metadata") or {},
+            "object_kind": object_kind, "label": row.get("label"),
+            "summary": row.get("summary"), "metadata": row.get("metadata") or {},
         }
     return out
 
@@ -126,10 +103,7 @@ def _check_placeholders(value: Any, forbidden: tuple[str, ...]) -> str | None:
     return None
 
 
-def _floor_from_skeleton(
-    skeleton: SkeletalPlan, label: str, source: str
-) -> list[str] | None:
-    """Look up the synthesizer's floor for a packet field."""
+def _floor_from_skeleton(skeleton: SkeletalPlan, label: str, source: str) -> list[str] | None:
     target = next((p for p in skeleton.packets if p.label == label), None)
     if target is None:
         return None
@@ -145,12 +119,8 @@ def _floor_from_skeleton(
 
 
 def validate_authored_plan(
-    plan: AuthoredPlan,
-    *,
-    skeleton: SkeletalPlan,
-    conn: Any,
+    plan: AuthoredPlan, *, skeleton: SkeletalPlan, conn: Any,
 ) -> ValidationReport:
-    """Check every packet against the plan_field schema and synthesizer floors."""
     schema = _load_plan_field_schema(conn)
     findings: list[ValidationFinding] = []
 
@@ -161,25 +131,15 @@ def validate_authored_plan(
     every_required_gate_scaffolded = True
 
     if not schema:
-        findings.append(
-            ValidationFinding(
-                label="*",
-                field="*",
-                severity="error",
-                code="plan_field.schema_missing",
-                detail=(
-                    "no plan_field rows in the data dictionary; cannot validate. "
-                    "Apply migration 247."
-                ),
-            )
-        )
+        findings.append(ValidationFinding(
+            label="*", field="*", severity="error",
+            code="plan_field.schema_missing",
+            detail="no plan_field rows in the data dictionary; apply migration 247",
+        ))
         return ValidationReport(
-            findings=findings,
-            every_required_filled=False,
-            no_forbidden_placeholders=False,
-            no_workspace_root=False,
-            no_dropped_floors=False,
-            every_required_gate_scaffolded=False,
+            findings=findings, every_required_filled=False,
+            no_forbidden_placeholders=False, no_workspace_root=False,
+            no_dropped_floors=False, every_required_gate_scaffolded=False,
         )
 
     for packet in plan.packets:
@@ -193,44 +153,29 @@ def validate_authored_plan(
 
             if required and not _is_filled(value):
                 every_required_filled = False
-                findings.append(
-                    ValidationFinding(
-                        label=packet.label,
-                        field=field_name,
-                        severity="error",
-                        code="plan_field.required_missing",
-                        detail=f"required field '{field_name}' is empty or missing",
-                    )
-                )
+                findings.append(ValidationFinding(
+                    label=packet.label, field=field_name, severity="error",
+                    code="plan_field.required_missing",
+                    detail=f"required field '{field_name}' is empty or missing",
+                ))
 
             placeholder_hit = _check_placeholders(value, forbid_placeholders)
             if placeholder_hit:
                 no_forbidden_placeholders = False
-                findings.append(
-                    ValidationFinding(
-                        label=packet.label,
-                        field=field_name,
-                        severity="error",
-                        code="plan_field.placeholder",
-                        detail=f"field '{field_name}' contains forbidden token {placeholder_hit!r}",
-                    )
-                )
+                findings.append(ValidationFinding(
+                    label=packet.label, field=field_name, severity="error",
+                    code="plan_field.placeholder",
+                    detail=f"field '{field_name}' contains forbidden token {placeholder_hit!r}",
+                ))
 
             if metadata.get("forbid_workspace_root") and isinstance(value, list):
-                if value in ([".", ], ["./"], []):
+                if value in ([","], ["."], ["./"], []):
                     no_workspace_root = False
-                    findings.append(
-                        ValidationFinding(
-                            label=packet.label,
-                            field=field_name,
-                            severity="error",
-                            code="plan_field.workspace_root",
-                            detail=(
-                                f"field '{field_name}' is workspace-root or empty; "
-                                "must be precise globs"
-                            ),
-                        )
-                    )
+                    findings.append(ValidationFinding(
+                        label=packet.label, field=field_name, severity="error",
+                        code="plan_field.workspace_root",
+                        detail=f"field '{field_name}' is workspace-root or empty",
+                    ))
 
             floor_from = metadata.get("floor_from")
             if floor_from and isinstance(value, list):
@@ -238,8 +183,7 @@ def validate_authored_plan(
                 if floor:
                     if field_name == "gates":
                         present_ids = {
-                            gate.get("gate_id")
-                            for gate in value
+                            gate.get("gate_id") for gate in value
                             if isinstance(gate, dict)
                         }
                         missing = [g for g in floor if g not in present_ids]
@@ -249,18 +193,11 @@ def validate_authored_plan(
                         no_dropped_floors = False
                         if field_name == "gates":
                             every_required_gate_scaffolded = False
-                        findings.append(
-                            ValidationFinding(
-                                label=packet.label,
-                                field=field_name,
-                                severity="error",
-                                code="plan_field.floor_dropped",
-                                detail=(
-                                    f"field '{field_name}' dropped floor entries "
-                                    f"required by {floor_from}: {missing}"
-                                ),
-                            )
-                        )
+                        findings.append(ValidationFinding(
+                            label=packet.label, field=field_name, severity="error",
+                            code="plan_field.floor_dropped",
+                            detail=f"field '{field_name}' dropped floor: {missing}",
+                        ))
 
     return ValidationReport(
         findings=findings,

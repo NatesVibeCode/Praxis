@@ -38,7 +38,7 @@
         "Code&DBs/Workflow/tests/unit/test_submission_self_report.py",
         "artifacts/workflow/self_report_status_consumers_inventory.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql postgresql://localhost:5432/praxis -tAc \"SELECT column_name FROM information_schema.columns WHERE table_name='workflow_job_submissions' AND column_name IN ('self_report','incomplete_items');\" | sort | tr '\\n' ',' | grep -q 'incomplete_items,self_report,' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_submission_self_report.py' && test -f artifacts/workflow/self_report_status_consumers_inventory.md"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql \"$WORKFLOW_DATABASE_URL\" -tAc \"SELECT column_name FROM information_schema.columns WHERE table_name='workflow_job_submissions' AND column_name IN ('self_report','incomplete_items');\" | sort | tr '\\n' ',' | grep -q 'incomplete_items,self_report,' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_submission_self_report.py' && test -f artifacts/workflow/self_report_status_consumers_inventory.md"
     },
     {
       "label": "02_autoseal_no_claim_split",
@@ -77,7 +77,7 @@
         "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
         "Code&DBs/Workflow/tests/unit/test_submission_self_report_required.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql postgresql://localhost:5432/praxis -tAc \"SELECT is_nullable FROM information_schema.columns WHERE table_name='workflow_job_submissions' AND column_name='self_report';\" | grep -q '^NO$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_submission_self_report_required.py'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql \"$WORKFLOW_DATABASE_URL\" -tAc \"SELECT is_nullable FROM information_schema.columns WHERE table_name='workflow_job_submissions' AND column_name='self_report';\" | grep -q '^NO$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_submission_self_report_required.py'"
     },
     {
       "label": "04_prompt_template_jsonmode",
@@ -117,7 +117,7 @@
         "Code&DBs/Workflow/surfaces/",
         "Code&DBs/Workflow/tests/unit/test_self_report_disagreement.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql postgresql://localhost:5432/praxis -tAc \"SELECT COUNT(*) FROM pg_views WHERE viewname='workflow_self_report_disagreement';\" | grep -q '^1$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_self_report_disagreement.py'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql \"$WORKFLOW_DATABASE_URL\" -tAc \"SELECT COUNT(*) FROM pg_views WHERE viewname='workflow_self_report_disagreement';\" | grep -q '^1$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_self_report_disagreement.py'"
     },
     {
       "label": "06_enforce_verify_command_at_spec_creation",
@@ -173,7 +173,7 @@
         "Code&DBs/Workflow/tests/unit/test_spec_self_report_rollup.py",
         "Code&DBs/Workflow/surfaces/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql postgresql://localhost:5432/praxis -tAc \"SELECT COUNT(*) FROM pg_views WHERE viewname='workflow_spec_self_report_rollup';\" | grep -q '^1$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_spec_self_report_rollup.py'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql \"$WORKFLOW_DATABASE_URL\" -tAc \"SELECT COUNT(*) FROM pg_views WHERE viewname='workflow_spec_self_report_rollup';\" | grep -q '^1$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_spec_self_report_rollup.py'"
     },
     {
       "label": "09_approve_override_gate",
@@ -197,7 +197,7 @@
         "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
         "Code&DBs/Workflow/tests/unit/test_review_override_gate.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_review_override_gate.py'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_review_override_gate.py'"
     },
     {
       "label": "10_trust_score_calibration",
@@ -218,7 +218,7 @@
         "Code&DBs/Workflow/runtime/workflow/trust_score_calibration.py",
         "Code&DBs/Workflow/tests/unit/test_trust_score.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_trust_score.py'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_trust_score.py'"
     },
     {
       "label": "11_incomplete_items_field",
@@ -292,7 +292,7 @@
         "Code&DBs/Workflow/surfaces/",
         "Code&DBs/Workflow/tests/unit/test_refused_unsafe_triage.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_refused_unsafe_triage.py'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_refused_unsafe_triage.py'"
     },
     {
       "label": "15_second_opinion_routing",
@@ -314,7 +314,7 @@
         "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
         "Code&DBs/Workflow/tests/unit/test_second_opinion.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_second_opinion.py'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_second_opinion.py'"
     },
     {
       "label": "16_posthoc_revision_dual_status",
@@ -338,7 +338,7 @@
         "Code&DBs/Workflow/runtime/workflow/trust_score.py",
         "Code&DBs/Workflow/tests/unit/test_dual_status_tracking.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_dual_status_tracking.py'"
+      "verify_command": "cd /Users/nate/Praxis && . ./scripts/_workflow_env.sh && workflow_load_repo_env && /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_dual_status_tracking.py'"
     }
   ]
 }

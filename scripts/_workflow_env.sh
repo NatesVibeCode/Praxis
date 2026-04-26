@@ -48,6 +48,14 @@ workflow_python_bin() {
       return 0
     fi
   done
+  if command -v python >/dev/null 2>&1; then
+    candidate="$(command -v python)"
+    probe="$("${candidate}" -c 'import sys; print(sys.version_info[0])' 2>/dev/null || true)"
+    if [ "${probe}" = "3" ]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  fi
   return 1
 }
 

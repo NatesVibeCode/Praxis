@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Canonical repo-local Python 3 entrypoint for ad hoc commands (pytest, -m, etc.)
+# when the environment only exposes `python` as Python 3 or only `python3` is on PATH.
+# Prefer ./scripts/test.sh for gated test runs.
+set -euo pipefail
+_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+# shellcheck source=/dev/null
+source "${_ROOT}/scripts/_workflow_env.sh"
+exec "$(workflow_python_bin)" "$@"

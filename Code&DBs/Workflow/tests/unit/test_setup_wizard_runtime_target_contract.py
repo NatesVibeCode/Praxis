@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from runtime import setup_wizard
 from runtime.operation_catalog_bindings import resolve_python_reference
 from runtime.service_lifecycle import RegisterRuntimeTargetCommand, normalize_substrate_kind
+from runtime.workspace_paths import workflow_migrations_root
 
 
 class _Authority:
@@ -101,30 +102,26 @@ def test_setup_apply_is_blocked_until_it_has_durable_write_authority(
     )
     monkeypatch.setattr(setup_wizard, "_orphan_container_count", lambda: 0)
 
-    payload = setup_wizard.setup_payload(
-        "apply",
+    payload = setup_wizard.setup_apply_payload(
+        approved=True,
         repo_root=repo_root,
-        apply=True,
         authority_surface="api",
     )
 
-    assert payload["ok"] is False
-    assert payload["applied"] is False
-    assert payload["mutation_performed"] is False
-    assert payload["requires_authority_apply"] is False
-    assert payload["error_code"] == "setup.apply_not_implemented"
+    assert payload["ok"] is True
+    assert payload["applied"] is True
+    assert payload["mutation_performed"] is True
+    assert payload["message"] == "setup apply successful; runtime authority updated."
 
 
 def test_runtime_setup_apply_catalog_seed_is_a_receipted_command() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     migration = (
-        repo_root
-        / "Code&DBs"
-        / "Databases"
-        / "migrations"
-        / "workflow"
+        workflow_migrations_root(repo_root=repo_root)
         / "209_empty_thin_sandbox_runtime_targets.sql"
-    ).read_text(encoding="utf-8")
+    ).read_text(
+        encoding="utf-8"
+    )
     apply_row = migration.split("'runtime-setup-apply'", 1)[1].split(")\nON CONFLICT", 1)[0]
 
     assert "'operation_command'" in apply_row

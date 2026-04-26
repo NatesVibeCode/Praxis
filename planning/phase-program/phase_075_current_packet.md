@@ -53,7 +53,7 @@ Registry authority:
 - No cache/reuse semantics are introduced in this sprint.
 
 ## 5. Verification commands
-- `cd /Users/nate/Praxis`
+- `cd` to the Praxis repository root (the directory that contains `scripts/_workflow_env.sh`)
 - `export PYTHONPATH='Code&DBs/Workflow'`
 - `python3 -m pytest 'Code&DBs/Workflow/tests/unit/test_sandbox_runtime.py' 'Code&DBs/Workflow/tests/unit/test_receipt_store_payloads.py' 'Code&DBs/Workflow/tests/unit/test_unified_workflow.py' -q`
 - `rg -n 'workspace_snapshot_ref|build_workspace_provenance|WorkspaceSnapshot|HydrationReceipt|SandboxExecutionResult' 'Code&DBs/Workflow/runtime' 'Code&DBs/Workflow/tests/unit'`

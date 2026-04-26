@@ -64,9 +64,14 @@ fire_one() {
 
   echo "[$(date +%H:%M:%S)] firing $spec_id -> $log_file"
 
-  if output=$(praxis workflow run "$spec_path" 2>&1 | tee "$log_file"); then
+  # Use --json so we can accurately extract the run_id without scraping prose.
+  if output=$(praxis workflow run "$spec_path" --json 2>&1 | tee "$log_file"); then
     local run_id
-    run_id=$(printf '%s\n' "$output" | grep -oE 'run[-_:][A-Za-z0-9:_\.-]+' | head -1 || true)
+    run_id=$(printf '%s\n' "$output" | jq -r '.run_id // empty' || true)
+    if [ -z "$run_id" ]; then
+        # Fallback to older grep if jq fails or run_id missing in JSON
+        run_id=$(printf '%s\n' "$output" | grep -oE 'run[-_:][A-Za-z0-9:_\.-]+' | head -1 || true)
+    fi
     mark_fired "$spec_id" "${run_id:-unknown}"
     echo "[$(date +%H:%M:%S)] fired $spec_id (run_id=${run_id:-unknown})"
   else

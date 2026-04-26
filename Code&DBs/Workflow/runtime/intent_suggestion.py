@@ -1,27 +1,8 @@
 """Layer 0 (Suggest): atoms from free prose, no ordering produced.
 
-Where ``intent_decomposition`` and ``intent_binding`` are deterministic
-splitters/binders, this layer is a *suggester*: given any prose — five
-sentences, no markers, no order — return the candidate pills, candidate
-step types, and candidate input parameters as separate streams. The
-downstream LLM author (or the operator) composes those atoms into a
-workflow.
-
-This layer never picks order, count, or final stage. It surfaces what
-the prose contains so a downstream author has the right materials.
-
-HONEST SCOPE:
-
-  - Deterministic. Regex + the same data-dictionary / lexicon authority
-    used by ``bind_data_pills``. No LLM call here.
-  - Suggestion only. Confidence scores are advisory; no field is bound,
-    no step is committed, no order is implied.
-  - Whole-prose. Unlike ``decompose_intent``, this does not require step
-    markers. Five sentences with no list structure are fully usable input.
-
-Standing-order anchors:
-  - ``architecture-policy::workflow-intent-binding::loose-prose-data-pill-suggestions-before-binding``
-  - ``platform_architecture / llm-first-infrastructure-trust-compiler-engine``
+Reuses ``runtime.intent_binding.bind_data_pills`` for pill candidates.
+Adds verb-keyed step-type suggestions and parameter detection on raw
+prose with no marker requirement.
 """
 
 from __future__ import annotations
@@ -33,12 +14,24 @@ from typing import Any
 from runtime.intent_binding import BoundIntent, bind_data_pills
 
 
-# Verb → (suggested_stage, base_confidence, capability_hints).
-# Broader than ``intent_decomposition._STAGE_VERB_MAP`` on purpose —
-# decomposition is conservative because it picks one stage per step;
-# the suggester returns candidates and lets the downstream author choose.
+_PILL_STOPWORDS: frozenset[str] = frozenset({
+    "the", "and", "for", "with", "from", "into", "this", "that", "then",
+    "are", "but", "not", "our", "its", "use", "you", "your", "where",
+    "when", "what", "who", "how", "all", "any", "can", "will", "may",
+    "should", "would", "could", "does", "have", "has", "had", "been",
+    "want", "need", "like", "make", "made", "give", "given", "feed",
+    "take", "takes", "given", "input", "output", "step", "steps",
+})
+
+
+def _tokenize_for_pills(text: str) -> set[str]:
+    return {
+        t for t in re.findall(r"[a-z][a-z0-9_]+", (text or "").lower())
+        if len(t) > 2 and t not in _PILL_STOPWORDS
+    }
+
+
 _STAGE_VERB_HINTS: dict[str, tuple[str, float, tuple[str, ...]]] = {
-    # build family
     "build": ("build", 0.85, ("code_generation", "architecture")),
     "implement": ("build", 0.85, ("code_generation",)),
     "wire": ("build", 0.8, ("code_generation",)),
@@ -51,7 +44,6 @@ _STAGE_VERB_HINTS: dict[str, tuple[str, float, tuple[str, ...]]] = {
     "extend": ("build", 0.7, ("code_generation",)),
     "attempt": ("build", 0.4, ("code_generation",)),
     "ship": ("build", 0.7, ("code_generation",)),
-    # research family
     "research": ("research", 0.9, ("research",)),
     "investigate": ("research", 0.85, ("research",)),
     "explore": ("research", 0.8, ("research",)),
@@ -66,7 +58,6 @@ _STAGE_VERB_HINTS: dict[str, tuple[str, float, tuple[str, ...]]] = {
     "gather": ("research", 0.7, ("research",)),
     "collect": ("research", 0.7, ("research",)),
     "plan": ("research", 0.65, ("architecture", "research")),
-    # review family
     "review": ("review", 0.85, ("review",)),
     "audit": ("review", 0.85, ("review",)),
     "evaluate": ("review", 0.8, ("review", "analysis")),
@@ -77,9 +68,7 @@ _STAGE_VERB_HINTS: dict[str, tuple[str, float, tuple[str, ...]]] = {
     "confirm": ("review", 0.75, ("review",)),
     "check": ("review", 0.6, ("review",)),
     "validate": ("review", 0.75, ("review", "validation")),
-    # test family
     "test": ("test", 0.85, ("testing",)),
-    # fix family
     "fix": ("fix", 0.85, ("debug",)),
     "repair": ("fix", 0.8, ("debug",)),
     "resolve": ("fix", 0.75, ("debug",)),
@@ -90,58 +79,22 @@ _STAGE_VERB_HINTS: dict[str, tuple[str, float, tuple[str, ...]]] = {
 }
 
 
-# Phrase-level overrides. Run alongside verb hints; downstream picks by
-# (stage, phrase_span) dedup keyed on highest confidence.
 _PHRASE_OVERRIDES: list[tuple[re.Pattern[str], str, float, tuple[str, ...], str]] = [
-    (
-        re.compile(
-            r"\b(?:write|add|author)\s+(?:integration\s+|unit\s+|smoke\s+)?tests?\b",
-            re.IGNORECASE,
-        ),
-        "test",
-        0.9,
-        ("testing",),
-        "write tests",
-    ),
-    (
-        re.compile(r"\bsmoke[-\s]?(?:test|check|endpoint)\b", re.IGNORECASE),
-        "test",
-        0.85,
-        ("testing",),
-        "smoke test",
-    ),
-    (
-        re.compile(r"\b(?:make\s+sure|ensure)\b", re.IGNORECASE),
-        "review",
-        0.65,
-        ("review", "validation"),
-        "ensure",
-    ),
-    (
-        re.compile(r"\b(?:roll\s*back|revert)\b", re.IGNORECASE),
-        "fix",
-        0.85,
-        ("debug",),
-        "rollback",
-    ),
-    (
-        re.compile(r"\blook\s+at\b", re.IGNORECASE),
-        "research",
-        0.7,
-        ("research",),
-        "look at",
-    ),
-    (
-        re.compile(r"\bscore\s+(?:the\s+)?fit\b|\bevaluate\s+fit\b", re.IGNORECASE),
-        "review",
-        0.85,
-        ("review", "analysis"),
-        "score fit",
-    ),
+    (re.compile(r"\b(?:write|add|author)\s+(?:integration\s+|unit\s+|smoke\s+)?tests?\b", re.IGNORECASE),
+     "test", 0.9, ("testing",), "write tests"),
+    (re.compile(r"\bsmoke[-\s]?(?:test|check|endpoint)\b", re.IGNORECASE),
+     "test", 0.85, ("testing",), "smoke test"),
+    (re.compile(r"\b(?:make\s+sure|ensure)\b", re.IGNORECASE),
+     "review", 0.65, ("review", "validation"), "ensure"),
+    (re.compile(r"\b(?:roll\s*back|revert)\b", re.IGNORECASE),
+     "fix", 0.85, ("debug",), "rollback"),
+    (re.compile(r"\blook\s+at\b", re.IGNORECASE),
+     "research", 0.7, ("research",), "look at"),
+    (re.compile(r"\bscore\s+(?:the\s+)?fit\b|\bevaluate\s+fit\b", re.IGNORECASE),
+     "review", 0.85, ("review", "analysis"), "score fit"),
 ]
 
 
-# Clause boundaries — break prose into candidate spans.
 _CLAUSE_SPLIT_RE = re.compile(
     r"(?<=[\.\!\?])\s+|"
     r"\s*[,;:]\s+|"
@@ -156,13 +109,6 @@ _LEADING_MARKER_RE = re.compile(
 
 
 def _split_clauses(intent: str) -> list[tuple[str, int]]:
-    """Break prose into clause spans for verb scanning.
-
-    Returns ``(clause_text, original_offset)`` pairs. Splits on sentence
-    punctuation, comma/semicolon/colon, and conjunction words. Leading
-    marker words ('then', 'finally', etc.) are stripped from the resulting
-    clause.
-    """
     out: list[tuple[str, int]] = []
     cursor = 0
     for match in _CLAUSE_SPLIT_RE.finditer(intent):
@@ -180,14 +126,12 @@ def _split_clauses(intent: str) -> list[tuple[str, int]]:
 
 @dataclass(frozen=True)
 class StepTypeSuggestion:
-    """A candidate step type lifted from a clause of the prose."""
-
     phrase_span: str
     suggested_stage: str
     confidence: float
     capability_hints: tuple[str, ...]
     matched_verb: str | None
-    rule: str  # 'verb' | 'phrase'
+    rule: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -200,48 +144,12 @@ class StepTypeSuggestion:
         }
 
 
-# Patterns for input parameters: "feed in X", "given X", "takes X", "accepts X".
 _PARAM_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (
-        re.compile(
-            r"\b(?:we\s+)?feed[s]?\s+in\s+(?:an?\s+|the\s+)?([^,;.\n]+?)"
-            r"(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)",
-            re.IGNORECASE,
-        ),
-        "feed_in",
-    ),
-    (
-        re.compile(
-            r"\bgiven\s+(?:an?\s+|the\s+)?([^,;.\n]+?)"
-            r"(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)",
-            re.IGNORECASE,
-        ),
-        "given",
-    ),
-    (
-        re.compile(
-            r"\btakes?\s+(?:an?\s+|the\s+)?([^,;.\n]+?)"
-            r"(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)",
-            re.IGNORECASE,
-        ),
-        "takes",
-    ),
-    (
-        re.compile(
-            r"\baccept[s]?\s+(?:an?\s+|the\s+)?([^,;.\n]+?)"
-            r"(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)",
-            re.IGNORECASE,
-        ),
-        "accepts",
-    ),
-    (
-        re.compile(
-            r"\b(?:input|param(?:eter)?)\s*(?:is|=|:)\s*(?:an?\s+|the\s+)?([^,;.\n]+?)"
-            r"(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)",
-            re.IGNORECASE,
-        ),
-        "input_is",
-    ),
+    (re.compile(r"\b(?:we\s+)?feed[s]?\s+in\s+(?:an?\s+|the\s+)?([^,;.\n]+?)(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)", re.IGNORECASE), "feed_in"),
+    (re.compile(r"\bgiven\s+(?:an?\s+|the\s+)?([^,;.\n]+?)(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)", re.IGNORECASE), "given"),
+    (re.compile(r"\btakes?\s+(?:an?\s+|the\s+)?([^,;.\n]+?)(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)", re.IGNORECASE), "takes"),
+    (re.compile(r"\baccept[s]?\s+(?:an?\s+|the\s+)?([^,;.\n]+?)(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)", re.IGNORECASE), "accepts"),
+    (re.compile(r"\b(?:input|param(?:eter)?)\s*(?:is|=|:)\s*(?:an?\s+|the\s+)?([^,;.\n]+?)(?=\s*[,;.\n]|\s+(?:and|to|then|that|which|so)\b|$)", re.IGNORECASE), "input_is"),
 ]
 
 _TYPE_HINT_RULES: list[tuple[re.Pattern[str], str]] = [
@@ -257,8 +165,6 @@ _TYPE_HINT_RULES: list[tuple[re.Pattern[str], str]] = [
 
 @dataclass(frozen=True)
 class ParameterSuggestion:
-    """A candidate workflow input lifted from a parameter-introducing phrase."""
-
     phrase: str
     name: str
     type_hint: str | None
@@ -274,11 +180,44 @@ class ParameterSuggestion:
 
 
 @dataclass(frozen=True)
-class SuggestedAtoms:
-    """Layer 0 output: pills, step types, parameters — no ordering, no count."""
+class SuggestedPill:
+    """A loose-prose pill candidate scored against the data dictionary.
 
+    Differs from BoundPill: not an explicit ``object.field`` ref in the prose;
+    inferred by token overlap against dictionary text. The spec author may
+    accept, reject, or ignore.
+    """
+
+    object_kind: str
+    field_path: str | None
+    score: int
+    matched_terms: list[str]
+    label: str | None
+    summary: str | None
+    field_kind: str | None
+
+    @property
+    def ref(self) -> str:
+        return f"{self.object_kind}.{self.field_path}" if self.field_path else self.object_kind
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ref": self.ref,
+            "object_kind": self.object_kind,
+            "field_path": self.field_path,
+            "score": self.score,
+            "matched_terms": list(self.matched_terms),
+            "label": self.label,
+            "summary": self.summary,
+            "field_kind": self.field_kind,
+        }
+
+
+@dataclass(frozen=True)
+class SuggestedAtoms:
     intent: str
     pills: BoundIntent
+    suggested_pills: list[SuggestedPill]
     step_types: list[StepTypeSuggestion]
     parameters: list[ParameterSuggestion]
     notes: list[str] = field(default_factory=list)
@@ -287,10 +226,81 @@ class SuggestedAtoms:
         return {
             "intent": self.intent,
             "pills": self.pills.to_dict(),
+            "suggested_pills": [p.to_dict() for p in self.suggested_pills],
             "step_types": [s.to_dict() for s in self.step_types],
             "parameters": [p.to_dict() for p in self.parameters],
             "notes": list(self.notes),
         }
+
+
+def _suggest_pills_from_data_dictionary(
+    intent: str, *, conn: Any, top_n: int = 12, min_score: int = 2,
+) -> list[SuggestedPill]:
+    """Scan registered objects + their effective fields for token overlap with the intent.
+
+    Returns top-N (object, field) candidates whose token overlap with the intent
+    meets ``min_score``. Object-level signal (label/summary/category) is combined
+    with field-level signal (label/description) so an object whose fields are
+    relevant scores higher than one whose only its name matches.
+    """
+    from runtime.data_dictionary import (
+        DataDictionaryBoundaryError,
+        list_object_kinds,
+        list_effective_entries,
+    )
+
+    intent_tokens = _tokenize_for_pills(intent)
+    if not intent_tokens:
+        return []
+
+    candidates: list[SuggestedPill] = []
+    try:
+        objects = list_object_kinds(conn)
+    except DataDictionaryBoundaryError:
+        return []
+
+    for obj in objects:
+        object_kind = str(obj.get("object_kind") or "")
+        if not object_kind:
+            continue
+        obj_text = " ".join(
+            str(obj.get(key) or "")
+            for key in ("object_kind", "label", "summary", "category")
+        )
+        obj_tokens = _tokenize_for_pills(obj_text)
+        obj_overlap = obj_tokens & intent_tokens
+
+        try:
+            entries = list_effective_entries(conn, object_kind=object_kind)
+        except Exception:
+            entries = []
+        for entry in entries:
+            field_path = str(entry.get("field_path") or "")
+            if not field_path:
+                continue
+            field_text = " ".join(
+                str(entry.get(key) or "")
+                for key in ("field_path", "label", "description")
+            )
+            field_tokens = _tokenize_for_pills(field_text)
+            field_overlap = field_tokens & intent_tokens
+            score = len(obj_overlap) + 2 * len(field_overlap)
+            if score < min_score:
+                continue
+            candidates.append(
+                SuggestedPill(
+                    object_kind=object_kind,
+                    field_path=field_path,
+                    score=score,
+                    matched_terms=sorted(obj_overlap | field_overlap),
+                    label=str(entry.get("label") or "") or None,
+                    summary=str(entry.get("description") or "")[:160] or None,
+                    field_kind=str(entry.get("field_kind") or "") or None,
+                )
+            )
+
+    candidates.sort(key=lambda p: (-p.score, p.object_kind, p.field_path or ""))
+    return candidates[:top_n]
 
 
 def _slug_from_phrase(phrase: str) -> str:
@@ -337,28 +347,16 @@ def _suggest_step_types(intent: str) -> list[StepTypeSuggestion]:
         clause_lower = clause.lower()
         for pattern, stage, conf, caps, label in _PHRASE_OVERRIDES:
             if pattern.search(clause):
-                out.append(
-                    StepTypeSuggestion(
-                        phrase_span=clause,
-                        suggested_stage=stage,
-                        confidence=conf,
-                        capability_hints=caps,
-                        matched_verb=label,
-                        rule="phrase",
-                    )
-                )
+                out.append(StepTypeSuggestion(
+                    phrase_span=clause, suggested_stage=stage, confidence=conf,
+                    capability_hints=caps, matched_verb=label, rule="phrase",
+                ))
         for verb, (stage, conf, caps) in _STAGE_VERB_HINTS.items():
             if re.search(rf"\b{re.escape(verb)}(?:s|es|ed|ing)?\b", clause_lower):
-                out.append(
-                    StepTypeSuggestion(
-                        phrase_span=clause,
-                        suggested_stage=stage,
-                        confidence=conf,
-                        capability_hints=caps,
-                        matched_verb=verb,
-                        rule="verb",
-                    )
-                )
+                out.append(StepTypeSuggestion(
+                    phrase_span=clause, suggested_stage=stage, confidence=conf,
+                    capability_hints=caps, matched_verb=verb, rule="verb",
+                ))
     by_key: dict[tuple[str, str], StepTypeSuggestion] = {}
     for suggestion in out:
         key = (suggestion.suggested_stage, suggestion.phrase_span)
@@ -369,60 +367,24 @@ def _suggest_step_types(intent: str) -> list[StepTypeSuggestion]:
 
 
 def suggest_plan_atoms(intent: str, *, conn: Any) -> SuggestedAtoms:
-    """Suggest pills, step types, and parameters from free prose.
-
-    Layer 0 of the planning stack. Runs deterministically on any prose
-    with no marker requirement. Returns suggestions only — no ordering,
-    no count, no final stages, no spec. The downstream LLM author (or
-    the operator) consumes the atoms and authors the actual workflow.
-
-    Args:
-        intent: prose describing what the caller wants done. Length and
-            structure are unconstrained.
-        conn: live Postgres connection for the data dictionary authority
-            (used by the underlying ``bind_data_pills`` call).
-
-    Returns:
-        ``SuggestedAtoms`` with pills (suggested + bound + ambiguous +
-        unbound from the data dictionary), step_types (verb-/phrase-keyed
-        stage candidates with confidence), and parameters (input
-        candidates from ``feed in X`` / ``given X`` / ``takes X`` /
-        ``accepts X`` / ``input is X`` patterns).
-    """
     text = (intent or "").strip()
     if not text:
         return SuggestedAtoms(
-            intent="",
-            pills=BoundIntent(intent="", warnings=["intent is empty"]),
-            step_types=[],
-            parameters=[],
-            notes=["intent is empty"],
+            intent="", pills=BoundIntent(intent="", warnings=["intent is empty"]),
+            step_types=[], parameters=[], notes=["intent is empty"],
         )
-
-    pills = bind_data_pills(text, conn=conn, suggest=True)
+    pills = bind_data_pills(text, conn=conn)
+    suggested_pills = _suggest_pills_from_data_dictionary(text, conn=conn)
     step_types = _suggest_step_types(text)
     parameters = _suggest_parameters(text)
-
     notes: list[str] = []
     if not step_types:
-        notes.append(
-            "no stage-suggestive verbs detected; downstream LLM author "
-            "should pick step types from prose context"
-        )
-    if not pills.bound and not pills.suggested:
-        notes.append(
-            "no data-pill candidates surfaced; refer to specific objects "
-            "or fields in the prose to anchor pills"
-        )
+        notes.append("no stage-suggestive verbs detected")
+    if not pills.bound and not suggested_pills:
+        notes.append("no pill candidates surfaced from prose or data dictionary")
     if not parameters:
-        notes.append(
-            "no input parameters detected; if the workflow takes runtime "
-            "inputs, phrase them as 'feed in X' / 'given X' / 'takes X'"
-        )
+        notes.append("no input parameters detected")
     return SuggestedAtoms(
-        intent=text,
-        pills=pills,
-        step_types=step_types,
-        parameters=parameters,
-        notes=notes,
+        intent=text, pills=pills, suggested_pills=suggested_pills,
+        step_types=step_types, parameters=parameters, notes=notes,
     )

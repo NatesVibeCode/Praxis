@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import secrets
+import time
 import tempfile
 import urllib.error
 import urllib.request
@@ -207,9 +208,7 @@ _CODEX_SANDBOX_ENV = "PRAXIS_AGENT_CODEX_SANDBOX"
 _OPENROUTER_MODEL_ENV = "PRAXIS_AGENT_OPENROUTER_MODEL"
 _DEFAULT_TURN_TIMEOUT_SECONDS = 180.0
 _DEFAULT_PERMISSION_MODE = "dontAsk"
-_DEFAULT_CLI_PROVIDER = "codex"
-_DEFAULT_CODEX_SANDBOX = "workspace-write"
-_DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-coder"
+
 
 app = FastAPI(title="Agent Sessions", version="1.0.0")
 
@@ -758,24 +757,17 @@ def _claude_permission_mode(env: dict[str, str] | None = None) -> str:
 
 
 def _cli_provider(value: str | None = None, env: dict[str, str] | None = None) -> str:
-    source = env if env is not None else os.environ
-    raw = value if value is not None else source.get(_CLI_PROVIDER_ENV)
-    provider = str(raw or _DEFAULT_CLI_PROVIDER).strip().lower()
-    if provider not in {"codex", "claude", "gemini", "openrouter"}:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": f"unsupported agent provider {provider!r}; use codex, claude, gemini, or openrouter",
-                "error_code": "agent_provider_unsupported",
-            },
-        )
-    return provider
+    """Single-provider stub: all chat now flows through DeepSeek V4 Pro via OpenRouter.
+
+    Provider field is kept for compat with old session rows but no longer
+    drives dispatch. Always returns "deepseek-v4-pro" regardless of input.
+    """
+    return "deepseek-v4-pro"
 
 
 def _codex_sandbox(env: dict[str, str] | None = None) -> str:
     source = env if env is not None else os.environ
-    value = str(source.get(_CODEX_SANDBOX_ENV) or "").strip()
-    return value or _DEFAULT_CODEX_SANDBOX
+    return str(source.get(_CODEX_SANDBOX_ENV) or "").strip() or None
 
 
 def _claude_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
@@ -834,7 +826,9 @@ def _build_codex_command(
     if permission_mode is not None:
         core.extend(translate_permission_flags("codex", permission_mode))
     else:
-        core.extend(["--sandbox", _codex_sandbox(env)])
+        sandbox = _codex_sandbox(env)
+        if sandbox:
+            core.extend(["--sandbox", sandbox])
     core.append(prompt)
     base.extend(core)
     return base
@@ -918,7 +912,16 @@ def _thread_id_from_events(events: list[dict[str, Any]], fallback: str) -> str:
 
 def _openrouter_model(env: dict[str, str] | None = None) -> str:
     source = env if env is not None else os.environ
-    return str(source.get(_OPENROUTER_MODEL_ENV) or _DEFAULT_OPENROUTER_MODEL).strip()
+    model = str(source.get(_OPENROUTER_MODEL_ENV) or "").strip()
+    if not model:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"{_OPENROUTER_MODEL_ENV} is not set",
+                "error_code": "openrouter_model_missing",
+            },
+        )
+    return model
 
 
 def _openrouter_messages(
@@ -1350,6 +1353,259 @@ async def create_agent(
     return response_payload
 
 
+_V4_PRO_ENDPOINT = "https://api.together.xyz/v1/chat/completions"
+_V4_PRO_MODEL = "deepseek-ai/DeepSeek-V4-Pro"
+_V4_PRO_PROVIDER = "together"
+_AGENT_SESSION_JOB_TYPE = "chat"
+
+# In-process cache for the Praxis context system prompt. Rebuilt every TTL
+# seconds; same string is reused across all chat turns so Together's prefix
+# cache can hit it. Refresh is cheap (a few small SELECTs).
+_PRAXIS_CONTEXT_CACHE: dict[str, Any] = {"text": None, "expires_at": 0.0}
+_PRAXIS_CONTEXT_TTL_SEC = 300
+
+
+def _build_praxis_context(pg_conn: Any) -> str:
+    """Compose a system-prompt block: standing orders + data dictionary.
+
+    Used as the system message for every operator-console chat turn so the
+    LLM understands what Praxis is, what rules bind it, and what types
+    flow through the graph.
+    """
+    now = time.time()
+    cached = _PRAXIS_CONTEXT_CACHE.get("text")
+    if cached and now < float(_PRAXIS_CONTEXT_CACHE.get("expires_at") or 0):
+        return cached
+
+    parts: list[str] = []
+    parts.append(
+        "You are the Praxis operator console assistant. Praxis is LLM-first "
+        "infrastructure powered by a trust compiler — one graph in Praxis.db "
+        "(nodes, edges, gates, typed by data-dictionary consumes/produces) with "
+        "many lenses (Moon canvas, executor, CLI, MCP, HTTP). Agents build and "
+        "mutate the graph; the operator (Nate) steers — approves gates, edits "
+        "misbehaving nodes — he does not assemble nodes from a palette."
+    )
+
+    try:
+        rows = pg_conn.execute(
+            """
+            SELECT title, rationale, decision_kind, decision_scope_kind, decision_scope_ref
+            FROM operator_decisions
+            WHERE decision_status IN ('active', 'decided')
+              AND (decision_kind ILIKE 'architecture%%'
+                   OR decision_kind ILIKE 'standing%%'
+                   OR decision_kind ILIKE 'product%%'
+                   OR decision_kind = 'platform_architecture'
+                   OR decision_kind = 'delivery_plan')
+            ORDER BY decided_at DESC NULLS LAST
+            LIMIT 30
+            """
+        )
+        rule_lines: list[str] = []
+        for r in rows or []:
+            d = dict(r)
+            title = (d.get("title") or "").strip()
+            why = (d.get("rationale") or "").strip()
+            scope = (d.get("decision_scope_ref") or d.get("decision_scope_kind") or "").strip()
+            if not title:
+                continue
+            line = f"- **{title}**"
+            if scope:
+                line += f" _(scope: {scope})_"
+            if why:
+                why_short = why if len(why) <= 240 else why[:237] + "…"
+                line += f"\n  WHY: {why_short}"
+            rule_lines.append(line)
+        if rule_lines:
+            parts.append("## Standing orders (active architecture/product policies)\n" + "\n".join(rule_lines))
+    except Exception as exc:
+        parts.append(f"_(standing orders unavailable: {exc})_")
+
+    try:
+        rows = pg_conn.execute(
+            """
+            SELECT object_kind, summary, category
+            FROM data_dictionary_objects
+            WHERE summary IS NOT NULL
+              AND summary <> ''
+              AND summary NOT ILIKE 'Legacy public table discovered%%'
+              AND object_kind NOT ILIKE 'pg_%%'
+            ORDER BY object_kind
+            LIMIT 60
+            """
+        )
+        dd_lines: list[str] = []
+        for r in rows or []:
+            d = dict(r)
+            kind = (d.get("object_kind") or "").strip()
+            summary = (d.get("summary") or "").strip()
+            if not kind or not summary:
+                continue
+            summary_short = summary if len(summary) <= 140 else summary[:137] + "…"
+            dd_lines.append(f"- `{kind}` — {summary_short}")
+        if dd_lines:
+            parts.append("## Data dictionary (typed objects you can reason about)\n" + "\n".join(dd_lines))
+    except Exception as exc:
+        parts.append(f"_(data dictionary unavailable: {exc})_")
+
+    parts.append(
+        "## How to respond\n"
+        "- Be concise. Nate does not code; he directs.\n"
+        "- When you reference a Praxis concept, use the exact slug from the data dictionary.\n"
+        "- If asked to make changes, propose the change in terms of which graph row, decision row, or surface would be edited — do not invent new tables or shims.\n"
+        "- If you don't know, say so. Do not fabricate orientation details."
+    )
+
+    text = "\n\n".join(parts)
+    _PRAXIS_CONTEXT_CACHE["text"] = text
+    _PRAXIS_CONTEXT_CACHE["expires_at"] = now + _PRAXIS_CONTEXT_TTL_SEC
+    return text
+
+
+async def _run_v4_pro_turn(
+    pg_conn: Any,
+    *,
+    agent_id: str,
+    user_prompt: str,
+) -> tuple[str, list[dict[str, Any]], int]:
+    """Single-provider turn dispatch: DeepSeek V4 Pro via Together.ai."""
+    try:
+        from runtime.workflow._shared import _default_native_runtime_profile_ref
+        from storage.postgres import PostgresTransportEligibilityRepository
+
+        runtime_profile_ref = _default_native_runtime_profile_ref(pg_conn)
+        rows = PostgresTransportEligibilityRepository(
+            pg_conn
+        ).list_effective_provider_job_catalog(
+            runtime_profile_ref=runtime_profile_ref,
+            job_type=_AGENT_SESSION_JOB_TYPE,
+            transport_type="API",
+            provider_slug=_V4_PRO_PROVIDER,
+            model_slug=_V4_PRO_MODEL,
+        )
+    except Exception as exc:
+        return (
+            "",
+            [
+                {
+                    "type": "error",
+                    "error_code": "agent_provider_catalog_unavailable",
+                    "message": f"provider catalog unavailable for agent session dispatch: {exc}",
+                }
+            ],
+            1,
+        )
+    if not rows:
+        return (
+            "",
+            [
+                {
+                    "type": "error",
+                    "error_code": "agent_provider_not_in_effective_catalog",
+                    "message": (
+                        "DeepSeek V4 Pro is not in the effective private provider "
+                        "job catalog for chat/API dispatch"
+                    ),
+                }
+            ],
+            1,
+        )
+
+    api_key = (os.environ.get("TOGETHER_API_KEY") or "").strip()
+    if not api_key:
+        return (
+            "",
+            [{"type": "error", "error_code": "together_key_missing", "message": "TOGETHER_API_KEY not configured"}],
+            1,
+        )
+
+    messages: list[dict[str, str]] = []
+    try:
+        system_prompt = _build_praxis_context(pg_conn)
+    except Exception as exc:
+        system_prompt = f"You are the Praxis operator console assistant. (context build failed: {exc})"
+    messages.append({"role": "system", "content": system_prompt})
+
+    for ev in list_interactive_agent_events(pg_conn, agent_id=agent_id):
+        kind = ev.get("event_kind") or ""
+        text = ev.get("text_content") or ev.get("text") or ""
+        if not text:
+            continue
+        if kind == "user.prompt":
+            messages.append({"role": "user", "content": str(text)})
+        elif kind == "assistant.reply":
+            messages.append({"role": "assistant", "content": str(text)})
+
+    if messages[-1].get("role") != "user" or messages[-1].get("content") != user_prompt:
+        messages.append({"role": "user", "content": user_prompt})
+
+    body = json.dumps({
+        "model": _V4_PRO_MODEL,
+        "messages": messages,
+        "max_tokens": 4096,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        _V4_PRO_ENDPOINT,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "praxis-operator-console/1.0",
+            "Accept": "application/json",
+        },
+    )
+
+    def _do_request() -> tuple[str, list[dict[str, Any]], int]:
+        # One retry with backoff on 429 / 5xx — V4-Pro on Together can throttle
+        # under tier-1 accounts; surface the final failure clearly if both fail.
+        last_err: tuple[str, list[dict[str, Any]], int] | None = None
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(req, timeout=180) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                detail = ""
+                try:
+                    detail = exc.read().decode("utf-8")[:500]
+                except Exception:
+                    pass
+                last_err = (
+                    "",
+                    [{"type": "error", "error_code": "together_http_error", "message": f"HTTP {exc.code} (attempt {attempt+1}): {detail}"}],
+                    1,
+                )
+                if exc.code == 429 or 500 <= exc.code < 600:
+                    if attempt == 0:
+                        time.sleep(3)
+                        continue
+                return last_err
+            except Exception as exc:
+                last_err = (
+                    "",
+                    [{"type": "error", "error_code": "together_request_failed", "message": f"attempt {attempt+1}: {exc}"}],
+                    1,
+                )
+                if attempt == 0:
+                    time.sleep(2)
+                    continue
+                return last_err
+        choice = (payload.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            return (
+                "",
+                [{"type": "error", "error_code": "together_empty_reply", "message": f"no content in Together reply: {json.dumps(payload)[:300]}"}],
+                1,
+            )
+        return content, [{"type": "assistant.reply", "text": content, "provider": "deepseek-v4-pro"}], 0
+
+    return await asyncio.to_thread(_do_request)
+
+
 @app.post("/agents/{agent_id}/messages")
 async def send_message(
     request: Request,
@@ -1399,35 +1655,31 @@ async def send_message(
     lock = _get_lock(agent_id)
     await lock.acquire()
     try:
-        provider_override = str(os.environ.get(_CLI_PROVIDER_ENV) or "").strip()
-        provider_slug = _cli_provider(provider_override or str(session.get("provider") or ""))
-        if provider_slug != str(session.get("provider") or ""):
-            update_interactive_agent_cli_session(
-                pg_conn,
-                agent_id=agent_id,
-                cli_session_id=str(session["session_id"]),
-                provider_slug=provider_slug,
-            )
-        reply, turn_events, exit_code, effective_session_id = await _run_turn(
-            agent_id,
-            str(session["session_id"]),
-            body.prompt,
-            provider_slug=provider_slug,
-            pg_conn=pg_conn,
-            permission_mode=validated_mode,
+        provider_slug = "deepseek-v4-pro"
+        reply, turn_events, exit_code = await _run_v4_pro_turn(
+            pg_conn,
+            agent_id=agent_id,
+            user_prompt=body.prompt,
         )
+        effective_session_id = str(session["session_id"])
     finally:
         lock.release()
         _release_turn(agent_id)
     assistant_payload: dict[str, Any] = {"exit_code": exit_code}
     if validated_mode is not None:
         assistant_payload["permission_mode"] = validated_mode
+    error_event = next((ev for ev in turn_events if ev.get("type") == "error"), None)
+    if error_event:
+        assistant_payload["error_code"] = error_event.get("error_code")
+        assistant_payload["error_message"] = error_event.get("message")
+        print(f"[agent_sessions] together failure agent={agent_id} code={error_event.get('error_code')} msg={error_event.get('message')!r}", flush=True)
+    text_to_store = reply or (f"[error: {error_event.get('error_code')}] {error_event.get('message','')}" if error_event else "")
     append_interactive_agent_event(
         pg_conn,
         agent_id=agent_id,
         event_kind="assistant.reply",
         payload=assistant_payload,
-        text_content=reply,
+        text_content=text_to_store,
     )
 
     return {"reply": reply, "turn_events": turn_events, "exit_code": exit_code, "session_id": effective_session_id, "provider": provider_slug}

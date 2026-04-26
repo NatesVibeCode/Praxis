@@ -32,6 +32,14 @@ def test_bug_d9b929a2_python_314_error_explains_pin() -> None:
     assert "python3.14 python@3.14" not in bootstrap
     assert "python3.14 python3.13 python3" in env_helper
     assert "workflow_python_bin" in env_helper
+    assert "command -v python" in env_helper
+    assert "sys.version_info[0]" in env_helper
+
+
+def test_bin_python_shim_delegates_to_workflow_python_bin() -> None:
+    shim = _read("bin/python")
+    assert "workflow_python_bin" in shim
+    assert 'exec "$(workflow_python_bin)"' in shim
 
 
 def test_bug_ba265a8a_no_backslash_escaped_ampersand_path() -> None:

@@ -13,7 +13,7 @@
   "target_repo": "/Users/nate/Praxis",
   "workdir": "/Users/nate/Praxis",
   "verify_refs": [
-    "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q /Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_operator_mcp_execution_gateway.py"
+    "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_operator_mcp_execution_gateway.py"
   ],
   "jobs": [
     {

@@ -156,7 +156,8 @@ Each wave's workflow spec requires:
 After each wave lands, the builder must run:
 
 ```bash
-export WORKFLOW_DATABASE_URL="postgresql://localhost:5432/praxis"
+# From the Praxis repo root — never hardcode localhost; use the resolved authority.
+. ./scripts/_workflow_env.sh && workflow_load_repo_env
 "Code&DBs/Workflow/workflow" tools call praxis_bugs --input-json '{
   "command": "resolve",
   "bug_id": "BUG-XXXXXXXX",

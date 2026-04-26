@@ -573,38 +573,23 @@ async def _schema_bootstrap_lock_holder_details(
 
 async def _acquire_schema_bootstrap_lock(conn: asyncpg.Connection) -> float:
     wait_started_at = _schema_bootstrap_monotonic()
-    warned = False
-    next_log_at = _SCHEMA_BOOTSTRAP_WAIT_WARNING_THRESHOLD_S
-
-    while True:
-        acquired = bool(
-            await conn.fetchval(
-                "SELECT pg_try_advisory_xact_lock($1::bigint)",
-                _SCHEMA_BOOTSTRAP_LOCK_ID,
-            )
+    
+    # Use session-level or transaction-level advisory lock to coordinate.
+    # pg_advisory_xact_lock(bigint) waits until the lock is available
+    # and releases it at the end of the transaction.
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock($1::bigint)",
+        _SCHEMA_BOOTSTRAP_LOCK_ID,
+    )
+    
+    elapsed_s = _schema_bootstrap_monotonic() - wait_started_at
+    if elapsed_s > 1.0:
+        logger.warning(
+            "schema bootstrap advisory lock %s acquired after %.2fs wait",
+            _SCHEMA_BOOTSTRAP_LOCK_ID,
+            elapsed_s,
         )
-        elapsed_s = _schema_bootstrap_monotonic() - wait_started_at
-        if acquired:
-            if warned:
-                logger.warning(
-                    "schema bootstrap advisory lock %s acquired after %.2fs wait",
-                    _SCHEMA_BOOTSTRAP_LOCK_ID,
-                    elapsed_s,
-                )
-            return elapsed_s
-
-        if elapsed_s >= next_log_at:
-            holder_details = await _schema_bootstrap_lock_holder_details(conn)
-            logger.warning(
-                "waiting %.2fs for schema bootstrap advisory lock %s; %s",
-                elapsed_s,
-                _SCHEMA_BOOTSTRAP_LOCK_ID,
-                holder_details,
-            )
-            warned = True
-            next_log_at = elapsed_s + _SCHEMA_BOOTSTRAP_WAIT_LOG_INTERVAL_S
-
-        await asyncio.sleep(_SCHEMA_BOOTSTRAP_LOCK_POLL_INTERVAL_S)
+    return elapsed_s
 
 
 def _workflow_migration_policy_for(filename: str) -> str:

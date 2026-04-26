@@ -831,6 +831,77 @@ def _submit_coordination_chain(
     return 0
 
 
+def _generate_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow generate` — render a spec from a manifest."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="workflow generate")
+    parser.add_argument("manifest_file", help="Path to the minimal JSON manifest file")
+    parser.add_argument("output", help="Path to the output .queue.json spec file")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--strict", action="store_true", help="Fail if the output file already exists")
+    mode.add_argument("--merge", action="store_true", help="Merge with existing output file if it exists")
+
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return exc.code
+
+    from surfaces.cli import workflow_cli
+    return workflow_cli.cmd_generate(parsed)
+
+
+def _validate_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow validate` — validate a spec without running."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="workflow validate")
+    parser.add_argument("spec", help="Path to the .queue.json spec file")
+
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return exc.code
+
+    from surfaces.cli import workflow_cli
+    return workflow_cli.cmd_validate(parsed)
+
+
+def _stream_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow stream` — stream run progress."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="workflow stream")
+    parser.add_argument("run_id", help="Workflow run id to stream")
+    parser.add_argument("--timeout", type=float, default=None, help="Stop streaming after N seconds")
+    parser.add_argument("--poll-interval", type=float, default=2.0, help="Poll interval in seconds")
+
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return exc.code
+
+    from surfaces.cli import workflow_cli
+    return workflow_cli.cmd_stream(parsed)
+
+
+def _chain_status_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow chain-status` — show multi-wave status."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="workflow chain-status")
+    parser.add_argument("chain_id", nargs="?", default=None, help="Chain ID to inspect")
+    parser.add_argument("--limit", type=int, default=20, help="Max chains to list")
+
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return exc.code
+
+    from surfaces.cli import workflow_cli
+    return workflow_cli.cmd_chain_status(parsed)
+
+
 def _status_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow status` — print recent workflow summary as JSON."""
 
@@ -2198,57 +2269,52 @@ def _records_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _retry_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow retry <run_id> <label>` via the bus-backed legacy CLI."""
-    from contextlib import redirect_stdout
-    from io import StringIO
-    from types import SimpleNamespace
+    """Handle `workflow retry` — retry a failed job."""
+    import argparse
 
-    if len(args) < 2 or args[0] in {"-h", "--help"}:
-        stdout.write("usage: workflow retry <run_id> <label>\n")
-        return 2
+    parser = argparse.ArgumentParser(prog="workflow retry")
+    parser.add_argument("run_id", help="Workflow run id")
+    parser.add_argument("label", help="Job label to retry")
 
-    run_id, label = args[0], args[1]
-    buffer = StringIO()
-    with redirect_stdout(buffer):
-        exit_code = _workflow_cli().cmd_retry(SimpleNamespace(run_id=run_id, label=label))
-    stdout.write(buffer.getvalue())
-    return exit_code
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return exc.code
+
+    from surfaces.cli import workflow_cli
+    return workflow_cli.cmd_retry(parsed)
 
 
 def _cancel_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow cancel <run_id>` — cancel an in-flight workflow."""
-    from contextlib import redirect_stdout
-    from io import StringIO
-    from types import SimpleNamespace
+    """Handle `workflow cancel` — cancel a run."""
+    import argparse
 
-    if not args or args[0] in {"-h", "--help"}:
-        stdout.write("usage: workflow cancel <run_id>\n")
-        return 2
+    parser = argparse.ArgumentParser(prog="workflow cancel")
+    parser.add_argument("run_id", help="Workflow run id to cancel")
 
-    run_id = args[0]
-    buffer = StringIO()
-    with redirect_stdout(buffer):
-        exit_code = _workflow_cli().cmd_cancel(SimpleNamespace(run_id=run_id))
-    stdout.write(buffer.getvalue())
-    return exit_code
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return exc.code
+
+    from surfaces.cli import workflow_cli
+    return workflow_cli.cmd_cancel(parsed)
 
 
 def _repair_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow repair <run_id>` via the bus-backed legacy CLI."""
-    from contextlib import redirect_stdout
-    from io import StringIO
-    from types import SimpleNamespace
+    """Handle `workflow repair` — repair run sync state."""
+    import argparse
 
-    if not args or args[0] in {"-h", "--help"}:
-        stdout.write("usage: workflow repair <run_id>\n")
-        return 2
+    parser = argparse.ArgumentParser(prog="workflow repair")
+    parser.add_argument("run_id", help="Workflow run id to repair")
 
-    run_id = args[0]
-    buffer = StringIO()
-    with redirect_stdout(buffer):
-        exit_code = _workflow_cli().cmd_repair(SimpleNamespace(run_id=run_id))
-    stdout.write(buffer.getvalue())
-    return exit_code
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return exc.code
+
+    from surfaces.cli import workflow_cli
+    return workflow_cli.cmd_repair(parsed)
 
 
 def _work_command(args: list[str], *, stdout: TextIO) -> int:

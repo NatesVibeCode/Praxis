@@ -119,7 +119,7 @@ _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
 _ROADMAP_STATUSES = frozenset({"active", "completed", "done"})
 _ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed", "retired"})
 _ROADMAP_RETIRED_LIFECYCLE = "retired"
-_ROADMAP_PRIORITIES = frozenset({"p1", "p2"})
+_ROADMAP_PRIORITIES = frozenset({"p0", "p1", "p2", "p3"})
 _CIRCUIT_BREAKER_OVERRIDE_STATES = frozenset({"open", "closed", "reset"})
 _FUNCTIONAL_AREA_STATUSES = frozenset(SUPPORTED_FUNCTIONAL_AREA_STATUSES)
 _OBJECT_RELATION_STATUSES = frozenset(SUPPORTED_OPERATOR_OBJECT_RELATION_STATUSES)
@@ -1251,8 +1251,14 @@ def _auto_promoted_bug_roadmap_item_id(bug_id: str) -> str:
 
 def _auto_promoted_bug_priority(severity: str | None) -> str:
     normalized = (severity or "").strip().upper()
-    if normalized in {"P0", "P1", "HIGH", "CRITICAL"}:
+    if normalized in {"P0", "CRITICAL"}:
+        return "p0"
+    if normalized in {"P1", "HIGH"}:
         return "p1"
+    if normalized == "P2":
+        return "p2"
+    if normalized == "P3":
+        return "p3"
     return "p2"
 
 
