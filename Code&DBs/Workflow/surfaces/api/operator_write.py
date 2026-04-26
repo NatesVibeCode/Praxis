@@ -335,6 +335,7 @@ def _operator_decision_id_from_key(
 def _operator_decision_to_json(
     decision: OperatorDecisionAuthorityRecord,
 ) -> dict[str, Any]:
+    scope_clamp_payload = decision.scope_clamp or {}
     return {
         "operator_decision_id": decision.operator_decision_id,
         "decision_key": decision.decision_key,
@@ -353,6 +354,12 @@ def _operator_decision_to_json(
         "updated_at": decision.updated_at.isoformat(),
         "decision_scope_kind": decision.decision_scope_kind,
         "decision_scope_ref": decision.decision_scope_ref,
+        "scope_clamp": {
+            "applies_to": list(scope_clamp_payload.get("applies_to") or ()),
+            "does_not_apply_to": list(
+                scope_clamp_payload.get("does_not_apply_to") or ()
+            ),
+        },
     }
 
 
@@ -5221,6 +5228,7 @@ class OperatorControlFrontdoor:
         effective_to: datetime | None = None,
         decision_scope_kind: str | None = None,
         decision_scope_ref: str | None = None,
+        scope_clamp: Mapping[str, Any] | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         normalized_decision_key = _require_text(
@@ -5255,7 +5263,7 @@ class OperatorControlFrontdoor:
         ):
             raise ValueError("effective_to must be later than or equal to effective_from")
         now = _now()
-        decision = OperatorDecisionAuthorityRecord(
+        decision_kwargs: dict[str, Any] = dict(
             operator_decision_id=_operator_decision_id_from_key(
                 decision_kind=normalized_decision_kind,
                 decision_key=normalized_decision_key,
@@ -5287,6 +5295,9 @@ class OperatorControlFrontdoor:
                 field_name="decision_scope_ref",
             ),
         )
+        if scope_clamp is not None:
+            decision_kwargs["scope_clamp"] = scope_clamp
+        decision = OperatorDecisionAuthorityRecord(**decision_kwargs)
 
         conn = await self.connect_database(env)
         try:
@@ -5583,6 +5594,7 @@ class OperatorControlFrontdoor:
         effective_to: datetime | None = None,
         decision_scope_kind: str | None = None,
         decision_scope_ref: str | None = None,
+        scope_clamp: Mapping[str, Any] | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         return _run_async(
@@ -5598,6 +5610,7 @@ class OperatorControlFrontdoor:
                 effective_to=effective_to,
                 decision_scope_kind=decision_scope_kind,
                 decision_scope_ref=decision_scope_ref,
+                scope_clamp=scope_clamp,
                 env=env,
             ),
             message=(
@@ -6424,6 +6437,7 @@ def record_operator_decision(
     effective_to: datetime | None = None,
     decision_scope_kind: str | None = None,
     decision_scope_ref: str | None = None,
+    scope_clamp: Mapping[str, Any] | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Record one canonical operator decision row through the default frontdoor."""
@@ -6440,6 +6454,7 @@ def record_operator_decision(
         effective_to=effective_to,
         decision_scope_kind=decision_scope_kind,
         decision_scope_ref=decision_scope_ref,
+        scope_clamp=scope_clamp,
         env=env,
     )
 
@@ -6457,6 +6472,7 @@ async def arecord_operator_decision(
     effective_to: datetime | None = None,
     decision_scope_kind: str | None = None,
     decision_scope_ref: str | None = None,
+    scope_clamp: Mapping[str, Any] | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Record one canonical operator decision row in async contexts."""
@@ -6473,6 +6489,7 @@ async def arecord_operator_decision(
         effective_to=effective_to,
         decision_scope_kind=decision_scope_kind,
         decision_scope_ref=decision_scope_ref,
+        scope_clamp=scope_clamp,
         env=env,
     )
 

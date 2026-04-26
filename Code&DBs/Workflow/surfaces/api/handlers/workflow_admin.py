@@ -173,7 +173,8 @@ def _build_standing_orders(subs: Any) -> list[dict[str, Any]]:
                 decided_by,
                 decision_source,
                 effective_from,
-                effective_to
+                effective_to,
+                scope_clamp
             FROM operator_decisions
             WHERE decision_kind = 'architecture_policy'
               AND decision_status IN ('decided', 'active')
@@ -190,6 +191,7 @@ def _build_standing_orders(subs: Any) -> list[dict[str, Any]]:
     for row in rows:
         effective_from = row["effective_from"]
         effective_to = row["effective_to"]
+        scope_clamp = _normalize_scope_clamp_for_orient(row["scope_clamp"])
         directive = {
             "authority_domain": row["decision_scope_ref"],
             "policy_slug": row["decision_key"],
@@ -199,9 +201,49 @@ def _build_standing_orders(subs: Any) -> list[dict[str, Any]]:
             "decision_source": row["decision_source"],
             "effective_from": effective_from.isoformat() if effective_from else None,
             "effective_to": effective_to.isoformat() if effective_to else None,
+            "scope_clamp": scope_clamp,
         }
         directives.append({k: v for k, v in directive.items() if v is not None})
     return directives
+
+
+def _normalize_scope_clamp_for_orient(raw: object) -> dict[str, Any]:
+    """Render scope_clamp verbatim for orient consumers.
+
+    The orient envelope quotes the clamp directly so that downstream agents
+    cannot collapse the applies_to / does_not_apply_to lists into prose. See
+    architecture-policy::decision-authority::scope-clamp-preserved-verbatim.
+    """
+
+    import json as _json
+
+    payload: object = raw
+    if isinstance(payload, (bytes, bytearray)):
+        try:
+            payload = _json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            payload = None
+    elif isinstance(payload, str):
+        try:
+            payload = _json.loads(payload)
+        except ValueError:
+            payload = None
+
+    if not isinstance(payload, dict):
+        return {"applies_to": [], "does_not_apply_to": [], "needs_review": True}
+
+    applies_to_raw = payload.get("applies_to") or []
+    does_not_apply_to_raw = payload.get("does_not_apply_to") or []
+    applies_to = [str(item) for item in applies_to_raw if isinstance(item, str)]
+    does_not_apply_to = [
+        str(item) for item in does_not_apply_to_raw if isinstance(item, str)
+    ]
+    needs_review = "pending_review" in applies_to
+    return {
+        "applies_to": applies_to,
+        "does_not_apply_to": does_not_apply_to,
+        "needs_review": needs_review,
+    }
 
 
 def _build_orient_tool_guidance(

@@ -539,6 +539,7 @@ def tool_praxis_operator_decisions(params: dict) -> dict:
             "decision_source": str(params.get("decision_source") or ""),
             "decision_scope_kind": params.get("decision_scope_kind"),
             "decision_scope_ref": params.get("decision_scope_ref"),
+            "scope_clamp": params.get("scope_clamp"),
             "effective_from": (
                 _parse_iso_datetime(effective_from, field_name="effective_from")
                 if effective_from is not None

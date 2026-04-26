@@ -13,8 +13,9 @@ parallel decision store that competes with it.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any
 
 from runtime.validation import (
@@ -94,6 +95,94 @@ def _optional_text(value: object, *, field_name: str) -> str | None:
     return _require_text(value, field_name=field_name)
 
 
+PENDING_REVIEW_SCOPE_CLAMP_TOKEN = "pending_review"
+"""Marker string in scope_clamp.applies_to identifying a row that has not yet
+been reviewed by the operator. Migration 264 backfills existing rows with this
+token so the Moon Decisions panel can surface them for review."""
+
+
+def _default_pending_review_scope_clamp() -> Mapping[str, Any]:
+    """Return the placeholder clamp used for unreviewed rows.
+
+    Returned as an immutable MappingProxyType so the dataclass default cannot
+    be mutated in-place by accident.
+    """
+
+    return MappingProxyType(
+        {
+            "applies_to": (PENDING_REVIEW_SCOPE_CLAMP_TOKEN,),
+            "does_not_apply_to": (),
+        }
+    )
+
+
+def _normalize_scope_clamp(value: object, *, field_name: str) -> Mapping[str, Any]:
+    """Validate and normalize a scope_clamp payload.
+
+    Shape: {"applies_to": [string, ...], "does_not_apply_to": [string, ...]}.
+    Empty arrays are allowed; non-string elements and unknown keys are rejected.
+    """
+
+    mapping = _shared_require_mapping(
+        value,
+        field_name=field_name,
+        error_factory=_error,
+        reason_code="operator_control.invalid_scope_clamp",
+        include_value_type=False,
+        parse_json_strings=True,
+    )
+    allowed_keys = {"applies_to", "does_not_apply_to"}
+    extra_keys = sorted(set(mapping.keys()) - allowed_keys)
+    if extra_keys:
+        raise _error(
+            "operator_control.invalid_scope_clamp",
+            f"{field_name} contains unsupported keys: {', '.join(extra_keys)}",
+            details={"field": field_name, "extra_keys": ",".join(extra_keys)},
+        )
+
+    def _coerce_list(key: str) -> tuple[str, ...]:
+        raw = mapping.get(key, ())
+        if not isinstance(raw, (list, tuple)):
+            raise _error(
+                "operator_control.invalid_scope_clamp",
+                f"{field_name}.{key} must be a list of strings",
+                details={"field": f"{field_name}.{key}"},
+            )
+        normalized: list[str] = []
+        for index, item in enumerate(raw):
+            if not isinstance(item, str):
+                raise _error(
+                    "operator_control.invalid_scope_clamp",
+                    f"{field_name}.{key}[{index}] must be a string",
+                    details={"field": f"{field_name}.{key}", "index": str(index)},
+                )
+            stripped = item.strip()
+            if not stripped:
+                raise _error(
+                    "operator_control.invalid_scope_clamp",
+                    f"{field_name}.{key}[{index}] must not be blank",
+                    details={"field": f"{field_name}.{key}", "index": str(index)},
+                )
+            normalized.append(stripped)
+        return tuple(normalized)
+
+    return MappingProxyType(
+        {
+            "applies_to": _coerce_list("applies_to"),
+            "does_not_apply_to": _coerce_list("does_not_apply_to"),
+        }
+    )
+
+
+def is_pending_review_scope_clamp(scope_clamp: Mapping[str, Any]) -> bool:
+    """True when scope_clamp.applies_to contains the pending_review marker."""
+
+    applies_to = scope_clamp.get("applies_to") if scope_clamp else None
+    if not applies_to:
+        return False
+    return PENDING_REVIEW_SCOPE_CLAMP_TOKEN in tuple(applies_to)
+
+
 @dataclass(frozen=True, slots=True)
 class OperatorDecisionAuthorityRecord:
     """Canonical operator decision row."""
@@ -113,6 +202,9 @@ class OperatorDecisionAuthorityRecord:
     updated_at: datetime
     decision_scope_kind: str | None = None
     decision_scope_ref: str | None = None
+    scope_clamp: Mapping[str, Any] = field(
+        default_factory=_default_pending_review_scope_clamp,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +318,15 @@ def normalize_operator_decision_record(
     fallback_scope_ref: str | None = None,
 ) -> OperatorDecisionAuthorityRecord:
     """Normalize one operator decision against the registered scope policy."""
+
+    normalized_scope_clamp = _normalize_scope_clamp(
+        operator_decision.scope_clamp,
+        field_name="operator_decision.scope_clamp",
+    )
+    operator_decision = replace(
+        operator_decision,
+        scope_clamp=normalized_scope_clamp,
+    )
 
     normalized_decision_kind = _require_text(
         operator_decision.decision_kind,
@@ -382,6 +483,10 @@ class OperatorDecisionResolution:
     @property
     def decision_scope_ref(self) -> str | None:
         return self.operator_decision.decision_scope_ref
+
+    @property
+    def scope_clamp(self) -> Mapping[str, Any]:
+        return self.operator_decision.scope_clamp
 
 
 @dataclass(frozen=True, slots=True)

@@ -561,7 +561,15 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="operator",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="List or record durable operator decisions such as architecture policy rows in the canonical operator_decisions table.",
+        when_to_use=(
+            "List or record durable operator decisions such as architecture "
+            "policy rows in the canonical operator_decisions table. New "
+            "records should pass scope_clamp={'applies_to': [...], "
+            "'does_not_apply_to': [...]} so downstream surfaces can quote the "
+            "clamp verbatim instead of paraphrasing rationale; rows omit it "
+            "default to a 'pending_review' placeholder for the operator to "
+            "fill in via the Moon Decisions panel."
+        ),
         when_not_to_use="Do not use it for roadmap item authoring or cutover-gate admission.",
         risks={"default": "read", "actions": {"list": "read", "record": "write"}},
         examples=[
@@ -570,7 +578,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 {"action": "list", "decision_kind": "architecture_policy"},
             ),
             _example(
-                "Record one architecture policy decision",
+                "Record one architecture policy decision with scope_clamp",
                 {
                     "action": "record",
                     "decision_key": "architecture-policy::decision-tables::db-native-authority",
@@ -581,6 +589,15 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "decision_source": "cto.guidance",
                     "decision_scope_kind": "authority_domain",
                     "decision_scope_ref": "decision_tables",
+                    "scope_clamp": {
+                        "applies_to": [
+                            "All architecture-policy decisions about decision authority storage",
+                        ],
+                        "does_not_apply_to": [
+                            "Per-run scratch state",
+                            "Ephemeral cache rows",
+                        ],
+                    },
                 },
             ),
         ],

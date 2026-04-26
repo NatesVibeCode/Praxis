@@ -181,6 +181,7 @@ class OperatorDecisionRecordCommand(BaseModel):
     effective_to: datetime | None = None
     decision_scope_kind: str | None = None
     decision_scope_ref: str | None = None
+    scope_clamp: dict[str, Any] | None = None
 
 
 def _resolved_env(subsystems: Any) -> dict[str, str] | None:
@@ -411,6 +412,7 @@ def handle_operator_decision_record(
         effective_to=command.effective_to,
         decision_scope_kind=command.decision_scope_kind,
         decision_scope_ref=command.decision_scope_ref,
+        scope_clamp=command.scope_clamp,
         env=_resolved_env(subsystems),
     )
 

@@ -116,7 +116,26 @@ def _decision_record_from_row(row: asyncpg.Record) -> OperatorDecisionAuthorityR
             if row["decision_scope_ref"] is not None
             else None
         ),
+        scope_clamp=_require_mapping(
+            row["scope_clamp"],
+            field_name="scope_clamp",
+        ),
     )
+
+
+def _scope_clamp_for_storage(scope_clamp: object) -> dict[str, list[str]]:
+    """Convert the in-memory scope_clamp Mapping into a JSONB-friendly dict."""
+
+    if not isinstance(scope_clamp, dict) and hasattr(scope_clamp, "get"):
+        applies_to = scope_clamp.get("applies_to") or ()
+        does_not_apply_to = scope_clamp.get("does_not_apply_to") or ()
+    else:
+        applies_to = (scope_clamp or {}).get("applies_to") or ()
+        does_not_apply_to = (scope_clamp or {}).get("does_not_apply_to") or ()
+    return {
+        "applies_to": [str(item) for item in applies_to],
+        "does_not_apply_to": [str(item) for item in does_not_apply_to],
+    }
 
 
 def _gate_record_from_row(row: asyncpg.Record) -> CutoverGateAuthorityRecord:
@@ -196,9 +215,10 @@ class PostgresOperatorControlRepository:
                     updated_at,
                     decision_scope_kind,
                     decision_scope_ref,
+                    scope_clamp,
                     embedding
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::vector
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::vector
                 )
                 ON CONFLICT (operator_decision_id) DO UPDATE SET
                     decision_key = EXCLUDED.decision_key,
@@ -214,6 +234,7 @@ class PostgresOperatorControlRepository:
                     updated_at = EXCLUDED.updated_at,
                     decision_scope_kind = EXCLUDED.decision_scope_kind,
                     decision_scope_ref = EXCLUDED.decision_scope_ref,
+                    scope_clamp = EXCLUDED.scope_clamp,
                     embedding = COALESCE(EXCLUDED.embedding, operator_decisions.embedding)
                 RETURNING
                     operator_decision_id,
@@ -230,7 +251,8 @@ class PostgresOperatorControlRepository:
                     created_at,
                     updated_at,
                     decision_scope_kind,
-                    decision_scope_ref
+                    decision_scope_ref,
+                    scope_clamp
                 """,
                 normalized_operator_decision.operator_decision_id,
                 normalized_operator_decision.decision_key,
@@ -247,6 +269,7 @@ class PostgresOperatorControlRepository:
                 normalized_operator_decision.updated_at,
                 normalized_operator_decision.decision_scope_kind,
                 normalized_operator_decision.decision_scope_ref,
+                _scope_clamp_for_storage(normalized_operator_decision.scope_clamp),
                 embedding_literal,
             )
         except asyncpg.PostgresError as exc:
@@ -338,6 +361,7 @@ class PostgresOperatorControlRepository:
             ),
             decision_scope_kind=normalized_operator_decision.decision_scope_kind,
             decision_scope_ref=normalized_operator_decision.decision_scope_ref,
+            scope_clamp=normalized_operator_decision.scope_clamp,
         )
         normalized_cutover_gate = CutoverGateAuthorityRecord(
             cutover_gate_id=_require_text(
@@ -452,9 +476,10 @@ class PostgresOperatorControlRepository:
                         updated_at,
                         decision_scope_kind,
                         decision_scope_ref,
+                        scope_clamp,
                         embedding
                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::vector
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::vector
                     )
                     ON CONFLICT (operator_decision_id) DO UPDATE SET
                         decision_key = EXCLUDED.decision_key,
@@ -470,6 +495,7 @@ class PostgresOperatorControlRepository:
                         updated_at = EXCLUDED.updated_at,
                         decision_scope_kind = EXCLUDED.decision_scope_kind,
                         decision_scope_ref = EXCLUDED.decision_scope_ref,
+                        scope_clamp = EXCLUDED.scope_clamp,
                         embedding = COALESCE(EXCLUDED.embedding, operator_decisions.embedding)
                     RETURNING
                         operator_decision_id,
@@ -486,7 +512,8 @@ class PostgresOperatorControlRepository:
                         created_at,
                         updated_at,
                         decision_scope_kind,
-                        decision_scope_ref
+                        decision_scope_ref,
+                        scope_clamp
                     """,
                     normalized_operator_decision.operator_decision_id,
                     normalized_operator_decision.decision_key,
@@ -503,6 +530,7 @@ class PostgresOperatorControlRepository:
                     normalized_operator_decision.updated_at,
                     normalized_operator_decision.decision_scope_kind,
                     normalized_operator_decision.decision_scope_ref,
+                    _scope_clamp_for_storage(normalized_operator_decision.scope_clamp),
                     gate_decision_embedding_literal,
                 )
                 gate_row = await self._conn.fetchrow(
@@ -629,7 +657,8 @@ class PostgresOperatorControlRepository:
                     created_at,
                     updated_at,
                     decision_scope_kind,
-                    decision_scope_ref
+                    decision_scope_ref,
+                    scope_clamp
                 FROM operator_decisions
                 WHERE effective_from <= $1
                   AND (effective_to IS NULL OR effective_to > $1)
@@ -696,7 +725,8 @@ class PostgresOperatorControlRepository:
                     created_at,
                     updated_at,
                     decision_scope_kind,
-                    decision_scope_ref
+                    decision_scope_ref,
+                    scope_clamp
                 FROM operator_decisions
                 WHERE ($1::text = '' OR decision_kind = $1)
                   AND ($2::text = '' OR decision_source = $2)
@@ -754,7 +784,8 @@ class PostgresOperatorControlRepository:
                     created_at,
                     updated_at,
                     decision_scope_kind,
-                    decision_scope_ref
+                    decision_scope_ref,
+                    scope_clamp
                 FROM operator_decisions
                 WHERE ($1::timestamptz IS NULL OR created_at <= $1)
                 ORDER BY effective_from ASC, decided_at ASC, created_at ASC, operator_decision_id ASC

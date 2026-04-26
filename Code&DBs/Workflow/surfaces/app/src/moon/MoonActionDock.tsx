@@ -21,6 +21,7 @@ import { MoonGlyph } from './MoonGlyph';
 import { MoonSurfaceReviewPanel } from './MoonSurfaceReviewPanel';
 import { MoonIntegrationsPanel } from './MoonIntegrationsPanel';
 import { MoonDataDictionaryPanel } from './MoonDataDictionaryPanel';
+import { MoonDecisionsPanel } from './MoonDecisionsPanel';
 
 interface Props {
   workflowId: string | null;
@@ -435,6 +436,7 @@ export function MoonActionDock({
         />
         <MoonIntegrationsPanel />
         <MoonDataDictionaryPanel />
+        <MoonDecisionsPanel />
         <div className="moon-action__catalog-header">
           <div>
             <div className="moon-dock__section-label">Catalog</div>
