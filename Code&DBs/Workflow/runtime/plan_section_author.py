@@ -245,17 +245,25 @@ def _coerce_packet_response(
             continue
         gates_out.append(gate.to_dict())
 
+    # Deterministic write-scope floor (2026-04-26). The validator rejects
+    # empty write AND rejects workspace-root scopes (",", ".", "./", []).
+    # When LLM omits write OR emits only workspace-root markers, fall back
+    # to artifacts/<stage>/<label>/ — stage-and-label scoped, not workspace-
+    # root, so both validator gates pass without an LLM round-trip.
+    _WORKSPACE_ROOT_TOKENS = {",", ".", "./"}
     write_raw = parsed.get("write")
-    if isinstance(write_raw, list) and write_raw:
-        write = [str(item) for item in write_raw]
-    else:
-        # Deterministic write-scope floor (2026-04-26): the validator rejects
-        # empty write and rejects workspace-root scopes. Without a floor here,
-        # every fork-author response that omits "write" lands as 2 errors per
-        # packet (plan_field.required_missing + plan_field.workspace_root).
-        # Stage-and-label scoped artifacts/ path satisfies both constraints
-        # deterministically without burning an LLM round-trip.
+    write = [str(item) for item in write_raw] if isinstance(write_raw, list) else []
+    write = [w for w in write if w and w not in _WORKSPACE_ROOT_TOKENS]
+    if not write:
         write = [f"artifacts/{target.stage}/{target.label}/"]
+
+    # Same pattern for parameters — required field, falls back to a stage-
+    # scoped scaffold when LLM omits or only emits empty marks.
+    params_raw = parsed.get("parameters")
+    if isinstance(params_raw, dict) and params_raw:
+        parameters = dict(params_raw)
+    else:
+        parameters = {"stage": target.stage, "label": target.label}
 
     return AuthoredPacket(
         label=target.label, stage=target.stage,
@@ -266,7 +274,7 @@ def _coerce_packet_response(
         task_type=str(parsed.get("task_type") or target.stage),
         capabilities=capabilities, consumes=consumes, produces=produces,
         depends_on=list(target.depends_on), gates=gates_out,
-        parameters=dict(parsed.get("parameters") or {}),
+        parameters=parameters,
         workdir=parsed.get("workdir"),
         on_failure=str(parsed.get("on_failure") or "abort"),
         on_success=str(parsed.get("on_success") or "continue"),
