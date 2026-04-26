@@ -11,6 +11,7 @@ import { MoonPopout } from './MoonPopout';
 import { MoonNodeDetail, type AuthorityActionMeta } from './MoonNodeDetail';
 import { MoonActionDock } from './MoonActionDock';
 import { MoonReleaseTray } from './MoonReleaseTray';
+import { MoonBindingReviewQueue } from './MoonBindingReviewQueue';
 import { MoonRunPanel } from './MoonRunPanel';
 import { MoonRunOverlay } from './MoonRunOverlay';
 import { MoonDragGhost } from './MoonDragGhost';
@@ -1647,6 +1648,19 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const actionOpen = state.openDock === 'action';
   const contextOpen = state.openDock === 'context';
   const releaseOpen = state.releaseOpen;
+  const pendingBindingCount = useMemo(() => {
+    const ledger = payload?.binding_ledger || [];
+    let count = 0;
+    for (const binding of ledger) {
+      if (!binding) continue;
+      const s = String(binding.state || '').toLowerCase();
+      if (s === 'accepted' || s === 'rejected') continue;
+      if (Array.isArray(binding.candidate_targets) && binding.candidate_targets.length > 0) {
+        count += 1;
+      }
+    }
+    return count;
+  }, [payload]);
   const compiling = state.compilePhase === 'compiling';
   const previewTargetId = drag.drag.hoveredTarget?.id ?? null;
   const previewEdgeId = drag.drag.hoveredTarget?.zone === 'edge'
@@ -1823,9 +1837,16 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                   <div className="moon-center__dock-group">
                     <DockToggleButton active={actionOpen} label="Authority" onClick={() => openDock('action')} />
                     <DockToggleButton active={contextOpen} label="Inspector" onClick={() => openDock('context')} />
+                    {pendingBindingCount > 0 && (
+                      <DockToggleButton
+                        active={state.reviewQueueOpen}
+                        label={`Review (${pendingBindingCount})`}
+                        onClick={() => dispatch({ type: 'TOGGLE_REVIEW_QUEUE' })}
+                      />
+                    )}
                   </div>
                 </div>
-                {!releaseOpen && !state.runViewOpen && <HalfMoon position="bottom" label="Release" onClick={() => dispatch({ type: 'TOGGLE_RELEASE' })} />}
+                {!releaseOpen && !state.reviewQueueOpen && !state.runViewOpen && <HalfMoon position="bottom" label="Release" onClick={() => dispatch({ type: 'TOGGLE_RELEASE' })} />}
               </>
             )}
 
@@ -2290,13 +2311,25 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
         </div>
 
         {/* Bottom dock: Release or Run */}
-        <div className={`moon-dock-bottom${(releaseOpen || state.runViewOpen) ? ' moon-dock-bottom--open' : ' moon-dock-bottom--closed'}`}>
+        <div className={`moon-dock-bottom${(releaseOpen || state.reviewQueueOpen || state.runViewOpen) ? ' moon-dock-bottom--open' : ' moon-dock-bottom--closed'}`}>
           {state.runViewOpen && state.activeRunId ? (
             <MoonRunPanel
               runId={state.activeRunId}
               workflowId={workflowId}
               onClose={() => dispatch({ type: 'CLOSE_RUN' })}
               onSwitchRun={(newRunId) => dispatch({ type: 'DISPATCH_SUCCESS', runId: newRunId })}
+            />
+          ) : state.reviewQueueOpen ? (
+            <MoonBindingReviewQueue
+              payload={payload}
+              onCommitAuthorityAction={async (subpath, body, meta) => {
+                await commitMoonAuthorityAction({
+                  subpath,
+                  body,
+                  ...meta,
+                });
+              }}
+              onClose={() => dispatch({ type: 'TOGGLE_REVIEW_QUEUE' })}
             />
           ) : releaseOpen ? (
             <MoonReleaseTray

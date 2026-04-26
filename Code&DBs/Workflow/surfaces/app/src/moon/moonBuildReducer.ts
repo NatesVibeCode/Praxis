@@ -17,6 +17,7 @@ export interface MoonBuildState {
   selectedEdgeId: string | null;
   openDock: 'action' | 'context' | null;
   releaseOpen: boolean;
+  reviewQueueOpen: boolean;
   popoutOpen: boolean;
   compileProse: string;
   compilePhase: 'idle' | 'compiling' | 'error';
@@ -48,6 +49,7 @@ export type MoonBuildAction =
   | { type: 'OPEN_DOCK'; dock: 'action' | 'context' }
   | { type: 'CLOSE_DOCK' }
   | { type: 'TOGGLE_RELEASE' }
+  | { type: 'TOGGLE_REVIEW_QUEUE' }
   | { type: 'OPEN_POPOUT' }
   | { type: 'CLOSE_POPOUT' }
   | { type: 'SET_PROSE'; prose: string }
@@ -79,6 +81,7 @@ export const initialMoonBuildState: MoonBuildState = {
   selectedEdgeId: null,
   openDock: null,
   releaseOpen: false,
+  reviewQueueOpen: false,
   popoutOpen: false,
   compileProse: '',
   compilePhase: 'idle',
@@ -119,13 +122,15 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
         advanceQueued: false,
       };
     case 'OPEN_DOCK':
-      return { ...state, openDock: action.dock, releaseOpen: false, popoutOpen: false };
+      return { ...state, openDock: action.dock, releaseOpen: false, reviewQueueOpen: false, popoutOpen: false };
     case 'CLOSE_DOCK':
       return { ...state, openDock: null };
     case 'TOGGLE_RELEASE':
-      return { ...state, releaseOpen: !state.releaseOpen, openDock: null, popoutOpen: false };
+      return { ...state, releaseOpen: !state.releaseOpen, reviewQueueOpen: false, openDock: null, popoutOpen: false };
+    case 'TOGGLE_REVIEW_QUEUE':
+      return { ...state, reviewQueueOpen: !state.reviewQueueOpen, releaseOpen: false, openDock: null, popoutOpen: false };
     case 'OPEN_POPOUT':
-      return { ...state, openDock: null, releaseOpen: false, popoutOpen: true };
+      return { ...state, openDock: null, releaseOpen: false, reviewQueueOpen: false, popoutOpen: true };
     case 'CLOSE_POPOUT':
       return { ...state, popoutOpen: false };
     case 'SET_PROSE':
@@ -174,6 +179,7 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
         previewTarget: null,
         pendingCatalogId: null,
         releaseOpen: false,
+        reviewQueueOpen: false,
         popoutOpen: false,
         openDock: null,
         selectedRunJobId: null,
