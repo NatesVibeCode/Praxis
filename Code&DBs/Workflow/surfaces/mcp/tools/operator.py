@@ -358,6 +358,30 @@ def tool_praxis_run(params: dict) -> dict:
     )
 
 
+def tool_praxis_trace(params: dict) -> dict:
+    """Walk the cause tree for any anchor (receipt_id, event_id, correlation_id, run_id, bug_id)."""
+
+    operation_name = "trace.walk"
+    anchors = {
+        "receipt_id": str(params.get("receipt_id") or "").strip() or None,
+        "event_id": str(params.get("event_id") or "").strip() or None,
+        "correlation_id": str(params.get("correlation_id") or "").strip() or None,
+        "run_id": str(params.get("run_id") or "").strip() or None,
+        "bug_id": str(params.get("bug_id") or "").strip() or None,
+    }
+    provided = [v for v in anchors.values() if v]
+    if len(provided) != 1:
+        return _structured_input_error(
+            ValueError(
+                "trace.walk requires exactly one of receipt_id, event_id, "
+                "correlation_id, run_id, or bug_id"
+            ),
+            operation_name=operation_name,
+        )
+    payload: dict[str, Any] = {key: value for key, value in anchors.items() if value}
+    return _execute_catalog_tool(operation_name=operation_name, payload=payload)
+
+
 def tool_praxis_issue_backlog(params: dict) -> dict:
     """Read the canonical operator issue backlog."""
 
@@ -1459,6 +1483,73 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "examples": [
                     {"title": "Read run lineage", "input": {"run_id": "run_123"}},
                 ],
+            },
+        },
+    ),
+    "praxis_trace": (
+        tool_praxis_trace,
+        {
+            "description": (
+                "Walk the cause tree for any anchor (receipt_id, event_id, or "
+                "correlation_id) and return the rooted DAG of receipts plus the "
+                "events they emitted. Phase 1 of causal tracing — links receipts "
+                "via cause_receipt_id and groups them by correlation_id. Returns "
+                "orphan_count so callers can see when a trace is incomplete "
+                "(e.g. when an async-spawned subtree did not propagate context)."
+            ),
+            "kind": "search",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "receipt_id": {
+                        "type": "string",
+                        "description": "Receipt UUID anchor.",
+                    },
+                    "event_id": {
+                        "type": "string",
+                        "description": "Authority event UUID anchor.",
+                    },
+                    "correlation_id": {
+                        "type": "string",
+                        "description": "Correlation UUID anchor — fetches the entire trace.",
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Workflow run id anchor — resolved via authority_events payloads or bugs.discovered_in_run_id fallback.",
+                    },
+                    "bug_id": {
+                        "type": "string",
+                        "description": "Bug id anchor — resolved via bugs.discovered_in_receipt_id, falling back to bug_evidence_links.",
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": (
+                    "Follow a flow end-to-end across nested gateway calls within "
+                    "one entry point. Start from any receipt, event, correlation, "
+                    "workflow run, or bug to see the whole tree."
+                ),
+                "when_not_to_use": (
+                    "Do not use this for run-scoped views — praxis_run(action='lineage') "
+                    "still walks the evidence_timeline for one workflow run. Use "
+                    "praxis_trace when the flow crosses operations, not just stages."
+                ),
+                "risks": {"default": "read"},
+                "examples": [
+                    {
+                        "title": "Trace from a receipt",
+                        "input": {"receipt_id": "<receipt-uuid>"},
+                    },
+                    {
+                        "title": "Trace by correlation",
+                        "input": {"correlation_id": "<correlation-uuid>"},
+                    },
+                ],
+            },
+            "type_contract": {
+                "default": {"consumes": [], "produces": ["praxis.trace.cause_tree"]},
             },
         },
     ),

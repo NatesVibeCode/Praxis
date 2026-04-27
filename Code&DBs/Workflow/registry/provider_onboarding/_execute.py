@@ -177,7 +177,8 @@ def _post_onboarding_sync(
             for task_type in task_types:
                 conn.execute(
                     """INSERT INTO task_type_routing (
-                           task_type, provider_slug, model_slug, permitted, rank,
+                           task_type, sub_task_type, provider_slug, model_slug,
+                           transport_type, permitted, rank,
                            route_tier, route_tier_rank, latency_class, latency_rank,
                            reasoning_control, route_health_score, route_source,
                            recent_successes, recent_failures,
@@ -187,12 +188,12 @@ def _post_onboarding_sync(
                            consecutive_internal_failures, last_failure_category,
                            last_failure_zone
                        ) VALUES (
-                           $1, $2, $3, true, $4,
+                           $1, '*', $2, $3, 'CLI', true, $4,
                            $5, $4, 'reasoning', $4,
                            '{}'::jsonb, 0.65, 'explicit',
                            0, 0, 0, 0, 0, 0, 0, 0, 0, '', ''
                        )
-                       ON CONFLICT (task_type, provider_slug, model_slug) DO NOTHING""",
+                       ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO NOTHING""",
                     task_type,
                     provider_slug,
                     model_slug,
@@ -207,7 +208,8 @@ def _post_onboarding_sync(
                     if str(avoid_label).lower() in task_type.lower():
                         conn.execute(
                             """INSERT INTO task_type_routing (
-                                   task_type, provider_slug, model_slug, permitted, rank,
+                                   task_type, sub_task_type, provider_slug, model_slug,
+                                   transport_type, permitted, rank,
                                    route_tier, route_tier_rank, latency_class, latency_rank,
                                    reasoning_control, route_health_score, route_source,
                                    recent_successes, recent_failures,
@@ -217,12 +219,12 @@ def _post_onboarding_sync(
                                    consecutive_internal_failures, last_failure_category,
                                    last_failure_zone
                                ) VALUES (
-                                   $1, $2, $3, false, 99,
+                                   $1, '*', $2, $3, 'CLI', false, 99,
                                    'low', 99, 'instant', 99,
                                    '{}'::jsonb, 0.65, 'explicit',
                                    0, 0, 0, 0, 0, 0, 0, 0, 0, '', ''
                                )
-                               ON CONFLICT (task_type, provider_slug, model_slug) DO NOTHING""",
+                               ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO NOTHING""",
                             task_type,
                             provider_slug,
                             model_slug,

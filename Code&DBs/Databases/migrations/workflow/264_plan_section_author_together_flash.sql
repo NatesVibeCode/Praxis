@@ -43,7 +43,7 @@ INSERT INTO task_type_routing (
 ) VALUES
     ('plan_section_author', 1, 'together', 'deepseek-ai/DeepSeek-V3.2',  'explicit', TRUE, now()),
     ('plan_section_author', 2, 'together', 'deepseek-ai/DeepSeek-V4-Pro', 'explicit', TRUE, now())
-ON CONFLICT (task_type, provider_slug, model_slug)
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type)
 DO UPDATE SET
     rank = EXCLUDED.rank,
     route_source = EXCLUDED.route_source,

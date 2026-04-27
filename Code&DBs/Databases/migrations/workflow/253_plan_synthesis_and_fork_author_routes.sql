@@ -21,7 +21,7 @@ INSERT INTO task_type_routing (
      TRUE, 2, 'high', 2, 'reasoning', 2,
      'Pro fallback when Together direct rate-limits or fails.',
      'explicit')
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted, rank = EXCLUDED.rank,
     route_tier = EXCLUDED.route_tier, rationale = EXCLUDED.rationale,
     route_source = EXCLUDED.route_source, updated_at = now();
@@ -44,7 +44,7 @@ INSERT INTO task_type_routing (
      TRUE, 3, 'high', 3, 'reasoning', 3,
      'Second pro fallback via OpenRouter pool.',
      'explicit')
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted, rank = EXCLUDED.rank,
     route_tier = EXCLUDED.route_tier, rationale = EXCLUDED.rationale,
     route_source = EXCLUDED.route_source, updated_at = now();

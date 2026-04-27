@@ -4617,7 +4617,7 @@ def operator_console_service_worker() -> Any:
     if not _operator_console_enabled():
         raise HTTPException(status_code=404, detail={"message": "operator console is not enabled"})
     body = """
-const CACHE_NAME = 'praxis-console-v1';
+const CACHE_NAME = 'praxis-console-v2';
 const SHELL_URLS = [
   '/console',
   '/console/manifest.webmanifest',

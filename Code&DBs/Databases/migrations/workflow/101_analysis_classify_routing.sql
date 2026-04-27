@@ -78,7 +78,7 @@ INSERT INTO task_type_routing (
         '{"kind":"budgeted","parameter":"thinking.budget_tokens","adaptive_thinking":true,"extended_thinking":true}'::jsonb, 0.64,
         0,0,0,0,0,0,0, '', '', 'explicit', 0,0
     )
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     route_tier = EXCLUDED.route_tier,

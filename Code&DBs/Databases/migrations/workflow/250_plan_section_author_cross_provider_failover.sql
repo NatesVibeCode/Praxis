@@ -43,7 +43,7 @@ INSERT INTO task_type_routing (
      TRUE, 6, 'high', 6, 'reasoning', 6,
      'Google Gemini 3 flash preview — fast US-hosted fallback when codex tier is also busy.',
      'explicit')
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     route_tier = EXCLUDED.route_tier,

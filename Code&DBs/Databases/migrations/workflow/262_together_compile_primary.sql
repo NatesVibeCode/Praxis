@@ -429,7 +429,7 @@ INSERT INTO task_type_routing (
         2,
         'explicit'
     )
-ON CONFLICT (task_type, provider_slug, model_slug)
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type)
 DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,

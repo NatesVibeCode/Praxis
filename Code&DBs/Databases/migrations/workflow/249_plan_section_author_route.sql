@@ -59,7 +59,7 @@ INSERT INTO task_type_routing (
         'Fallback when v4-pro is unavailable. Same provider lane (OpenRouter), faster but lower-accuracy variant.',
         'explicit'
     )
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     route_tier = EXCLUDED.route_tier,

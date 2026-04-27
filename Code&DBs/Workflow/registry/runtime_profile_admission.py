@@ -133,10 +133,11 @@ def _candidate_is_admitted_for_runtime_profile(
     eligibility_status: str,
     reason_code: str,
     source_window_refs: object,
+    conn: "SyncPostgresConnection | None" = None,
 ) -> bool:
     if eligibility_status == "eligible":
         return True
-    if not is_native_runtime_profile_ref(runtime_profile_ref):
+    if not is_native_runtime_profile_ref(runtime_profile_ref, conn=conn):
         return False
     if reason_code not in {
         "provider_route_authority.no_live_probe_state",
@@ -379,6 +380,7 @@ def load_admitted_runtime_profile_candidates(
             eligibility_status=str(eligibility["eligibility_status"]),
             reason_code=str(eligibility["reason_code"]),
             source_window_refs=eligibility.get("source_window_refs"),
+            conn=conn,
         ):
             continue
         admitted.append(
@@ -445,6 +447,7 @@ def load_admitted_runtime_profile_candidates(
                         eligibility_status=str(details["eligibility_status"]),
                         reason_code=str(details["reason_code"]),
                         source_window_refs=details.get("source_window_refs"),
+                        conn=conn,
                     )
                 ),
             },

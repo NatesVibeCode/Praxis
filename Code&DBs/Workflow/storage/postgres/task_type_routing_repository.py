@@ -133,7 +133,8 @@ class PostgresTaskTypeRoutingRepository:
         self._conn.execute(
             """
             INSERT INTO task_type_routing (
-                task_type, model_slug, provider_slug, permitted, rank,
+                task_type, sub_task_type, model_slug, provider_slug, transport_type,
+                permitted, rank,
                 benchmark_score, benchmark_name, cost_per_m_tokens, rationale,
                 route_tier, route_tier_rank, latency_class, latency_rank, route_source,
                 route_health_score, observed_completed_count, observed_execution_failure_count,
@@ -141,10 +142,10 @@ class PostgresTaskTypeRoutingRepository:
                 observed_downstream_failure_count, observed_downstream_bug_count,
                 consecutive_internal_failures, last_failure_category, last_failure_zone, updated_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $1, '*', $2, $3, 'CLI', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                 'derived', $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, now()
             )
-            ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+            ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
                 permitted = EXCLUDED.permitted, rank = EXCLUDED.rank,
                 benchmark_score = EXCLUDED.benchmark_score, benchmark_name = EXCLUDED.benchmark_name,
                 cost_per_m_tokens = EXCLUDED.cost_per_m_tokens, rationale = EXCLUDED.rationale,

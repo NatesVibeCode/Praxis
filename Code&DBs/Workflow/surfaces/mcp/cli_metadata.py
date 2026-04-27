@@ -794,6 +794,18 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Probe a provider", {"action": "probe", "provider_slug": "openrouter", "transport": "api"}),
         ],
     ),
+    "praxis_cli_auth_doctor": _tool(
+        surface="integration",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use="Diagnose CLI auth state for claude / codex / gemini in one call when a workflow run reported `Not logged in` / 401 / authentication errors, OR proactively before launching CLI-lane work.",
+        when_not_to_use="Do not use for general workflow status (use praxis_workflow action='status') or for provider catalog truth (use praxis_provider_control_plane).",
+        risks={"default": "read"},
+        examples=[
+            _example("Check all three CLIs", {}),
+            _example("Check just claude", {"providers": ["anthropic"]}),
+        ],
+    ),
     "praxis_query": _tool(
         surface="query",
         tier="stable",

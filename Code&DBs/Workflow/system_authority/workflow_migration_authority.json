@@ -296,7 +296,19 @@
     "279_register_bug_triage_packet_operation.sql",
     "280_promote_picker_winners.sql",
     "281_register_access_control_operation.sql",
-    "282_admit_picker_winners_to_access_matrix.sql"
+    "282_admit_picker_winners_to_access_matrix.sql",
+    "283_admit_picker_winners_runtime_profile_routes.sql",
+    "284_register_cli_auth_doctor_operation.sql",
+    "285_register_catalog_operation_register_and_retire.sql",
+    "286_routing_transport_and_sub_task_columns.sql",
+    "287_routing_replaces_api_allowlist_as_admission_authority.sql",
+    "288_extend_job_catalog_pk_for_transport_split.sql",
+    "289_routing_collapse_post_refresh.sql",
+    "290_causal_tracing_receipt_event_linkage.sql",
+    "291_register_trace_walk_operation.sql",
+    "292_causal_tracing_drop_strict_fks.sql",
+    "293_bugs_correlation_id_for_tracing.sql",
+    "294_trace_walk_non_idempotent.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -7331,6 +7343,150 @@
         "object_type": "view",
         "object_name": "task_type_routing_admission_audit"
       }
+    ],
+    "283_admit_picker_winners_runtime_profile_routes.sql": [
+      {
+        "object_type": "row",
+        "object_name": "runtime_profile_admitted_routes.praxis.candidate.openrouter.google-gemini-3-flash-preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "runtime_profile_admitted_routes.praxis.candidate.openrouter.openai-gpt-5-4-mini"
+      },
+      {
+        "object_type": "row",
+        "object_name": "runtime_profile_admitted_routes.scratch_agent.candidate.openrouter.google-gemini-3-flash-preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "runtime_profile_admitted_routes.scratch_agent.candidate.openrouter.openai-gpt-5-4-mini"
+      },
+      {
+        "object_type": "view",
+        "object_name": "task_type_routing_admission_audit"
+      }
+    ],
+    "284_register_cli_auth_doctor_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.cli_auth_doctor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.cli_auth_doctor"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.cli-auth-doctor"
+      }
+    ],
+    "285_register_catalog_operation_register_and_retire.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.catalog.operation.registered"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.catalog.operation.retired"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.catalog_operation_register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.catalog_operation_register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.catalog.operation.register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.catalog_operation_retire"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.catalog_operation_retire"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.catalog.operation.retire"
+      }
+    ],
+    "286_routing_transport_and_sub_task_columns.sql": [
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.sub_task_type"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.transport_type"
+      }
+    ],
+    "287_routing_replaces_api_allowlist_as_admission_authority.sql": [
+      {
+        "object_type": "view",
+        "object_name": "private_model_access_control_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.projection.private_model_access_control_matrix.routing_derived_v287"
+      }
+    ],
+    "288_extend_job_catalog_pk_for_transport_split.sql": [
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_provider_job_catalog"
+      }
+    ],
+    "289_routing_collapse_post_refresh.sql": [
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_provider_job_catalog"
+      }
+    ],
+    "290_causal_tracing_receipt_event_linkage.sql": [
+      {
+        "object_type": "column",
+        "object_name": "authority_operation_receipts.cause_receipt_id"
+      },
+      {
+        "object_type": "column",
+        "object_name": "authority_operation_receipts.correlation_id"
+      },
+      {
+        "object_type": "column",
+        "object_name": "authority_events.causation_event_id"
+      },
+      {
+        "object_type": "column",
+        "object_name": "authority_events.correlation_id"
+      }
+    ],
+    "291_register_trace_walk_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.trace-walk"
+      }
+    ],
+    "292_causal_tracing_drop_strict_fks.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.definition.authority_operation_receipts.causal_tracing_v290"
+      }
+    ],
+    "293_bugs_correlation_id_for_tracing.sql": [
+      {
+        "object_type": "column",
+        "object_name": "bugs.correlation_id"
+      }
+    ],
+    "294_trace_walk_non_idempotent.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.trace-walk"
+      }
     ]
   },
   "policy_buckets": {
@@ -7631,7 +7787,19 @@
       "279_register_bug_triage_packet_operation.sql",
       "280_promote_picker_winners.sql",
       "281_register_access_control_operation.sql",
-      "282_admit_picker_winners_to_access_matrix.sql"
+      "282_admit_picker_winners_to_access_matrix.sql",
+      "283_admit_picker_winners_runtime_profile_routes.sql",
+      "284_register_cli_auth_doctor_operation.sql",
+      "285_register_catalog_operation_register_and_retire.sql",
+      "286_routing_transport_and_sub_task_columns.sql",
+      "287_routing_replaces_api_allowlist_as_admission_authority.sql",
+      "288_extend_job_catalog_pk_for_transport_split.sql",
+      "289_routing_collapse_post_refresh.sql",
+      "290_causal_tracing_receipt_event_linkage.sql",
+      "291_register_trace_walk_operation.sql",
+      "292_causal_tracing_drop_strict_fks.sql",
+      "293_bugs_correlation_id_for_tracing.sql",
+      "294_trace_walk_non_idempotent.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

@@ -34,7 +34,37 @@ import urllib.request
 import uuid
 from typing import Any
 
-from surfaces.cli.commands.tools import _render_tool_lookup_failure, _resolve_tool_definition
+# In-sandbox shim — the praxis surfaces source tree is NOT available here,
+# only this single file is COPYed into /usr/local/bin/praxis. Importing from
+# `surfaces.cli.commands.tools` raises ModuleNotFoundError at startup and
+# prevents the shim from running at all (BUG-632E6F45 surfaced this when an
+# audit agent tried to call `praxis discover` and crashed before the HTTP
+# bridge call). Use minimal in-shim stand-ins backed by the live tools list
+# fetched from the bridge — exact-name match wins, otherwise an unambiguous
+# substring/alias match wins, otherwise we report ambiguity from the bridge
+# response.
+def _resolve_tool_definition(tool_name):  # type: ignore[no-redef]
+    # The shim's other path uses _call_tools_list to fetch the live catalog;
+    # this helper is only called BEFORE that fetch in older code paths. Just
+    # treat the input as the resolved name and let _match_tool_definition do
+    # the actual lookup against the bridge-supplied list.
+    class _StubDef:
+        def __init__(self, name):
+            self.name = name
+    return _StubDef(tool_name), []
+
+
+def _render_tool_lookup_failure(tool_name, candidates, *, stdout):  # type: ignore[no-redef]
+    if not candidates:
+        stdout.write(f"unknown tool: {tool_name}\n")
+        stdout.write("tip: run `praxis workflow tools list` to browse available tools.\n")
+        return 2
+    stdout.write(f"ambiguous tool name: {tool_name}\n")
+    stdout.write("did you mean:\n")
+    for definition in candidates[:5]:
+        name = getattr(definition, "name", str(definition))
+        stdout.write(f"  {name}\n")
+    return 2
 
 _ENV_URL = "PRAXIS_WORKFLOW_MCP_URL"
 _ENV_TOKEN = "PRAXIS_WORKFLOW_MCP_TOKEN"

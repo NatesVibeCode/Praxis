@@ -286,6 +286,8 @@ def resolve_matrix_gated_routes(
                 ON route.task_type = catalog.job_type
                AND route.provider_slug = catalog.provider_slug
                AND route.model_slug = catalog.model_slug
+               AND route.transport_type = catalog.transport_type
+               AND route.sub_task_type = '*'
              WHERE catalog.runtime_profile_ref = $1
                AND catalog.job_type = $2
                AND catalog.transport_type = $3
@@ -346,6 +348,8 @@ def resolve_matrix_gated_route_configs(
                 ON route.task_type = catalog.job_type
                AND route.provider_slug = catalog.provider_slug
                AND route.model_slug = catalog.model_slug
+               AND route.transport_type = catalog.transport_type
+               AND route.sub_task_type = '*'
              WHERE catalog.runtime_profile_ref = $1
                AND catalog.job_type = $2
                AND catalog.transport_type = $3

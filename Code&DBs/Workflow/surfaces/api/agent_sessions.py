@@ -2122,6 +2122,19 @@ async def send_message(
         payload=user_payload,
         text_content=body.prompt,
     )
+    # Drain any unflushed events left over from a previous turn. The
+    # per-agent SSE queue persists across turns, and if the prior turn's
+    # client aborted its stream before the assistant.reply frame flushed,
+    # that reply sits in the queue. Without draining, the new turn's
+    # stream connects, drains the stale reply first, and the user sees
+    # the previous answer in place of the current one (only a refresh —
+    # which reads from DB — recovers the right sequence).
+    queue = _get_queue(agent_id)
+    while not queue.empty():
+        try:
+            queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
     accepted_event = {
         "type": "turn.accepted",
         "provider": _OPERATOR_CONSOLE_PROVIDER,
@@ -2129,7 +2142,7 @@ async def send_message(
         "status": "ok",
         "message": "Praxis received and stored your message.",
     }
-    await _get_queue(agent_id).put(accepted_event)
+    await queue.put(accepted_event)
 
     _claim_turn(agent_id)
     lock = _get_lock(agent_id)

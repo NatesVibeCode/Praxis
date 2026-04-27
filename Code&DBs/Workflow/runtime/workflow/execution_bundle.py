@@ -219,7 +219,21 @@ _VERIFICATION_REQUIRED_TASK_TYPES = frozenset({
     "build", "implement", "code_generation", "code_edit",
     "refactor", "test", "wiring",
 })
-_SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES = _VERIFICATION_REQUIRED_TASK_TYPES
+
+# Review/research/audit/debate produce written deliverables (research_result
+# kind, sealed via praxis_submit_research_result). Their seal contract is
+# "produce a tangible artifact in write_scope" — same auto-seal diff flow as
+# build, but the proof shape is a markdown/JSON report rather than a code
+# change. Without this, "the agent ran cleanly with no on-disk output" passes
+# review jobs silently — operators get no link + content back, just an empty
+# success receipt.
+_DELIVERABLE_REQUIRED_TASK_TYPES = frozenset({
+    "review", "research", "analysis", "audit", "debate",
+})
+
+_SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES = (
+    _VERIFICATION_REQUIRED_TASK_TYPES | _DELIVERABLE_REQUIRED_TASK_TYPES
+)
 
 
 def _default_submission_required(task_type: str) -> bool:
@@ -394,7 +408,18 @@ def build_execution_bundle(
         verify_refs=normalized_verify_refs,
     )
     normalized_write_scope = _dedupe_strings(_string_list(write_scope))
-    mutation_requires_submission = bool(normalized_write_scope)
+    # A non-empty write_scope is the sandbox isolation boundary required by
+    # SandboxRuntime — it is NOT itself evidence of mutation intent. Only
+    # force the submission/verification contract when the task_type is one
+    # that actually mutates code (build/implement/refactor/test/wiring/
+    # code_generation/code_edit). Audit, review, research, debate, etc.
+    # carry a write_scope for isolation but produce no on-disk diff, so
+    # forcing them through the seal-gate makes every such job fail with
+    # workflow_submission.required_missing despite running successfully.
+    mutation_requires_submission = (
+        bool(normalized_write_scope)
+        and _default_submission_required(normalized_task_type)
+    )
     effective_submission_required = True if mutation_requires_submission else submission_required
     effective_verification_required = (
         True if mutation_requires_submission else verification_required

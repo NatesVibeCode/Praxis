@@ -6,8 +6,11 @@ import asyncio
 from collections.abc import Mapping
 from contextlib import contextmanager
 import hashlib
+import inspect
 import os
+import re
 import socket
+import sys
 import threading as _threading
 from urllib.parse import urlsplit, urlunsplit
 
@@ -15,6 +18,146 @@ import asyncpg
 
 from .validators import PostgresConfigurationError, PostgresStorageError
 from storage.migrations import workflow_compile_authority_readiness_tables
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Authority-table write guard
+#
+# These tables are owned by the MCP operator-tool surface (praxis_access_control,
+# praxis_provider_onboard, praxis_circuits, praxis_operator_decisions, etc.).
+# Writing them directly via SyncPostgresConnection.execute / execute_many /
+# execute_script bypasses the CQRS gateway, leaves no operator-decision row,
+# and yields stale projections — exactly the failure mode that produced
+# migration 282/283/284 spirals on 2026-04-26.
+#
+# The guard refuses INSERT/UPDATE/DELETE/UPSERT/TRUNCATE/DROP/ALTER against
+# these tables UNLESS the immediate caller stack includes an allowlisted
+# module (operator handler, repository, provider-onboarding pipeline, fresh-
+# install seed, or migration runner). The error message names the tool that
+# owns the concern so the model is told what to use instead.
+# ──────────────────────────────────────────────────────────────────────────
+
+_PROTECTED_TABLES_TO_OWNER_TOOL: dict[str, dict[str, str]] = {
+    "private_provider_api_job_allowlist": {
+        "tool": "praxis_access_control",
+        "action": "enable / disable",
+    },
+    "private_provider_model_access_denials": {
+        "tool": "praxis_access_control",
+        "action": "enable / disable",
+    },
+    "private_provider_transport_control_policy": {
+        "tool": "praxis_access_control",
+        "action": "enable / disable (transport policy)",
+    },
+    "runtime_profile_admitted_routes": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+    },
+    "provider_transport_admissions": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+    },
+    "provider_circuit_breaker_state": {
+        "tool": "praxis_circuits",
+        "action": "open / close / reset",
+    },
+    "task_type_routing": {
+        "tool": "praxis_provider_control_plane",
+        "action": "read first to confirm matrix admission BEFORE editing routing rank",
+    },
+    "task_type_route_eligibility": {
+        "tool": "praxis_provider_control_plane",
+        "action": "read first; eligibility is operator-tool territory",
+    },
+    "operator_decisions": {
+        "tool": "praxis_operator_decisions / praxis_operator_write",
+        "action": "record / supersede",
+    },
+}
+
+# Caller modules permitted to write these tables. Anything calling from
+# outside this allowlist gets refused. Pattern: the operator MCP tool surface
+# routes through the gateway → handler → repository, and the repositories
+# are the only legitimate direct writers.
+_AUTHORITATIVE_WRITER_MODULE_PATTERNS = (
+    re.compile(r"^storage\.postgres\..*_repository$"),
+    re.compile(r"^storage\.postgres\.fresh_install_seed$"),
+    re.compile(r"^storage\.migrations(\.|$)"),
+    re.compile(r"^runtime\.operations\.commands\."),
+    re.compile(r"^runtime\.operation_catalog_gateway$"),
+    re.compile(r"^runtime\.command_handlers$"),
+    re.compile(r"^runtime\.control_commands$"),
+    re.compile(r"^runtime\.workflow\._admission$"),  # workflow_runs/jobs writes
+    re.compile(r"^runtime\.workflow\."),
+    re.compile(r"^registry\.native_runtime_profile_sync$"),
+    re.compile(r"^registry\.provider_onboarding\."),
+    re.compile(r"^surfaces\.api\.operator_"),
+    re.compile(r"^surfaces\.api\.handlers\."),
+)
+
+# Verb patterns that count as a write. Lowercased SQL.
+_WRITE_VERB_PATTERN = re.compile(
+    r"\b(insert\s+into|update\s+|delete\s+from|truncate\s+|drop\s+table|alter\s+table)\b",
+    re.IGNORECASE,
+)
+
+# Bypass for operator-set explicit override.
+_AUTHORITY_GUARD_DISABLE_ENV = "PRAXIS_AUTHORITY_GUARD_DISABLE"
+
+
+class AuthorityTableWriteRefused(PostgresStorageError):
+    """Raised when a non-authoritative caller tries to write a protected table."""
+
+
+def _detect_protected_table_write(query: str) -> str | None:
+    """Return the protected table name if this query is a write against one,
+    else None. Cheap text inspection — no full SQL parse."""
+    if not isinstance(query, str) or not query:
+        return None
+    lowered = query.lower()
+    if not _WRITE_VERB_PATTERN.search(lowered):
+        return None
+    for table in _PROTECTED_TABLES_TO_OWNER_TOOL:
+        if re.search(rf"\b{re.escape(table)}\b", lowered):
+            return table
+    return None
+
+
+def _caller_module_is_authoritative(skip_frames: int = 3) -> bool:
+    """Walk the call stack starting `skip_frames` above this function and
+    return True if any frame's module matches the allowlist patterns."""
+    frame = sys._getframe(skip_frames)
+    while frame is not None:
+        module_name = frame.f_globals.get("__name__") or ""
+        for pattern in _AUTHORITATIVE_WRITER_MODULE_PATTERNS:
+            if pattern.match(module_name):
+                return True
+        frame = frame.f_back
+    return False
+
+
+def _enforce_authority_table_write_guard(query: str) -> None:
+    """Refuse the call if it's writing a protected table from a non-allowlisted
+    module. The error names the operator tool that owns the concern."""
+    if os.environ.get(_AUTHORITY_GUARD_DISABLE_ENV) == "1":
+        return
+    table = _detect_protected_table_write(query)
+    if table is None:
+        return
+    if _caller_module_is_authoritative():
+        return
+    owner = _PROTECTED_TABLES_TO_OWNER_TOOL.get(table) or {}
+    tool = owner.get("tool", "<unknown operator tool>")
+    action = owner.get("action", "")
+    raise AuthorityTableWriteRefused(
+        "authority_guard.protected_table_write_refused",
+        f"Refused: write against `{table}` from a non-authoritative caller. "
+        f"This table is owned by the MCP operator-tool surface, not by raw SQL. "
+        f"Use `{tool}` ({action}) instead. Set "
+        f"PRAXIS_AUTHORITY_GUARD_DISABLE=1 to bypass for explicit forensics.",
+        details={"protected_table": table, "owner_tool": tool, "owner_action": action},
+    )
 
 WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 WORKFLOW_POOL_ACQUIRE_TIMEOUT_ENV = "WORKFLOW_POOL_ACQUIRE_TIMEOUT_S"
@@ -468,6 +611,7 @@ class SyncPostgresConnection:
 
     def execute(self, query: str, *args) -> list:
         _reject_invalid_memory_metadata_for_test(self._database_url, query, args)
+        _enforce_authority_table_write_guard(query)
 
         async def _do():
             return await self._with_connection(
@@ -533,6 +677,8 @@ class SyncPostgresConnection:
             pinned.commit()
 
     def execute_many(self, query: str, args_list: list):
+        _enforce_authority_table_write_guard(query)
+
         async def _do():
             return await self._with_connection(
                 "execute_many",
@@ -541,6 +687,8 @@ class SyncPostgresConnection:
         _run_sync(_do())
 
     def execute_script(self, sql: str):
+        _enforce_authority_table_write_guard(sql)
+
         async def _do():
             return await self._with_connection(
                 "execute_script",
@@ -580,6 +728,7 @@ class _PinnedSyncPostgresConnection:
     def execute(self, query: str, *args) -> list:
         self._ensure_open()
         _reject_invalid_memory_metadata_for_test("", query, args)
+        _enforce_authority_table_write_guard(query)
 
         async def _do():
             return await self._conn.fetch(query, *args)
@@ -612,6 +761,7 @@ class _PinnedSyncPostgresConnection:
 
     def execute_many(self, query: str, args_list: list):
         self._ensure_open()
+        _enforce_authority_table_write_guard(query)
 
         async def _do():
             await self._conn.executemany(query, args_list)
@@ -620,6 +770,7 @@ class _PinnedSyncPostgresConnection:
 
     def execute_script(self, sql: str):
         self._ensure_open()
+        _enforce_authority_table_write_guard(sql)
 
         async def _do():
             await self._conn.execute(sql)
@@ -695,18 +846,48 @@ def ensure_postgres_available(
     try:
         _run_sync(_bootstrap())
     except Exception as exc:
-        raise PostgresConfigurationError(
-            "postgres.authority_unavailable",
-            (
+        # Pick a reason_code that REPRESENTS the actual failure, not a
+        # generic "postgres unavailable" — operators acted on the wrong
+        # gate when migration-drift / schema-readiness errors were
+        # all collapsed into "authority_unavailable" and then wrapped
+        # again upstream into "native runtime authority unavailable."
+        # Identify common non-connectivity failures by class name so we
+        # don't have to import every heterogeneous error type here.
+        cause_type = type(exc).__name__
+        cause_message = str(exc)
+        if cause_type in {"WorkflowMigrationError", "WorkflowMigrationPathError"}:
+            reason_code = "workflow.migration_policy_drift"
+            human = (
+                "workflow migration files on disk drifted from the generated "
+                "authority — register the new migration in "
+                "system_authority/workflow_migration_authority.json and re-run "
+                "the generator (system_authority/generate_workflow_migration_authority.py). "
+                f"Underlying error: {cause_message}"
+            )
+        elif cause_type == "RuntimeError" and "schema bootstrap incomplete" in cause_message:
+            reason_code = "workflow.schema_bootstrap_incomplete"
+            human = (
+                f"workflow schema bootstrap completed but critical objects are missing: "
+                f"{cause_message}"
+            )
+        else:
+            # Genuine connectivity / configuration failure (asyncpg.PostgresError,
+            # ConnectionError, OSError, etc.). Keep the historical reason_code so
+            # downstream consumers that switch on it still work.
+            reason_code = "postgres.authority_unavailable"
+            human = (
                 f"{WORKFLOW_DATABASE_URL_ENV} authority unavailable during "
-                f"workflow schema bootstrap: {type(exc).__name__}: {exc}"
-            ),
+                f"workflow schema bootstrap: {cause_type}: {cause_message}"
+            )
+        raise PostgresConfigurationError(
+            reason_code,
+            human,
             details={
                 "environment_variable": WORKFLOW_DATABASE_URL_ENV,
                 "database_url": database_url,
                 "operation": "bootstrap_workflow_schema",
-                "cause_type": type(exc).__name__,
-                "cause_message": str(exc),
+                "cause_type": cause_type,
+                "cause_message": cause_message,
             },
         ) from exc
 

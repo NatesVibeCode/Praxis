@@ -73,6 +73,15 @@ DO UPDATE SET
 -- `admission_status <> 'admitted'` to catch the hidden gap.
 -- ──────────────────────────────────────────────────────────────────────────
 
+-- DROP first so re-application after a column-shape change succeeds. Postgres
+-- forbids column renames via CREATE OR REPLACE VIEW; without this, every
+-- bootstrap restart on a database that already has the older view shape fails
+-- with "cannot change name of view column ... to ...". Migration 283 also
+-- carries this DROP for the same reason; mirroring it here lets 282 itself
+-- be idempotent on existing deployments where the column-renamed view was
+-- never re-created cleanly.
+DROP VIEW IF EXISTS task_type_routing_admission_audit CASCADE;
+
 CREATE OR REPLACE VIEW task_type_routing_admission_audit AS
 SELECT
     route.task_type,

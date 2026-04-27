@@ -299,7 +299,15 @@ _UPSERT_PROVIDER_TRANSPORT_ADMISSION_SQL = """
         lane_id = EXCLUDED.lane_id,
         docs_urls = EXCLUDED.docs_urls,
         credential_sources = EXCLUDED.credential_sources,
-        probe_contract = EXCLUDED.probe_contract,
+        -- MERGE probe_contract instead of replacing. Migration 263 wrote per-provider
+        -- `auth_mounts` and `cli_home_tmpfs_dirs` keys (the sandbox runner consumes
+        -- them to mount CLI credentials into thin sandbox images). A bare
+        -- `EXCLUDED.probe_contract` from re-onboard would overwrite those keys with
+        -- whatever the probe pipeline emitted (typically just probe shapes), silently
+        -- breaking sandbox auth for every reonboard. Shallow JSONB merge with
+        -- existing-row priority on keys NOT in EXCLUDED preserves the auth catalog.
+        probe_contract = COALESCE(provider_transport_admissions.probe_contract, '{}'::jsonb)
+                         || COALESCE(EXCLUDED.probe_contract, '{}'::jsonb),
         decision_ref = EXCLUDED.decision_ref,
         status = EXCLUDED.status,
         updated_at = now()

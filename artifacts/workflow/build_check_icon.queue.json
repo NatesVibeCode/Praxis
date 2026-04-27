@@ -1,0 +1,16 @@
+{
+  "name": "build_check_icon",
+  "queue_id": "build_check_icon_001",
+  "phase": "build",
+  "outcome_goal": "An SVG checkmark icon written to artifacts/icon_check.svg.",
+  "jobs": [
+    {
+      "label": "write_check_icon_svg",
+      "agent": "openai/gpt-5.4",
+      "prompt": "Write a small SVG checkmark icon to `artifacts/icon_check.svg`.\n\nRequirements:\n- viewBox: `0 0 64 64`\n- a green checkmark stroke (color `#16a34a`, stroke-width 8, stroke-linecap round, stroke-linejoin round, fill none)\n- transparent background\n- self-contained (no external CSS, no scripts)\n\nOutput just the file. No prose, no explanation.",
+      "write_scope": [
+        "artifacts/icon_check.svg"
+      ]
+    }
+  ]
+}

@@ -280,6 +280,9 @@ def test_operation_gateway_reuses_domain_authority_event_ids(monkeypatch) -> Non
         input_hash="input",
         idempotency_key=None,
         started_ns=0,
+        receipt_id="00000000-0000-0000-0000-000000000001",
+        correlation_id="00000000-0000-0000-0000-0000000000aa",
+        cause_receipt_id=None,
     )
 
     assert receipt["event_ids"] == [event_id]

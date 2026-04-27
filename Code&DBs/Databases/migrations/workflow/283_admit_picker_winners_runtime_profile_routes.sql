@@ -77,8 +77,11 @@ ON CONFLICT (runtime_profile_ref, candidate_ref) DO UPDATE SET
     projected_at       = EXCLUDED.projected_at,
     projection_ref     = EXCLUDED.projection_ref;
 
--- Refresh the snapshot for both runtime profiles so the change is live without
--- waiting for the next scheduled refresh.
+-- Refresh the catalog table FIRST (it rebuilds from runtime_profile_admitted_routes
+-- — without this call, the catalog is stale and the snapshot inherits the
+-- staleness), THEN refresh the snapshot.
+SELECT refresh_private_provider_job_catalog('praxis');
+SELECT refresh_private_provider_job_catalog('scratch_agent');
 SELECT refresh_private_provider_control_plane_snapshot('praxis');
 SELECT refresh_private_provider_control_plane_snapshot('scratch_agent');
 

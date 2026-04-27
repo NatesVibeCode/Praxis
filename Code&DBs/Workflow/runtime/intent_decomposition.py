@@ -100,6 +100,14 @@ _ORDERED_MARKERS: tuple[str, ...] = ("first", "then", "next", "after that", "fin
 
 
 # Stage inference from the first verb — conservative, small table.
+#
+# 2026-04-27: expanded the review-tier verb set so verification-style steps
+# (confirm/validate/check/ensure/inspect/assert/reconcile) route as review
+# instead of falling through to the default (build). The default-build
+# routing forces submission_required=True via execution_bundle's
+# write_scope-and-mutating-task-type heuristic, then auto-seal fails the
+# job with workflow_submission.required_missing because the LLM produced
+# no on-disk diff. Verification work has no diff by design.
 _STAGE_VERB_MAP: dict[str, str] = {
     "build": "build",
     "implement": "build",
@@ -115,6 +123,21 @@ _STAGE_VERB_MAP: dict[str, str] = {
     "verify": "test",
     "review": "review",
     "audit": "review",
+    "confirm": "review",
+    "validate": "review",
+    "check": "review",
+    "ensure": "review",
+    "inspect": "review",
+    "assert": "review",
+    "reconcile": "review",
+    "document": "review",
+    "describe": "review",
+    "summarize": "review",
+    "report": "review",
+    "enumerate": "review",
+    "surface": "review",
+    "trace": "review",
+    "diagnose": "review",
     "research": "research",
     "investigate": "research",
     "explore": "research",

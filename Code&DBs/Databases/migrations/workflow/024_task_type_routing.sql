@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS task_type_routing (
 
 DO $$
 BEGIN
+    -- Migration 286 swapped the PK to the compound (task_type, sub_task_type,
+    -- provider_slug, model_slug, transport_type). On re-runs after 286, leave
+    -- whatever PK is in place alone — only initialize a PK if NONE exists.
     IF EXISTS (
         SELECT 1
         FROM information_schema.tables
@@ -43,14 +46,8 @@ BEGIN
         JOIN pg_namespace n ON n.oid = t.relnamespace
         WHERE n.nspname = 'public'
           AND t.relname = 'task_type_routing'
-          AND c.contype IN ('p', 'u')
-          AND c.conkey = ARRAY[
-              (SELECT attnum FROM pg_attribute WHERE attrelid = t.oid AND attname = 'task_type'),
-              (SELECT attnum FROM pg_attribute WHERE attrelid = t.oid AND attname = 'provider_slug'),
-              (SELECT attnum FROM pg_attribute WHERE attrelid = t.oid AND attname = 'model_slug')
-          ]::smallint[]
+          AND c.contype = 'p'
     ) THEN
-        ALTER TABLE task_type_routing DROP CONSTRAINT IF EXISTS task_type_routing_pkey;
         ALTER TABLE task_type_routing
             ADD CONSTRAINT task_type_routing_pkey
             PRIMARY KEY (task_type, provider_slug, model_slug);
@@ -120,7 +117,7 @@ INSERT INTO task_type_routing (task_type, model_slug, provider_slug, permitted, 
 ('review', 'gemini-3.1-pro-preview', 'google',    true,  3, 0, '', 7.00, 'Adequate for review'),
 ('review', 'gpt-5.4-mini',           'openai',    true,  4, 0, '', 2.63, 'Quick reviews')
 
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     benchmark_score = EXCLUDED.benchmark_score,

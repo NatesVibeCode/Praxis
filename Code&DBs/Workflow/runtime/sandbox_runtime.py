@@ -1718,14 +1718,29 @@ class SandboxRuntime:
                 write_scope=write_scope,
                 submission_required=submission_required,
             )
-            # Dehydrate: copy changed files from sandbox back to host workdir.
-            # Legacy contract only. Under the sealed-submission contract the
-            # authoritative deliverable is the workflow_job_submissions row,
-            # not on-disk artifacts — dehydrating would pollute the host repo
-            # with ephemeral scratch from the sandbox.
+            # Dehydrate: copy changed in-scope files from sandbox back to host
+            # workdir BEFORE the sandbox is destroyed.
+            #
+            # Why this fires for submission_required=True (changed 2026-04-27):
+            # The submission gate's seal/auto-seal flow runs `_measured_operations`
+            # which reads from `baseline.workspace_root` — the host workdir.
+            # Without dehydration, sandbox writes only land in `artifact_store`
+            # (line below) and the on-disk diff finds 0 changes → every
+            # submission_required job fails with `workflow_submission.phantom_ship`
+            # or `workflow_submission.required_missing`. The previous comment said
+            # "the authoritative deliverable is the workflow_job_submissions row,
+            # not on-disk artifacts" — true intent, but it left a gap because
+            # the seal flow itself reads on-disk to populate that row.
+            #
+            # Dehydrating in-scope files keeps three properties:
+            #   1. The seal diff has something to compare (auto-seal works).
+            #   2. The artifact_store still records hashes via the loop below
+            #      (canonical deliverable provenance).
+            #   3. The host repo only sees paths inside `write_scope`, so
+            #      out-of-scope side-effects (shell history, /tmp scratch)
+            #      stay in the sandbox temp dir and get cleaned by destroy_session.
             if (
                 artifact_refs
-                and not submission_required
                 and getattr(provider, "execution_lane", "") == "local"
                 and not _uses_empty_workspace_materialization(workspace_materialization)
             ):

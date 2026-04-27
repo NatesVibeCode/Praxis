@@ -1745,7 +1745,16 @@ def _sync_runtime_profile_admitted_routes_projection_sync(
             candidate.provider_ref,
             candidate.provider_slug,
             candidate.model_slug,
-            route_state.eligibility_status,
+            # Write the literal 'admitted' when projected-admitted (the
+            # `_route_state_is_projected_admitted` check above already gated
+            # this branch). The catalog refresh SQL JOIN (migration 272)
+            # requires `eligibility_status = 'admitted'` literally, while
+            # upstream `route_state.eligibility_status` may carry probe-state
+            # values like 'eligible' or 'rejected' with a no_live_probe_state
+            # reason. Translating at the admission boundary keeps the
+            # Python resolver and the catalog SQL agreeing on what's
+            # admitted instead of disagreeing silently.
+            "admitted",
             route_state.reason_code,
             json.dumps(list(route_state.source_window_refs)),
         )
@@ -1831,7 +1840,10 @@ async def _sync_runtime_profile_admitted_routes_projection_async(
             candidate.provider_ref,
             candidate.provider_slug,
             candidate.model_slug,
-            route_state.eligibility_status,
+            # Mirror of the sync writer above: when projected-admitted, write
+            # the literal 'admitted' so the catalog SQL JOIN
+            # (eligibility_status = 'admitted') matches.
+            "admitted",
             route_state.reason_code,
             json.dumps(list(route_state.source_window_refs)),
         )

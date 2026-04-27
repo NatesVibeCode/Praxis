@@ -715,10 +715,18 @@ def execute_cli(
             else "disabled",
             execution_bundle=execution_bundle,
         )
+        # Default to "copy" so the agent's nested sandbox actually contains
+        # the repo files at /workspace. The previous "none" default left the
+        # sandbox empty even when context-shard manifests advertised paths,
+        # producing the BUG-632E6F45 "review jobs can't read source files"
+        # failure. The path_filter derived from access_policy.read_scope /
+        # write_scope still scopes WHICH files are copied, so big repos are
+        # not shipped wholesale unless the bundle explicitly leaves both
+        # scopes empty.
         workspace_materialization = _sandbox_policy_value(
             agent_config,
             "workspace_materialization",
-            "none",
+            "copy",
             execution_bundle=execution_bundle,
         )
         sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
@@ -877,10 +885,18 @@ def execute_api(
             "provider_only",
             execution_bundle=execution_bundle,
         )
+        # Default to "copy" so the agent's nested sandbox actually contains
+        # the repo files at /workspace. The previous "none" default left the
+        # sandbox empty even when context-shard manifests advertised paths,
+        # producing the BUG-632E6F45 "review jobs can't read source files"
+        # failure. The path_filter derived from access_policy.read_scope /
+        # write_scope still scopes WHICH files are copied, so big repos are
+        # not shipped wholesale unless the bundle explicitly leaves both
+        # scopes empty.
         workspace_materialization = _sandbox_policy_value(
             agent_config,
             "workspace_materialization",
-            "none",
+            "copy",
             execution_bundle=execution_bundle,
         )
         sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)

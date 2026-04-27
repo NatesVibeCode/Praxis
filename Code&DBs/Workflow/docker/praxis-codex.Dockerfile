@@ -6,12 +6,14 @@
 # Built automatically by docker_image_authority when dispatched to an openai/
 # codex agent and the image is missing on the host.
 #
-# Scope: codex CLI only. No claude, no gemini, no cursor-agent. No Python
-# runtime. No Praxis repo. Agents communicate with Praxis via the MCP bridge
-# at http://host.docker.internal:8420/mcp and submit sealed results through
+# Scope: codex CLI + Python 3.14 runtime so the agent can run repo scripts,
+# pytest, migrations, and verify edits against the same interpreter the
+# Praxis API server uses. No claude, no gemini, no cursor-agent. Agents
+# communicate with Praxis via the MCP bridge at
+# http://host.docker.internal:8420/mcp and submit sealed results through
 # praxis_submit_* tools — filesystem writes are not the authority.
 
-FROM node:22-bookworm-slim
+FROM python:3.14-slim
 
 ARG PRAXIS_CONTAINER_WORKSPACE_ROOT
 ARG PRAXIS_CONTAINER_HOME
@@ -23,14 +25,15 @@ ENV PRAXIS_CONTAINER_WORKSPACE_ROOT=${PRAXIS_CONTAINER_WORKSPACE_ROOT} \
 
 RUN test -n "$PRAXIS_CONTAINER_WORKSPACE_ROOT" && test -n "$PRAXIS_CONTAINER_HOME"
 
-# Minimal system — bash for the command launcher, curl for health probes,
-# ca-certificates for TLS to MCP / upstream APIs, python3-minimal for the
-# `praxis` shell shim (uses only stdlib urllib, no pip). Nothing else.
+# Base image already ships Python 3.14. Add Node 22 (codex CLI runs on it),
+# bash, ca-certificates, and curl.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
         curl \
-        python3-minimal \
+        gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Just codex. One CLI, one family.
@@ -55,5 +58,6 @@ RUN useradd -m -d "${PRAXIS_CONTAINER_HOME}" -u 1100 -s /bin/bash praxis-agent \
     && mkdir -p "${PRAXIS_CONTAINER_HOME}/.codex" \
     && chown -R 1100:1100 "${PRAXIS_CONTAINER_HOME}"
 
-# Smoke test — verify the CLI and the praxis shim are reachable.
-RUN bash -lc "node --version && which codex && which praxis && id praxis-agent"
+# Smoke test — verify Python 3.14, Node, codex CLI, and the praxis shim
+# are all reachable.
+RUN bash -lc "python3 --version && node --version && which codex && which praxis && id praxis-agent"

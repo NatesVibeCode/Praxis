@@ -55,7 +55,7 @@ INSERT INTO task_type_routing (
       "decision_evidence": "operator_ideas.idea.compose-picker.empirical-findings.2026-04-26"}'::jsonb,
     'explicit', now()
 )
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     rank = 1, permitted = TRUE,
     temperature = EXCLUDED.temperature,
     max_tokens = EXCLUDED.max_tokens,
@@ -88,7 +88,7 @@ INSERT INTO task_type_routing (
       "note": "per-packet matrix not run yet; promoted from same-family decomposition winner. Re-pick when per-packet data lands."}'::jsonb,
     'explicit', now()
 )
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     rank = 1, permitted = TRUE,
     temperature = EXCLUDED.temperature,
     max_tokens = EXCLUDED.max_tokens,
@@ -114,7 +114,7 @@ INSERT INTO task_type_routing (
       "rationale": "5-intent consistency check confirmed gpt-5.4-mini @ medium effort is the only OpenAI mini variant that genuinely discriminates pills (cheaper minis are uniform-positive; high effort breaks parsing). Empirical findings: operator_ideas.idea.compose-picker.empirical-findings.2026-04-26"}'::jsonb,
     'explicit', now()
 )
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     rank = 1, permitted = TRUE,
     temperature = EXCLUDED.temperature,
     max_tokens = EXCLUDED.max_tokens,

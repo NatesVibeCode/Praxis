@@ -200,17 +200,90 @@ def build_shared_prefix(atoms: "SuggestedAtoms", sandbox: SectionSandbox) -> str
         field_lines.append(f"  - {entry['field']}: {entry['summary']} [{', '.join(flags)}]")
 
     sections: list[str] = [
-        "PROMPT:",
+        "ROLE:",
+        (
+            "You are authoring ONE PlanPacket inside a multi-step plan that the Praxis "
+            "runtime will execute. Each packet you author is a JOB SPEC: at run time, "
+            "the runtime resolves placeholders, picks an executor based on `task_type`, "
+            "feeds it the rendered `prompt`, and lets it write only inside `write`. "
+            "Bad packet = bad runtime behavior — be precise."
+        ),
+        "",
+        "PROMPT (the operator intent — the WHOLE plan must serve this):",
         atoms.intent,
         "",
-        "DATA PILLS:",
+        "DATA PILLS (typed authority handles available to packets in this plan):",
         json.dumps(pills_view, indent=2, sort_keys=True),
         "",
-        "DATA DICTIONARY (registered stages):",
+        "DATA DICTIONARY (registered stages — consumes/produces are the FLOOR a packet of that stage MUST satisfy; you may NARROW produces to what THIS packet actually emits, never expand or drop floor types):",
         json.dumps(sandbox.stage_io, indent=2, sort_keys=True),
         "",
-        "DATA DICTIONARY (PlanPacket fields):",
+        "DATA DICTIONARY (PlanPacket fields — what each field means at runtime):",
         "\n".join(field_lines),
+        "",
+        "AUTHORING CONVENTIONS (the runtime enforces these — invented variations break execution):",
+        (
+            "  • Placeholder syntax — `{{name}}` (DOUBLE braces). The runtime engine\n"
+            "    resolves `{{name}}` against the packet's `parameters` dict at run\n"
+            "    time. Single-brace `{name}` is NOT a placeholder; it stays literal.\n"
+            "    Dotted access works: `{{leads.count}}` resolves nested keys.\n"
+            "    Defaults work: `{{key|default:fallback}}`.\n"
+            "    Example:\n"
+            "      \"parameters\": {\n"
+            "        \"tickets\": \"{{fetch_tickets.output}}\",\n"
+            "        \"severity_field\": \"issues.severity\"\n"
+            "      },\n"
+            "      \"prompt\": \"Classify {{tickets}} by {{severity_field}}…\"\n"
+            "\n"
+            "  • Pill references — pills are typed authority handles. Reference one\n"
+            "    by storing its `ref` (e.g. `\"issues.severity\"`) as a STRING value\n"
+            "    in `parameters` under a key the prompt then reads via `{{key}}`.\n"
+            "    Don't try to template the pill ref itself — the runtime resolves\n"
+            "    `parameters` first, then renders `prompt` with those values.\n"
+            "\n"
+            "  • Upstream output — `{{<upstream_label>.output}}` reads the JSON\n"
+            "    output of an earlier packet you declared in `depends_on`. Don't\n"
+            "    invent a `.output` for a packet you didn't depend on — the\n"
+            "    placeholder will fail to resolve at runtime.\n"
+            "\n"
+            "  • `consumes` / `produces` — start from the stage floor; you may NARROW\n"
+            "    `produces` to only the types this packet actually emits (e.g. a build\n"
+            "    packet that only emits an execution_receipt should drop code_change/diff\n"
+            "    if it doesn't really produce them); you may NOT drop a type the runtime\n"
+            "    floor requires nor invent un-registered types. The downstream type-flow\n"
+            "    gate JOINs producers→consumers by these arrays — over-claiming poisons\n"
+            "    the type graph.\n"
+            "\n"
+            "  • `task_type` — the routing key the executor uses to pick an LLM/agent\n"
+            "    via `task_type_routing`. Default to the stage name (`research`,\n"
+            "    `review`, `build`, `fix`, `test`); pick a more specific registered\n"
+            "    task_type only when one fits and you're sure it's registered.\n"
+            "    `task_type` is NOT the same as `stage`.\n"
+            "\n"
+            "  • `agent` — `auto/<stage>` is fine and means \"runtime picks based on\n"
+            "    task_type_routing.\" Only override with a specific agent slug if you\n"
+            "    have a concrete reason (e.g. operator pinned a particular composer).\n"
+            "\n"
+            "  • `gates` — list each gate by `gate_id`. The required gates per stage\n"
+            "    are listed in DATA DICTIONARY (registered stages). For\n"
+            "    `type_flow_gate`, `params={}` is correct — the gate reads\n"
+            "    consumes/produces from the packet itself; do NOT invent param schemas.\n"
+            "    For `write_scope_gate`, `params={}` similarly — the gate reads `write`.\n"
+            "    Other gates: emit `params={}` unless you know the param contract.\n"
+            "\n"
+            "  • `write` — packet-relative paths under `artifacts/<stage>/<label>/`\n"
+            "    by convention. Never the workspace root (`.`, `./`, `,`).\n"
+            "\n"
+            "  • `pill_audit_local` — for EACH pill in DATA PILLS that you actually\n"
+            "    referenced (either by storing its ref as a parameter value or\n"
+            "    citing it in the prompt body), emit\n"
+            "    `{ref, verdict: confirmed|misattributed, reason}`. Reject\n"
+            "    (misattributed) when a pill matched on prose-similarity but isn't\n"
+            "    semantically right for THIS packet — e.g., a `capability_catalog.route`\n"
+            "    surfaced for a Slack-routing intent is misattributed (route here\n"
+            "    refers to model routing, not message dispatch). Only audit pills you\n"
+            "    considered; an empty list means you didn't reference any."
+        ),
     ]
     return "\n".join(sections)
 

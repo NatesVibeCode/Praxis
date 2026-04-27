@@ -423,6 +423,11 @@
         if (bottomRef.current) bottomRef.current.scrollTop = bottomRef.current.scrollHeight;
       }, []);
 
+      // Keep the thinking card in view through the whole turn — phase events
+      // (sending → thinking → tool calls → finishing) don't touch bubbles, so
+      // without this the card can scroll out of sight on small viewports.
+      useEffect(() => { if (turnPhase) setTimeout(scrollToBottom, 0); }, [turnPhase, scrollToBottom]);
+
       const refreshAgents = useCallback(async () => {
         try {
           const list = await listAgents(token);
@@ -543,9 +548,19 @@
         // Stream-first: open the event stream BEFORE firing POST so we see
         // the agent's work as it happens, not in a lump at the end.
         const streamCtrl = new AbortController();
-        let streamedAny = false;
+        // Track the terminal event explicitly. The server enqueues the
+        // assistant reply onto the SSE queue and *then* returns the POST
+        // response; AbortController.abort() can tear the stream down before
+        // that final frame flushes, leaving the reply orphaned in the queue.
+        // Gating the fallback on this flag (not on "any bubble streamed")
+        // makes us pull from postResult.turn_events whenever that race hits.
+        let sawAssistantReply = false;
 
         const streamPromise = streamTurnEvents(token, turnAgentId, (ev) => {
+          const evType = (ev && ev.type) || '';
+          if (evType === 'assistant' || evType === 'assistant.reply' || evType === 'error') {
+            sawAssistantReply = true;
+          }
           const nextPhase = turnPhaseFromEvent(ev);
           if (nextPhase === null) {
             setTurnPhase(null);
@@ -555,7 +570,6 @@
           }
           const bubbles = turnEventBubbles([ev], turnMode);
           if (bubbles.length) {
-            streamedAny = true;
             setBubbles((prev) => [...prev, ...bubbles]);
             const last = bubbles[bubbles.length - 1];
             if (document.hidden && (last.role === 'assistant' || last.role === 'error')) {
@@ -599,7 +613,7 @@
           if (document.hidden) {
             showConsoleNotification('Praxis agent error', postError.message);
           }
-        } else if (!streamedAny && postResult) {
+        } else if (!sawAssistantReply && postResult) {
           for (const ev of (postResult.turn_events || [])) {
             const phase = turnPhaseFromEvent(ev);
             if (phase) setTurnSteps((prev) => mergeStep(prev, phase));
@@ -688,7 +702,7 @@
           <span class="dot"></span>
           ${activeAgent ? `${CHAT_MODEL_LABEL} · ${activeAgent.status || ''}` : 'no agent'}
           ${status ? html`<span>· ${status}</span>` : null}
-          ${streaming ? html`<span>· watching</span>` : null}
+          ${streaming ? html`<span>· ${(turnPhase && turnPhase.label) ? turnPhase.label.toLowerCase() : 'watching'}</span>` : null}
         </div>
         <div class="turns" ref=${bottomRef}>
           ${bubbles.length === 0

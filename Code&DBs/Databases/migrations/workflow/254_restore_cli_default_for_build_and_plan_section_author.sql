@@ -58,7 +58,7 @@ INSERT INTO task_type_routing (
     TRUE, 1, 'high', 1, 'reasoning', 1,
     'Primary build engine restored to cli_llm per cli_default_api_exception standing order (migration 254). cursor_local has cli-only transport admission (migration 125); BUG-A7A940DF blocks anthropic CLI in worker container.',
     'explicit'
-) ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+) ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     route_tier = EXCLUDED.route_tier,
@@ -110,7 +110,7 @@ INSERT INTO task_type_routing (
     TRUE, 1, 'high', 1, 'reasoning', 1,
     'Primary plan_section_author engine restored to cli_llm per cli_default_api_exception standing order (migration 254). cursor_local has cli-only transport admission (migration 125).',
     'explicit'
-) ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+) ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     route_tier = EXCLUDED.route_tier,

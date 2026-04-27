@@ -155,6 +155,104 @@ def _cli_surface_hint(
     return text
 
 
+def _concern_to_tool_index() -> dict[str, Any]:
+    """Return the canonical concern → operator-tool routing.
+
+    When the model sees an authority symptom (e.g. ``runtime_profile_route.not_admitted``,
+    ``circuit_breaker.manual_override_open``, "API key missing"), this index says
+    EXACTLY which operator MCP tool owns the concern. The model is expected to
+    use the named tool — never raw SQL, psql, or a new migration — to lift the gate.
+
+    Surfaced from /orient and from SessionStart standing-orders so a fresh model
+    sees this on the way in. The same map drives the failure-response enrichment
+    in `tool_praxis_workflow` and `praxis_provider_control_plane`.
+    """
+    return {
+        "directive": (
+            "When you encounter an authority symptom in this list, USE THE NAMED TOOL. "
+            "Never reach for psql, raw INSERT/UPDATE, or a new migration to mutate these "
+            "concerns — the operator tool surface is the only authoritative writer."
+        ),
+        "concerns": [
+            {
+                "symptom": "runtime_profile_route.not_admitted",
+                "concern": "candidate is missing from runtime_profile_admitted_routes for this profile",
+                "tool": "praxis_provider_onboard",
+                "action": "onboard",
+                "do_not": "INSERT into runtime_profile_admitted_routes via SQL or migration",
+            },
+            {
+                "symptom": "control_panel.transport_turned_off / transport_default_deny",
+                "concern": "API/CLI transport is denied at the control panel for this scope",
+                "tool": "praxis_access_control",
+                "action": "enable",
+                "do_not": "INSERT into private_provider_model_access_denials directly",
+            },
+            {
+                "symptom": "control_panel.model_access_method_turned_off",
+                "concern": "explicit denial row blocking this provider/model",
+                "tool": "praxis_access_control",
+                "action": "enable",
+                "do_not": "DELETE from private_provider_model_access_denials directly",
+            },
+            {
+                "symptom": "circuit_breaker manual_override_state=OPEN",
+                "concern": "operator forced this provider's breaker OPEN — kills runnability for ALL transports of that provider",
+                "tool": "praxis_circuits",
+                "action": "reset",
+                "do_not": "DELETE from operator_decisions directly to clear an override",
+            },
+            {
+                "symptom": "circuit_breaker.runtime_open",
+                "concern": "circuit breaker is open due to repeated runtime failures",
+                "tool": "praxis_circuits",
+                "action": "list",
+                "do_not": "manually edit provider_circuit_breaker_state",
+            },
+            {
+                "symptom": "credentials.missing / API key not found",
+                "concern": "provider credential is missing from keychain or env",
+                "tool": "praxis_provider_onboard",
+                "action": "onboard (re-onboard with the api_key_env_var)",
+                "do_not": "hand-edit env files; store secrets in macOS Keychain via the onboarding flow",
+            },
+            {
+                "symptom": "task_type_routing rank-1 doesn't take effect",
+                "concern": "the matrix gate (allowlist + admitted_routes + transport + breaker + credentials) ALSO has to admit the candidate",
+                "tool": "praxis_provider_control_plane",
+                "action": "read — shows is_runnable + removal_reasons per row",
+                "do_not": (
+                    "write a new migration just to flip a routing rank — first check "
+                    "task_type_routing_admission_audit and praxis_provider_control_plane "
+                    "to see whether the gate is actually open"
+                ),
+            },
+            {
+                "symptom": "praxis_circuits list shows CLOSED but submits keep failing",
+                "concern": (
+                    "BEFORE 2026-04-26: the gateway replayed cached read_only results so "
+                    "list could lag the live projection. FIXED: read_only no longer replays. "
+                    "If you still see disagreement, query effective_provider_circuit_breaker_state "
+                    "directly and report the divergence."
+                ),
+                "tool": "praxis_circuits",
+                "action": "list (now reads live state)",
+            },
+            {
+                "symptom": "workflow.submit fails with postgres.authority_unavailable",
+                "concern": (
+                    "submit_workflow couldn't resolve a runnable candidate from the matrix. "
+                    "The MCP failure response now embeds admission_diagnosis with "
+                    "rejection_rows[] and next_actions[] — read those instead of grepping."
+                ),
+                "tool": "praxis_provider_control_plane",
+                "action": "read (job_type=<your task_type>, transport_type=CLI)",
+                "do_not": "blame the LLM or write a workaround migration",
+            },
+        ],
+    }
+
+
 def _build_standing_orders(subs: Any) -> list[dict[str, Any]]:
     """Return active architecture-policy rows as boot-time directives.
 
@@ -687,6 +785,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         if isinstance(runtime_setup, dict)
         else None,
         "tool_guidance": tool_guidance,
+        "concern_to_tool": _concern_to_tool_index(),
         "primitive_contracts": authority_envelope.get("primitive_contracts"),
         "capabilities": [
             "workflow_runs",

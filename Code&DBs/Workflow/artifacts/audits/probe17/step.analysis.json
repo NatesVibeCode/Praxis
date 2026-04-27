@@ -1,0 +1,16 @@
+{
+  "completion_status": "declined",
+  "result_kind": "analysis_declined",
+  "decline_reason": "I attempted to review the health probe authority by reading the requested repo paths from the live sandbox and by querying the workflow MCP context. The blocker is that the session advertises a repo snapshot containing Code&DBs/Workflow files, but those files are not mounted at readable paths in /workspace, so source-level reconciliation across runtime subsystems cannot be completed from this environment. The operator would need to provide a readable repo mount matching the advertised snapshot, or a supported snapshot-reader path, to unblock the requested audit.",
+  "analyzed_paths": [
+    "/usr/local/bin/praxis",
+    "mcp:praxis_context_shard",
+    "mcp:praxis_query"
+  ],
+  "links": [
+    {
+      "label": "blocker_bug",
+      "ref": "BUG-632E6F45"
+    }
+  ]
+}

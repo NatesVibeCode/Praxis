@@ -34,7 +34,7 @@ INSERT INTO task_type_routing (
      TRUE, 2, 'high', 2, 'reasoning', 2,
      'Same provider lane (Together direct); fallback when V4-Pro is unavailable. Latest V3 series.',
      'explicit')
-ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     route_tier = EXCLUDED.route_tier,

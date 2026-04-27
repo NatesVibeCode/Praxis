@@ -1630,6 +1630,19 @@ def _enforce_effective_provider_job_catalog(
     }
     if any(candidate in catalog_slugs for candidate in normalized_candidates):
         return
+
+    # The submit failed admission. Pull the full control-plane snapshot for the
+    # rejected candidates so the caller gets the per-row `removal_reasons` AND
+    # a `next_action.tool` hint pointing at the operator tool that owns the
+    # gate. Without this, the error is just "no candidate" and the operator
+    # has to query four other surfaces to find out why.
+    rejection_rows = _build_admission_rejection_rows(
+        conn,
+        runtime_profile_ref=normalized_runtime_profile_ref,
+        task_type=normalized_task_type,
+        requested_candidates=normalized_candidates,
+    )
+    next_actions = _build_next_action_hints(rejection_rows)
     raise provider_authority_fail(
         "provider_authority.effective_catalog_rejected",
         "workflow submit failed closed: no effective provider job catalog "
@@ -1640,7 +1653,173 @@ def _enforce_effective_provider_job_catalog(
         route_task_type=normalized_task_type,
         runtime_profile_ref=normalized_runtime_profile_ref,
         requested_candidates=normalized_candidates,
+        rejection_rows=rejection_rows,
+        next_actions=next_actions,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Admission-rejection enrichment
+#
+# When `_enforce_effective_provider_job_catalog` rejects a submit, we pull
+# `private_provider_control_plane_snapshot` for the requested candidates so
+# the caller sees:
+#   - is_runnable + breaker_state per row
+#   - removal_reasons (every gate that rejected: matrix, profile-admission,
+#     transport-admission, breaker, credentials)
+#   - next_action.tool (the operator tool that owns each blocking gate)
+#
+# Reason-code → tool routing lives here so the model-facing failure response
+# names the tool to use instead of leaving the operator to guess.
+# ──────────────────────────────────────────────────────────────────────────
+
+_REASON_CODE_TO_TOOL: dict[str, dict[str, str]] = {
+    "control_panel.transport_turned_off": {
+        "tool": "praxis_access_control",
+        "action": "enable",
+        "concern": "API/CLI transport policy or model-access denial",
+    },
+    "control_panel.model_access_method_turned_off": {
+        "tool": "praxis_access_control",
+        "action": "enable",
+        "concern": "explicit denial row blocking this provider/model",
+    },
+    "runtime_profile_route.not_admitted": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "runtime_profile_admitted_routes is missing this candidate",
+    },
+    "provider_transport.missing": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "provider_transport_admissions row missing",
+    },
+    "provider_transport.policy_denied": {
+        "tool": "praxis_access_control",
+        "action": "enable",
+        "concern": "transport policy denies this adapter",
+    },
+    "provider_transport.disabled": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "transport admission is inactive",
+    },
+    "circuit_breaker.manual_override_open": {
+        "tool": "praxis_circuits",
+        "action": "reset",
+        "concern": "operator forced this provider's breaker OPEN",
+    },
+    "circuit_breaker.runtime_open": {
+        "tool": "praxis_circuits",
+        "action": "list",
+        "concern": "circuit breaker is open due to recent failures",
+    },
+    "credentials.missing": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "API key / CLI credential missing for this provider",
+    },
+}
+
+
+def _build_admission_rejection_rows(
+    conn: SyncPostgresConnection,
+    *,
+    runtime_profile_ref: str,
+    task_type: str,
+    requested_candidates: list[str],
+) -> list[dict[str, Any]]:
+    if not requested_candidates:
+        return []
+    pairs = [c.split("/", 1) for c in requested_candidates if "/" in c]
+    if not pairs:
+        return []
+    placeholders = ", ".join(
+        f"(${i*2 + 3}::text, ${i*2 + 4}::text)" for i in range(len(pairs))
+    )
+    sql = f"""
+        SELECT provider_slug, model_slug, transport_type, adapter_type,
+               is_runnable, breaker_state, manual_override_state,
+               manual_override_reason, primary_removal_reason_code,
+               removal_reasons, credential_availability_state
+        FROM private_provider_control_plane_snapshot
+        WHERE runtime_profile_ref = $1
+          AND job_type = $2
+          AND (provider_slug, model_slug) IN ({placeholders})
+        ORDER BY transport_type DESC, provider_slug, model_slug
+    """
+    args: list[Any] = [runtime_profile_ref, task_type]
+    for prov, model in pairs:
+        args.append(prov)
+        args.append(model)
+    try:
+        rows = conn.execute(sql, *args)
+    except Exception:
+        return []
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        rd = dict(row)
+        out.append({
+            "candidate": f"{rd.get('provider_slug')}/{rd.get('model_slug')}",
+            "transport_type": rd.get("transport_type"),
+            "adapter_type": rd.get("adapter_type"),
+            "is_runnable": rd.get("is_runnable"),
+            "breaker_state": rd.get("breaker_state"),
+            "manual_override_state": rd.get("manual_override_state"),
+            "manual_override_reason": rd.get("manual_override_reason"),
+            "primary_removal_reason_code": rd.get("primary_removal_reason_code"),
+            "removal_reasons": rd.get("removal_reasons") or [],
+            "credential_availability_state": rd.get("credential_availability_state"),
+        })
+    return out
+
+
+def _build_next_action_hints(
+    rejection_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Map each unique blocking reason_code → operator tool that owns it.
+
+    Returned as a deduplicated list so the failure response says EXACTLY which
+    tools to call to lift each gate, not just one generic 'fix admission'.
+    """
+    seen_reasons: set[str] = set()
+    actions: list[dict[str, Any]] = []
+    for row in rejection_rows:
+        if row.get("is_runnable"):
+            continue
+        primary = str(row.get("primary_removal_reason_code") or "").strip()
+        for reason_obj in row.get("removal_reasons") or []:
+            rc = ""
+            if isinstance(reason_obj, dict):
+                rc = str(reason_obj.get("reason_code") or "").strip()
+            elif isinstance(reason_obj, str):
+                rc = reason_obj.strip()
+            if rc and rc not in seen_reasons:
+                seen_reasons.add(rc)
+                hint = _REASON_CODE_TO_TOOL.get(rc)
+                if hint:
+                    actions.append({
+                        "reason_code": rc,
+                        "blocked_candidates": [
+                            r["candidate"] for r in rejection_rows
+                            if any(
+                                (isinstance(rr, dict) and rr.get("reason_code") == rc)
+                                or (isinstance(rr, str) and rr == rc)
+                                for rr in (r.get("removal_reasons") or [])
+                            )
+                        ],
+                        **hint,
+                    })
+        if primary and primary not in seen_reasons:
+            seen_reasons.add(primary)
+            hint = _REASON_CODE_TO_TOOL.get(primary)
+            if hint:
+                actions.append({
+                    "reason_code": primary,
+                    "blocked_candidates": [row["candidate"]],
+                    **hint,
+                })
+    return actions
 
 
 def _do_submit_workflow(

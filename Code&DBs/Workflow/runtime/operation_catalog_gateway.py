@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
+import contextvars
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import inspect
 import json
+import threading
 import time
 from typing import Any
 from uuid import uuid4
@@ -37,25 +40,128 @@ class _EnvironmentBackedSubsystems:
 
 
 @dataclass(frozen=True, slots=True)
+class CallerContext:
+    """Causal-tracing handle threaded through nested gateway calls.
+
+    A handler that triggers downstream gateway calls passes the parent
+    receipt's context so child receipts get cause_receipt_id and inherit
+    correlation_id. When ``caller_context`` is None at an entry point
+    (HTTP/CLI/MCP boundary), the gateway mints a fresh correlation_id
+    and the receipt is the root of a new trace tree.
+    """
+
+    cause_receipt_id: str | None
+    correlation_id: str
+
+
+def caller_context_from_receipt(receipt: Mapping[str, Any]) -> CallerContext:
+    """Build a child ``CallerContext`` from a parent receipt dict.
+
+    Use this in handlers that call ``execute_operation_from_subsystems``
+    on behalf of a parent operation: pass the parent's receipt mapping
+    in, get a context whose ``cause_receipt_id`` points at the parent
+    and ``correlation_id`` is inherited.
+    """
+
+    receipt_id = receipt.get("receipt_id")
+    correlation = receipt.get("correlation_id")
+    if receipt_id is None:
+        raise ValueError("caller_context_from_receipt: receipt is missing receipt_id")
+    if correlation is None:
+        raise ValueError("caller_context_from_receipt: receipt is missing correlation_id")
+    return CallerContext(cause_receipt_id=str(receipt_id), correlation_id=str(correlation))
+
+
+# ContextVar holding the caller context that nested gateway calls should
+# inherit. The gateway sets this to the *child* context for the duration
+# of a handler invocation: nested execute_operation_from_subsystems calls
+# read it and produce receipts whose cause_receipt_id points at the
+# parent receipt and whose correlation_id matches the parent trace.
+#
+# Asyncio Task creation copies the current Context, so nested calls in
+# coroutines spawned via `asyncio.create_task(...)` from a handler also
+# inherit. Phase 2 will harden the propagation across additional spawn
+# boundaries (run_in_executor, queue handoffs).
+CURRENT_CALLER_CONTEXT: ContextVar[CallerContext | None] = ContextVar(
+    "praxis_gateway_caller_context",
+    default=None,
+)
+
+
+def current_caller_context() -> CallerContext | None:
+    """Return the caller context the current code path should inherit."""
+    return CURRENT_CALLER_CONTEXT.get()
+
+
+def spawn_threaded(
+    target: Callable[..., Any],
+    *args: Any,
+    name: str | None = None,
+    daemon: bool = True,
+    **kwargs: Any,
+) -> threading.Thread:
+    """Start a daemon thread that inherits the current ContextVar context.
+
+    Plain ``threading.Thread`` runs its target in a fresh thread with empty
+    ContextVars, so any nested gateway call inside the target produces a
+    receipt with no cause_receipt_id and a fresh correlation_id —
+    disconnected from the caller's trace. This helper snapshots
+    ``contextvars.copy_context()`` and runs the target inside
+    ``ctx.run(target, ...)`` so CURRENT_CALLER_CONTEXT (and any other
+    ContextVar) flows in.
+
+    Use this in any handler that does fire-and-forget background work via
+    raw threads — kickoff dispatchers, async worker spawns, post-receipt
+    hooks. asyncio.create_task already handles inheritance automatically;
+    this is the threading-side analogue.
+    """
+
+    ctx = contextvars.copy_context()
+    thread = threading.Thread(
+        target=ctx.run,
+        args=(target, *args),
+        kwargs=kwargs,
+        name=name,
+        daemon=daemon,
+    )
+    thread.start()
+    return thread
+
+
+@dataclass(frozen=True, slots=True)
 class AuthorityGateway:
     """Universal CQRS front door over registered authority operations."""
 
     subsystems: Any
 
-    def execute(self, operation_name: str, payload: Mapping[str, Any] | None = None) -> Any:
+    def execute(
+        self,
+        operation_name: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        caller_context: CallerContext | None = None,
+    ) -> Any:
         return execute_operation_from_subsystems(
             self.subsystems,
             operation_name=operation_name,
             payload=payload,
             requested_mode="command",
+            caller_context=caller_context,
         )
 
-    def query(self, operation_name: str, payload: Mapping[str, Any] | None = None) -> Any:
+    def query(
+        self,
+        operation_name: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        caller_context: CallerContext | None = None,
+    ) -> Any:
         return execute_operation_from_subsystems(
             self.subsystems,
             operation_name=operation_name,
             payload=payload,
             requested_mode="query",
+            caller_context=caller_context,
         )
 
 
@@ -151,6 +257,171 @@ def _binding_value(binding: Any, name: str, default: Any) -> Any:
     return getattr(binding, name, default)
 
 
+import threading as _threading
+import time as _time
+from pathlib import Path as _Path
+
+_GATEWAY_CALL_COUNTERS: dict[str, list[float]] = {}
+_GATEWAY_DRIFT_WINDOW_S = 90.0
+_GATEWAY_DRIFT_THRESHOLD = 5
+_GATEWAY_DRIFT_LOCK = _threading.Lock()
+_GATEWAY_REFUSAL_COUNTERS: dict[str, list[float]] = {}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Code-drift signal — stale-process detector
+#
+# Long-running container processes (api-server, workflow-worker, scheduler,
+# semantic-backend) and the host MCP daemon all import Python modules at
+# process start. Edits to bind-mounted source files don't reach those
+# processes until they restart. This session's history shows that gap:
+# multiple "fixed code" cycles where the edits were on disk but the running
+# process kept executing the old version, leading to silent wrong behavior.
+#
+# This detector captures `_PROCESS_STARTED_AT_EPOCH` at module import. On
+# every gateway response it walks the runtime code roots and compares max
+# mtime. If on-disk code is newer than the process, it attaches a
+# `code_out_of_date` signal on the response — fail-open: the call still
+# returns its result, but the model/operator sees that the result was
+# computed by stale code and should bounce the container.
+#
+# Cached for 30s to avoid stat-walking on every call.
+# ──────────────────────────────────────────────────────────────────────────
+
+_PROCESS_STARTED_AT_EPOCH: float = _time.time()
+
+_CODE_DRIFT_ROOT_NAMES: tuple[str, ...] = (
+    "runtime",
+    "registry",
+    "surfaces",
+    "storage",
+    "adapters",
+)
+_CODE_DRIFT_CACHE: dict[str, float] = {"checked_at": 0.0, "max_mtime": 0.0}
+_CODE_DRIFT_CACHE_TTL_S: float = 30.0
+_CODE_DRIFT_LOCK = _threading.Lock()
+
+
+def _workflow_code_root() -> _Path:
+    """Return the Code&DBs/Workflow directory (parent of runtime/)."""
+    return _Path(__file__).resolve().parents[1]
+
+
+def _max_code_mtime_cached() -> float:
+    """Walk the code roots and return the max .py mtime. Fail-open: any
+    OSError → 0.0 (no signal). Cached 30s."""
+    now = _time.time()
+    with _CODE_DRIFT_LOCK:
+        if now - _CODE_DRIFT_CACHE["checked_at"] < _CODE_DRIFT_CACHE_TTL_S:
+            return _CODE_DRIFT_CACHE["max_mtime"]
+    try:
+        root = _workflow_code_root()
+        max_mtime = 0.0
+        for root_name in _CODE_DRIFT_ROOT_NAMES:
+            sub = root / root_name
+            if not sub.is_dir():
+                continue
+            for py_file in sub.rglob("*.py"):
+                try:
+                    m = py_file.stat().st_mtime
+                    if m > max_mtime:
+                        max_mtime = m
+                except OSError:
+                    continue
+    except OSError:
+        return 0.0
+    with _CODE_DRIFT_LOCK:
+        _CODE_DRIFT_CACHE["checked_at"] = now
+        _CODE_DRIFT_CACHE["max_mtime"] = max_mtime
+    return max_mtime
+
+
+def _check_code_drift_signal() -> dict[str, Any] | None:
+    """Return a `code_out_of_date` payload when on-disk code is newer than
+    process start, or None when the process is up-to-date. Fails open: any
+    error returns None (no false-positive drift signal)."""
+    try:
+        max_mtime = _max_code_mtime_cached()
+        if max_mtime <= _PROCESS_STARTED_AT_EPOCH:
+            return None
+        drift_seconds = int(max_mtime - _PROCESS_STARTED_AT_EPOCH)
+        return {
+            "code_out_of_date": True,
+            "process_started_at_epoch": _PROCESS_STARTED_AT_EPOCH,
+            "latest_code_mtime_epoch": max_mtime,
+            "drift_seconds": drift_seconds,
+            "scanned_roots": list(_CODE_DRIFT_ROOT_NAMES),
+            "hint": (
+                "This process is running stale code — files under "
+                f"{', '.join(_CODE_DRIFT_ROOT_NAMES)} have been modified "
+                f"{drift_seconds}s after the process started. The result "
+                "above was computed by the OLD code; restart the container "
+                "(`docker compose restart api-server workflow-worker scheduler`) "
+                "or bounce the host MCP daemon before trusting subsequent results."
+            ),
+        }
+    except Exception:  # noqa: BLE001 — fail open
+        return None
+
+
+def _record_gateway_call_and_check_drift(operation_ref: str) -> dict[str, Any] | None:
+    """Track repeated calls per operation_ref. When the same op fires N times
+    in a sliding window, return a `model_drift_signal` dict the response
+    builder will surface to the caller. Tells the model "you keep doing this;
+    use a different tool" — putting reality in the model's face per the
+    operator request to make platform observability self-defending.
+
+    Pure in-process; no DB hit. Reset across restarts."""
+    now = _time.monotonic()
+    with _GATEWAY_DRIFT_LOCK:
+        timestamps = _GATEWAY_CALL_COUNTERS.setdefault(operation_ref, [])
+        # Drop entries outside the window
+        cutoff = now - _GATEWAY_DRIFT_WINDOW_S
+        timestamps[:] = [t for t in timestamps if t >= cutoff]
+        timestamps.append(now)
+        recent_count = len(timestamps)
+    if recent_count >= _GATEWAY_DRIFT_THRESHOLD:
+        # Suggest the next tool the operator should pivot to. Operation-specific
+        # routing — for read ops where the model is hammering, suggest the
+        # consolidated control-plane / search tool.
+        suggested_pivot = _drift_pivot_for_operation(operation_ref)
+        return {
+            "drift": True,
+            "operation_ref": operation_ref,
+            "calls_in_window_seconds": int(_GATEWAY_DRIFT_WINDOW_S),
+            "calls_in_window": recent_count,
+            "threshold": _GATEWAY_DRIFT_THRESHOLD,
+            "hint": (
+                f"You've called `{operation_ref}` {recent_count} times in the last "
+                f"{int(_GATEWAY_DRIFT_WINDOW_S)}s. If the answer hasn't changed, "
+                "stop polling and either pivot to a different tool or surface "
+                "the unresolved problem to the operator. Repeated identical "
+                "calls almost always mean you're stuck in mode-lock."
+            ),
+            "suggested_pivot": suggested_pivot,
+        }
+    return None
+
+
+def _drift_pivot_for_operation(operation_ref: str) -> dict[str, str] | None:
+    """Map common 'I'm stuck in this tool' patterns to the better tool."""
+    pivots: dict[str, dict[str, str]] = {
+        "operator-circuit-states": {
+            "tool": "praxis_provider_control_plane",
+            "reason": "if you keep listing breaker state, the issue is downstream — control plane shows is_runnable + removal_reasons across every gate",
+        },
+        "operator-provider-control-plane": {
+            "tool": "praxis_circuits / praxis_access_control / praxis_provider_onboard",
+            "reason": "if control plane keeps showing is_runnable=false, fix the gate the named tool owns",
+        },
+        "operator-model-access-control-matrix": {
+            "tool": "praxis_provider_control_plane",
+            "reason": "matrix is the read; control_plane is the read+removal_reasons. Pivot.",
+        },
+    }
+    return pivots.get(operation_ref)
+
+
 def _idempotency_key(
     binding: ResolvedHttpOperationBinding,
     *,
@@ -158,10 +429,24 @@ def _idempotency_key(
     input_hash: str,
     idempotency_key_override: str | None = None,
 ) -> str | None:
+    """Compute the cache key used for replay lookup. Returning None disables replay.
+
+    Policy semantics (2026-04-26 correction):
+      * ``idempotent`` — pure function of input; replay is free.
+      * ``read_only`` — does not mutate, BUT the underlying state can change
+        between calls (live views, time-windowed projections, circuit-breaker
+        state, control-plane catalog). Replay would serve stale data, so we
+        do NOT replay; each call runs fresh and records its own receipt.
+      * ``non_idempotent`` — every call must run.
+
+    Previously ``read_only`` was treated like ``idempotent`` and caused
+    ``praxis_circuits list`` etc. to return cached results that disagreed
+    with the live projection.
+    """
     if idempotency_key_override is not None and idempotency_key_override.strip():
         return idempotency_key_override.strip()
     policy = str(_binding_value(binding, "idempotency_policy", "") or "").strip()
-    if policy not in {"idempotent", "read_only"}:
+    if policy != "idempotent":
         return None
     fields = _binding_value(binding, "idempotency_key_fields", ()) or ()
     source = dict(payload or {})
@@ -263,6 +548,8 @@ def _receipt_payload(
     event_ids: list[str],
     projection_freshness: Mapping[str, Any],
     duration_ms: int,
+    cause_receipt_id: str | None,
+    correlation_id: str,
 ) -> dict[str, Any]:
     return {
         "receipt_id": receipt_id,
@@ -288,6 +575,8 @@ def _receipt_payload(
         "event_ids": list(event_ids),
         "projection_freshness": dict(projection_freshness),
         "duration_ms": duration_ms,
+        "cause_receipt_id": cause_receipt_id,
+        "correlation_id": correlation_id,
     }
 
 
@@ -322,11 +611,13 @@ def _insert_operation_receipt(
             result_payload,
             duration_ms,
             binding_revision,
-            decision_ref
+            decision_ref,
+            cause_receipt_id,
+            correlation_id
         ) VALUES (
             $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10,
             $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb,
-            $19::jsonb, $20, $21, $22
+            $19::jsonb, $20, $21, $22, $23::uuid, $24::uuid
         )
         """,
         receipt["receipt_id"],
@@ -351,6 +642,8 @@ def _insert_operation_receipt(
         receipt["duration_ms"],
         binding.binding_revision,
         binding.decision_ref,
+        receipt.get("cause_receipt_id"),
+        receipt.get("correlation_id"),
     )
 
 
@@ -365,6 +658,7 @@ def _insert_authority_event(
     idempotency_key: str | None,
     result_status: str | None,
     custom_payload: Mapping[str, Any] | None = None,
+    correlation_id: str | None = None,
 ) -> str:
     """Insert one row into ``authority_events``.
 
@@ -404,8 +698,9 @@ def _insert_authority_event(
             idempotency_key,
             operation_ref,
             receipt_id,
-            emitted_by
-        ) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8::uuid, $9)
+            emitted_by,
+            correlation_id
+        ) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8::uuid, $9, $10::uuid)
         """,
         event_id,
         authority_domain_ref,
@@ -416,6 +711,7 @@ def _insert_authority_event(
         binding.operation_ref,
         receipt_id,
         "authority_gateway",
+        correlation_id,
     )
     return event_id
 
@@ -434,18 +730,21 @@ def _attach_receipt_to_authority_events(
     *,
     receipt_id: str,
     event_ids: list[str],
+    correlation_id: str | None = None,
 ) -> None:
     if not event_ids:
         return
     conn.execute(
         """
         UPDATE authority_events
-           SET receipt_id = $1::uuid
+           SET receipt_id = $1::uuid,
+               correlation_id = COALESCE(correlation_id, $3::uuid)
          WHERE event_id = ANY($2::uuid[])
            AND receipt_id IS NULL
         """,
         receipt_id,
         event_ids,
+        correlation_id,
     )
 
 
@@ -497,14 +796,49 @@ def _write_operation_proof(
                 idempotency_key=idempotency_key,
                 result_status=result_status,
                 custom_payload=custom_event_payload,
+                correlation_id=durable_receipt.get("correlation_id"),
             )
         else:
             _attach_receipt_to_authority_events(
                 conn,
                 receipt_id=str(durable_receipt["receipt_id"]),
                 event_ids=event_ids,
+                correlation_id=durable_receipt.get("correlation_id"),
             )
     return durable_receipt
+
+
+def _prepare_call_context(
+    caller_context: CallerContext | None,
+) -> tuple[str, str, str | None, CallerContext]:
+    """Resolve caller context and pre-mint receipt_id + correlation_id.
+
+    Returns ``(receipt_id, correlation_id, cause_receipt_id, nested_context)``.
+
+    ``nested_context`` is the context that nested gateway calls inherit
+    from the ContextVar set around the handler invocation: its
+    ``cause_receipt_id`` is the freshly-minted receipt_id (so children
+    point at this receipt) and its ``correlation_id`` matches this
+    receipt (so the whole tree shares the same correlation).
+
+    When caller_context is None and the ContextVar is also empty, this
+    is a root entry-point call: cause_receipt_id is None and a fresh
+    correlation_id is minted.
+    """
+
+    effective = caller_context if caller_context is not None else CURRENT_CALLER_CONTEXT.get()
+    receipt_id = str(uuid4())
+    if effective is None:
+        correlation_id = str(uuid4())
+        cause_receipt_id: str | None = None
+    else:
+        correlation_id = effective.correlation_id
+        cause_receipt_id = effective.cause_receipt_id
+    nested_context = CallerContext(
+        cause_receipt_id=receipt_id,
+        correlation_id=correlation_id,
+    )
+    return receipt_id, correlation_id, cause_receipt_id, nested_context
 
 
 def _persist_operation_outcome(
@@ -516,6 +850,9 @@ def _persist_operation_outcome(
     input_hash: str,
     idempotency_key: str | None,
     started_ns: int,
+    receipt_id: str,
+    correlation_id: str,
+    cause_receipt_id: str | None,
     execution_status: str = "completed",
     error_code: str | None = None,
     error_detail: str | None = None,
@@ -525,7 +862,6 @@ def _persist_operation_outcome(
     normalized_result_status = str(result_status).strip() if isinstance(result_status, str) else None
     projection_freshness = _projection_freshness(result)
     duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
-    receipt_id = str(uuid4())
     event_ids: list[str] = _result_authority_event_ids(result)
     receipt = _receipt_payload(
         binding,
@@ -540,6 +876,8 @@ def _persist_operation_outcome(
         event_ids=event_ids,
         projection_freshness=projection_freshness,
         duration_ms=duration_ms,
+        cause_receipt_id=cause_receipt_id,
+        correlation_id=correlation_id,
     )
     with _operation_proof_transaction(conn) as proof_conn:
         receipt = _write_operation_proof(
@@ -587,30 +925,43 @@ def _with_operation_receipt(
         binding,
         result=result if isinstance(result, Mapping) else None,
     )
+    drift_signal = _record_gateway_call_and_check_drift(binding.operation_ref)
+    code_drift = _check_code_drift_signal()
     if isinstance(result, Mapping):
         payload = dict(result)
         if "ok" not in payload:
             payload["ok"] = True
         if binding.operation_kind == "query" and "results" not in payload:
-            # If a query returns a mapping that isn't 'results' but contains a list,
-            # we should encourage the handler to use 'results', but as a fallback
-            # we don't force it here yet to avoid breaking very specific contracts.
             pass
         payload["operation_receipt"] = operation_receipt
+        if drift_signal:
+            payload["model_drift_signal"] = drift_signal
+        if code_drift:
+            payload["code_drift_signal"] = code_drift
         return payload
 
     if binding.operation_kind == "query" and isinstance(result, list):
-        return {
+        out = {
             "ok": True,
             "results": result,
             "operation_receipt": operation_receipt,
         }
+        if drift_signal:
+            out["model_drift_signal"] = drift_signal
+        if code_drift:
+            out["code_drift_signal"] = code_drift
+        return out
 
-    return {
+    out = {
         "ok": True,
         "result": result,
         "operation_receipt": operation_receipt,
     }
+    if drift_signal:
+        out["model_drift_signal"] = drift_signal
+    if code_drift:
+        out["code_drift_signal"] = code_drift
+    return out
 
 
 async def _await_handler_result(result: Any) -> Any:
@@ -638,6 +989,7 @@ async def aexecute_operation_binding(
     subsystems: Any,
     idempotency_key_override: str | None = None,
     requested_mode: str | None = None,
+    caller_context: CallerContext | None = None,
 ) -> Any:
     _assert_mode_admits_operation(binding, requested_mode=requested_mode)
     conn = subsystems.get_pg_conn()
@@ -647,6 +999,9 @@ async def aexecute_operation_binding(
         payload=payload,
         input_hash=input_hash,
         idempotency_key_override=idempotency_key_override,
+    )
+    receipt_id, correlation_id, cause_receipt_id, nested_context = _prepare_call_context(
+        caller_context
     )
     cached = _fetch_existing_idempotent_result(
         conn,
@@ -666,10 +1021,14 @@ async def aexecute_operation_binding(
             idempotency_key=idempotency_key,
             started_ns=started_ns,
             execution_status="replayed",
+            receipt_id=receipt_id,
+            correlation_id=correlation_id,
+            cause_receipt_id=cause_receipt_id,
         )
         return _with_operation_receipt(binding, result, receipt=receipt)
     command = build_operation_command(binding, payload=payload)
     started_ns = time.monotonic_ns()
+    token = CURRENT_CALLER_CONTEXT.set(nested_context)
     try:
         result = await _await_handler_result(binding.handler(command, subsystems))
     except Exception as exc:
@@ -686,6 +1045,9 @@ async def aexecute_operation_binding(
             execution_status="failed",
             error_code=error_code,
             error_detail=str(exc),
+            receipt_id=receipt_id,
+            correlation_id=correlation_id,
+            cause_receipt_id=cause_receipt_id,
         )
         failure = {
             "ok": False,
@@ -695,6 +1057,8 @@ async def aexecute_operation_binding(
         if error_details:
             failure["details"] = error_details
         return failure
+    finally:
+        CURRENT_CALLER_CONTEXT.reset(token)
     receipt = _persist_operation_outcome(
         conn,
         binding,
@@ -703,6 +1067,9 @@ async def aexecute_operation_binding(
         input_hash=input_hash,
         idempotency_key=idempotency_key,
         started_ns=started_ns,
+        receipt_id=receipt_id,
+        correlation_id=correlation_id,
+        cause_receipt_id=cause_receipt_id,
     )
     return _with_operation_receipt(binding, result, receipt=receipt)
 
@@ -714,6 +1081,7 @@ def execute_operation_binding(
     subsystems: Any,
     idempotency_key_override: str | None = None,
     requested_mode: str | None = None,
+    caller_context: CallerContext | None = None,
 ) -> Any:
     _assert_mode_admits_operation(binding, requested_mode=requested_mode)
     conn = subsystems.get_pg_conn()
@@ -723,6 +1091,9 @@ def execute_operation_binding(
         payload=payload,
         input_hash=input_hash,
         idempotency_key_override=idempotency_key_override,
+    )
+    receipt_id, correlation_id, cause_receipt_id, nested_context = _prepare_call_context(
+        caller_context
     )
     cached = _fetch_existing_idempotent_result(
         conn,
@@ -742,10 +1113,14 @@ def execute_operation_binding(
             idempotency_key=idempotency_key,
             started_ns=started_ns,
             execution_status="replayed",
+            receipt_id=receipt_id,
+            correlation_id=correlation_id,
+            cause_receipt_id=cause_receipt_id,
         )
         return _with_operation_receipt(binding, result, receipt=receipt)
     command = build_operation_command(binding, payload=payload)
     started_ns = time.monotonic_ns()
+    token = CURRENT_CALLER_CONTEXT.set(nested_context)
     try:
         result = binding.handler(command, subsystems)
         if inspect.isawaitable(result):
@@ -764,6 +1139,9 @@ def execute_operation_binding(
             execution_status="failed",
             error_code=error_code,
             error_detail=str(exc),
+            receipt_id=receipt_id,
+            correlation_id=correlation_id,
+            cause_receipt_id=cause_receipt_id,
         )
         failure = {
             "ok": False,
@@ -773,6 +1151,8 @@ def execute_operation_binding(
         if error_details:
             failure["details"] = error_details
         return failure
+    finally:
+        CURRENT_CALLER_CONTEXT.reset(token)
     receipt = _persist_operation_outcome(
         conn,
         binding,
@@ -781,6 +1161,9 @@ def execute_operation_binding(
         input_hash=input_hash,
         idempotency_key=idempotency_key,
         started_ns=started_ns,
+        receipt_id=receipt_id,
+        correlation_id=correlation_id,
+        cause_receipt_id=cause_receipt_id,
     )
     return _with_operation_receipt(binding, result, receipt=receipt)
 
@@ -792,6 +1175,7 @@ async def aexecute_operation_from_subsystems(
     payload: Mapping[str, Any] | None = None,
     idempotency_key_override: str | None = None,
     requested_mode: str | None = None,
+    caller_context: CallerContext | None = None,
 ) -> Any:
     if not hasattr(subsystems, "get_pg_conn") or not callable(subsystems.get_pg_conn):
         raise RuntimeError("operation execution requires subsystems.get_pg_conn()")
@@ -805,6 +1189,7 @@ async def aexecute_operation_from_subsystems(
         subsystems=subsystems,
         idempotency_key_override=idempotency_key_override,
         requested_mode=requested_mode,
+        caller_context=caller_context,
     )
 
 
@@ -815,6 +1200,7 @@ def execute_operation_from_subsystems(
     payload: Mapping[str, Any] | None = None,
     idempotency_key_override: str | None = None,
     requested_mode: str | None = None,
+    caller_context: CallerContext | None = None,
 ) -> Any:
     if not hasattr(subsystems, "get_pg_conn") or not callable(subsystems.get_pg_conn):
         raise RuntimeError("operation execution requires subsystems.get_pg_conn()")
@@ -828,6 +1214,7 @@ def execute_operation_from_subsystems(
         subsystems=subsystems,
         idempotency_key_override=idempotency_key_override,
         requested_mode=requested_mode,
+        caller_context=caller_context,
     )
 
 
@@ -849,13 +1236,18 @@ def execute_operation_from_env(
 
 __all__ = [
     "AuthorityGateway",
+    "CallerContext",
+    "CURRENT_CALLER_CONTEXT",
     "OperationIdempotencyConflict",
     "OperationModeViolation",
     "aexecute_operation_binding",
     "aexecute_operation_from_subsystems",
     "build_operation_command",
+    "caller_context_from_receipt",
+    "current_caller_context",
     "execute_operation_binding",
     "execute_operation_from_env",
     "execute_operation_from_subsystems",
     "resolve_named_operation_binding",
+    "spawn_threaded",
 ]

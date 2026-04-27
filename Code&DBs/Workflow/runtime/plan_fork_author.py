@@ -85,17 +85,37 @@ def _build_fork_prompt(
     return "\n\n".join(
         [
             build_shared_prefix(atoms, sandbox),
-            "TASK: Author one PlanPacket for the skeleton below. Keep depends_on "
-            "as given. gates is a list of {gate_id, params} objects.\n"
-            "Also emit one side-channel alongside the packet:\n"
-            "  - pill_audit_local: triage of every DATA PILL above that was "
-            "RELEVANT to this packet. {ref, verdict (confirmed|misattributed), "
-            "reason}. Skip pills you didn't consider. Keep this list short.",
+            (
+                "TASK: Author the ONE PlanPacket described by SKELETON below. The "
+                "skeleton already pins your label, stage, depends_on, and required-"
+                "gate floor; do not change those. Your job is to fill in:\n"
+                "  • `prompt` — the agent's runtime instruction. Use {{placeholders}} "
+                "    bound through `parameters`; describe what to produce, not how.\n"
+                "  • `parameters` — the input dict. Bind every {{placeholder}} you "
+                "    reference in `prompt` here. Pill refs go in as strings; upstream "
+                "    outputs as `{{<upstream_label>.output}}` (per AUTHORING CONVENTIONS).\n"
+                "  • `consumes`/`produces` — narrow from the stage floor to what "
+                "    this packet actually consumes/produces (per AUTHORING CONVENTIONS).\n"
+                "  • `write` — packet-scoped paths under `artifacts/<stage>/<label>/`.\n"
+                "  • `gates` — one entry per scaffolded `gate_id`; `params={}` unless "
+                "    you know the gate's param contract.\n"
+                "  • `task_type` — usually the stage name; only specialize if you're "
+                "    sure a registered task_type fits.\n"
+                "  • `agent` — `auto/<stage>` unless you have a concrete reason.\n"
+                "Plus the side-channel:\n"
+                "  • `pill_audit_local` — verdict for each pill you ACTUALLY "
+                "    referenced in `prompt` or `parameters`. Skip pills you didn't "
+                "    use. Reject (`misattributed`) when a pill matched by prose-"
+                "    similarity but isn't semantically right for THIS packet."
+            ),
             "SKELETON:",
             json.dumps(target_view, indent=2, sort_keys=True),
-            "OUTPUT: a JSON object with the PlanPacket fields PLUS a top-level "
-            "\"pill_audit_local\": [...] array. Empty array is fine. No fences, "
-            "no prose outside JSON.",
+            (
+                "OUTPUT: a single JSON object with the PlanPacket fields PLUS a "
+                "top-level `pill_audit_local: []` array. No code fences, no prose "
+                "outside JSON. If you can't author cleanly, return a JSON object "
+                "with `\"error\": \"<brief reason>\"` instead of inventing fields."
+            ),
         ]
     )
 

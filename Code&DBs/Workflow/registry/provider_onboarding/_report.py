@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
 from typing import Any
 
@@ -331,6 +332,18 @@ async def _run_provider_onboarding(
                 binding_reports.append(
                     await _upsert_model_profile_binding_impl(conn, spec=resolved_spec, model=model)
                 )
+
+            # No route_eligibility_states write here on purpose: the
+            # `_candidate_is_admitted_for_runtime_profile` Python resolver
+            # already special-cases `eligibility_status='rejected' AND
+            # reason_code='no_live_probe_state' AND
+            # source_window_refs contains transport:*` as ADMITTED. Combined
+            # with the matching write in native_runtime_profile_sync that
+            # translates projected-admitted route_states to literal
+            # eligibility_status='admitted' on the runtime_profile_admitted_routes
+            # row, the catalog SQL JOIN now sees the candidate as admitted
+            # without needing a separate route_eligibility_states write
+            # (which would require provider_policies FK setup).
             benchmark_rule_reports: list[dict[str, Any]] = []
             bound_market_models = 0
             if benchmark_step is not None and benchmark_step.status == "succeeded":
@@ -384,6 +397,19 @@ async def _run_provider_onboarding(
             router_supported=None,
             record_receipts=True,
         )
+
+        # Refresh runtime_profile_admitted_routes for every native profile
+        # so the newly-onboarded candidate's admission state lands without
+        # waiting for the next process boot. Boot was the only caller of
+        # this sync historically — onboarding-without-boot left the catalog
+        # stale and made workflow submits fail with not_admitted reasons.
+        try:
+            from registry.native_runtime_profile_sync import (
+                sync_native_runtime_profile_authority_async,
+            )
+            await sync_native_runtime_profile_authority_async(conn)
+        except Exception:  # noqa: BLE001 — verification step also reflects state
+            pass
 
         verification = await _verification_report(conn=conn, spec=resolved_spec, decision_ref=decision_ref)
         provider_report = dict(verification.get("provider_report") or {})

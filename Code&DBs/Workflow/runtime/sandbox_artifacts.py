@@ -40,7 +40,17 @@ class ArtifactStore:
     def capture(
         self, file_path: str, content: str, sandbox_id: str
     ) -> ArtifactRecord:
-        """Compute SHA256, persist content, return record."""
+        """Compute SHA256, persist content, return record.
+
+        Postgres TEXT columns cannot store NUL bytes (0x00) — they are valid
+        UTF-8 but PG raises ``invalid byte sequence for encoding "UTF8": 0x00``
+        on insert. LLM tools occasionally emit files with embedded NULs
+        (model artifacts, JSON-encoded escapes, partial binary writes). Strip
+        NULs before computing the hash + byte_count so the stored record
+        stays internally consistent with what reaches PG.
+        """
+        if "\x00" in content:
+            content = content.replace("\x00", "")
         artifact_id = uuid.uuid4().hex[:16]
         sha = hashlib.sha256(content.encode()).hexdigest()
         byte_count = len(content.encode())

@@ -152,6 +152,8 @@ BEGIN
         FROM task_type_routing AS route
         JOIN economics
           ON economics.provider_slug = route.provider_slug
+         AND economics.transport_type = route.transport_type
+         AND route.sub_task_type = '*'
         LEFT JOIN active_candidates
           ON active_candidates.provider_slug = route.provider_slug
          AND active_candidates.model_slug = route.model_slug

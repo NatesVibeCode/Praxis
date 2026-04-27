@@ -55,12 +55,101 @@ _STAGE_TO_TIER: dict[str, str] = {
 }
 
 # Stage → prompt template
+#
+# 2026-04-27: review/research/audit prompts now demand a STRUCTURED JSON
+# deliverable so the seal records (analyzed_paths, findings, conclusions)
+# rather than free-form prose. This mirrors the shape of a research/audit
+# report: "here's what I looked at, here's what I found, here's my
+# conclusion." Auto-seal captures the JSON file as the artifact_ref so
+# downstream consumers can parse the structured fields back.
+_REVIEW_DELIVERABLE_INSTRUCTIONS = (
+    "\n\n---\nDELIVERABLE CONTRACT (NON-NEGOTIABLE)\n"
+    "Your job is incomplete until you write a single structured JSON file\n"
+    "to the path below. The seal gate captures whatever lands in write_scope\n"
+    "as your submission. No prose-only output, no chat-only output, no\n"
+    "stdout-only verbal seal. A real on-disk JSON or no submission.\n"
+    "\n"
+    "Path: {write_scope}/{step_deliverable}.analysis.json\n"
+    "\n"
+    "Pick ONE of three completion_status values and follow that mode's\n"
+    "required fields. Self-report honestly — if you cannot complete the spec\n"
+    "as written, say so explicitly with diverged or declined; the operator\n"
+    "would rather read a structured 'I could not do X because Y' than try\n"
+    "to decipher silence.\n"
+    "\n"
+    "Mode 1 — completion_status=\"completed\" (you did the work as specified):\n"
+    "{{\n"
+    '  "completion_status": "completed",\n'
+    '  "result_kind": "analysis_result",\n'
+    '  "analyzed_paths": ["<repo-relative path or DB ref you inspected>", ...],\n'
+    '  "findings": [\n'
+    '    {{"observation": "<concrete, specific fact — name files, lines, '
+    "fields, or behaviors>\", \"severity\": \"info|warning|critical\", "
+    '"evidence_path": "<repo-relative path that proves this finding>"}}\n'
+    "  ],\n"
+    '  "conclusions": "<2-3 sentence paragraph>",\n'
+    '  "recommendations": [\n'
+    '    {{"action": "<concrete next step>", "rationale": "<why>"}}\n'
+    "  ],\n"
+    '  "links": [{{"label": "<label>", "ref": "<bug id, decision ref, URL>"}}]\n'
+    "}}\n"
+    "\n"
+    "Mode 2 — completion_status=\"diverged\" (you completed, but in a\n"
+    "different shape than the spec asked for — e.g. you found the spec\n"
+    "was based on a wrong premise, or a different deliverable was more\n"
+    "useful):\n"
+    "{{\n"
+    '  "completion_status": "diverged",\n'
+    '  "result_kind": "analysis_result",\n'
+    '  "divergence_reason": "<2-3 sentences: what the spec asked for, what '
+    "you actually did, and why the divergence was the right call>\",\n"
+    '  "analyzed_paths": [...],\n'
+    '  "findings": [...],          // structure same as Mode 1\n'
+    '  "conclusions": "...",\n'
+    '  "recommendations": [...],\n'
+    '  "links": [...]\n'
+    "}}\n"
+    "\n"
+    "Mode 3 — completion_status=\"declined\" (you genuinely cannot complete\n"
+    "this — missing context, blocked by an authority gap, the task as\n"
+    "written is incoherent, etc.):\n"
+    "{{\n"
+    '  "completion_status": "declined",\n'
+    '  "result_kind": "analysis_declined",\n'
+    '  "decline_reason": "<2-3 sentences: what you tried, what blocked you, '
+    "and what the operator would need to do to unblock>\",\n"
+    '  "analyzed_paths": [...],     // optional but include any path you did read\n'
+    '  "links": [{{"label": "<label>", "ref": "<bug id you filed for the blocker>"}}]\n'
+    "}}\n"
+    "\n"
+    "Rules for Mode 1 / Mode 2 (the seal gate trusts your structure but the\n"
+    "operator will read it; soft-pass costs you trust):\n"
+    "- analyzed_paths MUST list at least 3 distinct repo paths or DB refs.\n"
+    "- findings MUST contain at least 2 entries with concrete evidence_path.\n"
+    "  Generic 'looks fine' / 'seems ok' are not findings.\n"
+    "- conclusions MUST be a 2-3 sentence paragraph.\n"
+    "- recommendations MUST contain at least 1 concrete next action.\n"
+    "\n"
+    "Rule for Mode 3:\n"
+    "- decline_reason MUST name a specific blocker (missing tool, missing\n"
+    "  authority row, conflicting policy, ambiguous spec) — not 'I could\n"
+    "  not figure it out'. File a bug for the blocker if one fits.\n"
+    "\n"
+    "The file MUST be valid JSON parseable by json.loads.\n"
+)
+
 _STAGE_TEMPLATES: dict[str, str] = {
     "build": "Implement the following in {write_scope}:\n\n{description}",
     "fix": "Fix the following issue in {write_scope}:\n\n{description}",
-    "review": "Review {write_scope} for the following:\n\n{description}",
+    "review": (
+        "Review {write_scope} for the following:\n\n{description}"
+        + _REVIEW_DELIVERABLE_INSTRUCTIONS
+    ),
     "test": "Write tests for {write_scope}:\n\n{description}",
-    "research": "Research and report on the following:\n\n{description}",
+    "research": (
+        "Research and report on the following:\n\n{description}"
+        + _REVIEW_DELIVERABLE_INSTRUCTIONS
+    ),
 }
 
 def _default_workspace_ref(conn=None) -> str:
@@ -220,11 +309,27 @@ def _generate_label(stage: str, description: str) -> str:
     return f"{stage}:{slug}"
 
 
-def _generate_prompt(stage: str, write_scope: list[str], description: str) -> str:
-    """Generate a prompt from stage template and description."""
+def _generate_prompt(
+    stage: str,
+    write_scope: list[str],
+    description: str,
+    label: str = "step",
+) -> str:
+    """Generate a prompt from stage template and description.
+
+    ``label`` is sanitized into a filename-safe slug used by review/research
+    templates that demand a structured JSON deliverable at
+    ``{write_scope}/{step_deliverable}.analysis.json``. Other stage templates
+    ignore the variable.
+    """
     template = _STAGE_TEMPLATES[stage]
     write_str = ", ".join(write_scope) if len(write_scope) > 1 else (write_scope[0] if write_scope else "")
-    return template.format(write_scope=write_str, description=description)
+    step_deliverable = re.sub(r"[^a-zA-Z0-9_-]+", "-", label).strip("-") or "step"
+    return template.format(
+        write_scope=write_str,
+        description=description,
+        step_deliverable=step_deliverable,
+    )
 
 
 def _verify_ref_name(verification_ref: str, file_path: str) -> str:

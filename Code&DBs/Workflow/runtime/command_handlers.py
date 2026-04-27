@@ -344,20 +344,38 @@ def _workflow_submit_dispatch(
                 lineage_depth=lineage_depth,
             )
         except Exception as exc:
+            # Surface inner ProviderAuthorityError details (rejection_rows,
+            # next_actions) — the admission gate already enumerated which
+            # gates blocked the submit and which tool owns each gate. Without
+            # extracting these, the operator sees only the wrapped string.
+            inner_details: dict[str, Any] = {}
+            cause: BaseException | None = exc
+            while cause is not None:
+                cause_details = getattr(cause, "details", None)
+                if isinstance(cause_details, Mapping):
+                    inner_details = dict(cause_details)
+                    break
+                cause = getattr(cause, "__cause__", None) or getattr(cause, "__context__", None)
+            error_details: dict[str, Any] = {
+                "command_id": command.command_id,
+                "spec_path": spec_path,
+                "repo_root": repo_root,
+                "run_id": run_id,
+                "parent_run_id": parent_run_id,
+                "parent_job_label": parent_job_label,
+                "dispatch_reason": dispatch_reason,
+                "lineage_depth": lineage_depth,
+                "force_fresh_run": force_fresh_run,
+            }
+            for key in ("rejection_rows", "next_actions",
+                        "requested_candidates", "route_task_type",
+                        "runtime_profile_ref", "job_label"):
+                if key in inner_details:
+                    error_details[key] = inner_details[key]
             raise ControlCommandExecutionError(
                 "control.command.workflow_spawn_failed" if require_parent else "control.command.workflow_submit_failed",
                 str(exc),
-                details={
-                    "command_id": command.command_id,
-                    "spec_path": spec_path,
-                    "repo_root": repo_root,
-                    "run_id": run_id,
-                    "parent_run_id": parent_run_id,
-                    "parent_job_label": parent_job_label,
-                    "dispatch_reason": dispatch_reason,
-                    "lineage_depth": lineage_depth,
-                    "force_fresh_run": force_fresh_run,
-                },
+                details=error_details,
             ) from exc
     result_status = str(result.get("status") or "").strip().lower()
     result_run_id = result.get("run_id")

@@ -652,6 +652,72 @@ def _provider_transport_probe_receipt_id(
     )
 
 
+# Per-provider CLI auth-file mount catalog. Sandbox runner reads this from
+# `provider_transport_admissions.probe_contract.auth_mounts` to mount the right
+# credentials/state files into thin sandbox images. Migration 263 set this
+# initially; without these defaults in the onboarding probe_contract builder
+# the onboarding upsert wiped them silently — exactly the bug that made
+# `claude` in the sandbox say "Not logged in" even with the host CLI logged in.
+_PROVIDER_CLI_AUTH_MOUNTS: dict[str, dict[str, Any]] = {
+    "anthropic": {
+        "auth_mounts": [
+            {
+                "host_relative_path": ".claude/.credentials.json",
+                "container_relative_path": ".claude/.credentials.json",
+            },
+            {
+                "host_relative_path": ".claude.json",
+                "container_relative_path": ".claude.json",
+            },
+        ],
+        "cli_home_tmpfs_dirs": [".claude"],
+    },
+    "openai": {
+        "auth_mounts": [
+            {
+                "host_relative_path": ".codex/auth.json",
+                "container_seed_filename": "openai-auth.json",
+            }
+        ],
+        "cli_home_tmpfs_dirs": [".codex"],
+    },
+    "google": {
+        "auth_mounts": [
+            {
+                "host_relative_path": ".gemini/oauth_creds.json",
+                "container_relative_path": ".gemini/oauth_creds.json",
+            },
+            {
+                "host_relative_path": ".gemini/google_accounts.json",
+                "container_relative_path": ".gemini/google_accounts.json",
+            },
+            {
+                "host_relative_path": ".gemini/settings.json",
+                "container_relative_path": ".gemini/settings.json",
+            },
+        ],
+        "cli_home_tmpfs_dirs": [".gemini"],
+    },
+    "gemini": {
+        "auth_mounts": [
+            {
+                "host_relative_path": ".gemini/oauth_creds.json",
+                "container_relative_path": ".gemini/oauth_creds.json",
+            },
+            {
+                "host_relative_path": ".gemini/google_accounts.json",
+                "container_relative_path": ".gemini/google_accounts.json",
+            },
+            {
+                "host_relative_path": ".gemini/settings.json",
+                "container_relative_path": ".gemini/settings.json",
+            },
+        ],
+        "cli_home_tmpfs_dirs": [".gemini"],
+    },
+}
+
+
 def _selected_lane_probe_contract(
     *,
     spec: ProviderOnboardingSpec,
@@ -662,7 +728,7 @@ def _selected_lane_probe_contract(
     selected_models: Sequence[ProviderOnboardingModelSpec],
     router_supported: bool | None,
 ) -> dict[str, Any]:
-    return {
+    contract: dict[str, Any] = {
         "model_discovery_probe": {
             "strategy": transport_template.discovery_strategy,
             "requested_models": list(spec.requested_models),
@@ -687,6 +753,16 @@ def _selected_lane_probe_contract(
             "selected_transport_supported": router_supported,
         },
     }
+    # CLI lane: include the per-provider auth-mount catalog so the sandbox
+    # runner can mount credentials into thin images. Only emitted for cli_llm
+    # adapter — API-lane probes don't need filesystem auth mounts.
+    if (spec.selected_transport or "").strip().lower() == "cli":
+        provider_key = (spec.provider_slug or "").strip().lower()
+        auth_catalog = _PROVIDER_CLI_AUTH_MOUNTS.get(provider_key)
+        if auth_catalog is not None:
+            contract["auth_mounts"] = auth_catalog["auth_mounts"]
+            contract["cli_home_tmpfs_dirs"] = auth_catalog["cli_home_tmpfs_dirs"]
+    return contract
 
 
 def _utc_now():

@@ -156,7 +156,7 @@ Docker-only commands:
   status [--json]         Show Docker service state and active workflows
   start [service...]      Start Docker services (default: cockpit)
   stop [service...]       Stop Docker services (default: cockpit)
-  restart [service...]    Restart Docker services (default: cockpit)
+  restart [service...]    Restart Docker services AND kill any host MCP daemons (default: cockpit)
   logs [service...]       Show Docker logs (default: cockpit, tail=200)
 
 Other commands:
@@ -240,10 +240,37 @@ docker_only_stop() {
     (cd "$REPO_ROOT" && docker compose stop "${services[@]}")
 }
 
+kill_host_mcp_daemons() {
+    # Force-rotate any host-side `python3 -m surfaces.mcp` daemons so
+    # Claude / other MCP clients respawn against the freshly-restarted
+    # backend. Without this, restart only bounces docker — host daemons
+    # keep running stale code and reattaching to the same Python process,
+    # so file edits silently fail to take effect on MCP-routed calls.
+    #
+    # Whatever spawned each daemon (Claude Code, Codex, etc.) is
+    # responsible for respawning on next MCP call; this command just
+    # kills the stuck process.
+    local pids=()
+    if command -v pgrep >/dev/null 2>&1; then
+        mapfile -t pids < <(pgrep -f 'python3 -m surfaces.mcp' 2>/dev/null || true)
+    fi
+    if [ "${#pids[@]}" -eq 0 ]; then
+        echo "  no host MCP daemons running"
+        return 0
+    fi
+    echo "  killing host MCP daemons: ${pids[*]}"
+    # SIGKILL: SIGTERM is often caught by the disclaimer wrapper and
+    # the python child survives. -9 is the only signal that reliably
+    # rotates the actual python process.
+    kill -9 "${pids[@]}" 2>/dev/null || true
+}
+
 docker_only_restart() {
     require_docker
     mapfile -t services < <(docker_services_from_args "$@")
     (cd "$REPO_ROOT" && docker compose restart "${services[@]}")
+    echo "Rotating host MCP daemons:"
+    kill_host_mcp_daemons
 }
 
 docker_only_logs() {

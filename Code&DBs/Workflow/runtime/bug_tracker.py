@@ -770,18 +770,27 @@ class BugTracker:
                 })
 
         initial_resume = resume_context if isinstance(resume_context, dict) else {}
+        # Capture the gateway correlation_id at filing time so trace.walk
+        # can resolve a bug_id anchor without chasing legacy receipt-ref
+        # strings through bugs.discovered_in_receipt_id. When the bug is
+        # filed outside a CQRS-routed flow (no ContextVar), correlation_id
+        # stays NULL and trace.walk returns trace.no_correlation honestly.
+        from runtime.operation_catalog_gateway import current_caller_context
+
+        active_context = current_caller_context()
+        correlation_id = active_context.correlation_id if active_context else None
         self._conn.execute(
             """INSERT INTO bugs
                 (bug_id, bug_key, title, severity, status, priority, category, description,
                  summary, source_kind, discovered_in_run_id, discovered_in_receipt_id,
                  owner_ref, source_issue_id, decision_ref, opened_at, resolved_at,
-                 created_at, updated_at, filed_by, tags, resume_context)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULL, $17, $18, $19, $20, $21::jsonb)""",
+                 created_at, updated_at, filed_by, tags, resume_context, correlation_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULL, $17, $18, $19, $20, $21::jsonb, $22::uuid)""",
             bug_id, bug_key, title, severity.value, BugStatus.OPEN.value,
             severity.value, category.value, description,
             description[:200], normalized_source_kind, discovered_in_run_id, discovered_in_receipt_id,
             owner_ref, normalized_source_issue_id, normalized_decision_ref, now, now, now, filed_by, tags_str,
-            json.dumps(initial_resume, default=str),
+            json.dumps(initial_resume, default=str), correlation_id,
         )
         if vector_query is not None:
             vector_query.set_embedding("bugs", "bug_id", bug_id)

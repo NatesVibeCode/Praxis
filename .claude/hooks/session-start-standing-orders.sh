@@ -90,4 +90,25 @@ done <<< "$ROWS"
 
 printf '\nRefresh: `POST /orient` or re-run this hook.\n'
 
+cat <<'EOF'
+
+## Operator Tool Routing — concern → tool
+
+When you encounter an authority symptom, USE THE NAMED TOOL. Do not write SQL or a migration to mutate these concerns. The operator tool surface is the only authoritative writer.
+
+| Symptom | Tool | Action |
+|---|---|---|
+| `runtime_profile_route.not_admitted` | `praxis_provider_onboard` | onboard |
+| `control_panel.transport_turned_off` / `transport_default_deny` | `praxis_access_control` | enable |
+| `control_panel.model_access_method_turned_off` | `praxis_access_control` | enable |
+| circuit breaker `manual_override_state=OPEN` | `praxis_circuits` | reset |
+| `circuit_breaker.runtime_open` | `praxis_circuits` | list (then investigate failures) |
+| credentials missing / API key not found | `praxis_provider_onboard` | re-onboard with `api_key_env_var` |
+| `task_type_routing` rank-1 doesn't take effect | `praxis_provider_control_plane` | read — check `is_runnable` + `removal_reasons` BEFORE writing migrations |
+| `workflow.submit` fails with `postgres.authority_unavailable` | `praxis_provider_control_plane` | read; the failed-submit response also carries `admission_diagnosis.rejection_rows` + `next_actions[].tool` |
+
+If you find yourself drafting a migration for any of these concerns, stop and use the tool instead. Migrations are reserved for schema/structural changes, not operator-facing admission state.
+
+EOF
+
 exit 0

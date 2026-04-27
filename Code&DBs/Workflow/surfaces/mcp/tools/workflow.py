@@ -525,6 +525,187 @@ def _run_status_payload(
     return payload
 
 
+def _enrich_failed_submit_response(result: dict[str, Any], *, pg: Any) -> dict[str, Any]:
+    """Embed admission rejection rows + next-action hints into a failed
+    workflow.submit response.
+
+    When the submit fails, the operator has historically gotten only a wrapped
+    error string (``"native runtime authority unavailable: ..."``). The truth
+    — which gates blocked which candidates and which operator tool owns each
+    gate — already lives in ``private_provider_control_plane_snapshot`` /
+    ``effective_provider_circuit_breaker_state``. This helper joins that data
+    onto the failure response so the model gets actionable next-steps inline
+    instead of having to manually query four other surfaces.
+    """
+    if pg is None:
+        return result
+    payload = result.get("command", {}).get("payload") if isinstance(result.get("command"), dict) else None
+    if not isinstance(payload, dict):
+        return result
+    spec_path = payload.get("spec_path")
+    repo_root = payload.get("repo_root") or str(REPO_ROOT)
+    if not isinstance(spec_path, str):
+        return result
+    try:
+        spec_mod = _workflow_spec_mod()
+        from pathlib import Path as _Path
+        path_obj = _Path(spec_path)
+        full_path = str(path_obj if path_obj.is_absolute() else _Path(repo_root) / path_obj)
+        spec = spec_mod.WorkflowSpec.load(full_path)
+    except Exception:
+        return result
+    task_types: set[str] = set()
+    auto_jobs: list[tuple[str, str]] = []  # (label, stage_or_task)
+    for job in getattr(spec, "jobs", []) or []:
+        agent = str(job.get("agent") or "")
+        task_type = str(job.get("task_type") or "")
+        if task_type:
+            task_types.add(task_type)
+        if agent.startswith("auto/"):
+            stage = agent.split("/", 1)[1]
+            task_types.add(stage)
+            auto_jobs.append((str(job.get("label", "")), stage))
+    if not task_types:
+        return result
+    runtime_profile_ref = "praxis"
+    raw_spec = getattr(spec, "_raw", {}) or {}
+    rp = raw_spec.get("runtime_profile_ref")
+    if isinstance(rp, str) and rp.strip():
+        runtime_profile_ref = rp.strip()
+    rejection_rows: list[dict[str, Any]] = []
+    try:
+        rows = pg.execute(
+            """
+            SELECT job_type, provider_slug, model_slug, transport_type, adapter_type,
+                   is_runnable, breaker_state, manual_override_state,
+                   manual_override_reason, primary_removal_reason_code,
+                   removal_reasons, credential_availability_state
+            FROM private_provider_control_plane_snapshot
+            WHERE runtime_profile_ref = $1
+              AND job_type = ANY($2::text[])
+            ORDER BY job_type, transport_type DESC, provider_slug, model_slug
+            """,
+            runtime_profile_ref,
+            list(task_types),
+        )
+        for row in rows or []:
+            rd = dict(row)
+            rejection_rows.append({
+                "task_type": rd.get("job_type"),
+                "candidate": f"{rd.get('provider_slug')}/{rd.get('model_slug')}",
+                "transport_type": rd.get("transport_type"),
+                "adapter_type": rd.get("adapter_type"),
+                "is_runnable": rd.get("is_runnable"),
+                "breaker_state": rd.get("breaker_state"),
+                "manual_override_state": rd.get("manual_override_state"),
+                "manual_override_reason": rd.get("manual_override_reason"),
+                "primary_removal_reason_code": rd.get("primary_removal_reason_code"),
+                "removal_reasons": rd.get("removal_reasons") or [],
+                "credential_availability_state": rd.get("credential_availability_state"),
+            })
+    except Exception:
+        return result
+    next_actions = _next_actions_from_rejections(rejection_rows)
+    if rejection_rows or next_actions:
+        result["admission_diagnosis"] = {
+            "spec_name": getattr(spec, "name", None) or spec_path,
+            "runtime_profile_ref": runtime_profile_ref,
+            "task_types": sorted(task_types),
+            "rejection_rows": rejection_rows[:60],
+            "next_actions": next_actions,
+            "hint": (
+                "These rows show every gate that blocked the requested candidates. "
+                "The next_actions list names the operator tool that owns each gate — "
+                "use those tools, not raw SQL or migrations, to lift the gate."
+            ),
+        }
+    return result
+
+
+_REASON_CODE_TO_TOOL: dict[str, dict[str, str]] = {
+    "control_panel.transport_turned_off": {
+        "tool": "praxis_access_control",
+        "action": "enable",
+        "concern": "API/CLI transport policy or model-access denial",
+    },
+    "control_panel.model_access_method_turned_off": {
+        "tool": "praxis_access_control",
+        "action": "enable",
+        "concern": "explicit denial row blocking this provider/model",
+    },
+    "runtime_profile_route.not_admitted": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "runtime_profile_admitted_routes is missing this candidate",
+    },
+    "provider_transport.missing": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "provider_transport_admissions row missing",
+    },
+    "provider_transport.policy_denied": {
+        "tool": "praxis_access_control",
+        "action": "enable",
+        "concern": "transport policy denies this adapter",
+    },
+    "provider_transport.disabled": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "transport admission is inactive",
+    },
+    "circuit_breaker.manual_override_open": {
+        "tool": "praxis_circuits",
+        "action": "reset",
+        "concern": "operator forced this provider's breaker OPEN",
+    },
+    "circuit_breaker.runtime_open": {
+        "tool": "praxis_circuits",
+        "action": "list",
+        "concern": "circuit breaker is open due to recent failures",
+    },
+    "credentials.missing": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "API key / CLI credential missing for this provider",
+    },
+}
+
+
+def _next_actions_from_rejections(rejection_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for row in rejection_rows:
+        if row.get("is_runnable"):
+            continue
+        codes: list[str] = []
+        primary = str(row.get("primary_removal_reason_code") or "").strip()
+        if primary:
+            codes.append(primary)
+        for r in row.get("removal_reasons") or []:
+            if isinstance(r, dict) and r.get("reason_code"):
+                codes.append(str(r["reason_code"]).strip())
+            elif isinstance(r, str):
+                codes.append(r.strip())
+        # Manual breaker override surfaces with a different code shape; map it
+        if row.get("manual_override_state") == "OPEN":
+            codes.append("circuit_breaker.manual_override_open")
+        elif row.get("breaker_state") == "OPEN":
+            codes.append("circuit_breaker.runtime_open")
+        for code in codes:
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            hint = _REASON_CODE_TO_TOOL.get(code)
+            if hint:
+                out.append({
+                    "reason_code": code,
+                    "tool": hint["tool"],
+                    "action": hint["action"],
+                    "concern": hint["concern"],
+                })
+    return out
+
+
 def _run_submit_result_payload(
     result: dict[str, Any],
     include_warning: bool = False,
@@ -1569,7 +1750,14 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
             if force_fresh_run:
                 submit_kwargs["force_fresh_run"] = True
             result = _submit_workflow_via_service_bus(pg, **submit_kwargs)
-        if result.get("error"):
+        if result.get("error") or result.get("status") == "failed":
+            # Enrich the failed response with admission_diagnosis (rejection
+            # rows + next_actions per gate) so the operator/model sees which
+            # tool to call instead of grepping schemas.
+            try:
+                result = _enrich_failed_submit_response(result, pg=pg)
+            except Exception:  # noqa: BLE001
+                pass
             return result
 
         run_id = result["run_id"]
@@ -2253,7 +2441,23 @@ def tool_praxis_synthesize_skeleton(params: dict) -> dict:
 
 
 def tool_praxis_compose_plan_via_llm(params: dict) -> dict:
-    """End-to-end: atoms → skeleton → synthesis (1 LLM call) → fork-out N parallel authors → validate."""
+    """End-to-end: atoms → skeleton → synthesis (1 LLM call) → fork-out N parallel
+    authors → validate.
+
+    Kickoff-first by default (wait=False): spawns the compose work on a daemon
+    thread, returns immediately with an ``operation_ref`` handle. The caller
+    queries ``praxis_receipts(action='search', query='compose-plan-via-llm')``
+    to retrieve the result once the gateway writes the receipt.
+
+    Pass ``wait=True`` to keep the legacy synchronous behavior (the UI compile
+    path uses this since it needs the result inline). Synchronous calls under
+    MCP frequently exceed the 60s tool-call timeout — that's why kickoff-first
+    is the new default for the MCP path.
+    """
+    import threading
+    import time
+    import uuid
+
     intent = params.get("intent")
     if not isinstance(intent, str):
         return {"ok": False, "error": "intent must be a string", "reason_code": "intent.invalid"}
@@ -2265,22 +2469,118 @@ def tool_praxis_compose_plan_via_llm(params: dict) -> dict:
                 "reason_code": "concurrency.invalid"}
     plan_name = params.get("plan_name")
     why = params.get("why")
+    wait = bool(params.get("wait", False))
+
     try:
         pg_conn = _subs.get_pg_conn()
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}",
                 "reason_code": "postgres.authority.unavailable"}
-    try:
-        from runtime.compose_plan_via_llm import compose_plan_via_llm
-        result = compose_plan_via_llm(
-            intent, conn=pg_conn,
-            plan_name=plan_name if isinstance(plan_name, str) else None,
-            why=why if isinstance(why, str) else None,
-            concurrency=concurrency,
-        )
-    except Exception as exc:
-        return _structured_runtime_error(exc, action="compose_plan_via_llm")
-    return result.to_dict()
+
+    if wait:
+        # Synchronous path — original behavior, used by the UI compile flow.
+        try:
+            from runtime.compose_plan_via_llm import compose_plan_via_llm
+            result = compose_plan_via_llm(
+                intent, conn=pg_conn,
+                plan_name=plan_name if isinstance(plan_name, str) else None,
+                why=why if isinstance(why, str) else None,
+                concurrency=concurrency,
+            )
+        except Exception as exc:
+            return _structured_runtime_error(exc, action="compose_plan_via_llm")
+        return result.to_dict()
+
+    # Kickoff-first path: spawn a daemon thread that runs the compose pipeline
+    # and writes the receipt via the standard runtime path. Return immediately
+    # with a tracking handle. The caller polls via praxis_receipts.
+    kickoff_id = f"compose_kickoff_{uuid.uuid4().hex[:12]}"
+    kickoff_started_at = time.time()
+
+    # Causal tracing: mint a correlation_id at kickoff and set the
+    # CURRENT_CALLER_CONTEXT ContextVar so every gateway call inside the
+    # background compose pipeline (synthesis, fork-out authors, validation)
+    # gets stamped with the same correlation_id. The kickoff itself is not
+    # a registered gateway operation, so there is no parent receipt — the
+    # whole compose subtree shares this fresh root correlation. The
+    # correlation_id flows back in the response so callers can pass it to
+    # praxis_trace as the trace anchor.
+    from runtime.operation_catalog_gateway import (
+        CURRENT_CALLER_CONTEXT,
+        CallerContext,
+        spawn_threaded,
+    )
+    kickoff_correlation_id = str(uuid.uuid4())
+    _ctx_token = CURRENT_CALLER_CONTEXT.set(
+        CallerContext(cause_receipt_id=None, correlation_id=kickoff_correlation_id)
+    )
+
+    def _run_compose_in_background() -> None:
+        # Each background thread needs its own DB connection — sync-bridge
+        # connections are not safe to share across threads.
+        try:
+            local_subs = _subs.__class__()
+        except Exception:  # noqa: BLE001
+            return
+        try:
+            # Dispatch through the CQRS gateway so a receipt + plan.composed
+            # event get written under the kickoff's correlation_id. The
+            # bare runtime.compose_plan_via_llm function bypasses the
+            # gateway entirely — switching to execute_operation_from_subsystems
+            # is what makes praxis_trace(correlation_id=...) actually surface
+            # the compose work.
+            from runtime.operation_catalog_gateway import (
+                execute_operation_from_subsystems,
+            )
+            payload: dict[str, Any] = {"intent": intent, "concurrency": concurrency}
+            if isinstance(plan_name, str):
+                payload["plan_name"] = plan_name
+            if isinstance(why, str):
+                payload["why"] = why
+            execute_operation_from_subsystems(
+                local_subs,
+                operation_name="compose_plan_via_llm",
+                payload=payload,
+            )
+        except Exception:  # noqa: BLE001
+            # The receipt the gateway writes will carry the failure; nothing
+            # to surface here since the caller has already returned.
+            pass
+
+    # spawn_threaded snapshots the current ContextVar context so the
+    # background thread inherits CURRENT_CALLER_CONTEXT — without it,
+    # threading.Thread starts with empty ContextVars and the compose
+    # subtree gets a disconnected fresh correlation per gateway call.
+    spawn_threaded(
+        _run_compose_in_background,
+        name=f"compose_kickoff:{kickoff_id}",
+    )
+    # Reset the caller context on this MCP call so the kickoff's
+    # correlation_id does not leak into any other work the daemon thread
+    # does after this function returns. The background thread already
+    # snapshotted Context inside spawn_threaded, so reset here is safe.
+    CURRENT_CALLER_CONTEXT.reset(_ctx_token)
+
+    return {
+        "ok": True,
+        "kickoff": True,
+        "kickoff_id": kickoff_id,
+        "kickoff_started_at": kickoff_started_at,
+        "correlation_id": kickoff_correlation_id,
+        "operation_ref": "compose-plan-via-llm",
+        "intent": intent,
+        "next_step": (
+            "compose is running in the background; results land in "
+            "authority_operation_receipts under operation_ref='compose-plan-via-llm'. "
+            f"Walk the trace: praxis_trace(correlation_id='{kickoff_correlation_id}'). "
+            "Or fetch the receipt: praxis_receipts(action='search', query='compose-plan-via-llm')."
+        ),
+        "wait_for_synchronous": (
+            "Pass wait=true to block until the pipeline finishes (legacy UI "
+            "compile behavior). MCP tool-call timeouts may fire; kickoff-first "
+            "is recommended."
+        ),
+    }
 
 
 def tool_praxis_compose_experiment(params: dict) -> dict:
@@ -2374,8 +2674,17 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         {
             "description": (
                 "End-to-end LLM compile: atoms → skeleton → ONE synthesis LLM call "
-                "(few-sentence plan statement) → N parallel fork-out author calls (each "
-                "shares the synthesis as cached prefix) → validate."
+                "(few-sentence plan statement) → N parallel fork-out author calls "
+                "(each shares the synthesis as cached prefix) → validate.\n\n"
+                "KICKOFF-FIRST BY DEFAULT (wait=False): the call returns immediately "
+                "with a kickoff handle while the compose pipeline runs on a background "
+                "thread. The receipt lands in `authority_operation_receipts` under "
+                "`operation_ref='compose-plan-via-llm'` when complete; query it via "
+                "`praxis_receipts(action='search', query='compose-plan-via-llm')`. "
+                "This avoids the 60s MCP tool-call timeout for full pipeline runs.\n\n"
+                "Pass `wait=True` to keep the original synchronous behavior — used by "
+                "the UI compile path which needs the plan inline. Synchronous calls "
+                "via MCP often exceed the tool-call timeout."
             ),
             "inputSchema": {
                 "type": "object",
@@ -2384,6 +2693,16 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "plan_name": {"type": "string"},
                     "why": {"type": "string"},
                     "concurrency": {"type": "integer", "default": 20},
+                    "wait": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "False (default): kickoff-first; tool returns "
+                            "immediately, work runs in background, receipt lands "
+                            "asynchronously. True: legacy synchronous behavior; "
+                            "tool blocks until full pipeline completes."
+                        ),
+                    },
                 },
                 "required": ["intent"],
             },
