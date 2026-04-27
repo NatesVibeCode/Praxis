@@ -1,0 +1,35 @@
+---
+description: Praxis standing-order JIT surfacing — always-on
+alwaysApply: true
+---
+
+# Praxis standing orders — JIT surface
+
+Operator standing orders live in `operator_decisions` (Praxis.db,
+`decision_kind=architecture_policy`). The trigger registry at
+`policy/operator-decision-triggers.json` projects them into match
+conditions.
+
+**For raw shell commands** (anything you'd run via your built-in shell
+tool that doesn't go through Praxis MCP): pipe the proposed command
+through the universal shim BEFORE executing:
+
+```bash
+bin/praxis-policy-check Bash '{"command":"<your command>"}'
+```
+
+If the shim prints a `⚠ STANDING ORDER MATCH` block, read it and pivot
+if the proposed action would violate it. Empty output = no match,
+proceed.
+
+**For Edit/Write to source files**: rules in `.cursor/rules/*.mdc` with
+`globs:` frontmatter auto-attach to your context when you edit matching
+files. Read them when they appear.
+
+**For Praxis MCP/CLI calls** (`praxis_*` tools): the gateway already
+appends `_standing_orders_surfaced` to every tool result. No extra step.
+
+Full rationale for any `decision_key`:
+```bash
+bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"<key>"}'
+```

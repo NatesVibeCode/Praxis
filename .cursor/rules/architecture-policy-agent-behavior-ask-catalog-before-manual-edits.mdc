@@ -1,0 +1,14 @@
+---
+description: Ask the catalog before manual file edits
+globs: **/Code&DBs/Workflow/runtime/**/*.py, **/Code&DBs/Workflow/surfaces/**/*.py
+alwaysApply: false
+---
+
+# Standing order — Ask the catalog before manual file edits
+
+`decision_key`: `architecture-policy::agent-behavior::ask-catalog-before-manual-edits`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::agent-behavior::ask-catalog-before-manual-edits"}'`

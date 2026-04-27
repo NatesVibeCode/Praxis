@@ -1,0 +1,14 @@
+---
+description: DeepSeek scope: direct API research only; OpenRouter compile only; nothing else
+globs: **/migrations/workflow/*.sql, **/migrations/workflow/*.sql
+alwaysApply: false
+---
+
+# Standing order — DeepSeek scope: direct API research only; OpenRouter compile only; nothing else
+
+`decision_key`: `architecture-policy::providers::deepseek-research-only`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::providers::deepseek-research-only"}'`

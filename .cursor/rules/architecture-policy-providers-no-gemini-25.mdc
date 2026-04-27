@@ -1,0 +1,14 @@
+---
+description: Never route Gemini 2.5 (any variant) for real work
+globs: **/migrations/workflow/*.sql
+alwaysApply: false
+---
+
+# Standing order — Never route Gemini 2.5 (any variant) for real work
+
+`decision_key`: `architecture-policy::providers::no-gemini-25`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::providers::no-gemini-25"}'`

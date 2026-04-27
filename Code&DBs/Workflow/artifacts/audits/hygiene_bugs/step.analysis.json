@@ -1,0 +1,95 @@
+{
+  "completion_status": "diverged",
+  "result_kind": "analysis_result",
+  "divergence_reason": "The brief asked for an audit of 'six repeated-receipt-failure rows', but the strict title prefix 'Repeated receipt failure:' returns only four rows in the live bug tracker (BUG-665AA992, BUG-28A9CC35, BUG-F28BF7B6, BUG-B5C4B240). I extended the audit to the two mcp_workflow_server-filed receipt-failure cousins that share the workflow_unified executor and the same receipt-failure pathology (BUG-D2363EB8 phantom_ship; BUG-17CC1088 sandbox missing target repo + broken praxis CLI), bringing the audited set to six. The divergence was the right call because reviewing the four strict matches in isolation hides the fact that two of them (Row 3 sandbox_error and Row 4 workflow_submission.required_missing) are downstream of root causes already filed in those cousins.",
+  "analyzed_paths": [
+    "Code&DBs/Workflow/artifacts/audits/hygiene_bugs/receipt_failure_symptoms.md",
+    "bug_tracker:BUG-665AA992",
+    "bug_tracker:BUG-28A9CC35",
+    "bug_tracker:BUG-F28BF7B6",
+    "bug_tracker:BUG-B5C4B240",
+    "bug_tracker:BUG-D2363EB8",
+    "bug_tracker:BUG-17CC1088",
+    "bug_tracker:BUG-B41802F3",
+    "bug_tracker:BUG-31E77A5E",
+    "receipt:workflow_8913ede67521:595:1",
+    "receipt:workflow_9af0c9b09c5b:593:1",
+    "receipt:workflow_b614c602d5d2:565:1",
+    "receipt:workflow_478149599bdb:572:1",
+    "receipt:workflow_40a9582fc641:531:1"
+  ],
+  "findings": [
+    {
+      "observation": "BUG-665AA992 and BUG-28A9CC35 (host_resource_capacity, signatures a04f157b93a73e636e0e and 1b6f5f1ef731776855a7) are NOT a Claude-auth artefact — packet evidence shows recurrences across BOTH anthropic/claude-opus-4-7 and openai/gpt-5.4, all with latency_ms ~30100ms. That is the fingerprint of a deterministic per-job host wall-clock budget being exhausted, not provider-side flakiness. They must be re-anchored under a new parent host-budget root-cause bug, not closed as duplicates of BUG-B41802F3 (FIXED Claude auth).",
+      "severity": "critical",
+      "evidence_path": "Code&DBs/Workflow/artifacts/audits/hygiene_bugs/receipt_failure_symptoms.md"
+    },
+    {
+      "observation": "BUG-F28BF7B6 (sandbox_error step_3) IS a duplicate-of BUG-B41802F3 (Claude worker auth FIXED 2026-04-27 17:17:41). Cross-evidence receipt:workflow_478149599bdb:572:1 carries stdout_preview 'Not logged in · Please run /login', the exact failure pattern that fix removed. This row is a clean symptom-closure candidate; resolve as DEFERRED or FIXED with verifier_ref once the auth verifier is registered.",
+      "severity": "warning",
+      "evidence_path": "Code&DBs/Workflow/artifacts/audits/hygiene_bugs/receipt_failure_symptoms.md"
+    },
+    {
+      "observation": "BUG-B5C4B240 (workflow_submission.required_missing step_1, recurrence_count=6) is downstream of two already-filed root causes: BUG-D2363EB8 (phantom_ship — workspace-hydration mismatch between sandbox writes and the seal bridge) and BUG-31E77A5E (submission_gate Stage 4 fails build jobs without explicit verify_refs, FIX_PENDING_VERIFICATION). It must NOT be auto-closed; keep OPEN and attach as observed_in evidence on both parents until BUG-31E77A5E exits FIX_PENDING_VERIFICATION.",
+      "severity": "warning",
+      "evidence_path": "Code&DBs/Workflow/artifacts/audits/hygiene_bugs/receipt_failure_symptoms.md"
+    },
+    {
+      "observation": "BUG-D2363EB8 and BUG-17CC1088 are root-cause anchors filed by mcp_workflow_server but have replay_ready=false (bug.replay_missing_run_context) and no fix in flight — they are the upstream of Row 4 (and probably Rows 1-2 via wasted budget probing /workspace). They need manual repro evidence attached and replay readiness backfilled. BUG-17CC1088 specifically bundles two distinct concerns (workspace hydration drift + packaged praxis CLI json-stdlib import failure) and should be split to avoid hiding the CLI fragility behind the hydration headline.",
+      "severity": "warning",
+      "evidence_path": "Code&DBs/Workflow/artifacts/audits/hygiene_bugs/receipt_failure_symptoms.md"
+    },
+    {
+      "observation": "All four receipt_store auto-filed rows return historical_fixes.reason_code='bug.historical_fixes.none', confirming the platform has never resolved this signature class before — they are live regressions, not stale captures. Combined with replay_ready=true on each, the auto-filer is operating correctly; the missing piece is the manual root-cause anchor that the auto-filer is not authorised to write itself.",
+      "severity": "info",
+      "evidence_path": "Code&DBs/Workflow/artifacts/audits/hygiene_bugs/receipt_failure_symptoms.md"
+    },
+    {
+      "observation": "Bug-tracker query results in the workflow MCP session are capped at 20 entries per response (count:20 in every search payload), and praxis_bugs action='list'/'search'/'duplicate_check' are blocked inside the workflow session. If additional 'Repeated receipt failure' rows exist beyond the visible four (e.g., FIXED ones outside the 20-cap window), this audit cannot see them. Recommendation: re-run audit from an operator-mode session with `praxis_bugs action='search' title='Repeated receipt failure' open_only=false limit=100` to confirm the count.",
+      "severity": "warning",
+      "evidence_path": "Code&DBs/Workflow/artifacts/audits/hygiene_bugs/receipt_failure_symptoms.md"
+    },
+    {
+      "observation": "META: this audit job itself reproduced the workspace-hydration cluster (BUG-D2363EB8 / BUG-17CC1088 / BUG-632E6F45). /workspace started empty, I created exactly the two files in declared write_scope (hygiene_bugs/{receipt_failure_symptoms.md,step.analysis.json}), and praxis_submit_code_change rejected with workflow_submission.out_of_scope listing seven baseline.workspace_manifest paths that do NOT exist on disk (p1_foundation/*, p3_provider/*, surfaces/mcp/tools/provider_onboard.py, scripts/praxis-refresh-auth.sh, scripts/praxis-up). I filed this as BUG-E68A6013 and attached run workflow_8913ede67521 as observed_in evidence on BUG-D2363EB8 (bug_evidence_link:52328de6d4194ca1a663db054192365c). This is direct in-flight confirmation that the cluster is live and currently blocks legitimate review-job submissions even when the agent stays in scope.",
+      "severity": "critical",
+      "evidence_path": "Code&DBs/Workflow/artifacts/audits/hygiene_bugs/receipt_failure_symptoms.md"
+    }
+  ],
+  "conclusions": "Of the audited six rows, two demand re-anchoring under a NEW host-wall-clock-budget root cause (Rows 1-2, host_resource_capacity, cross-provider 30s timeouts), one is a clean symptom-closure candidate against the just-fixed BUG-B41802F3 (Row 3, sandbox_error / 'Not logged in'), and one must stay OPEN as duplicate-of evidence under existing root causes (Row 4, workflow_submission.required_missing → BUG-D2363EB8 + BUG-31E77A5E). The two cousins (Rows 5-6) are themselves the upstream root anchors and need investigation effort, not closure. Net: only one of the six is a no-cost symptom closure today; the rest require either filing a new parent or waiting on parent verification before closing.",
+  "recommendations": [
+    {
+      "action": "File a NEW P1/P2 root-cause bug titled 'workflow_unified host wall-clock budget ~30s clips review-class jobs across providers', attach BUG-665AA992 and BUG-28A9CC35 as observed_in evidence, then resolve them as duplicate-of when the parent has a fix.",
+      "rationale": "Rows 1-2 share latency_ms ≈ 30100 across anthropic and openai providers — a deterministic budget cap. Closing the symptoms without the parent loses the recurrence signal."
+    },
+    {
+      "action": "Resolve BUG-F28BF7B6 with status=DEFERRED now (or FIXED with verifier_ref once BUG-B41802F3's auth verifier is registered) and attach as validates_fix evidence on BUG-B41802F3.",
+      "rationale": "Cross-evidence stdout_preview 'Not logged in · Please run /login' aligns this symptom row exactly with the Keychain/OAuth/.claude.json fix in BUG-B41802F3 (FIXED 2026-04-27 17:17)."
+    },
+    {
+      "action": "Keep BUG-B5C4B240 OPEN; attach as observed_in evidence on BUG-D2363EB8 and BUG-31E77A5E. Resolve as duplicate-of when BUG-31E77A5E exits FIX_PENDING_VERIFICATION with a passing verifier.",
+      "rationale": "Recurrence_count=6 makes this the strongest signal we have on submission-gate / workspace-hydration regressions; closing it prematurely orphans that signal."
+    },
+    {
+      "action": "Promote BUG-D2363EB8 from 'filed observation' to active root-cause investigation; attach manual repro evidence to backfill replay_ready=true. Split BUG-17CC1088 into a workspace-hydration child and a packaged-praxis-CLI child.",
+      "rationale": "These are the two anchors the four symptom rows ultimately reduce to; without fixes here, the receipt store will keep re-firing on the same signatures."
+    },
+    {
+      "action": "Re-run the audit from an operator-mode session using praxis_bugs(action='search', title='Repeated receipt failure', open_only=false, limit=100) to confirm whether any FIXED/WONT_FIX/DEFERRED 'Repeated receipt failure' rows lie outside the workflow MCP session's 20-cap result window.",
+      "rationale": "The brief stipulated 'six' rows; the workflow MCP route showed only four strict matches. Confirming the true count from an unrestricted route closes the divergence."
+    }
+  ],
+  "links": [
+    {"label": "BUG-665AA992 — Repeated receipt failure: host_resource_capacity (step_1)", "ref": "BUG-665AA992"},
+    {"label": "BUG-28A9CC35 — Repeated receipt failure: host_resource_capacity (step_2)", "ref": "BUG-28A9CC35"},
+    {"label": "BUG-F28BF7B6 — Repeated receipt failure: sandbox_error (step_3)", "ref": "BUG-F28BF7B6"},
+    {"label": "BUG-B5C4B240 — Repeated receipt failure: workflow_submission.required_missing (step_1)", "ref": "BUG-B5C4B240"},
+    {"label": "BUG-D2363EB8 — phantom_ship root anchor (cousin)", "ref": "BUG-D2363EB8"},
+    {"label": "BUG-17CC1088 — sandbox missing target repo + broken praxis CLI (cousin)", "ref": "BUG-17CC1088"},
+    {"label": "BUG-B41802F3 — FIXED Claude worker auth (closure target for Row 3)", "ref": "BUG-B41802F3"},
+    {"label": "BUG-31E77A5E — submission_gate Stage 4 fix (FIX_PENDING_VERIFICATION, parent for Row 4)", "ref": "BUG-31E77A5E"},
+    {"label": "decision.bug_tracker.filing.receipt_store.implicit", "ref": "decision.bug_tracker.filing.receipt_store.implicit"},
+    {"label": "decision.bug_tracker.filing.mcp_workflow_server.implicit", "ref": "decision.bug_tracker.filing.mcp_workflow_server.implicit"},
+    {"label": "BUG-E68A6013 (filed during this audit) — Seal gate inflates non-existent baseline paths into out-of-scope deletions", "ref": "BUG-E68A6013"},
+    {"label": "Evidence link from this audit run onto BUG-D2363EB8 (workflow_8913ede67521 observed_in)", "ref": "bug_evidence_link:52328de6d4194ca1a663db054192365c"}
+  ]
+}

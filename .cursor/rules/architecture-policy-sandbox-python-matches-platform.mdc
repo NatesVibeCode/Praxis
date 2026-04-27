@@ -1,0 +1,14 @@
+---
+description: Sandbox Python matches platform Python (3.14)
+globs: **/Code&DBs/Workflow/docker/praxis-*.Dockerfile, **/Code&DBs/Workflow/docker/praxis-*.Dockerfile
+alwaysApply: false
+---
+
+# Standing order — Sandbox Python matches platform Python (3.14)
+
+`decision_key`: `architecture-policy::sandbox::python-matches-platform`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::sandbox::python-matches-platform"}'`

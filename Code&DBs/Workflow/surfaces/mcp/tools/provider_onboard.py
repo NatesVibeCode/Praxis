@@ -59,12 +59,12 @@ def tool_praxis_provider_onboard(params: dict, _progress_emitter=None) -> dict:
 # operator goes to find out which CLI is broken AND what to do about it,
 # without having to grep three different binaries' output formats.
 #
-# The Anthropic standing order (single auth authority via `.claude/.credentials.json`
-# mounted at /root/.claude/.credentials.json in worker containers) means the
-# refresh path is: re-authenticate on the host (`claude login`), then bounce
-# the api-server + worker containers so the new credentials.json mount is
-# re-read by the sandbox runner. CLAUDE_CODE_OAUTH_TOKEN env-var pathway is
-# also re-hydrated via `praxis-compose-env` from macOS Keychain.
+# The Anthropic standing order is "one real auth rail per environment". On
+# macOS hosts that means Claude's OAuth token lives in Keychain and must be
+# bridged into Linux containers via CLAUDE_CODE_OAUTH_TOKEN. On Linux hosts
+# Claude also supports ~/.claude/.credentials.json. The refresh path is:
+# re-authenticate on the host (`claude login`), then bounce the api-server +
+# worker containers so the renewed token/file is re-read by the sandbox runner.
 # ──────────────────────────────────────────────────────────────────────────
 
 # (binary_name, provider_slug, prompt_args). We use `claude -p`, `codex exec`,
@@ -188,14 +188,12 @@ def _provider_auth_remediation(provider_slug: str) -> dict[str, Any]:
             "provider": "anthropic",
             "host_action": "Run `claude login` on your Mac (host shell), authorize via browser.",
             "rehydrate_action": (
-                "From the host repo root: "
-                "`eval \"$(bin/praxis-compose-env)\" && "
-                "docker compose up -d --force-recreate api-server workflow-worker scheduler`"
+                "From the host repo root run the canonical resolver: "
+                "`scripts/praxis-up`"
             ),
             "auth_sources": [
-                "macOS Keychain entry CLAUDE_CODE_OAUTH_TOKEN under account=praxis (env-var path)",
-                "~/.claude/.credentials.json (file mount path — sandbox uses this)",
-                "~/.claude.json",
+                "macOS Keychain entry Claude Code-credentials -> CLAUDE_CODE_OAUTH_TOKEN (container env path)",
+                "~/.claude/.credentials.json on Linux/Windows hosts (file mount path)",
             ],
             "expected_status_after_fix": "claude -p inside api-server container responds without 'Not logged in'",
         }
@@ -204,9 +202,8 @@ def _provider_auth_remediation(provider_slug: str) -> dict[str, Any]:
             "provider": "openai",
             "host_action": "Run `codex login` on your Mac (host shell).",
             "rehydrate_action": (
-                "From the host repo root: "
-                "`eval \"$(bin/praxis-compose-env)\" && "
-                "docker compose up -d --force-recreate api-server workflow-worker scheduler`"
+                "From the host repo root run the canonical resolver: "
+                "`scripts/praxis-up`"
             ),
             "auth_sources": [
                 "~/.codex/auth.json (file mount path)",
@@ -219,8 +216,8 @@ def _provider_auth_remediation(provider_slug: str) -> dict[str, Any]:
             "provider": provider_slug,
             "host_action": "Run `gemini` interactively on your Mac, complete OAuth flow.",
             "rehydrate_action": (
-                "From the host repo root: "
-                "`docker compose up -d --force-recreate api-server workflow-worker scheduler`"
+                "From the host repo root run the canonical resolver: "
+                "`scripts/praxis-up`"
             ),
             "auth_sources": [
                 "~/.gemini/oauth_creds.json",
@@ -288,10 +285,7 @@ def tool_praxis_cli_auth_doctor(params: dict, _progress_emitter=None) -> dict:
     if unhealthy:
         response["next_action"] = {
             "kind": "host_remediation",
-            "rehydration_command_chain": (
-                "eval \"$(bin/praxis-compose-env)\" && "
-                "docker compose up -d --force-recreate api-server workflow-worker scheduler"
-            ),
+            "rehydration_command_chain": "scripts/praxis-up",
             "per_provider_actions": [r.get("remediation") for r in unhealthy],
             "hint": (
                 "Run host_action(s) below on your Mac shell, then run rehydration_command_chain "

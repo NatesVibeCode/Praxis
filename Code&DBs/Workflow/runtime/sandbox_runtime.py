@@ -364,6 +364,13 @@ def _cli_auth_volume_flags(*, provider_slug: str | None = None) -> list[str]:
     for spec in _load_cli_auth_catalog().mount_specs:
         if normalized_provider and normalized_provider != spec.provider_slug:
             continue
+        # Claude Code still rewrites ~/.claude.json at runtime even on builds
+        # where docs describe it as deprecated. Mounting the host file :ro makes
+        # the CLI back it up, lose the live path, and hang before auth
+        # completes. Treat OAuth env/token or Linux-only credentials.json as the
+        # Anthropic auth authority instead of the legacy config file.
+        if spec.provider_slug == "anthropic" and spec.host_relative_path == ".claude.json":
+            continue
         host_path = os.path.join(home, spec.host_relative_path)
         if any(os.path.isfile(os.path.join(probe_home, spec.host_relative_path)) for probe_home in probe_homes):
             flags.extend(["-v", f"{host_path}:{spec.container_path}:ro"])

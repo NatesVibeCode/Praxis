@@ -84,8 +84,8 @@ services:
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
-      # Provider auth single-authority: blank stale Anthropic API key so the
-      # OAuth subscription rail (CLAUDE_CODE_OAUTH_TOKEN) wins if the bridge
+      # Provider auth single-authority: blank stale Anthropic API-key rails so
+      # the OAuth subscription rail (CLAUDE_CODE_OAUTH_TOKEN) wins if the bridge
       # ever spawns Anthropic-authenticated calls. See
       # architecture-policy::providers::provider-auth-mode-single-authority.
       ANTHROPIC_API_KEY: ""
@@ -97,7 +97,6 @@ services:
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex
-      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude.json:/root/.claude.json:ro
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
     command:
       - sh
@@ -190,14 +189,13 @@ services:
       PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
       PRAXIS_WORKFLOW_MCP_URL: ${PRAXIS_WORKFLOW_MCP_URL:-http://host.docker.internal:8420/mcp}
       PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
-      # Single Anthropic auth authority: ~/.claude/.credentials.json is
-      # mounted into the worker and is the only source of truth. We blank
-      # every env-based Anthropic auth rail so the CLI cannot pick up a
-      # stale shell or .env token that drifts from the credentials file.
-      # See architecture-policy::providers::provider-auth-mode-single-authority.
+      # Anthropic in the worker is a noninteractive Linux consumer of a macOS
+      # host login. The durable auth rail is the Keychain-derived
+      # CLAUDE_CODE_OAUTH_TOKEN exported by bin/praxis-compose-env; stale API-key
+      # rails stay blank so Claude cannot drift onto the wrong authority.
       ANTHROPIC_API_KEY: ""
       ANTHROPIC_AUTH_TOKEN: ""
-      CLAUDE_CODE_OAUTH_TOKEN: ""
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
     volumes:
       - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
@@ -206,7 +204,6 @@ services:
       # they fail with "Read-only file system" before producing any output.
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.gemini:/root/.gemini
-      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude.json:/root/.claude.json:ro
       - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
       # Cursor CLI auth state (single-file mount, matches .claude.json pattern).
       # Host is currently not logged in (cursor-agent status -> "Not logged in")

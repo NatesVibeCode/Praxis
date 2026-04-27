@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# praxis-policy-check — universal harness shim into surfaces.policy.check.
+#
+# Every harness (Claude, Cursor, Gemini, Codex, plain shell) can invoke this
+# before a raw tool call (Bash/Edit/Write that bypasses Praxis MCP) to surface
+# matching standing orders. Same registry, same matcher, single binary.
+#
+# Inputs:
+#   $1  tool name (Bash | Edit | Write | MultiEdit | Read)
+#   $2  JSON tool input ('{"command":"..."}' or '{"file_path":"..."}' etc.)
+#
+# Output:
+#   stdout — rendered standing-order surface if any matched (multi-line text).
+#   stdout — empty if no match.
+#   stderr — diagnostic only on import error; non-fatal.
+#   exit   — always 0 (fail open). Hard enforcement lives at the data layer
+#            via Packet 4 (Policy Authority); this surface is advisory.
+#
+# Why a shim and not direct python in each harness:
+#   Each harness's hook/wrapper config benefits from a single executable to
+#   point at. When the matcher API changes, only this file moves; the
+#   per-harness configs keep pointing at $REPO/bin/praxis-policy-check.
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TOOL_NAME="${1:-}"
+TOOL_INPUT="${2-}"
+[[ -z "$TOOL_INPUT" ]] && TOOL_INPUT='{}'
+
+if [[ -z "$TOOL_NAME" ]]; then
+  exit 0
+fi
+
+PYTHONPATH="${REPO_ROOT}/Code&DBs/Workflow:${PYTHONPATH:-}" \
+  PRAXIS_TOOL_NAME="$TOOL_NAME" \
+  PRAXIS_TOOL_INPUT="$TOOL_INPUT" \
+  python3 - <<'PY' || exit 0
+import json, os, sys
+try:
+    from surfaces.policy import check, render_additional_context
+except Exception:
+    sys.exit(0)
+
+tool_name = os.environ.get("PRAXIS_TOOL_NAME", "")
+raw = os.environ.get("PRAXIS_TOOL_INPUT", "{}")
+try:
+    tool_input = json.loads(raw)
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+except Exception:
+    tool_input = {}
+
+matches = check(tool_name, tool_input)
+if not matches:
+    sys.exit(0)
+sys.stdout.write(render_additional_context(matches, tool_name))
+sys.stdout.flush()
+PY

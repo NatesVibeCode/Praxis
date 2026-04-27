@@ -1,0 +1,14 @@
+---
+description: Praxis worker uses MCP bridge to host, not bundled praxis CLI inside
+globs: **/Code&DBs/Workflow/docker/praxis-worker.Dockerfile
+alwaysApply: false
+---
+
+# Standing order — Praxis worker uses MCP bridge to host, not bundled praxis CLI inside
+
+`decision_key`: `architecture-policy::deployment::worker-mcp-bridge`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::deployment::worker-mcp-bridge"}'`

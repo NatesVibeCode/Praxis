@@ -2,6 +2,32 @@
 
 You are operating inside the Praxis repository. Before doing any work, fetch standing orders from Praxis.db.
 
+## JIT standing-order surfacing — universal across harnesses
+
+Praxis ships a harness-neutral JIT-surfacing layer that injects matching
+standing orders at the moment of action. **You do not need to read all 25+ KB
+of standing orders at session start.** The system surfaces what's relevant
+when you're about to do something it covers.
+
+**Two layers, both already wired:**
+
+1. **Gateway-side (universal, you can't bypass it).** Every MCP / CLI / HTTP
+   call into Praxis routes through `surfaces.mcp.invocation.invoke_tool`,
+   which evaluates `surfaces.policy.check(tool_name, payload)` and appends
+   matching standing orders to the result as `_standing_orders_surfaced`.
+   When you see that key in a tool result, read it — the policy fires
+   because of what you just did.
+
+2. **Per-harness, raw tool path.** Bash / Edit / Write calls that don't
+   go through Praxis MCP get the same matcher applied via your harness's
+   wrapper. For Gemini, see `policy/HARNESS_INTEGRATION.md` for the bash
+   wrapper pattern. The matcher itself is at
+   `Code&DBs/Workflow/surfaces/policy/trigger_check.py` — single
+   implementation, every harness imports it.
+
+The trigger registry lives at `policy/operator-decision-triggers.json`
+and maps each `operator_decisions.decision_key` to match conditions.
+
 ## First action every session
 
 Run one of these to retrieve current standing orders:

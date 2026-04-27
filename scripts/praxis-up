@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# praxis-up — single command to rehydrate Praxis containers with fresh
+# host-resolved provider auth and verify the worker's live CLI state.
+#
+# Why this exists:
+#   Provider auth (CLAUDE_CODE_OAUTH_TOKEN, OPENROUTER_API_KEY, etc.) is
+#   resolved on the host, then bridged into long-lived containers at recreate
+#   time. For Claude on macOS specifically, the token lives in the
+#   "Claude Code-credentials" Keychain item as JSON and is exported by
+#   bin/praxis-compose-env as the bare CLAUDE_CODE_OAUTH_TOKEN string.
+#   docker-compose resolves env vars at recreate time from the calling shell,
+#   so the chain has always been:
+#
+#       eval "$(bin/praxis-compose-env)"   # keychain → shell exports
+#       docker compose up -d --force-recreate <services>
+#
+#   Operators kept forgetting one half or the other, leaving workers with
+#   stale empty tokens or legacy file mounts that no longer match the host
+#   platform. This script bundles both into one invocation and verifies the
+#   result via praxis_cli_auth_doctor inside the worker.
+#
+# Standing-order references:
+#   architecture-policy::auth::via-docker-creds-not-shell
+#   architecture-policy::deployment::docker-restart-caches-env
+#
+# Usage:
+#   scripts/praxis-up               # recreate api-server + workflow-worker + scheduler
+#   scripts/praxis-up <service>...  # recreate only the named services
+#   scripts/praxis-up --verify-only # skip recreate, just run auth_doctor
+#
+# Exit codes:
+#   0 — recreate succeeded AND auth_doctor reports all CLIs healthy
+#   1 — recreate succeeded but auth_doctor reports at least one unhealthy CLI
+#   2 — usage error
+#   3 — recreate or compose-env failed
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_ENV_BIN="${REPO_ROOT}/bin/praxis-compose-env"
+
+DEFAULT_SERVICES=(api-server workflow-worker scheduler)
+
+VERIFY_ONLY=0
+SERVICES=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      cat <<'USAGE'
+praxis-up — Keychain-rehydrate + compose recreate (one command).
+
+Usage:
+  scripts/praxis-up
+  scripts/praxis-up <service>...
+  scripts/praxis-up --verify-only
+
+Examples:
+  scripts/praxis-up                           # default 3 services
+  scripts/praxis-up workflow-worker           # just the worker
+  scripts/praxis-up --verify-only             # skip recreate, run auth_doctor
+
+This is the right path after:
+  - Docker Desktop / OrbStack restart
+  - macOS reboot
+  - "claude login" or any host-side credential refresh
+  - Worker container appearing healthy in `docker ps` but failing auth probes
+USAGE
+      exit 0
+      ;;
+    --verify-only)
+      VERIFY_ONLY=1
+      shift
+      ;;
+    *)
+      SERVICES+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ ${#SERVICES[@]} -eq 0 ]]; then
+  SERVICES=("${DEFAULT_SERVICES[@]}")
+fi
+
+cd "$REPO_ROOT"
+
+if [[ $VERIFY_ONLY -eq 0 ]]; then
+  if [[ ! -x "$COMPOSE_ENV_BIN" ]]; then
+    echo "praxis-up: $COMPOSE_ENV_BIN missing or not executable" >&2
+    exit 3
+  fi
+
+  echo "→ exporting Keychain (account=praxis) into shell env via bin/praxis-compose-env"
+  # shellcheck disable=SC2046
+  set -a
+  eval "$("$COMPOSE_ENV_BIN")"
+  set +a
+
+  echo "→ docker compose up -d --force-recreate ${SERVICES[*]}"
+  docker compose up -d --force-recreate "${SERVICES[@]}"
+
+  echo "→ waiting for praxis-api-server to come back online..."
+  for _ in $(seq 1 30); do
+    if docker exec praxis-api-server-1 python3 -c "print(1)" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+fi
+
+# Run the auth doctor inside the worker — that's the container that
+# actually executes LLM jobs, so its auth state is the real authority.
+echo "→ running praxis_cli_auth_doctor inside praxis-workflow-worker-1"
+DOCTOR_OUT="$(
+  docker exec -i praxis-workflow-worker-1 python3 - <<'PY'
+import json
+from surfaces.mcp.tools.provider_onboard import tool_praxis_cli_auth_doctor
+result = tool_praxis_cli_auth_doctor({})
+print(json.dumps({
+    "ok": result.get("ok"),
+    "summary": result.get("summary"),
+    "unhealthy_count": result.get("unhealthy_count", 0),
+    "reports": [
+        {
+            "provider": r["provider_slug"],
+            "auth_state": r["auth_state"],
+            "healthy": r["healthy"],
+            "summary": r.get("summary"),
+        }
+        for r in result.get("reports", [])
+    ],
+}, indent=2))
+PY
+)"
+
+echo "$DOCTOR_OUT"
+
+UNHEALTHY="$(echo "$DOCTOR_OUT" | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+print(d.get('unhealthy_count', 1))
+")"
+
+if [[ "$UNHEALTHY" != "0" ]]; then
+  echo
+  echo "praxis-up: $UNHEALTHY provider(s) failed auth probe."
+  echo "Inspect the reports above. A 'timeout' state usually means the worker"
+  echo "has stale auth hydration or an invalid legacy mount, while"
+  echo "'unauthenticated' means the host login or token source itself is bad."
+  exit 1
+fi
+
+echo "✓ all CLI providers healthy."

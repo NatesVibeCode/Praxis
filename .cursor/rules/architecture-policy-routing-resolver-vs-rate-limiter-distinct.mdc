@@ -1,0 +1,14 @@
+---
+description: Resolver ≠ rate-limiter — distinct layers
+globs: **/runtime/integrations/rate_limiter.py, **/runtime/task_type_router.py
+alwaysApply: false
+---
+
+# Standing order — Resolver ≠ rate-limiter — distinct layers
+
+`decision_key`: `architecture-policy::routing::resolver-vs-rate-limiter-distinct`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::routing::resolver-vs-rate-limiter-distinct"}'`

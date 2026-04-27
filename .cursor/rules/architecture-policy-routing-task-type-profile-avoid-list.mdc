@@ -1,0 +1,14 @@
+---
+description: task_type_profile.avoid_list takes positive labels only, not capability gaps
+globs: **/adapters/task_profiles.py
+alwaysApply: false
+---
+
+# Standing order — task_type_profile.avoid_list takes positive labels only, not capability gaps
+
+`decision_key`: `architecture-policy::routing::task-type-profile-avoid-list`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::routing::task-type-profile-avoid-list"}'`

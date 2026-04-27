@@ -1,0 +1,393 @@
+{
+  "$schema_version": 1,
+  "$description": "Sidecar trigger index for operator_decisions standing orders. Authored alongside (not inside) operator_decisions because that table's scope_clamp is preserved verbatim per architecture-policy::*::scope_clamp_preserved_verbatim. Each entry maps a decision_key to one or more match conditions. The PreToolUse hook reads this file, matches tool inputs, emits a FrictionEvent tagged with the decision_key, and injects the order's title + rationale via additionalContext.",
+  "$why": "Tonight (2026-04-27) the operator filed 11 architecture_policy decisions covering patterns the agent kept repeating. Eleven memos with no surfacing layer is the same as zero memos. This file is the surfacing layer.",
+  "$replay_target": "When tonight's session is replayed against this file + the preact-orient-friction hook, at least 8 of the 11 corrections must fire as friction events the FIRST time the wrong action is attempted, not the third or fifth.",
+  "$update_protocol": "When operator files a new architecture_policy decision via praxis_operator_decisions, add a corresponding entry here with structurally matchable triggers. If the policy is purely semantic (no shell pattern, no file glob), leave triggers empty; the entry still exists for /orient surfacing.",
+  "triggers": [
+    {
+      "decision_key": "architecture-policy::agent-behavior::local-pacing-fail-faster",
+      "title": "Local stack: 1-2s polls, no 30s sleeps",
+      "match": [
+        {
+          "tool": "Bash",
+          "regex": "(?i)\\bsleep\\s+(?:[3-9]|[1-9][0-9]+)\\b"
+        },
+        {
+          "tool": "Bash",
+          "regex": "(?i)\\buntil\\b.*\\bdo\\b.*\\bsleep\\b"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::no-babysitters",
+      "title": "Fix the flow, don't wrap broken flows in monitors",
+      "match": [
+        {
+          "tool": "Bash",
+          "regex": "babysitter|wave[-_]watcher|babysit"
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/*babysitter*"
+        },
+        {
+          "tool": "Write",
+          "file_glob": "/Users/nate/.praxis_waves/**"
+        },
+        {
+          "tool": "Write",
+          "file_glob": "/tmp/praxis_waves/**"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::sandbox::claudecode-handling-off-limits",
+      "title": "Don't touch CLAUDECODE handling in sandbox",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/runtime/workflow/execution_backends.py",
+          "string_match": "_sanitize_base_env|CLAUDECODE"
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/adapters/docker_runner.py",
+          "string_match": "_cli_auth_env_forward|CLAUDECODE"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::claude-code-uses-mcp",
+      "title": "Claude Code agent: MCP only, no bash praxis CLI",
+      "match": [
+        {
+          "tool": "Bash",
+          "regex": "^\\s*praxis\\s+workflow\\b"
+        },
+        {
+          "tool": "Bash",
+          "regex": "^\\s*praxis\\s+(?:query|bugs|recall|discover|artifacts|health)\\b"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::auth::via-docker-creds-not-shell",
+      "title": "Auth via docker mounts, never agent shell env",
+      "match": [
+        {
+          "tool": "Bash",
+          "regex": "docker\\s+(?:exec|run).*-e\\s+(?:CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_AUTH_TOKEN)="
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::deployment::docker-restart-caches-env",
+      "title": "docker restart preserves cached env; use compose recreate",
+      "match": [
+        {
+          "tool": "Bash",
+          "regex": "^\\s*docker\\s+restart\\s+praxis[-_]"
+        },
+        {
+          "tool": "Bash",
+          "regex": "^\\s*docker\\s+restart\\s+praxis-(?:api-server|workflow-worker|scheduler)"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::ask-catalog-before-manual-edits",
+      "title": "Ask the catalog before manual file edits",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/Code&DBs/Workflow/runtime/**/*.py",
+          "advisory_only": true
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/Code&DBs/Workflow/surfaces/**/*.py",
+          "advisory_only": true
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::surfaces::cli-mcp-parallel",
+      "title": "CLI and MCP are siblings, neither wraps the other",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::sandbox::python-matches-platform",
+      "title": "Sandbox Python matches platform Python (3.14)",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/Code&DBs/Workflow/docker/praxis-*.Dockerfile",
+          "string_match": "python3-minimal|libpython3-stdlib|FROM\\s+python:"
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/Code&DBs/Workflow/docker/praxis-*.Dockerfile"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::routing::resolver-vs-rate-limiter-distinct",
+      "title": "Resolver ≠ rate-limiter — distinct layers",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/runtime/integrations/rate_limiter.py",
+          "advisory_only": true
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/runtime/task_type_router.py",
+          "advisory_only": true
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::submission-gate::no-verbal-seal",
+      "title": "stdout-only ≠ submission",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/runtime/workflow/submission_gate.py",
+          "string_match": "verbal_seal|verbal_submission|stdout.*as.*deliverable"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::providers::deepseek-research-only",
+      "title": "DeepSeek scope: direct API research only; OpenRouter compile only; nothing else",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/migrations/workflow/*.sql",
+          "string_match": "(?i)\\bdeepseek\\b|\\btogether[-/]deepseek\\b"
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/migrations/workflow/*.sql",
+          "string_match": "(?i)\\bdeepseek\\b|\\btogether[-/]deepseek\\b"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::providers::no-gemini-25",
+      "title": "Never route Gemini 2.5 (any variant) for real work",
+      "match": [
+        {
+          "tool": "Bash",
+          "regex": "(?i)gemini[-_.]?2\\.?5"
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/migrations/workflow/*.sql",
+          "string_match": "(?i)gemini[-_.]?2\\.?5"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::providers::api-not-cli",
+      "title": "DeepSeek is API-only — never via OpenRouter or CLI transport",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/migrations/workflow/*.sql",
+          "string_match": "(?i)deepseek.*(?:transport_type\\s*=\\s*['\"]CLI|provider_slug\\s*=\\s*['\"]openrouter)"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::auth::keychain-secrets",
+      "title": "API keys live in macOS Keychain (account=praxis), never plaintext",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/.env",
+          "string_match": "(?i)(?:api_key|secret|token)\\s*="
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/.env",
+          "string_match": "(?i)(?:api_key|secret|token)\\s*="
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/.env.example",
+          "string_match": "sk-[a-z0-9]{20,}"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::routing::task-type-profile-avoid-list",
+      "title": "task_type_profile.avoid_list takes positive labels only, not capability gaps",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/adapters/task_profiles.py",
+          "string_match": "avoid_list|avoid_label"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::submission-gate::outcome-gates",
+      "title": "Workflow specs use verify_command + outcome_goal; deliverable proof is mandatory",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/runtime/workflow_spec.py",
+          "string_match": "verify_command|outcome_goal"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::deployment::worker-mcp-bridge",
+      "title": "Praxis worker uses MCP bridge to host, not bundled praxis CLI inside",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/Code&DBs/Workflow/docker/praxis-worker.Dockerfile"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::compose::fanout-by-work-volume",
+      "title": "Compose synthesis decomposes by work volume into ~20 packet seeds, not step count",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/runtime/plan_synthesis.py",
+          "string_match": "_seed_count|n_seeds|fork_count"
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/runtime/intent_decomposition.py",
+          "string_match": "_seed_count|n_seeds"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::providers::openrouter-app-only",
+      "title": "OpenRouter is invoked only from the Praxis app user surface (compile button)",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/migrations/workflow/*.sql",
+          "string_match": "(?i)provider_slug\\s*=\\s*['\"]openrouter['\"]"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::providers::use-named-provider",
+      "title": "When operator names a provider, use that exact provider — not the wired default",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::no-shims",
+      "title": "No monkey-patches or shim layers in production — fix root causes",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::collapse-simplify",
+      "title": "Every change must actively reduce complexity, not just fix the bug",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::valuable-not-overwhelming",
+      "title": "Valuable not overwhelming — lead with signal, omit noise",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::trust-user-bug-reports",
+      "title": "Reproduce end-to-end before reframing a bug as UX confusion",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::supersede-only-named",
+      "title": "Supersede only the exact decision the operator named",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::rank-before-filing-roadmap",
+      "title": "Give build/no-build/defer/retire ranking before bulk-filing roadmap items",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::autonomous-first-no-review-gates",
+      "title": "Default to autonomous; review gates are wrong-direction by default",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::you-are-not-praxis",
+      "title": "Agent is not Praxis — chat-directed 'stop X' is not a directive to mutate Praxis.db",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::use-praxis-agents",
+      "title": "Dispatch investigation through Praxis agents, not Explore/general-purpose subagents",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::user-cannot-code",
+      "title": "Operator directs; Claude executes — never punt syntax to operator",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::no-launch-from-claude-code",
+      "title": "Default to mcp__praxis__praxis_workflow for dispatch from Claude Code",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::no-recruiter-examples",
+      "title": "No recruiter / candidate-matching examples in Praxis",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::auth::credentials-per-sandbox-per-provider",
+      "title": "Sandboxes mint freshly-issued, lifetime-scoped creds at spawn time",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::debate::debate-models",
+      "title": "Debates assign frontier-tier models, one per provider",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::moon::moon-is-the-app",
+      "title": "Moon is the entire Praxis UI — not a tab, not a builder surface",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::moon::moon-visual-language",
+      "title": "Moon visual language: black/white, hollow nodes, compact-idle expand-on-interact",
+      "match": [],
+      "$semantic_only": true
+    },
+    {
+      "decision_key": "architecture-policy::deployment::vps-migration-direction",
+      "title": "Praxis Engine moves to rented VPS; July 19 2026 external-user deadline",
+      "match": [],
+      "$semantic_only": true
+    }
+  ]
+}

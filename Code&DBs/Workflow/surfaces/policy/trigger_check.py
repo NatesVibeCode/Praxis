@@ -1,0 +1,332 @@
+"""Trigger matching against the operator-decision trigger registry.
+
+Reads `policy/operator-decision-triggers.json` (repo-rooted, harness-neutral)
+and matches a proposed agent action against the declared triggers for each
+standing order. Returns the matched (decision, condition) pairs so the
+caller can:
+
+  - Inject the matching standing orders' titles + rationales into the agent's
+    next-message context (additionalContext / surface-specific equivalent)
+  - Emit a FrictionEvent into the friction_ledger for the audit trail
+  - Optionally escalate to a typed gap or operator notification when the
+    same agent has tripped the same trigger N times in a session
+
+This module is *advisory*. It does not block. Hard blocks are navigation
+puzzles for the agent, not lessons (per /praxis-debate fork round 2).
+Enforcement-with-rejection lives at the data layer (Packet 2 — separate
+build) where it belongs: BEFORE INSERT/UPDATE triggers on authority tables
+backed by `policy_definitions` rows that are FK-bound to operator_decisions.
+
+The trigger registry itself lives at `policy/operator-decision-triggers.json`
+at the repo root. It is hand-authored alongside operator_decisions writes
+because `operator_decisions.scope_clamp` is preserved verbatim by migration
+264 (`scope_clamp_preserved_verbatim`) and cannot be repurposed for
+machine-readable matchers. The registry is the sidecar projection.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import json
+import logging
+import os
+import re
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Any, Iterable
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_repo_root_from_module_path() -> str:
+    """Walk up from this file to find the repo root.
+
+    This module lives at <repo>/Code&DBs/Workflow/surfaces/policy/trigger_check.py
+    so the repo root is four parents up.
+    """
+    here = os.path.abspath(__file__)
+    return os.path.normpath(os.path.join(os.path.dirname(here), "..", "..", "..", ".."))
+
+
+def _registry_path() -> str:
+    explicit = os.environ.get("PRAXIS_TRIGGER_REGISTRY")
+    if explicit:
+        return explicit
+    base = (
+        os.environ.get("PRAXIS_HOST_WORKSPACE_ROOT")
+        or os.environ.get("CLAUDE_PROJECT_DIR")
+        or _resolve_repo_root_from_module_path()
+    )
+    return os.path.join(base, "policy", "operator-decision-triggers.json")
+
+
+@dataclass(frozen=True)
+class TriggerMatch:
+    """One matched (decision, condition) pair.
+
+    `decision` is the registry entry as parsed JSON.
+    `condition` is the specific match clause inside the decision's `match`
+    array that fired.
+    """
+    decision: dict[str, Any]
+    condition: dict[str, Any]
+
+    @property
+    def decision_key(self) -> str:
+        return str(self.decision.get("decision_key") or "")
+
+    @property
+    def title(self) -> str:
+        return str(self.decision.get("title") or "")
+
+    @property
+    def advisory_only(self) -> bool:
+        return bool(self.condition.get("advisory_only"))
+
+    def trigger_repr(self) -> str:
+        return str(
+            self.condition.get("regex")
+            or self.condition.get("file_glob")
+            or self.condition.get("string_match")
+            or "(matched)"
+        )
+
+
+@lru_cache(maxsize=4)
+def _load_registry_cached(path: str, mtime_ns: int) -> tuple[dict[str, Any], ...]:
+    """Load and cache the trigger registry, keyed by (path, mtime).
+
+    The mtime in the cache key forces a reload when operators edit the file.
+    Returns a tuple of decision dicts (immutable) so the cache stays valid.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            registry = json.load(fp)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("trigger_check: failed to load registry at %s: %s", path, exc)
+        return ()
+    triggers = registry.get("triggers")
+    if not isinstance(triggers, list):
+        return ()
+    return tuple(triggers)
+
+
+def load_registry(path: str | None = None) -> tuple[dict[str, Any], ...]:
+    """Public entry: load (and cache) the trigger registry."""
+    resolved = path or _registry_path()
+    try:
+        mtime_ns = os.stat(resolved).st_mtime_ns
+    except OSError:
+        return ()
+    return _load_registry_cached(resolved, mtime_ns)
+
+
+# Per-harness tool-name aliases. Each harness names its built-in shell /
+# edit / write / read tools differently. The registry uses the Claude Code
+# names as the canonical key (Bash/Edit/Write/Read/MultiEdit) because that
+# was the first harness wired. Other harnesses' hooks pass their native
+# tool name and we normalize before matching, so the registry stays
+# harness-neutral and only one set of trigger names exists.
+#
+# Gemini CLI:    run_shell_command, replace, write_file, read_file, MultiEdit
+# Codex CLI:     local_shell, apply_patch, ... (see .codex/hooks/)
+# Cursor:        no hooks today (rules-based) — N/A
+_TOOL_NAME_ALIASES: dict[str, str] = {
+    # Gemini CLI native names → registry canonical names.
+    "run_shell_command": "Bash",
+    "ShellTool": "Bash",
+    "replace": "Edit",
+    "write_file": "Write",
+    "read_file": "Read",
+    # Codex CLI native names → registry canonical names.
+    "local_shell": "Bash",
+    "shell": "Bash",
+    "apply_patch": "Edit",
+}
+
+
+def _normalize_tool_name(tool_name: str) -> str:
+    return _TOOL_NAME_ALIASES.get(tool_name, tool_name)
+
+
+def _extract_match_target(
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> tuple[str | None, str | None, str]:
+    """Return (regex_target, file_path, content_target) for matching.
+
+    Matches the harness-side hook's logic so a Bash command, an Edit, a
+    Write, or a Read is evaluated identically whether the call comes from
+    a PreToolUse hook or from inside `surfaces.mcp.invocation.invoke_tool`.
+
+    Tool name shape examples:
+      - "Bash" — agent-harness Bash tool
+      - "Edit" / "MultiEdit" / "Write" / "Read" — agent file tools
+      - "run_shell_command" / "replace" / "write_file" / "read_file" — Gemini CLI
+      - "local_shell" / "apply_patch" — Codex CLI
+      - "praxis_compose_and_launch" — Praxis MCP tool name (rare match here;
+        usually triggers fire on agent-harness tools that touch sensitive
+        files or run shell commands. Praxis tool calls already record their
+        own gateway receipts.)
+    """
+    tool_name = _normalize_tool_name(tool_name)
+    if tool_name == "Bash":
+        cmd = str(tool_input.get("command") or "")
+        return cmd, None, cmd
+    if tool_name in ("Edit", "MultiEdit"):
+        path = str(tool_input.get("file_path") or "")
+        chunks: list[str] = [
+            str(tool_input.get("old_string") or ""),
+            str(tool_input.get("new_string") or ""),
+        ]
+        for edit in tool_input.get("edits") or []:
+            chunks.append(str(edit.get("old_string") or ""))
+            chunks.append(str(edit.get("new_string") or ""))
+        return None, path, "\n".join(chunks)
+    if tool_name == "Write":
+        path = str(tool_input.get("file_path") or "")
+        content = str(tool_input.get("content") or "")
+        return None, path, content
+    if tool_name == "Read":
+        path = str(tool_input.get("file_path") or "")
+        return None, path, ""
+    # Catch-all for Praxis MCP tool dispatch and other surfaces. The tool
+    # input is treated as the regex target (for tool-name regex triggers)
+    # and as the content target (for string_match against payload JSON).
+    try:
+        content = json.dumps(tool_input, default=str)
+    except Exception:
+        content = ""
+    return tool_name, None, content
+
+
+def _match_glob(pattern: str, file_path: str) -> bool:
+    """Glob match supporting **/ — fnmatch doesn't natively understand **."""
+    if not file_path:
+        return False
+    if fnmatch.fnmatch(file_path, pattern):
+        return True
+    collapsed = pattern.replace("**/", "*").replace("/**", "*")
+    if fnmatch.fnmatch(file_path, collapsed):
+        return True
+    base = os.path.basename(file_path)
+    if fnmatch.fnmatch(base, pattern) or fnmatch.fnmatch(base, collapsed):
+        return True
+    stripped = pattern.lstrip("*").lstrip("/")
+    if stripped and len(stripped) >= 4 and stripped in file_path:
+        return True
+    return False
+
+
+def _match_one(
+    condition: dict[str, Any],
+    tool_name: str,
+    regex_target: str | None,
+    file_path: str | None,
+    content_target: str,
+) -> bool:
+    cond_tool = str(condition.get("tool") or "").strip()
+    if cond_tool and cond_tool != tool_name:
+        return False
+
+    rgx = condition.get("regex")
+    if rgx:
+        if regex_target is None:
+            return False
+        try:
+            if not re.search(rgx, regex_target):
+                return False
+        except re.error:
+            logger.warning("trigger_check: bad regex in registry: %r", rgx)
+            return False
+
+    glob = condition.get("file_glob")
+    if glob and not _match_glob(glob, file_path or ""):
+        return False
+
+    string_match = condition.get("string_match")
+    if string_match:
+        if not content_target:
+            return False
+        try:
+            if not re.search(string_match, content_target):
+                return False
+        except re.error:
+            logger.warning("trigger_check: bad string_match regex: %r", string_match)
+            return False
+
+    return True
+
+
+def check(
+    tool_name: str,
+    tool_input: dict[str, Any] | None,
+    *,
+    registry: Iterable[dict[str, Any]] | None = None,
+) -> list[TriggerMatch]:
+    """Match a proposed action against the trigger registry.
+
+    Returns a list of TriggerMatch objects, one per matching (decision,
+    condition) pair. Empty list = no matches. Always non-throwing — caller
+    may receive an empty list if the registry is missing/corrupt.
+    """
+    if not tool_name:
+        return []
+    tool_name = _normalize_tool_name(tool_name)
+    decisions = registry if registry is not None else load_registry()
+    if not decisions:
+        return []
+    if tool_input is None:
+        tool_input = {}
+    if not isinstance(tool_input, dict):
+        return []
+
+    regex_target, file_path, content_target = _extract_match_target(tool_name, tool_input)
+
+    matches: list[TriggerMatch] = []
+    for decision in decisions:
+        for condition in decision.get("match") or []:
+            if _match_one(condition, tool_name, regex_target, file_path, content_target):
+                matches.append(TriggerMatch(decision=decision, condition=condition))
+                break  # one match per decision is enough
+    return matches
+
+
+def render_additional_context(matches: list[TriggerMatch], tool_name: str) -> str:
+    """Render matches as a concise context string for harness injection.
+
+    Verbosity costs tokens AND dilutes signal. Title + decision_key + a
+    one-line trigger summary is enough; full rationale lives in
+    operator_decisions and is reachable via praxis_orient.
+    """
+    if not matches:
+        return ""
+    lines = ["⚠ STANDING ORDER MATCH — pause and consider:"]
+    for match in matches:
+        advisory = " (advisory)" if match.advisory_only else ""
+        lines.append("")
+        lines.append(f"• {match.title}{advisory}")
+        lines.append(f"  decision_key: {match.decision_key}")
+        why = (
+            match.decision.get("why")
+            or match.decision.get("$note")
+            or ""
+        ).strip()
+        if why:
+            lines.append(f"  why: {why.split(chr(10))[0][:240]}")
+        lines.append(f"  triggered by: {match.trigger_repr()}")
+    lines.append("")
+    lines.append(
+        f"Action proposed: {tool_name} (continuing). If you're about to "
+        "violate one of the above, pivot now and articulate why before "
+        "retrying. Full rationale: query operator_decisions or call praxis_orient."
+    )
+    return "\n".join(lines)
+
+
+__all__ = [
+    "TriggerMatch",
+    "check",
+    "load_registry",
+    "render_additional_context",
+]

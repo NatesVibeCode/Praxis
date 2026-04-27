@@ -1,0 +1,14 @@
+---
+description: DeepSeek is API-only — never via OpenRouter or CLI transport
+globs: **/migrations/workflow/*.sql
+alwaysApply: false
+---
+
+# Standing order — DeepSeek is API-only — never via OpenRouter or CLI transport
+
+`decision_key`: `architecture-policy::providers::api-not-cli`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::providers::api-not-cli"}'`

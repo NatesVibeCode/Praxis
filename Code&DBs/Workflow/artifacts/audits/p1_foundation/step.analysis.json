@@ -1,0 +1,109 @@
+{
+  "completion_status": "completed",
+  "result_kind": "analysis_result",
+  "analyzed_paths": [
+    "Code&DBs/Workflow/artifacts/audits/p1_foundation/orient_audit.md",
+    "kg://operator_decision/operator_decision.architecture_policy.orient.mandatory_authority_envelope",
+    "kg://authority_domain/orient",
+    "kg://bugs/orient_standing_orders_projection_scope_clamp",
+    "kg://bugs/orient_cli_surface_tool_count_zero",
+    "kg://bugs/scripts_praxis_workflow_front_door_hangs_orient",
+    "kg://bugs/workflow_help_cold_start_imports_too_much",
+    "kg://bugs/cli_tools_surface_tests_stale_orient_help_expectations",
+    "kg://bugs/hygiene_2026_04_22_wiring_audit_active_standing_orders_unwired",
+    "kg://bugs/praxis_workflow_recall_fails_operator_decision_payload_shape",
+    "kg://schema/table/operator_decisions",
+    "Code&DBs/Workflow/surfaces/mcp/catalog.py",
+    "Code&DBs/Workflow/tests/unit/test_cli_tools_surface.py"
+  ],
+  "findings": [
+    {
+      "observation": "/orient standing_orders projection returns 'standing_orders unavailable: column \"scope_clamp\" does not exist' on both `praxis workflow orient` and `praxis_orient`, while `praxis_operator_decisions` still serves. Schema readback via praxis_query confirms scope_clamp DOES exist on operator_decisions (jsonb, default '{\"applies_to\":[\"pending_review\"]}', with operator_decisions_scope_clamp_gin_idx and operator_decisions_scope_clamp_pending_review_idx). The bug is therefore a drift between operator_decisions and the standing_orders read-model/projection that orient queries — not a missing source column.",
+      "severity": "critical",
+      "evidence_path": "kg://bugs/orient_standing_orders_projection_scope_clamp"
+    },
+    {
+      "observation": "praxis_orient with input {fast:true, skip_engineering_observability:true} reports cli_surface.tool_count = 0 during the Mac front-door audit, even though `praxis workflow tools list --json | jq length` returns 76. orient reads cli_surface from a different (or short-circuited) source than the live tool catalog — agents using cli_surface.tool_count as a precondition gate at cold start are silently misled.",
+      "severity": "critical",
+      "evidence_path": "kg://bugs/orient_cli_surface_tool_count_zero"
+    },
+    {
+      "observation": "`./scripts/praxis workflow orient --json` (and `bugs stats --json`, `bugs list ...`) hang with no stdout. The CLI front door is the surface mandated by operator_decision.architecture_policy.orient.mandatory_authority_envelope, so the official cold-start path is broken even though the MCP path returns (degraded).",
+      "severity": "critical",
+      "evidence_path": "kg://bugs/scripts_praxis_workflow_front_door_hangs_orient"
+    },
+    {
+      "observation": "`praxis workflow --help` from outside the repo prints after ~20 s. Help no longer requires DB authority, but cold-import cost is still high enough that fresh agents and MCP clients can mistake the silent window for a hang and re-issue or abandon the orient command — directly undermining the 'fresh sessions begin from the envelope' contract.",
+      "severity": "warning",
+      "evidence_path": "kg://bugs/workflow_help_cold_start_imports_too_much"
+    },
+    {
+      "observation": "Code&DBs/Workflow/tests/unit/test_cli_tools_surface.py encodes stale orient and help expectations — observed while validating an unrelated CLI/MCP authority patch. There is therefore no live regression gate around the orient CLI surface; F-01/F-02-class regressions land without tripping a test, while the failing tests themselves become noise during unrelated work.",
+      "severity": "warning",
+      "evidence_path": "Code&DBs/Workflow/tests/unit/test_cli_tools_surface.py"
+    },
+    {
+      "observation": "praxis_data_dictionary_wiring_audit returns 23 `unreferenced_decision` findings that include live standing orders the orient envelope is supposed to surface — corroborating from the wiring side that orient is no longer wired as the consumer of those operator_decisions rows. Same root cause family as the scope_clamp projection drift.",
+      "severity": "warning",
+      "evidence_path": "kg://bugs/hygiene_2026_04_22_wiring_audit_active_standing_orders_unwired"
+    },
+    {
+      "observation": "On the same Mac front-door audit run, `praxis workflow recall` returned status=unavailable / error_type=RecallAuthorityError. The operator decision binds orient + recall as the cold-start replacement for sidecar docs; with both broken simultaneously, agents on Mac front-door cannot satisfy the mandated cold-start contract.",
+      "severity": "warning",
+      "evidence_path": "kg://bugs/praxis_workflow_recall_fails_operator_decision_payload_shape"
+    },
+    {
+      "observation": "praxis_query response body carried a code_drift_signal block (code_out_of_date:true, drift_seconds:640, scanned_roots:['runtime','registry','surfaces','storage','adapters']) telling callers to bounce the daemon before trusting results. Live-payload measurements (response keys, exact field values) used in this audit may need re-measurement after a restart; KG-grounded findings (decisions, bug records, schema rows) are stable.",
+      "severity": "info",
+      "evidence_path": "kg://runtime/code_drift_signal/praxis_query_2026-04-27"
+    },
+    {
+      "observation": "/workspace was empty in the review sandbox; orient source files (expected under Code&DBs/Workflow/surfaces/mcp/tools/ and Code&DBs/Workflow/runtime/) were not directly readable. Findings rely on knowledge-graph evidence rather than source-level diffing. Recent bugs BUG-17CC1088, BUG-632E6F45, BUG-D2363EB8 confirm this is the structural state of the review sandbox, not a one-off setup miss.",
+      "severity": "info",
+      "evidence_path": "kg://bugs/workflow_review_sandbox_missing_repo_BUG-17CC1088"
+    }
+  ],
+  "conclusions": "Orient is the operator-mandated cold-start authority envelope, yet it is currently degraded on three independent and orthogonal dimensions: a scope_clamp projection drift that nulls standing_orders (F-01), a cli_surface.tool_count divergence from the live catalog under fast/skip flags (F-02), and a hung CLI front door on the very surface the decision mandates (F-03). With test_cli_tools_surface.py expectations stale (F-05) and the wiring audit reporting standing orders as unreferenced (F-06), there is no live gate catching further drift. Restoring the envelope's correctness — projection alignment, catalog parity, and front-door responsiveness — is the highest-leverage p1_foundation fix because every other session inherits whatever orient returns.",
+  "recommendations": [
+    {
+      "action": "Fix the standing_orders read-model so its scope_clamp column source matches operator_decisions (the GIN-indexed jsonb column already exists on the source table). Add a registered verifier that calls praxis_orient on a fresh DB and asserts standing_orders.status != 'unavailable'.",
+      "rationale": "F-01 is the canonical-cold-start P1 blocker; it nulls the very block the operator decision binds orient to surface."
+    },
+    {
+      "action": "Make praxis_orient.cli_surface read from the same registry that backs `praxis workflow tools list`, and assert orient.cli_surface.tool_count == len(tools_list()) in a contract test. Audit fast/skip_engineering_observability flag handlers so they only suppress observability subblocks, never catalog metrics.",
+      "rationale": "F-02 silently lies to cold-start readers; agents using cli_surface as a precondition gate would proceed with tool_count=0 unaware."
+    },
+    {
+      "action": "Diagnose and fix the `./scripts/praxis workflow orient --json` hang so degradation is surfaced (with a structured error envelope) rather than absorbed into a stalled stdout. The CLI front door is the mandated path.",
+      "rationale": "F-03: even degraded orient must respond on the front door operators are told to use."
+    },
+    {
+      "action": "Lazy-import behind `praxis workflow --help` so cold-start prints help in well under a second; until that lands, document the expected cold-start latency in the orient envelope itself so agents do not re-issue.",
+      "rationale": "F-04 trains agents to distrust the orient-adjacent CLI exactly when they are most likely to be using it."
+    },
+    {
+      "action": "Update Code&DBs/Workflow/tests/unit/test_cli_tools_surface.py with current orient/help shape AND add a new orient-envelope contract test that pins the required keys: standing_orders, cli_surface, workspace_boundary, database_authority, health, operator_surface. Wire it into the default unit run so F-01/F-02-class regressions fail loudly.",
+      "rationale": "F-05/F-06: without a live regression gate, the projection/catalog drift will keep recurring."
+    },
+    {
+      "action": "Re-run this audit against a hydrated /workspace and after a daemon bounce so source-level diffing can confirm the projection drift hypothesis (F-01) and validate live-payload measurements that the code_drift_signal flagged as potentially stale (F-08).",
+      "rationale": "F-08/F-09: knowledge-graph evidence is stable, but the hypothesis about *where* the projection drift lives needs source confirmation before a fix lands."
+    }
+  ],
+  "links": [
+    {"label": "operator decision", "ref": "operator_decision.architecture_policy.orient.mandatory_authority_envelope"},
+    {"label": "authority domain", "ref": "authority_domain::orient"},
+    {"label": "bug — standing_orders scope_clamp", "ref": "kg://bugs//orient standing_orders projection fails with missing scope_clamp column"},
+    {"label": "bug — cli_surface tool_count zero", "ref": "kg://bugs/orient cli_surface tool_count reports zero despite live tool catalog"},
+    {"label": "bug — front door hangs", "ref": "kg://bugs/scripts/praxis workflow front door hangs for orient and bugs commands without output"},
+    {"label": "bug — help cold start", "ref": "kg://bugs/workflow help cold start imports too much before showing orientation help"},
+    {"label": "bug — stale test expectations", "ref": "kg://bugs/CLI tools surface tests encode stale orient and help expectations"},
+    {"label": "bug — wiring audit unreferenced standing orders", "ref": "kg://bugs/hygiene-2026-04-22/wiring-audit Active standing orders are reported as unwired decisions"},
+    {"label": "bug — recall payload shape", "ref": "kg://bugs/praxis workflow recall fails on operator decision recall payload shape"},
+    {"label": "sandbox bug — empty workspace", "ref": "BUG-17CC1088"},
+    {"label": "sandbox bug — phantom_ship", "ref": "BUG-D2363EB8"},
+    {"label": "sandbox bug — workspace not mounted", "ref": "BUG-632E6F45"},
+    {"label": "seal-gate bug filed during this audit", "ref": "BUG-F78C0477"}
+  ],
+  "submission_note": "Analytical deliverables (orient_audit.md, step.analysis.json) landed under the declared write_scope. The praxis_submit_code_change gate blocked sealing with reason_code workflow_submission.out_of_scope listing 5 unrelated paths (Code&DBs/Workflow/artifacts/audits/p3_provider/cli_default_enforcement.md, p3_provider/step.analysis.json, Code&DBs/Workflow/surfaces/mcp/tools/provider_onboard.py, scripts/praxis-refresh-auth.sh, scripts/praxis-up) — none of which were written by this job and none of which exist on disk in this empty /workspace sandbox. Two of the five (praxis-refresh-auth.sh, praxis-up) are in the workspace_manifest baseline so the gate reads them as deleted-outside-scope; the other three are not in the baseline at all. Filed as BUG-F78C0477 (seal-gate workspace-diff variant of the BUG-D2363EB8 / BUG-17CC1088 / BUG-632E6F45 hydration class). The seal gate captures whatever lands in write_scope per the deliverable contract, so this file is the canonical submission record."
+}

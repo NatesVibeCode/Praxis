@@ -152,14 +152,47 @@ Until Praxis.db answers, stay inside the public fresh-clone scope from
 
 ## Tool Authority
 
-Praxis exposes a live surface of catalog-backed tools.
+Praxis exposes a live surface of catalog-backed tools through three
+sibling surfaces over the same `operation_catalog_gateway` engine bus.
+Pick by audience — they all return the same gateway result, the
+difference is the front door:
 
-Do not memorize a static surface table. Ask the catalog:
+### Claude Code agent (this assistant) → `bin/praxis-agent`
 
-- `praxis workflow tools list`
-- `praxis workflow tools search <text>`
-- `praxis workflow tools describe <tool|alias>`
-- `praxis workflow tools call <tool|alias> --input-json '{...}'`
+The bash CLI is denied in `.claude/settings.json` (`Bash(praxis:*)`)
+because the host shell carries `CLAUDECODE=1` and trips the Claude CLI
+nested-session guard, AND Claude Desktop's stdio MCP server triggers
+the post-2026-04-24 disclaimer wrapper on every spawn of unsigned
+homebrew Python. Both lanes are broken for Claude Code.
+
+`bin/praxis-agent` is the right lane: a thin bash wrapper that does
+`docker exec praxis-api-server-1 python3 → surfaces.mcp.invocation.invoke_tool`
+so dispatch happens inside the container with a clean env. No host
+shell pollution, no disclaimer wrapper, same gateway result as the
+MCP tool would return.
+
+Usage:
+
+```bash
+bin/praxis-agent --list                                    # browse catalog
+bin/praxis-agent --describe praxis_compose_and_launch       # tool schema
+bin/praxis-agent praxis_compose_and_launch \
+  --input-json '{"approved_by":"nate@praxis","plan_name":"audit","intent":"1. ...\n2. ..."}'
+bin/praxis-agent praxis_search --input-file query.json
+```
+
+### Operator at a terminal / scripts / launchd → `praxis workflow ...`
+
+The full bash CLI is fine for human operators and shell automation —
+no nested-session guard from a real terminal, no Claude.app disclaimer.
+Same catalog, same gateway.
+
+```text
+praxis workflow tools list
+praxis workflow tools search <text>
+praxis workflow tools describe <tool|alias>
+praxis workflow tools call <tool|alias> --input-json '{...}'
+```
 
 Curated high-frequency aliases stay flat:
 
@@ -169,6 +202,22 @@ Curated high-frequency aliases stay flat:
 - `praxis workflow discover`
 - `praxis workflow artifacts`
 - `praxis workflow health`
+
+### Codex / Gemini agents → `mcp__praxis__*`
+
+Their MCP transport is unaffected by the Claude.app disclaimer wrapper
+because their host sessions don't carry `CLAUDECODE` and their parent
+app doesn't disclaimer-wrap stdio servers. They use the MCP tools
+directly through their respective harnesses.
+
+### Auth refresh
+
+When the worker reports `auth_state: timeout` for any provider (or
+after Docker Desktop / OrbStack / macOS restarts), run
+`scripts/praxis-up`. It does the keychain export and compose recreate
+in one command and verifies via `praxis_cli_auth_doctor` inside the
+worker. See `architecture-policy::deployment::docker-restart-caches-env`
+and `architecture-policy::auth::via-docker-creds-not-shell`.
 
 Tools self-declare a `kind` field in their MCP metadata so the choice space narrows fast:
 

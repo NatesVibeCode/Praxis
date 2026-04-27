@@ -1,0 +1,14 @@
+---
+description: OpenRouter is invoked only from the Praxis app user surface (compile button)
+globs: **/migrations/workflow/*.sql
+alwaysApply: false
+---
+
+# Standing order — OpenRouter is invoked only from the Praxis app user surface (compile button)
+
+`decision_key`: `architecture-policy::providers::openrouter-app-only`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::providers::openrouter-app-only"}'`

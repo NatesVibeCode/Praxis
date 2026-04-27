@@ -161,7 +161,7 @@ def test_cli_auth_volume_flags_use_explicit_host_home(monkeypatch) -> None:
     flags = sandbox_runtime._cli_auth_volume_flags()
 
     assert f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro" in flags
-    assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" in flags
+    assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" not in flags
     assert (
         f"{AUTH_HOME}/.gemini/oauth_creds.json:"
         f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
@@ -185,7 +185,7 @@ def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypat
     flags = sandbox_runtime._cli_auth_volume_flags()
 
     assert f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro" in flags
-    assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" in flags
+    assert f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro" not in flags
     assert (
         f"{AUTH_HOME}/.gemini/oauth_creds.json:"
         f"{CONTAINER_HOME}/.gemini/oauth_creds.json:ro"
@@ -212,10 +212,7 @@ def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) ->
         "-v",
         f"{AUTH_HOME}/.codex/auth.json:{sandbox_runtime._OPENAI_AUTH_SEED_PATH}:ro",
     ]
-    assert anthropic_flags == [
-        "-v",
-        f"{AUTH_HOME}/.claude.json:{CONTAINER_HOME}/.claude.json:ro",
-    ]
+    assert anthropic_flags == []
 
 
 def test_docker_local_exec_prefers_metadata_resource_limits(monkeypatch, tmp_path) -> None:

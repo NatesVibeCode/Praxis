@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# praxis-compose-env — export macOS Keychain secrets (account="praxis") as
-# shell env lines so docker-compose can pass them into long-lived control
-# containers (api-server, scheduler) that run the MCP bridge and integration
-# dispatch paths.
+# praxis-compose-env — export macOS Keychain secrets as shell env lines so
+# docker-compose can pass them into long-lived control containers
+# (api-server, scheduler, workflow-worker) that run the MCP bridge,
+# integration dispatch paths, and CLI-backed providers.
 #
 # Usage:
 #   eval "$(bin/praxis-compose-env)"
@@ -88,3 +88,26 @@ while IFS= read -r name; do
       ;;
   esac
 done <<< "$services"
+
+# Claude Code OAuth on macOS lives in Anthropic's own Keychain item rather
+# than under account="praxis". Export it explicitly so noninteractive Linux
+# containers can authenticate via CLAUDE_CODE_OAUTH_TOKEN instead of a
+# file-backed ~/.claude/.credentials.json path that only exists on Linux.
+claude_oauth_json="$(security find-generic-password -s 'Claude Code-credentials' -w 2>/dev/null || true)"
+if [[ -n "$claude_oauth_json" ]]; then
+  claude_oauth_token="$(
+    printf '%s' "$claude_oauth_json" \
+      | /usr/bin/python3 -c 'import json, sys; print(json.load(sys.stdin).get("claudeAiOauth", {}).get("accessToken", ""))' \
+        2>/dev/null || true
+  )"
+  if [[ -n "$claude_oauth_token" ]]; then
+    case "$emit_mode" in
+      shell)
+        printf "export %s=%s\n" "CLAUDE_CODE_OAUTH_TOKEN" "$(printf '%s' "$claude_oauth_token" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/")"
+        ;;
+      dotenv)
+        printf "%s=%s\n" "CLAUDE_CODE_OAUTH_TOKEN" "$claude_oauth_token"
+        ;;
+    esac
+  fi
+fi

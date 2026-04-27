@@ -1,0 +1,14 @@
+---
+description: Fix the flow, don't wrap broken flows in monitors
+globs: **/*babysitter*, /Users/nate/.praxis_waves/**, /tmp/praxis_waves/**
+alwaysApply: false
+---
+
+# Standing order — Fix the flow, don't wrap broken flows in monitors
+
+`decision_key`: `architecture-policy::agent-behavior::no-babysitters`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::agent-behavior::no-babysitters"}'`

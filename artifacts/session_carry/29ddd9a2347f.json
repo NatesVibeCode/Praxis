@@ -1,0 +1,20 @@
+{
+  "pack_id": "29ddd9a2347f",
+  "objective": "Hi",
+  "decisions": [],
+  "open_questions": [
+    "What can I help you with?"
+  ],
+  "constraints": [],
+  "risks": [],
+  "artifacts": [],
+  "next_actions": [
+    "**Search** the knowledge graph for entities, decisions, and documents",
+    "**Query** recent workflow runs and their status (including costs and token usage)",
+    "**Run** automated workflows",
+    "**Check** detailed workflow status with per-job outputs",
+    "**Retry** or **cancel** jobs"
+  ],
+  "created_at": "2026-04-27T16:43:13.995270+00:00",
+  "token_estimate": 140
+}

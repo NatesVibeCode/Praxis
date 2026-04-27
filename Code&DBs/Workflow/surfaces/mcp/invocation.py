@@ -52,6 +52,61 @@ class ToolInvocationError(RuntimeError):
         return payload
 
 
+def _evaluate_trigger_matches(
+    tool_name: str,
+    tool_input: dict[str, Any] | None,
+) -> list:
+    """Match a proposed MCP call against the operator-decision trigger
+    registry. Universal across all agent harnesses (Claude Code / Codex /
+    Gemini) because every harness routes through `invoke_tool`.
+
+    Returns an empty list on any failure — never blocks the call.
+    Surfacing is advisory; hard rejection lives at the data-authority
+    layer (Packet 2). See `surfaces.policy.trigger_check` for the matcher.
+    """
+    try:
+        from surfaces.policy import check as _check_triggers
+
+        return _check_triggers(tool_name, tool_input or {})
+    except Exception:  # noqa: BLE001 — fail open, never block tool dispatch
+        return []
+
+
+def _render_trigger_matches_payload(
+    matches: list,
+    tool_name: str,
+) -> dict[str, Any]:
+    """Render trigger matches as a structured payload for inclusion in tool
+    results. Includes a rendered text block for direct surfacing AND a
+    structured list so consumers can reason about the matches programmatically.
+    """
+    try:
+        from surfaces.policy import render_additional_context
+
+        rendered = render_additional_context(matches, tool_name)
+    except Exception:  # noqa: BLE001 — degrade gracefully
+        rendered = ""
+
+    structured = []
+    for match in matches:
+        try:
+            structured.append({
+                "decision_key": match.decision_key,
+                "title": match.title,
+                "advisory_only": match.advisory_only,
+                "trigger": match.trigger_repr(),
+            })
+        except Exception:  # noqa: BLE001
+            continue
+
+    return {
+        "rendered": rendered,
+        "matches": structured,
+        "count": len(structured),
+        "source": "surfaces.mcp.invocation:trigger_check",
+    }
+
+
 def normalize_allowed_tool_names(value: object | None) -> set[str] | None:
     if value is None:
         return None
@@ -131,6 +186,16 @@ def invoke_tool(
         if canonical_name in _EMBEDDING_PREWARM_TOOLS:
             _maybe_start_embedding_prewarm()
 
+        # JIT trigger-check against operator-decision registry. Surfaces
+        # matching standing orders into the result payload as
+        # `_standing_orders_surfaced` so any agent surface (Claude Code,
+        # Codex, Gemini, raw HTTP) sees the same enforcement layer. Per
+        # /praxis-debate fork: surfacing is advisory; hard rejection lives
+        # at the data layer (Packet 2 — Policy Authority subsystem). This
+        # is the universal floor — every MCP call goes through here so
+        # enforcement does not depend on which harness the agent is in.
+        trigger_matches = _evaluate_trigger_matches(canonical_name, tool_input)
+
         handler, _ = resolve_tool_entry(canonical_name)
         call_context = _context_manager_for_claims(claims)
         with call_context:
@@ -139,6 +204,15 @@ def invoke_tool(
                 tool_input,
                 workflow_token=token_text,
                 progress_emitter=progress_emitter,
+            )
+        if trigger_matches and isinstance(result_payload, dict):
+            # Inject the surface into the result so the harness or
+            # downstream consumer renders it back to the agent. Use a
+            # neutral key ("_standing_orders_surfaced") that does not
+            # collide with any tool's result schema.
+            result_payload.setdefault(
+                "_standing_orders_surfaced",
+                _render_trigger_matches_payload(trigger_matches, canonical_name),
             )
         return result_payload
     except ToolInvocationError as exc:

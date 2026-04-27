@@ -1,0 +1,27 @@
+{
+  "$comment": "Codex CLI hook config. Loaded automatically when the project root contains .codex/hooks.json (codex-cli >= 0.121). For earlier codex-cli, copy this content into ~/.codex/hooks.json or reference these paths from a Codex plugin manifest. Hook event names and the wire shape (`hookEventName`, `additionalContext`, `hookSpecificOutput`) are identical to Claude Code's. Confirmed against codex-cli@0.121.0 binary string types.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "local_shell|shell|apply_patch|write_file|read_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CODEX_PROJECT_DIR/.codex/hooks/preact-orient-friction.sh",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CODEX_PROJECT_DIR/.claude/hooks/session-start-standing-orders.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

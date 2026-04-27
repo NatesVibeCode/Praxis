@@ -665,10 +665,6 @@ _PROVIDER_CLI_AUTH_MOUNTS: dict[str, dict[str, Any]] = {
                 "host_relative_path": ".claude/.credentials.json",
                 "container_relative_path": ".claude/.credentials.json",
             },
-            {
-                "host_relative_path": ".claude.json",
-                "container_relative_path": ".claude.json",
-            },
         ],
         "cli_home_tmpfs_dirs": [".claude"],
     },

@@ -1,0 +1,14 @@
+---
+description: stdout-only ≠ submission
+globs: **/runtime/workflow/submission_gate.py
+alwaysApply: false
+---
+
+# Standing order — stdout-only ≠ submission
+
+`decision_key`: `architecture-policy::submission-gate::no-verbal-seal`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::submission-gate::no-verbal-seal"}'`

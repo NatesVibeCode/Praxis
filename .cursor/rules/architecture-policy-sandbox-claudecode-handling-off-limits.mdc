@@ -1,0 +1,14 @@
+---
+description: Don't touch CLAUDECODE handling in sandbox
+globs: **/runtime/workflow/execution_backends.py, **/adapters/docker_runner.py
+alwaysApply: false
+---
+
+# Standing order — Don't touch CLAUDECODE handling in sandbox
+
+`decision_key`: `architecture-policy::sandbox::claudecode-handling-off-limits`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::sandbox::claudecode-handling-off-limits"}'`

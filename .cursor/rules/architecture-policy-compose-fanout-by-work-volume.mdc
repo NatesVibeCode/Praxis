@@ -1,0 +1,14 @@
+---
+description: Compose synthesis decomposes by work volume into ~20 packet seeds, not step count
+globs: **/runtime/plan_synthesis.py, **/runtime/intent_decomposition.py
+alwaysApply: false
+---
+
+# Standing order — Compose synthesis decomposes by work volume into ~20 packet seeds, not step count
+
+`decision_key`: `architecture-policy::compose::fanout-by-work-volume`
+
+(no rationale captured)
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::compose::fanout-by-work-volume"}'`

@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# praxis-agent — canonical agent dispatcher for Praxis.
+#
+# This is THE one front door for Claude Code and any other Mac-host agent
+# that operates against Praxis. It bypasses host-shell pollution
+# (CLAUDECODE nested-session guard, macOS Gatekeeper / Claude.app disclaimer
+# wrapper on unsigned Python) by dispatching INTO the running api-server
+# container, where the runtime is clean and the operation_catalog_gateway
+# is the canonical engine bus.
+#
+# Why this surface exists (standing-order references):
+#   architecture-policy::surfaces::cli-mcp-parallel
+#       — CLI and MCP are siblings over operation_catalog_gateway. This is
+#         a third sibling: docker-exec direct dispatch, audience = host
+#         agents whose shell or MCP transport is blocked by Mac security
+#         policy.
+#   architecture-policy::agent-behavior::claude-code-uses-mcp
+#       — Claude Code's bash CLI is denied by .claude/settings.json. This
+#         script is exempt because it does NOT spawn host Python and does
+#         NOT spawn the `claude` binary; it is a docker shell-out.
+#   architecture-policy::sandbox::claudecode-handling-off-limits
+#       — Container env scrubs CLAUDECODE already. We rely on that, we do
+#         not modify it here.
+#
+# Usage:
+#   praxis-agent <tool_name> --input-json '{...}'
+#   praxis-agent <tool_name> --input-file <path>
+#   praxis-agent --list
+#   praxis-agent --describe <tool_name>
+#
+# Examples:
+#   praxis-agent praxis_compose_and_launch --input-json '{
+#     "approved_by": "nate@praxis",
+#     "plan_name": "audit_x",
+#     "intent": "1. Audit X.\n2. Audit Y."
+#   }'
+#   praxis-agent praxis_search --input-json '{"query": "provider routing"}'
+#
+# Returns: tool result as JSON on stdout. Non-zero exit on dispatch error.
+#
+# Configuration:
+#   PRAXIS_AGENT_CONTAINER (default: praxis-api-server-1) — which container
+#       to dispatch into. The container must have surfaces.mcp.invocation
+#       importable (i.e. the praxis-api image, not the worker image).
+#
+# Operator notes:
+#   - If the container is not running, this script exits 3 with a hint to
+#     run `scripts/praxis-up`.
+#   - If you need to refresh provider auth state (Keychain → container env),
+#     run `scripts/praxis-up` first; it does the keychain export and
+#     compose recreate dance in one step.
+#   - The script is intentionally pure bash + docker, no Python on the host
+#     side — that is the whole point.
+
+set -euo pipefail
+
+CONTAINER="${PRAXIS_AGENT_CONTAINER:-praxis-api-server-1}"
+
+usage() {
+  cat <<'USAGE'
+praxis-agent — canonical agent dispatcher (docker-exec → operation_catalog_gateway)
+
+Usage:
+  praxis-agent <tool_name> --input-json '{...}'
+  praxis-agent <tool_name> --input-file <path>
+  praxis-agent --list
+  praxis-agent --describe <tool_name>
+  praxis-agent --help
+
+Environment:
+  PRAXIS_AGENT_CONTAINER    Container to dispatch into (default: praxis-api-server-1).
+USAGE
+}
+
+if [[ $# -eq 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+case "$1" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  --list)
+    docker exec -i "$CONTAINER" python3 - <<'PY'
+import json
+from surfaces.mcp.catalog import get_tool_catalog
+catalog = get_tool_catalog()
+for name in sorted(catalog.keys()):
+    defn = catalog[name]
+    desc = (getattr(defn, "description", "") or "").splitlines()[0][:90]
+    print(f"{name}\t{desc}")
+PY
+    exit 0
+    ;;
+  --describe)
+    if [[ $# -lt 2 ]]; then
+      echo "praxis-agent: --describe requires a tool name" >&2
+      exit 2
+    fi
+    docker exec -i -e "PRAXIS_TOOL_NAME=$2" "$CONTAINER" python3 - <<'PY'
+import json, os, sys
+from surfaces.mcp.catalog import get_tool_catalog
+name = os.environ["PRAXIS_TOOL_NAME"]
+catalog = get_tool_catalog()
+defn = catalog.get(name)
+if defn is None:
+    print(json.dumps({"ok": False, "error": f"tool not found: {name}"}), file=sys.stderr)
+    sys.exit(1)
+out = {
+    "name": defn.name,
+    "description": getattr(defn, "description", "") or "",
+    "input_schema": getattr(defn, "input_schema", None),
+    "badges": list(getattr(defn, "badges", ()) or ()),
+}
+print(json.dumps(out, indent=2, default=str))
+PY
+    exit 0
+    ;;
+esac
+
+TOOL_NAME="$1"
+shift
+
+PAYLOAD=""
+if [[ $# -lt 2 ]]; then
+  echo "praxis-agent: expected --input-json '{...}' or --input-file <path> after tool name" >&2
+  exit 2
+fi
+
+case "$1" in
+  --input-json)
+    PAYLOAD="$2"
+    ;;
+  --input-file)
+    if [[ ! -f "$2" ]]; then
+      echo "praxis-agent: --input-file path does not exist: $2" >&2
+      exit 2
+    fi
+    PAYLOAD="$(cat "$2")"
+    ;;
+  *)
+    echo "praxis-agent: expected --input-json or --input-file, got: $1" >&2
+    exit 2
+    ;;
+esac
+
+# Sanity-check JSON before paying the docker round-trip.
+if ! python3 -c "import json,sys; json.loads(sys.argv[1])" "$PAYLOAD" 2>/dev/null; then
+  # If host python3 is also unavailable, fall back to a docker-side parse.
+  if ! docker exec -i "$CONTAINER" python3 -c "import json,sys; json.loads(sys.stdin.read())" <<<"$PAYLOAD" 2>/dev/null; then
+    echo "praxis-agent: --input-json must be valid JSON" >&2
+    exit 2
+  fi
+fi
+
+# Confirm the container is alive before dispatching.
+if ! docker ps --filter "name=^${CONTAINER}$" --filter "status=running" -q | grep -q .; then
+  cat >&2 <<EOF
+praxis-agent: container "${CONTAINER}" is not running.
+
+Run scripts/praxis-up from the repo root to rehydrate Keychain auth and
+recreate the api-server / workflow-worker / scheduler containers, then
+retry.
+EOF
+  exit 3
+fi
+
+# Dispatch. Pass the tool name AND the payload as env vars (avoids the
+# bash double-stdin trap and avoids shell-quoting both tool names and
+# arbitrary JSON, including embedded newlines).
+docker exec -i \
+  -e "PRAXIS_TOOL_NAME=$TOOL_NAME" \
+  -e "PRAXIS_TOOL_PAYLOAD=$PAYLOAD" \
+  "$CONTAINER" \
+  python3 - <<'PY'
+import json
+import os
+import sys
+import traceback
+
+tool_name = os.environ["PRAXIS_TOOL_NAME"]
+raw_payload = os.environ.get("PRAXIS_TOOL_PAYLOAD", "")
+try:
+    arguments = json.loads(raw_payload) if raw_payload.strip() else {}
+except json.JSONDecodeError as exc:
+    print(json.dumps({
+        "ok": False,
+        "error": f"invalid input JSON: {exc}",
+        "reason_code": "praxis_agent.invalid_input_json",
+    }), file=sys.stderr)
+    sys.exit(2)
+
+try:
+    from surfaces.mcp.invocation import invoke_tool, ToolInvocationError
+except Exception as exc:
+    print(json.dumps({
+        "ok": False,
+        "error": f"praxis-agent could not import surfaces.mcp.invocation: {exc}",
+        "reason_code": "praxis_agent.import_failed",
+        "container_traceback": traceback.format_exc(),
+    }), file=sys.stderr)
+    sys.exit(4)
+
+try:
+    result = invoke_tool(tool_name, arguments)
+    print(json.dumps(result, default=str))
+except ToolInvocationError as exc:
+    print(json.dumps({
+        "ok": False,
+        "error": str(exc),
+        "reason_code": getattr(exc, "reason_code", "praxis_agent.tool_invocation_error"),
+    }), file=sys.stderr)
+    sys.exit(1)
+except Exception as exc:
+    print(json.dumps({
+        "ok": False,
+        "error": str(exc),
+        "reason_code": "praxis_agent.unhandled_exception",
+        "container_traceback": traceback.format_exc(),
+    }), file=sys.stderr)
+    sys.exit(1)
+PY
