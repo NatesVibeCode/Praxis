@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# Friendly manager for the Praxis phone console.
+#
+# The normal command is:
+#   ./scripts/operator-console
+#
+# It installs/starts a user LaunchAgent, waits for the console to publish its
+# URL, then prints exactly what to open and paste.
+
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+
+label="com.praxis.operator-console"
+plist_path="$HOME/Library/LaunchAgents/${label}.plist"
+state_dir="${repo_root}/artifacts/operator-console"
+state_file="${state_dir}/state.env"
+token_file="${state_dir}/token"
+log_dir="${state_dir}/logs"
+stdout_log="${log_dir}/launchd.out.log"
+stderr_log="${log_dir}/launchd.err.log"
+uid="$(id -u)"
+launch_domain="gui/${uid}"
+service_path="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:${HOME}/.local/bin:${HOME}/.orbstack/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+fail() { printf '  \033[1;31m[fail]\033[0m %s\n' "$*" >&2; exit 1; }
+ok()   { printf '  \033[1;32m[ok]\033[0m %s\n' "$*"; }
+warn() { printf '  \033[1;33m[warn]\033[0m %s\n' "$*" >&2; }
+step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
+
+usage() {
+  cat <<'USAGE'
+Praxis phone console manager.
+
+Start or restart the background phone console:
+  ./scripts/operator-console
+
+Show the URL and access code:
+  ./scripts/operator-console url
+
+Stop it:
+  ./scripts/operator-console stop
+
+Show service state:
+  ./scripts/operator-console status
+
+Remove the background service:
+  ./scripts/operator-console uninstall
+USAGE
+}
+
+read_state_value() {
+  local key="$1"
+  if [ ! -r "$state_file" ]; then
+    return 1
+  fi
+  sed -n "s/^${key}='\\(.*\\)'$/\\1/p" "$state_file" | tail -n1
+}
+
+render_plist() {
+  mkdir -p "$(dirname "$plist_path")" "$log_dir"
+  cat > "$plist_path" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${repo_root}/scripts/operator-console-up</string>
+    <string>--service</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${repo_root}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${service_path}</string>
+    <key>HOME</key>
+    <string>${HOME}</string>
+    <key>USER</key>
+    <string>${USER}</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${stdout_log}</string>
+  <key>StandardErrorPath</key>
+  <string>${stderr_log}</string>
+</dict>
+</plist>
+PLIST
+  chmod 644 "$plist_path"
+}
+
+launchctl_bootout() {
+  launchctl bootout "$launch_domain" "$plist_path" >/dev/null 2>&1 || true
+  launchctl unload "$plist_path" >/dev/null 2>&1 || true
+}
+
+launchctl_bootstrap() {
+  if ! command -v launchctl >/dev/null 2>&1; then
+    fail "launchctl is unavailable; this background manager is for macOS."
+  fi
+  launchctl bootstrap "$launch_domain" "$plist_path" 2>/dev/null || launchctl load "$plist_path"
+  launchctl kickstart -k "${launch_domain}/${label}" >/dev/null 2>&1 || true
+}
+
+print_connection_info() {
+  local url token host port
+  url="$(read_state_value CONSOLE_URL || true)"
+  token="$(read_state_value PRAXIS_API_TOKEN || true)"
+  host="$(read_state_value PRAXIS_API_HOST || true)"
+  port="$(read_state_value PRAXIS_API_PORT || true)"
+
+  if [ -z "$url" ]; then
+    warn "console has not published its URL yet"
+    warn "recent log: ${stdout_log}"
+    tail -n 30 "$stdout_log" 2>/dev/null || true
+    return 1
+  fi
+
+  cat <<INFO
+
+Open this on your phone:
+  ${url}
+
+No sign-in code required. Tailscale is the gate.
+
+If it does not load:
+  1. Make sure Tailscale is on for both this computer and your phone.
+  2. Make sure your phone is not blocking local/VPN traffic.
+  3. Tell me the exact browser error text.
+
+Details:
+  host ${host}
+  port ${port}
+  logs ${stdout_log}
+
+INFO
+}
+
+wait_for_state() {
+  local i
+  for i in $(seq 1 30); do
+    if [ -r "$state_file" ] && [ -n "$(read_state_value CONSOLE_URL || true)" ]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+start_service() {
+  step "Installing background phone console"
+  mkdir -p "$state_dir" "$log_dir"
+  rm -f "$state_file"
+  render_plist
+  ok "LaunchAgent installed"
+
+  step "Starting background service"
+  launchctl_bootout
+  launchctl_bootstrap
+  ok "service start requested"
+
+  step "Waiting for URL"
+  if wait_for_state; then
+    print_connection_info
+  else
+    print_connection_info || true
+    fail "console did not become ready. Check ${stderr_log}"
+  fi
+}
+
+stop_service() {
+  step "Stopping background phone console"
+  launchctl_bootout
+  ok "stopped"
+}
+
+status_service() {
+  step "Service status"
+  if launchctl print "${launch_domain}/${label}" >/dev/null 2>&1; then
+    ok "LaunchAgent is loaded"
+  else
+    warn "LaunchAgent is not loaded"
+  fi
+  print_connection_info || true
+}
+
+uninstall_service() {
+  stop_service
+  rm -f "$plist_path"
+  ok "removed ${plist_path}"
+  if [ -r "$token_file" ]; then
+    warn "saved access code remains at ${token_file}"
+  fi
+}
+
+case "${1:-start}" in
+  start)
+    start_service
+    ;;
+  restart)
+    start_service
+    ;;
+  url)
+    print_connection_info
+    ;;
+  status)
+    status_service
+    ;;
+  stop)
+    stop_service
+    ;;
+  uninstall)
+    uninstall_service
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    fail "unknown command: $1"
+    ;;
+esac

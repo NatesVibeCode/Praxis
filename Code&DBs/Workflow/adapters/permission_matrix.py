@@ -80,7 +80,7 @@ PERMISSION_MODE_RANK: dict[NormalizedPermissionMode, int] = {
 # constrain what the model is asked to produce. Honest: this is softer than
 # the CLI flag path. An API provider that grows tool-use will need its own
 # capability layer on top of this vocabulary.
-API_PROVIDERS: frozenset[str] = frozenset({"openrouter"})
+API_PROVIDERS: frozenset[str] = frozenset({"openrouter", "together"})
 
 
 _API_PERMISSION_PROMPT_SUFFIX: dict[NormalizedPermissionMode, str] = {

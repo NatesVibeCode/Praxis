@@ -7,11 +7,14 @@ prose with no marker requirement.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from runtime.intent_binding import BoundIntent, bind_data_pills
+
+logger = logging.getLogger(__name__)
 
 
 _PILL_STOPWORDS: frozenset[str] = frozenset({
@@ -233,16 +236,252 @@ class SuggestedAtoms:
         }
 
 
+# Categories that should NEVER surface as workflow-composition pills.
+# These are infrastructure / control-plane records, not data entities or
+# fields that a workflow operates on. Surfacing them produces noisy
+# candidates that downstream LLM filters can't reliably reject (the
+# 50%-acceptance ceiling we hit on the picker matrix is the symptom).
+#
+# Conservative default — only `tool:*` is excluded. Other categories
+# (command/query/projection/table) are debatable and may carry signal
+# in some intents; revisit when we have data showing they're noise too.
+_WORKFLOW_PILL_EXCLUDED_CATEGORIES: frozenset[str] = frozenset({"tool"})
+
+
+# =====================================================================
+# Semantic pill retrieval via pgvector (Fix #2)
+# =====================================================================
+#
+# Token overlap is too coarse — it surfaces pills whose docstrings happen
+# to share words with the intent but aren't conceptually related. The
+# picker matrix proved no LLM filter on top can reliably clean that up
+# (50% false-positive ceiling).
+#
+# Semantic retrieval embeds the intent + each (object, field) corpus row
+# and ranks by cosine similarity. Concepts ("integration", "auth",
+# "endpoint") cluster together in embedding space even when tokens differ
+# ("API spec", "credentials", "URL"). The LLM filter then sees a smaller,
+# more semantically-aligned candidate set and the 50% ceiling falls.
+#
+# Caching strategy: corpus + embeddings are cached at module scope.
+# First call after process start pays ~5-15s to embed ~100 rows; every
+# subsequent call pays ~50-100ms (just embed the intent).
+
+_DICT_CORPUS_CACHE: list[dict[str, Any]] | None = None
+_DICT_CORPUS_LOCK: Any = None  # lazy-init to avoid import-time threading
+
+
+def _ensure_corpus_lock():
+    global _DICT_CORPUS_LOCK
+    if _DICT_CORPUS_LOCK is None:
+        import threading
+        _DICT_CORPUS_LOCK = threading.Lock()
+    return _DICT_CORPUS_LOCK
+
+
+def _load_dictionary_corpus(
+    conn: Any, *, excluded_categories: frozenset[str],
+) -> list[dict[str, Any]]:
+    """Build + embed the (object, field) corpus once per process. Each
+    row carries object_kind, field_path, label, description, category,
+    and the embedding vector. Cached at module scope.
+
+    Returns an empty list if the embedding backend is unavailable —
+    callers fall back to token-overlap.
+    """
+    global _DICT_CORPUS_CACHE
+    if _DICT_CORPUS_CACHE is not None:
+        return _DICT_CORPUS_CACHE
+
+    lock = _ensure_corpus_lock()
+    with lock:
+        if _DICT_CORPUS_CACHE is not None:
+            return _DICT_CORPUS_CACHE
+
+        from runtime.embedding_service import EmbeddingService, get_shared_embedder
+        if not EmbeddingService.backend_available():
+            _DICT_CORPUS_CACHE = []
+            return _DICT_CORPUS_CACHE
+
+        embedder = get_shared_embedder()
+        if embedder is None:
+            _DICT_CORPUS_CACHE = []
+            return _DICT_CORPUS_CACHE
+
+        from runtime.data_dictionary import (
+            DataDictionaryBoundaryError, list_object_kinds, list_effective_entries,
+        )
+
+        try:
+            objects = list_object_kinds(conn)
+        except DataDictionaryBoundaryError:
+            _DICT_CORPUS_CACHE = []
+            return _DICT_CORPUS_CACHE
+
+        rows: list[dict[str, Any]] = []
+        texts: list[str] = []
+        for obj in objects:
+            object_kind = str(obj.get("object_kind") or "")
+            if not object_kind:
+                continue
+            category = str(obj.get("category") or "").strip().lower()
+            if category in excluded_categories:
+                continue
+            obj_label = str(obj.get("label") or "")
+            obj_summary = str(obj.get("summary") or "")
+            try:
+                entries = list_effective_entries(conn, object_kind=object_kind)
+            except Exception:
+                entries = []
+            for entry in entries:
+                field_path = str(entry.get("field_path") or "")
+                if not field_path:
+                    continue
+                label = str(entry.get("label") or "")
+                description = str(entry.get("description") or "")
+                # Embed text concatenates the most informative semantic
+                # signals — object kind/label/summary + field path/label/description.
+                text = (
+                    f"{object_kind}.{field_path}\n"
+                    f"object: {obj_label} — {obj_summary}\n"
+                    f"field: {label} — {description}"
+                ).strip()
+                rows.append({
+                    "object_kind": object_kind, "field_path": field_path,
+                    "label": label or None, "description": description[:160] or None,
+                    "category": category,
+                    "field_kind": str(entry.get("field_kind") or "") or None,
+                })
+                texts.append(text)
+
+        if not texts:
+            _DICT_CORPUS_CACHE = []
+            return _DICT_CORPUS_CACHE
+
+        # Chunk the embed call. The semantic-backend service has a
+        # short per-request timeout; sending all ~100+ rows in one
+        # batch can exceed it. 16-row chunks fit comfortably.
+        embeddings: list[list[float]] = []
+        chunk_size = 16
+        for chunk_start in range(0, len(texts), chunk_size):
+            chunk = texts[chunk_start:chunk_start + chunk_size]
+            try:
+                chunk_vecs = embedder.embed(chunk)
+            except Exception as exc:
+                logger.warning(
+                    "dictionary corpus embed failed at chunk %d-%d: %s",
+                    chunk_start, chunk_start + len(chunk), exc,
+                )
+                _DICT_CORPUS_CACHE = []
+                return _DICT_CORPUS_CACHE
+            embeddings.extend(chunk_vecs)
+
+        for row, vec in zip(rows, embeddings):
+            row["embedding"] = vec
+        _DICT_CORPUS_CACHE = rows
+        logger.info("dictionary corpus embedded: %d rows", len(rows))
+        return _DICT_CORPUS_CACHE
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity for two same-length vectors. Pure Python — no numpy."""
+    n = min(len(a), len(b))
+    if n == 0:
+        return 0.0
+    dot = sum(a[i] * b[i] for i in range(n))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _suggest_pills_via_semantic(
+    intent: str, *, conn: Any, top_n: int = 12, min_similarity: float = 0.45,
+    excluded_categories: frozenset[str] = _WORKFLOW_PILL_EXCLUDED_CATEGORIES,
+) -> list[SuggestedPill] | None:
+    """Semantic-search variant of the pill suggester. Returns None when
+    the embedding backend is unavailable — callers fall back to
+    token-overlap. Returns [] when the corpus is empty / embedded but
+    nothing scored above ``min_similarity``.
+
+    ``min_similarity`` floor (0.45 default) drops the long tail of
+    weakly-related rows. Empirical tuning per real intent is recommended;
+    0.45 ≈ "noticeably related" for typical sentence-transformer models.
+    """
+    from runtime.embedding_service import EmbeddingService, get_shared_embedder
+    if not EmbeddingService.backend_available():
+        return None
+    embedder = get_shared_embedder()
+    if embedder is None:
+        return None
+
+    corpus = _load_dictionary_corpus(conn, excluded_categories=excluded_categories)
+    if not corpus:
+        return []
+
+    try:
+        intent_vec = embedder.embed_one(intent)
+    except Exception as exc:
+        logger.warning("intent embed failed: %s", exc)
+        return None
+
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for row in corpus:
+        sim = _cosine(intent_vec, row["embedding"])
+        if sim < min_similarity:
+            continue
+        scored.append((sim, row))
+    scored.sort(key=lambda t: -t[0])
+
+    return [
+        SuggestedPill(
+            object_kind=r["object_kind"],
+            field_path=r["field_path"],
+            score=int(round(sim * 100)),  # surface similarity * 100 as integer score
+            matched_terms=[],  # n/a for semantic match
+            label=r.get("label"),
+            summary=r.get("description"),
+            field_kind=r.get("field_kind"),
+        )
+        for sim, r in scored[:top_n]
+    ]
+
+
 def _suggest_pills_from_data_dictionary(
     intent: str, *, conn: Any, top_n: int = 12, min_score: int = 2,
+    excluded_categories: frozenset[str] = _WORKFLOW_PILL_EXCLUDED_CATEGORIES,
 ) -> list[SuggestedPill]:
-    """Scan registered objects + their effective fields for token overlap with the intent.
+    """Surface candidate pills for the intent.
 
-    Returns top-N (object, field) candidates whose token overlap with the intent
-    meets ``min_score``. Object-level signal (label/summary/category) is combined
-    with field-level signal (label/description) so an object whose fields are
-    relevant scores higher than one whose only its name matches.
+    Strategy: semantic search via pgvector when the embedding backend is
+    available (Fix #2 — concept-level matching that recovers synonyms +
+    rejects spurious token-overlap noise); fall back to token-overlap
+    when the backend isn't available (e.g. semantic-backend container
+    down). Both paths apply ``excluded_categories`` (Fix #1) so
+    ``tool:*`` pills never reach workflow-compose.
+
+    ``excluded_categories`` filters out object-kinds whose category isn't
+    appropriate for workflow composition. Default excludes ``tool`` —
+    MCP tool parameter pills are surfaced for their token overlap with
+    the intent's docstring but they're the wrong KIND of pill for
+    workflow-design. Callers in tool-invocation contexts can pass an
+    empty set to disable the filter.
     """
+    # Try semantic search first. Returns None when backend unavailable —
+    # we fall back to token-overlap. Returns empty list when the corpus
+    # was loaded but nothing scored above threshold OR the embed call
+    # failed mid-flight (e.g. semantic-backend timeout). In the failure
+    # case we ALSO fall back to token-overlap so the caller still gets
+    # candidates; the failure is logged at warning level above.
+    semantic_results = _suggest_pills_via_semantic(
+        intent, conn=conn, top_n=top_n,
+        excluded_categories=excluded_categories,
+    )
+    if semantic_results:
+        return semantic_results
+
+    # Fallback: token-overlap (the original heuristic)
     from runtime.data_dictionary import (
         DataDictionaryBoundaryError,
         list_object_kinds,
@@ -262,6 +501,9 @@ def _suggest_pills_from_data_dictionary(
     for obj in objects:
         object_kind = str(obj.get("object_kind") or "")
         if not object_kind:
+            continue
+        category = str(obj.get("category") or "").strip().lower()
+        if category in excluded_categories:
             continue
         obj_text = " ".join(
             str(obj.get(key) or "")

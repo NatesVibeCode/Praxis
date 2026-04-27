@@ -4,6 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0d10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Praxis" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/console/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/console/icon-192.png" />
   <title>Praxis Operator Console</title>
   <style>
     :root {
@@ -29,6 +34,9 @@
     .header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--bg-raised); }
     .header .title { font-weight: 700; letter-spacing: 0.02em; margin-right: 8px; }
     .header select { flex: 1 1 130px; }
+    .header .notify { font-size: 11px; padding: 7px 10px; }
+    .install-card { margin: 8px 12px 0; padding: 8px 10px; border: 1px solid rgba(45, 212, 191, 0.28); border-radius: 10px; color: var(--fg-dim); background: rgba(45, 212, 191, 0.06); font-size: 11px; line-height: 1.4; }
+    .install-card strong { color: var(--accent); }
     .turns { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
     .bubble { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); max-width: 92%; white-space: pre-wrap; word-wrap: break-word; font-size: 14px; line-height: 1.4; }
     .bubble.user { align-self: flex-end; background: var(--user-bubble); }
@@ -56,7 +64,21 @@
     .status-strip.live { color: var(--accent); }
     .status-strip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-dim); flex: 0 0 auto; }
     .status-strip.live .dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+    .thinking-card { align-self: stretch; border: 1px solid rgba(45, 212, 191, 0.26); border-radius: 12px; padding: 10px 12px; background: linear-gradient(135deg, rgba(45, 212, 191, 0.10), rgba(19, 23, 28, 0.96)); color: var(--fg); font-size: 12px; display: grid; gap: 5px; }
+    .thinking-card .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .thinking-card .detail { color: var(--fg-dim); line-height: 1.35; }
+    .thinking-card .dots span { display: inline-block; width: 4px; height: 4px; margin-right: 4px; border-radius: 50%; background: var(--accent); animation: bounce 1s infinite ease-in-out; }
+    .thinking-card .dots span:nth-child(2) { animation-delay: 0.14s; }
+    .thinking-card .dots span:nth-child(3) { animation-delay: 0.28s; }
+    .trace-list { display: grid; gap: 4px; margin-top: 4px; }
+    .trace-step { display: grid; grid-template-columns: 54px 1fr; gap: 8px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); }
+    .trace-step .state { color: var(--accent); font-size: 10px; text-transform: uppercase; }
+    .trace-step.failed .state { color: var(--error); }
+    .trace-step .copy { min-width: 0; }
+    .trace-step .copy strong { display: block; font-size: 11px; }
+    .trace-step .copy span { display: block; color: var(--fg-dim); overflow-wrap: anywhere; }
     @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+    @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.35; } 40% { transform: translateY(-3px); opacity: 1; } }
     @media (min-width: 720px) {
       .bubble { max-width: 72ch; }
       .composer { padding: 14px 16px; }
@@ -72,11 +94,20 @@
     </div>
   </div>
   <script>
-    // Unregister any leftover mobile-v1 service worker that may be intercepting fetches.
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then((rs) => {
-        for (const r of rs) r.unregister();
-      }).catch(() => {});
+    window.PraxisPWA = { ready: false, registration: null, installPrompt: null };
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      window.PraxisPWA.installPrompt = event;
+      window.dispatchEvent(new Event('praxis-install-ready'));
+    });
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register('/console/sw.js', { scope: '/console' })
+        .then((registration) => {
+          window.PraxisPWA.ready = true;
+          window.PraxisPWA.registration = registration;
+          window.dispatchEvent(new Event('praxis-pwa-ready'));
+        })
+        .catch((err) => console.warn('[console] service worker unavailable:', err && err.message));
     }
     window.addEventListener('error', (e) => {
       const el = document.getElementById('boot-err');
@@ -96,12 +127,7 @@
     const html = htm.bind(React.createElement);
     const { useState, useEffect, useRef, useCallback } = React;
 
-    const PROVIDERS = [
-      { value: 'claude',   label: 'Claude CLI' },
-      { value: 'codex',    label: 'Codex CLI' },
-      { value: 'gemini',   label: 'Gemini CLI' },
-      { value: 'openrouter', label: 'OpenRouter (API)' },
-    ];
+    const CHAT_MODEL_LABEL = 'DeepSeek V4 Pro';
 
     const PERMISSION_MODES = [
       { value: 'read_only',     label: 'read only' },
@@ -131,12 +157,11 @@
     // --- API client --------------------------------------------------------
 
     async function api(token, method, path, body) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch(path, {
         method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       const text = await res.text();
@@ -165,8 +190,10 @@
     // `data: ...\n\n` framing ourselves. onEvent is called for every parsed
     // JSON event payload. The signal aborts the underlying fetch.
     async function streamTurnEvents(token, id, onEvent, signal) {
+      const headers = { 'Accept': 'text/event-stream' };
+      if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch(`/api/agent-sessions/agents/${id}/stream`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'text/event-stream' },
+        headers,
         signal,
       });
       if (!res.ok || !res.body) {
@@ -201,9 +228,57 @@
       }
     }
 
+    // --- Phone app + notifications ---------------------------------------
+
+    function isStandaloneApp() {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    }
+
+    function notificationCapability() {
+      if (!('Notification' in window)) return 'unsupported';
+      if (!('serviceWorker' in navigator)) return 'unsupported';
+      if (!window.isSecureContext) return 'needs_https';
+      return Notification.permission || 'default';
+    }
+
+    async function requestNotifications() {
+      const capability = notificationCapability();
+      if (capability === 'unsupported' || capability === 'needs_https') return capability;
+      const permission = await Notification.requestPermission();
+      return permission;
+    }
+
+    async function showConsoleNotification(title, body) {
+      if (notificationCapability() !== 'granted') return;
+      try {
+        const registration = window.PraxisPWA.registration || await navigator.serviceWorker.ready;
+        if (registration && registration.active) {
+          registration.active.postMessage({
+            type: 'praxis.notify',
+            title,
+            body,
+            tag: 'praxis-console-agent',
+          });
+          return;
+        }
+        if (registration && registration.showNotification) {
+          await registration.showNotification(title, { body, icon: '/console/icon.svg', tag: 'praxis-console-agent' });
+          return;
+        }
+      } catch (err) {
+        console.warn('[console] notification failed:', err && err.message);
+      }
+      try { new Notification(title, { body, icon: '/console/icon.svg', tag: 'praxis-console-agent' }); } catch {}
+    }
+
+    function notificationBodyFromBubble(bubble) {
+      const text = String((bubble && bubble.text) || '').replace(/\s+/g, ' ').trim();
+      return text.length > 160 ? text.slice(0, 157) + '...' : text;
+    }
+
     // --- Components --------------------------------------------------------
 
-    function TokenGate({ onReady }) {
+    function TokenGate({ onReady, notice }) {
       const [value, setValue] = useState('');
       const submit = () => {
         const trimmed = value.trim();
@@ -215,6 +290,7 @@
         <div class="gate-screen">
           <h1>Praxis Operator Console</h1>
           <p>Watch and steer your agents from the road. Paste your PRAXIS_API_TOKEN — stored locally, sent only to the API.</p>
+          ${notice ? html`<p style=${{ color: 'var(--error)' }}>${notice}</p>` : null}
           <input type="password" value=${value} onInput=${(e) => setValue(e.target.value)} placeholder="PRAXIS_API_TOKEN" autofocus />
           <button class="primary" onClick=${submit}>Unlock</button>
         </div>
@@ -250,6 +326,73 @@
       return out;
     }
 
+    function turnPhaseFromEvent(ev) {
+      const type = (ev && ev.type) || '';
+      if (type === 'turn.accepted') {
+        return { kind: 'seen', label: 'Message received', detail: ev.message || 'Praxis has the turn.' };
+      }
+      if (type === 'turn.stage') {
+        return {
+          kind: ev.status === 'failed' ? 'error' : (ev.status === 'ok' ? 'seen' : 'thinking'),
+          key: ev.stage || ev.label || type,
+          status: ev.status || 'running',
+          label: ev.label || ev.stage || 'Turn stage',
+          detail: ev.message || ''
+        };
+      }
+      if (type === 'assistant.thinking') {
+        return { kind: 'thinking', label: 'DeepSeek is thinking', detail: ev.message || 'The model is reading the turn.' };
+      }
+      if (type === 'praxis.lookup' || type === 'praxis.tool_call') {
+        const tool = ev.tool ? ` · ${ev.tool}` : '';
+        return { kind: 'lookup', label: 'Checking Praxis', detail: (ev.message || 'Reading live Praxis state.') + tool };
+      }
+      if (type === 'praxis.lookup.done' || type === 'praxis.tool_result') {
+        return { kind: 'finishing', label: 'Praxis answered', detail: 'DeepSeek is turning that into a reply.' };
+      }
+      if (type === 'error') {
+        return { kind: 'error', label: 'Failed', detail: ev.message || 'The turn failed.' };
+      }
+      if (type === 'assistant' || type === 'assistant.reply') {
+        return null;
+      }
+      return undefined;
+    }
+
+    function mergeStep(steps, phase) {
+      if (!phase) return steps || [];
+      const key = phase.key || phase.label || phase.kind;
+      const next = {
+        key,
+        label: phase.label || 'Working',
+        detail: phase.detail || '',
+        status: phase.status || (phase.kind === 'error' ? 'failed' : phase.kind === 'seen' ? 'ok' : 'running'),
+      };
+      const existing = (steps || []).filter((step) => step.key !== key);
+      return [...existing, next].slice(-8);
+    }
+
+    function ThinkingCard({ phase, steps }) {
+      if (!phase) return null;
+      return html`
+        <div class=${`thinking-card ${phase.kind || 'thinking'}`}>
+          <div class="eyebrow">${phase.label}</div>
+          <div class="detail">${phase.detail}</div>
+          ${(steps && steps.length) ? html`
+            <div class="trace-list">
+              ${steps.map((step) => html`
+                <div key=${step.key} class=${`trace-step ${step.status === 'failed' ? 'failed' : ''}`}>
+                  <div class="state">${step.status || 'run'}</div>
+                  <div class="copy"><strong>${step.label}</strong><span>${step.detail}</span></div>
+                </div>
+              `)}
+            </div>
+          ` : null}
+          <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+        </div>
+      `;
+    }
+
     function PlanActions({ onApprove, onReject, onEdit, busy, escalateTo }) {
       return html`
         <div class="plan-actions">
@@ -263,13 +406,17 @@
     function Chat({ token, onLogout }) {
       const [agents, setAgents]         = useState([]);
       const [activeId, setActiveId]     = useState(localStorage.getItem(ACTIVE_KEY) || null);
-      const [provider, setProvider]     = useState('claude');
       const [mode, setMode]             = useState('propose_edits');
       const [bubbles, setBubbles]       = useState([]);
       const [draft, setDraft]           = useState('');
       const [busy, setBusy]             = useState(false);
       const [streaming, setStreaming]   = useState(false);
       const [status, setStatus]         = useState('');
+      const [turnPhase, setTurnPhase]   = useState(null);
+      const [turnSteps, setTurnSteps]   = useState([]);
+      const [notifyState, setNotifyState] = useState(notificationCapability());
+      const [standalone, setStandalone] = useState(isStandaloneApp());
+      const [installReady, setInstallReady] = useState(Boolean(window.PraxisPWA.installPrompt));
       const bottomRef = useRef(null);
 
       const scrollToBottom = useCallback(() => {
@@ -281,7 +428,7 @@
           const list = await listAgents(token);
           setAgents(Array.isArray(list) ? list : []);
         } catch (err) {
-          if (err.status === 401 || err.status === 403) { onLogout(); return; }
+          if (err.status === 401 || err.status === 403) { onLogout('Access code rejected. Paste the current code printed by ./scripts/operator-console url.'); return; }
           setStatus(`agent list failed: ${err.message}`);
         }
       }, [token, onLogout]);
@@ -304,27 +451,73 @@
           setBubbles(out);
           setTimeout(scrollToBottom, 0);
         } catch (err) {
+          if (err.status === 401 || err.status === 403) { onLogout('Access code rejected. Paste the current code printed by ./scripts/operator-console url.'); return; }
           setStatus(`history load failed: ${err.message}`);
         }
       }, [token, scrollToBottom]);
 
       useEffect(() => { refreshAgents(); }, [refreshAgents]);
       useEffect(() => {
+        const syncInstall = () => {
+          setNotifyState(notificationCapability());
+          setStandalone(isStandaloneApp());
+          setInstallReady(Boolean(window.PraxisPWA.installPrompt));
+        };
+        window.addEventListener('praxis-pwa-ready', syncInstall);
+        window.addEventListener('praxis-install-ready', syncInstall);
+        window.matchMedia('(display-mode: standalone)').addEventListener?.('change', syncInstall);
+        syncInstall();
+        return () => {
+          window.removeEventListener('praxis-pwa-ready', syncInstall);
+          window.removeEventListener('praxis-install-ready', syncInstall);
+          window.matchMedia('(display-mode: standalone)').removeEventListener?.('change', syncInstall);
+        };
+      }, []);
+      useEffect(() => {
+        setTurnPhase(null);
+        setTurnSteps([]);
         if (activeId) { localStorage.setItem(ACTIVE_KEY, activeId); loadHistory(activeId); }
         else { localStorage.removeItem(ACTIVE_KEY); setBubbles([]); }
       }, [activeId, loadHistory]);
+
+      const enableNotifications = async () => {
+        const result = await requestNotifications();
+        setNotifyState(result);
+        if (result === 'granted') {
+          setStatus('notifications on');
+          await showConsoleNotification('Praxis notifications on', 'I can notify you when agent replies land.');
+        } else if (result === 'needs_https') {
+          setStatus('notifications need HTTPS / secure Tailscale Serve');
+        } else {
+          setStatus(`notifications ${result}`);
+        }
+      };
+
+      const installApp = async () => {
+        if (window.PraxisPWA.installPrompt) {
+          const prompt = window.PraxisPWA.installPrompt;
+          window.PraxisPWA.installPrompt = null;
+          setInstallReady(false);
+          await prompt.prompt();
+          setStandalone(isStandaloneApp());
+        } else {
+          setStatus('iPhone: Share button, then Add to Home Screen');
+        }
+      };
 
       const newAgent = async () => {
         setBusy(true);
         setStatus('creating agent…');
         try {
-          const agent = await createAgent(token, { provider, permission_mode: mode });
+          const agent = await createAgent(token, { permission_mode: mode });
           await refreshAgents();
           setActiveId(agent.agent_id);
           setBubbles([]);
           setStatus('');
+          return agent;
         } catch (err) {
           setStatus(`create failed: ${err.message}`);
+          return null;
         } finally {
           setBusy(false);
         }
@@ -332,10 +525,18 @@
 
       const dispatchMessage = useCallback(async (prompt, turnMode) => {
         if (!prompt || busy) return;
-        if (!activeId) { await newAgent(); if (!activeId) return; }
+        let turnAgentId = activeId;
+        if (!turnAgentId) {
+          const agent = await newAgent();
+          turnAgentId = agent && agent.agent_id;
+          if (!turnAgentId) return;
+        }
         setBusy(true);
         setStreaming(true);
-        setStatus('steering…');
+        setStatus('sending…');
+        const sendingPhase = { kind: 'sending', key: 'client_send', status: 'running', label: 'Sending', detail: 'Sending your message to Praxis.' };
+        setTurnPhase(sendingPhase);
+        setTurnSteps([sendingPhase]);
         setBubbles((prev) => [...prev, { role: 'user', text: prompt, permission_mode: turnMode }]);
         setTimeout(scrollToBottom, 0);
 
@@ -344,14 +545,25 @@
         const streamCtrl = new AbortController();
         let streamedAny = false;
 
-        const streamPromise = streamTurnEvents(token, activeId, (ev) => {
+        const streamPromise = streamTurnEvents(token, turnAgentId, (ev) => {
+          const nextPhase = turnPhaseFromEvent(ev);
+          if (nextPhase === null) {
+            setTurnPhase(null);
+          } else if (nextPhase) {
+            setTurnPhase(nextPhase);
+            setTurnSteps((prev) => mergeStep(prev, nextPhase));
+          }
           const bubbles = turnEventBubbles([ev], turnMode);
           if (bubbles.length) {
             streamedAny = true;
             setBubbles((prev) => [...prev, ...bubbles]);
+            const last = bubbles[bubbles.length - 1];
+            if (document.hidden && (last.role === 'assistant' || last.role === 'error')) {
+              showConsoleNotification(last.role === 'error' ? 'Praxis agent error' : 'Praxis agent replied', notificationBodyFromBubble(last));
+            }
             setTimeout(scrollToBottom, 0);
           }
-          setStatus('agent is working…');
+          setStatus(nextPhase && nextPhase.label ? nextPhase.label.toLowerCase() : 'agent is working…');
         }, streamCtrl.signal).catch((err) => {
           if (err && err.name !== 'AbortError') {
             console.warn('[console] stream error:', err.message);
@@ -361,7 +573,7 @@
         let postResult = null;
         let postError = null;
         try {
-          postResult = await sendMessage(token, activeId, { prompt, permission_mode: turnMode });
+          postResult = await sendMessage(token, turnAgentId, { prompt, permission_mode: turnMode });
         } catch (err) {
           postError = err;
         } finally {
@@ -371,13 +583,27 @@
         }
 
         if (postError) {
+          if (postError.status === 401 || postError.status === 403) {
+            onLogout('Access code rejected. Paste the current code printed by ./scripts/operator-console url.');
+            return;
+          }
           setBubbles((prev) => [...prev, {
             role: 'error',
             text: postError.message,
             meta: (postError.detail && postError.detail.error_code) || 'error',
             permission_mode: turnMode,
           }]);
+          const failedPhase = { kind: 'error', key: 'post_error', status: 'failed', label: 'Failed', detail: postError.message };
+          setTurnPhase(failedPhase);
+          setTurnSteps((prev) => mergeStep(prev, failedPhase));
+          if (document.hidden) {
+            showConsoleNotification('Praxis agent error', postError.message);
+          }
         } else if (!streamedAny && postResult) {
+          for (const ev of (postResult.turn_events || [])) {
+            const phase = turnPhaseFromEvent(ev);
+            if (phase) setTurnSteps((prev) => mergeStep(prev, phase));
+          }
           // Stream delivered nothing (maybe it never connected). Fall back
           // to the POST response's turn_events so the user still sees the reply.
           const replies = turnEventBubbles(postResult.turn_events, turnMode);
@@ -385,9 +611,18 @@
             replies.push({ role: 'assistant', text: postResult.reply, permission_mode: turnMode });
           }
           setBubbles((prev) => [...prev, ...replies]);
+          const last = replies[replies.length - 1];
+          if (document.hidden && last) {
+            showConsoleNotification('Praxis agent replied', notificationBodyFromBubble(last));
+          }
+          setTurnPhase(null);
         }
 
         setStatus('');
+        if (!postError) {
+          setTurnPhase(null);
+          setTurnSteps([]);
+        }
         setBusy(false);
         setTimeout(scrollToBottom, 0);
       }, [activeId, busy, token, scrollToBottom]);
@@ -422,16 +657,23 @@
 
       return html`
         <div class="header">
-          <div class="title">praxis</div>
-          <select value=${provider} onChange=${(e) => setProvider(e.target.value)} disabled=${busy}>
-            ${PROVIDERS.map((p) => html`<option key=${p.value} value=${p.value}>${p.label}</option>`)}
-          </select>
+          <div class="title">praxis · ${CHAT_MODEL_LABEL}</div>
           <select value=${mode} onChange=${(e) => setMode(e.target.value)} disabled=${busy}>
             ${PERMISSION_MODES.map((m) => html`<option key=${m.value} value=${m.value}>${m.label}</option>`)}
           </select>
+          <button class="notify" onClick=${enableNotifications} disabled=${busy || notifyState === 'granted'}>
+            ${notifyState === 'granted' ? 'alerts on' : notifyState === 'needs_https' ? 'alerts need https' : 'alerts'}
+          </button>
           <button onClick=${newAgent} disabled=${busy}>new</button>
-          <button onClick=${onLogout} title="forget token">lock</button>
         </div>
+        ${standalone ? null : html`
+          <div class="install-card" onClick=${installApp}>
+            <strong>Install:</strong>
+            ${installReady
+              ? 'Tap here to install Praxis.'
+              : 'Android Chrome: tap ⋮, then Install app or Add to Home screen. If that option is missing, refresh this HTTPS page once.'}
+          </div>
+        `}
         <div class="agents-bar">
           ${agents.length === 0 ? html`<div class="chip" onClick=${newAgent}>+ start one</div>` : null}
           ${agents.map((a) => {
@@ -444,7 +686,7 @@
         </div>
         <div class=${`status-strip${streaming ? ' live' : ''}`}>
           <span class="dot"></span>
-          ${activeAgent ? `${activeAgent.agent_slug || activeAgent.provider || ''} · ${activeAgent.status || ''}` : 'no agent'}
+          ${activeAgent ? `${CHAT_MODEL_LABEL} · ${activeAgent.status || ''}` : 'no agent'}
           ${status ? html`<span>· ${status}</span>` : null}
           ${streaming ? html`<span>· watching</span>` : null}
         </div>
@@ -477,6 +719,7 @@
                 `;
               })
           }
+          ${turnPhase ? html`<${ThinkingCard} phase=${turnPhase} steps=${turnSteps} />` : null}
         </div>
         <div class="composer">
           <textarea
@@ -487,7 +730,7 @@
             disabled=${busy}
           />
           <div class="composer-actions">
-            <div style=${{ color: 'var(--fg-dim)', fontSize: '11px' }}>${provider} · ${mode.replace('_', ' ')}</div>
+            <div style=${{ color: 'var(--fg-dim)', fontSize: '11px' }}>${CHAT_MODEL_LABEL} · ${mode.replace('_', ' ')}</div>
             <button class="primary" onClick=${send} disabled=${busy || !draft.trim()}>${busy ? '…' : 'send'}</button>
           </div>
         </div>
@@ -496,12 +739,17 @@
 
     function App() {
       const [token, setToken] = useState(localStorage.getItem(TOKEN_KEY) || '');
-      const handleLogout = () => {
+      const [notice, setNotice] = useState('');
+      const handleLogout = (message) => {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(ACTIVE_KEY);
+        setNotice(message || '');
         setToken('');
       };
-      if (!token) return html`<${TokenGate} onReady=${setToken} />`;
+      const handleReady = (nextToken) => {
+        setNotice('');
+        setToken(nextToken);
+      };
       return html`<${Chat} token=${token} onLogout=${handleLogout} />`;
     }
 

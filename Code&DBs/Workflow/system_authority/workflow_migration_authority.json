@@ -292,7 +292,11 @@
     "277_register_promote_experiment_winner.sql",
     "278_register_openrouter_picker_candidates.sql",
     "278_register_search_query_operations.sql",
-    "279_register_bug_triage_packet_operation.sql"
+    "279_authority_object_registry_query_kind.sql",
+    "279_register_bug_triage_packet_operation.sql",
+    "280_promote_picker_winners.sql",
+    "281_register_access_control_operation.sql",
+    "282_admit_picker_winners_to_access_matrix.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -7247,6 +7251,7 @@
         "object_name": "operation_catalog_registry.search.db"
       }
     ],
+    "279_authority_object_registry_query_kind.sql": [],
     "279_register_bug_triage_packet_operation.sql": [
       {
         "object_type": "row",
@@ -7259,6 +7264,72 @@
       {
         "object_type": "row",
         "object_name": "operation_catalog_registry.operator.bug_triage_packet"
+      }
+    ],
+    "280_promote_picker_winners.sql": [
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.plan_synthesis.openrouter.google/gemini-3-flash-preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.plan_fork_author.openrouter.google/gemini-3-flash-preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.plan_pill_match.openrouter.openai/gpt-5.4-mini"
+      }
+    ],
+    "281_register_access_control_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.access_control.denial.changed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.access_control"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.access_control_denial_changed_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.access_control"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.access_control"
+      }
+    ],
+    "282_admit_picker_winners_to_access_matrix.sql": [
+      {
+        "object_type": "row",
+        "object_name": "private_provider_api_job_allowlist.praxis.plan_synthesis.openrouter.google/gemini-3-flash-preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "private_provider_api_job_allowlist.praxis.plan_fork_author.openrouter.google/gemini-3-flash-preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "private_provider_api_job_allowlist.praxis.plan_pill_match.openrouter.openai/gpt-5.4-mini"
+      },
+      {
+        "object_type": "row",
+        "object_name": "private_provider_api_job_allowlist.scratch_agent.plan_synthesis.openrouter.google/gemini-3-flash-preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "private_provider_api_job_allowlist.scratch_agent.plan_fork_author.openrouter.google/gemini-3-flash-preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "private_provider_api_job_allowlist.scratch_agent.plan_pill_match.openrouter.openai/gpt-5.4-mini"
+      },
+      {
+        "object_type": "view",
+        "object_name": "task_type_routing_admission_audit"
       }
     ]
   },
@@ -7556,7 +7627,11 @@
       "277_register_promote_experiment_winner.sql",
       "278_register_openrouter_picker_candidates.sql",
       "278_register_search_query_operations.sql",
-      "279_register_bug_triage_packet_operation.sql"
+      "279_authority_object_registry_query_kind.sql",
+      "279_register_bug_triage_packet_operation.sql",
+      "280_promote_picker_winners.sql",
+      "281_register_access_control_operation.sql",
+      "282_admit_picker_winners_to_access_matrix.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -7725,6 +7800,10 @@
     "278": [
       "278_register_openrouter_picker_candidates.sql",
       "278_register_search_query_operations.sql"
+    ],
+    "279": [
+      "279_authority_object_registry_query_kind.sql",
+      "279_register_bug_triage_packet_operation.sql"
     ]
   }
 }

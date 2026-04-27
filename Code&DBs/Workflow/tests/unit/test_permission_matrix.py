@@ -231,8 +231,9 @@ def test_gemini_builder_honors_model_env(monkeypatch: pytest.MonkeyPatch) -> Non
 # --- API provider permission normalization (B.5) ---------------------------
 
 
-def test_api_providers_include_openrouter() -> None:
+def test_api_providers_include_console_routes() -> None:
     assert "openrouter" in API_PROVIDERS
+    assert "together" in API_PROVIDERS
 
 
 def test_api_permission_prompt_suffix_returns_empty_for_none_mode() -> None:
@@ -260,7 +261,7 @@ def test_api_permission_prompt_suffix_returns_empty_for_unknown_mode() -> None:
 def test_api_permission_prompt_suffix_names_each_mode(
     mode: str, required_fragment: str,
 ) -> None:
-    suffix = api_permission_prompt_suffix("openrouter", mode)
+    suffix = api_permission_prompt_suffix("together", mode)
     assert suffix  # non-empty
     assert required_fragment in suffix
 
@@ -651,13 +652,32 @@ def test_console_html_streams_turn_events_live(monkeypatch: pytest.MonkeyPatch) 
     assert "getReader()" in body
     # The client must carry the bearer token on the stream (browser
     # EventSource can't, which is why we use fetch).
-    assert "'Authorization': `Bearer ${token}`" in body
+    assert "headers.Authorization = `Bearer ${token}`" in body
     # Stream must be abortable so the client can stop it when a turn ends.
     assert "AbortController" in body
     # Live-streaming indicator CSS + React state must ship together.
     assert "setStreaming" in body
     assert ".status-strip.live" in body
     assert "@keyframes pulse" in body
+
+
+def test_console_html_registers_pwa_and_notifications(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi.testclient import TestClient
+    from surfaces.api import rest
+
+    monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
+    with TestClient(rest.app) as client:
+        response = client.get("/console")
+    body = response.text
+
+    assert 'rel="manifest"' in body
+    assert "/console/manifest.webmanifest" in body
+    assert "serviceWorker.register('/console/sw.js'" in body
+    assert "Notification.requestPermission" in body
+    assert "showConsoleNotification" in body
+    assert "Install app or Add to Home screen" in body
 
 
 def test_console_html_language_reflects_watching_and_steering(

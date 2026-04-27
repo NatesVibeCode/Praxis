@@ -143,7 +143,11 @@ def _build_synthesis_prompt(
     if span_count > 0:
         target_clause = (
             f"Emit one packet seed per recognized span (~{span_count} here). "
-            f"Use the suggested_step labels above as packet labels when they fit."
+            f"Suggested_step labels above are HINTS — only use them when the "
+            f"suggested label semantically matches THIS intent's domain. "
+            f"When the suggestions don't fit (e.g. they're from a different "
+            f"problem domain than what the operator wrote), emit fresh, "
+            f"intent-specific labels grounded in the actual prose."
         )
     else:
         # Recognition produced no spans; fall back to the work-volume framing

@@ -1,0 +1,182 @@
+P1	OPEN	WIRING	BUG-026AB2E7	praxis_graph_projection fails on empty decision_ref row		blocks_v1	Foundation reliability and authority health	
+P1	OPEN	WIRING	BUG-BD989209	/orient standing_orders projection fails with missing scope_clamp column		blocks_v1	Foundation reliability and authority health	
+P1	OPEN	WIRING	BUG-70706DC9	Sandbox auth seeding hardcodes provider credential homes outside credential CQRS	C_credential_mechanical_capability			
+P3	OPEN	VERIFY	BUG-C3800386	Dashboard quick reference contains static provider circuit and model values	F_picker_helper_leaks			
+P1	OPEN	ARCHITECTURE	BUG-023252F7	Docker and sandbox setup install and mount provider CLIs outside catalog authority	C_credential_mechanical_capability			
+P1	OPEN	WIRING	BUG-ADAEB359	Permission matrix hardcodes provider allowlists outside provider catalog	F_picker_helper_leaks	blocks_v1	Agent registry and routing control plane	
+P1	FIX_PENDING_VERIFICATION	ARCHITECTURE	BUG-1B959922	Runtime profiles hardcode provider env vars and model allowlists outside effective catalog	A_provider_catalog_authority	candidate_fixed_pending_evidence	Agent registry and routing control plane	
+P1	FIX_PENDING_VERIFICATION	ARCHITECTURE	BUG-D4CC68A9	provider_transport built-in defaults remain executable fallback authority	A_provider_catalog_authority	candidate_fixed_pending_evidence	Agent registry and routing control plane	
+P2	OPEN	WIRING	BUG-80CF188A	Compiler route catalog bypasses effective provider job catalog	E_compiler_rollover_spec_integration	blocks_v1	Agent registry and routing control plane	
+P2	OPEN	WIRING	BUG-C7B9D6F2	Provider cost and budget posture is not exposed through effective catalog CQRS	D_cost_and_catalog_operations	blocks_v1	Agent registry and routing control plane	
+P2	OPEN	WIRING	BUG-DF343C7D	Credential availability is not projected into provider capability CQRS	C_credential_mechanical_capability	blocks_v1	Agent registry and routing control plane	
+P1	OPEN	RUNTIME	BUG-5DFF1C68	Provider transport admission filter fail-opens when admissions table is missing	B_fail_closed_breakers	blocks_v1	Agent registry and routing control plane	
+P1	OPEN	RUNTIME	BUG-2D9A6DED	Manual circuit breaker override query failure erases force-open decisions	B_fail_closed_breakers	blocks_v1	Agent registry and routing control plane	
+P1	OPEN	RUNTIME	BUG-724759AE	Circuit breaker authority unavailable skips provider preflight	B_fail_closed_breakers	blocks_v1	Agent registry and routing control plane	
+P1	FIX_PENDING_VERIFICATION	WIRING	BUG-EBE27625	CQRS provider capability matrix is missing for effective provider job catalog	A_provider_catalog_authority	candidate_fixed_pending_evidence	Agent registry and routing control plane	
+P1	FIX_PENDING_VERIFICATION	WIRING	BUG-5444AA3C	Route explanation CQRS is missing for provider/model removal reasons	A_provider_catalog_authority	candidate_fixed_pending_evidence	Agent registry and routing control plane	
+P1	OPEN	ARCHITECTURE	BUG-FD42FE1D	compile/submission path calls api_llm despite operator decision + registry binding cli_llm — MCP timeouts on multi-packet submissions when api_llm transport unwired		blocks_v1	Adapter consolidation into the A2A-native kernel	
+P2	FIX_PENDING_VERIFICATION	RUNTIME	BUG-2907B68C	Worker background-consumer loop dies with NameError: _evaluate_ready_specs not defined				
+P2	OPEN	WIRING	BUG-17601F93	praxis workflow query "is the workflow runtime healthy" returns overall=healthy while worker force-fails every run		blocks_v1	Foundation reliability and authority health	
+P1	OPEN	RUNTIME	BUG-0C0C55B1	Worker force-fails every admitted run with workflow.execution_crash; effective workflow-runtime outage		blocks_v1	Foundation reliability and authority health	
+P2	FIX_PENDING_VERIFICATION	ARCHITECTURE	BUG-D2ED53B4	WorkflowMigrationError on praxis-api-server boot		blocks_v1	Foundation reliability and authority health	
+P2	FIX_PENDING_VERIFICATION	WIRING	BUG-1879A498	bin/praxis-compose-env dump-keychain silently skips TOGETHER_API_KEY				
+P1	OPEN	RUNTIME	BUG-F65A9A98	Together API decoder corruption in V4-Pro responses				
+P2	OPEN	OTHER	BUG-3330D2CD	Compiler build_graph renders template stubs instead of semantic-retrieval capability nodes				
+P2	OPEN	OTHER	BUG-B7A075E2	persona_profiles is empty — Moon compose path has no response_contract / system_prompt to teach the LLM the build shape				
+P2	OPEN	OTHER	BUG-D4D0A348	task_type_router resolves no llm_task adapters for any auto/X key — compile_prose silently falls through to deterministic path				
+P2	OPEN	TEST	BUG-52408D6E	Linter rollback can revert command-bus bypass cleanup				
+P1	OPEN	ARCHITECTURE	BUG-25829630	[architecture] Build per-sandbox per-provider credential authority to replace launch-context credential forwarding				credential-authority,sandbox-provisioning,anthropic,docker,post-beta-blocker,architecture-sprint
+P1	OPEN	WIRING	BUG-C0E107A6	Execution transport authority is split across resolver, worker loop, core executor, and CLI runner		blocks_v1	Adapter consolidation into the A2A-native kernel	cluster:execution-transport-split,authority-overlap,remote-lane
+P2	OPEN	WIRING	BUG-25EF566B	Add setup apply as mutating state authority command path				
+P1	OPEN	WIRING	BUG-B0BCB286	Wire execution transport authority through runtime adapters		blocks_v1	Adapter consolidation into the A2A-native kernel	
+P2	OPEN	WIRING	BUG-2529D366	Wire api_models table into runtime model resolution authority		blocks_v1	A2A DB and CQRS kernel	
+P2	OPEN	WIRING	BUG-010C811D	Wire setup wizard apply mode to catalog-backed mutating authority				
+P2	OPEN	WIRING	BUG-22C9EC03	workflow CLI runner has transport implementation dead-end		blocks_v1	Adapter consolidation into the A2A-native kernel	
+P1	OPEN	WIRING	BUG-D3C6352B	execution transport authority never reaches remote lanes		blocks_v1	Adapter consolidation into the A2A-native kernel	
+P1	OPEN	WIRING	BUG-1E77345E	Wire oversight telemetry tables (policy_drift_events/session_blast_radius) into lifecycle runtime				
+P2	OPEN	WIRING	BUG-1D781196	Use ui_shell_route_registry as authoritative source for app shell routing				
+P2	OPEN	WIRING	BUG-9229A265	Wire workflow_spec_ready staging lifecycle into runtime service		blocks_v1	Durable work programs over A2A tasks	
+P2	OPEN	WIRING	BUG-1350534F	Setup apply flow should execute through mutating state authority				
+P2	OPEN	WIRING	BUG-1DEEBF2D	Implement provider onboarding capacity probing for all protocol families		blocks_v1	Agent registry and routing control plane	
+P2	OPEN	WIRING	BUG-FEC8E8E3	Add time-window support to workflow status surface				
+P2	OPEN	WIRING	BUG-AEEC855B	Hardcoded repo paths bypass workspace layout registry				
+P1	OPEN	WIRING	BUG-5DD67C2A	Moon generated nodes leave data dictionary, bindings, imports, and DB object contracts empty				
+P1	OPEN	WIRING	BUG-2729F8B7	Moon generated workflow has no release gates or typed gate contracts				
+P2	OPEN	WIRING	BUG-65964DC8	Regression: capability route conflict still degrades API startup for service lifecycle desired-state				
+P2	OPEN	RUNTIME	BUG-FF7424CC	Regression: data_dictionary_stewardship projector still writes missing object_type contact owner				
+P2	OPEN	VERIFY	BUG-759D70A2	Generated Atlas artifact is stale against live Atlas graph		defer_static_artifact_under_cockpit	Operator cockpit for stateful A2A work	
+P2	OPEN	ARCHITECTURE	BUG-E6D338F6	Atlas read model leaves most nodes unowned		blocks_cockpit_if_atlas_reused	Operator cockpit for stateful A2A work	
+P2	OPEN	WIRING	BUG-363F16A6	Atlas detail panel does not provide authoritative drilldown		blocks_v1	Operator cockpit for stateful A2A work	
+P2	OPEN	WIRING	BUG-AF43D300	Atlas search behaves differently between graph and table		blocks_cockpit_if_atlas_reused	Operator cockpit for stateful A2A work	
+P1	OPEN	RUNTIME	BUG-A274AEBC	Atlas graph is too heavy to inspect reliably		blocks_cockpit_if_atlas_reused	Operator cockpit for stateful A2A work	
+P1	OPEN	ARCHITECTURE	BUG-71AE925E	Atlas default view is not outcome-oriented		defer_taste_gate_under_cockpit	Operator cockpit for stateful A2A work	
+P2	OPEN	RUNTIME	BUG-DDFA8F9E	Support Intake proof run blocked by missing OpenAI credential				
+P1	OPEN	RUNTIME	BUG-40494726	Connector auto-builder aborts the full run instead of emitting downstream mock artifacts after early discovery failure		later_integration_adapter	Adapter consolidation into the A2A-native kernel	
+P2	OPEN	WIRING	BUG-F8C9F5B5	[hygiene-2026-04-24/db-authority-orphans] Data dictionary still exposes DB authority tables with no production runtime owner		blocks_v1	A2A DB and CQRS kernel	
+P2	OPEN	ARCHITECTURE	BUG-F8B4EDE7	[hygiene-2026-04-24/mobile-agent-sessions-authority] Agent sessions API owns provider execution, workflow launch, approval, DB writes, and compatibility exports in one surface module				
+P1	OPEN	VERIFY	BUG-D39EBC3F	workflow health reports healthy while projections are critical and routes are unhealthy		blocks_v1	Foundation reliability and authority health	
+P2	OPEN	RUNTIME	BUG-5861F7F9	Moon trigger picker hangs while loading available triggers because catalog API does not return				
+P2	OPEN	WIRING	BUG-8DADDD64	Moon compose creates local drafts with no trigger or jobs, leaving release dispatch disabled				
+P2	OPEN	WIRING	BUG-F758C3D4	Dev UI API cannot import generated connector artifacts from artifacts.connectors				
+P1	OPEN	RUNTIME	BUG-3CC5D3AD	Moon dev API crash loop blocks compose engine handoff				
+P1	OPEN	RUNTIME	BUG-AA7CA63D	Workflow docker_packet_only sandbox fails with too many open files				
+P2	OPEN	ARCHITECTURE	BUG-8DB03A36	Refactor workflow submission and run lifecycle spread across front doors and runtime modules				
+P1	OPEN	ARCHITECTURE	BUG-BF734C00	Refactor secrets OAuth and credential resolution spread across adapters registry runtime and memory		blocks_v1	Agent registry and routing control plane	
+P2	OPEN	ARCHITECTURE	BUG-79695B46	Refactor receipts evidence and verification proof pipeline spread across runtime storage and observability		blocks_v1	A2A DB and CQRS kernel	
+P2	OPEN	ARCHITECTURE	BUG-91A91284	Refactor provider routing and runtime-profile admission spread across registry runtime and adapters				
+P1	OPEN	ARCHITECTURE	BUG-DFC8607C	Native service lifecycle is spread across launch scripts, runtime CQRS, surfaces, heartbeat, and setup checks				
+P1	OPEN	ARCHITECTURE	BUG-46A6C7F2	Workspace and scope boundary authority is spread across runtime, registry, adapters, shell wrappers, and tests				
+P1	OPEN	ARCHITECTURE	BUG-268ECD3F	Registry/catalog/tool authority is spread across registry, runtime, surfaces, storage, and tests				
+P1	OPEN	ARCHITECTURE	BUG-9BB04947	Database environment authority is split across shell bootstrap, runtime, surface resolvers, and tests				
+P2	OPEN	ARCHITECTURE	BUG-68256068	Refactor discovery recall query and memory retrieval authority spread across modules				
+P1	OPEN	ARCHITECTURE	BUG-32E01522	Event and receipt projection authority is spread across runtime, storage, observability, subscriptions, and surfaces		blocks_v1	A2A DB and CQRS kernel	
+P2	OPEN	VERIFY	BUG-5D0140CD	Validation and verification contract is spread across test shell, verifier runtime, workflow specs, and queue artifacts				
+P1	OPEN	ARCHITECTURE	BUG-EEE3E88E	Provider routing and admission authority is duplicated across registry, adapters, runtime profiles, and transport code		blocks_v1	Agent registry and routing control plane	
+P1	OPEN	ARCHITECTURE	BUG-2337DB51	Secret and credential resolution is spread across keychain, OAuth, env forwarding, provider transport, and execution backends		blocks_v1	Agent registry and routing control plane	
+P1	OPEN	ARCHITECTURE	BUG-080157FE	Service lifecycle authority is spread across setup, health, scripts, runtime, and target-specific launch paths				
+P1	OPEN	ARCHITECTURE	BUG-F2EA854B	Workflow execution lifecycle is spread across admission, claims, leases, workers, receipts, and status surfaces		blocks_v1	Durable work programs over A2A tasks	
+P2	OPEN	RUNTIME	BUG-C094B483	Strengthen ProviderAdapterContract for cross-cutting concerns				
+P2	OPEN	WIRING	BUG-0FB23DDF	Extract shared client-core library for CLI and API				
+P2	OPEN	ARCHITECTURE	BUG-50389B7D	Centralize environment and configuration resolution				
+P2	OPEN	ARCHITECTURE	BUG-C3582EAA	Unified tool factory for MCP tool surfaces				
+P2	OPEN	ARCHITECTURE	BUG-644C5F2D	Refactor storage layer to reduce repository sprawl				
+P2	OPEN	RUNTIME	BUG-A84383D1	[hygiene-2026-04-23/reload-workaround-authority] praxis_reload mutates live process state without durable operational receipt				
+P1	OPEN	ARCHITECTURE	BUG-9B812B32	[hygiene-2026-04-23/operation-receipts] Operation catalog execution receipts are response decoration instead of atomic durable proof		blocks_v1	A2A DB and CQRS kernel	
+P2	OPEN	VERIFY	BUG-4BBE6C43	[hygiene-2026-04-23/observability-file-receipts] Observability hub and dashboard still read receipt JSON directories beside DB receipt authority				
+P2	OPEN	RUNTIME	BUG-9CA0CB78	Repeated receipt failure: sandbox_error				auto-filed,failure_code:sandbox_error,job_label:execute_packet,failure_category:sandbox_error,provider:unknown,model:unknown,signature:64e3ab41db85b977736b
+P2	OPEN	WIRING	BUG-D92E6B38	[hygiene-2026-04-23/workflow-cli-authority] Modern workflow front door still routes core commands through legacy workflow_cli		blocks_v1	Adapter consolidation into the A2A-native kernel	
+P2	OPEN	VERIFY	BUG-1A4029F2	[hygiene-2026-04-23/graph-authority] Authority-free graph validation accepts unbound workspace and runtime refs				cluster:hygiene-2026-04-23-graph-authority,graph-runtime,validation-drift,workspace-boundary
+P2	OPEN	WIRING	BUG-6AB79F3B	[hygiene-2026-04-23/integration-secret-authority] API and MCP duplicate integration secret writes and preserve env fallback guidance				
+P2	OPEN	VERIFY	BUG-5AA2CCF3	[hygiene-2026-04-23/workflow-history-authority] Workflow history merges process-local fallback into durable status summaries				
+P2	OPEN	ARCHITECTURE	BUG-A63D9317	[hygiene-2026-04-23/connector-builder-authority] Connector registrar auto-imports filesystem clients and writes multiple registry projections				
+P1	OPEN	ARCHITECTURE	BUG-4C7E2290	praxis_wave and workflow_chain split wave authority between in-memory state and Postgres		blocks_v1	Durable work programs over A2A tasks	
+P1	OPEN	ARCHITECTURE	BUG-0AB8A780	[hygiene-2026-04-23/connector-builder-authority] Connector build authority is split between dead codegen artifacts and manifest registry flow		later_integration_adapter	Adapter consolidation into the A2A-native kernel	
+P1	OPEN	ARCHITECTURE	BUG-F9FD6AC3	[hygiene-2026-04-23/runtime-target-setup] Runtime-target setup authority is split across setup wizard, service lifecycle, and operation catalog				
+P2	OPEN	OTHER	BUG-6F69A6DF	Moon node state styling uses filled alarm circles as primary graph language				
+P2	OPEN	RUNTIME	BUG-EAD36E8A	Repeated receipt failure: route.unhealthy				auto-filed,failure_code:route.unhealthy,job_label:execute_packet,failure_category:rate_limit,provider:unknown,model:unknown,signature:229fde0a6af3e5741748
+P1	OPEN	RUNTIME	BUG-AF7C1773	praxis_wave start reports a running wave but observe from a fresh process shows no waves		blocks_v1	Durable work programs over A2A tasks	surface:workflow,cluster:authority-bug-system,wave:wave0,scope:wave-durability
+P2	OPEN	WIRING	BUG-96F12329	Global praxis launcher can route outside the active workspace and hide repo-local fixes				cli-frontdoor,workspace-boundary,authority-drift
+P2	OPEN	RUNTIME	BUG-247C050D	roadmap tree view omits direct child roadmap items		candidate_fixed_pending_evidence	Foundation reliability and authority health	
+P2	OPEN	WIRING	BUG-507AB442	operator_write commit succeeds without roadmap item readback		candidate_fixed_pending_evidence	Foundation reliability and authority health	
+P3	OPEN	VERIFY	BUG-50ACD990	Python dependency audit tool unavailable from repo quality surface				
+P2	OPEN	RUNTIME	BUG-8E1C52AE	Launcher /app returns 503 until the SPA bundle is built locally				
+P1	OPEN	RUNTIME	BUG-90E70AA6	OrbStack migration can leave Docker authority unavailable with root-owned or corrupted VM data				
+P1	OPEN	RUNTIME	BUG-A5FE235C	Native cutover can leave workspace and database authority split across old mount and local runtime				
+P2	OPEN	RUNTIME	BUG-91D41A89	praxis query routes readback questions to empty quality_views rollup		blocks_v1	Foundation reliability and authority health	
+P2	OPEN	RUNTIME	BUG-C4091203	praxis_ingest accepts conversation memory that recall cannot retrieve				
+P2	OPEN	VERIFY	BUG-D7801F5D	No existing workflow receipts for ui_atlas_refinement wave IDs before edit				
+P1	OPEN	ARCHITECTURE	BUG-37D18B71	Atlas missing graph-table toggle and data-graph hierarchy-aware node metadata		defer_atlas_specific_shape_under_cockpit	Operator cockpit for stateful A2A work	
+P2	OPEN	WIRING	BUG-AD8C5792	Missing UI workflow spec directory for ui_atlas_refinement_wave				
+P2	OPEN	TEST	BUG-8742C732	MoonBuildPage dock authority tests fail because node-popout is absent				
+P2	OPEN	ARCHITECTURE	BUG-54EEB8B5	Direct internal imports remain in surfaces/api				
+P2	OPEN	RUNTIME	BUG-07771B2A	Bug duplicate/search surfaces hang during operator filing				deployment,dell,launcher
+P2	OPEN	WIRING	BUG-8B3AED45	App registers /sw.js but the API server returns 404				deployment,dell,launcher
+P2	OPEN	RUNTIME	BUG-22B49805	Hosted app has no canonical rebuild command				
+P2	OPEN	RUNTIME	BUG-8D8C5256	workflow CLI discover and bug search can hang silently				cqrs,operator-surface,discover,bugs-cli
+P2	OPEN	RUNTIME	BUG-DF4CAB94	Manual migration promotion has no safe schema_migrations receipt helper				
+P2	OPEN	RUNTIME	BUG-A9A42870	Repo .env contains BOM/CRLF that breaks shell sourcing				
+P2	OPEN	ARCHITECTURE	BUG-121B5049	Task contract maintain_wiring_health unresolved after 1 iter(s)				audit_contract,maintain_wiring_health
+P2	OPEN	WIRING	BUG-1FB4A132	[hygiene-2026-04-22/agent-skills] Agent skill authority policy has no DB-backed registry or operator surface		blocks_v1	A2A DB and CQRS kernel	cluster:hygiene-2026-04-22-agent-skills,agent-skills,unwired-authority,sidecar-drift,operator-decisions
+P2	OPEN	VERIFY	BUG-A75BC81E	[hygiene-2026-04-22/bug-evidence] Post-receipt hooks swallow ledger and evidence-link failures		blocks_v1	A2A DB and CQRS kernel	cluster:hygiene-2026-04-22-bug-evidence-authority,receipt-store,silent-fallback,observability-gap,evidence-links
+P2	OPEN	RUNTIME	BUG-69870BA5	[hygiene-2026-04-22/bug-evidence] Receipt failure auto-filer uses different identities for counting and dedupe		blocks_v1	A2A DB and CQRS kernel	cluster:hygiene-2026-04-22-bug-evidence-authority,receipt-store,auto-file,dedupe,duplicate-authority
+P1	OPEN	ARCHITECTURE	BUG-1D9FAF57	[hygiene-2026-04-22/bug-evidence] Bug file action accepts underlinked rows despite evidence authority requirement		blocks_v1	A2A DB and CQRS kernel	cluster:hygiene-2026-04-22-bug-evidence-authority,root-cause,bug-evidence,observability,replay-readiness
+P2	OPEN	VERIFY	BUG-08E4B65C	[hygiene-2026-04-22/wiring-audit] Active standing orders are reported as unwired decisions		blocks_v1	A2A DB and CQRS kernel	cluster:hygiene-2026-04-22-wiring-audit,wiring-audit,operator-decisions,observability-drift
+P1	OPEN	ARCHITECTURE	BUG-2CF335E3	[hygiene-2026-04-22/secret-authority] Sandbox env assembly copies host env and dotenv before secret allowlist		blocks_v1	Agent registry and routing control plane	cluster:hygiene-2026-04-22-secret-authority,secret-authority,sandbox,dotenv,env-propagation
+P1	OPEN	WIRING	BUG-25224975	[hygiene-2026-04-22/secret-authority] OAuth refresh reads client credentials directly from process env		blocks_v1	Agent registry and routing control plane	cluster:hygiene-2026-04-22-secret-authority,secret-authority,oauth,keychain-bypass
+P1	OPEN	ARCHITECTURE	BUG-1DBACCD8	[hygiene-2026-04-22/db-authority] Bug surface and documented Postgres fallback read different bug tables		blocks_v1	Foundation reliability and authority health	cluster:hygiene-2026-04-22-db-authority,root-cause,authority-split,bug-surface
+P2	OPEN	RUNTIME	BUG-A3B51E8D	Repeated receipt failure: workflow.timeout				auto-filed,failure_code:workflow.timeout,job_label:wave6_blast_radius_threshold_halve,failure_category:timeout,provider:unknown,model:unknown,signature:5e651fdf9b7fd95288e0
+P2	OPEN	ARCHITECTURE	BUG-EBE6B0E1	security-review-2026-04-22-cors: REST API defaults to wildcard CORS origin				
+P2	OPEN	RUNTIME	BUG-AA6AC4E0	contract-drift::runtime/build_planning_contract.py				
+P2	OPEN	RUNTIME	BUG-EE65C154	dep-audit::vitest — moderate advisory via vite chain; major bump to 4.1.5				dep-audit,npm,security,dev-dep,major-bump,surfaces-app
+P2	OPEN	RUNTIME	BUG-ABBEFC6F	dep-audit::vite — path traversal in .map handling; major bump to 8.0.9				dep-audit,npm,security,dev-dep,major-bump,surfaces-app
+P2	OPEN	OTHER	BUG-34C2F2DA	input-validation::mcp::operator::action_enum_dispatch — multi-action operator tools normalize action without enum check				
+P2	OPEN	OTHER	BUG-419EDA6D	input-validation::rest::observability_roots — /api/observability/code-hotspots roots and path_prefix are unsanitized				
+P2	OPEN	OTHER	BUG-24F87D0F	input-validation::rest::handler_catchall_path — rest_of_path:path routes accept arbitrary path segments with no traversal guard				
+P3	OPEN	VERIFY	BUG-616A0D2E	input-validation::contracts::domain — validate_workflow_request collapses distinct errors to request.graph_invalid				
+P2	OPEN	ARCHITECTURE	BUG-FF008A47	input-validation::mcp::workflow::spec_path — no workspace containment check				
+P2	OPEN	ARCHITECTURE	BUG-AD855F0C	input-validation::rest::workflow_run_request — pydantic models lack field constraints				
+P2	OPEN	ARCHITECTURE	BUG-76A0519D	input-validation::rest::cors — PRAXIS_API_ALLOWED_ORIGINS defaults to wildcard				
+P2	OPEN	RUNTIME	BUG-1980557E	Repeated receipt failure: workflow_submission.required_missing				auto-filed,failure_code:workflow_submission.required_missing,job_label:wave0_migration_capability_ledger,failure_category:infrastructure,provider:unknown,model:unknown,signature:76d3094c50449e0993cc
+P2	OPEN	RUNTIME	BUG-7C5D8AE4	Repeated receipt failure: sandbox_error				auto-filed,failure_code:sandbox_error,job_label:wave0_integrated_design,failure_category:sandbox_error,provider:unknown,model:unknown,signature:04b2528b35c9dfa6a016
+P2	OPEN	RUNTIME	BUG-39D02693	Repeated receipt failure: sandbox_error				auto-filed,failure_code:sandbox_error,job_label:wave0_integrated_design,failure_category:sandbox_error,provider:unknown,model:unknown,signature:90e94ba32cefea9e284b
+P2	OPEN	RUNTIME	BUG-AAE46E22	dep-audit::anthropic minor bump 0.86.0 -> 0.87.0 required (CVE-2026-34450, CVE-2026-34452)				dep-audit,python,anthropic,cve-2026-34450,cve-2026-34452
+P2	OPEN	OTHER	bug.2a66ce827c.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.67f9968048.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.7e0f249aa7.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.9557bfd3bc.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.6bd2c3bee7.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.d48079a039.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.3bab0a06e3.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.4379d5d19c.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.227b891bbf.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.f2d2213feb.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.044572c78f.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.780c33a110.activity-truth.cockpit	Activity truth evidence drift requires explicit review				
+P2	OPEN	OTHER	bug.7ff24e26a4.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.7ff24e26a4.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.18b8f30517.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.18b8f30517.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.db79c7cf95.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.db79c7cf95.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.701142f92e.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.701142f92e.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.5f7f34b6e5.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.5f7f34b6e5.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.7c47901e45.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.7c47901e45.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.4402d457dd.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.4402d457dd.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.fba4f99a60.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.fba4f99a60.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.fc24c406c2.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.fc24c406c2.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.cf5203b26d.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.cf5203b26d.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.2bd43612d2.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.2bd43612d2.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.98a0019d7b.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.98a0019d7b.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.c131a81647.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.c131a81647.governing.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.3a960d0db7.other.cockpit	Cockpit truth binding bug				
+P2	OPEN	OTHER	bug.3a960d0db7.governing.cockpit	Cockpit truth binding bug				

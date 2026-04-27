@@ -2132,12 +2132,18 @@ class BugTracker:
             f"LIMIT ${next_idx}",
             query, *params, limit * 2,
         )
+        # BUG-9475EEB0: without a similarity floor, the vector branch
+        # returns the top N bugs by raw cosine even when none of them
+        # are about the query — for nonsense queries that's essentially
+        # random recent open bugs. Floor at 0.3 (same default as
+        # module_indexer.search) so vector only contributes hits that
+        # are at least loosely about the query topic.
         vec_rows = vector_query.search(
             "bugs",
             select_columns=("bug_id",),
             filters=vector_filters or None,
             limit=limit * 2,
-            min_similarity=None,
+            min_similarity=0.3,
             score_alias="similarity",
         )
 

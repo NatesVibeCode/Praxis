@@ -1,0 +1,36 @@
+{
+  "ok": true,
+  "stats": {
+    "total": 445,
+    "by_status": {
+      "OPEN": 175,
+      "DEFERRED": 9,
+      "FIXED": 251,
+      "WONT_FIX": 3,
+      "FIX_PENDING_VERIFICATION": 7
+    },
+    "by_severity": {
+      "P0": 15,
+      "P2": 296,
+      "P1": 87,
+      "P3": 47
+    },
+    "by_category": {
+      "RUNTIME": 102,
+      "VERIFY": 38,
+      "OTHER": 80,
+      "WIRING": 107,
+      "ARCHITECTURE": 90,
+      "TEST": 28
+    },
+    "open_count": 175,
+    "mttr_hours": 8.067035453701951,
+    "packet_ready_count": 24,
+    "replay_ready_count": 24,
+    "replay_blocked_count": 151,
+    "fix_verified_count": 244,
+    "underlinked_count": 177,
+    "observability_state": "complete",
+    "errors": []
+  }
+}

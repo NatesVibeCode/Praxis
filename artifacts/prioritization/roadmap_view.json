@@ -1,0 +1,2285 @@
+{
+  "native_instance": {
+    "praxis_instance_name": "praxis",
+    "praxis_receipts_dir": "/Users/nate/Praxis/artifacts/runtime_receipts",
+    "praxis_runtime_profile": "praxis",
+    "praxis_topology_dir": "/Users/nate/Praxis/artifacts/runtime_topology",
+    "repo_root": "/Users/nate/Praxis",
+    "runtime_profiles_config": "/Users/nate/Praxis/config/runtime_profiles.json",
+    "workdir": "/Users/nate/Praxis"
+  },
+  "kind": "roadmap_tree",
+  "instruction_authority": {
+    "kind": "roadmap_tree_instruction_authority",
+    "authority": "surfaces.api.operator_read.query_roadmap_tree",
+    "packet_read_order": [
+      "root_item",
+      "roadmap_item_clusters",
+      "roadmap_items",
+      "roadmap_item_dependencies",
+      "rendered_markdown"
+    ],
+    "roadmap_truth": {
+      "root_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "items": [
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work",
+          "title": "A2A-native stateful server for agentic work",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": null,
+          "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "title": "Intent-aware synthesis prompt compiler",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+          "decision_ref": "decision.2026-04-26.intent-aware-synthesis-prompt-compiler"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+          "title": "Wire recognize_intent output into synthesis prompt",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "decision_ref": "decision.2026-04-26.wire-recognize-intent-output-into-synthesis-prompt"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+          "title": "Foundation reliability and authority health",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+          "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+          "title": "A2A protocol surface",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+          "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+          "title": "A2A DB and CQRS kernel",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+          "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+          "title": "Agent registry and routing control plane",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+          "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+          "title": "Durable work programs over A2A tasks",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+          "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+          "title": "Operator cockpit for stateful A2A work",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+          "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel",
+          "title": "Adapter consolidation into the A2A-native kernel",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+          "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull",
+          "title": "Embedding-rank pill suggestions instead of alphabetical pull",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "decision_ref": "decision.2026-04-26.embedding-rank-pill-suggestions-instead-of-alphabetical-pull"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+          "title": "Filter stage dictionary by recognized verbs",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p2",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "decision_ref": "decision.2026-04-26.filter-stage-dictionary-by-recognized-verbs"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+          "title": "Slim PlanPacket schema in synthesis to seed-only fields",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "decision_ref": "decision.2026-04-26.slim-planpacket-schema-in-synthesis-to-seed-only-fields"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+          "title": "Few-shot worked example retrieved from prior compile receipts",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p1",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "decision_ref": "decision.2026-04-26.few-shot-worked-example-retrieved-from-prior-compile-receipts"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+          "title": "Synthesis temperature 0.2 instead of 0.0",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p2",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "decision_ref": "decision.2026-04-26.synthesis-temperature-0-2-instead-of-0-0"
+        },
+        {
+          "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example",
+          "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example",
+          "title": "Replace OUTPUT placeholder template with rendered typed example",
+          "status": "active",
+          "lifecycle": "planned",
+          "priority": "p2",
+          "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+          "decision_ref": "decision.2026-04-26.replace-output-placeholder-template-with-rendered-typed-example"
+        }
+      ]
+    },
+    "queue_refs": {
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example"
+      ]
+    },
+    "directive": "Read roadmap_item_clusters before individual roadmap_items so related waves stay batched by default."
+  },
+  "as_of": "2026-04-27T00:53:46.358794+00:00",
+  "root_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+  "counts": {
+    "roadmap_items": 16,
+    "roadmap_item_clusters": 8,
+    "roadmap_item_dependencies": 6,
+    "work_item_assessments": 16,
+    "semantic_neighbors": 2
+  },
+  "root_item": {
+    "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+    "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work",
+    "title": "A2A-native stateful server for agentic work",
+    "item_kind": "initiative",
+    "status": "active",
+    "lifecycle": "planned",
+    "priority": "p1",
+    "parent_roadmap_item_id": null,
+    "source_bug_id": null,
+    "source_idea_id": null,
+    "registry_paths": [],
+    "summary": "Re-center Praxis V1 around being a stateful A2A server: first-class A2A agent/task/message/artifact/status surfaces mapped into durable Praxis work programs, routing, memory, audit, authority, and operator control without reducing Praxis to protocol compliance.",
+    "acceptance_criteria": {
+      "tier": "tier_1",
+      "must_have": [
+        "Re-center Praxis V1 around being a stateful A2A server: first-class A2A agent/task/message/artifact/status surfaces mapped into durable Praxis work programs, routing, memory, audit, authority, and operator control without reducing Praxis to protocol compliance."
+      ],
+      "phase_order": "1",
+      "phase_ready": false,
+      "approval_tag": "operator-write-2026-04-26",
+      "outcome_gate": "Praxis exposes an A2A-compatible server surface; A2A agents, skills, tasks, messages, artifacts, and statuses have explicit DB/CQRS mappings; existing provider registry, workflow runs, evidence, receipts, and operator UI are mapped under durable work programs; competing roadmap and bug work is classified as foundation, core, adapter, later, or retire."
+    },
+    "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+    "target_start_at": null,
+    "target_end_at": null,
+    "completed_at": null,
+    "created_at": "2026-04-26T19:52:43.928253+00:00",
+    "updated_at": "2026-04-26T19:52:43.928253+00:00",
+    "assessment": {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    }
+  },
+  "roadmap_item_clusters": [
+    {
+      "cluster_key": "roadmap.parent:roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "label": "Intent-aware synthesis prompt compiler",
+      "reason_code": "roadmap_cluster.parent_child_wave",
+      "count": 8,
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example"
+      ],
+      "titles": [
+        "Intent-aware synthesis prompt compiler",
+        "Wire recognize_intent output into synthesis prompt",
+        "Embedding-rank pill suggestions instead of alphabetical pull",
+        "Filter stage dictionary by recognized verbs",
+        "Slim PlanPacket schema in synthesis to seed-only fields"
+      ],
+      "status_counts": {
+        "active": 8
+      },
+      "lifecycle_counts": {
+        "planned": 8
+      },
+      "priority_counts": {
+        "p1": 5,
+        "p2": 3
+      },
+      "source_bug_ids": [],
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/plan_section_author.py",
+        "Code&DBs/Workflow/runtime/data_dictionary.py"
+      ],
+      "dependency_roadmap_item_ids": []
+    },
+    {
+      "cluster_key": "roadmap.parent:roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "label": "A2A-native stateful server for agentic work",
+      "reason_code": "roadmap_cluster.parent_child_wave",
+      "count": 8,
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel"
+      ],
+      "titles": [
+        "A2A-native stateful server for agentic work",
+        "Foundation reliability and authority health",
+        "A2A protocol surface",
+        "A2A DB and CQRS kernel",
+        "Agent registry and routing control plane"
+      ],
+      "status_counts": {
+        "active": 8
+      },
+      "lifecycle_counts": {
+        "planned": 8
+      },
+      "priority_counts": {
+        "p1": 8
+      },
+      "source_bug_ids": [],
+      "registry_paths": [],
+      "dependency_roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work"
+      ]
+    },
+    {
+      "cluster_key": "roadmap.decision:operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "label": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "reason_code": "roadmap_cluster.decision_ref",
+      "count": 8,
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel"
+      ],
+      "titles": [
+        "A2A-native stateful server for agentic work",
+        "Foundation reliability and authority health",
+        "A2A protocol surface",
+        "A2A DB and CQRS kernel",
+        "Agent registry and routing control plane"
+      ],
+      "status_counts": {
+        "active": 8
+      },
+      "lifecycle_counts": {
+        "planned": 8
+      },
+      "priority_counts": {
+        "p1": 8
+      },
+      "source_bug_ids": [],
+      "registry_paths": [],
+      "dependency_roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work"
+      ]
+    },
+    {
+      "cluster_key": "roadmap.registry_path:Code&DBs/Workflow/runtime/plan_synthesis.py",
+      "label": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+      "reason_code": "roadmap_cluster.registry_path",
+      "count": 7,
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example"
+      ],
+      "titles": [
+        "Intent-aware synthesis prompt compiler",
+        "Wire recognize_intent output into synthesis prompt",
+        "Filter stage dictionary by recognized verbs",
+        "Slim PlanPacket schema in synthesis to seed-only fields",
+        "Few-shot worked example retrieved from prior compile receipts"
+      ],
+      "status_counts": {
+        "active": 7
+      },
+      "lifecycle_counts": {
+        "planned": 7
+      },
+      "priority_counts": {
+        "p1": 4,
+        "p2": 3
+      },
+      "source_bug_ids": [],
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/plan_section_author.py",
+        "Code&DBs/Workflow/storage/postgres/operation_receipts_repository.py"
+      ],
+      "dependency_roadmap_item_ids": []
+    },
+    {
+      "cluster_key": "roadmap.registry_path:Code&DBs/Workflow/runtime/intent_suggestion.py",
+      "label": "Code&DBs/Workflow/runtime/intent_suggestion.py",
+      "reason_code": "roadmap_cluster.registry_path",
+      "count": 3,
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull"
+      ],
+      "titles": [
+        "Intent-aware synthesis prompt compiler",
+        "Wire recognize_intent output into synthesis prompt",
+        "Embedding-rank pill suggestions instead of alphabetical pull"
+      ],
+      "status_counts": {
+        "active": 3
+      },
+      "lifecycle_counts": {
+        "planned": 3
+      },
+      "priority_counts": {
+        "p1": 3
+      },
+      "source_bug_ids": [],
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/plan_section_author.py",
+        "Code&DBs/Workflow/runtime/data_dictionary.py"
+      ],
+      "dependency_roadmap_item_ids": []
+    },
+    {
+      "cluster_key": "roadmap.registry_path:Code&DBs/Workflow/runtime/plan_section_author.py",
+      "label": "Code&DBs/Workflow/runtime/plan_section_author.py",
+      "reason_code": "roadmap_cluster.registry_path",
+      "count": 3,
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields"
+      ],
+      "titles": [
+        "Intent-aware synthesis prompt compiler",
+        "Filter stage dictionary by recognized verbs",
+        "Slim PlanPacket schema in synthesis to seed-only fields"
+      ],
+      "status_counts": {
+        "active": 3
+      },
+      "lifecycle_counts": {
+        "planned": 3
+      },
+      "priority_counts": {
+        "p1": 2,
+        "p2": 1
+      },
+      "source_bug_ids": [],
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/plan_section_author.py"
+      ],
+      "dependency_roadmap_item_ids": []
+    },
+    {
+      "cluster_key": "roadmap.parent:roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+      "label": "Durable work programs over A2A tasks",
+      "reason_code": "roadmap_cluster.parent_child_wave",
+      "count": 2,
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler"
+      ],
+      "titles": [
+        "Durable work programs over A2A tasks",
+        "Intent-aware synthesis prompt compiler"
+      ],
+      "status_counts": {
+        "active": 2
+      },
+      "lifecycle_counts": {
+        "planned": 2
+      },
+      "priority_counts": {
+        "p1": 2
+      },
+      "source_bug_ids": [],
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/plan_section_author.py"
+      ],
+      "dependency_roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane"
+      ]
+    },
+    {
+      "cluster_key": "roadmap.registry_path:Code&DBs/Workflow/runtime/intent_recognition.py",
+      "label": "Code&DBs/Workflow/runtime/intent_recognition.py",
+      "reason_code": "roadmap_cluster.registry_path",
+      "count": 2,
+      "roadmap_item_ids": [
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+        "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt"
+      ],
+      "titles": [
+        "Intent-aware synthesis prompt compiler",
+        "Wire recognize_intent output into synthesis prompt"
+      ],
+      "status_counts": {
+        "active": 2
+      },
+      "lifecycle_counts": {
+        "planned": 2
+      },
+      "priority_counts": {
+        "p1": 2
+      },
+      "source_bug_ids": [],
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/plan_section_author.py"
+      ],
+      "dependency_roadmap_item_ids": []
+    }
+  ],
+  "roadmap_item_clustering": {
+    "item_kind": "roadmap_item",
+    "authority": "runtime.work_item_clustering.cluster_roadmap_items",
+    "cluster_count": 8,
+    "clustered_item_count": 16,
+    "singleton_count": 0,
+    "grouping_order": [
+      "parent_roadmap_item_id",
+      "source_bug_id",
+      "registry_paths",
+      "decision_ref"
+    ],
+    "membership_policy": "overlapping_clusters_allowed"
+  },
+  "roadmap_items": [
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work",
+      "title": "A2A-native stateful server for agentic work",
+      "item_kind": "initiative",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": null,
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [],
+      "summary": "Re-center Praxis V1 around being a stateful A2A server: first-class A2A agent/task/message/artifact/status surfaces mapped into durable Praxis work programs, routing, memory, audit, authority, and operator control without reducing Praxis to protocol compliance.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Re-center Praxis V1 around being a stateful A2A server: first-class A2A agent/task/message/artifact/status surfaces mapped into durable Praxis work programs, routing, memory, audit, authority, and operator control without reducing Praxis to protocol compliance."
+        ],
+        "phase_order": "1",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "Praxis exposes an A2A-compatible server surface; A2A agents, skills, tasks, messages, artifacts, and statuses have explicit DB/CQRS mappings; existing provider registry, workflow runs, evidence, receipts, and operator UI are mapped under durable work programs; competing roadmap and bug work is classified as foundation, core, adapter, later, or retire."
+      },
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T19:52:43.928253+00:00",
+      "updated_at": "2026-04-26T19:52:43.928253+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+        "freshness_state": "fresh",
+        "resolution_state": "open",
+        "confidence": 0.0,
+        "suggested_action": "none",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "planned",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [],
+        "evidence_refs": [],
+        "associated_paths": [],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "title": "Intent-aware synthesis prompt compiler",
+      "item_kind": "initiative",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/plan_section_author.py"
+      ],
+      "summary": "Today the synthesis prompt is a fixed 5572-char template that ships the same DATA PILLS / DATA DICTIONARY / TASK blocks for every intent. Live evidence: Together DeepSeek-V4-Pro entered a degenerate We-have16 reasoning loop on a trivial validate/summarize/record intent because the prompt forced 20-packet decomposition with 8 irrelevant tool-parameter pills and a full 5-stage dictionary dump. Fix: compile the synthesis prompt at runtime from recognize_intent output (verbs, spans, suggested_steps) so it ships only relevant pills, only the stages those verbs need, only the seed-shape PlanPacket fields, and a typed worked example. This is the trust-compiler thesis applied to the compile path itself.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Today the synthesis prompt is a fixed 5572-char template that ships the same DATA PILLS / DATA DICTIONARY / TASK blocks for every intent. Live evidence: Together DeepSeek-V4-Pro entered a degenerate We-have16 reasoning loop on a trivial validate/summarize/record intent because the prompt forced 20-packet decomposition with 8 irrelevant tool-parameter pills and a full 5-stage dictionary dump. Fix: compile the synthesis prompt at runtime from recognize_intent output (verbs, spans, suggested_steps) so it ships only relevant pills, only the stages those verbs need, only the seed-shape PlanPacket fields, and a typed worked example. This is the trust-compiler thesis applied to the compile path itself."
+        ],
+        "phase_order": "1",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "Today the synthesis prompt is a fixed 5572-char template that ships the same DATA PILLS / DATA DICTIONARY / TASK blocks for every intent. Live evidence: Together DeepSeek-V4-Pro entered a degenerate We-have16 reasoning loop on a trivial validate/summarize/record intent because the prompt forced 20-packet decomposition with 8 irrelevant tool-parameter pills and a full 5-stage dictionary dump. Fix: compile the synthesis prompt at runtime from recognize_intent output (verbs, spans, suggested_steps) so it ships only relevant pills, only the stages those verbs need, only the seed-shape PlanPacket fields, and a typed worked example. This is the trust-compiler thesis applied to the compile path itself."
+      },
+      "decision_ref": "decision.2026-04-26.intent-aware-synthesis-prompt-compiler",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T20:45:47.484731+00:00",
+      "updated_at": "2026-04-26T20:45:47.484731+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+        "freshness_state": "needs_review",
+        "resolution_state": "open",
+        "confidence": 0.8,
+        "suggested_action": "review_roadmap_scope",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "scope_changed",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [
+          "architecture_changed"
+        ],
+        "evidence_refs": [
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+            "role": "architecture_changed"
+          },
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/intent_suggestion.py",
+            "role": "architecture_changed"
+          },
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_section_author.py",
+            "role": "architecture_changed"
+          }
+        ],
+        "associated_paths": [
+          "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "Code&DBs/Workflow/runtime/intent_suggestion.py",
+          "Code&DBs/Workflow/runtime/intent_recognition.py",
+          "Code&DBs/Workflow/runtime/plan_section_author.py"
+        ],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+      "title": "Wire recognize_intent output into synthesis prompt",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py"
+      ],
+      "summary": "runtime.intent_recognition.recognize_intent already extracts spans, suggested_steps, gaps, and matches for the compile-preview surface \u2014 the synthesis prompt does not consume any of it. Fix: pass the recognition result into _build_synthesis_prompt so the prompt ships a RECOGNIZED STEPS block (the spans Praxis already extracted) and replaces the hardcoded 'up to 20 concrete packet seeds' clause with 'one seed per recognized step (~N here)'. Highest-leverage single change because it kills the 20-packet attractor that triggered the We-have16 loop. Smallest blast radius (touches plan_synthesis.py + intent_suggestion.py only).",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "runtime.intent_recognition.recognize_intent already extracts spans, suggested_steps, gaps, and matches for the compile-preview surface \u2014 the synthesis prompt does not consume any of it. Fix: pass the recognition result into _build_synthesis_prompt so the prompt ships a RECOGNIZED STEPS block (the spans Praxis already extracted) and replaces the hardcoded 'up to 20 concrete packet seeds' clause with 'one seed per recognized step (~N here)'. Highest-leverage single change because it kills the 20-packet attractor that triggered the We-have16 loop. Smallest blast radius (touches plan_synthesis.py + intent_suggestion.py only)."
+        ],
+        "phase_order": "1",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "runtime.intent_recognition.recognize_intent already extracts spans, suggested_steps, gaps, and matches for the compile-preview surface \u2014 the synthesis prompt does not consume any of it. Fix: pass the recognition result into _build_synthesis_prompt so the prompt ships a RECOGNIZED STEPS block (the spans Praxis already extracted) and replaces the hardcoded 'up to 20 concrete packet seeds' clause with 'one seed per recognized step (~N here)'. Highest-leverage single change because it kills the 20-packet attractor that triggered the We-have16 loop. Smallest blast radius (touches plan_synthesis.py + intent_suggestion.py only)."
+      },
+      "decision_ref": "decision.2026-04-26.wire-recognize-intent-output-into-synthesis-prompt",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T20:45:56.582151+00:00",
+      "updated_at": "2026-04-26T20:45:56.582151+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+        "freshness_state": "needs_review",
+        "resolution_state": "open",
+        "confidence": 0.8,
+        "suggested_action": "review_roadmap_scope",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "scope_changed",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [
+          "architecture_changed"
+        ],
+        "evidence_refs": [
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+            "role": "architecture_changed"
+          },
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/intent_suggestion.py",
+            "role": "architecture_changed"
+          }
+        ],
+        "associated_paths": [
+          "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "Code&DBs/Workflow/runtime/intent_recognition.py",
+          "Code&DBs/Workflow/runtime/intent_suggestion.py"
+        ],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+      "title": "Foundation reliability and authority health",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [],
+      "summary": "Make the existing authority plane dependable before A2A becomes a public protocol surface: orient, health, roadmap, graph projection, worker execution, provider routing, and fail-closed admission must produce honest, queryable state.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Make the existing authority plane dependable before A2A becomes a public protocol surface: orient, health, roadmap, graph projection, worker execution, provider routing, and fail-closed admission must produce honest, queryable state."
+        ],
+        "phase_order": "1.1",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "/orient and /api/health respond reliably; roadmap and operator graph projections read without P1 crashes; admitted worker runs do not force-fail; route health reports degraded states honestly; provider and circuit failures fail closed instead of silently selecting unavailable execution paths."
+      },
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T19:54:11.553914+00:00",
+      "updated_at": "2026-04-26T19:54:11.553914+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+        "freshness_state": "fresh",
+        "resolution_state": "open",
+        "confidence": 0.0,
+        "suggested_action": "none",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "planned",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [],
+        "evidence_refs": [],
+        "associated_paths": [],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+      "title": "A2A protocol surface",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [],
+      "summary": "Expose Praxis as an A2A-compatible server with first-class Agent Card, skills, tasks, messages, artifacts, task status, cancellation, and streaming/status exchange semantics.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Expose Praxis as an A2A-compatible server with first-class Agent Card, skills, tasks, messages, artifacts, task status, cancellation, and streaming/status exchange semantics."
+        ],
+        "phase_order": "1.2",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "A2A clients can discover Praxis, inspect its skills, create or resume a task, send and receive messages, attach artifacts, observe status, and cancel work through a protocol-compatible surface backed by Praxis authority."
+      },
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T19:54:32.098056+00:00",
+      "updated_at": "2026-04-26T19:54:32.098056+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+        "freshness_state": "fresh",
+        "resolution_state": "open",
+        "confidence": 0.0,
+        "suggested_action": "none",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "planned",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [],
+        "evidence_refs": [],
+        "associated_paths": [],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+      "title": "A2A DB and CQRS kernel",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [],
+      "summary": "Represent A2A agents, skills, tasks, messages, artifacts, status transitions, and protocol identity as durable DB-backed records and CQRS projections instead of transport-only JSON.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Represent A2A agents, skills, tasks, messages, artifacts, status transitions, and protocol identity as durable DB-backed records and CQRS projections instead of transport-only JSON."
+        ],
+        "phase_order": "1.3",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "Given any A2A task, message, artifact, or agent id, Praxis can query the corresponding work program, run, event, evidence, receipt, route, and operator state through CQRS surfaces without scraping raw payload blobs."
+      },
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T19:54:47.534832+00:00",
+      "updated_at": "2026-04-26T19:54:47.534832+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+        "freshness_state": "fresh",
+        "resolution_state": "open",
+        "confidence": 0.0,
+        "suggested_action": "none",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "planned",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [],
+        "evidence_refs": [],
+        "associated_paths": [],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+      "title": "Agent registry and routing control plane",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [],
+      "summary": "Treat external A2A agents as registered providers: Agent Cards become admitted agent records, A2A skills become capabilities, and routing decisions stay policy-bound, observable, and explainable.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Treat external A2A agents as registered providers: Agent Cards become admitted agent records, A2A skills become capabilities, and routing decisions stay policy-bound, observable, and explainable."
+        ],
+        "phase_order": "1.4",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "An external A2A agent can be registered, inspected, enabled or disabled, routed to, denied with machine-readable reasons, and shown in provider/capability matrices without bypassing credential, circuit, cost, tenant, or lane policy."
+      },
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T19:55:08.045175+00:00",
+      "updated_at": "2026-04-26T19:55:08.045175+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+        "freshness_state": "fresh",
+        "resolution_state": "open",
+        "confidence": 0.0,
+        "suggested_action": "none",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "planned",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [],
+        "evidence_refs": [],
+        "associated_paths": [],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+      "title": "Durable work programs over A2A tasks",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [],
+      "summary": "Make the Praxis work program the durable parent object around A2A tasks, preserving objective, memory, attempts, blockers, decisions, artifacts, run history, and next action across agents and sessions.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Make the Praxis work program the durable parent object around A2A tasks, preserving objective, memory, attempts, blockers, decisions, artifacts, run history, and next action across agents and sessions."
+        ],
+        "phase_order": "1.5",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "One work program can contain multiple A2A tasks from different agents; a later agent can resume the program and see current objective, prior attempts, blockers, decisions, artifacts, and recommended next action without relying on chat history."
+      },
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T19:55:23.511599+00:00",
+      "updated_at": "2026-04-26T19:55:23.511599+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+        "freshness_state": "fresh",
+        "resolution_state": "open",
+        "confidence": 0.0,
+        "suggested_action": "none",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "planned",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [],
+        "evidence_refs": [],
+        "associated_paths": [],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+      "title": "Operator cockpit for stateful A2A work",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [],
+      "summary": "Reframe Moon as the human control room for stateful A2A work: inspect work programs, tasks, routes, artifacts, blockers, approvals, retries, handoffs, and next actions without making the UI the source of truth.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Reframe Moon as the human control room for stateful A2A work: inspect work programs, tasks, routes, artifacts, blockers, approvals, retries, handoffs, and next actions without making the UI the source of truth."
+        ],
+        "phase_order": "1.6",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "A human can open one work program, see its A2A tasks/messages/artifacts/statuses, understand what changed and why, pause or redirect work, approve or retry actions, and hand the work to another agent without reading raw logs or chat residue."
+      },
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T19:55:40.550185+00:00",
+      "updated_at": "2026-04-26T19:55:40.550185+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+        "freshness_state": "fresh",
+        "resolution_state": "open",
+        "confidence": 0.0,
+        "suggested_action": "none",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "planned",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [],
+        "evidence_refs": [],
+        "associated_paths": [],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel",
+      "title": "Adapter consolidation into the A2A-native kernel",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [],
+      "summary": "Collapse MCP, CLI, legacy workflow specs, provider APIs, and existing protocol-event adapters into the same A2A-native work-program kernel instead of maintaining separate product-shaped execution lanes.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Collapse MCP, CLI, legacy workflow specs, provider APIs, and existing protocol-event adapters into the same A2A-native work-program kernel instead of maintaining separate product-shaped execution lanes."
+        ],
+        "phase_order": "1.7",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "A task submitted through MCP, CLI, public API, or an A2A client lands in the same durable work-program/A2A record model with the same routing, evidence, artifact, and operator-control behavior; duplicated execution authority is either removed or explicitly demoted to adapter glue."
+      },
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T19:56:00.133733+00:00",
+      "updated_at": "2026-04-26T19:56:00.133733+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel",
+        "freshness_state": "fresh",
+        "resolution_state": "open",
+        "confidence": 0.0,
+        "suggested_action": "none",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "planned",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [],
+        "evidence_refs": [],
+        "associated_paths": [],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull",
+      "title": "Embedding-rank pill suggestions instead of alphabetical pull",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/data_dictionary.py",
+        "Code&DBs/Workflow/storage/postgres/data_dictionary_repository.py"
+      ],
+      "summary": "Live evidence: synthesis prompt for 'validate input is non-empty, summarize it in one sentence, record receipt' shipped 8 DATA PILLS \u2014 every one of which was a tool-parameter pill (tool:praxis_bug_replay_provenance_backfill.open_only, tool:praxis_compose_plan_via_llm.concurrency, tool:praxis_heal.failure_code, etc.). Zero pills matched the verbs validate/summarize/record. Fix: backfill embeddings on data_dictionary_objects (one-time pgvector pass), then change suggest_plan_atoms to retrieve top-K=5 by cosine similarity to the embedded intent with a 0.35 similarity floor instead of the current alphabetical-ish heuristic. Pills below threshold are dropped, not padded. Trust-compiler thesis: only ship context that earns its prompt-token cost.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Live evidence: synthesis prompt for 'validate input is non-empty, summarize it in one sentence, record receipt' shipped 8 DATA PILLS \u2014 every one of which was a tool-parameter pill (tool:praxis_bug_replay_provenance_backfill.open_only, tool:praxis_compose_plan_via_llm.concurrency, tool:praxis_heal.failure_code, etc.). Zero pills matched the verbs validate/summarize/record. Fix: backfill embeddings on data_dictionary_objects (one-time pgvector pass), then change suggest_plan_atoms to retrieve top-K=5 by cosine similarity to the embedded intent with a 0.35 similarity floor instead of the current alphabetical-ish heuristic. Pills below threshold are dropped, not padded. Trust-compiler thesis: only ship context that earns its prompt-token cost."
+        ],
+        "phase_order": "2",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "Live evidence: synthesis prompt for 'validate input is non-empty, summarize it in one sentence, record receipt' shipped 8 DATA PILLS \u2014 every one of which was a tool-parameter pill (tool:praxis_bug_replay_provenance_backfill.open_only, tool:praxis_compose_plan_via_llm.concurrency, tool:praxis_heal.failure_code, etc.). Zero pills matched the verbs validate/summarize/record. Fix: backfill embeddings on data_dictionary_objects (one-time pgvector pass), then change suggest_plan_atoms to retrieve top-K=5 by cosine similarity to the embedded intent with a 0.35 similarity floor instead of the current alphabetical-ish heuristic. Pills below threshold are dropped, not padded. Trust-compiler thesis: only ship context that earns its prompt-token cost."
+      },
+      "decision_ref": "decision.2026-04-26.embedding-rank-pill-suggestions-instead-of-alphabetical-pull",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T20:45:59.172516+00:00",
+      "updated_at": "2026-04-26T20:45:59.172516+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull",
+        "freshness_state": "needs_review",
+        "resolution_state": "open",
+        "confidence": 0.8,
+        "suggested_action": "review_roadmap_scope",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "scope_changed",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [
+          "architecture_changed"
+        ],
+        "evidence_refs": [
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/intent_suggestion.py",
+            "role": "architecture_changed"
+          }
+        ],
+        "associated_paths": [
+          "Code&DBs/Workflow/runtime/intent_suggestion.py",
+          "Code&DBs/Workflow/runtime/data_dictionary.py",
+          "Code&DBs/Workflow/storage/postgres/data_dictionary_repository.py"
+        ],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+      "title": "Filter stage dictionary by recognized verbs",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p2",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_section_author.py",
+        "Code&DBs/Workflow/runtime/plan_synthesis.py"
+      ],
+      "summary": "The synthesis prompt's DATA DICTIONARY (registered stages) section dumps all 5 stages (build / fix / review / test / research) with their consumes/produces arrays for every intent. For 'validate / summarize / record', only review and build are reachable \u2014 the other 3 are pure noise. Fix: map verb tokens from recognize_intent to the stages that produce/consume their typed outputs (validate\u2192review, summarize\u2192build, record\u2192build, search\u2192research, fix\u2192fix, etc.) and only include those rows in the prompt. Cuts ~40% of prompt tokens and removes irrelevant attractors. Pairs with the recognize_intent wiring child.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "The synthesis prompt's DATA DICTIONARY (registered stages) section dumps all 5 stages (build / fix / review / test / research) with their consumes/produces arrays for every intent. For 'validate / summarize / record', only review and build are reachable \u2014 the other 3 are pure noise. Fix: map verb tokens from recognize_intent to the stages that produce/consume their typed outputs (validate\u2192review, summarize\u2192build, record\u2192build, search\u2192research, fix\u2192fix, etc.) and only include those rows in the prompt. Cuts ~40% of prompt tokens and removes irrelevant attractors. Pairs with the recognize_intent wiring child."
+        ],
+        "phase_order": "3",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "The synthesis prompt's DATA DICTIONARY (registered stages) section dumps all 5 stages (build / fix / review / test / research) with their consumes/produces arrays for every intent. For 'validate / summarize / record', only review and build are reachable \u2014 the other 3 are pure noise. Fix: map verb tokens from recognize_intent to the stages that produce/consume their typed outputs (validate\u2192review, summarize\u2192build, record\u2192build, search\u2192research, fix\u2192fix, etc.) and only include those rows in the prompt. Cuts ~40% of prompt tokens and removes irrelevant attractors. Pairs with the recognize_intent wiring child."
+      },
+      "decision_ref": "decision.2026-04-26.filter-stage-dictionary-by-recognized-verbs",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T20:46:01.761910+00:00",
+      "updated_at": "2026-04-26T20:46:01.761910+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+        "freshness_state": "needs_review",
+        "resolution_state": "open",
+        "confidence": 0.8,
+        "suggested_action": "review_roadmap_scope",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "scope_changed",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [
+          "architecture_changed"
+        ],
+        "evidence_refs": [
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_section_author.py",
+            "role": "architecture_changed"
+          },
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+            "role": "architecture_changed"
+          }
+        ],
+        "associated_paths": [
+          "Code&DBs/Workflow/runtime/plan_section_author.py",
+          "Code&DBs/Workflow/runtime/plan_synthesis.py"
+        ],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+      "title": "Slim PlanPacket schema in synthesis to seed-only fields",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_section_author.py",
+        "Code&DBs/Workflow/runtime/plan_synthesis.py"
+      ],
+      "summary": "Today's synthesis prompt enumerates all 16 PlanPacket fields (label, stage, description, prompt, write, agent, capabilities, consumes, produces, depends_on, gates, parameters, workdir, on_failure, on_success, timeout). Synthesis only emits a 4-field seed shape ({label, stage, description, depends_on}). The other 12 fields are filled by the synthesizer scaffold or by fork-out authors per packet. Fix: build_shared_prefix and _build_synthesis_prompt should narrow the PlanPacket field block to only the 4 seed fields when called from synthesis, and keep the full schema only for fork-out authors. Saves ~1500 prompt chars and removes a major source of model confusion (the model saw 16 required fields but was asked to emit 4).",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Today's synthesis prompt enumerates all 16 PlanPacket fields (label, stage, description, prompt, write, agent, capabilities, consumes, produces, depends_on, gates, parameters, workdir, on_failure, on_success, timeout). Synthesis only emits a 4-field seed shape ({label, stage, description, depends_on}). The other 12 fields are filled by the synthesizer scaffold or by fork-out authors per packet. Fix: build_shared_prefix and _build_synthesis_prompt should narrow the PlanPacket field block to only the 4 seed fields when called from synthesis, and keep the full schema only for fork-out authors. Saves ~1500 prompt chars and removes a major source of model confusion (the model saw 16 required fields but was asked to emit 4)."
+        ],
+        "phase_order": "4",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "Today's synthesis prompt enumerates all 16 PlanPacket fields (label, stage, description, prompt, write, agent, capabilities, consumes, produces, depends_on, gates, parameters, workdir, on_failure, on_success, timeout). Synthesis only emits a 4-field seed shape ({label, stage, description, depends_on}). The other 12 fields are filled by the synthesizer scaffold or by fork-out authors per packet. Fix: build_shared_prefix and _build_synthesis_prompt should narrow the PlanPacket field block to only the 4 seed fields when called from synthesis, and keep the full schema only for fork-out authors. Saves ~1500 prompt chars and removes a major source of model confusion (the model saw 16 required fields but was asked to emit 4)."
+      },
+      "decision_ref": "decision.2026-04-26.slim-planpacket-schema-in-synthesis-to-seed-only-fields",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T20:46:04.338570+00:00",
+      "updated_at": "2026-04-26T20:46:04.338570+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+        "freshness_state": "needs_review",
+        "resolution_state": "open",
+        "confidence": 0.8,
+        "suggested_action": "review_roadmap_scope",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "scope_changed",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [
+          "architecture_changed"
+        ],
+        "evidence_refs": [
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_section_author.py",
+            "role": "architecture_changed"
+          },
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+            "role": "architecture_changed"
+          }
+        ],
+        "associated_paths": [
+          "Code&DBs/Workflow/runtime/plan_section_author.py",
+          "Code&DBs/Workflow/runtime/plan_synthesis.py"
+        ],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+      "title": "Few-shot worked example retrieved from prior compile receipts",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p1",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/storage/postgres/operation_receipts_repository.py",
+        "Code&DBs/Workflow/runtime/operation_catalog_gateway.py"
+      ],
+      "summary": "Synthesis runs zero-shot at temperature=0 on a quantized reasoning model (DeepSeek-V4-Pro). That combination has no escape from degenerate basins \u2014 observed live as a 2048-token We-have16 reasoning loop. Fix: pull 1-2 worked examples from authority_operation_receipts where operation_ref='compose_plan_via_llm' and result_status='completed', match by embedding similarity to the current intent, render their packet_seeds output as a fully-formed example block before the OUTPUT line. Highest-leverage stability gain because it gives the model a concrete reference shape that matches its tokenizer. Depends on backfill + embedding on prior successful receipts; can ship after children 1-4 land.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Synthesis runs zero-shot at temperature=0 on a quantized reasoning model (DeepSeek-V4-Pro). That combination has no escape from degenerate basins \u2014 observed live as a 2048-token We-have16 reasoning loop. Fix: pull 1-2 worked examples from authority_operation_receipts where operation_ref='compose_plan_via_llm' and result_status='completed', match by embedding similarity to the current intent, render their packet_seeds output as a fully-formed example block before the OUTPUT line. Highest-leverage stability gain because it gives the model a concrete reference shape that matches its tokenizer. Depends on backfill + embedding on prior successful receipts; can ship after children 1-4 land."
+        ],
+        "phase_order": "5",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "Synthesis runs zero-shot at temperature=0 on a quantized reasoning model (DeepSeek-V4-Pro). That combination has no escape from degenerate basins \u2014 observed live as a 2048-token We-have16 reasoning loop. Fix: pull 1-2 worked examples from authority_operation_receipts where operation_ref='compose_plan_via_llm' and result_status='completed', match by embedding similarity to the current intent, render their packet_seeds output as a fully-formed example block before the OUTPUT line. Highest-leverage stability gain because it gives the model a concrete reference shape that matches its tokenizer. Depends on backfill + embedding on prior successful receipts; can ship after children 1-4 land."
+      },
+      "decision_ref": "decision.2026-04-26.few-shot-worked-example-retrieved-from-prior-compile-receipts",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T20:46:06.937365+00:00",
+      "updated_at": "2026-04-26T20:46:06.937365+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+        "freshness_state": "needs_review",
+        "resolution_state": "open",
+        "confidence": 0.8,
+        "suggested_action": "review_roadmap_scope",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "scope_changed",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [
+          "architecture_changed"
+        ],
+        "evidence_refs": [
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+            "role": "architecture_changed"
+          },
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/operation_catalog_gateway.py",
+            "role": "architecture_changed"
+          }
+        ],
+        "associated_paths": [
+          "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "Code&DBs/Workflow/storage/postgres/operation_receipts_repository.py",
+          "Code&DBs/Workflow/runtime/operation_catalog_gateway.py"
+        ],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+      "title": "Synthesis temperature 0.2 instead of 0.0",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p2",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/adapters/llm_client.py"
+      ],
+      "summary": "LLMRequest defaults temperature=0.0 across all calls. Greedy decoding amplifies repetition collapse on quantized models \u2014 confirmed live by the We-have16 loop on DeepSeek-V4-Pro at temp=0. Fix: synthesis call sets temperature=0.2. Tiny stochasticity breaks degenerate token attractors without compromising reproducibility (the structured JSON schema constrains the output anyway). Fork-out author calls stay at 0 because they have a fully scaffolded PlanPacket shape and tighter prompt structure. One-line edit in plan_synthesis.py.",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "LLMRequest defaults temperature=0.0 across all calls. Greedy decoding amplifies repetition collapse on quantized models \u2014 confirmed live by the We-have16 loop on DeepSeek-V4-Pro at temp=0. Fix: synthesis call sets temperature=0.2. Tiny stochasticity breaks degenerate token attractors without compromising reproducibility (the structured JSON schema constrains the output anyway). Fork-out author calls stay at 0 because they have a fully scaffolded PlanPacket shape and tighter prompt structure. One-line edit in plan_synthesis.py."
+        ],
+        "phase_order": "6",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "LLMRequest defaults temperature=0.0 across all calls. Greedy decoding amplifies repetition collapse on quantized models \u2014 confirmed live by the We-have16 loop on DeepSeek-V4-Pro at temp=0. Fix: synthesis call sets temperature=0.2. Tiny stochasticity breaks degenerate token attractors without compromising reproducibility (the structured JSON schema constrains the output anyway). Fork-out author calls stay at 0 because they have a fully scaffolded PlanPacket shape and tighter prompt structure. One-line edit in plan_synthesis.py."
+      },
+      "decision_ref": "decision.2026-04-26.synthesis-temperature-0-2-instead-of-0-0",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T20:46:09.579231+00:00",
+      "updated_at": "2026-04-26T20:46:09.579231+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+        "freshness_state": "needs_review",
+        "resolution_state": "open",
+        "confidence": 0.8,
+        "suggested_action": "review_roadmap_scope",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "scope_changed",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [
+          "architecture_changed"
+        ],
+        "evidence_refs": [
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+            "role": "architecture_changed"
+          },
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/adapters/llm_client.py",
+            "role": "architecture_changed"
+          }
+        ],
+        "associated_paths": [
+          "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "Code&DBs/Workflow/adapters/llm_client.py"
+        ],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    },
+    {
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example",
+      "roadmap_key": "roadmap.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example",
+      "title": "Replace OUTPUT placeholder template with rendered typed example",
+      "item_kind": "capability",
+      "status": "active",
+      "lifecycle": "planned",
+      "priority": "p2",
+      "parent_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "source_bug_id": null,
+      "source_idea_id": null,
+      "registry_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py"
+      ],
+      "summary": "Today's synthesis prompt OUTPUT block ends with a placeholder schema: {\"packet_seeds\": [{\"label\": \"<slug>\", \"stage\": \"<research|review|build>\", \"description\": \"<one sentence>\", \"depends_on\": [\"<upstream_label>\", ...]}, ...]}. The angle-bracket placeholders are not concrete enough to anchor a quantized model's structured output. Fix: render the OUTPUT block as a fully-formed JSON example whose seed count matches the recognized step count, with realistic label slugs, real stage values, and one-sentence descriptions. The model copies the shape rather than inferring it from a metavariable template. Pairs with the few-shot child but addresses a different failure mode (template literalism vs. zero-shot instability).",
+      "acceptance_criteria": {
+        "tier": "tier_1",
+        "must_have": [
+          "Today's synthesis prompt OUTPUT block ends with a placeholder schema: {\"packet_seeds\": [{\"label\": \"<slug>\", \"stage\": \"<research|review|build>\", \"description\": \"<one sentence>\", \"depends_on\": [\"<upstream_label>\", ...]}, ...]}. The angle-bracket placeholders are not concrete enough to anchor a quantized model's structured output. Fix: render the OUTPUT block as a fully-formed JSON example whose seed count matches the recognized step count, with realistic label slugs, real stage values, and one-sentence descriptions. The model copies the shape rather than inferring it from a metavariable template. Pairs with the few-shot child but addresses a different failure mode (template literalism vs. zero-shot instability)."
+        ],
+        "phase_order": "7",
+        "phase_ready": false,
+        "approval_tag": "operator-write-2026-04-26",
+        "outcome_gate": "Today's synthesis prompt OUTPUT block ends with a placeholder schema: {\"packet_seeds\": [{\"label\": \"<slug>\", \"stage\": \"<research|review|build>\", \"description\": \"<one sentence>\", \"depends_on\": [\"<upstream_label>\", ...]}, ...]}. The angle-bracket placeholders are not concrete enough to anchor a quantized model's structured output. Fix: render the OUTPUT block as a fully-formed JSON example whose seed count matches the recognized step count, with realistic label slugs, real stage values, and one-sentence descriptions. The model copies the shape rather than inferring it from a metavariable template. Pairs with the few-shot child but addresses a different failure mode (template literalism vs. zero-shot instability)."
+      },
+      "decision_ref": "decision.2026-04-26.replace-output-placeholder-template-with-rendered-typed-example",
+      "target_start_at": null,
+      "target_end_at": null,
+      "completed_at": null,
+      "created_at": "2026-04-26T20:46:12.247267+00:00",
+      "updated_at": "2026-04-26T20:46:12.247267+00:00",
+      "assessment": {
+        "item_kind": "roadmap_item",
+        "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example",
+        "freshness_state": "needs_review",
+        "resolution_state": "open",
+        "confidence": 0.8,
+        "suggested_action": "review_roadmap_scope",
+        "closeout": {
+          "state": "none",
+          "action": "none",
+          "bug_ids": [],
+          "roadmap_item_ids": []
+        },
+        "activity_state": "planned",
+        "pipeline_state": "scope_changed",
+        "promotion_state": "none",
+        "last_touched_at": null,
+        "stale_after_at": null,
+        "binding_ids": [],
+        "workflow_run_ids": [],
+        "reason_codes": [
+          "architecture_changed"
+        ],
+        "evidence_refs": [
+          {
+            "kind": "repo_path",
+            "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+            "role": "architecture_changed"
+          }
+        ],
+        "associated_paths": [
+          "Code&DBs/Workflow/runtime/plan_synthesis.py"
+        ],
+        "linked_items": [],
+        "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+      }
+    }
+  ],
+  "roadmap_item_dependencies": [
+    {
+      "roadmap_item_dependency_id": "roadmap_item_dependency.roadmap.item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel.blocks.roadmap.item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+      "depends_on_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+      "dependency_kind": "blocks",
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "created_at": "2026-04-26T19:54:47.534832+00:00"
+    },
+    {
+      "roadmap_item_dependency_id": "roadmap_item_dependency.roadmap.item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface.blocks.roadmap.item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+      "depends_on_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+      "dependency_kind": "blocks",
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "created_at": "2026-04-26T19:54:32.098056+00:00"
+    },
+    {
+      "roadmap_item_dependency_id": "roadmap_item_dependency.roadmap.item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel.blocks.roadmap.item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel",
+      "depends_on_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+      "dependency_kind": "blocks",
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "created_at": "2026-04-26T19:56:00.133733+00:00"
+    },
+    {
+      "roadmap_item_dependency_id": "roadmap_item_dependency.roadmap.item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane.blocks.roadmap.item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+      "depends_on_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+      "dependency_kind": "blocks",
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "created_at": "2026-04-26T19:55:08.045175+00:00"
+    },
+    {
+      "roadmap_item_dependency_id": "roadmap_item_dependency.roadmap.item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.blocks.roadmap.item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+      "depends_on_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+      "dependency_kind": "blocks",
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "created_at": "2026-04-26T19:55:23.511599+00:00"
+    },
+    {
+      "roadmap_item_dependency_id": "roadmap_item_dependency.roadmap.item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work.blocks.roadmap.item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+      "roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+      "depends_on_roadmap_item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+      "dependency_kind": "blocks",
+      "decision_ref": "operator_decision.architecture_policy.product_architecture.stateful_a2a_server_with_praxis_core",
+      "created_at": "2026-04-26T19:55:40.550185+00:00"
+    }
+  ],
+  "work_item_assessments": [
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler",
+      "freshness_state": "needs_review",
+      "resolution_state": "open",
+      "confidence": 0.8,
+      "suggested_action": "review_roadmap_scope",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "scope_changed",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [
+        "architecture_changed"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "role": "architecture_changed"
+        },
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/intent_suggestion.py",
+          "role": "architecture_changed"
+        },
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_section_author.py",
+          "role": "architecture_changed"
+        }
+      ],
+      "associated_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/plan_section_author.py"
+      ],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull",
+      "freshness_state": "needs_review",
+      "resolution_state": "open",
+      "confidence": 0.8,
+      "suggested_action": "review_roadmap_scope",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "scope_changed",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [
+        "architecture_changed"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/intent_suggestion.py",
+          "role": "architecture_changed"
+        }
+      ],
+      "associated_paths": [
+        "Code&DBs/Workflow/runtime/intent_suggestion.py",
+        "Code&DBs/Workflow/runtime/data_dictionary.py",
+        "Code&DBs/Workflow/storage/postgres/data_dictionary_repository.py"
+      ],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts",
+      "freshness_state": "needs_review",
+      "resolution_state": "open",
+      "confidence": 0.8,
+      "suggested_action": "review_roadmap_scope",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "scope_changed",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [
+        "architecture_changed"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "role": "architecture_changed"
+        },
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/operation_catalog_gateway.py",
+          "role": "architecture_changed"
+        }
+      ],
+      "associated_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/storage/postgres/operation_receipts_repository.py",
+        "Code&DBs/Workflow/runtime/operation_catalog_gateway.py"
+      ],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs",
+      "freshness_state": "needs_review",
+      "resolution_state": "open",
+      "confidence": 0.8,
+      "suggested_action": "review_roadmap_scope",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "scope_changed",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [
+        "architecture_changed"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_section_author.py",
+          "role": "architecture_changed"
+        },
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "role": "architecture_changed"
+        }
+      ],
+      "associated_paths": [
+        "Code&DBs/Workflow/runtime/plan_section_author.py",
+        "Code&DBs/Workflow/runtime/plan_synthesis.py"
+      ],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example",
+      "freshness_state": "needs_review",
+      "resolution_state": "open",
+      "confidence": 0.8,
+      "suggested_action": "review_roadmap_scope",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "scope_changed",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [
+        "architecture_changed"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "role": "architecture_changed"
+        }
+      ],
+      "associated_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py"
+      ],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields",
+      "freshness_state": "needs_review",
+      "resolution_state": "open",
+      "confidence": 0.8,
+      "suggested_action": "review_roadmap_scope",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "scope_changed",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [
+        "architecture_changed"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_section_author.py",
+          "role": "architecture_changed"
+        },
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "role": "architecture_changed"
+        }
+      ],
+      "associated_paths": [
+        "Code&DBs/Workflow/runtime/plan_section_author.py",
+        "Code&DBs/Workflow/runtime/plan_synthesis.py"
+      ],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0",
+      "freshness_state": "needs_review",
+      "resolution_state": "open",
+      "confidence": 0.8,
+      "suggested_action": "review_roadmap_scope",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "scope_changed",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [
+        "architecture_changed"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "role": "architecture_changed"
+        },
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/adapters/llm_client.py",
+          "role": "architecture_changed"
+        }
+      ],
+      "associated_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/adapters/llm_client.py"
+      ],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt",
+      "freshness_state": "needs_review",
+      "resolution_state": "open",
+      "confidence": 0.8,
+      "suggested_action": "review_roadmap_scope",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "scope_changed",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [
+        "architecture_changed"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/plan_synthesis.py",
+          "role": "architecture_changed"
+        },
+        {
+          "kind": "repo_path",
+          "ref": "Code&DBs/Workflow/runtime/intent_suggestion.py",
+          "role": "architecture_changed"
+        }
+      ],
+      "associated_paths": [
+        "Code&DBs/Workflow/runtime/plan_synthesis.py",
+        "Code&DBs/Workflow/runtime/intent_recognition.py",
+        "Code&DBs/Workflow/runtime/intent_suggestion.py"
+      ],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    },
+    {
+      "item_kind": "roadmap_item",
+      "item_id": "roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work",
+      "freshness_state": "fresh",
+      "resolution_state": "open",
+      "confidence": 0.0,
+      "suggested_action": "none",
+      "closeout": {
+        "state": "none",
+        "action": "none",
+        "bug_ids": [],
+        "roadmap_item_ids": []
+      },
+      "activity_state": "planned",
+      "pipeline_state": "planned",
+      "promotion_state": "none",
+      "last_touched_at": null,
+      "stale_after_at": null,
+      "binding_ids": [],
+      "workflow_run_ids": [],
+      "reason_codes": [],
+      "evidence_refs": [],
+      "associated_paths": [],
+      "linked_items": [],
+      "assessed_at": "2026-04-27T00:53:46.358794+00:00"
+    }
+  ],
+  "semantic_neighbors": [
+    {
+      "roadmap_item_id": "roadmap_item.convert.orient.and.api.health.to.native.async.handlers",
+      "title": "Convert /orient and /api/health to native async handlers",
+      "status": "completed",
+      "priority": "p1",
+      "similarity": 1.0,
+      "match_kind": "semantic_assertion",
+      "shared_signal_count": 8
+    },
+    {
+      "roadmap_item_id": "roadmap_item.make.operation.receipts.atomic.durable.proof",
+      "title": "Make operation receipts atomic durable proof",
+      "status": "active",
+      "priority": "p1",
+      "similarity": 1.0,
+      "match_kind": "semantic_assertion",
+      "shared_signal_count": 1
+    }
+  ],
+  "semantic_neighbors_reason_code": "roadmap.semantic_neighbors.semantic_assertions",
+  "rendered_markdown": "# A2A-native stateful server for agentic work\n\n- A2A-native stateful server for agentic work [1]\n  id: roadmap_item.a2a.native.stateful.server.for.agentic.work\n  priority: p1\n  outcome_gate: Praxis exposes an A2A-compatible server surface; A2A agents, skills, tasks, messages, artifacts, and statuses have explicit DB/CQRS mappings; existing provider registry, workflow runs, evidence, receipts, and operator UI are mapped under durable work programs; competing roadmap and bug work is classified as foundation, core, adapter, later, or retire.\n  - Foundation reliability and authority health [1.1]\n    id: roadmap_item.a2a.native.stateful.server.for.agentic.work.foundation.reliability.and.authority.health\n    priority: p1\n    outcome_gate: /orient and /api/health respond reliably; roadmap and operator graph projections read without P1 crashes; admitted worker runs do not force-fail; route health reports degraded states honestly; provider and circuit failures fail closed instead of silently selecting unavailable execution paths.\n  - A2A protocol surface [1.2]\n    id: roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.protocol.surface\n    priority: p1\n    outcome_gate: A2A clients can discover Praxis, inspect its skills, create or resume a task, send and receive messages, attach artifacts, observe status, and cancel work through a protocol-compatible surface backed by Praxis authority.\n  - A2A DB and CQRS kernel [1.3]\n    id: roadmap_item.a2a.native.stateful.server.for.agentic.work.a2a.db.and.cqrs.kernel\n    priority: p1\n    outcome_gate: Given any A2A task, message, artifact, or agent id, Praxis can query the corresponding work program, run, event, evidence, receipt, route, and operator state through CQRS surfaces without scraping raw payload blobs.\n  - Agent registry and routing control plane [1.4]\n    id: roadmap_item.a2a.native.stateful.server.for.agentic.work.agent.registry.and.routing.control.plane\n    priority: p1\n    outcome_gate: An external A2A agent can be registered, inspected, enabled or disabled, routed to, denied with machine-readable reasons, and shown in provider/capability matrices without bypassing credential, circuit, cost, tenant, or lane policy.\n  - Durable work programs over A2A tasks [1.5]\n    id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks\n    priority: p1\n    outcome_gate: One work program can contain multiple A2A tasks from different agents; a later agent can resume the program and see current objective, prior attempts, blockers, decisions, artifacts, and recommended next action without relying on chat history.\n    - Intent-aware synthesis prompt compiler [1]\n      id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler\n      priority: p1\n      outcome_gate: Today the synthesis prompt is a fixed 5572-char template that ships the same DATA PILLS / DATA DICTIONARY / TASK blocks for every intent. Live evidence: Together DeepSeek-V4-Pro entered a degenerate We-have16 reasoning loop on a trivial validate/summarize/record intent because the prompt forced 20-packet decomposition with 8 irrelevant tool-parameter pills and a full 5-stage dictionary dump. Fix: compile the synthesis prompt at runtime from recognize_intent output (verbs, spans, suggested_steps) so it ships only relevant pills, only the stages those verbs need, only the seed-shape PlanPacket fields, and a typed worked example. This is the trust-compiler thesis applied to the compile path itself.\n      - Wire recognize_intent output into synthesis prompt [1]\n        id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.wire.recognize.intent.output.into.synthesis.prompt\n        priority: p1\n        outcome_gate: runtime.intent_recognition.recognize_intent already extracts spans, suggested_steps, gaps, and matches for the compile-preview surface \u2014 the synthesis prompt does not consume any of it. Fix: pass the recognition result into _build_synthesis_prompt so the prompt ships a RECOGNIZED STEPS block (the spans Praxis already extracted) and replaces the hardcoded 'up to 20 concrete packet seeds' clause with 'one seed per recognized step (~N here)'. Highest-leverage single change because it kills the 20-packet attractor that triggered the We-have16 loop. Smallest blast radius (touches plan_synthesis.py + intent_suggestion.py only).\n      - Embedding-rank pill suggestions instead of alphabetical pull [2]\n        id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.embedding.rank.pill.suggestions.instead.of.alphabetical.pull\n        priority: p1\n        outcome_gate: Live evidence: synthesis prompt for 'validate input is non-empty, summarize it in one sentence, record receipt' shipped 8 DATA PILLS \u2014 every one of which was a tool-parameter pill (tool:praxis_bug_replay_provenance_backfill.open_only, tool:praxis_compose_plan_via_llm.concurrency, tool:praxis_heal.failure_code, etc.). Zero pills matched the verbs validate/summarize/record. Fix: backfill embeddings on data_dictionary_objects (one-time pgvector pass), then change suggest_plan_atoms to retrieve top-K=5 by cosine similarity to the embedded intent with a 0.35 similarity floor instead of the current alphabetical-ish heuristic. Pills below threshold are dropped, not padded. Trust-compiler thesis: only ship context that earns its prompt-token cost.\n      - Filter stage dictionary by recognized verbs [3]\n        id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.filter.stage.dictionary.by.recognized.verbs\n        priority: p2\n        outcome_gate: The synthesis prompt's DATA DICTIONARY (registered stages) section dumps all 5 stages (build / fix / review / test / research) with their consumes/produces arrays for every intent. For 'validate / summarize / record', only review and build are reachable \u2014 the other 3 are pure noise. Fix: map verb tokens from recognize_intent to the stages that produce/consume their typed outputs (validate\u2192review, summarize\u2192build, record\u2192build, search\u2192research, fix\u2192fix, etc.) and only include those rows in the prompt. Cuts ~40% of prompt tokens and removes irrelevant attractors. Pairs with the recognize_intent wiring child.\n      - Slim PlanPacket schema in synthesis to seed-only fields [4]\n        id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.slim.planpacket.schema.in.synthesis.to.seed.only.fields\n        priority: p1\n        outcome_gate: Today's synthesis prompt enumerates all 16 PlanPacket fields (label, stage, description, prompt, write, agent, capabilities, consumes, produces, depends_on, gates, parameters, workdir, on_failure, on_success, timeout). Synthesis only emits a 4-field seed shape ({label, stage, description, depends_on}). The other 12 fields are filled by the synthesizer scaffold or by fork-out authors per packet. Fix: build_shared_prefix and _build_synthesis_prompt should narrow the PlanPacket field block to only the 4 seed fields when called from synthesis, and keep the full schema only for fork-out authors. Saves ~1500 prompt chars and removes a major source of model confusion (the model saw 16 required fields but was asked to emit 4).\n      - Few-shot worked example retrieved from prior compile receipts [5]\n        id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.few.shot.worked.example.retrieved.from.prior.compile.receipts\n        priority: p1\n        outcome_gate: Synthesis runs zero-shot at temperature=0 on a quantized reasoning model (DeepSeek-V4-Pro). That combination has no escape from degenerate basins \u2014 observed live as a 2048-token We-have16 reasoning loop. Fix: pull 1-2 worked examples from authority_operation_receipts where operation_ref='compose_plan_via_llm' and result_status='completed', match by embedding similarity to the current intent, render their packet_seeds output as a fully-formed example block before the OUTPUT line. Highest-leverage stability gain because it gives the model a concrete reference shape that matches its tokenizer. Depends on backfill + embedding on prior successful receipts; can ship after children 1-4 land.\n      - Synthesis temperature 0.2 instead of 0.0 [6]\n        id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.synthesis.temperature.0.2.instead.of.0.0\n        priority: p2\n        outcome_gate: LLMRequest defaults temperature=0.0 across all calls. Greedy decoding amplifies repetition collapse on quantized models \u2014 confirmed live by the We-have16 loop on DeepSeek-V4-Pro at temp=0. Fix: synthesis call sets temperature=0.2. Tiny stochasticity breaks degenerate token attractors without compromising reproducibility (the structured JSON schema constrains the output anyway). Fork-out author calls stay at 0 because they have a fully scaffolded PlanPacket shape and tighter prompt structure. One-line edit in plan_synthesis.py.\n      - Replace OUTPUT placeholder template with rendered typed example [7]\n        id: roadmap_item.a2a.native.stateful.server.for.agentic.work.durable.work.programs.over.a2a.tasks.intent.aware.synthesis.prompt.compiler.replace.output.placeholder.template.with.rendered.typed.example\n        priority: p2\n        outcome_gate: Today's synthesis prompt OUTPUT block ends with a placeholder schema: {\"packet_seeds\": [{\"label\": \"<slug>\", \"stage\": \"<research|review|build>\", \"description\": \"<one sentence>\", \"depends_on\": [\"<upstream_label>\", ...]}, ...]}. The angle-bracket placeholders are not concrete enough to anchor a quantized model's structured output. Fix: render the OUTPUT block as a fully-formed JSON example whose seed count matches the recognized step count, with realistic label slugs, real stage values, and one-sentence descriptions. The model copies the shape rather than inferring it from a metavariable template. Pairs with the few-shot child but addresses a different failure mode (template literalism vs. zero-shot instability).\n  - Operator cockpit for stateful A2A work [1.6]\n    id: roadmap_item.a2a.native.stateful.server.for.agentic.work.operator.cockpit.for.stateful.a2a.work\n    priority: p1\n    outcome_gate: A human can open one work program, see its A2A tasks/messages/artifacts/statuses, understand what changed and why, pause or redirect work, approve or retry actions, and hand the work to another agent without reading raw logs or chat residue.\n  - Adapter consolidation into the A2A-native kernel [1.7]\n    id: roadmap_item.a2a.native.stateful.server.for.agentic.work.adapter.consolidation.into.a2a.native.kernel\n    priority: p1\n    outcome_gate: A task submitted through MCP, CLI, public API, or an A2A client lands in the same durable work-program/A2A record model with the same routing, evidence, artifact, and operator-control behavior; duplicated execution authority is either removed or explicitly demoted to adapter glue.",
+  "ok": true,
+  "operation_receipt": {
+    "receipt_id": "cbf26c08-463c-4db0-b000-e9560b4b64d8",
+    "operation_ref": "operator-roadmap-tree",
+    "operation_name": "operator.roadmap_tree",
+    "operation_kind": "query",
+    "source_kind": "operation_query",
+    "authority_ref": "authority.roadmap_items",
+    "authority_domain_ref": "authority.roadmap_items",
+    "projection_ref": "projection.roadmap_tree",
+    "storage_target_ref": "praxis.primary_postgres",
+    "posture": "observe",
+    "idempotency_policy": "non_idempotent",
+    "idempotency_key": null,
+    "binding_revision": "binding.operation_catalog_registry.roadmap_tree_fresh_reads.20260424",
+    "decision_ref": "decision.operator.roadmap_tree.fresh_reads_after_write.20260424",
+    "execution_status": "completed",
+    "result_status": null,
+    "error_code": null,
+    "error_detail": null,
+    "input_hash": "c752fccf050320465d58dff57d2369101f35fdc6909e5be3ca53421a0da038b6",
+    "output_hash": "e1cbb767328332b55bd05a16d5d3a27b4a662d265137664875744db105d029ae",
+    "event_ids": [],
+    "projection_freshness": {},
+    "duration_ms": 156
+  }
+}

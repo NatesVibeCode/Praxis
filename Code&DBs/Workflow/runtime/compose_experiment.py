@@ -116,7 +116,7 @@ class ComposeExperimentRun:
             return row
 
         result = self.result
-        synthesis = result.synthesis
+        synthesis = getattr(result, "synthesis", None)
 
         # Per-call rollup (sums across synthesis + every fork-out)
         usage = result.usage_summary()
@@ -149,57 +149,66 @@ class ComposeExperimentRun:
             else None
         )
 
-        # Fork-out fan: per-packet success rows + per-packet failure rows
-        authored = result.authored
-        row["fork_author"] = {
-            "n_attempted": len(authored.packets) + len(authored.errors),
-            "n_succeeded": len(authored.packets),
-            "n_failed": len(authored.errors),
-            "wall_ms": authored.fork_author_wall_ms,
-        }
-        row["per_packet"] = [
-            {
-                "label": p.label,
-                "stage": p.stage,
-                "provider_slug": p.provider_slug,
-                "model_slug": p.model_slug,
-                "prompt_tokens": p.usage.get("prompt_tokens"),
-                "completion_tokens": p.usage.get("completion_tokens"),
-                "cached_tokens": p.usage.get("cached_tokens"),
-                "total_tokens": p.usage.get("total_tokens"),
-                "wall_ms": p.wall_ms,
-                "latency_ms": p.latency_ms,
-                "finish_reason": p.finish_reason,
-                "content_len": p.content_len,
-                "reasoning_len": p.reasoning_len,
+        # Fork-out fan: per-packet success rows + per-packet failure rows.
+        # Only present for the full compose_plan_via_llm work type — the
+        # focused synthesis-only / pill-match-only experiments have no
+        # fork-out fan, so authored is None and we skip these blocks.
+        authored = getattr(result, "authored", None)
+        if authored is None:
+            row["fork_author"] = None
+            row["per_packet"] = []
+            row["per_packet_failures"] = []
+        else:
+            row["fork_author"] = {
+                "n_attempted": len(authored.packets) + len(authored.errors),
+                "n_succeeded": len(authored.packets),
+                "n_failed": len(authored.errors),
+                "wall_ms": authored.fork_author_wall_ms,
             }
-            for p in authored.packets
-        ]
-        row["per_packet_failures"] = [
-            {
-                "label": e.label,
-                "reason_code": e.reason_code,
-                "error": e.error,
-                "provider_slug": e.provider_slug,
-                "model_slug": e.model_slug,
-                "wall_ms": e.wall_ms,
-                "latency_ms": e.latency_ms,
-                "finish_reason": e.finish_reason,
-                "content_len": e.content_len,
-                "reasoning_len": e.reasoning_len,
-                "usage": dict(e.usage) if e.usage else None,
-                # Truncate raw_llm_response in the summary; full text lives
-                # on AuthorError.to_dict() in the deeper compose payload.
-                "raw_llm_response_preview": (
-                    (e.raw_llm_response or "")[:160] if e.raw_llm_response else None
-                ),
-            }
-            for e in authored.errors
-        ]
+            row["per_packet"] = [
+                {
+                    "label": p.label,
+                    "stage": p.stage,
+                    "provider_slug": p.provider_slug,
+                    "model_slug": p.model_slug,
+                    "prompt_tokens": p.usage.get("prompt_tokens"),
+                    "completion_tokens": p.usage.get("completion_tokens"),
+                    "cached_tokens": p.usage.get("cached_tokens"),
+                    "total_tokens": p.usage.get("total_tokens"),
+                    "wall_ms": p.wall_ms,
+                    "latency_ms": p.latency_ms,
+                    "finish_reason": p.finish_reason,
+                    "content_len": p.content_len,
+                    "reasoning_len": p.reasoning_len,
+                }
+                for p in authored.packets
+            ]
+            row["per_packet_failures"] = [
+                {
+                    "label": e.label,
+                    "reason_code": e.reason_code,
+                    "error": e.error,
+                    "provider_slug": e.provider_slug,
+                    "model_slug": e.model_slug,
+                    "wall_ms": e.wall_ms,
+                    "latency_ms": e.latency_ms,
+                    "finish_reason": e.finish_reason,
+                    "content_len": e.content_len,
+                    "reasoning_len": e.reasoning_len,
+                    "usage": dict(e.usage) if e.usage else None,
+                    # Truncate raw_llm_response in the summary; full text lives
+                    # on AuthorError.to_dict() in the deeper compose payload.
+                    "raw_llm_response_preview": (
+                        (e.raw_llm_response or "")[:160] if e.raw_llm_response else None
+                    ),
+                }
+                for e in authored.errors
+            ]
 
-        # Validation — full per-finding detail (not just a count)
-        validation = result.validation
-        findings = list(getattr(validation, "findings", []) or [])
+        # Validation — full per-finding detail (not just a count). Skip
+        # entirely when result has no validation (focused experiments).
+        validation = getattr(result, "validation", None)
+        findings = list(getattr(validation, "findings", []) or []) if validation else []
         findings_by_severity: dict[str, int] = {}
         for f in findings:
             sev = str(getattr(f, "severity", "info") or "info")
@@ -223,9 +232,9 @@ class ComposeExperimentRun:
         # Quality signals — dispatched per work_task_type. compose runs
         # get the compose-specific scorer (pills, match rate, validation
         # accuracy); future work types register their own.
-        plan_packets = list(result.plan_packets or [])
-        row["compose_ok"] = result.ok
-        row["reason_code"] = result.reason_code
+        plan_packets = list(getattr(result, "plan_packets", None) or [])
+        row["compose_ok"] = getattr(result, "ok", None)
+        row["reason_code"] = getattr(result, "reason_code", None)
         row["packet_count"] = len(plan_packets)
         scorer = _QUALITY_SCORERS.get(work_task_type, _universal_quality_signals)
         try:
@@ -288,7 +297,15 @@ class ComposeExperimentReport:
         return None
 
 
-_KNOWN_OVERRIDE_KEYS = {"provider_slug", "model_slug", "temperature", "max_tokens"}
+_KNOWN_OVERRIDE_KEYS = {
+    "provider_slug", "model_slug", "temperature", "max_tokens",
+    # Provider-specific extras used by some experiments. `reasoning_effort`
+    # is OpenAI-style ("low"/"medium"/"high"); the runner translates it
+    # to OpenRouter's unified `reasoning: {"effort": ...}` schema.
+    # `extra_body` is the escape-hatch for any other provider-specific
+    # body field (Anthropic thinking budget, etc.).
+    "reasoning_effort", "extra_body",
+}
 
 
 def _coerce_override_dict(raw: Any, *, index: int, ctx: str) -> dict[str, Any]:
@@ -691,20 +708,22 @@ def _project_cost(result: Any) -> dict[str, Any] | None:
 
     missing: list[str] = []
     synthesis_usd: float | None = None
-    if result.synthesis is not None:
-        prov = str(result.synthesis.provider_slug or "")
-        mod = str(result.synthesis.model_slug or "")
+    synthesis = getattr(result, "synthesis", None)
+    if synthesis is not None:
+        prov = str(synthesis.provider_slug or "")
+        mod = str(synthesis.model_slug or "")
         synthesis_usd = _usd(
             prov, mod,
-            int(result.synthesis.usage.get("prompt_tokens") or 0),
-            int(result.synthesis.usage.get("completion_tokens") or 0),
+            int(synthesis.usage.get("prompt_tokens") or 0),
+            int(synthesis.usage.get("completion_tokens") or 0),
         )
         if synthesis_usd is None and prov and mod:
             missing.append(f"{prov}/{mod}")
 
     fork_usd_total = 0.0
     fork_seen = False
-    for packet in result.authored.packets:
+    authored = getattr(result, "authored", None)
+    for packet in (authored.packets if authored else []):
         prov = str(packet.provider_slug or "")
         mod = str(packet.model_slug or "")
         cost = _usd(

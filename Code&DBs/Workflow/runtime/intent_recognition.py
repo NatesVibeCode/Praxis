@@ -273,6 +273,28 @@ def _suggest_steps(
     has_app_input = bool(kinds.intersection({"app_name", "app_domain"}))
     has_research = bool(kinds.intersection({"search", "retrieve", "evaluate"}))
     has_integration = "custom_integration" in kinds
+
+    # ---------------------------------------------------------------
+    # App-integration domain suggestions — gated on domain markers, not
+    # just on verb-class match. The previous version fired
+    # "retrieve docs, auth details, and API shape" for ANY intent where
+    # `has_research = True` (i.e. any verb in {search, retrieve,
+    # evaluate}). That polluted recruiter / support / data-ingestion
+    # intents with app-integration-flavored labels.
+    #
+    # Tightened: app-integration-flavored labels now require
+    # `has_app_input` OR `has_integration` — i.e. the intent must actually
+    # mention app names, app domains, or custom integrations. Generic
+    # "search/retrieve/evaluate" verbs alone no longer trigger.
+    #
+    # NOTE: this block of hardcoded rules really belongs in the data
+    # dictionary as registered patterns (suggested_step_rules table or
+    # similar) so they can be edited without code changes and
+    # semantic-matched against the full intent. That's a separate
+    # migration; for now Fix 2 (semantic filter on the recognition
+    # output) catches anything that slips through.
+    # ---------------------------------------------------------------
+    is_app_integration_domain = has_app_input or has_integration
     if has_app_input and has_integration:
         _append_suggestion(
             suggestions,
@@ -282,7 +304,7 @@ def _suggest_steps(
             reason="app integration work should first decide whether an existing integration can satisfy the requested inputs and outputs",
             confidence="high",
         )
-    if (has_app_input or has_research) and "fan_out" not in kinds:
+    if is_app_integration_domain and "fan_out" not in kinds:
         _append_suggestion(
             suggestions,
             seen,
@@ -299,7 +321,10 @@ def _suggest_steps(
             source_ref=matched_tool_ref,
             reason="app name/domain inputs need authoritative source discovery before retrieval or evaluation",
         )
-    if has_research and "retrieve" not in kinds:
+    # Tightened: was `has_research` (fires on any search/retrieve/evaluate
+    # verb regardless of domain). Now requires app-integration domain
+    # context so the label matches the suggestion.
+    if is_app_integration_domain and "retrieve" not in kinds:
         _append_suggestion(
             suggestions,
             seen,
@@ -307,7 +332,7 @@ def _suggest_steps(
             source_ref=matched_tool_ref,
             reason="research findings need durable source material before evaluation",
         )
-    if has_research and "evaluate" not in kinds:
+    if is_app_integration_domain and "evaluate" not in kinds:
         _append_suggestion(
             suggestions,
             seen,
@@ -324,7 +349,108 @@ def _suggest_steps(
             reason="custom integrations need proof that auth, retrieval, and execution work after build",
             confidence="high",
         )
+
+    # ---------------------------------------------------------------
+    # Domain-agnostic abstract suggestions — fire for any intent whose
+    # spans include the matching verb-kind. Labels are intentionally
+    # abstract (no domain phrases) so the synthesis prompt's softened
+    # TASK clause can specialize them per intent.
+    #
+    # The synthesis TASK clause now reads: "Suggested_step labels above
+    # are HINTS — only use them when the suggested label semantically
+    # matches THIS intent's domain. When the suggestions don't fit,
+    # emit fresh, intent-specific labels." So abstract labels are
+    # safe — they hint at structure without forcing domain.
+    # ---------------------------------------------------------------
+    if not is_app_integration_domain:
+        if "search" in kinds:
+            _append_suggestion(
+                suggestions, seen,
+                label="search_sources",
+                source_ref=matched_tool_ref,
+                reason="abstract step: discover candidate inputs before processing",
+                confidence="medium",
+            )
+        if "retrieve" in kinds:
+            _append_suggestion(
+                suggestions, seen,
+                label="retrieve_data",
+                source_ref=matched_tool_ref,
+                reason="abstract step: pull the items the workflow operates on",
+                confidence="medium",
+            )
+        if "evaluate" in kinds:
+            _append_suggestion(
+                suggestions, seen,
+                label="evaluate_results",
+                source_ref=matched_tool_ref,
+                reason="abstract step: rank, score, or filter outputs",
+                confidence="medium",
+            )
+
     return suggestions
+
+
+def _filter_suggested_steps_by_relevance(
+    suggestions: list[SuggestedStep], intent: str, *, min_similarity: float = 0.35,
+) -> list[SuggestedStep]:
+    """Drop suggested_steps whose semantic similarity to the intent is below
+    threshold. The hardcoded ``_suggest_steps`` rules (above) fire on verb
+    KINDS (search, retrieve, evaluate, etc.) without checking whether the
+    suggested-step's *label* makes sense for THIS intent's domain.
+
+    Concrete example of the bug this fixes: an intent like
+    "Given a job description, find candidates from our recruiter database"
+    triggers ``kind=search`` and gets suggested_steps like
+    ``retrieve docs, auth details, and API shape`` —
+    those labels are app-integration-flavored and pollute the synthesis
+    prompt for a recruiter-domain intent.
+
+    Falls back to returning the unfiltered list when the embedding backend
+    is unavailable, so we never lose suggestions to infrastructure issues.
+    """
+    if not suggestions:
+        return suggestions
+    try:
+        from runtime.embedding_service import EmbeddingService, get_shared_embedder
+        if not EmbeddingService.backend_available():
+            return suggestions
+        embedder = get_shared_embedder()
+        if embedder is None:
+            return suggestions
+    except Exception:
+        return suggestions
+
+    try:
+        intent_vec = embedder.embed_one(intent)
+        # Embed each suggestion's (label + reason) — both carry signal about
+        # what the step is for, so we get a stronger semantic match than
+        # label-only.
+        step_texts = [f"{s.label}. {s.reason}".strip() for s in suggestions]
+        step_vecs = embedder.embed(step_texts)
+    except Exception:
+        return suggestions
+
+    # Cosine similarity (pure Python; no numpy dependency)
+    def _cos(a: list[float], b: list[float]) -> float:
+        n = min(len(a), len(b))
+        if n == 0: return 0.0
+        dot = sum(a[i] * b[i] for i in range(n))
+        na = sum(x * x for x in a) ** 0.5
+        nb = sum(x * x for x in b) ** 0.5
+        if na == 0 or nb == 0: return 0.0
+        return dot / (na * nb)
+
+    kept: list[SuggestedStep] = []
+    for sug, vec in zip(suggestions, step_vecs):
+        sim = _cos(intent_vec, vec)
+        if sim >= min_similarity:
+            kept.append(sug)
+    # Defensive floor: if NOTHING clears the threshold, the suggestions
+    # weren't useful anyway — return empty so the synthesis prompt doesn't
+    # get poisoned. The model falls back to recognizing-spans-only or
+    # generates fresh labels per the softened TASK clause.
+    return kept
 
 
 def recognize_intent(intent: str, *, conn: Any, match_limit: int = 5) -> IntentRecognition:
@@ -376,11 +502,19 @@ def recognize_intent(intent: str, *, conn: Any, match_limit: int = 5) -> IntentR
             for gap in gaps
             if gap.kind not in {"app_name", "app_domain", "custom_integration"}
         ]
+    raw_suggestions = _suggest_steps(spans, all_matches, rows)
+    # Filter suggestions whose labels don't semantically match the intent.
+    # Catches the bug where hardcoded ``_suggest_steps`` rules fire on verb
+    # kinds (search/retrieve/evaluate) and emit app-integration-flavored
+    # labels for recruiter / support / data-ingestion / etc. intents.
+    relevant_suggestions = _filter_suggested_steps_by_relevance(
+        raw_suggestions, clean_intent,
+    )
     return IntentRecognition(
         intent=clean_intent,
         spans=spans,
         matches=all_matches,
-        suggested_steps=_suggest_steps(spans, all_matches, rows),
+        suggested_steps=relevant_suggestions,
         gaps=gaps,
     )
 

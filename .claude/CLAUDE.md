@@ -170,7 +170,32 @@ Curated high-frequency aliases stay flat:
 - `praxis workflow artifacts`
 - `praxis workflow health`
 
-The registry/integration projection is a read model. Tool truth lives in `Code&DBs/Workflow/surfaces/mcp/catalog.py`.
+Tools self-declare a `kind` field in their MCP metadata so the choice space narrows fast:
+
+- `kind=search` — read-many across sources (`praxis_search`, `praxis_query`, `praxis_recall`, `praxis_discover`, `praxis_research`)
+- `kind=write` — mutates state (default for unlabeled tools — err on the safe side)
+- `kind=walk` — graph traversal / run-scoped views (`praxis_run`)
+- `kind=analytics` — aggregations / cost rollups
+- `kind=alias` — deprecated wrapper kept for one window before deletion
+
+`praxis_orient` and `praxis workflow tools list` surface `kind` per tool. The registry/integration projection is a read model. Tool truth lives in `Code&DBs/Workflow/surfaces/mcp/catalog.py`.
+
+## CQRS gateway dispatch is the engine bus
+
+Every Praxis Engine operation runs through `runtime.operation_catalog_gateway.execute_operation_from_subsystems(subsystems, operation_name=..., payload=...)`. The gateway:
+
+- validates the payload against the operation's Pydantic `input_model_ref`,
+- writes a row to `authority_operation_receipts` (input hash, idempotency key, timestamps, `execution_status` ∈ {`completed`, `replayed`, `failed`}),
+- replays cached results when `idempotency_policy='read_only'` or `'idempotent'` and the same payload reappears,
+- emits `authority_events` rows for command operations with `event_required=TRUE`.
+
+Standing-order row: `architecture_policy / cqrs_gateway_robust_determinism` — robust determinism for the hundreds-of-agents future. No MCP-tool-tier shims dispatching to subsystems directly. Every new MCP tool is a thin wrapper that calls `execute_operation_from_subsystems` and returns the gateway's result. Migrations registering new operations populate all three CQRS tables consistently:
+
+- `operation_catalog_registry` (authoritative — `operation_kind`, `idempotency_policy`, `receipt_required`, `event_required`, `event_type`, `handler_ref`, `input_model_ref`),
+- `authority_object_registry` (`object_kind` matches `operation_kind` — `'query'` for query ops, `'command'` for command ops; constraint widened in migration 279),
+- `data_dictionary_objects` (`category` matches `operation_kind`).
+
+Read receipts are not optional — read ops record their own ledger row so an agent's "what did the LLM ask?" trail is reproducible.
 
 ## Provider Execution Boundary
 
@@ -186,14 +211,71 @@ Standing-order row: `architecture-policy::provider-routing::cli-default-api-exce
 
 ## Search Before Building
 
-Before writing new infrastructure, search first:
+Lead with the canonical federated entry point, **`praxis_search`**. It dispatches through the CQRS gateway (`search.federated`), records a read receipt, and returns a topic-anchor cluster shape that bundles code, decisions, knowledge, bugs, receipts, git history, files, and allowlisted DB rows in one call.
 
-- `praxis workflow discover "<behavior>"`
-- `praxis workflow recall "<topic>"` for architecture/context
+```bash
+# MCP / CLI
+praxis workflow tools call praxis_search --input-json '{
+  "query": "provider routing CLI default API exception",
+  "sources": ["code", "decisions", "knowledge", "bugs"],
+  "limit": 8
+}'
 
-Uses vector embeddings over AST-extracted behavioral fingerprints. After code changes, refresh the index with:
+# Variants
+praxis_search(query="subprocess.", mode="exact",
+  scope={"paths":["Code&DBs/Workflow/runtime/**/*.py"]},
+  shape="context", context_lines=3)
+praxis_search(query="/class .*Authority/", mode="regex", ...)
+```
 
-- `praxis workflow discover reindex --yes`
+**Modes:** `auto` (default — `/regex/` → regex, `'quoted'` → exact, prose → semantic), `semantic`, `exact`, `regex`.
+
+**Shapes:** `match` (single line), `context` (±N lines, default), `full` (whole file/record).
+
+**Scope filters** narrow before ranking: `paths` / `exclude_paths` (glob), `since_iso` / `until_iso` (mtime or commit time), `type_slug`, `entity_kind` (`module|class|function|subsystem` for code), `exclude_terms`, source-specific knobs in `extras` (e.g. `extras.table` + `extras.where` for db, `extras.action` ∈ `log|diff|blame` for git).
+
+**Response shape** (cluster mode, federated):
+
+```jsonc
+{
+  "ok": true,
+  "anchor_count": 5,
+  "clusters": [
+    {
+      "anchor": "provider routing CLI/API",
+      "primary": { source: "decisions", name: "...", score: 1.00, ... },
+      "related": {
+        "code":     { items: [...], count: 7, fetch_hint: {...} },
+        "knowledge":{ items: [...], count: 4 },
+        "bugs":     { items: [...], count: 3 }
+      },
+      "score": 1.00
+    }, ...
+  ],
+  "also": {
+    "receipts": { count: 12, preview: "...", fetch: {...} }
+  },
+  "source_empty_states": {
+    "receipts": { reason_code: "retrieval.no_match", message: "..." }
+  },
+  "_meta": { dispatch_path: "gateway", index_freshness_per_source: {...} },
+  "operation_receipt": { receipt_id: "...", execution_status: "completed" }
+}
+```
+
+`related` is capped at 3 items per source with `count` showing how many more exist. `also` carries count + one-line preview + the exact follow-up `praxis_search` payload. Empty-state blocks emit when the whole query or a targeted source returns nothing — they include `reason_code=retrieval.no_match`, suggestions, and a `typed_gap_emitted` id when the standing "retrieval is the filter" decision applies.
+
+**Per-source ops** are also gateway-dispatched (one receipt per call) when you only need one source: `search.code`, `search.knowledge`, `search.decisions`, `search.research`, `search.bugs`, `search.receipts`, `search.git_history`, `search.files`, `search.db`.
+
+**Auto-reindex on stale code search** is on by default (`auto_reindex_if_stale=true`) — the indexer refreshes lazily when on-disk drift exceeds `stale_threshold` (default 5 files). Manual reindex remains as escape hatch:
+
+```bash
+praxis workflow discover reindex --yes
+```
+
+**Specialty search tools still exist** for niche cases — `praxis_discover` (hybrid code retrieval, AST fingerprints + FTS, returns reindex/stats actions), `praxis_recall` (knowledge-graph entity lookup), `praxis_query` (NL router) — but new code should reach for `praxis_search` first. They surface in the catalog with `kind=search`.
+
+**Knowledge-graph noise filter** is on by default — machine-generated event-log entities (`hard_failure:*`, `verification:*`, `workflow_<hex>`, `receipt:*`) are filtered out of `knowledge`/`decisions`/`research` results. Opt back in with `scope.extras.include_event_log_facts=true` if you genuinely want event-log search.
 
 ## Workflow Contract
 
@@ -210,6 +292,37 @@ Treat launch as kickoff-first:
 - use stream/status URLs as the live observation channels
 
 Use `--kill-if-idle` only when a run is clearly unhealthy and idle.
+
+## Run-scoped views — `praxis_run` (consolidated)
+
+Four legacy tools `praxis_run_status`, `praxis_run_scoreboard`, `praxis_run_graph`, `praxis_run_lineage` collapsed into one tool with an `action=` enum. Old names remain as `kind=alias` for one window then get deleted.
+
+```bash
+praxis workflow tools call praxis_run --input-json '{
+  "run_id": "run_123",
+  "action": "graph"          # status | scoreboard | graph | lineage
+}'
+```
+
+## Bug filing & verifier-backed resolution
+
+Use `praxis_bugs` for filing, dedup, evidence, replay, and resolution. Bug search now applies a `min_similarity=0.3` floor on the vector branch (BUG-9475EEB0 fix) so unmatched queries return zero hits instead of dumping the open-bug list.
+
+Resolving a bug to `FIXED` requires a **verifier run** — you can't claim "fixed", you have to point at a registered verifier authority that the tracker actually executes:
+
+```bash
+praxis workflow tools call praxis_bugs --input-json '{
+  "action": "resolve",
+  "bug_id": "BUG-XXXXXXXX",
+  "status": "FIXED",
+  "verifier_ref": "verifier.job.python.pytest_file",
+  "inputs": {"path": "/Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_X.py"},
+  "target_kind": "path",
+  "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_X.py"
+}'
+```
+
+The tracker writes a `verification_runs` row with stdout/stderr/exit_code/latency, links it as `evidence_role=validates_fix` on the bug via `bug_evidence_links`, and only then flips status. **Caveat:** `verifier.job.python.pytest_file` runs the executor from `/`, so paths must be **absolute** — relative paths fail with "file or directory not found." Use `FIX_PENDING_VERIFICATION` if you can't run the verifier yet; never claim FIXED without proof.
 
 ## Naming Convention
 

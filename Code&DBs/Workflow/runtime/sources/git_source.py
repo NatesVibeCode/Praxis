@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
+from runtime.sources._relevance import query_tokens, token_overlap_score
 from surfaces.mcp.tools._search_envelope import (
     SHAPE_FULL,
     SOURCE_GIT,
@@ -141,6 +142,7 @@ def _log_results(
 
     records = _parse_log_records(stdout)
     mode = resolve_mode(envelope)
+    tokens = query_tokens(envelope.query)
     rows: list[dict[str, Any]] = []
     for rec in records:
         haystack = f"{rec['subject']} {rec['body']}"
@@ -151,6 +153,13 @@ def _log_results(
             raise
         if _exclude_term_hit(haystack, envelope.scope.exclude_terms):
             continue
+        score = token_overlap_score(tokens, haystack)
+        if score == 0.0 and tokens:
+            # Query had matchable tokens but none appear here — skip.
+            # (The earlier _query_matches gate may have admitted via
+            # exact-substring or regex, but token-overlap=0 means the
+            # commit is not actually about these tokens.)
+            continue
         rows.append(
             {
                 "source": SOURCE_GIT,
@@ -160,8 +169,8 @@ def _log_results(
                 "committed_iso": rec["committed_iso"],
                 "match_text": rec["subject"],
                 "context": rec["body"][:800] if envelope.shape != SHAPE_FULL else rec["body"],
-                "score": 1.0,
-                "found_via": "git_log",
+                "score": score,
+                "found_via": "git_log.token_overlap",
             }
         )
         if len(rows) >= envelope.limit:

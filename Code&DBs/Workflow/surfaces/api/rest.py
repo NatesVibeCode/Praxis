@@ -24,7 +24,9 @@ import json
 import logging
 import os
 import re
+import struct
 import time
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -4438,9 +4440,8 @@ def _operator_console_enabled(env: dict[str, str] | None = None) -> bool:
 def operator_console_root() -> Any:
     """Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE).
 
-    Reachable only when the env flag is set. No public docs, no PWA manifest
-    — a single self-contained HTML page designed to be loaded over Tailscale
-    from the operator's phone or laptop.
+    Reachable only when the env flag is set. The route serves a narrow PWA
+    shell designed to be installed over Tailscale from the operator's phone.
     """
     if not _operator_console_enabled():
         raise HTTPException(
@@ -4471,6 +4472,216 @@ def operator_console_root() -> Any:
 
 _OPERATOR_CONSOLE_VENDOR_DIR = Path(__file__).resolve().parents[1] / "console" / "vendor"
 _OPERATOR_CONSOLE_VENDOR_ALLOWLIST = {"react.js", "react-dom.js", "htm.js"}
+_PRAXIS_LOGO_SVG = Path(__file__).resolve().parents[4] / "praxis_logo_premium.svg"
+
+
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(data))
+        + kind
+        + data
+        + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    )
+
+
+def _operator_console_png_icon(size: int) -> bytes:
+    """Generate a Chrome-compatible PNG approximation of the real logo."""
+    bg = (255, 255, 255, 255)
+    black = (11, 11, 11, 255)
+    pixels = bytearray()
+
+    def scale(value: float) -> float:
+        return value / 500.0 * size
+
+    def near_segment(x: float, y: float, x1: float, y1: float, x2: float, y2: float, width: float) -> bool:
+        px, py = scale(x1), scale(y1)
+        qx, qy = scale(x2), scale(y2)
+        vx, vy = qx - px, qy - py
+        wx, wy = x - px, y - py
+        length_sq = vx * vx + vy * vy
+        t = 0 if length_sq == 0 else max(0, min(1, (wx * vx + wy * vy) / length_sq))
+        cx, cy = px + t * vx, py + t * vy
+        return (x - cx) ** 2 + (y - cy) ** 2 <= (scale(width) / 2) ** 2
+
+    def in_circle(x: float, y: float, cx: float, cy: float, r: float) -> bool:
+        return (x - scale(cx)) ** 2 + (y - scale(cy)) ** 2 <= scale(r) ** 2
+
+    for y in range(size):
+        row = bytearray([0])
+        for x in range(size):
+            color = bg
+            border_segments = (
+                (130, 100, 370, 100, 10),
+                (370, 100, 370, 188, 10),
+                (370, 252, 370, 340, 10),
+                (370, 340, 130, 340, 10),
+                (130, 340, 130, 252, 10),
+                (130, 188, 130, 100, 10),
+                (130, 220, 370, 220, 7),
+            )
+            if any(near_segment(x, y, *segment) for segment in border_segments):
+                color = black
+            if in_circle(x, y, 130, 220, 16) or in_circle(x, y, 306, 220, 11) or in_circle(x, y, 370, 220, 23):
+                color = black
+            if in_circle(x, y, 228, 220, 35) and not in_circle(x, y, 228, 220, 29):
+                color = black
+            if in_circle(x, y, 228, 220, 20) and not in_circle(x, y, 228, 220, 14):
+                color = black
+            if in_circle(x, y, 228, 220, 9):
+                color = black
+            row.extend(color)
+        pixels.extend(row)
+    header = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+    return header + _png_chunk(b"IHDR", ihdr) + _png_chunk(b"IDAT", zlib.compress(bytes(pixels), 9)) + _png_chunk(b"IEND", b"")
+
+
+@app.get("/console/manifest.webmanifest", response_model=None, include_in_schema=False)
+def operator_console_manifest() -> Any:
+    """Serve the installable operator-console PWA manifest."""
+    if not _operator_console_enabled():
+        raise HTTPException(status_code=404, detail={"message": "operator console is not enabled"})
+    payload = {
+        "id": "/console",
+        "name": "Praxis Operator Console",
+        "short_name": "Praxis",
+        "description": "Tailscale-private Praxis operator chat console.",
+        "start_url": "/console?source=pwa",
+        "scope": "/console",
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": "#0b0d10",
+        "theme_color": "#0b0d10",
+        "categories": ["productivity", "developer"],
+        "icons": [
+            {
+                "src": "/console/icon-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any maskable",
+            },
+            {
+                "src": "/console/icon-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any maskable",
+            },
+            {
+                "src": "/console/icon.svg",
+                "sizes": "any",
+                "type": "image/svg+xml",
+                "purpose": "any maskable",
+            }
+        ],
+    }
+    return JSONResponse(
+        payload,
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
+
+
+@app.get("/console/icon-{size}.png", response_model=None, include_in_schema=False)
+def operator_console_png_icon(size: int) -> Any:
+    """Serve Android/Chrome installability icons."""
+    if not _operator_console_enabled():
+        raise HTTPException(status_code=404, detail={"message": "operator console is not enabled"})
+    if size not in {192, 512}:
+        raise HTTPException(status_code=404, detail={"message": "icon size not available"})
+    return Response(
+        content=_operator_console_png_icon(size),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/console/icon.svg", response_model=None, include_in_schema=False)
+def operator_console_icon() -> Any:
+    """Serve the real Praxis logo SVG for the installed phone console."""
+    if not _operator_console_enabled():
+        raise HTTPException(status_code=404, detail={"message": "operator console is not enabled"})
+    try:
+        body = _PRAXIS_LOGO_SVG.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail={"message": f"Praxis logo unavailable: {exc}"}) from exc
+    return Response(
+        content=body,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/console/sw.js", response_model=None, include_in_schema=False)
+def operator_console_service_worker() -> Any:
+    """Serve the console service worker for install + notification clicks."""
+    if not _operator_console_enabled():
+        raise HTTPException(status_code=404, detail={"message": "operator console is not enabled"})
+    body = """
+const CACHE_NAME = 'praxis-console-v1';
+const SHELL_URLS = [
+  '/console',
+  '/console/manifest.webmanifest',
+  '/console/icon.svg',
+  '/console/icon-192.png',
+  '/console/icon-512.png',
+  '/console/vendor/react.js',
+  '/console/vendor/react-dom.js',
+  '/console/vendor/htm.js'
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)).then(() => self.skipWaiting()));
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  if (url.origin !== location.origin || !url.pathname.startsWith('/console')) return;
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(event.request).then((match) => match || caches.match('/console')))
+  );
+});
+
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (data.type !== 'praxis.notify') return;
+  event.waitUntil(self.registration.showNotification(data.title || 'Praxis', {
+    body: data.body || '',
+    icon: '/console/icon.svg',
+    badge: '/console/icon.svg',
+    tag: data.tag || 'praxis-console',
+    renotify: true,
+    data: { url: '/console' }
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes('/console') && 'focus' in client) return client.focus();
+      }
+      return clients.openWindow('/console');
+    })
+  );
+});
+"""
+    return Response(
+        content=body,
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Service-Worker-Allowed": "/console",
+        },
+    )
 
 
 @app.get("/console/vendor/{name}", response_model=None, include_in_schema=False)

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from runtime.sources._relevance import query_tokens, token_overlap_score
 from runtime.sources.code_source import _glob_to_regex, _within_time_window
 from surfaces.mcp.tools._search_envelope import (
     MODE_EXACT,
@@ -76,6 +77,7 @@ def search_files(
 
     mode = resolve_mode(envelope)
     require_match = mode in (MODE_EXACT, MODE_REGEX)
+    tokens = query_tokens(envelope.query)
 
     rows: list[dict[str, Any]] = []
     for dirpath, dirnames, filenames in os.walk(repo_root):
@@ -107,6 +109,12 @@ def search_files(
             except OSError:
                 size = 0
                 mtime = None
+            # Score by token overlap on path+filename. When tokens is
+            # empty (no matchable query words), token_overlap_score
+            # returns 0.5 — a structured-query call (e.g. ``query="."``
+            # with a path glob) just relies on the path filter and gets
+            # a neutral score.
+            score = token_overlap_score(tokens, f"{rel} {filename}")
             rows.append(
                 {
                     "source": SOURCE_FILES,
@@ -115,8 +123,8 @@ def search_files(
                     "size_bytes": size,
                     "mtime_iso": mtime,
                     "match_text": rel,
-                    "score": 1.0,
-                    "found_via": "files",
+                    "score": score,
+                    "found_via": "files.token_overlap",
                 }
             )
             if len(rows) >= envelope.limit:

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -111,6 +112,24 @@ def test_agent_sessions_fail_closed_without_public_api_token() -> None:
     assert response.json()["detail"]["error_code"] == "agent_sessions_auth_not_configured"
 
 
+def test_agent_sessions_trust_tailscale_operator_mode_without_bearer_token(monkeypatch) -> None:
+    monkeypatch.setenv("PRAXIS_OPERATOR_TRUST_TAILSCALE", "1")
+
+    with TestClient(agent_sessions.app) as client:
+        response = client.get("/agents")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_agent_sessions_trust_tailscale_client_ip_without_bearer_token() -> None:
+    with TestClient(agent_sessions.app, client=("100.80.157.47", 48080)) as client:
+        response = client.get("/agents")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_agent_sessions_require_valid_bearer_token(monkeypatch) -> None:
     monkeypatch.setenv("PRAXIS_API_TOKEN", "session-token")
 
@@ -204,8 +223,8 @@ def test_agent_session_runner_accepts_openrouter_provider() -> None:
     assert agent_sessions._cli_provider("openrouter") == "openrouter"
 
 
-def test_agent_session_openrouter_default_is_paid_tool_capable_route() -> None:
-    assert agent_sessions._openrouter_model({}) == "qwen/qwen3-coder"
+def test_agent_session_openrouter_default_is_deepseek_route() -> None:
+    assert agent_sessions._openrouter_model({}) == "deepseek/deepseek-v4-pro"
 
 
 def test_openrouter_messages_preserve_prior_turns(isolated_agent_sessions) -> None:
@@ -243,6 +262,206 @@ def test_openrouter_messages_preserve_prior_turns(isolated_agent_sessions) -> No
         {"role": "assistant", "content": "second"},
         {"role": "user", "content": "third"},
     ]
+
+
+def test_send_message_dispatches_to_single_together_provider(monkeypatch, isolated_agent_sessions) -> None:
+    monkeypatch.setenv("PRAXIS_API_TOKEN", "session-token")
+    captured: dict[str, object] = {}
+
+    async def _fake_run_turn(
+        agent_id: str,
+        session_id: str,
+        prompt: str,
+        *,
+        provider_slug: str,
+        pg_conn=None,
+        permission_mode=None,
+    ):
+        captured.update(
+            {
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "prompt": prompt,
+                "provider_slug": provider_slug,
+                "permission_mode": permission_mode,
+                "pg_conn": pg_conn,
+            }
+        )
+        return "reply", [{"type": "assistant", "message": {"content": "reply"}}], 0, session_id
+
+    monkeypatch.setattr(agent_sessions, "_run_turn", _fake_run_turn)
+
+    with TestClient(agent_sessions.app) as client:
+        create = client.post(
+            "/agents",
+            headers=_auth_headers(),
+            json={"title": "DeepSeek lane", "provider": "codex"},
+        )
+        assert create.status_code == 200
+        assert create.json()["provider"] == "together"
+        agent_id = create.json()["agent_id"]
+
+        response = client.post(
+            f"/agents/{agent_id}/messages",
+            headers=_auth_headers(),
+            json={"prompt": "inspect Praxis", "permission_mode": "plan_only"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["provider"] == "together"
+    assert captured["provider_slug"] == "together"
+    assert captured["prompt"] == "inspect Praxis"
+    assert captured["permission_mode"] == "plan_only"
+    assert captured["pg_conn"] is isolated_agent_sessions
+
+
+def test_console_tool_call_protocol_extracts_json() -> None:
+    call = agent_sessions._extract_praxis_tool_call(
+        '{"praxis_tool_call":{"tool":"praxis_model_access_control_matrix","input":{"job_type":"chat"}}}'
+    )
+
+    assert call == {
+        "tool": "praxis_model_access_control_matrix",
+        "input": {"job_type": "chat"},
+    }
+
+
+def test_console_tool_call_rejects_unlisted_tool() -> None:
+    result = agent_sessions._run_praxis_tool_for_console(
+        {"tool": "praxis_operator_architecture_policy", "input": {"action": "record"}}
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "praxis_tool_not_allowed"
+
+
+def test_together_reply_cleanup_removes_timestamp_and_word_digit_junk() -> None:
+    dirty = "The10 matrix is02:38:55 AM on and12 ready."
+
+    assert agent_sessions._clean_api_reply_text(dirty, provider_slug="together") == "The matrix is on and ready."
+
+
+def test_praxis_lookup_context_is_internal_not_visible_chat(monkeypatch, isolated_agent_sessions) -> None:
+    monkeypatch.setattr("adapters.keychain.resolve_secret", lambda _name, env=None: "test-key")
+    captured_messages: list[list[dict[str, str]]] = []
+
+    def _fake_chat_completion_json_request(**kwargs):
+        captured_messages.append(kwargs["messages"])
+        if len(captured_messages) == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"praxis_tool_call":{"tool":"praxis_health","input":{}}}'
+                            )
+                        }
+                    }
+                ]
+            }
+        return {"choices": [{"message": {"content": "Praxis is healthy."}}]}
+
+    monkeypatch.setattr(agent_sessions, "_chat_completion_json_request", _fake_chat_completion_json_request)
+    monkeypatch.setattr(
+        agent_sessions,
+        "_run_praxis_tool_for_console",
+        lambda _call: {
+            "ok": True,
+            "tool": "praxis_health",
+            "stdout": {
+                "status": "ok",
+                "projected_at": "2026-04-27 00:31:22+00:00",
+                "operation_receipt": {"receipt_id": "noisy-machine-metadata"},
+            },
+        },
+    )
+
+    agent_id = str(uuid4())
+    reply, turn_events, exit_code, _session_id = asyncio.run(
+        agent_sessions._run_api_provider_turn(
+            agent_id=agent_id,
+            session_id="session-1",
+            prompt="Check Praxis health",
+            provider_slug="together",
+            pg_conn=isolated_agent_sessions,
+        )
+    )
+
+    assert reply == "Praxis is healthy."
+    assert exit_code == 0
+    event_types = [event["type"] for event in turn_events]
+    assert "praxis.tool_call" in event_types
+    assert "praxis.tool_result" in event_types
+    assert event_types[-1] == "assistant"
+    stages = [event.get("stage") for event in turn_events if event["type"] == "turn.stage"]
+    assert stages == [
+        "provider_key",
+        "provider_request",
+        "provider_response",
+        "assistant_text",
+        "final_provider_request",
+        "final_provider_response",
+        "final_assistant_text",
+    ]
+    assert len(captured_messages) == 2
+    second_call_messages = captured_messages[1]
+    assert not any(
+        message["role"] == "user" and "praxis_tool_result" in message["content"]
+        for message in second_call_messages
+    )
+    assert not any(
+        message["role"] == "assistant" and "praxis_tool_call" in message["content"]
+        for message in second_call_messages
+    )
+    internal_messages = [
+        message
+        for message in second_call_messages
+        if message["role"] == "system"
+        and "INTERNAL PRAXIS LOOKUP CONTEXT" in message["content"]
+    ]
+    assert internal_messages
+    assert "projected_at" not in internal_messages[0]["content"]
+    assert "operation_receipt" not in internal_messages[0]["content"]
+
+
+def test_empty_provider_reply_is_visible_error(monkeypatch, isolated_agent_sessions) -> None:
+    monkeypatch.setattr("adapters.keychain.resolve_secret", lambda _name, env=None: "test-key")
+    monkeypatch.setattr(
+        agent_sessions,
+        "_chat_completion_json_request",
+        lambda **_kwargs: {"choices": [{"message": {"content": ""}}]},
+    )
+
+    agent_id = str(uuid4())
+    reply, turn_events, exit_code, _session_id = asyncio.run(
+        agent_sessions._run_api_provider_turn(
+            agent_id=agent_id,
+            session_id="session-1",
+            prompt="Hi",
+            provider_slug="together",
+            pg_conn=isolated_agent_sessions,
+        )
+    )
+
+    assert exit_code == 1
+    assert turn_events[-1]["type"] == "error"
+    assert turn_events[-1]["error_code"] == "agent_provider_failed"
+    assert turn_events[-1]["stage"] == "provider_response"
+    stages = [event.get("stage") for event in turn_events if event["type"] == "turn.stage"]
+    assert stages == ["provider_key", "provider_request", "provider_response"]
+    assert "empty assistant reply" in reply
+
+
+def test_praxis_context_includes_operator_chat_doctrine(isolated_agent_sessions) -> None:
+    agent_sessions._PRAXIS_CONTEXT_CACHE["text"] = None
+    agent_sessions._PRAXIS_CONTEXT_CACHE["expires_at"] = 0.0
+
+    context = agent_sessions._build_praxis_context(isolated_agent_sessions)
+
+    assert "Neo operator doctrine" in context
+    assert "high-taste operator" in context
+    assert "canonical operator surface is `praxis workflow`" in context
+    assert "Lead with the verdict" in context
 
 
 def test_agent_session_runner_strips_blank_anthropic_api_env() -> None:

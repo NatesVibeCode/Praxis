@@ -76,6 +76,11 @@ class LLMRequest:
     max_tokens: int | None = None
     temperature: float = 0.0
     tools: tuple[dict[str, Any], ...] | None = None
+    # Provider-specific extras merged into the request body verbatim.
+    # Used for OpenRouter's `reasoning: {"effort": "low|medium|high"}`,
+    # OpenAI's `reasoning_effort`, Anthropic's `thinking`, etc. Caller is
+    # responsible for matching the schema to the underlying provider.
+    extra_body: dict[str, Any] | None = None
     system_prompt: str | None = None
     protocol_family: str | None = None
     timeout_seconds: int | None = None
@@ -137,6 +142,13 @@ def _build_openai_body(request: LLMRequest) -> dict[str, Any]:
     # reasoning into empty `content`.
     if request.max_tokens is not None:
         body["max_tokens"] = request.max_tokens
+
+    # Merge any provider-specific extras (reasoning_effort, OpenRouter's
+    # `reasoning`, Anthropic's `thinking`, etc.). Caller is responsible
+    # for schema correctness for the provider being targeted.
+    if request.extra_body:
+        for key, value in request.extra_body.items():
+            body[key] = value
 
     if request.tools:
         body["tools"] = [

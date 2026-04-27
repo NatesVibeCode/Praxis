@@ -1013,6 +1013,39 @@ def tool_praxis_model_access_control_matrix(params: dict) -> dict:
     )
 
 
+def tool_praxis_access_control(params: dict) -> dict:
+    """Mutate the control-panel denial table.
+
+    Actions: list, disable, enable. Selector tuple is
+    (runtime_profile_ref, job_type, transport_type, adapter_type,
+    provider_slug, model_slug); '*' is wildcard.
+    """
+
+    payload = {
+        "action": str(params.get("action") or "list").strip().lower(),
+        "runtime_profile_ref": str(params.get("runtime_profile_ref") or "praxis").strip(),
+        "job_type": str(params.get("job_type") or "*").strip(),
+        "transport_type": str(params.get("transport_type") or "*").strip().upper(),
+        "adapter_type": str(params.get("adapter_type") or "*").strip(),
+        "provider_slug": str(params.get("provider_slug") or "*").strip().lower(),
+        "model_slug": str(params.get("model_slug") or "*").strip(),
+        "decision_ref": str(params.get("decision_ref") or "").strip() or None,
+        "operator_message": (
+            str(params.get("operator_message") or "").strip() or None
+        ),
+        "reason_code": (
+            str(params.get("reason_code") or "control_panel.model_access_method_turned_off").strip()
+        ),
+    }
+    if payload["transport_type"] == "":
+        payload["transport_type"] = "*"
+    try:
+        payload["limit"] = _bounded_limit(params, default=200, maximum=1000)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name="access_control")
+    return _execute_catalog_tool(operation_name="access_control", payload=payload)
+
+
 def tool_praxis_work_assignment_matrix(params: dict) -> dict:
     """Read the model-tier work assignment matrix through CQRS authority."""
 
@@ -2285,6 +2318,83 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "control_state": {
                         "type": "string",
                         "enum": ["on", "off"],
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 200,
+                    },
+                },
+            },
+        },
+    ),
+    "praxis_access_control": (
+        tool_praxis_access_control,
+        {
+            "description": (
+                "Mutate the control-panel model-access denial table — the first-class "
+                "checkbox surface for turning a (provider × transport × job_type × model) "
+                "tuple on or off.\n\n"
+                "USE WHEN: you need to disable or re-enable a provider/model for routing "
+                "without writing a migration. Wildcards ('*') broaden the selector — e.g. "
+                "(provider_slug='openai', transport_type='CLI') turns OpenAI off for every "
+                "CLI job_type/adapter/model in one row.\n\n"
+                "ACTIONS:\n"
+                "  list    — read existing denial rows (filtered by selector)\n"
+                "  disable — upsert a denial row (denied=TRUE) and refresh the projection\n"
+                "  enable  — delete the matching denial row and refresh the projection\n\n"
+                "Emits access_control.denial.changed on disable/enable."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "disable", "enable"],
+                        "default": "list",
+                    },
+                    "runtime_profile_ref": {
+                        "type": "string",
+                        "description": "Runtime profile whose denial set is being read or written.",
+                        "default": "praxis",
+                    },
+                    "job_type": {
+                        "type": "string",
+                        "description": "Task type selector or '*' for all.",
+                        "default": "*",
+                    },
+                    "transport_type": {
+                        "type": "string",
+                        "enum": ["*", "CLI", "API"],
+                        "default": "*",
+                    },
+                    "adapter_type": {
+                        "type": "string",
+                        "description": "Adapter selector or '*' for all.",
+                        "default": "*",
+                    },
+                    "provider_slug": {
+                        "type": "string",
+                        "description": "Provider selector or '*' for all.",
+                        "default": "*",
+                    },
+                    "model_slug": {
+                        "type": "string",
+                        "description": "Model selector or '*' for all.",
+                        "default": "*",
+                    },
+                    "decision_ref": {
+                        "type": "string",
+                        "description": "Operator decision reference. Required for action='disable'.",
+                    },
+                    "operator_message": {
+                        "type": "string",
+                        "description": "Custom operator-message override; defaults to the standard control-panel guidance string.",
+                    },
+                    "reason_code": {
+                        "type": "string",
+                        "description": "Override the reason_code stored on the denial row.",
+                        "default": "control_panel.model_access_method_turned_off",
                     },
                     "limit": {
                         "type": "integer",

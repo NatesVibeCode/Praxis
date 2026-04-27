@@ -56,9 +56,11 @@ def test_operator_console_html_wires_to_agent_sessions_api(
     # Must name the normalized permission modes so the UI mirrors the matrix.
     for mode in ("read_only", "plan_only", "propose_edits", "auto_edits", "full_autonomy"):
         assert mode in body
-    # Must name the CLI providers.
-    for provider in ("claude", "codex", "gemini"):
-        assert provider in body
+    # The phone console is now single-lane rather than a provider picker.
+    assert "DeepSeek V4 Pro" in body
+    assert "Claude CLI" not in body
+    assert "Codex CLI" not in body
+    assert "Gemini CLI" not in body
 
 
 def test_operator_console_trailing_slash_also_gated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -73,3 +75,42 @@ def test_operator_console_zero_disables_gate(monkeypatch: pytest.MonkeyPatch) ->
     with TestClient(rest.app) as client:
         response = client.get("/console")
     assert response.status_code == 404
+
+
+def test_operator_console_serves_pwa_manifest_and_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
+    with TestClient(rest.app) as client:
+        manifest = client.get("/console/manifest.webmanifest")
+        worker = client.get("/console/sw.js")
+        icon = client.get("/console/icon.svg")
+        icon_192 = client.get("/console/icon-192.png")
+        icon_512 = client.get("/console/icon-512.png")
+
+    assert manifest.status_code == 200
+    assert manifest.headers["content-type"].startswith("application/manifest+json")
+    payload = manifest.json()
+    assert payload["display"] == "standalone"
+    assert payload["start_url"].startswith("/console")
+    assert payload["icons"][0]["src"] == "/console/icon-192.png"
+    assert payload["icons"][0]["sizes"] == "192x192"
+    assert payload["icons"][1]["src"] == "/console/icon-512.png"
+    assert payload["icons"][1]["sizes"] == "512x512"
+
+    assert worker.status_code == 200
+    assert "showNotification" in worker.text
+    assert "notificationclick" in worker.text
+    assert "/console/icon-192.png" in worker.text
+    assert "/console/icon-512.png" in worker.text
+    assert worker.headers["service-worker-allowed"] == "/console"
+
+    assert icon.status_code == 200
+    assert icon.headers["content-type"].startswith("image/svg+xml")
+    assert "Praxis premium logo" in icon.text
+    assert icon_192.status_code == 200
+    assert icon_192.headers["content-type"].startswith("image/png")
+    assert icon_192.content.startswith(b"\x89PNG")
+    assert icon_512.status_code == 200
+    assert icon_512.headers["content-type"].startswith("image/png")
+    assert icon_512.content.startswith(b"\x89PNG")

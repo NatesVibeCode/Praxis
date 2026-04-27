@@ -23,6 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from runtime.operations.queries.search_clustering import build_clusters
 from runtime.sources.bugs_source import search_bugs as _impl_bugs
 from runtime.sources.code_source import (
     maybe_refresh_index as _impl_maybe_refresh,
@@ -231,6 +232,7 @@ def _run_envelope(
     *,
     auto_reindex: bool,
     stale_threshold: int,
+    cluster: bool = True,
 ) -> dict[str, Any]:
     all_results: list[dict[str, Any]] = []
     freshness: dict[str, dict[str, Any]] = {}
@@ -249,17 +251,39 @@ def _run_envelope(
         all_results.extend(results)
 
     all_results.sort(key=lambda row: -float(row.get("score") or 0.0))
-    if len(all_results) > envelope.limit:
-        all_results = all_results[: envelope.limit]
+    flat_results = list(all_results)
+    if len(flat_results) > envelope.limit:
+        flat_results = flat_results[: envelope.limit]
     if not envelope.explain:
-        for row in all_results:
+        for row in flat_results:
             row.pop("_explain", None)
-    return build_response(
+
+    response = build_response(
         envelope=envelope,
-        results=all_results,
+        results=flat_results,
         sources_status=sources_status,
         freshness=freshness,
     )
+
+    if cluster:
+        cluster_block = build_clusters(
+            envelope=envelope,
+            raw_hits=all_results,
+            sources_status=sources_status,
+            subsystems=subsystems,
+        )
+        # Surface clusters as the primary shape; keep flat 'results' for
+        # backward-compat with callers that still iterate it.
+        response["clusters"] = cluster_block.get("clusters", [])
+        response["anchor_count"] = cluster_block.get("anchor_count", 0)
+        if "also" in cluster_block:
+            response["also"] = cluster_block["also"]
+        if "empty_state" in cluster_block:
+            response["empty_state"] = cluster_block["empty_state"]
+        if "source_empty_states" in cluster_block:
+            response["source_empty_states"] = cluster_block["source_empty_states"]
+
+    return response
 
 
 def _run_single_source(
@@ -280,11 +304,13 @@ def _run_single_source(
         cursor=envelope.cursor,
         explain=envelope.explain,
     )
+    # Single-source ops skip clustering — caller asked for one source by name.
     return _run_envelope(
         envelope,
         subsystems,
         auto_reindex=query.auto_reindex_if_stale,
         stale_threshold=query.stale_threshold,
+        cluster=False,
     )
 
 

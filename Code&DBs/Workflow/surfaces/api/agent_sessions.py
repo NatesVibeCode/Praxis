@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import os
+import re
 import secrets
+import subprocess
 import time
 import tempfile
 import urllib.error
@@ -46,10 +49,12 @@ PRAXIS_ROOT = Path(__file__).resolve().parents[4]
 ARTIFACTS_DIR = PRAXIS_ROOT / "artifacts"
 AGENTS_DIR = ARTIFACTS_DIR / "agents"
 _PUBLIC_AUTH_TOKEN_ENV = "PRAXIS_API_TOKEN"
+_TRUST_TAILSCALE_ENV = "PRAXIS_OPERATOR_TRUST_TAILSCALE"
 _AGENT_SESSIONS_HOST_ENV = "PRAXIS_AGENT_SESSIONS_HOST"
 _AGENT_SESSIONS_PORT_ENV = "PRAXIS_AGENT_SESSIONS_PORT"
 _RUNNER_URL_ENV = "PRAXIS_AGENT_SESSIONS_RUNNER_URL"
 _HTTP_BEARER = HTTPBearer(auto_error=False)
+_TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 
 
 def _claude_cwd(env: dict[str, str] | None = None) -> Path:
@@ -64,6 +69,23 @@ def _public_api_token(env: dict[str, str] | None = None) -> str | None:
     source = env if env is not None else os.environ
     value = (source.get(_PUBLIC_AUTH_TOKEN_ENV) or "").strip()
     return value or None
+
+
+def _trust_tailscale_operator(env: dict[str, str] | None = None) -> bool:
+    source = env if env is not None else os.environ
+    return str(source.get(_TRUST_TAILSCALE_ENV) or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _is_tailscale_client(request: Request) -> bool:
+    client = getattr(request, "client", None)
+    host = str(getattr(client, "host", "") or "").strip()
+    if not host:
+        return False
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return addr in _TAILSCALE_CGNAT or addr.is_loopback
 
 
 def _agent_sessions_host(env: dict[str, str] | None = None) -> str:
@@ -159,6 +181,10 @@ async def _require_agent_session_access(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(_HTTP_BEARER),
 ) -> dict[str, str]:
+    if _trust_tailscale_operator() or _is_tailscale_client(request):
+        request.state.authenticated_principal = "operator_tailscale"
+        return _auth_payload(principal_ref="operator:tailscale", auth_kind="tailscale")
+
     expected_token = _public_api_token()
 
     if credentials is not None and str(credentials.scheme).lower() == "bearer":
@@ -207,6 +233,30 @@ _PERMISSION_MODE_ENV = "PRAXIS_AGENT_PERMISSION_MODE"
 _CLI_PROVIDER_ENV = "PRAXIS_AGENT_CLI_PROVIDER"
 _CODEX_SANDBOX_ENV = "PRAXIS_AGENT_CODEX_SANDBOX"
 _OPENROUTER_MODEL_ENV = "PRAXIS_AGENT_OPENROUTER_MODEL"
+_OPERATOR_CONSOLE_PROVIDER = "together"
+_TOGETHER_MODEL = "deepseek-ai/DeepSeek-V4-Pro"
+_TOGETHER_ENDPOINT = "https://api.together.xyz/v1/chat/completions"
+_TOGETHER_KEY_NAME = "TOGETHER_API_KEY"
+_PRAXIS_TOOL_TIMEOUT_SECONDS = 45.0
+_PRAXIS_READ_TOOLS = frozenset(
+    {
+        "praxis_orient",
+        "praxis_query",
+        "praxis_search",
+        "praxis_discover",
+        "praxis_recall",
+        "praxis_data_dictionary",
+        "praxis_model_access_control_matrix",
+        "praxis_provider_control_plane",
+        "praxis_receipts",
+        "praxis_bugs",
+        "praxis_health",
+        "praxis_status_snapshot",
+        "praxis_run",
+    }
+)
+_TOGETHER_TIMESTAMP_JUNK_RE = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)\b")
+_TOGETHER_WORD_DIGIT_JUNK_RE = re.compile(r"(?<=[a-z])\d{2,3}(?=\s|$)")
 _DEFAULT_TURN_TIMEOUT_SECONDS = 180.0
 _DEFAULT_PERMISSION_MODE = "dontAsk"
 
@@ -252,16 +302,22 @@ def _validate_permission_mode(value: str | None) -> NormalizedPermissionMode | N
 
 
 def _agent_sessions_pg_conn() -> Any:
+    return _agent_sessions_subsystems().get_pg_conn()
+
+
+def _agent_sessions_subsystems() -> Any:
     factory = getattr(app.state, "pg_conn_factory", None)
     if callable(factory):
-        return factory()
+        from types import SimpleNamespace
+
+        return SimpleNamespace(get_pg_conn=factory)
 
     global _subsystems
     if _subsystems is None:
         from surfaces.api.handlers._subsystems import _Subsystems
 
         _subsystems = _Subsystems()
-    return _subsystems.get_pg_conn()
+    return _subsystems
 
 
 def _auth_payload(
@@ -924,21 +980,159 @@ def _thread_id_from_events(events: list[dict[str, Any]], fallback: str) -> str:
 def _openrouter_model(env: dict[str, str] | None = None) -> str:
     source = env if env is not None else os.environ
     model = str(source.get(_OPENROUTER_MODEL_ENV) or "").strip()
-    return model or "qwen/qwen3-coder"
+    return model or "deepseek/deepseek-v4-pro"
 
 
-def _openrouter_messages(
+def _prompt_json(value: Any, *, max_chars: int = 12000) -> str:
+    text = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 32] + "\n...[truncated for prompt budget]"
+
+
+def _compact_tool_result_for_prompt(value: Any) -> Any:
+    noisy_keys = {
+        "operation_receipt",
+        "projected_at",
+        "source_refs",
+        "cost_metadata",
+        "created_at",
+        "updated_at",
+        "last_activity",
+    }
+    if isinstance(value, dict):
+        return {
+            key: _compact_tool_result_for_prompt(item)
+            for key, item in value.items()
+            if key not in noisy_keys
+        }
+    if isinstance(value, list):
+        return [_compact_tool_result_for_prompt(item) for item in value[:20]]
+    return value
+
+
+def _internal_praxis_lookup_message(call: dict[str, Any], result: dict[str, Any]) -> dict[str, str]:
+    """Build an ephemeral model-only context message for one Praxis lookup.
+
+    This must never be persisted or replayed as user/assistant conversation.
+    The visible chat stays human; Praxis lookup machinery stays internal to
+    the current model call.
+    """
+    packet = {
+        "requested_lookup": {
+            "tool": call.get("tool"),
+            "input": call.get("input") or {},
+        },
+        "lookup_result": _compact_tool_result_for_prompt(result),
+    }
+    return {
+        "role": "system",
+        "content": (
+            "INTERNAL PRAXIS LOOKUP CONTEXT. This is not user-authored chat and "
+            "not visible conversation history. Use it only as factual context for "
+            "answering Nate's latest message. Do not quote raw JSON, timestamps, "
+            "receipt IDs, hashes, or protocol fields. Do not request another "
+            "lookup in this reply.\n\n"
+            + _prompt_json(packet, max_chars=10000)
+        ),
+    }
+
+
+def _clean_api_reply_text(text: str, *, provider_slug: str) -> str:
+    if provider_slug != "together" or not text:
+        return text
+    cleaned = _TOGETHER_TIMESTAMP_JUNK_RE.sub("", text)
+    cleaned = _TOGETHER_WORD_DIGIT_JUNK_RE.sub("", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _orient_context_for_prompt() -> str:
+    try:
+        from surfaces.api.handlers.workflow_admin import _handle_orient
+
+        payload = _handle_orient(
+            _agent_sessions_subsystems(),
+            {"fast": True, "compact": True, "skip_engineering_observability": True},
+        )
+        packet = {
+            "instruction_authority": payload.get("instruction_authority"),
+            "standing_orders": payload.get("standing_orders"),
+            "tool_guidance": payload.get("tool_guidance"),
+            "search_surfaces": payload.get("search_surfaces"),
+            "cli_surface": payload.get("cli_surface"),
+            "endpoints": payload.get("endpoints"),
+            "capabilities": payload.get("capabilities"),
+            "instructions": payload.get("instructions"),
+        }
+        return _prompt_json(packet, max_chars=16000)
+    except Exception as exc:
+        return _prompt_json({"error": f"orient packet unavailable: {type(exc).__name__}: {exc}"})
+
+
+def _tool_catalog_context_for_prompt() -> str:
+    preferred = {
+        "praxis_orient",
+        "praxis_query",
+        "praxis_search",
+        "praxis_discover",
+        "praxis_recall",
+        "praxis_workflow",
+        "praxis_run",
+        "praxis_bugs",
+        "praxis_receipts",
+        "praxis_data_dictionary",
+        "praxis_model_access_control_matrix",
+        "praxis_provider_control_plane",
+        "praxis_operator_architecture_policy",
+        "praxis_operator_decisions",
+    }
+    try:
+        from surfaces.mcp.catalog import get_tool_catalog
+
+        catalog = get_tool_catalog()
+        rows: list[dict[str, Any]] = []
+        for name in sorted(catalog):
+            if name not in preferred and len(rows) >= 40:
+                continue
+            definition = catalog[name]
+            if isinstance(definition, dict):
+                getter = definition.get
+            else:
+                getter = lambda key, default=None, obj=definition: getattr(obj, key, default)
+            rows.append(
+                {
+                    "tool": name,
+                    "entrypoint": getter("cli_entrypoint") or getter("entrypoint"),
+                    "description": getter("description"),
+                    "when_to_use": getter("when_to_use"),
+                    "example_call": getter("example_call"),
+                    "input_schema": getter("input_schema"),
+                }
+            )
+        rows.sort(key=lambda row: (row["tool"] not in preferred, row["tool"]))
+        return _prompt_json(rows[:40], max_chars=18000)
+    except Exception as exc:
+        return _prompt_json({"error": f"tool catalog unavailable: {type(exc).__name__}: {exc}"})
+
+
+def _api_provider_messages(
     pg_conn: Any | None,
     *,
     agent_id: str,
     prompt: str,
+    provider_slug: str,
     permission_mode: NormalizedPermissionMode | None = None,
 ) -> list[dict[str, str]]:
-    base_system = (
-        "You are the Praxis operator's persistent agent-session conversation. "
-        "Be concise, direct, and preserve continuity from the visible prior turns."
-    )
-    suffix = api_permission_prompt_suffix("openrouter", permission_mode)
+    if pg_conn is not None:
+        base_system = _build_praxis_context(pg_conn)
+    else:
+        base_system = (
+            "You are the Praxis operator's persistent agent-session conversation. "
+            "Be concise, direct, and preserve continuity from the visible prior turns."
+        )
+    suffix = api_permission_prompt_suffix(provider_slug, permission_mode)
     messages: list[dict[str, str]] = [
         {"role": "system", "content": base_system + suffix},
     ]
@@ -957,33 +1151,399 @@ def _openrouter_messages(
     return messages[-20:]
 
 
-def _openrouter_json_request(
+def _openrouter_messages(
+    pg_conn: Any | None,
+    *,
+    agent_id: str,
+    prompt: str,
+    permission_mode: NormalizedPermissionMode | None = None,
+) -> list[dict[str, str]]:
+    return _api_provider_messages(
+        pg_conn,
+        agent_id=agent_id,
+        prompt=prompt,
+        provider_slug="openrouter",
+        permission_mode=permission_mode,
+    )
+
+
+def _together_messages(
+    pg_conn: Any | None,
+    *,
+    agent_id: str,
+    prompt: str,
+    permission_mode: NormalizedPermissionMode | None = None,
+) -> list[dict[str, str]]:
+    return _api_provider_messages(
+        pg_conn,
+        agent_id=agent_id,
+        prompt=prompt,
+        provider_slug="together",
+        permission_mode=permission_mode,
+    )
+
+
+def _chat_completion_json_request(
     *,
     api_key: str,
+    endpoint: str,
     model: str,
     messages: list[dict[str, str]],
     timeout_seconds: float,
+    headers: dict[str, str] | None = None,
+    max_tokens: int = 1200,
 ) -> dict[str, Any]:
     body = json.dumps(
         {
             "model": model,
             "messages": messages,
-            "max_tokens": 1200,
+            "max_tokens": max_tokens,
         }
     ).encode("utf-8")
+    request_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "User-Agent": "Praxis Operator Console",
+    }
+    request_headers.update(headers or {})
     req = urllib.request.Request(
-        "https://openrouter.ai/api/v1/chat/completions",
+        endpoint,
         data=body,
         method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://praxis.local/operator-console",
-            "X-Title": "Praxis Operator Console",
-        },
+        headers=request_headers,
     )
     with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _chat_completion_reply_text(payload: dict[str, Any], *, provider_slug: str) -> str:
+    choice = (payload.get("choices") or [{}])[0]
+    message = choice.get("message") if isinstance(choice, dict) else {}
+    reply = _clean_api_reply_text(
+        str((message or {}).get("content") or "").strip(),
+        provider_slug=provider_slug,
+    )
+    if not reply:
+        raise RuntimeError(f"{provider_slug} returned an empty assistant reply")
+    return reply
+
+
+def _extract_praxis_tool_call(text: str) -> dict[str, Any] | None:
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        lines = candidate.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        candidate = "\n".join(lines).strip()
+    start = candidate.find("{")
+    end = candidate.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        payload = json.loads(candidate[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    call = payload.get("praxis_tool_call") if isinstance(payload, dict) else None
+    if not isinstance(call, dict):
+        return None
+    tool = str(call.get("tool") or "").strip()
+    input_payload = call.get("input") or {}
+    if not tool or not isinstance(input_payload, dict):
+        return None
+    return {"tool": tool, "input": input_payload}
+
+
+def _run_praxis_tool_for_console(call: dict[str, Any]) -> dict[str, Any]:
+    tool = str(call.get("tool") or "").strip()
+    input_payload = call.get("input") or {}
+    if tool not in _PRAXIS_READ_TOOLS:
+        return {
+            "ok": False,
+            "error_code": "praxis_tool_not_allowed",
+            "message": f"{tool!r} is not allowed from the API chat console",
+            "allowed_tools": sorted(_PRAXIS_READ_TOOLS),
+        }
+    if not isinstance(input_payload, dict):
+        return {
+            "ok": False,
+            "error_code": "praxis_tool_invalid_input",
+            "message": "tool input must be a JSON object",
+        }
+    try:
+        completed = subprocess.run(
+            [
+                str(PRAXIS_ROOT / "scripts" / "praxis"),
+                "workflow",
+                "tools",
+                "call",
+                tool,
+                "--input-json",
+                json.dumps(input_payload, ensure_ascii=False),
+            ],
+            cwd=str(PRAXIS_ROOT),
+            env=dict(os.environ),
+            text=True,
+            capture_output=True,
+            timeout=_PRAXIS_TOOL_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "error_code": "praxis_tool_timeout",
+            "message": f"{tool} timed out after {_PRAXIS_TOOL_TIMEOUT_SECONDS:.0f}s",
+        }
+    raw = (completed.stdout or "").strip()
+    parsed: Any
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        parsed = {"raw": raw}
+    return {
+        "ok": completed.returncode == 0,
+        "tool": tool,
+        "input": input_payload,
+        "exit_code": completed.returncode,
+        "stdout": parsed,
+        "stderr": (completed.stderr or "").strip()[-2000:],
+    }
+
+
+async def _run_api_provider_turn(
+    agent_id: str,
+    session_id: str,
+    prompt: str,
+    *,
+    provider_slug: str,
+    pg_conn: Any | None,
+    permission_mode: NormalizedPermissionMode | None = None,
+) -> tuple[str, list[dict[str, Any]], int, str]:
+    from adapters.keychain import resolve_secret
+
+    trace_events: list[dict[str, Any]] = []
+    current_stage = "provider_setup"
+
+    async def _emit_stage(
+        stage: str,
+        label: str,
+        message: str,
+        *,
+        status: str = "running",
+        **extra: Any,
+    ) -> None:
+        event = {
+            "type": "turn.stage",
+            "stage": stage,
+            "status": status,
+            "label": label,
+            "message": message,
+            **extra,
+        }
+        trace_events.append(event)
+        await _get_queue(agent_id).put(event)
+
+    if provider_slug == "together":
+        key_name = _TOGETHER_KEY_NAME
+        model = _TOGETHER_MODEL
+        endpoint = _TOGETHER_ENDPOINT
+        extra_headers: dict[str, str] = {}
+        max_tokens = 4096
+    else:
+        key_name = "OPENROUTER_API_KEY"
+        model = _openrouter_model()
+        endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        extra_headers = {
+            "HTTP-Referer": "https://praxis.local/operator-console",
+            "X-Title": "Praxis Operator Console",
+        }
+        max_tokens = 1200
+
+    api_key = str(resolve_secret(key_name, env=dict(os.environ)) or "").strip()
+    if not api_key:
+        await _emit_stage(
+            "provider_key",
+            "Provider key missing",
+            f"{key_name} is not configured.",
+            status="failed",
+            provider=provider_slug,
+            model=model,
+        )
+        event = {
+            "type": "error",
+            "error_code": "agent_provider_not_configured",
+            "message": f"{key_name} is not configured in Keychain or environment for the agent session {provider_slug} provider",
+            "provider": provider_slug,
+            "model": model,
+            "stage": "provider_key",
+        }
+        return event["message"], [*trace_events, event], 78, session_id
+
+    await _emit_stage(
+        "provider_key",
+        "Provider key found",
+        f"{key_name} resolved.",
+        status="ok",
+        provider=provider_slug,
+        model=model,
+    )
+
+    messages = _api_provider_messages(
+        pg_conn,
+        agent_id=agent_id,
+        prompt=prompt,
+        provider_slug=provider_slug,
+        permission_mode=permission_mode,
+    )
+    try:
+        current_stage = "provider_request"
+        await _emit_stage(
+            "provider_request",
+            "Provider request sent",
+            f"Sending the turn to {provider_slug}.",
+            provider=provider_slug,
+            model=model,
+        )
+        payload = await asyncio.to_thread(
+            _chat_completion_json_request,
+            api_key=api_key,
+            endpoint=endpoint,
+            model=model,
+            messages=messages,
+            timeout_seconds=_turn_timeout_seconds(),
+            headers=extra_headers,
+            max_tokens=max_tokens,
+        )
+        current_stage = "provider_response"
+        await _emit_stage(
+            "provider_response",
+            "Provider replied",
+            f"{provider_slug} returned a response envelope.",
+            status="ok",
+            provider=provider_slug,
+            model=model,
+        )
+        reply = _chat_completion_reply_text(payload, provider_slug=provider_slug)
+        await _emit_stage(
+            "assistant_text",
+            "Assistant text parsed",
+            "The response contained visible assistant text.",
+            status="ok",
+            provider=provider_slug,
+            model=model,
+        )
+        event = {
+            "type": "assistant",
+            "provider": provider_slug,
+            "model": model,
+            "message": {"content": reply},
+        }
+        turn_events: list[dict[str, Any]] = []
+        tool_call = _extract_praxis_tool_call(reply)
+        if tool_call is not None:
+            tool_event = {
+                "type": "praxis.tool_call",
+                "provider": provider_slug,
+                "model": model,
+                "tool": tool_call["tool"],
+                "input": tool_call["input"],
+            }
+            trace_events.append(tool_event)
+            await _get_queue(agent_id).put(
+                {
+                    "type": "praxis.lookup",
+                    "provider": provider_slug,
+                    "model": model,
+                    "tool": tool_call["tool"],
+                    "message": f"Checking Praxis with {tool_call['tool']}.",
+                }
+            )
+            current_stage = "praxis_lookup"
+            tool_result = await asyncio.to_thread(_run_praxis_tool_for_console, tool_call)
+            result_event = {
+                "type": "praxis.tool_result",
+                "provider": provider_slug,
+                "model": model,
+                "tool": tool_call["tool"],
+                "result": tool_result,
+            }
+            trace_events.append(result_event)
+            await _get_queue(agent_id).put(
+                {
+                    "type": "praxis.lookup.done",
+                    "provider": provider_slug,
+                    "model": model,
+                    "tool": tool_call["tool"],
+                    "ok": bool(tool_result.get("ok")),
+                    "message": "Praxis lookup returned.",
+                }
+            )
+            messages.append(_internal_praxis_lookup_message(tool_call, tool_result))
+            current_stage = "final_provider_request"
+            await _emit_stage(
+                "final_provider_request",
+                "Final answer requested",
+                "Sending compact Praxis context back to the model.",
+                provider=provider_slug,
+                model=model,
+            )
+            payload = await asyncio.to_thread(
+                _chat_completion_json_request,
+                api_key=api_key,
+                endpoint=endpoint,
+                model=model,
+                messages=messages[-22:],
+                timeout_seconds=_turn_timeout_seconds(),
+                headers=extra_headers,
+                max_tokens=max_tokens,
+            )
+            current_stage = "final_provider_response"
+            await _emit_stage(
+                "final_provider_response",
+                "Final answer returned",
+                f"{provider_slug} returned the final answer envelope.",
+                status="ok",
+                provider=provider_slug,
+                model=model,
+            )
+            reply = _chat_completion_reply_text(payload, provider_slug=provider_slug)
+            await _emit_stage(
+                "final_assistant_text",
+                "Final text parsed",
+                "The final answer contained visible assistant text.",
+                status="ok",
+                provider=provider_slug,
+                model=model,
+            )
+            event = {
+                "type": "assistant",
+                "provider": provider_slug,
+                "model": model,
+                "message": {"content": reply},
+            }
+            turn_events.append(event)
+        else:
+            turn_events.append(event)
+        turn_events = [*trace_events, *turn_events]
+        for turn_event in turn_events:
+            if turn_event.get("type") not in {"turn.stage", "praxis.tool_call", "praxis.tool_result"}:
+                _append_jsonl(_messages_path(agent_id), turn_event)
+            if turn_event.get("type") != "turn.stage":
+                await _get_queue(agent_id).put(turn_event)
+        return reply, turn_events, 0, session_id
+    except Exception as exc:
+        event = {
+            "type": "error",
+            "error_code": "agent_provider_failed",
+            "message": f"{type(exc).__name__}: {exc}",
+            "provider": provider_slug,
+            "model": model,
+            "stage": current_stage,
+        }
+        _append_jsonl(_messages_path(agent_id), event)
+        await _get_queue(agent_id).put(event)
+        return event["message"], [*trace_events, event], 1, session_id
 
 
 async def _run_openrouter_turn(
@@ -994,50 +1554,32 @@ async def _run_openrouter_turn(
     pg_conn: Any | None,
     permission_mode: NormalizedPermissionMode | None = None,
 ) -> tuple[str, list[dict[str, Any]], int, str]:
-    api_key = str(os.environ.get("OPENROUTER_API_KEY") or "").strip()
-    if not api_key:
-        event = {
-            "type": "error",
-            "error_code": "agent_provider_not_configured",
-            "message": "OPENROUTER_API_KEY is not configured for the agent session OpenRouter provider",
-        }
-        return event["message"], [event], 78, session_id
-
-    model = _openrouter_model()
-    messages = _openrouter_messages(
-        pg_conn, agent_id=agent_id, prompt=prompt, permission_mode=permission_mode,
+    return await _run_api_provider_turn(
+        agent_id,
+        session_id,
+        prompt,
+        provider_slug="openrouter",
+        pg_conn=pg_conn,
+        permission_mode=permission_mode,
     )
-    try:
-        payload = await asyncio.to_thread(
-            _openrouter_json_request,
-            api_key=api_key,
-            model=model,
-            messages=messages,
-            timeout_seconds=_turn_timeout_seconds(),
-        )
-        choice = (payload.get("choices") or [{}])[0]
-        message = choice.get("message") if isinstance(choice, dict) else {}
-        reply = str((message or {}).get("content") or "").strip()
-        event = {
-            "type": "assistant",
-            "provider": "openrouter",
-            "model": model,
-            "message": {"content": reply},
-        }
-        _append_jsonl(_messages_path(agent_id), event)
-        await _get_queue(agent_id).put(event)
-        return reply, [event], 0, session_id
-    except Exception as exc:
-        event = {
-            "type": "error",
-            "error_code": "agent_provider_failed",
-            "message": f"{type(exc).__name__}: {exc}",
-            "provider": "openrouter",
-            "model": model,
-        }
-        _append_jsonl(_messages_path(agent_id), event)
-        await _get_queue(agent_id).put(event)
-        return event["message"], [event], 1, session_id
+
+
+async def _run_together_v4_pro_turn(
+    agent_id: str,
+    session_id: str,
+    prompt: str,
+    *,
+    pg_conn: Any | None,
+    permission_mode: NormalizedPermissionMode | None = None,
+) -> tuple[str, list[dict[str, Any]], int, str]:
+    return await _run_api_provider_turn(
+        agent_id,
+        session_id,
+        prompt,
+        provider_slug="together",
+        pg_conn=pg_conn,
+        permission_mode=permission_mode,
+    )
 
 
 async def _read_stderr(proc: asyncio.subprocess.Process) -> str:
@@ -1061,6 +1603,14 @@ async def _run_turn(
     reply_file: Path | None = None
     if provider_slug == "openrouter":
         return await _run_openrouter_turn(
+            agent_id,
+            session_id,
+            prompt,
+            pg_conn=pg_conn,
+            permission_mode=permission_mode,
+        )
+    if provider_slug == "together":
+        return await _run_together_v4_pro_turn(
             agent_id,
             session_id,
             prompt,
@@ -1254,7 +1804,7 @@ async def create_agent(
     agent_id = str(uuid4())
     session_id = str(uuid4())
     title = body.title or f"agent-{agent_id[:8]}"
-    provider_slug = _cli_provider(body.provider)
+    provider_slug = _OPERATOR_CONSOLE_PROVIDER
     now = _now_iso()
     session = create_interactive_agent_session(
         pg_conn,
@@ -1356,24 +1906,19 @@ async def create_agent(
     return response_payload
 
 
-_V4_PRO_ENDPOINT = "https://api.together.xyz/v1/chat/completions"
-_V4_PRO_MODEL = "deepseek-ai/DeepSeek-V4-Pro"
-_V4_PRO_PROVIDER = "together"
-_AGENT_SESSION_JOB_TYPE = "chat"
-
 # In-process cache for the Praxis context system prompt. Rebuilt every TTL
-# seconds; same string is reused across all chat turns so Together's prefix
-# cache can hit it. Refresh is cheap (a few small SELECTs).
+# seconds; same string is reused across API-backed chat turns. Refresh is
+# cheap (a few small SELECTs).
 _PRAXIS_CONTEXT_CACHE: dict[str, Any] = {"text": None, "expires_at": 0.0}
 _PRAXIS_CONTEXT_TTL_SEC = 300
 
 
 def _build_praxis_context(pg_conn: Any) -> str:
-    """Compose a system-prompt block: standing orders + data dictionary.
+    """Compose a system-prompt block: orient packet + tools + dictionary.
 
     Used as the system message for every operator-console chat turn so the
-    LLM understands what Praxis is, what rules bind it, and what types
-    flow through the graph.
+    LLM understands what Praxis is, what rules bind it, what surfaces are
+    available, and what typed objects flow through the graph.
     """
     now = time.time()
     cached = _PRAXIS_CONTEXT_CACHE.get("text")
@@ -1387,8 +1932,72 @@ def _build_praxis_context(pg_conn: Any) -> str:
         "(nodes, edges, gates, typed by data-dictionary consumes/produces) with "
         "many lenses (Moon canvas, executor, CLI, MCP, HTTP). Agents build and "
         "mutate the graph; the operator (Nate) steers — approves gates, edits "
-        "misbehaving nodes — he does not assemble nodes from a palette."
+        "misbehaving nodes — he does not assemble nodes from a palette.\n\n"
+        "This chat lane runs on Together DeepSeek V4 Pro. It is an API-backed "
+        "chat transport, not a local shell. Use the Praxis tool catalog and "
+        "endpoint descriptions below as the operating map. When the transport "
+        "cannot execute a tool directly, give Nate the exact Praxis surface to "
+        "invoke and what it will change or inspect. Do not pretend a command, "
+        "HTTP request, or MCP call has executed unless a tool result is present."
     )
+
+    parts.append(
+        "## Neo operator doctrine\n"
+        "Treat Nate as a high-taste operator, not a syntax worker. Bring him "
+        "decisions, trade-offs, failure modes, and clean recommendations; do "
+        "not make him decipher implementation mechanics unless he asks.\n"
+        "- Persona: you are Neo — sharp, skeptical of first answers, pragmatic, "
+        "mildly cheeky when it keeps the work honest, and exact when accuracy matters.\n"
+        "- Architecture is not sacred. If a pattern is weak, identify the failure, "
+        "remove the weak shape, and recommend the simpler durable replacement.\n"
+        "- Power comes from control over state plus observability proving that "
+        "control is real. Prefer one obvious authority, one explicit reason, "
+        "and one verifiable outcome.\n"
+        "- Favor durable, inspectable, queryable systems over things that merely "
+        "appear to work. Database-backed authority beats script-first convenience "
+        "when state, routing, receipts, or coordination matter.\n"
+        "- The canonical operator surface is `praxis workflow`: query for state, "
+        "discover/recall for context, tools for schemas, bugs for bug authority, "
+        "and run/run-status for execution lifecycle. Do not guess tool schemas "
+        "or live system state; inspect the Praxis authority.\n"
+        "- Optimize every recommendation for single source of truth, deterministic "
+        "behavior, inspectability, recoverability, low cognitive load, low blast "
+        "radius, and future agent usability.\n"
+        "- The customer is the LLM, including future runs. Make contracts, "
+        "boundaries, assumptions, examples, and success criteria explicit because "
+        "LLMs are smart amnesiacs.\n"
+        "- Do not preserve bad structure for compatibility theater. Do not invent "
+        "tools, APIs, files, state, or passing tests. If you do not know, say so "
+        "and use the tool bridge to inspect what can be inspected.\n"
+        "- For reviews, actively look for duplicated authority, hidden state, "
+        "implicit contracts, registry drift, event models without durable receipts, "
+        "and scripts masquerading as architecture."
+    )
+
+    parts.append("## Canonical orient packet\n" + _orient_context_for_prompt())
+
+    parts.append(
+        "## MCP and API tool-use map\n"
+        "- Canonical first read: `praxis_orient` or HTTP `POST /orient`.\n"
+        "- MCP bridge: `POST /mcp` speaks JSON-RPC. Use `tools/list` to inspect available tools and `tools/call` with a tool name plus JSON arguments to invoke one.\n"
+        "- CLI equivalent: `praxis workflow tools list`, `praxis workflow tools describe <tool>`, then `praxis workflow tools call <tool> --input-json '{...}'`.\n"
+        "- HTTP equivalent: use the endpoints from `/orient#endpoints`; workflow launches are kickoff-first, then inspect status/stream.\n"
+        "- Discovery rule: before proposing new code, use `praxis_discover`; for architectural memory use `praxis_recall`; for natural-language operator questions use `praxis_query` or `praxis_search`.\n"
+        "- Dictionary rule: when a term, table, event, tool, or contract matters, describe it with `praxis_data_dictionary` instead of guessing."
+    )
+
+    parts.append(
+        "## Console tool execution protocol\n"
+        "This console can execute one read-oriented Praxis tool call for you when you need live state. "
+        "To request execution, reply with exactly one JSON object and no markdown:\n"
+        '{"praxis_tool_call":{"tool":"praxis_model_access_control_matrix","input":{"runtime_profile_ref":"praxis","job_type":"chat"}}}\n'
+        "Allowed read tools include: "
+        + ", ".join(sorted(_PRAXIS_READ_TOOLS))
+        + ". After the console returns an internal Praxis lookup result, answer Nate from that context. "
+        "Do not claim a lookup ran unless an internal lookup result is provided."
+    )
+
+    parts.append("## High-value MCP/CLI tools\n" + _tool_catalog_context_for_prompt())
 
     try:
         rows = pg_conn.execute(
@@ -1454,159 +2063,19 @@ def _build_praxis_context(pg_conn: Any) -> str:
 
     parts.append(
         "## How to respond\n"
-        "- Be concise. Nate does not code; he directs.\n"
+        "- Be direct and concise. Nate directs architecture; he does not want syntax homework.\n"
+        "- Lead with the verdict when useful, then why, recommended change, trade-offs, validation path, and remaining risk.\n"
+        "- Explain in terms of authority, interfaces, failure modes, operational burden, blast radius, and maintainability.\n"
         "- When you reference a Praxis concept, use the exact slug from the data dictionary.\n"
-        "- If asked to make changes, propose the change in terms of which graph row, decision row, or surface would be edited — do not invent new tables or shims.\n"
-        "- If you don't know, say so. Do not fabricate orientation details."
+        "- If live state matters, request a read tool call through the console protocol instead of guessing.\n"
+        "- If asked to make changes, name the graph row, decision row, registry row, database surface, or operator surface that should change.\n"
+        "- Do not fabricate orientation details. If something is unavailable, state the gap plainly and give the grounded next move."
     )
 
     text = "\n\n".join(parts)
     _PRAXIS_CONTEXT_CACHE["text"] = text
     _PRAXIS_CONTEXT_CACHE["expires_at"] = now + _PRAXIS_CONTEXT_TTL_SEC
     return text
-
-
-async def _run_v4_pro_turn(
-    pg_conn: Any,
-    *,
-    agent_id: str,
-    user_prompt: str,
-) -> tuple[str, list[dict[str, Any]], int]:
-    """Single-provider turn dispatch: DeepSeek V4 Pro via Together.ai."""
-    try:
-        from runtime.workflow._shared import _default_native_runtime_profile_ref
-        from storage.postgres import PostgresTransportEligibilityRepository
-
-        runtime_profile_ref = _default_native_runtime_profile_ref(pg_conn)
-        rows = PostgresTransportEligibilityRepository(
-            pg_conn
-        ).list_effective_provider_job_catalog(
-            runtime_profile_ref=runtime_profile_ref,
-            job_type=_AGENT_SESSION_JOB_TYPE,
-            transport_type="API",
-            provider_slug=_V4_PRO_PROVIDER,
-            model_slug=_V4_PRO_MODEL,
-        )
-    except Exception as exc:
-        return (
-            "",
-            [
-                {
-                    "type": "error",
-                    "error_code": "agent_provider_catalog_unavailable",
-                    "message": f"provider catalog unavailable for agent session dispatch: {exc}",
-                }
-            ],
-            1,
-        )
-    if not rows:
-        return (
-            "",
-            [
-                {
-                    "type": "error",
-                    "error_code": "agent_provider_not_in_effective_catalog",
-                    "message": (
-                        "DeepSeek V4 Pro is not in the effective private provider "
-                        "job catalog for chat/API dispatch"
-                    ),
-                }
-            ],
-            1,
-        )
-
-    api_key = (os.environ.get("TOGETHER_API_KEY") or "").strip()
-    if not api_key:
-        return (
-            "",
-            [{"type": "error", "error_code": "together_key_missing", "message": "TOGETHER_API_KEY not configured"}],
-            1,
-        )
-
-    messages: list[dict[str, str]] = []
-    try:
-        system_prompt = _build_praxis_context(pg_conn)
-    except Exception as exc:
-        system_prompt = f"You are the Praxis operator console assistant. (context build failed: {exc})"
-    messages.append({"role": "system", "content": system_prompt})
-
-    for ev in list_interactive_agent_events(pg_conn, agent_id=agent_id):
-        kind = ev.get("event_kind") or ""
-        text = ev.get("text_content") or ev.get("text") or ""
-        if not text:
-            continue
-        if kind == "user.prompt":
-            messages.append({"role": "user", "content": str(text)})
-        elif kind == "assistant.reply":
-            messages.append({"role": "assistant", "content": str(text)})
-
-    if messages[-1].get("role") != "user" or messages[-1].get("content") != user_prompt:
-        messages.append({"role": "user", "content": user_prompt})
-
-    body = json.dumps({
-        "model": _V4_PRO_MODEL,
-        "messages": messages,
-        "max_tokens": 4096,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        _V4_PRO_ENDPOINT,
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "praxis-operator-console/1.0",
-            "Accept": "application/json",
-        },
-    )
-
-    def _do_request() -> tuple[str, list[dict[str, Any]], int]:
-        # One retry with backoff on 429 / 5xx — V4-Pro on Together can throttle
-        # under tier-1 accounts; surface the final failure clearly if both fail.
-        last_err: tuple[str, list[dict[str, Any]], int] | None = None
-        for attempt in range(2):
-            try:
-                with urllib.request.urlopen(req, timeout=180) as resp:
-                    payload = json.loads(resp.read().decode("utf-8"))
-                break
-            except urllib.error.HTTPError as exc:
-                detail = ""
-                try:
-                    detail = exc.read().decode("utf-8")[:500]
-                except Exception:
-                    pass
-                last_err = (
-                    "",
-                    [{"type": "error", "error_code": "together_http_error", "message": f"HTTP {exc.code} (attempt {attempt+1}): {detail}"}],
-                    1,
-                )
-                if exc.code == 429 or 500 <= exc.code < 600:
-                    if attempt == 0:
-                        time.sleep(3)
-                        continue
-                return last_err
-            except Exception as exc:
-                last_err = (
-                    "",
-                    [{"type": "error", "error_code": "together_request_failed", "message": f"attempt {attempt+1}: {exc}"}],
-                    1,
-                )
-                if attempt == 0:
-                    time.sleep(2)
-                    continue
-                return last_err
-        choice = (payload.get("choices") or [{}])[0]
-        msg = choice.get("message") or {}
-        content = str(msg.get("content") or "").strip()
-        if not content:
-            return (
-                "",
-                [{"type": "error", "error_code": "together_empty_reply", "message": f"no content in Together reply: {json.dumps(payload)[:300]}"}],
-                1,
-            )
-        return content, [{"type": "assistant.reply", "text": content, "provider": "deepseek-v4-pro"}], 0
-
-    return await asyncio.to_thread(_do_request)
 
 
 @app.post("/agents/{agent_id}/messages")
@@ -1653,18 +2122,38 @@ async def send_message(
         payload=user_payload,
         text_content=body.prompt,
     )
+    accepted_event = {
+        "type": "turn.accepted",
+        "provider": _OPERATOR_CONSOLE_PROVIDER,
+        "stage": "stored_message",
+        "status": "ok",
+        "message": "Praxis received and stored your message.",
+    }
+    await _get_queue(agent_id).put(accepted_event)
 
     _claim_turn(agent_id)
     lock = _get_lock(agent_id)
     await lock.acquire()
     try:
-        provider_slug = "deepseek-v4-pro"
-        reply, turn_events, exit_code = await _run_v4_pro_turn(
-            pg_conn,
+        provider_slug = _OPERATOR_CONSOLE_PROVIDER
+        thinking_event = {
+            "type": "assistant.thinking",
+            "provider": provider_slug,
+            "model": _TOGETHER_MODEL,
+            "stage": "provider_turn_started",
+            "status": "running",
+            "message": "DeepSeek is reading the turn.",
+        }
+        await _get_queue(agent_id).put(thinking_event)
+        reply, turn_events, exit_code, effective_session_id = await _run_turn(
             agent_id=agent_id,
-            user_prompt=body.prompt,
+            session_id=str(session["session_id"]),
+            prompt=body.prompt,
+            provider_slug=provider_slug,
+            pg_conn=pg_conn,
+            permission_mode=validated_mode,
         )
-        effective_session_id = str(session["session_id"])
+        turn_events = [accepted_event, thinking_event, *turn_events]
     finally:
         lock.release()
         _release_turn(agent_id)
@@ -1675,7 +2164,7 @@ async def send_message(
     if error_event:
         assistant_payload["error_code"] = error_event.get("error_code")
         assistant_payload["error_message"] = error_event.get("message")
-        print(f"[agent_sessions] together failure agent={agent_id} code={error_event.get('error_code')} msg={error_event.get('message')!r}", flush=True)
+        print(f"[agent_sessions] provider failure agent={agent_id} provider={provider_slug} code={error_event.get('error_code')} msg={error_event.get('message')!r}", flush=True)
     text_to_store = reply or (f"[error: {error_event.get('error_code')}] {error_event.get('message','')}" if error_event else "")
     append_interactive_agent_event(
         pg_conn,
