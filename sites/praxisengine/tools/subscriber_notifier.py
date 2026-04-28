@@ -272,7 +272,7 @@ def add_common(command: argparse.ArgumentParser) -> None:
     command.add_argument("--db", default=DEFAULT_DB, help=f"D1 database name. Default: {DEFAULT_DB}")
     command.add_argument("--csv", type=Path, default=DEFAULT_CSV, help=f"CSV path. Default: {DEFAULT_CSV}")
     command.add_argument("--state", type=Path, default=DEFAULT_STATE, help=f"State path. Default: {DEFAULT_STATE}")
-    command.add_argument("--interval", type=int, default=60, help="Polling interval in seconds.")
+    command.add_argument("--interval", type=int, default=1800, help="Polling interval in seconds.")
     command.add_argument("--limit", type=int, default=100, help="Max events per polling pass.")
     command.add_argument(
         "--wrangler",

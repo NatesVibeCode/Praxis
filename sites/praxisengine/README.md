@@ -114,6 +114,7 @@ Defaults:
 - Database: `praxisengine-subscribers`
 - CSV: `~/Documents/PraxisEngine/subscribers.csv`
 - State: `~/Library/Application Support/PraxisEngine/subscriber_notifier_state.json`
+- Poll interval: 30 minutes
 
 Run one polling pass:
 
