@@ -383,10 +383,13 @@ def capture_submission_baseline_for_job(
         f"workflow_submission_baseline:{normalized_run_id}:{normalized_job_label}"
     )
     workspace_manifest = _workspace_manifest(normalized_workspace_root)
+    scoped_workspace_manifest = {
+        path: metadata
+        for path, metadata in workspace_manifest.items()
+        if _scope_allows_path(path, normalized_write_scope)
+    }
     scoped_artifacts: dict[str, dict[str, str]] = {}
-    for path in sorted(workspace_manifest):
-        if not _scope_allows_path(path, normalized_write_scope):
-            continue
+    for path in sorted(scoped_workspace_manifest):
         text = _read_artifact_text(Path(normalized_workspace_root) / path)
         if text is None:
             continue
@@ -400,7 +403,11 @@ def capture_submission_baseline_for_job(
         "captured_at": _utc_now().isoformat(),
         "workspace_root": normalized_workspace_root,
         "write_scope": normalized_write_scope,
-        "workspace_manifest": workspace_manifest,
+        # Scope baseline diffs to the write boundary. Any baseline-only files
+        # outside write_scope are not authoritative for diffing and must not
+        # hard-fail submissions when sandboxes are intentionally hydrated
+        # with a subset of the repo.
+        "workspace_manifest": scoped_workspace_manifest,
         "scoped_artifacts": scoped_artifacts,
     }
     submission_protocol = _submission_protocol_state(active_shard)

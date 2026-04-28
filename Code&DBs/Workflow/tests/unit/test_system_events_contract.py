@@ -76,7 +76,7 @@ def test_emit_system_event_call_sites_use_the_canonical_keywords() -> None:
         ("runtime/receipt_store.py", 288),
         ("runtime/scheduler.py", 262),
         ("runtime/scheduler.py", 278),
-        ("runtime/spec_compiler.py", 788),
+        ("runtime/spec_compiler.py", 893),
         ("runtime/typed_gap_events.py", 85),
         ("runtime/workflow/_worker_loop.py", 315),
         ("runtime/workflow/_worker_loop.py", 322),

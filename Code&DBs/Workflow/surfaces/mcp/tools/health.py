@@ -484,4 +484,14 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "tool_dag_health": (
+        tool_dag_health,
+        {
+            "description": "Backwards-compatible alias for praxis_health.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    ),
 }

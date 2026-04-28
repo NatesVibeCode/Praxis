@@ -1,0 +1,46 @@
+name: policy-artifacts
+
+# Drift gate for committed policy artifacts.
+#
+# Runs the same check as `.githooks/pre-commit` so a missed local hook
+# install (or a `git commit --no-verify`) still gets caught at PR time.
+# Skips the DB-dependent snapshot renderer — that's an operator-driven
+# refresh, not CI-gated.
+
+on:
+  pull_request:
+    paths:
+      - 'policy/operator-decision-triggers.json'
+      - '.cursor/rules/**'
+      - 'scripts/render-policy-artifacts.sh'
+      - 'scripts/render-cursor-rules.sh'
+      - 'scripts/check-migration-safety.py'
+      - 'Code&DBs/Databases/migrations/workflow/**'
+      - 'Code&DBs/Workflow/surfaces/policy/**'
+      - '.github/workflows/policy-artifacts.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'policy/operator-decision-triggers.json'
+      - '.cursor/rules/**'
+      - 'scripts/render-policy-artifacts.sh'
+      - 'scripts/render-cursor-rules.sh'
+      - 'scripts/check-migration-safety.py'
+      - 'Code&DBs/Databases/migrations/workflow/**'
+
+jobs:
+  check-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Render check
+        run: scripts/render-policy-artifacts.sh --check --skip-snapshot
+
+      - name: Migration safety scan
+        run: scripts/check-migration-safety.py

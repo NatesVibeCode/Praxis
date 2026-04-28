@@ -151,20 +151,198 @@ def build_llm_context(
 
 
 def call_llm_compile(prose: str, context: str, *, conn: Any = None, hydrate_env: Any = None, get_connection: Any = None) -> dict[str, Any]:
-    """Compile prose via direct HTTP call to the task_type_routing primary.
+    """Compile prose via three independently-routed sub-task LLM calls.
 
-    This is the Praxis app's "Describe it" compile path. It resolves the
-    primary llm_task route for `auto/compile` from `task_type_routing`
-    authority (not the workflow runtime_profile) and calls that provider's
-    HTTP endpoint directly. Keeping resolution in the DB means a single
-    `task_type_routing` row flip retargets the compile engine without
-    editing code — and confines paid providers to this app compile surface
-    instead of leaking into background workflow jobs or CLI build routes.
+    Stages, each routed by its own task_type row in `task_type_routing`:
+      1. compile_synthesize — parse prose into skeleton (title, placeholders,
+         agent roles, variable hints).
+      2. compile_pill_match — resolve placeholders against the catalog into
+         concrete @integration/action and #type/field bindings.
+      3. compile_author     — weave bound refs into the final compiled prose
+         with authority/SLA/capabilities.
+
+    Each stage's primary model is picked by the routing authority — flipping
+    a `task_type_routing` row retargets that stage without editing code.
     """
     del conn, get_connection  # unused — compile does not submit a workflow job
     if hydrate_env is not None:
         hydrate_env()
 
+    shrunk_context = context[:3000] if len(context) > 3000 else context
+
+    # Stage 1: synthesize — extract title + skeleton with placeholders
+    synthesize_raw = _call_compile_sub_task(
+        task_type="compile_synthesize",
+        prompt=_compile_synthesize_prompt(prose),
+    )
+    skeleton = _parse_synthesize_response(synthesize_raw, prose)
+
+    # Stage 2: pill_match — resolve placeholders against the catalog
+    pill_match_raw = _call_compile_sub_task(
+        task_type="compile_pill_match",
+        prompt=_compile_pill_match_prompt(skeleton, shrunk_context),
+    )
+    bindings = _parse_pill_match_response(pill_match_raw)
+
+    # Stage 3: author — weave bindings into the final compiled prose
+    author_raw = _call_compile_sub_task(
+        task_type="compile_author",
+        prompt=_compile_author_prompt(prose, skeleton, bindings, shrunk_context),
+    )
+    return parse_compile_response(author_raw, prose)
+
+
+def _call_voting_sub_task(
+    *,
+    task_type: str,
+    prompt: str,
+    parser: Any,
+    min_votes: int = 3,
+    max_votes: int = 5,
+    tiebreaker_provider: str | None = None,
+    tiebreaker_model: str | None = None,
+    early_stop_unanimous: bool = True,
+) -> dict[str, Any]:
+    """Adaptive voting dispatcher for classification-shaped sub-tasks.
+
+    Resolves top-K voter candidates via `resolve_top_k_voters(task_type)`, runs
+    parallel calls, parses each via `parser(raw)` → comparable answer dict, then:
+
+      Round 1 (min_votes calls in parallel):
+        - All agree → return that answer (early stop)
+        - Clear majority (≥⌈min_votes/2⌉ agree) → return majority
+        - Otherwise → expand to Round 2
+
+      Round 2 (additional calls, up to max_votes total):
+        - Clear majority across all votes → return majority
+        - Still split → escalate to tiebreaker
+
+      Round 3 (single tiebreaker call):
+        - Use the supplied tiebreaker_provider/model, OR the rank-1 (highest-
+          score) candidate from the resolver as escalation
+        - Return its answer with provenance
+
+    The parser must return a hashable-key answer (e.g. a tuple or frozen dict)
+    so votes can be tallied. Returns {"answer": <parser output>, "votes": [...],
+    "decision_path": "unanimous"|"majority_round1"|"majority_round2"|"tiebreaker"}.
+    """
+    voters = resolve_top_k_voters(task_type, k=max_votes)
+    if not voters:
+        raise RuntimeError(
+            f"resolve_top_k_voters returned no candidates for {task_type!r}"
+        )
+
+    initial_voters = voters[:min_votes]
+    extra_voters = voters[min_votes:max_votes]
+
+    def _vote(voter: dict[str, Any]) -> dict[str, Any]:
+        try:
+            raw = _call_specific_route(
+                provider_slug=voter["provider_slug"],
+                model_slug=voter["model_slug"],
+                prompt=prompt,
+                temperature=voter.get("temperature"),
+                max_tokens=voter.get("max_tokens"),
+            )
+            answer = parser(raw)
+            return {
+                "voter": f"{voter['provider_slug']}/{voter['model_slug']}",
+                "answer": answer,
+                "raw": raw,
+                "ok": True,
+            }
+        except Exception as exc:
+            return {
+                "voter": f"{voter['provider_slug']}/{voter['model_slug']}",
+                "answer": None,
+                "raw": None,
+                "ok": False,
+                "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            }
+
+    import concurrent.futures
+
+    votes: list[dict[str, Any]] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(min_votes, len(initial_voters))) as pool:
+        futures = [pool.submit(_vote, v) for v in initial_voters]
+        for fut in futures:
+            votes.append(fut.result())
+
+    def _tally(items: list[dict[str, Any]]) -> tuple[Any, int, int]:
+        """Return (winning_answer, vote_count, total_ok). Skips failed votes."""
+        ok_votes = [v for v in items if v.get("ok") and v.get("answer") is not None]
+        if not ok_votes:
+            return None, 0, 0
+        counts: dict[Any, int] = {}
+        for v in ok_votes:
+            key = _hashable(v["answer"])
+            counts[key] = counts.get(key, 0) + 1
+        winner_key, winner_count = max(counts.items(), key=lambda kv: kv[1])
+        for v in ok_votes:
+            if _hashable(v["answer"]) == winner_key:
+                return v["answer"], winner_count, len(ok_votes)
+        return None, 0, len(ok_votes)
+
+    answer, count, total_ok = _tally(votes)
+
+    if early_stop_unanimous and total_ok > 0 and count == total_ok and count >= min_votes:
+        return {"answer": answer, "votes": votes, "decision_path": "unanimous", "vote_count": count, "total_ok": total_ok}
+
+    majority_threshold = (min_votes // 2) + 1
+    if count >= majority_threshold and (count / max(total_ok, 1)) > 0.5:
+        return {"answer": answer, "votes": votes, "decision_path": "majority_round1", "vote_count": count, "total_ok": total_ok}
+
+    if extra_voters:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(extra_voters)) as pool:
+            extra_futures = [pool.submit(_vote, v) for v in extra_voters]
+            for fut in extra_futures:
+                votes.append(fut.result())
+        answer, count, total_ok = _tally(votes)
+        majority_threshold = (max_votes // 2) + 1
+        if count >= majority_threshold and (count / max(total_ok, 1)) > 0.5:
+            return {"answer": answer, "votes": votes, "decision_path": "majority_round2", "vote_count": count, "total_ok": total_ok}
+
+    if tiebreaker_provider and tiebreaker_model:
+        tiebreaker = {
+            "provider_slug": tiebreaker_provider,
+            "model_slug": tiebreaker_model,
+            "temperature": 0.0,
+            "max_tokens": 4096,
+        }
+    else:
+        tiebreaker = voters[0]
+    tiebreak_vote = _vote(tiebreaker)
+    votes.append(tiebreak_vote)
+    if tiebreak_vote.get("ok"):
+        return {"answer": tiebreak_vote["answer"], "votes": votes, "decision_path": "tiebreaker",
+                "vote_count": 1, "total_ok": total_ok + 1}
+
+    if answer is not None:
+        return {"answer": answer, "votes": votes, "decision_path": "tiebreaker_fallback",
+                "vote_count": count, "total_ok": total_ok}
+    raise RuntimeError(
+        f"voting for {task_type!r} produced no usable answer across {len(votes)} votes"
+    )
+
+
+def _hashable(value: Any) -> Any:
+    """Convert nested dict/list values to hashable equivalents for vote tallying."""
+    if isinstance(value, dict):
+        return tuple(sorted((k, _hashable(v)) for k, v in value.items()))
+    if isinstance(value, list):
+        return tuple(_hashable(item) for item in value)
+    return value
+
+
+def _call_specific_route(
+    *,
+    provider_slug: str,
+    model_slug: str,
+    prompt: str,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    """Single LLM call against a named provider/model. Used by voting helper."""
     from adapters.keychain import resolve_secret
     from adapters.llm_client import LLMRequest, call_llm
     from registry.provider_execution_registry import (
@@ -173,29 +351,58 @@ def call_llm_compile(prose: str, context: str, *, conn: Any = None, hydrate_env:
         resolve_api_protocol_family,
     )
 
-    shrunk_context = context[:3000] if len(context) > 3000 else context
+    endpoint = resolve_api_endpoint(provider_slug, model_slug)
+    if not endpoint:
+        raise RuntimeError(f"no registered endpoint for {provider_slug}/{model_slug}")
+    protocol_family = resolve_api_protocol_family(provider_slug)
+    if not protocol_family:
+        raise RuntimeError(f"no registered protocol_family for {provider_slug}")
 
-    prompt = f"""TASK: Compile this operating model description into structured prose with executable references.
+    env = dict(os.environ)
+    api_key: str | None = None
+    for env_var in resolve_api_key_env_vars(provider_slug):
+        candidate = resolve_secret(env_var, env=env)
+        if candidate and candidate.strip():
+            api_key = candidate.strip()
+            break
+    if not api_key:
+        raise RuntimeError(f"no API key available for {provider_slug}")
 
-{shrunk_context}
+    request = LLMRequest(
+        endpoint_uri=str(endpoint),
+        api_key=api_key,
+        provider_slug=provider_slug,
+        model_slug=model_slug,
+        messages=({"role": "user", "content": prompt},),
+        max_tokens=max_tokens,
+        temperature=temperature if temperature is not None else 0.0,
+        protocol_family=str(protocol_family),
+        timeout_seconds=int(compiler_llm_timeout_seconds()),
+    )
+    response = call_llm(request)
+    return response.content
 
-RULES:
-- Replace vague system references with @integration/action (e.g., @webhook/post, @notifications/send)
-- Replace vague data references with #type/field (e.g., #contact/email, #bug/severity)
-- Mark dynamic values as {{variable: option1|option2}} (e.g., {{priority: P1|P2|P3}})
-- Name agents with descriptive hyphenated names ending in -agent (e.g., triage-agent, quality-reviewer)
-- Keep prose natural and readable — not code
-- Add Authority and SLA lines if the description implies them
-- If the workflow depends on specific research or execution methods, select capability slugs from the toolchain list into a capabilities array
 
-INPUT:
-{prose}
+def _call_compile_sub_task(*, task_type: str, prompt: str) -> str:
+    """Resolve routes for a compile sub-task and run failover loop. Returns raw response content."""
+    from adapters.keychain import resolve_secret
+    from adapters.llm_client import LLMRequest, call_llm
+    from registry.provider_execution_registry import (
+        resolve_api_endpoint,
+        resolve_api_key_env_vars,
+        resolve_api_protocol_family,
+    )
 
-OUTPUT (JSON only, no markdown fences, no other text):
-{{"title":"short title","prose":"the compiled prose with @/#/{{}} references","authority":"","sla":{{}},"capabilities":["research/local-knowledge"]}}"""
+    configs = resolve_matrix_gated_route_configs(task_type)
+    if not configs:
+        raise RuntimeError(
+            f"task_type_routing returned no llm_task routes for {task_type!r}"
+        )
 
     last_error: Exception | None = None
-    for provider_slug, model_slug in _resolve_app_compile_routes():
+    for cfg in configs:
+        provider_slug = cfg["provider_slug"]
+        model_slug = cfg["model_slug"]
         try:
             endpoint = resolve_api_endpoint(provider_slug, model_slug)
             if not endpoint:
@@ -226,23 +433,132 @@ OUTPUT (JSON only, no markdown fences, no other text):
                 provider_slug=provider_slug,
                 model_slug=model_slug,
                 messages=({"role": "user", "content": prompt},),
+                max_tokens=cfg.get("max_tokens"),
+                temperature=cfg["temperature"] if cfg.get("temperature") is not None else 0.0,
                 protocol_family=str(protocol_family),
                 timeout_seconds=int(compiler_llm_timeout_seconds()),
             )
             response = call_llm(request)
-            logger.debug("Compile response (%d chars): %.300s", len(response.content), response.content)
-            return parse_compile_response(response.content, prose)
+            logger.debug(
+                "Compile sub-task %s response (%d chars): %.200s",
+                task_type, len(response.content), response.content,
+            )
+            return response.content
         except Exception as exc:
             last_error = exc
             logger.warning(
-                "Compile route failed for %s/%s; trying next route if available: %s",
-                provider_slug,
-                model_slug,
-                exc,
+                "Compile sub-task %s route %s/%s failed; trying next route if available: %s",
+                task_type, provider_slug, model_slug, exc,
             )
     if last_error is not None:
         raise last_error
-    raise RuntimeError(f"task_type_routing returned no llm_task routes for {_APP_COMPILE_TASK_ROUTE!r}")
+    raise RuntimeError(f"all routes for compile sub-task {task_type!r} failed")
+
+
+def _compile_synthesize_prompt(prose: str) -> str:
+    return f"""TASK: Read this operating-model prose and produce a structured skeleton.
+
+Extract the title, the rough prose with placeholders for unresolved references, the agent role names, and any variable patterns. Do NOT try to resolve references against a catalog yet — that's a later step.
+
+PLACEHOLDER NOTATION:
+- System/integration references (vague): mark as @?short-role-name (e.g., @?notifier, @?contact-store)
+- Data type references (vague): mark as #?short-type-name (e.g., #?contact, #?ticket)
+- Variable patterns: capture in variable_hints (e.g., {{"label":"priority","options":["P1","P2","P3"]}})
+
+INPUT:
+{prose}
+
+OUTPUT (JSON only, no markdown fences, no other text):
+{{"title":"short title","prose_skeleton":"prose with @?placeholder and #?placeholder markers","agent_roles":["role-name"],"variable_hints":[{{"label":"priority","options":["P1","P2","P3"]}}]}}"""
+
+
+def _compile_pill_match_prompt(skeleton: dict[str, Any], shrunk_context: str) -> str:
+    skeleton_json = json.dumps({
+        "prose_skeleton": skeleton.get("prose_skeleton", ""),
+        "agent_roles": skeleton.get("agent_roles", []),
+    }, ensure_ascii=False)
+    return f"""TASK: Resolve the @? and #? placeholders in this skeleton against the catalog.
+
+For each placeholder, pick the best concrete catalog entry. Use null for placeholders with no good match.
+
+CATALOG:
+{shrunk_context}
+
+SKELETON:
+{skeleton_json}
+
+OUTPUT (JSON only, no markdown fences, no other text):
+{{"bindings":[{{"placeholder":"@?notifier","resolved":"@notifications/send","confidence":0.9}},{{"placeholder":"#?contact","resolved":"#contact/email","confidence":0.8}}]}}"""
+
+
+def _compile_author_prompt(prose: str, skeleton: dict[str, Any], bindings: dict[str, Any], shrunk_context: str) -> str:
+    skeleton_json = json.dumps(skeleton, ensure_ascii=False)
+    bindings_json = json.dumps(bindings, ensure_ascii=False)
+    return f"""TASK: Compose the final operating model from the original prose, the skeleton, and the resolved bindings.
+
+{shrunk_context}
+
+RULES:
+- Replace each @?placeholder and #?placeholder with its resolved binding from BINDINGS, or rephrase if null
+- Mark dynamic values as {{variable: option1|option2}} from variable_hints (e.g., {{priority: P1|P2|P3}})
+- Name agents with descriptive hyphenated names ending in -agent (e.g., triage-agent, quality-reviewer)
+- Keep prose natural and readable — not code
+- Add Authority and SLA lines if the prose implies them
+- If the workflow depends on specific research or execution methods, select capability slugs from the toolchain list into a capabilities array
+
+ORIGINAL PROSE:
+{prose}
+
+SKELETON:
+{skeleton_json}
+
+BINDINGS:
+{bindings_json}
+
+OUTPUT (JSON only, no markdown fences, no other text):
+{{"title":"short title","prose":"the compiled prose with @/#/{{}} references","authority":"","sla":{{}},"capabilities":["research/local-knowledge"]}}"""
+
+
+def _parse_synthesize_response(raw: str, original_prose: str) -> dict[str, Any]:
+    """Parse synthesize stage. Returns dict with title, prose_skeleton, agent_roles, variable_hints.
+
+    Falls back to a degenerate skeleton built from the original prose if parsing fails,
+    so the pipeline can still proceed to author with the original text.
+    """
+    try:
+        parsed = parse_json_object(raw)
+    except ValueError:
+        return {
+            "title": derive_title(original_prose, original_prose),
+            "prose_skeleton": original_prose,
+            "agent_roles": [],
+            "variable_hints": [],
+        }
+    if not isinstance(parsed, dict):
+        return {
+            "title": derive_title(original_prose, original_prose),
+            "prose_skeleton": original_prose,
+            "agent_roles": [],
+            "variable_hints": [],
+        }
+    return {
+        "title": _as_text(parsed.get("title")) or derive_title(original_prose, original_prose),
+        "prose_skeleton": _as_text(parsed.get("prose_skeleton")) or original_prose,
+        "agent_roles": _as_string_list(parsed.get("agent_roles")),
+        "variable_hints": parsed.get("variable_hints") if isinstance(parsed.get("variable_hints"), list) else [],
+    }
+
+
+def _parse_pill_match_response(raw: str) -> dict[str, Any]:
+    """Parse pill_match stage. Returns dict with bindings list. Empty list on parse failure."""
+    try:
+        parsed = parse_json_object(raw)
+    except ValueError:
+        return {"bindings": []}
+    if not isinstance(parsed, dict):
+        return {"bindings": []}
+    bindings = parsed.get("bindings") if isinstance(parsed.get("bindings"), list) else []
+    return {"bindings": bindings}
 
 
 def _resolve_app_compile_route() -> tuple[str, str]:
@@ -311,6 +627,201 @@ def resolve_matrix_gated_routes(
         if str(row.get("provider_slug") or "").strip()
         and str(row.get("model_slug") or "").strip()
     ]
+
+
+def resolve_top_k_voters(
+    task_type: str,
+    *,
+    k: int = 3,
+    transport_type: str = "API",
+    adapter_type: str = "llm_task",
+    diverse_providers: bool = True,
+    exclude_providers: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    """Pick top-K voter candidates for a voting-shaped sub-task, scored from data.
+
+    Reads matrix-gated routes (same admission gate as resolve_matrix_gated_routes),
+    joins each route to its provider_model_candidates row for capability tags +
+    task affinities + benchmark_profile, then to task_type_route_profiles for
+    affinity_labels + benchmark_metric_weights. Each candidate gets a score:
+
+        affinity_score    = (primary match × 3) + (secondary × 2) + (specialized × 1) - (avoid × 5)
+        benchmark_score   = sum(benchmark_profile[metric] × benchmark_metric_weights[metric])
+        combined          = affinity_score × 100 + benchmark_score
+
+    Affinity dominates while benchmark_profile is empty (current state); benchmark
+    refines ordering automatically once Artificial Analysis sync populates it.
+
+    `diverse_providers=True` enforces uncorrelated errors by walking sorted
+    candidates and skipping a provider once it's already represented (relaxes
+    the constraint if the pool is too small to fill K).
+    """
+    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+    from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
+
+    pool = get_workflow_pool()
+    pg = SyncPostgresConnection(pool)
+    runtime_profile_ref = (
+        os.environ.get("PRAXIS_RUNTIME_PROFILE_REF", "").strip()
+        or default_native_runtime_profile_ref(pg)
+    )
+
+    profile_row = pg.fetchrow(
+        """
+        SELECT affinity_labels, benchmark_metric_weights
+          FROM task_type_route_profiles
+         WHERE task_type = $1
+        """,
+        task_type,
+    )
+    affinity_labels = (profile_row or {}).get("affinity_labels") if profile_row else None
+    benchmark_metric_weights = (profile_row or {}).get("benchmark_metric_weights") if profile_row else None
+    if isinstance(affinity_labels, str):
+        try:
+            affinity_labels = json.loads(affinity_labels)
+        except (json.JSONDecodeError, TypeError):
+            affinity_labels = None
+    if isinstance(benchmark_metric_weights, str):
+        try:
+            benchmark_metric_weights = json.loads(benchmark_metric_weights)
+        except (json.JSONDecodeError, TypeError):
+            benchmark_metric_weights = None
+    affinity_labels = affinity_labels if isinstance(affinity_labels, dict) else {}
+    benchmark_metric_weights = benchmark_metric_weights if isinstance(benchmark_metric_weights, dict) else {}
+
+    primary = set(_as_string_list(affinity_labels.get("primary")))
+    secondary = set(_as_string_list(affinity_labels.get("secondary")))
+    specialized = set(_as_string_list(affinity_labels.get("specialized")))
+    avoid = set(_as_string_list(affinity_labels.get("avoid")))
+
+    rows = pg.fetch(
+        """
+        SELECT catalog.provider_slug,
+               catalog.model_slug,
+               route.temperature,
+               route.max_tokens,
+               cand.capability_tags,
+               cand.task_affinities,
+               cand.benchmark_profile,
+               cand.priority
+          FROM effective_private_provider_job_catalog AS catalog
+          JOIN task_type_routing AS route
+            ON route.task_type = catalog.job_type
+           AND route.provider_slug = catalog.provider_slug
+           AND route.model_slug = catalog.model_slug
+           AND route.transport_type = catalog.transport_type
+           AND route.sub_task_type = '*'
+          LEFT JOIN provider_model_candidates AS cand
+            ON cand.provider_slug = catalog.provider_slug
+           AND cand.model_slug = catalog.model_slug
+           AND cand.status = 'active'
+         WHERE catalog.runtime_profile_ref = $1
+           AND catalog.job_type = $2
+           AND catalog.transport_type = $3
+           AND catalog.adapter_type = $4
+           AND route.permitted IS TRUE
+        """,
+        runtime_profile_ref,
+        task_type,
+        transport_type,
+        adapter_type,
+    )
+
+    scored: list[dict[str, Any]] = []
+    for row in rows or []:
+        provider = str(row.get("provider_slug") or "").strip()
+        model = str(row.get("model_slug") or "").strip()
+        if not provider or not model or provider in exclude_providers:
+            continue
+
+        capability_tags = row.get("capability_tags") or []
+        task_affinities = row.get("task_affinities") or {}
+        benchmark_profile = row.get("benchmark_profile") or {}
+        if isinstance(capability_tags, str):
+            try:
+                capability_tags = json.loads(capability_tags)
+            except (json.JSONDecodeError, TypeError):
+                capability_tags = []
+        if isinstance(task_affinities, str):
+            try:
+                task_affinities = json.loads(task_affinities)
+            except (json.JSONDecodeError, TypeError):
+                task_affinities = {}
+        if isinstance(benchmark_profile, str):
+            try:
+                benchmark_profile = json.loads(benchmark_profile)
+            except (json.JSONDecodeError, TypeError):
+                benchmark_profile = {}
+
+        candidate_tags: set[str] = set()
+        if isinstance(capability_tags, list):
+            candidate_tags.update(str(t).strip() for t in capability_tags if t)
+        if isinstance(task_affinities, dict):
+            for bucket in ("primary", "secondary", "specialized"):
+                items = task_affinities.get(bucket)
+                if isinstance(items, list):
+                    candidate_tags.update(str(t).strip() for t in items if t)
+
+        candidate_avoid: set[str] = set()
+        if isinstance(task_affinities, dict):
+            avoid_list = task_affinities.get("avoid")
+            if isinstance(avoid_list, list):
+                candidate_avoid.update(str(t).strip() for t in avoid_list if t)
+
+        affinity_score = (
+            3 * len(primary & candidate_tags)
+            + 2 * len(secondary & candidate_tags)
+            + 1 * len(specialized & candidate_tags)
+            - 5 * len(avoid & candidate_tags)
+            - 5 * len(primary & candidate_avoid)
+        )
+
+        benchmark_score = 0.0
+        if isinstance(benchmark_profile, dict):
+            for metric, weight in benchmark_metric_weights.items():
+                metric_value = benchmark_profile.get(metric)
+                if isinstance(metric_value, (int, float)):
+                    benchmark_score += float(metric_value) * float(weight)
+
+        priority = row.get("priority")
+        priority_score = -float(priority) if isinstance(priority, (int, float)) else 0.0
+
+        combined_score = affinity_score * 100.0 + benchmark_score + priority_score * 0.01
+        temperature = row.get("temperature")
+        max_tokens = row.get("max_tokens")
+
+        scored.append({
+            "provider_slug": provider,
+            "model_slug": model,
+            "score": combined_score,
+            "score_breakdown": {
+                "affinity": float(affinity_score),
+                "benchmark": float(benchmark_score),
+                "priority": priority_score,
+            },
+            "temperature": float(temperature) if temperature is not None else None,
+            "max_tokens": int(max_tokens) if max_tokens is not None else None,
+        })
+
+    scored.sort(key=lambda c: c["score"], reverse=True)
+
+    if not diverse_providers or len(scored) <= k:
+        return scored[:k]
+
+    selected: list[dict[str, Any]] = []
+    used_providers: set[str] = set()
+    leftovers: list[dict[str, Any]] = []
+    for cand in scored:
+        if len(selected) >= k:
+            break
+        if cand["provider_slug"] in used_providers:
+            leftovers.append(cand)
+            continue
+        selected.append(cand)
+        used_providers.add(cand["provider_slug"])
+    if len(selected) < k:
+        selected.extend(leftovers[: k - len(selected)])
+    return selected
 
 
 def resolve_matrix_gated_route_configs(

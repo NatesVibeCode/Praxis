@@ -121,6 +121,23 @@ def _require_text(value: object, *, field_name: str) -> str:
     return value.strip()
 
 
+def _optional_text(value: object, *, field_name: str) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _text_or_fallback(
+    value: object,
+    *,
+    field_name: str,
+    fallback: str,
+) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return fallback
+    return value.strip()
+
+
 def _require_datetime(value: object, *, field_name: str) -> datetime:
     if not isinstance(value, datetime):
         raise _fail(
@@ -245,7 +262,7 @@ class OperatorGraphBugRecord:
     priority: str
     summary: str
     source_kind: str
-    decision_ref: str
+    decision_ref: str | None
     opened_at: datetime
     resolved_at: datetime | None
     created_at: datetime
@@ -267,7 +284,7 @@ class OperatorGraphRoadmapRecord:
     source_bug_id: str | None
     summary: str
     acceptance_criteria: Mapping[str, Any]
-    decision_ref: str
+    decision_ref: str | None
     target_start_at: datetime | None
     target_end_at: datetime | None
     completed_at: datetime | None
@@ -350,9 +367,13 @@ def _bug_record_from_row(row: Mapping[str, object]) -> OperatorGraphBugRecord:
         status=_require_text(row["status"], field_name="status"),
         severity=_require_text(row["severity"], field_name="severity"),
         priority=_require_text(row["priority"], field_name="priority"),
-        summary=_require_text(row["summary"], field_name="summary"),
+        summary=_text_or_fallback(
+            row["summary"],
+            field_name="summary",
+            fallback="(no bug summary)",
+        ),
         source_kind=_require_text(row["source_kind"], field_name="source_kind"),
-        decision_ref=_require_text(row["decision_ref"], field_name="decision_ref"),
+        decision_ref=_optional_text(row["decision_ref"], field_name="decision_ref"),
         opened_at=_require_datetime(row["opened_at"], field_name="opened_at"),
         resolved_at=(
             _require_datetime(row["resolved_at"], field_name="resolved_at")
@@ -387,9 +408,13 @@ def _roadmap_record_from_row(row: Mapping[str, object]) -> OperatorGraphRoadmapR
             if row["source_bug_id"] is not None
             else None
         ),
-        summary=_require_text(row["summary"], field_name="summary"),
+        summary=_text_or_fallback(
+            row["summary"],
+            field_name="summary",
+            fallback="(no roadmap summary)",
+        ),
         acceptance_criteria=acceptance_criteria,
-        decision_ref=_require_text(row["decision_ref"], field_name="decision_ref"),
+        decision_ref=_optional_text(row["decision_ref"], field_name="decision_ref"),
         target_start_at=(
             _require_datetime(row["target_start_at"], field_name="target_start_at")
             if row["target_start_at"] is not None
@@ -950,6 +975,8 @@ def _build_edges(
         if source_node_id is None:
             missing_refs.append(f"operator_graph.bug_missing:{record.bug_id}")
             continue
+        if record.decision_ref is None:
+            continue
         target_node_id = _resolve_decision_ref(
             decision_ref=record.decision_ref,
             decision_key_lookup=decision_key_lookup,
@@ -1006,6 +1033,9 @@ def _build_edges(
                 ),
                 authority_source="roadmap_items",
             )
+
+        if record.decision_ref is None:
+            continue
 
         target_node_id = _resolve_decision_ref(
             decision_ref=record.decision_ref,

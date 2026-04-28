@@ -113,7 +113,7 @@ _SPAN_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("operation", "retrieve", re.compile(r"\bretrieve\b|\bfetch\b|\bcollect\b|\bgather\b", re.I)),
     ("operation", "evaluate", re.compile(r"\bevaluate\b|\bassess\b|\breview\b", re.I)),
     ("operation", "build", re.compile(r"\battempt\s+to\s+build\b|\bbuild\b|\bcreate\b|\bimplement\b", re.I)),
-    ("operation", "verify", re.compile(r"\bverify\b|\bvalidate\b|\btest\b|\bsmoke\b", re.I)),
+    ("operation", "verify", re.compile(r"\baudit\b|\bconfirm\b|\bvalidate\b|\bcheck\b|\binspect\b|\bverify\b|\btest\b|\bsmoke\b", re.I)),
     ("control", "fan_out", re.compile(r"\bfan[- ]out\b|\bparallel\b|\bmultiple\s+sources\b", re.I)),
 )
 

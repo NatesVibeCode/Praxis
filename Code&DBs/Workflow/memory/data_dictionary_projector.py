@@ -390,6 +390,17 @@ class DataDictionaryProjector(HeartbeatModule):
                  "description": "When the decision takes effect.", "display_order": 70},
                 {"field_path": "effective_to", "field_kind": "datetime",
                  "description": "When the decision expires (null = open-ended).", "display_order": 80},
+                {"field_path": "scope_clamp", "field_kind": "json",
+                 "description": "Structured scope: {applies_to:[...], does_not_apply_to:[...]}. Per migration 264 this is preserved verbatim — the operator-authored rationale must not be auto-rewritten.",
+                 "display_order": 90},
+                {"field_path": "decision_provenance", "field_kind": "text",
+                 "required": True,
+                 "description": "How the decision landed: 'explicit' (operator unequivocally said so) or 'inferred' (model guessed from conversation/debate). Consumers weight explicit higher than inferred. Per migration 302.",
+                 "display_order": 100,
+                 "valid_values": ["explicit", "inferred"]},
+                {"field_path": "decision_why", "field_kind": "text",
+                 "description": "Deeper motivation, separate from rationale (which captures the rule). Per migration 302; nullable until operator-authored.",
+                 "display_order": 110},
             ]
             apply_projection(
                 self._conn,

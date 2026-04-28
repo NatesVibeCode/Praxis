@@ -155,6 +155,22 @@ def test_recognize_intent_extracts_and_matches_user_stated_spans(monkeypatch) ->
     assert "custom integration" not in gap_spans
 
 
+def test_recognize_intent_extracts_review_verbs(monkeypatch) -> None:
+    _install_authority(monkeypatch)
+
+    result = recognize_intent(
+        "Please audit the module, then inspect and confirm changes and validate results before verify.",
+        conn=_StubConn(),
+    )
+
+    extracted = [span["text"].lower() for span in result.to_dict()["extracted"]]
+    assert "audit" in extracted
+    assert "inspect" in extracted
+    assert "confirm" in extracted
+    assert "validate" in extracted
+    assert "verify" in extracted
+
+
 def test_recognize_intent_suggests_only_from_matched_authority(monkeypatch) -> None:
     _install_authority(monkeypatch)
 

@@ -99,6 +99,16 @@ def test_help_is_available_without_database_env(monkeypatch: pytest.MonkeyPatch)
     assert payload["results"]["usage"].startswith("usage: ./scripts/test.sh")
 
 
+def test_help_lists_python_dependency_audit_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frontdoor = _load_test_frontdoor(monkeypatch)
+
+    payload = frontdoor._help_payload()
+
+    assert "python-dependency-audit" in payload["results"]["commands"]
+
+
 def test_pytest_commands_bootstrap_database_authority_without_leaking_dsn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -139,3 +149,19 @@ def test_check_affected_rejects_queue_with_no_known_suite_matches(
     assert payload["results"]["unclassified_paths"] == [
         "docs/operator-notes/not-covered-by-suite.md"
     ]
+
+
+def test_python_dependency_audit_reports_unsupported_when_tool_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frontdoor = _load_test_frontdoor(monkeypatch)
+
+    monkeypatch.setattr(frontdoor.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(frontdoor.shutil, "which", lambda _name: None)
+
+    payload = frontdoor._python_dependency_audit_payload([])
+
+    assert payload["ok"] is False
+    assert payload["results"]["status"] == "unsupported"
+    assert payload["results"]["requirements_file"].endswith("Code&DBs/Workflow/requirements.runtime.txt")
+    assert "pip-audit" in payload["errors"][0]

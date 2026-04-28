@@ -308,7 +308,18 @@
     "291_register_trace_walk_operation.sql",
     "292_causal_tracing_drop_strict_fks.sql",
     "293_bugs_correlation_id_for_tracing.sql",
-    "294_trace_walk_non_idempotent.sql"
+    "294_trace_walk_non_idempotent.sql",
+    "295_policy_authority_schema.sql",
+    "296_policy_authority_triggers.sql",
+    "297_register_policy_authority_operations.sql",
+    "298_policy_authority_compliance_receipts.sql",
+    "299_policy_authority_insert_update_machinery.sql",
+    "300_policy_authority_receipt_writer_bypasses_self.sql",
+    "301_policy_definitions_enforcement_kind_widen.sql",
+    "302_operator_decisions_drillable_provenance_and_why.sql",
+    "303_compile_sub_task_routing_split.sql",
+    "304_compile_author_gemini_fallback.sql",
+    "305_extend_aa_creator_aliases_for_openrouter_prefixes.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -7281,15 +7292,15 @@
     "280_promote_picker_winners.sql": [
       {
         "object_type": "row",
-        "object_name": "task_type_routing.plan_synthesis.openrouter.google/gemini-3-flash-preview"
+        "object_name": "task_type_routing.plan_synthesis|openrouter|google/gemini-3-flash-preview"
       },
       {
         "object_type": "row",
-        "object_name": "task_type_routing.plan_fork_author.openrouter.google/gemini-3-flash-preview"
+        "object_name": "task_type_routing.plan_fork_author|openrouter|google/gemini-3-flash-preview"
       },
       {
         "object_type": "row",
-        "object_name": "task_type_routing.plan_pill_match.openrouter.openai/gpt-5.4-mini"
+        "object_name": "task_type_routing.plan_pill_match|openrouter|openai/gpt-5.4-mini"
       }
     ],
     "281_register_access_control_operation.sql": [
@@ -7487,7 +7498,127 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.trace-walk"
       }
-    ]
+    ],
+    "295_policy_authority_schema.sql": [
+      {
+        "object_type": "table",
+        "object_name": "policy_definitions"
+      },
+      {
+        "object_type": "table",
+        "object_name": "authority_compliance_receipts"
+      }
+    ],
+    "296_policy_authority_triggers.sql": [
+      {
+        "object_type": "function",
+        "object_name": "policy_authority_reject_delete"
+      },
+      {
+        "object_type": "function",
+        "object_name": "policy_authority_reject_truncate"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "policy_operator_decisions_no_delete"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "policy_operator_decisions_no_truncate"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "policy_authority_operation_receipts_no_delete"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "policy_authority_operation_receipts_no_truncate"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "policy_authority_events_no_delete"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "policy_authority_events_no_truncate"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.architecture-policy::policy-authority::operator-decisions-not-deletable"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.architecture-policy::policy-authority::receipts-immutable"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.architecture-policy::policy-authority::events-immutable"
+      },
+      {
+        "object_type": "row",
+        "object_name": "policy_definitions.policy.operator_decisions.delete_reject"
+      },
+      {
+        "object_type": "row",
+        "object_name": "policy_definitions.policy.operator_decisions.truncate_reject"
+      },
+      {
+        "object_type": "row",
+        "object_name": "policy_definitions.policy.authority_operation_receipts.delete_reject"
+      },
+      {
+        "object_type": "row",
+        "object_name": "policy_definitions.policy.authority_operation_receipts.truncate_reject"
+      },
+      {
+        "object_type": "row",
+        "object_name": "policy_definitions.policy.authority_events.delete_reject"
+      },
+      {
+        "object_type": "row",
+        "object_name": "policy_definitions.policy.authority_events.truncate_reject"
+      }
+    ],
+    "297_register_policy_authority_operations.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.policy_definitions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.policy-list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compliance-list-receipts"
+      }
+    ],
+    "298_policy_authority_compliance_receipts.sql": [
+      {
+        "object_type": "function",
+        "object_name": "policy_authority_record_compliance_receipt"
+      }
+    ],
+    "299_policy_authority_insert_update_machinery.sql": [
+      {
+        "object_type": "function",
+        "object_name": "policy_authority_record_admit_receipt"
+      },
+      {
+        "object_type": "function",
+        "object_name": "policy_authority_attach_table_policy"
+      },
+      {
+        "object_type": "function",
+        "object_name": "policy_authority_detach_table_policy"
+      }
+    ],
+    "300_policy_authority_receipt_writer_bypasses_self.sql": [],
+    "301_policy_definitions_enforcement_kind_widen.sql": [],
+    "302_operator_decisions_drillable_provenance_and_why.sql": [],
+    "303_compile_sub_task_routing_split.sql": [],
+    "304_compile_author_gemini_fallback.sql": [],
+    "305_extend_aa_creator_aliases_for_openrouter_prefixes.sql": []
   },
   "policy_buckets": {
     "canonical": [
@@ -7799,7 +7930,18 @@
       "291_register_trace_walk_operation.sql",
       "292_causal_tracing_drop_strict_fks.sql",
       "293_bugs_correlation_id_for_tracing.sql",
-      "294_trace_walk_non_idempotent.sql"
+      "294_trace_walk_non_idempotent.sql",
+      "295_policy_authority_schema.sql",
+      "296_policy_authority_triggers.sql",
+      "297_register_policy_authority_operations.sql",
+      "298_policy_authority_compliance_receipts.sql",
+      "299_policy_authority_insert_update_machinery.sql",
+      "300_policy_authority_receipt_writer_bypasses_self.sql",
+      "301_policy_definitions_enforcement_kind_widen.sql",
+      "302_operator_decisions_drillable_provenance_and_why.sql",
+      "303_compile_sub_task_routing_split.sql",
+      "304_compile_author_gemini_fallback.sql",
+      "305_extend_aa_creator_aliases_for_openrouter_prefixes.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

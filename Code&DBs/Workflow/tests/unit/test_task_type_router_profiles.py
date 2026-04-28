@@ -727,7 +727,7 @@ class _ResearchOnlyGuardConn(_FakeConn):
                     "latency_class": "instant",
                     "latency_rank": 1,
                     "capability_tags": ["research", "reasoning"],
-                    "task_affinities": {"primary": ["research"], "secondary": [], "specialized": [], "avoid": []},
+                    "task_affinities": {"primary": ["research", "analysis"], "secondary": [], "specialized": [], "avoid": []},
                     "benchmark_profile": {},
                 },
                 {
@@ -746,7 +746,7 @@ class _ResearchOnlyGuardConn(_FakeConn):
         return super().execute(sql, *params)
 
 
-def test_research_only_candidate_does_not_leak_into_non_research_routes(monkeypatch) -> None:
+def test_research_tagged_candidate_does_not_leak_into_non_research_routes(monkeypatch) -> None:
     import runtime.routing_economics as _routing_economics
     monkeypatch.setattr(_routing_economics, "supports_adapter", lambda _provider_slug, _adapter_type: True)
     monkeypatch.setattr(
@@ -769,6 +769,87 @@ def test_research_only_candidate_does_not_leak_into_non_research_routes(monkeypa
     assert [entry.model_slug for entry in chat_chain] == ["gpt-5.4-mini"]
     assert [entry.provider_slug for entry in research_chain] == ["openai", "deepseek"]
     assert [entry.model_slug for entry in research_chain] == ["gpt-5.4-mini", "deepseek-r3"]
+
+
+class _ResearchCompileGuardConn(_ResearchOnlyGuardConn):
+    def execute(self, sql: str, *params):
+        if "FROM task_type_route_profiles" in sql:
+            return [
+                {
+                    "task_type": "chat",
+                    "affinity_labels": {
+                        "primary": ["chat", "support"],
+                        "secondary": ["analysis", "research"],
+                        "specialized": [],
+                        "fallback": ["build"],
+                        "avoid": [],
+                    },
+                    "affinity_weights": {"primary": 1.0, "secondary": 0.7, "specialized": 0.4, "fallback": 0.2, "unclassified": 0.1, "avoid": 0.0},
+                    "task_rank_weights": {"affinity": 0.6, "route_tier": 0.25, "latency": 0.15},
+                    "benchmark_metric_weights": {},
+                    "route_tier_preferences": ["high", "medium", "low"],
+                    "latency_class_preferences": ["instant", "reasoning"],
+                    "allow_unclassified_candidates": True,
+                    "rationale": "chat profile",
+                },
+                {
+                    "task_type": "compile",
+                    "affinity_labels": {
+                        "primary": ["compile", "analysis"],
+                        "secondary": ["research", "review"],
+                        "specialized": [],
+                        "fallback": ["build"],
+                        "avoid": [],
+                    },
+                    "affinity_weights": {"primary": 1.0, "secondary": 0.7, "specialized": 0.4, "fallback": 0.2, "unclassified": 0.1, "avoid": 0.0},
+                    "task_rank_weights": {"affinity": 0.6, "route_tier": 0.25, "latency": 0.15},
+                    "benchmark_metric_weights": {},
+                    "route_tier_preferences": ["high", "medium", "low"],
+                    "latency_class_preferences": ["instant", "reasoning"],
+                    "allow_unclassified_candidates": True,
+                    "rationale": "compile profile",
+                },
+                {
+                    "task_type": "research",
+                    "affinity_labels": {
+                        "primary": ["research", "analysis", "documentation"],
+                        "secondary": ["architecture", "review", "chat"],
+                        "specialized": [],
+                        "fallback": ["multimodal"],
+                        "avoid": [],
+                    },
+                    "affinity_weights": {"primary": 1.0, "secondary": 0.74, "specialized": 0.45, "fallback": 0.3, "unclassified": 0.2, "avoid": 0.0},
+                    "task_rank_weights": {"affinity": 0.62, "route_tier": 0.23, "latency": 0.15},
+                    "benchmark_metric_weights": {},
+                    "route_tier_preferences": ["high", "medium", "low"],
+                    "latency_class_preferences": ["reasoning", "instant"],
+                    "allow_unclassified_candidates": True,
+                    "rationale": "research profile",
+                },
+            ]
+        return super().execute(sql, *params)
+
+
+def test_research_tagged_candidate_is_allowed_for_compile_routes(monkeypatch) -> None:
+    import runtime.routing_economics as _routing_economics
+    monkeypatch.setattr(_routing_economics, "supports_adapter", lambda _provider_slug, _adapter_type: True)
+    monkeypatch.setattr(
+        _routing_economics,
+        "resolve_adapter_economics",
+        lambda _provider_slug, adapter_type: {
+            "billing_mode": "subscription_included" if adapter_type == "cli_llm" else "metered_api",
+            "budget_bucket": f"{adapter_type}.test",
+            "effective_marginal_cost": 0.0,
+            "prefer_prepaid": True,
+            "allow_payg_fallback": True,
+        },
+    )
+    router = TaskTypeRouter(_ResearchCompileGuardConn())
+
+    compile_chain = router.resolve_failover_chain("auto/compile")
+
+    assert [entry.provider_slug for entry in compile_chain] == ["deepseek", "openai"]
+    assert [entry.model_slug for entry in compile_chain] == ["deepseek-r3", "gpt-5.4-mini"]
 
 
 class _SemanticAutoAliasConn(_FakeConn):

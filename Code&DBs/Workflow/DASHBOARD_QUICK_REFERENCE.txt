@@ -28,16 +28,17 @@ REPLACES:
 
 SAMPLE OUTPUT (illustrative only — query live dashboard for actual state):
   === Praxis Engine Dashboard ===
-  System: HEALTHY | 42 runs | 95% pass rate | $3.21 total cost
+  System: HEALTHY | <run_count> runs | <pass_rate>% pass rate | <$total_cost> total cost
 
-  Circuits: anthropic=CLOSED openai=CLOSED google=CLOSED
+  Circuits:
+    <provider_slug>=<state> ...
 
   Top Agents:
-    openai/gpt-5.4-mini                     100%  $0.0500/run   3100ms avg
-    anthropic/sonnet                         92%  $0.0600/run   4200ms avg
+    <provider>/<model_slug>                 <pass_rate>%  <$avg_cost>/run   <avg_latency>ms avg
+    <provider>/<model_slug>                 <pass_rate>%  <$avg_cost>/run   <avg_latency>ms avg
 
   Recent Failures:
-    [12:34] run:abc123 | google | rate_limit_exceeded
+    [HH:MM] <run_ref> | <provider>/<model> | <code>
 
 FILES ADDED:
   runtime/dashboard.py              - Core dashboard logic (209 lines)

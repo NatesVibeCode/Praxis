@@ -48,6 +48,16 @@ def test_json_artifact_filename_is_not_a_pill() -> None:
     assert ("atlas_defer", "json") not in _refs(intent)
 
 
+def test_praxis_db_literal_is_not_a_pill() -> None:
+    intent = "Compare latency in Praxis.db before you propose a routing change."
+    assert ("praxis", "db") not in _refs(intent)
+
+
+def test_praxis_db_status_is_treated_as_a_pill_candidate() -> None:
+    intent = "Compare latency in Praxis.db.status before you propose a routing change."
+    assert ("praxis.db", "status") in _refs(intent)
+
+
 def test_real_data_pill_still_binds() -> None:
     intent = "Backfill the users.first_name column from existing rows."
     assert ("users", "first_name") in _refs(intent)

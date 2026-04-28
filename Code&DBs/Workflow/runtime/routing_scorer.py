@@ -335,9 +335,77 @@ def candidate_affinity_labels(
     return labels
 
 
-def candidate_is_research_only(candidate: dict[str, Any]) -> bool:
+def candidate_is_research_only(
+    candidate: dict[str, Any],
+    *,
+    profile_task_primary: tuple[str, ...] | None = None,
+    profile_task_secondary: tuple[str, ...] | None = None,
+    profile_task_specialized: tuple[str, ...] | None = None,
+) -> bool:
+    """Heuristic gate for candidates that should remain research-gated.
+
+    In strict mode (when profile affinity sets are passed), a candidate is
+    research-gated unless it shows explicit non-research affinity to the
+    current task profile. That allows profiles like `compile` that include
+    analysis to use broader research-adjacent models while keeping pure
+    research candidates from leaking into unrelated tasks.
+    """
     affinity_labels = candidate_affinity_labels(candidate)
-    return bool(affinity_labels) and affinity_labels == {"research"}
+    if "research" not in affinity_labels:
+        return False
+
+    if profile_task_primary is None and profile_task_secondary is None:
+        # Backward-compatible fallback: preserve prior behavior for callers
+        # that only need a static check.
+        return True
+
+    task_affinities = candidate.get("task_affinities") or {}
+    candidate_primary = {
+        str(label).strip().lower()
+        for label in (task_affinities.get("primary") or ())
+        if isinstance(label, str) and str(label).strip()
+    }
+    candidate_secondary = {
+        str(label).strip().lower()
+        for label in (task_affinities.get("secondary") or ())
+        if isinstance(label, str) and str(label).strip()
+    }
+    candidate_specialized = {
+        str(label).strip().lower()
+        for label in (task_affinities.get("specialized") or ())
+        if isinstance(label, str) and str(label).strip()
+    }
+    profile_primary = {
+        str(label).strip().lower()
+        for label in (profile_task_primary or ())
+        if isinstance(label, str) and str(label).strip()
+    }
+    profile_secondary = {
+        str(label).strip().lower()
+        for label in (profile_task_secondary or ())
+        if isinstance(label, str) and str(label).strip()
+    }
+    profile_specialized = {
+        str(label).strip().lower()
+        for label in (profile_task_specialized or ())
+        if isinstance(label, str) and str(label).strip()
+    }
+
+    candidate_primary_non_research = {label for label in candidate_primary if label != "research"}
+    if candidate_primary_non_research.intersection(profile_primary):
+        return False
+    candidate_secondary_non_research = {
+        label for label in candidate_secondary if label != "research"
+    }
+    if candidate_secondary_non_research.intersection(profile_secondary):
+        return False
+    if candidate_specialized.intersection(profile_specialized):
+        return False
+
+    if "research" in candidate_secondary and "research" in profile_secondary:
+        return False
+
+    return True
 
 
 def candidate_common_metrics(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -356,7 +424,7 @@ def base_cost_per_m_tokens(candidate: dict[str, Any], *, state_row: dict[str, An
 
 
 def match_affinity_bucket(candidate: dict[str, Any], profile: "TaskTypeRouteProfile") -> str:
-    positive_labels = positive_candidate_labels(candidate)
+    positive_labels = candidate_affinity_labels(candidate)
     for bucket in ("avoid", "primary", "secondary", "specialized", "fallback"):
         if positive_labels.intersection(profile.affinity_labels.get(bucket, ())):
             return bucket

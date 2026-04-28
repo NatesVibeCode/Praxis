@@ -100,7 +100,7 @@ def test_workflow_runner_api_execution_does_not_retry_locally(monkeypatch) -> No
 
     monkeypatch.setattr(_mod, "execute_api_in_sandbox", _fail_once)
     runner = _mod.WorkflowRunner.__new__(_mod.WorkflowRunner)
-    runner._repo_root = Path(__file__).resolve().parents[3]
+    runner._repo_root = Path(__file__).resolve().parents[4]
 
     result = runner._execute_api_job(
         label="api_job",

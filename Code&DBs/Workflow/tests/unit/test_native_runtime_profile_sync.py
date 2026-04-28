@@ -97,7 +97,7 @@ def test_native_transport_ready_degraded_candidate_is_admitted_for_native_profil
 ) -> None:
     monkeypatch.setattr(
         "registry.runtime_profile_admission.is_native_runtime_profile_ref",
-        lambda runtime_profile_ref: runtime_profile_ref == "praxis",
+        lambda runtime_profile_ref, conn=None: runtime_profile_ref == "praxis",
     )
     assert _candidate_is_admitted_for_runtime_profile(
         runtime_profile_ref="praxis",

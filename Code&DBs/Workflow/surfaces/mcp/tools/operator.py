@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from runtime.primitive_contracts import bug_query_default_open_only_list
+
 from ..subsystems import _subs
 
 _OPERATOR_READ_LIMIT_MAX = 500
@@ -879,6 +881,33 @@ def tool_praxis_operator_architecture_policy(params: dict) -> dict:
                 if updated_at is not None
                 else None
             ),
+            # Migration 302 — drillability + provenance. Both optional.
+            # decision_provenance ∈ {explicit, inferred}; default 'inferred'
+            # downstream. decision_why is operator-authored deeper motivation,
+            # separate from rationale (which captures the rule).
+            "decision_provenance": params.get("decision_provenance"),
+            "decision_why": params.get("decision_why"),
+        },
+    )
+
+
+def tool_praxis_evolve_operation_field(params: dict) -> dict:
+    """Plan-only wizard: introspect the CQRS chain for adding a new field
+    to an existing operation. v1 returns the file-by-file edit plan.
+    Closes the gap surfaced during P4.2 Pydantic input-model evolution
+    where adding one field touched 6-10 files by hand."""
+
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operation.evolve_field",
+        payload={
+            "operation_name": params.get("operation_name", ""),
+            "field_name": params.get("field_name", ""),
+            "field_type_annotation": params.get("field_type_annotation", "str | None"),
+            "field_default_repr": params.get("field_default_repr", "None"),
+            "field_description": params.get("field_description", ""),
+            "db_column": params.get("db_column"),
+            "db_table": params.get("db_table"),
         },
     )
 
@@ -2232,6 +2261,15 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "string",
                         "description": "Optional ISO-8601 datetime for the row update timestamp.",
                     },
+                    "decision_provenance": {
+                        "type": "string",
+                        "enum": ["explicit", "inferred"],
+                        "description": "Optional. 'explicit' = operator unequivocally said so (binding). 'inferred' = model guessed from conversation/debate (advisory). Defaults to 'inferred' when omitted; surfacing layers weight explicit higher.",
+                    },
+                    "decision_why": {
+                        "type": "string",
+                        "description": "Optional deeper motivation, separate from rationale (which captures the rule). Drillable surfaces expose this alongside rationale.",
+                    },
                 },
                 "required": [
                     "authority_domain",
@@ -2241,6 +2279,61 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "decided_by",
                     "decision_source",
                 ],
+            },
+        },
+    ),
+    "praxis_evolve_operation_field": (
+        tool_praxis_evolve_operation_field,
+        {
+            "description": (
+                "Plan-only wizard for adding a new field to an existing CQRS operation's input model.\n\n"
+                "USE WHEN: you need to evolve an existing operation's input shape (add an optional field). "
+                "Returns a complete file-by-file edit checklist instead of grep-hunting through the chain. "
+                "v1 is plan-only — operator/agent applies the diffs.\n\n"
+                "EXAMPLE: praxis_evolve_operation_field(\n"
+                "  operation_name='operator.architecture_policy_record',\n"
+                "  field_name='decision_provenance',\n"
+                "  field_type_annotation='str | None',\n"
+                "  field_default_repr='None',\n"
+                "  field_description='explicit | inferred',\n"
+                "  db_table='operator_decisions',\n"
+                "  db_column='decision_provenance'\n"
+                ")\n\n"
+                "USE praxis_register_operation for net-new operations; this tool is for evolving existing ones."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "operation_name": {
+                        "type": "string",
+                        "description": "Existing operation_name (e.g. 'operator.architecture_policy_record').",
+                    },
+                    "field_name": {
+                        "type": "string",
+                        "description": "New field name to add to the input shape.",
+                    },
+                    "field_type_annotation": {
+                        "type": "string",
+                        "description": "Python type annotation, e.g. 'str | None' or 'int'. Default 'str | None'.",
+                    },
+                    "field_default_repr": {
+                        "type": "string",
+                        "description": "Python literal default, e.g. 'None' or \"'inferred'\". Default 'None'.",
+                    },
+                    "field_description": {
+                        "type": "string",
+                        "description": "Human description for the MCP tool's inputSchema.",
+                    },
+                    "db_column": {
+                        "type": "string",
+                        "description": "Optional matching DB column name when the field is column-backed.",
+                    },
+                    "db_table": {
+                        "type": "string",
+                        "description": "Optional table that owns db_column.",
+                    },
+                },
+                "required": ["operation_name", "field_name"],
             },
         },
     ),
@@ -2515,7 +2608,13 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "open_only": {
                         "type": "boolean",
-                        "default": True,
+                        "description": (
+                            "When true, excludes resolved-terminal work items the same way bug list "
+                            "surfaces do. Default is sourced from "
+                            "runtime.primitive_contracts.bug_query_default_open_only_list() "
+                            "so open_only defaults stay aligned (BUG-BAEC85C1)."
+                        ),
+                        "default": bug_query_default_open_only_list(),
                     },
                     "limit": {
                         "type": "integer",

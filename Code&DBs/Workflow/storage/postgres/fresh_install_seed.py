@@ -671,6 +671,111 @@ async def _seed_public_operator_decisions(conn: Any) -> tuple[str, ...]:
     return tuple(seeded)
 
 
+_DECISIONS_SNAPSHOT_RELPATH = "policy/operator-decisions-snapshot.json"
+
+
+def _load_decisions_snapshot(repo_root: Path) -> tuple[dict[str, Any], ...]:
+    """Load policy/operator-decisions-snapshot.json if present.
+
+    The snapshot is a byte-deterministic export of operator_decisions
+    architecture_policy rows produced by scripts/refresh-decisions-snapshot.sh.
+    Forks that strip private operator policy can simply remove or empty the
+    file; this loader returns () in that case so the seed degrades cleanly.
+    """
+    path = repo_root / _DECISIONS_SNAPSHOT_RELPATH
+    if not path.exists():
+        return ()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+    rows = data.get("decisions") or ()
+    if not isinstance(rows, list):
+        return ()
+    return tuple(r for r in rows if isinstance(r, dict))
+
+
+async def _seed_operator_decisions_from_snapshot(
+    conn: Any,
+    repo_root: Path,
+) -> tuple[str, ...]:
+    """Seed operator_decisions from the committed snapshot.
+
+    Sits AFTER `_seed_public_operator_decisions` so the public-safe baseline
+    always wins when both define the same `decision_key`. Uses
+    `ON CONFLICT (decision_key) DO NOTHING` so this seed never clobbers
+    rows the operator has authored later (those carry their real
+    `decision_source`, this seed only writes when the row is absent).
+
+    Volatile timestamp fields are stripped from the snapshot for byte
+    determinism — we synthesize stable defaults at seed time using
+    `_FRESH_INSTALL_DECIDED_AT`. The downside is that re-running on a
+    populated DB does not refresh content; the upside is the seed is a
+    floor, not a source of truth. Operator authority lives in the live
+    table once the agent starts writing.
+    """
+    rows = _load_decisions_snapshot(repo_root)
+    if not rows:
+        return ()
+    seeded: list[str] = []
+    seen_keys: set[str] = set()
+    for r in rows:
+        decision_key = r.get("decision_key") or ""
+        if not decision_key or decision_key in seen_keys:
+            continue
+        scope_clamp = r.get("scope_clamp")
+        if not isinstance(scope_clamp, dict):
+            scope_clamp = {"applies_to": ["pending_review"], "does_not_apply_to": []}
+        scope_kind = r.get("decision_scope_kind") or "authority_domain"
+        scope_ref = r.get("decision_scope_ref") or "operator"
+        operator_decision_id = (
+            f"operator_decision.{r.get('decision_kind') or 'architecture_policy'}."
+            f"snapshot.{decision_key.replace('::','.').replace('-','_')}"
+        )[:240]
+        await conn.execute(
+            """
+            INSERT INTO operator_decisions (
+                operator_decision_id,
+                decision_key,
+                decision_kind,
+                decision_status,
+                title,
+                rationale,
+                decided_by,
+                decision_source,
+                effective_from,
+                effective_to,
+                decided_at,
+                created_at,
+                updated_at,
+                decision_scope_kind,
+                decision_scope_ref,
+                scope_clamp
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, NULL, $9, $9, $9,
+                $10, $11, $12::jsonb
+            )
+            ON CONFLICT (decision_key) DO NOTHING
+            """,
+            operator_decision_id,
+            decision_key,
+            r.get("decision_kind") or "architecture_policy",
+            r.get("decision_status") or "decided",
+            r.get("title") or decision_key,
+            r.get("rationale") or "",
+            r.get("decided_by") or "praxis",
+            r.get("decision_source") or "operator_decisions_snapshot",
+            _FRESH_INSTALL_DECIDED_AT,
+            scope_kind,
+            scope_ref,
+            json.dumps(scope_clamp),
+        )
+        seen_keys.add(decision_key)
+        seeded.append(decision_key)
+    return tuple(seeded)
+
+
 async def _seed_public_functional_areas(conn: Any) -> tuple[str, ...]:
     seeded: list[str] = []
     for area in _PUBLIC_FUNCTIONAL_AREAS:
@@ -855,6 +960,14 @@ async def seed_fresh_install_authority_async(
     sandbox_refs = await _seed_sandbox_profiles(conn, sandbox_profiles)
     runtime_refs = await _seed_runtime_profiles(conn, config)
     decision_keys = await _seed_public_operator_decisions(conn)
+    snapshot_decision_keys = await _seed_operator_decisions_from_snapshot(
+        conn,
+        resolved_repo_root,
+    )
+    # Merge for the summary; keep public-seed keys first since those are the
+    # authoritative baseline. The snapshot keys are advisory floor — the
+    # operator's authoring is what fills in rationale/timestamps over time.
+    merged_decision_keys = tuple(dict.fromkeys((*decision_keys, *snapshot_decision_keys)))
     functional_area_refs = await _seed_public_functional_areas(conn)
     workflow_definition_refs = await _seed_native_self_hosted_smoke_definition(conn)
 
@@ -875,7 +988,7 @@ async def seed_fresh_install_authority_async(
     return FreshInstallSeedSummary(
         runtime_profiles=runtime_refs,
         sandbox_profiles=sandbox_refs,
-        operator_decisions=decision_keys,
+        operator_decisions=merged_decision_keys,
         functional_areas=functional_area_refs,
         workflow_definitions=workflow_definition_refs,
         synced_runtime_profiles=tuple(synced_refs),

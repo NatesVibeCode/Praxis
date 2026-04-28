@@ -17,6 +17,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+from adapters.credential_capture import secure_entry_action
 from adapters.keychain import resolve_secret
 
 from .graph import (
@@ -81,8 +82,8 @@ def _probe_api_key(
         )
     if sys.platform == "darwin":
         remediation = (
-            f"Store {env_var} in macOS Keychain: "
-            f'security add-generic-password -U -a "praxis" -s "{env_var}" -w "<your-key>"'
+            f"Open the Praxis secure API-key entry window for {human_name}; "
+            f"it stores {env_var} in macOS Keychain without exposing the key to chat."
         )
     else:
         remediation = (
@@ -92,7 +93,11 @@ def _probe_api_key(
     return gate_result(
         probe,
         status="missing",
-        observed_state={"env_var": env_var, "resolved": False},
+        observed_state={
+            "env_var": env_var,
+            "resolved": False,
+            "credential_capture": secure_entry_action(env_var, human_name),
+        },
         remediation_hint=remediation,
     )
 

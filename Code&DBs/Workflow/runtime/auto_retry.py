@@ -71,8 +71,7 @@ _NON_RETRYABLE_PATTERNS = [
 
 _TRIAGEABLE_PATTERNS = [
     re.compile(r"FAILED"),
-    re.compile(r"AssertionError"),      # sic — common typo in real logs
-    re.compile(r"AssertionError|AssertionError", re.IGNORECASE),
+    re.compile(r"AssertionError", re.IGNORECASE),
 ]
 
 

@@ -70,6 +70,17 @@ _ENV_URL = "PRAXIS_WORKFLOW_MCP_URL"
 _ENV_TOKEN = "PRAXIS_WORKFLOW_MCP_TOKEN"
 _ENV_ALLOWED = "PRAXIS_ALLOWED_MCP_TOOLS"
 
+# `praxis workflow <sub>` short aliases — same mapping used when resolving
+# `praxis workflow tools describe|call workflow <sub>` entrypoints (multi-token).
+_WORKFLOW_SUBCOMMAND_TO_TOOL: dict[str, str] = {
+    "query": "praxis_query",
+    "discover": "praxis_discover",
+    "recall": "praxis_recall",
+    "health": "praxis_health",
+    "artifacts": "praxis_artifacts",
+    "bugs": "praxis_bugs",
+}
+
 # Subcommand → (MCP tool name, argspec)
 # argspec is a list of (flag, dest, kind, required). kind ∈ {"str", "json", "positional"}.
 _COMMANDS: dict[str, tuple[str, list[tuple[str, str, str, bool]]]] = {
@@ -266,9 +277,27 @@ def _call_tools_list(*, url: str, token: str, allowed_tools: str) -> list[dict[s
 
 
 def _match_tool_definition(tools: list[dict[str, Any]], tool_name: str) -> dict[str, Any] | None:
-    candidates = [tool_name]
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _add(name: str) -> None:
+        key = name.strip()
+        if key and key not in seen:
+            seen.add(key)
+            candidates.append(key)
+
+    _add(tool_name)
     if not tool_name.startswith("praxis_"):
-        candidates.append(f"praxis_{tool_name}")
+        _add(f"praxis_{tool_name}")
+    # Host CLI teaches `workflow tools describe workflow query` — two trailing
+    # tokens that are not flags; join to `workflow query` then map to MCP name.
+    normalized = " ".join(tool_name.strip().split())
+    if normalized.startswith("workflow "):
+        tail = normalized.removeprefix("workflow ").strip()
+        if tail and " " not in tail:
+            mapped = _WORKFLOW_SUBCOMMAND_TO_TOOL.get(tail)
+            if mapped:
+                _add(mapped)
 
     for candidate in candidates:
         for tool in tools:
@@ -552,7 +581,12 @@ def main(argv: list[str] | None = None) -> int:
                 if resolved_definition is None:
                     _render_tool_lookup_failure(tool_reference, candidates, stdout=sys.stdout)
                     return 2
-                if _match_tool_definition(tools, resolved_definition.name) is None:
+                matched = _match_tool_definition(tools, resolved_definition.name)
+                if matched is None:
+                    _render_tool_lookup_failure(tool_reference, [], stdout=sys.stdout)
+                    return 2
+                canonical = str(matched.get("name") or "").strip()
+                if not canonical:
                     _render_tool_lookup_failure(tool_reference, [], stdout=sys.stdout)
                     return 2
                 parser = argparse.ArgumentParser(prog="praxis workflow tools call", add_help=False)
@@ -572,9 +606,9 @@ def main(argv: list[str] | None = None) -> int:
                 result = _post_jsonrpc(
                     url=url,
                     token=token,
-                    tool_name=resolved_definition.name,
+                    tool_name=canonical,
                     arguments=call_arguments,
-                    allowed_tools=allowed_tools or resolved_definition.name,
+                    allowed_tools=allowed_tools or canonical,
                 )
                 _print_result(result)
                 return 0
@@ -588,16 +622,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         # `praxis workflow <short-subcommand>` aliases: query, discover, recall,
         # health, artifacts, bugs. Map to the tool_name directly.
-        alias_map = {
-            "query": "praxis_query",
-            "discover": "praxis_discover",
-            "recall": "praxis_recall",
-            "health": "praxis_health",
-            "artifacts": "praxis_artifacts",
-            "bugs": "praxis_bugs",
-        }
-        if sub in alias_map:
-            tool_name = alias_map[sub]
+        if sub in _WORKFLOW_SUBCOMMAND_TO_TOOL:
+            tool_name = _WORKFLOW_SUBCOMMAND_TO_TOOL[sub]
             remaining = argv[2:]
             # Reuse the short-form parser by mapping to a known _COMMANDS entry.
             short_name = sub

@@ -318,44 +318,6 @@ class ConstraintLedger:
 # Miner
 # ---------------------------------------------------------------------------
 
-_PATTERNS: list[tuple[str, str, float]] = [
-    (
-        r"(?:ImportError|ModuleNotFoundError)",
-        "MUST include all required imports at top of file",
-        0.9,
-    ),
-    (
-        r"SyntaxError",
-        "MUST produce valid Python syntax. Run a mental syntax check before outputting.",
-        0.9,
-    ),
-    (
-        r"IndentationError",
-        "MUST use consistent 4-space indentation throughout",
-        0.85,
-    ),
-    (
-        r"FileNotFoundError",
-        "MUST verify target paths exist before writing",
-        0.8,
-    ),
-    (
-        r"AssertionError|AssertionError|AssertionError",
-        "MUST ensure all test assertions match actual behavior",
-        0.75,
-    ),
-]
-
-# Also match the correctly-spelled variant
-_PATTERNS.append(
-    (
-        r"AssertionError|AssertionError",
-        "MUST ensure all test assertions match actual behavior",
-        0.75,
-    ),
-)
-
-# Deduplicate and rebuild with both spellings handled
 _FAILURE_RULES: list[tuple[re.Pattern, str, str, float]] = [
     (
         re.compile(r"ImportError|ModuleNotFoundError"),
@@ -382,7 +344,7 @@ _FAILURE_RULES: list[tuple[re.Pattern, str, str, float]] = [
         0.8,
     ),
     (
-        re.compile(r"Assertion(?:Error|Error)"),
+        re.compile(r"AssertionError"),
         "AssertionError",
         "MUST ensure all test assertions match actual behavior",
         0.75,

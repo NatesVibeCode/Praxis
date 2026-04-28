@@ -327,8 +327,9 @@ def test_probe_openai_missing_suggests_platform_specific_store(tmp_path: Path) -
             fake_sys.platform = "darwin"
             result = probes_provider.probe_openai({}, tmp_path)
     assert result.status == "missing"
-    assert "Keychain" in (result.remediation_hint or "")
-    assert "security add-generic-password" in (result.remediation_hint or "")
+    assert "secure API-key entry window" in (result.remediation_hint or "")
+    assert result.observed_state["credential_capture"]["kind"] == "secure_key_entry"
+    assert result.observed_state["credential_capture"]["service"] == "OPENAI_API_KEY"
 
 
 def test_probe_openai_missing_on_linux_suggests_env_export(tmp_path: Path) -> None:

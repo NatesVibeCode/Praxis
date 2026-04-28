@@ -205,6 +205,15 @@ class OperatorDecisionAuthorityRecord:
     scope_clamp: Mapping[str, Any] = field(
         default_factory=_default_pending_review_scope_clamp,
     )
+    # Migration 302 — drillability + provenance.
+    # decision_provenance: 'explicit' (operator unequivocally said so) or
+    # 'inferred' (model guessed during conversation/debate parsing).
+    # Default mirrors the schema default — model-authored writes start as
+    # inferred until promoted by an explicit operator action.
+    decision_provenance: str = "inferred"
+    # Deeper motivation, separate from rationale (which captures the rule).
+    # Nullable; populated when known.
+    decision_why: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

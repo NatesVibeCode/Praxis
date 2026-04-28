@@ -1,6 +1,6 @@
 ---
 description: Sandbox Python matches platform Python (3.14)
-globs: **/Code&DBs/Workflow/docker/praxis-*.Dockerfile, **/Code&DBs/Workflow/docker/praxis-*.Dockerfile
+globs: **/Code&DBs/Workflow/docker/praxis-*.Dockerfile
 alwaysApply: false
 ---
 

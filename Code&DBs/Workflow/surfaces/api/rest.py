@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections import Counter
 from contextlib import asynccontextmanager
 import dataclasses
+import inspect
 import io
 import json
 import logging
@@ -1411,7 +1412,7 @@ async def _dispatch_standard_route(request: Request) -> Response:
         # worker thread so concurrent async routes (e.g. /api/health, the MCP
         # bridge) keep responding while the handler does sync DB work.
         import asyncio
-        if asyncio.iscoroutinefunction(handler):
+        if inspect.iscoroutinefunction(handler):
             result = await handler(subsystems, body)
         else:
             result = await asyncio.to_thread(handler, subsystems, body)

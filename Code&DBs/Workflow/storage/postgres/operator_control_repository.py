@@ -11,6 +11,7 @@ from authority.operator_control import (
     OperatorControlAuthority,
     OperatorControlRepositoryError,
     OperatorDecisionAuthorityRecord,
+    PENDING_REVIEW_SCOPE_CLAMP_TOKEN,
     _normalize_as_of,
     normalize_operator_decision_record,
     _require_datetime,
@@ -117,8 +118,26 @@ def _decision_record_from_row(row: asyncpg.Record) -> OperatorDecisionAuthorityR
             else None
         ),
         scope_clamp=_require_mapping(
-            row["scope_clamp"],
+            row["scope_clamp"]
+            if "scope_clamp" in row.keys() and row["scope_clamp"] is not None
+            else {
+                "applies_to": (PENDING_REVIEW_SCOPE_CLAMP_TOKEN,),
+                "does_not_apply_to": (),
+            },
             field_name="scope_clamp",
+        ),
+        decision_provenance=(
+            # Migration 302 column. Backward compatible: if the row was
+            # selected by an older query that didn't include this column,
+            # fall back to the schema default.
+            str(row["decision_provenance"]).strip()
+            if "decision_provenance" in row.keys() and row["decision_provenance"] is not None
+            else "inferred"
+        ),
+        decision_why=(
+            str(row["decision_why"])
+            if "decision_why" in row.keys() and row["decision_why"] is not None
+            else None
         ),
     )
 
@@ -216,9 +235,11 @@ class PostgresOperatorControlRepository:
                     decision_scope_kind,
                     decision_scope_ref,
                     scope_clamp,
-                    embedding
+                    embedding,
+                    decision_provenance,
+                    decision_why
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::vector
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::vector, $18, $19
                 )
                 ON CONFLICT (operator_decision_id) DO UPDATE SET
                     decision_key = EXCLUDED.decision_key,
@@ -235,7 +256,9 @@ class PostgresOperatorControlRepository:
                     decision_scope_kind = EXCLUDED.decision_scope_kind,
                     decision_scope_ref = EXCLUDED.decision_scope_ref,
                     scope_clamp = EXCLUDED.scope_clamp,
-                    embedding = COALESCE(EXCLUDED.embedding, operator_decisions.embedding)
+                    embedding = COALESCE(EXCLUDED.embedding, operator_decisions.embedding),
+                    decision_provenance = EXCLUDED.decision_provenance,
+                    decision_why = COALESCE(EXCLUDED.decision_why, operator_decisions.decision_why)
                 RETURNING
                     operator_decision_id,
                     decision_key,
@@ -252,7 +275,9 @@ class PostgresOperatorControlRepository:
                     updated_at,
                     decision_scope_kind,
                     decision_scope_ref,
-                    scope_clamp
+                    scope_clamp,
+                    decision_provenance,
+                    decision_why
                 """,
                 normalized_operator_decision.operator_decision_id,
                 normalized_operator_decision.decision_key,
@@ -271,6 +296,8 @@ class PostgresOperatorControlRepository:
                 normalized_operator_decision.decision_scope_ref,
                 _scope_clamp_for_storage(normalized_operator_decision.scope_clamp),
                 embedding_literal,
+                normalized_operator_decision.decision_provenance,
+                normalized_operator_decision.decision_why,
             )
         except asyncpg.PostgresError as exc:
             raise OperatorControlRepositoryError(
@@ -477,9 +504,11 @@ class PostgresOperatorControlRepository:
                         decision_scope_kind,
                         decision_scope_ref,
                         scope_clamp,
-                        embedding
+                        embedding,
+                        decision_provenance,
+                        decision_why
                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::vector
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::vector, $18, $19
                     )
                     ON CONFLICT (operator_decision_id) DO UPDATE SET
                         decision_key = EXCLUDED.decision_key,
@@ -496,7 +525,9 @@ class PostgresOperatorControlRepository:
                         decision_scope_kind = EXCLUDED.decision_scope_kind,
                         decision_scope_ref = EXCLUDED.decision_scope_ref,
                         scope_clamp = EXCLUDED.scope_clamp,
-                        embedding = COALESCE(EXCLUDED.embedding, operator_decisions.embedding)
+                        embedding = COALESCE(EXCLUDED.embedding, operator_decisions.embedding),
+                        decision_provenance = EXCLUDED.decision_provenance,
+                        decision_why = COALESCE(EXCLUDED.decision_why, operator_decisions.decision_why)
                     RETURNING
                         operator_decision_id,
                         decision_key,
@@ -513,7 +544,9 @@ class PostgresOperatorControlRepository:
                         updated_at,
                         decision_scope_kind,
                         decision_scope_ref,
-                        scope_clamp
+                        scope_clamp,
+                        decision_provenance,
+                        decision_why
                     """,
                     normalized_operator_decision.operator_decision_id,
                     normalized_operator_decision.decision_key,
@@ -532,6 +565,8 @@ class PostgresOperatorControlRepository:
                     normalized_operator_decision.decision_scope_ref,
                     _scope_clamp_for_storage(normalized_operator_decision.scope_clamp),
                     gate_decision_embedding_literal,
+                    normalized_operator_decision.decision_provenance,
+                    normalized_operator_decision.decision_why,
                 )
                 gate_row = await self._conn.fetchrow(
                     """

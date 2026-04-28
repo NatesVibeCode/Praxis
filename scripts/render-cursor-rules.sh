@@ -91,13 +91,16 @@ rendered = 0
 for t in triggers:
     key = t.get("decision_key") or ""
     title = (t.get("title") or "").strip()
-    rationale = (t.get("rationale") or "").strip()
+    # Registry uses `why` (matches operator_decisions field). Older entries
+    # used `rationale`; fall back so neither shape silently produces the
+    # "(no rationale captured)" placeholder.
+    rationale = (t.get("why") or t.get("rationale") or "").strip()
     matches = t.get("match") or []
 
     file_globs = []
     for c in matches:
         g = c.get("file_glob")
-        if g:
+        if g and g not in file_globs:
             file_globs.append(g)
 
     if not file_globs:

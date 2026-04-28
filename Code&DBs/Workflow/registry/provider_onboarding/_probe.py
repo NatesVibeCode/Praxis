@@ -798,7 +798,7 @@ def _probe_capacity(
                     provider_slug=spec.provider_slug,
                     model_slug=default_model,
                     messages=({"role": "user", "content": _PROBE_PROMPT},),
-                    max_tokens=32,
+                    max_tokens=1024,
                     temperature=0.0,
                     protocol_family=spec.api_protocol_family,
                     timeout_seconds=min(int(spec.default_timeout or 60), 60),

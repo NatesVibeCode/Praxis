@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,7 @@ FOCUS_FILE = CACHE_DIR / "focused_suite.json"
 DEFAULT_SUITE = "workflow_first_slice"
 USAGE = (
     "usage: ./scripts/test.sh "
-    "suite list|suite focus|plan|check-affected|validate|selftest|moon-style-lint"
+    "suite list|suite focus|plan|check-affected|validate|selftest|moon-style-lint|python-dependency-audit"
 )
 
 SUITE_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -308,6 +310,7 @@ def _help_payload() -> dict[str, Any]:
                 "validate <queue-file>",
                 "selftest",
                 "moon-style-lint",
+                "python-dependency-audit",
             ],
         },
         "errors": [],
@@ -528,6 +531,93 @@ def _moon_style_lint_payload(args: list[str]) -> dict[str, Any]:
     }
 
 
+def _python_dependency_audit_payload(args: list[str]) -> dict[str, Any]:
+    if args:
+        return {
+            "ok": False,
+            "results": {},
+            "errors": ["python-dependency-audit does not accept positional arguments"],
+            "warnings": [],
+        }
+
+    requirements_file = WORKFLOW_ROOT / "requirements.runtime.txt"
+    module_available = importlib.util.find_spec("pip_audit") is not None
+    executable = shutil.which("pip-audit")
+
+    if module_available:
+        command = [
+            sys.executable,
+            "-m",
+            "pip_audit",
+            "-r",
+            str(requirements_file),
+            "--format",
+            "json",
+        ]
+    elif executable:
+        command = [
+            executable,
+            "-r",
+            str(requirements_file),
+            "--format",
+            "json",
+        ]
+    else:
+        return {
+            "ok": False,
+            "results": {
+                "status": "unsupported",
+                "requirements_file": str(requirements_file),
+                "tool_candidates": ["python -m pip_audit", "pip-audit"],
+            },
+            "errors": [
+                "python dependency audit is unavailable: pip-audit and python -m pip_audit were not found",
+            ],
+            "warnings": [
+                "install pip-audit or expose it through the repo runtime to enable this surface",
+            ],
+        }
+
+    run = _run_command(command)
+    try:
+        audit = json.loads(run["stdout"] or "{}")
+    except json.JSONDecodeError:
+        return {
+            "ok": False,
+            "results": {
+                "status": "parse_failed",
+                "requirements_file": str(requirements_file),
+                "audit_command": " ".join(shlex.quote(part) for part in command),
+                "run": run,
+            },
+            "errors": ["python dependency audit output was not valid JSON"],
+            "warnings": [run["stderr"].strip()] if run["stderr"] else [],
+        }
+
+    ok = run["returncode"] == 0
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not ok:
+        errors.append(f"python dependency audit failed with exit code {run['returncode']}")
+        if run["stderr"]:
+            warnings.append(run["stderr"].strip())
+        elif run["stdout"]:
+            warnings.append(run["stdout"].strip())
+
+    return {
+        "ok": ok,
+        "results": {
+            "status": "completed" if ok else "failed",
+            "requirements_file": str(requirements_file),
+            "audit_command": " ".join(shlex.quote(part) for part in command),
+            "run": run,
+            "audit": audit,
+        },
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
 def _dispatch(argv: list[str]) -> dict[str, Any]:
     if not argv:
         return {
@@ -581,6 +671,8 @@ def _dispatch(argv: list[str]) -> dict[str, Any]:
         return _selftest_payload()
     if command == "moon-style-lint":
         return _moon_style_lint_payload(tail)
+    if command == "python-dependency-audit":
+        return _python_dependency_audit_payload(tail)
 
     return {
         "ok": False,

@@ -7,9 +7,26 @@
 -- Columns per task type control which models are permitted for which work.
 -- This prevents using expensive reasoning models for mechanical wiring,
 -- or cheap models for architecture decisions.
+--
+-- Schema shape note (fresh-bootstrap fix, 2026-04-27):
+--   The original 024 declared PK = (task_type, provider_slug, model_slug).
+--   Migration 286 later widened the PK to (task_type, sub_task_type,
+--   provider_slug, model_slug, transport_type) and added the two new
+--   columns with defaults '*' / 'CLI'. Migrations 091/093/101/214/249-...
+--   all use the post-286 ON CONFLICT shape — which means on a fresh
+--   bootstrap (where 024 ran before 286), every one of those INSERT
+--   statements would fail with "column does not exist".
+--
+--   Resolution: pre-apply 286's column adds + PK shape here. The original
+--   PK initialization block below now no-ops (PK already set by CREATE
+--   TABLE). Migration 286 becomes idempotent on fresh installs (its
+--   ADD COLUMN IF NOT EXISTS / DROP-AND-READD-PK guards already handle
+--   the no-op case).
 
 CREATE TABLE IF NOT EXISTS task_type_routing (
     task_type       TEXT NOT NULL,
+    sub_task_type   TEXT NOT NULL DEFAULT '*',
+    transport_type  TEXT NOT NULL DEFAULT 'CLI',
     model_slug      TEXT NOT NULL,
     provider_slug   TEXT NOT NULL,
     -- Permission gate: is this model allowed for this task type?
@@ -26,14 +43,15 @@ CREATE TABLE IF NOT EXISTS task_type_routing (
     -- Notes for humans
     rationale       TEXT DEFAULT '',
     updated_at      TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (task_type, provider_slug, model_slug)
+    PRIMARY KEY (task_type, sub_task_type, provider_slug, model_slug, transport_type)
 );
 
 DO $$
 BEGIN
-    -- Migration 286 swapped the PK to the compound (task_type, sub_task_type,
-    -- provider_slug, model_slug, transport_type). On re-runs after 286, leave
-    -- whatever PK is in place alone — only initialize a PK if NONE exists.
+    -- Defensive: only initialize a PK if none exists. With the CREATE
+    -- TABLE above setting the wide PK, this branch never fires on fresh
+    -- installs. Kept for re-runs against historical DBs that might have
+    -- the table without a PK (legacy edge case).
     IF EXISTS (
         SELECT 1
         FROM information_schema.tables
@@ -50,7 +68,7 @@ BEGIN
     ) THEN
         ALTER TABLE task_type_routing
             ADD CONSTRAINT task_type_routing_pkey
-            PRIMARY KEY (task_type, provider_slug, model_slug);
+            PRIMARY KEY (task_type, sub_task_type, provider_slug, model_slug, transport_type);
     END IF;
 END $$;
 
@@ -68,6 +86,10 @@ CREATE INDEX IF NOT EXISTS task_type_routing_type_rank_idx
 --   refactor    = restructure existing code
 --   debate      = adversarial analysis, tradeoff evaluation
 --   review      = code review, quality assessment
+--
+-- The INSERT omits sub_task_type and transport_type so they take the
+-- column defaults ('*' / 'CLI') — matching what migration 286's
+-- column-adds would have produced on a historical bootstrap.
 
 INSERT INTO task_type_routing (task_type, model_slug, provider_slug, permitted, rank, benchmark_score, benchmark_name, cost_per_m_tokens, rationale) VALUES
 -- BUILD: GPT-5.4 leads SWE-Bench Pro (57.7%), Terminal-Bench (75.1%), Aider (88%)

@@ -1,6 +1,6 @@
 ---
 description: DeepSeek scope: direct API research only; OpenRouter compile only; nothing else
-globs: **/migrations/workflow/*.sql, **/migrations/workflow/*.sql
+globs: **/migrations/workflow/*.sql
 alwaysApply: false
 ---
 

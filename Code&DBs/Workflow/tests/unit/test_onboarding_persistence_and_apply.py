@@ -353,17 +353,56 @@ def test_provider_apply_returns_current_state_when_already_ok(tmp_path: Path) ->
     assert result.status == "ok"
 
 
-def test_provider_apply_emits_keychain_command_when_missing_on_darwin(tmp_path: Path) -> None:
+def test_provider_apply_opens_secure_capture_when_missing_on_darwin(tmp_path: Path) -> None:
     with patch("runtime.onboarding.probes_provider.resolve_secret", return_value=None):
         with patch("runtime.onboarding.applies.sys") as fake_sys:
             fake_sys.platform = "darwin"
-            apply_entry = next(
-                a for a in ONBOARDING_GRAPH.applies() if a.gate_ref == "provider.openai"
-            )
-            result = apply_entry.handler({}, tmp_path)
+            with patch(
+                "runtime.operation_catalog_gateway.execute_operation_from_env"
+            ) as fake_execute:
+                fake_execute.return_value = {
+                    "ok": True,
+                    "credential_capture": {
+                        "env_var_name": "OPENAI_API_KEY",
+                        "status": "ok",
+                        "stored": True,
+                        "verified": True,
+                        "source": "keychain",
+                    },
+                    "operation_receipt": {"receipt_id": "receipt-1"},
+                }
+                apply_entry = next(
+                    a for a in ONBOARDING_GRAPH.applies() if a.gate_ref == "provider.openai"
+                )
+                result = apply_entry.handler({}, tmp_path)
+    assert result.status == "ok"
+    assert result.observed_state["credential_capture"]["status"] == "ok"
+    assert result.observed_state["credential_capture"]["source"] == "keychain"
+
+
+def test_provider_apply_reports_secure_capture_cancel_when_missing_on_darwin(tmp_path: Path) -> None:
+    with patch("runtime.onboarding.probes_provider.resolve_secret", return_value=None):
+        with patch("runtime.onboarding.applies.sys") as fake_sys:
+            fake_sys.platform = "darwin"
+            with patch(
+                "runtime.operation_catalog_gateway.execute_operation_from_env"
+            ) as fake_execute:
+                fake_execute.return_value = {
+                    "ok": False,
+                    "credential_capture": {
+                        "env_var_name": "OPENAI_API_KEY",
+                        "status": "canceled",
+                        "stored": False,
+                        "verified": False,
+                    },
+                }
+                apply_entry = next(
+                    a for a in ONBOARDING_GRAPH.applies() if a.gate_ref == "provider.openai"
+                )
+                result = apply_entry.handler({}, tmp_path)
     assert result.status == "missing"
-    assert "security add-generic-password" in (result.remediation_hint or "")
-    assert "OPENAI_API_KEY" in (result.remediation_hint or "")
+    assert "secure capture" in (result.remediation_hint or "")
+    assert result.observed_state["credential_capture"]["status"] == "canceled"
 
 
 # --- Apply surface dispatch -------------------------------------------------

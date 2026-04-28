@@ -18,6 +18,7 @@ from ._spec import (
 )
 
 __all__ = [
+    "_aggregator_routing",
     "_load_benchmark_source_info",
     "_plan_benchmark_rules",
     "_probe_benchmark",
@@ -50,6 +51,29 @@ async def _load_benchmark_source_info(
     }
 
 
+def _aggregator_routing(
+    provider_slug: str, model_slug: str
+) -> tuple[str, str] | None:
+    """Map an aggregator candidate to its underlying creator/model for planning.
+
+    OpenRouter and Together publish models as `<creator_prefix>/<model>`; the
+    benchmark planner needs the underlying creator and model to find the
+    matching row in the source feed. Returns `None` for non-aggregator or
+    unparseable candidates so the caller falls back to the native path
+    (provider_slug treated as creator).
+    """
+    if provider_slug not in {"openrouter", "together"}:
+        return None
+    if "/" not in model_slug:
+        return None
+    prefix, _, rest = model_slug.partition("/")
+    prefix = prefix.strip().lower()
+    rest = rest.strip()
+    if not prefix or not rest:
+        return None
+    return prefix, rest
+
+
 def _plan_benchmark_rules(
     *,
     provider_slug: str,
@@ -61,7 +85,6 @@ def _plan_benchmark_rules(
         str(key).strip().lower(): str(value).strip().lower()
         for key, value in dict(source_config.get("creator_slug_aliases") or {}).items()
     }
-    creator_slug = creator_aliases.get(provider_slug, provider_slug)
     market_lookup = {
         (str(row["creator_slug"]), str(row["source_model_slug"])): dict(row)
         for row in market_rows
@@ -70,15 +93,25 @@ def _plan_benchmark_rules(
     for row in market_rows:
         by_creator[str(row["creator_slug"])].append(dict(row))
 
+    def _resolve_lookup_keys(model_slug: str) -> tuple[str, str]:
+        agg = _aggregator_routing(provider_slug, model_slug)
+        if agg is None:
+            return creator_aliases.get(provider_slug, provider_slug), model_slug
+        raw_creator, effective_slug = agg
+        return creator_aliases.get(raw_creator, raw_creator), effective_slug
+
     plan: list[dict[str, Any]] = []
     for model in models:
-        exact = market_lookup.get((creator_slug, model.model_slug))
+        creator_slug, lookup_slug = _resolve_lookup_keys(model.model_slug)
+        creator_rows = by_creator.get(creator_slug, [])
+
+        exact = market_lookup.get((creator_slug, lookup_slug))
         if exact is not None:
             plan.append(
                 {
                     "model_slug": model.model_slug,
                     "target_creator_slug": creator_slug,
-                    "target_source_model_slug": model.model_slug,
+                    "target_source_model_slug": str(exact["source_model_slug"]),
                     "match_kind": "exact_source_slug",
                     "binding_confidence": 1.0,
                     "selection_metadata": {
@@ -90,8 +123,7 @@ def _plan_benchmark_rules(
             )
             continue
 
-        creator_rows = by_creator.get(creator_slug, [])
-        normalized_target = _normalized_slug(model.model_slug)
+        normalized_target = _normalized_slug(lookup_slug)
         normalized_matches = [
             row
             for row in creator_rows
@@ -114,7 +146,7 @@ def _plan_benchmark_rules(
             )
             continue
 
-        family_target = _family_slug(model.model_slug)
+        family_target = _family_slug(lookup_slug)
         family_matches = [
             row
             for row in creator_rows

@@ -1,5 +1,5 @@
 {
-  "$comment": "Codex CLI hook config. Loaded automatically when the project root contains .codex/hooks.json (codex-cli >= 0.121). For earlier codex-cli, copy this content into ~/.codex/hooks.json or reference these paths from a Codex plugin manifest. Hook event names and the wire shape (`hookEventName`, `additionalContext`, `hookSpecificOutput`) are identical to Claude Code's. Confirmed against codex-cli@0.121.0 binary string types.",
+  "$comment": "Codex CLI hook config. Loaded automatically when the project root contains .codex/hooks.json (codex-cli >= 0.121). For earlier codex-cli, copy this content into ~/.codex/hooks.json or reference these paths from a Codex plugin manifest. Hook event names and the wire shape (`hookEventName`, `additionalContext`, `hookSpecificOutput`) are identical to Claude Code's. Commands are wrapped in `bash -c` with a CODEX_PROJECT_DIR -> CLAUDE_PROJECT_DIR -> $PWD fallback because Codex Desktop (codex-cli 0.125.x bundled in /Applications/Codex.app) does not propagate CODEX_PROJECT_DIR to hook subprocesses, which collapses the unwrapped path to /.codex/... and yields exit 127.",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CODEX_PROJECT_DIR/.codex/hooks/preact-orient-friction.sh",
+            "command": "bash -c 'exec \"${CODEX_PROJECT_DIR:-${CLAUDE_PROJECT_DIR:-$PWD}}/.codex/hooks/preact-orient-friction.sh\"'",
             "timeout": 6
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$CODEX_PROJECT_DIR/.claude/hooks/session-start-standing-orders.sh"
+            "command": "bash -c 'exec \"${CODEX_PROJECT_DIR:-${CLAUDE_PROJECT_DIR:-$PWD}}/.claude/hooks/session-start-standing-orders.sh\"'"
           }
         ]
       }

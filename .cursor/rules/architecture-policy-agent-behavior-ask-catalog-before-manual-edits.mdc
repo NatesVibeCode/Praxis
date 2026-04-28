@@ -1,14 +1,24 @@
 ---
-description: Ask the catalog before manual file edits
-globs: **/Code&DBs/Workflow/runtime/**/*.py, **/Code&DBs/Workflow/surfaces/**/*.py
+description: Check catalog before manual edits — if no wizard exists, edit is canonical
+globs: **/Code&DBs/Workflow/runtime/**/*.py, **/Code&DBs/Workflow/surfaces/**/*.py, **/Code&DBs/Databases/migrations/workflow/*.sql
 alwaysApply: false
 ---
 
-# Standing order — Ask the catalog before manual file edits
+# Standing order — Check catalog before manual edits — if no wizard exists, edit is canonical
 
 `decision_key`: `architecture-policy::agent-behavior::ask-catalog-before-manual-edits`
 
-(no rationale captured)
+Many runtime/surfaces/migration edits have wizard equivalents in the catalog. Before hand-editing, check:
+
+  • New CQRS operation? → praxis_register_operation (lands data_dictionary_objects + authority_object_registry + operation_catalog_registry rows atomically; import-resolves handler_ref + input_model_ref BEFORE writing; idempotent on operation_ref).
+  • Add an optional field to an existing op's input model? → praxis_evolve_operation_field (plan-only wizard; returns a complete file-by-file edit checklist).
+  • Provider/model onboarding? → praxis_provider_onboard.
+  • Field metadata / data-dictionary reproject? → praxis_data_dictionary.
+  • Soft-retire an op? → praxis_retire_operation.
+
+Hand-editing migrations to add catalog rows (operation_catalog_registry / authority_object_registry / data_dictionary_objects) drifts from the wizard's atomic helper, skips the import-resolve guard, and skips receipts. Hand-editing handler files where the wizard would also write the migration leaves the two out of sync. BUT — if you've checked the catalog and no wizard covers the change you need (novel runtime logic, new business rule, novel migration), the edit IS canonical. The pause is to enforce the check, not to block all edits.
+
+Keywords that should trigger this check: 'add column', 'register operation', 'new operation', 'add field', 'evolve operation', 'CQRS handler', 'INSERT INTO operation_catalog_registry', 'INSERT INTO authority_object_registry'.
 
 Source: `operator_decisions` row, `decision_kind=architecture_policy`.
 Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::agent-behavior::ask-catalog-before-manual-edits"}'`

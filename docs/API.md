@@ -30,7 +30,7 @@ If it disagrees with runtime output, trust `praxis workflow routes --json` and r
 
 ## All Routes
 
-Public route count: `8`. All route count: `220`.
+Public route count: `8`. All route count: `224`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -220,6 +220,10 @@ Public route count: `8`. All route count: `220`.
 | `POST` | `/bugs` | `internal` | - | bugs_post |
 | `GET` | `/console` | `internal` | - | Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE). |
 | `GET` | `/console/` | `internal` | - | Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE). |
+| `GET` | `/console/icon-{size}.png` | `internal` | - | Serve Android/Chrome installability icons. |
+| `GET` | `/console/icon.svg` | `internal` | - | Serve the real Praxis logo SVG for the installed phone console. |
+| `GET` | `/console/manifest.webmanifest` | `internal` | - | Serve the installable operator-console PWA manifest. |
+| `GET` | `/console/sw.js` | `internal` | - | Serve the console service worker for install + notification clicks. |
 | `GET` | `/console/vendor/{name}` | `internal` | - | Serve inlined JS dependencies for the operator console (dev-only). |
 | `POST` | `/constraints` | `internal` | - | constraints_post |
 | `POST` | `/decompose` | `internal` | - | decompose_post |

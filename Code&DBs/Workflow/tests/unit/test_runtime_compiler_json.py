@@ -178,54 +178,80 @@ def _compile_index_snapshot(
     )
 
 
+_SYNTHESIZE_RESPONSE = json.dumps(
+    {
+        "title": "Support Mail",
+        "prose_skeleton": "Use @?mail-system before @?triager reviews the queue.",
+        "agent_roles": ["triage-agent"],
+        "variable_hints": [],
+    }
+)
+_PILL_MATCH_RESPONSE = json.dumps(
+    {
+        "bindings": [
+            {"placeholder": "@?mail-system", "resolved": "@gmail/search", "confidence": 0.9},
+            {"placeholder": "@?triager", "resolved": "triage-agent", "confidence": 0.95},
+        ]
+    }
+)
+_AUTHOR_RESPONSE = json.dumps(
+    {
+        "title": "Support Mail",
+        "prose": "Use @gmail/search before triage-agent reviews the queue.",
+        "authority": "",
+        "sla": {},
+        "capabilities": [],
+    }
+)
+
+
+def _stage_response_for(task_type: str) -> str:
+    if task_type == "compile_synthesize":
+        return _SYNTHESIZE_RESPONSE
+    if task_type == "compile_pill_match":
+        return _PILL_MATCH_RESPONSE
+    if task_type == "compile_author":
+        return _AUTHOR_RESPONSE
+    raise AssertionError(f"unexpected compile sub-task: {task_type}")
+
+
 def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
-    captured: dict[str, object] = {}
+    """Compile dispatches three sub-task LLM calls, each routed via task_type_routing."""
+    captured: dict[str, object] = {
+        "catalog_args_per_call": [],
+        "request_task_types": [],
+    }
 
     def _fake_call_llm(request):
-        captured["request_provider"] = request.provider_slug
-        captured["request_model"] = request.model_slug
-        captured["request_endpoint"] = request.endpoint_uri
-        captured["request_protocol"] = request.protocol_family
-        captured["request_api_key"] = request.api_key
-        return SimpleNamespace(
-            content=json.dumps(
-                {
-                    "title": "Support Mail",
-                    "prose": "Use @gmail/search before triage-agent reviews the queue.",
-                    "authority": "",
-                    "sla": {},
-                    "capabilities": [],
-                }
-            ),
+        # Each stage's prompt embeds an OUTPUT schema; recover task_type from current call index
+        idx = len(captured["request_task_types"])
+        # The stage call index lines up with catalog query order
+        task_type = captured["catalog_args_per_call"][idx][1]
+        captured["request_task_types"].append(task_type)
+        captured.setdefault("calls", []).append(
+            (request.provider_slug, request.model_slug, task_type)
         )
+        return SimpleNamespace(content=_stage_response_for(task_type))
 
     def _fake_endpoint(provider, model):
-        captured["endpoint_provider"] = provider
-        captured["endpoint_model"] = model
         return "https://broker.example/v1/chat/completions"
 
     def _fake_protocol(provider):
-        captured["protocol_provider"] = provider
         return "openai_chat_completions"
 
     def _fake_env_vars(provider):
-        captured["env_vars_provider"] = provider
         return ["SAMPLE_BROKER_API_KEY"]
 
     def _fake_resolve_secret(name, *, env=None):
-        captured.setdefault("secret_names", []).append(name)
         return "sk-test"
-
-    def _fake_get_pool():
-        return object()
 
     class _FakeSyncConn:
         def __init__(self, pool):
-            captured["conn_pool"] = pool
+            pass
 
         def fetch(self, query, *args):
-            captured["catalog_query"] = " ".join(str(query).split())
-            captured["catalog_args"] = args
+            captured.setdefault("catalog_query", " ".join(str(query).split()))
+            captured["catalog_args_per_call"].append(args)
             return [
                 {
                     "provider_slug": "sample-broker",
@@ -257,7 +283,7 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
         "storage.postgres.connection",
         SimpleNamespace(
             SyncPostgresConnection=_FakeSyncConn,
-            get_workflow_pool=_fake_get_pool,
+            get_workflow_pool=lambda: object(),
         ),
     )
     monkeypatch.setitem(
@@ -273,38 +299,47 @@ def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
     )
 
     assert "effective_private_provider_job_catalog" in captured["catalog_query"]
-    assert captured["catalog_args"] == ("nate-private", "compile", "API", "llm_task")
-    assert captured["endpoint_provider"] == "sample-broker"
-    assert captured["endpoint_model"] == "vendor/some-model"
-    assert captured["protocol_provider"] == "sample-broker"
-    assert captured["env_vars_provider"] == "sample-broker"
-    assert captured["secret_names"] == ["SAMPLE_BROKER_API_KEY"]
-    assert captured["request_provider"] == "sample-broker"
-    assert captured["request_model"] == "vendor/some-model"
-    assert captured["request_protocol"] == "openai_chat_completions"
-    assert captured["request_api_key"] == "sk-test"
+    # Three sub-task dispatches in order: synthesize → pill_match → author
+    assert [args[1] for args in captured["catalog_args_per_call"]] == [
+        "compile_synthesize",
+        "compile_pill_match",
+        "compile_author",
+    ]
+    # All resolve through the same matrix-gated runtime profile + adapter type
+    for args in captured["catalog_args_per_call"]:
+        assert args[0] == "nate-private"
+        assert args[2] == "API"
+        assert args[3] == "llm_task"
+    # Three LLM HTTP calls, one per stage
+    assert len(captured["calls"]) == 3
+    assert captured["request_task_types"] == [
+        "compile_synthesize",
+        "compile_pill_match",
+        "compile_author",
+    ]
+    # Final compiled artifact comes from the author stage
     assert result["title"] == "Support Mail"
     assert result["prose"] == "Use @gmail/search before triage-agent reviews the queue."
 
 
 def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None:
-    captured: dict[str, object] = {"calls": []}
+    """Within a single sub-task stage, route failover walks to the next route on error."""
+    captured: dict[str, object] = {
+        "catalog_args_per_call": [],
+        "calls": [],
+    }
 
     def _fake_call_llm(request):
-        captured["calls"].append((request.provider_slug, request.model_slug))
-        if request.model_slug == "deepseek/deepseek-v4-flash":
+        idx = len(captured["catalog_args_per_call"]) - 1
+        task_type = captured["catalog_args_per_call"][idx][1]
+        captured["calls"].append((request.provider_slug, request.model_slug, task_type))
+        # First route of the synthesize stage fails; failover should pick the next route
+        if (
+            task_type == "compile_synthesize"
+            and request.model_slug == "deepseek/deepseek-v4-flash"
+        ):
             raise RuntimeError("HTTP 429: upstream rate limited")
-        return SimpleNamespace(
-            content=json.dumps(
-                {
-                    "title": "Fallback Compile",
-                    "prose": "Use @webhook/post then compile-agent normalizes the request.",
-                    "authority": "",
-                    "sla": {},
-                    "capabilities": [],
-                }
-            ),
-        )
+        return SimpleNamespace(content=_stage_response_for(task_type))
 
     def _fake_endpoint(provider, model):
         return "https://broker.example/v1/chat/completions"
@@ -320,21 +355,19 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
 
     class _FakeSyncConn:
         def __init__(self, pool):
-            captured["conn_pool"] = pool
+            pass
 
         def fetch(self, query, *args):
-            captured["catalog_query"] = " ".join(str(query).split())
-            captured["catalog_args"] = args
-            return [
-                {
-                    "provider_slug": "openrouter",
-                    "model_slug": "deepseek/deepseek-v4-flash",
-                },
-                {
-                    "provider_slug": "openrouter",
-                    "model_slug": "deepseek/deepseek-v4-pro",
-                },
-            ]
+            captured.setdefault("catalog_query", " ".join(str(query).split()))
+            captured["catalog_args_per_call"].append(args)
+            # synthesize gets two routes (so failover can be exercised); other stages get one
+            task_type = args[1]
+            if task_type == "compile_synthesize":
+                return [
+                    {"provider_slug": "openrouter", "model_slug": "deepseek/deepseek-v4-flash"},
+                    {"provider_slug": "openrouter", "model_slug": "deepseek/deepseek-v4-pro"},
+                ]
+            return [{"provider_slug": "openrouter", "model_slug": "openai/gpt-5.4-mini"}]
 
     monkeypatch.setitem(
         sys.modules,
@@ -376,12 +409,14 @@ def test_call_llm_compile_falls_back_to_next_llm_task_route(monkeypatch) -> None
     )
 
     assert "effective_private_provider_job_catalog" in captured["catalog_query"]
-    assert captured["catalog_args"] == ("nate-private", "compile", "API", "llm_task")
+    # synthesize first route fails, then succeeds on second; pill_match + author each one call
     assert captured["calls"] == [
-        ("openrouter", "deepseek/deepseek-v4-flash"),
-        ("openrouter", "deepseek/deepseek-v4-pro"),
+        ("openrouter", "deepseek/deepseek-v4-flash", "compile_synthesize"),
+        ("openrouter", "deepseek/deepseek-v4-pro", "compile_synthesize"),
+        ("openrouter", "openai/gpt-5.4-mini", "compile_pill_match"),
+        ("openrouter", "openai/gpt-5.4-mini", "compile_author"),
     ]
-    assert result["title"] == "Fallback Compile"
+    assert result["title"] == "Support Mail"
 
 
 def test_compile_prose_uses_preloaded_compile_index_snapshot_without_reloading(monkeypatch) -> None:

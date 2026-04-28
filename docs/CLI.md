@@ -23,6 +23,7 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 | `praxis workflow bugs` | `praxis_bugs` | `evidence` | `launch`, `read`, `write` | Inspect the bug tracker, run keyword or hybrid search, file a new bug, or drive replay-ready bug workflows. |
 | `praxis workflow integration` | `praxis_integration` | `integration` | `launch`, `read`, `write` | List integrations, inspect one, validate credentials, or invoke an integration action. |
 | `praxis workflow recall` | `praxis_recall` | `knowledge` | `read` | Search the knowledge graph for decisions, patterns, entities, and prior analysis using ranked text, graph, and vector retrieval. |
+| `praxis workflow search` | `praxis_search` | `knowledge` | `read` | Federated search across code, decisions, knowledge, bugs, receipts, and related sources with semantic, exact, or regex modes — prefer this as the default discovery entry point. |
 | `praxis workflow heartbeat` | `praxis_daily_heartbeat` | `operations` | `read` | Run the daily external-health probe across providers, connectors, credentials, and MCP servers. |
 | `praxis workflow orient` | `praxis_orient` | `operations` | `read` | Wake up against Praxis and get standing orders, authority envelope, tool guidance, and endpoints in one call. |
 | `praxis workflow circuits` | `praxis_circuits` | `operations` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
@@ -92,6 +93,7 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 | --- | --- | --- | --- | --- |
 | `praxis workflow integration` | `praxis_integration` | `advanced` | action: call, list, describe, test_credentials, health, create, set_secret, reload | `launch`, `read`, `write` |
 | `praxis workflow tools call praxis_provider_onboard` | `praxis_provider_onboard` | `advanced` | action: probe, onboard | `read`, `write` |
+| `praxis workflow tools call praxis_cli_auth_doctor` | `praxis_cli_auth_doctor` | `stable` | - | `read` |
 
 ### Knowledge
 
@@ -101,6 +103,7 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 | `praxis workflow tools call praxis_ingest` | `praxis_ingest` | `advanced` | - | `write` |
 | `praxis workflow tools call praxis_story` | `praxis_story` | `advanced` | - | `read` |
 | `praxis workflow recall` | `praxis_recall` | `stable` | - | `read` |
+| `praxis workflow search` | `praxis_search` | `stable` | - | `read` |
 | `praxis workflow tools call praxis_research` | `praxis_research` | `stable` | action: search | `read` |
 
 ### Operations
@@ -108,11 +111,15 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 | Entrypoint | Tool | Tier | Selector | Risks |
 | --- | --- | --- | --- | --- |
 | `praxis workflow heartbeat` | `praxis_daily_heartbeat` | `advanced` | - | `read` |
+| `praxis workflow tools call praxis_access_control` | `praxis_access_control` | `advanced` | action: list, disable, enable | `read`, `write` |
 | `praxis workflow tools call praxis_authority_memory_refresh` | `praxis_authority_memory_refresh` | `advanced` | - | `write` |
 | `praxis workflow tools call praxis_bug_replay_provenance_backfill` | `praxis_bug_replay_provenance_backfill` | `advanced` | - | `write` |
+| `praxis workflow tools call praxis_evolve_operation_field` | `praxis_evolve_operation_field` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_heartbeat` | `praxis_heartbeat` | `advanced` | action: run, status | `read`, `write` |
 | `praxis workflow tools call praxis_metrics_reset` | `praxis_metrics_reset` | `advanced` | - | `write` |
+| `praxis workflow tools call praxis_register_operation` | `praxis_register_operation` | `advanced` | - | `write` |
 | `praxis workflow tools call praxis_reload` | `praxis_reload` | `advanced` | - | `write` |
+| `praxis workflow tools call praxis_retire_operation` | `praxis_retire_operation` | `advanced` | - | `write` |
 | `praxis workflow tools call praxis_semantic_bridges_backfill` | `praxis_semantic_bridges_backfill` | `advanced` | - | `write` |
 | `praxis workflow tools call praxis_semantic_projection_refresh` | `praxis_semantic_projection_refresh` | `advanced` | - | `write` |
 | `praxis workflow tools call praxis_status_snapshot` | `praxis_status_snapshot` | `advanced` | - | `read` |
@@ -129,6 +136,7 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 
 | Entrypoint | Tool | Tier | Selector | Risks |
 | --- | --- | --- | --- | --- |
+| `praxis workflow tools call praxis_bug_triage_packet` | `praxis_bug_triage_packet` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_graph_projection` | `praxis_graph_projection` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_issue_backlog` | `praxis_issue_backlog` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_operator_architecture_policy` | `praxis_operator_architecture_policy` | `advanced` | - | `write` |
@@ -140,11 +148,13 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 | `praxis workflow tools call praxis_operator_roadmap_view` | `praxis_operator_roadmap_view` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_operator_write` | `praxis_operator_write` | `advanced` | action: preview, validate, commit, update, retire, re_parent, reparent | `read`, `write` |
 | `praxis workflow tools call praxis_replay_ready_bugs` | `praxis_replay_ready_bugs` | `advanced` | - | `read` |
+| `praxis workflow tools call praxis_run` | `praxis_run` | `advanced` | action: status, scoreboard, graph, lineage | `read` |
 | `praxis workflow tools call praxis_run_graph` | `praxis_run_graph` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_run_lineage` | `praxis_run_lineage` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_run_scoreboard` | `praxis_run_scoreboard` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_run_status` | `praxis_run_status` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_semantic_assertions` | `praxis_semantic_assertions` | `advanced` | action: list, register_predicate, record_assertion, retract_assertion | `read`, `write` |
+| `praxis workflow tools call praxis_trace` | `praxis_trace` | `advanced` | - | `read` |
 | `praxis workflow tools call praxis_ui_experience_graph` | `praxis_ui_experience_graph` | `advanced` | - | `read` |
 
 ### Planning
@@ -182,6 +192,7 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 | Entrypoint | Tool | Tier | Selector | Risks |
 | --- | --- | --- | --- | --- |
 | `praxis workflow tools call praxis_setup` | `praxis_setup` | `core` | action: doctor, plan, apply, graph | `read` |
+| `praxis workflow tools call praxis_credential_capture` | `praxis_credential_capture` | `stable` | action: request, status, capture | `read`, `write` |
 
 ### Submissions
 
@@ -197,6 +208,7 @@ If it disagrees with runtime output, trust the runtime and regenerate this file.
 
 | Entrypoint | Tool | Tier | Selector | Risks |
 | --- | --- | --- | --- | --- |
+| `praxis workflow tools call praxis_compose_experiment` | `praxis_compose_experiment` | `advanced` | - | `launch` |
 | `praxis workflow tools call praxis_compose_plan_via_llm` | `praxis_compose_plan_via_llm` | `advanced` | - | `launch` |
 | `praxis workflow tools call praxis_connector` | `praxis_connector` | `advanced` | action: build, list, get, register, verify | `launch`, `read`, `write` |
 | `praxis workflow tools call praxis_synthesize_skeleton` | `praxis_synthesize_skeleton` | `advanced` | - | `read` |

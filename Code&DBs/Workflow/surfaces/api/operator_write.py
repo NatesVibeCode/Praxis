@@ -4859,6 +4859,8 @@ class OperatorControlFrontdoor:
         decided_at: datetime | None,
         created_at: datetime | None,
         updated_at: datetime | None,
+        decision_provenance: str | None = None,
+        decision_why: str | None = None,
     ) -> ArchitecturePolicyDecisionRecord:
         normalized_authority_domain = _normalize_authority_domain_scope_ref(authority_domain)
         normalized_policy_slug = _normalize_architecture_policy_slug(policy_slug)
@@ -4919,6 +4921,16 @@ class OperatorControlFrontdoor:
                 reason_code="operator_control.invalid_updated_at",
             )
         )
+        # Migration 302 — drillability.
+        # Empty string or None → fall back to schema default 'inferred'.
+        # Operators promote to 'explicit' by passing decision_provenance='explicit'.
+        normalized_provenance = (
+            "explicit"
+            if (decision_provenance or "").strip().lower() == "explicit"
+            else "inferred"
+        )
+        normalized_why = (decision_why or "").strip() or None
+
         decision = OperatorDecisionAuthorityRecord(
             operator_decision_id=_architecture_policy_operator_decision_id(
                 normalized_authority_domain,
@@ -4941,6 +4953,8 @@ class OperatorControlFrontdoor:
             updated_at=normalized_updated_at,
             decision_scope_kind="authority_domain",
             decision_scope_ref=normalized_authority_domain,
+            decision_provenance=normalized_provenance,
+            decision_why=normalized_why,
         )
 
         conn = await self.connect_database(env)
@@ -4975,6 +4989,8 @@ class OperatorControlFrontdoor:
         decided_at: datetime | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
+        decision_provenance: str | None = None,
+        decision_why: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         record = await self._record_architecture_policy_decision(
@@ -4990,6 +5006,8 @@ class OperatorControlFrontdoor:
             decided_at=decided_at,
             created_at=created_at,
             updated_at=updated_at,
+            decision_provenance=decision_provenance,
+            decision_why=decision_why,
         )
         return {"architecture_policy_decision": record.to_json()}
 
@@ -5685,6 +5703,8 @@ class OperatorControlFrontdoor:
         decided_at: datetime | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
+        decision_provenance: str | None = None,
+        decision_why: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         return _run_async(
@@ -5700,6 +5720,8 @@ class OperatorControlFrontdoor:
                 decided_at=decided_at,
                 created_at=created_at,
                 updated_at=updated_at,
+                decision_provenance=decision_provenance,
+                decision_why=decision_why,
                 env=env,
             ),
             message=(

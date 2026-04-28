@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from .health_map import HealthMapper
-from .primitive_contracts import bug_open_status_values
+from .primitive_contracts import bug_open_status_values, bug_resolved_status_values_with_legacy
 from .risk_scoring import RiskScorer
 from .trend_detector import TrendDetector, format_trends
 
@@ -45,8 +45,8 @@ _BUG_TRIAGE_SUMMARY_KEYS: tuple[str, ...] = (
     "fixed_pending_verification",
 )
 _INACTIVE_BUG_STATUSES: frozenset[str] = frozenset(
-    {"FIXED", "WONT_FIX", "DEFERRED", "RETIRED", "CLOSED"}
-)
+    bug_resolved_status_values_with_legacy()
+) | frozenset(("RETIRED",))
 _FIX_PENDING_STATUSES: frozenset[str] = frozenset({"FIX_PENDING_VERIFICATION"})
 _STABLE_TRIAGE_ACTIONS: dict[str, str] = {
     "live_defect": "fix",

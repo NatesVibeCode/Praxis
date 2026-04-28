@@ -56,7 +56,7 @@ def test_mutating_jobs_require_sealed_code_submission_by_default() -> None:
     ]
 
 
-def test_write_scope_requires_sealed_code_submission_even_without_mutating_task_type() -> None:
+def test_write_scope_does_not_force_submission_for_non_mutating_task_type() -> None:
     bundle = build_execution_bundle(
         job_label="job.alpha",
         prompt="Audit and patch the declared file.",
@@ -68,13 +68,10 @@ def test_write_scope_requires_sealed_code_submission_even_without_mutating_task_
     )
 
     contract = bundle["completion_contract"]
-    assert contract["submission_required"] is True
-    assert contract["verification_required"] is True
-    assert contract["result_kind"] == "code_change"
-    assert contract["submit_tool_names"] == [
-        "praxis_submit_code_change",
-        "praxis_get_submission",
-    ]
+    assert contract["submission_required"] is False
+    assert contract["verification_required"] is False
+    assert contract["result_kind"] == "research_result"
+    assert contract["submit_tool_names"] == []
 
 
 def test_mutating_jobs_require_verification_even_when_verify_refs_missing() -> None:
@@ -87,6 +84,19 @@ def test_mutating_jobs_require_verification_even_when_verify_refs_missing() -> N
     )
 
     assert contract["submission_required"] is True
+    assert contract["verification_required"] is True
+
+
+def test_explicit_submission_override_stays_honored_for_mutating_task_type() -> None:
+    contract = _completion_contract(
+        task_type="build",
+        bucket="build",
+        submission_required=False,
+        downstream_labels=(),
+        verify_refs=(),
+    )
+
+    assert contract["submission_required"] is False
     assert contract["verification_required"] is True
 
 

@@ -121,6 +121,77 @@ def test_platform_config_rows_are_schema_readiness_authority() -> None:
     assert postgres_schema._ROW_EXPECTATION_KEY_COLUMNS["platform_config"] == "config_key"
 
 
+def test_parse_task_type_routing_row_key_supports_dot_syntax_with_dotted_model() -> None:
+    assert postgres_schema._parse_task_type_routing_row_key(
+        "plan_pill_match.openrouter.openai/gpt-5.4-mini",
+    ) == ("plan_pill_match", "openrouter", "openai/gpt-5.4-mini")
+
+
+def test_parse_task_type_routing_row_key_supports_legacy_pipe_syntax() -> None:
+    assert postgres_schema._parse_task_type_routing_row_key(
+        "plan_pill_match|openrouter|openai/gpt-5.4-mini",
+    ) == ("plan_pill_match", "openrouter", "openai/gpt-5.4-mini")
+
+
+def test_parse_private_provider_api_job_allowlist_row_key_supports_implicit_llm_task_adapter() -> None:
+    assert postgres_schema._parse_private_provider_api_job_allowlist_row_key(
+        "scratch_agent.plan_pill_match.openrouter.openai/gpt-5.4-mini",
+    ) == (
+        "scratch_agent",
+        "plan_pill_match",
+        "llm_task",
+        "openrouter",
+        "openai/gpt-5.4-mini",
+    )
+
+
+def test_parse_private_provider_api_job_allowlist_row_key_supports_authority_dotted_shape() -> None:
+    assert postgres_schema._parse_private_provider_api_job_allowlist_row_key(
+        "praxis.plan_pill_match.openrouter.openai/gpt-5.4-mini",
+    ) == (
+        "praxis",
+        "plan_pill_match",
+        "llm_task",
+        "openrouter",
+        "openai/gpt-5.4-mini",
+    )
+
+
+def test_parse_private_provider_api_job_allowlist_row_key_supports_explicit_adapter_dotted_model() -> None:
+    assert postgres_schema._parse_private_provider_api_job_allowlist_row_key(
+        "scratch_agent.plan_pill_match.llm_task.openrouter.openai/gpt-5.4-mini",
+    ) == (
+        "scratch_agent",
+        "plan_pill_match",
+        "llm_task",
+        "openrouter",
+        "openai/gpt-5.4-mini",
+    )
+
+
+def test_parse_private_provider_api_job_allowlist_row_key_supports_legacy_pipe_syntax() -> None:
+    assert postgres_schema._parse_private_provider_api_job_allowlist_row_key(
+        "scratch_agent|plan_pill_match|llm_task|openrouter|openai/gpt-5.4-mini",
+    ) == (
+        "scratch_agent",
+        "plan_pill_match",
+        "llm_task",
+        "openrouter",
+        "openai/gpt-5.4-mini",
+    )
+
+
+def test_parse_task_type_routing_row_key_rejects_bad_shape() -> None:
+    assert postgres_schema._parse_task_type_routing_row_key("not|enough") is None
+
+
+def test_parse_private_provider_api_job_allowlist_row_key_rejects_bad_shape() -> None:
+    assert (
+        postgres_schema._parse_private_provider_api_job_allowlist_row_key("not|enough|parts")
+        is None
+    )
+
+
 def test_bootstrap_workflow_schema_skips_advisory_lock_when_schema_is_ready(
     monkeypatch,
 ) -> None:

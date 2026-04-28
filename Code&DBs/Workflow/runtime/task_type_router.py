@@ -85,6 +85,27 @@ _ROUTE_HEALTH_CONFIG_FAILURE_CATEGORIES = frozenset(
         "model_error",
     }
 )
+_DEEPSEEK_SCOPE_TASK_TYPES = frozenset({"research"})
+_DEEPSEEK_SCOPE_PROVIDER_SLUGS = frozenset({"openrouter", "together"})
+_DEEPSEEK_MODEL_KEY = "deepseek"
+
+
+def _is_deepseek_scoped_for_task_type(task_type: str) -> bool:
+    normalized_task_type = task_type.strip().lower()
+    return (
+        normalized_task_type in _DEEPSEEK_SCOPE_TASK_TYPES
+        or normalized_task_type == "compile"
+        or normalized_task_type.startswith("compile_")
+    )
+
+
+def _is_scoped_deepseek_candidate(candidate: dict[str, Any]) -> bool:
+    provider_slug = str(candidate.get("provider_slug") or "").strip().lower()
+    model_slug = str(candidate.get("model_slug") or "").strip().lower()
+    return (
+        provider_slug in _DEEPSEEK_SCOPE_PROVIDER_SLUGS
+        and _DEEPSEEK_MODEL_KEY in model_slug
+    )
 
 
 class TaskRouteAuthorityError(ProviderAuthorityError):
@@ -946,12 +967,29 @@ class TaskTypeRouter:
         budget_authority = self._load_budget_authority_snapshot()
         built_rows: list[dict[str, Any]] = []
         for candidate in catalog_candidates:
+            if (
+                not _is_deepseek_scoped_for_task_type(task_type)
+                and _is_scoped_deepseek_candidate(candidate)
+            ):
+                logger.debug(
+                    "skipping deepseek candidate %s/%s for task_type=%s due scope memo",
+                    candidate.get("provider_slug"),
+                    candidate.get("model_slug"),
+                    task_type,
+                )
+                continue
+
             key = (candidate["provider_slug"], candidate["model_slug"])
             state_row = state_by_key.get(key)
             explicit_override = state_row if (
                 state_row is not None and str(state_row.get("route_source") or "explicit") == "explicit"
             ) else None
-            if task_type != "research" and _candidate_is_research_only(candidate):
+            if task_type != "research" and _candidate_is_research_only(
+                candidate,
+                profile_task_primary=profile.affinity_labels.get("primary", ()),
+                profile_task_secondary=profile.affinity_labels.get("secondary", ()),
+                profile_task_specialized=profile.affinity_labels.get("specialized", ()),
+            ):
                 continue
             affinity_bucket = _match_affinity_bucket(candidate, profile)
             avoid_labels = _candidate_avoid_labels(candidate)
@@ -1129,13 +1167,32 @@ class TaskTypeRouter:
         prefer_cost: bool,
         runtime_profile_ref: str | None = None,
     ) -> list[TaskRouteDecision]:
+        profile = self._task_profiles.get(profile_value)
         rows: list[dict[str, Any]] = []
         catalog_candidates = list(self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref))
         budget_authority = self._load_budget_authority_snapshot()
         for candidate in catalog_candidates:
             if _normalize_auto_route_key(str(candidate.get(profile_column) or "")) != profile_value:
                 continue
-            if profile_value != "research" and _candidate_is_research_only(candidate):
+            if profile_value != "research" and _candidate_is_research_only(
+                candidate,
+                profile_task_primary=profile.affinity_labels.get("primary", ()) if profile else None,
+                profile_task_secondary=profile.affinity_labels.get("secondary", ()) if profile else None,
+                profile_task_specialized=profile.affinity_labels.get("specialized", ())
+                if profile
+                else None,
+            ):
+                continue
+            if (
+                not _is_deepseek_scoped_for_task_type(profile_value)
+                and _is_scoped_deepseek_candidate(candidate)
+            ):
+                logger.debug(
+                    "skipping deepseek candidate %s/%s for auto profile value=%s due scope memo",
+                    candidate.get("provider_slug"),
+                    candidate.get("model_slug"),
+                    profile_value,
+                )
                 continue
             if "general-routing" in _candidate_avoid_labels(candidate):
                 continue

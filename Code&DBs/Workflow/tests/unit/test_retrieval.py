@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -31,7 +31,7 @@ def _make_entity(
     entity_type: EntityType = EntityType.fact,
     **kwargs,
 ) -> Entity:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return Entity(
         id=id,
         entity_type=entity_type,
@@ -52,7 +52,7 @@ def _make_edge(src: str, tgt: str, weight: float = 0.8) -> Edge:
         relation_type=RelationType.related_to,
         weight=weight,
         metadata={},
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         authority_class=EdgeAuthorityClass.canonical,
         provenance_kind=EdgeProvenanceKind.legacy_unspecified,
     )
@@ -136,26 +136,26 @@ class TestNoisyOrFusion:
 class TestRecencyDecay:
     def test_recent_entity_near_full_score(self):
         decay = RecencyDecay()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         result = decay.decay(1.0, now, half_life_days=30.0)
         assert result == pytest.approx(1.0, abs=0.01)
 
     def test_old_entity_reduced_score(self):
         decay = RecencyDecay()
-        old = datetime.utcnow() - timedelta(days=60)
+        old = datetime.now(timezone.utc) - timedelta(days=60)
         result = decay.decay(1.0, old, half_life_days=30.0)
         # After 2 half-lives, should be ~0.25
         assert result == pytest.approx(0.25, abs=0.05)
 
     def test_half_life_gives_half_score(self):
         decay = RecencyDecay()
-        half_ago = datetime.utcnow() - timedelta(days=30)
+        half_ago = datetime.now(timezone.utc) - timedelta(days=30)
         result = decay.decay(1.0, half_ago, half_life_days=30.0)
         assert result == pytest.approx(0.5, abs=0.05)
 
     def test_score_scales_linearly(self):
         decay = RecencyDecay()
-        old = datetime.utcnow() - timedelta(days=30)
+        old = datetime.now(timezone.utc) - timedelta(days=30)
         r1 = decay.decay(1.0, old, half_life_days=30.0)
         r2 = decay.decay(2.0, old, half_life_days=30.0)
         assert r2 == pytest.approx(2.0 * r1, abs=0.01)
@@ -280,7 +280,7 @@ class TestHybridRetriever:
                 relation_type=RelationType.related_to,
                 weight=0.95,
                 metadata={"kind": "heuristic"},
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
                 authority_class=EdgeAuthorityClass.enrichment,
                 provenance_kind=EdgeProvenanceKind.heuristic_extraction,
             )

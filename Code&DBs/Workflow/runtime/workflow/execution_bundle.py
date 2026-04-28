@@ -409,20 +409,21 @@ def build_execution_bundle(
     )
     normalized_write_scope = _dedupe_strings(_string_list(write_scope))
     # A non-empty write_scope is the sandbox isolation boundary required by
-    # SandboxRuntime — it is NOT itself evidence of mutation intent. Only
-    # force the submission/verification contract when the task_type is one
-    # that actually mutates code (build/implement/refactor/test/wiring/
-    # code_generation/code_edit). Audit, review, research, debate, etc.
-    # carry a write_scope for isolation but produce no on-disk diff, so
-    # forcing them through the seal-gate makes every such job fail with
-    # workflow_submission.required_missing despite running successfully.
+    # SandboxRuntime — it is NOT itself evidence of mutation intent.
+    # Force submission/verification only from task_type defaults unless the
+    # caller explicitly overrides completion_contract values.
     mutation_requires_submission = (
-        bool(normalized_write_scope)
-        and _default_submission_required(normalized_task_type)
+        _default_submission_required(normalized_task_type)
     )
-    effective_submission_required = True if mutation_requires_submission else submission_required
+    effective_submission_required = (
+        _default_submission_required(normalized_task_type)
+        if submission_required is None
+        else bool(submission_required)
+    )
     effective_verification_required = (
-        True if mutation_requires_submission else verification_required
+        normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
+        if verification_required is None
+        else bool(verification_required)
     )
     effective_result_kind = (
         "code_change"

@@ -93,6 +93,7 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {"command": "workflow api data-dictionary", "description": "Scoped route discovery for /api/data-dictionary"},
     {"command": "workflow api help [routes|integrations|data-dictionary]", "description": "Show API route discovery help"},
     {"command": "workflow integration [list|describe|health|test|call|create|secret|reload|help]", "description": "Integration management via the catalog-backed MCP tool"},
+    {"command": "workflow dataset <action>", "description": "Unified dataset refinery (curated training data) authority"},
     {"command": "workflow dictionary <list|describe|set-override|clear-override|reproject>", "description": "Unified data dictionary authority"},
     {"command": "workflow authority-memory refresh", "description": "Refresh authority FK projection into memory_edges"},
     {"command": "workflow maintenance <backfill-failure-categories|help>", "description": "Backfill failure classification fields from canonical receipts"},
@@ -108,6 +109,9 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
         "description": "Direct database, file, and registry authority frontdoors",
     },
     {"command": "workflow handoff <latest|lineage|status|history>", "description": "CQRS handoff inspection surface"},
+    {"command": "workflow launcher <configure|resolve|doctor>", "description": "Host-local launcher resolution"},
+    {"command": "workflow page scaffold <intent>", "description": "Generate or apply starter app manifests"},
+    {"command": "workflow hierarchy scaffold <parent_type_id> <child_type_id>", "description": "Generate hierarchy field and view plans"},
     {
         "command": "workflow query|recall|discover|research|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
         "description": "Derived search, analysis, and bug-tracker surfaces",
@@ -274,6 +278,12 @@ def _lazy_prefixed_args_command(
     return _handler
 
 
+def _launcher_command(args: list[str], *, stdout: TextIO) -> int:
+    import importlib
+    launcher_module = importlib.import_module("runtime.launcher_authority")
+    return getattr(launcher_module, "launcher_cli")(args, stdout=stdout)
+
+
 def _compile_command(args: list[str], *, stdout: TextIO) -> int:
     return _module_command_handler(".commands.admin", "_compile_command")(
         args,
@@ -336,6 +346,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "research": _lazy_args_command(".commands.query", "_research_command"),
         "decompose": _lazy_args_command(".commands.query", "_decompose_command"),
         "data": _lazy_args_command(".commands.data", "_data_command"),
+        "dataset": _lazy_args_command(".commands.dataset", "_dataset_command"),
         "files": _lazy_args_command(".commands.files", "_files_command"),
         "handoff": _lazy_args_command(".commands.handoff", "_handoff_command"),
         "schema": _lazy_args_command(".commands.authority", "_schema_command"),
@@ -346,6 +357,9 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "catalog": _lazy_args_command(".commands.authority", "_catalog_command"),
         "reload": _lazy_args_command(".commands.authority", "_reload_command"),
         "reconcile": _lazy_args_command(".commands.authority", "_reconcile_command"),
+        "page": _lazy_args_command(".commands.praxis_authoring", "_page_command"),
+        "hierarchy": _lazy_args_command(".commands.praxis_authoring", "_hierarchy_command"),
+        "launcher": _launcher_command,
         "architecture": _lazy_args_command(".commands.query", "_architecture_command"),
         "bugs": _lazy_args_command(".commands.query", "_bugs_command"),
         "recall": _lazy_args_command(".commands.query", "_recall_command"),
@@ -559,6 +573,8 @@ def _help_text() -> str:
             "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
             "  workflow api routes",
             "  workflow api help",
+            "  workflow dataset summary",
+            "  workflow dataset list",
             "  workflow dictionary list",
             "  workflow authority-memory refresh",
             "  workflow help tools",
@@ -586,6 +602,7 @@ def _help_text() -> str:
             "",
             "Command groups:",
             "  workflow tools [list|search|describe|call|help]",
+            "  workflow dataset <summary|list|candidate|policy|promotions|export|...>",
             "  workflow dictionary <list|describe|set-override|clear-override|reproject>",
             "  workflow authority-memory refresh",
             "  workflow authority [--json] [--check] [--instance]",
@@ -598,6 +615,9 @@ def _help_text() -> str:
             "  workflow decompose <objective...>",
             "  workflow files <list|get|content|upload|delete>",
             "  workflow handoff <latest|lineage|status|history>",
+            "  workflow launcher <configure|resolve|doctor>",
+            "  workflow page scaffold <intent>",
+            "  workflow hierarchy scaffold <parent_type_id> <child_type_id>",
             "  workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile",
             "  workflow query|recall|discover|research|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "  workflow run|preview|run-status|status|active|scheduler|loop|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job|heartbeat",

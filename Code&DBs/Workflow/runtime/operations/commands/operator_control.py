@@ -156,6 +156,13 @@ class ArchitecturePolicyRecordCommand(BaseModel):
     decided_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Migration 302 — drillability + provenance.
+    # decision_provenance: 'explicit' (operator unequivocally said so) or
+    # 'inferred' (model guessed). Default 'inferred' — model-authored
+    # writes should err on the side of advisory until promoted.
+    decision_provenance: str | None = None
+    # Optional deeper motivation, separate from rationale.
+    decision_why: str | None = None
 
 
 class CircuitOverrideCommand(BaseModel):
@@ -371,6 +378,8 @@ def handle_architecture_policy_record(
         decided_at=command.decided_at,
         created_at=command.created_at,
         updated_at=command.updated_at,
+        decision_provenance=command.decision_provenance,
+        decision_why=command.decision_why,
         env=_resolved_env(subsystems),
     )
 

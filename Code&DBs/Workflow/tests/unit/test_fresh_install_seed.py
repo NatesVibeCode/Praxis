@@ -124,3 +124,117 @@ def test_fresh_install_seed_fails_closed_on_missing_config(tmp_path: Path) -> No
         )
 
     assert exc_info.value.reason_code == "fresh_install_seed.config_missing"
+
+
+def test_load_decisions_snapshot_returns_empty_tuple_when_missing(
+    tmp_path: Path,
+) -> None:
+    rows = fresh_install_seed._load_decisions_snapshot(tmp_path)
+    assert rows == ()
+
+
+def test_load_decisions_snapshot_parses_committed_file(tmp_path: Path) -> None:
+    policy_dir = tmp_path / "policy"
+    policy_dir.mkdir()
+    (policy_dir / "operator-decisions-snapshot.json").write_text(
+        json.dumps(
+            {
+                "$schema_version": 1,
+                "count": 2,
+                "decisions": [
+                    {
+                        "decision_key": "architecture-policy::test::one",
+                        "decision_kind": "architecture_policy",
+                        "decision_status": "decided",
+                        "decision_source": "test",
+                        "decision_scope_kind": "authority_domain",
+                        "decision_scope_ref": "test",
+                        "title": "first",
+                        "rationale": "because",
+                        "decided_by": "praxis",
+                        "scope_clamp": {
+                            "applies_to": ["pending_review"],
+                            "does_not_apply_to": [],
+                        },
+                    },
+                    {
+                        "decision_key": "architecture-policy::test::two",
+                        "decision_kind": "architecture_policy",
+                        "decision_status": "decided",
+                        "decision_source": "test",
+                        "decision_scope_kind": "authority_domain",
+                        "decision_scope_ref": "test",
+                        "title": "second",
+                        "rationale": "and",
+                        "decided_by": "praxis",
+                        "scope_clamp": {
+                            "applies_to": ["pending_review"],
+                            "does_not_apply_to": [],
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = fresh_install_seed._load_decisions_snapshot(tmp_path)
+    assert len(rows) == 2
+    assert rows[0]["decision_key"] == "architecture-policy::test::one"
+    assert rows[1]["title"] == "second"
+
+
+def test_seed_operator_decisions_from_snapshot_inserts_each_row(
+    tmp_path: Path,
+) -> None:
+    policy_dir = tmp_path / "policy"
+    policy_dir.mkdir()
+    (policy_dir / "operator-decisions-snapshot.json").write_text(
+        json.dumps(
+            {
+                "count": 1,
+                "decisions": [
+                    {
+                        "decision_key": "architecture-policy::test::row",
+                        "decision_kind": "architecture_policy",
+                        "decision_status": "decided",
+                        "decision_source": "operator_decisions_snapshot",
+                        "decision_scope_kind": "authority_domain",
+                        "decision_scope_ref": "test",
+                        "title": "row",
+                        "rationale": "snapshot row",
+                        "decided_by": "praxis",
+                        "scope_clamp": {
+                            "applies_to": ["pending_review"],
+                            "does_not_apply_to": [],
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    conn = _FakeAsyncConn()
+    seeded = asyncio.run(
+        fresh_install_seed._seed_operator_decisions_from_snapshot(conn, tmp_path)
+    )
+    assert seeded == ("architecture-policy::test::row",)
+    assert len(conn.calls) == 1
+    query, args = conn.calls[0]
+    assert "INSERT INTO operator_decisions" in query
+    assert "ON CONFLICT (decision_key) DO NOTHING" in query
+    assert "architecture-policy::test::row" in args
+    # scope_clamp serialized to JSON for the JSONB cast
+    assert any('"applies_to"' in str(arg) for arg in args)
+
+
+def test_seed_operator_decisions_from_snapshot_noop_when_missing(
+    tmp_path: Path,
+) -> None:
+    conn = _FakeAsyncConn()
+    seeded = asyncio.run(
+        fresh_install_seed._seed_operator_decisions_from_snapshot(conn, tmp_path)
+    )
+    assert seeded == ()
+    assert conn.calls == []

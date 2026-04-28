@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Praxis pre-commit hook — drift gate for committed policy artifacts.
+#
+# Runs `scripts/render-policy-artifacts.sh --check` so any stale Cursor
+# rules or other generated artifacts block the commit. The check is
+# read-only (working tree is restored regardless of result), so a failed
+# pre-commit never silently mutates your changes.
+#
+# Activate per-clone with:
+#   git config core.hooksPath .githooks
+# (./scripts/bootstrap will run this for you.)
+#
+# To bypass for emergency commits: `git commit --no-verify`. Don't make
+# a habit of it — the CI gate will fail in the same place.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT="$REPO_ROOT/scripts/render-policy-artifacts.sh"
+
+if [[ ! -x "$SCRIPT" ]]; then
+  # Render orchestrator missing — degrade gracefully, don't block commit.
+  exit 0
+fi
+
+# --skip-snapshot: pre-commit runs without an API server, so the
+# DB-dependent snapshot renderer is silently skipped. Only the cursor
+# rules drift check fires here. The CI gate runs the same way.
+drift_status=0
+if ! "$SCRIPT" --check --skip-snapshot; then
+  drift_status=1
+fi
+
+# Migration safety: only scan migrations that are actually staged for
+# this commit. Pre-commit shouldn't punish you for old files you didn't
+# touch — that's CI's job (full scan).
+migration_status=0
+staged_migrations="$(
+  git diff --cached --name-only --diff-filter=AM \
+    | grep -E '^Code&DBs/Databases/migrations/.*\.sql$' || true
+)"
+if [[ -n "$staged_migrations" ]]; then
+  if ! python3 "$REPO_ROOT/scripts/check-migration-safety.py" $staged_migrations; then
+    migration_status=1
+  fi
+fi
+
+if [[ "$drift_status" -eq 0 && "$migration_status" -eq 0 ]]; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+
+Pre-commit blocked. Above output names the gate that fired.
+
+Common fixes:
+  • Cursor-rules drift:  scripts/render-policy-artifacts.sh && git add .cursor/rules
+  • Migration banned pattern: rework the migration; if genuinely needed,
+    add a same-line comment '-- safety-bypass: <reason>'.
+
+To bypass (not recommended): git commit --no-verify
+EOF
+exit 1

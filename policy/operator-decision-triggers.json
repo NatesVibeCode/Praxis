@@ -97,7 +97,8 @@
     },
     {
       "decision_key": "architecture-policy::agent-behavior::ask-catalog-before-manual-edits",
-      "title": "Ask the catalog before manual file edits",
+      "title": "Check catalog before manual edits — if no wizard exists, edit is canonical",
+      "why": "Many runtime/surfaces/migration edits have wizard equivalents in the catalog. Before hand-editing, check:\n\n  • New CQRS operation? → praxis_register_operation (lands data_dictionary_objects + authority_object_registry + operation_catalog_registry rows atomically; import-resolves handler_ref + input_model_ref BEFORE writing; idempotent on operation_ref).\n  • Add an optional field to an existing op's input model? → praxis_evolve_operation_field (plan-only wizard; returns a complete file-by-file edit checklist).\n  • Provider/model onboarding? → praxis_provider_onboard.\n  • Field metadata / data-dictionary reproject? → praxis_data_dictionary.\n  • Soft-retire an op? → praxis_retire_operation.\n\nHand-editing migrations to add catalog rows (operation_catalog_registry / authority_object_registry / data_dictionary_objects) drifts from the wizard's atomic helper, skips the import-resolve guard, and skips receipts. Hand-editing handler files where the wizard would also write the migration leaves the two out of sync. BUT — if you've checked the catalog and no wizard covers the change you need (novel runtime logic, new business rule, novel migration), the edit IS canonical. The pause is to enforce the check, not to block all edits.\n\nKeywords that should trigger this check: 'add column', 'register operation', 'new operation', 'add field', 'evolve operation', 'CQRS handler', 'INSERT INTO operation_catalog_registry', 'INSERT INTO authority_object_registry'.",
       "match": [
         {
           "tool": "Edit",
@@ -108,6 +109,30 @@
           "tool": "Write",
           "file_glob": "**/Code&DBs/Workflow/surfaces/**/*.py",
           "advisory_only": true
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/Code&DBs/Databases/migrations/workflow/*.sql",
+          "advisory_only": true
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/Code&DBs/Databases/migrations/workflow/*.sql",
+          "advisory_only": true
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/Code&DBs/Databases/migrations/workflow/*.sql",
+          "string_match": "operation_catalog_registry|authority_object_registry|data_dictionary_objects",
+          "advisory_only": true
+        },
+        {
+          "tool": "Bash",
+          "regex": "(?im)^[^\"'#]*\\bpsql\\b[^\\n]*\\bINSERT\\s+INTO\\s+(?:operation_catalog_registry|authority_object_registry)\\b"
+        },
+        {
+          "tool": "Bash",
+          "regex": "(?im)^\\s*(?:INSERT\\s+INTO|UPDATE)\\s+(?:operation_catalog_registry|authority_object_registry|data_dictionary_objects)\\b"
         }
       ]
     },

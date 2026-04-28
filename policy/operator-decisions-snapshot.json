@@ -1,7 +1,7 @@
 {
   "$description": "Bootstrap snapshot of operator_decisions architecture_policy rows. Committed in the repo so a fresh clone can populate operator_decisions before the agent's first /orient call. Refreshed by scripts/refresh-decisions-snapshot.sh.",
   "$schema_version": 1,
-  "count": 139,
+  "count": 147,
   "decisions": [
     {
       "decided_by": "nate",
@@ -38,21 +38,38 @@
       "title": "No task_type_routing pins \u2014 router decides all routes"
     },
     {
-      "decided_by": "nate@praxis",
-      "decision_key": "architecture-policy::agent-behavior::ask-catalog-before-manual-edits",
+      "decided_by": "praxis",
+      "decision_key": "architecture-policy::TEST::compliance-164d0714",
       "decision_kind": "architecture_policy",
       "decision_scope_kind": "authority_domain",
-      "decision_scope_ref": "agent_behavior",
-      "decision_source": "claude_code_session",
+      "decision_scope_ref": "test",
+      "decision_source": "compliance_test",
       "decision_status": "decided",
-      "rationale": "Wizards exist: praxis_cli_auth_doctor (diagnose CLI auth), praxis_provider_onboard (probe/onboard providers), praxis_setup (runtime setup). Search catalog (`tools list`/`search`) before poking files or guessing at mounts.",
+      "rationale": "compliance receipt smoke",
       "scope_clamp": {
         "applies_to": [
           "pending_review"
         ],
         "does_not_apply_to": []
       },
-      "title": "Ask the catalog before manual file edits"
+      "title": "TEST"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::agent-behavior::ask-catalog-before-manual-edits",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "agent_behavior",
+      "decision_source": "operator",
+      "decision_status": "decided",
+      "rationale": "Many runtime/surfaces files have wizard equivalents (praxis_register_operation for new CQRS ops, praxis_provider_onboard for providers, praxis_data_dictionary for field metadata, praxis_operate_evolve_field for evolving existing op input models). Hand-editing where a wizard exists drifts from catalog and skips receipts. The pause is to enforce the check, not block all edits.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Check catalog before manual edits \u2014 if no wizard exists, edit is canonical"
     },
     {
       "decided_by": "nate@praxis",
@@ -1184,6 +1201,23 @@
       "title": "Operator console chat uses Together DeepSeek V4 Pro as the single lane"
     },
     {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::operator-decisions::drillable-with-provenance-and-why",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "operator_decisions",
+      "decision_source": "operator",
+      "decision_status": "decided",
+      "rationale": "Every operator_decisions row exposes (1) decision_provenance \u2208 {explicit, inferred} and (2) optional decision_why separate from rationale. Explicit = operator unequivocally said so. Inferred = model guessed during conversation/debate parsing. Surfacing layers (trigger registry render, friction events, compliance scoring, conflict resolution) weight explicit higher than inferred. Drillable means surfaces include enough metadata (or a fetch hint) for consumers to pull the full object \u2014 title, rationale, why, scope_clamp, history.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Decisions are drillable; provenance and why are first-class"
+    },
+    {
       "decided_by": "praxis",
       "decision_key": "architecture-policy::orient::mandatory-authority-envelope",
       "decision_kind": "architecture_policy",
@@ -1456,6 +1490,57 @@
       "title": "source_refs: [] is the canonical internal shape; from: is caller convenience"
     },
     {
+      "decided_by": "praxis",
+      "decision_key": "architecture-policy::policy-authority::events-immutable",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "policy_authority",
+      "decision_source": "migration_296_policy_authority",
+      "decision_status": "decided",
+      "rationale": "Events are the command-event ledger emitted by every gateway command with event_required=TRUE. Deleting them breaks downstream projections and event-sourced consumers. Enforced via BEFORE DELETE + BEFORE TRUNCATE triggers.",
+      "scope_clamp": {
+        "applies_to": [
+          "authority_events"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "authority_events is immutable"
+    },
+    {
+      "decided_by": "praxis",
+      "decision_key": "architecture-policy::policy-authority::operator-decisions-not-deletable",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "policy_authority",
+      "decision_source": "migration_296_policy_authority",
+      "decision_status": "decided",
+      "rationale": "Standing orders are the durable history of operator authority. To retire a decision, set effective_to (supersession). Hard delete erases the audit trail and lets a confused agent rewrite history. Enforced at the data layer via a BEFORE DELETE trigger.",
+      "scope_clamp": {
+        "applies_to": [
+          "operator_decisions"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "operator_decisions rows are not deletable"
+    },
+    {
+      "decided_by": "praxis",
+      "decision_key": "architecture-policy::policy-authority::receipts-immutable",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "policy_authority",
+      "decision_source": "migration_296_policy_authority",
+      "decision_status": "decided",
+      "rationale": "Receipts are the canonical audit trail for every gateway dispatch. Deleting them breaks replay, cause-walking, and idempotency caches. Enforced via BEFORE DELETE + BEFORE TRUNCATE triggers.",
+      "scope_clamp": {
+        "applies_to": [
+          "authority_operation_receipts"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "authority_operation_receipts is immutable"
+    },
+    {
       "decided_by": "nate",
       "decision_key": "architecture-policy::primitives::catalog-managed-blueprints",
       "decision_kind": "architecture_policy",
@@ -1559,6 +1644,23 @@
     },
     {
       "decided_by": "nate",
+      "decision_key": "architecture-policy::provider-routing::anthropic-disabled-2026-04-27",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "provider_routing",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Operator directive: turn off anthropic. Disable applies to every (transport, job_type, adapter, model) tuple via wildcard selector.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Anthropic disabled across all transports and job types"
+    },
+    {
+      "decided_by": "nate",
       "decision_key": "architecture-policy::provider-routing::cli-default-api-exception",
       "decision_kind": "architecture_policy",
       "decision_scope_kind": "authority_domain",
@@ -1643,6 +1745,23 @@
       "title": "DeepSeek is an API model accessed directly (not through OpenRouter). Provider slug is `deepseek`, endpoint is `https://a"
     },
     {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::providers::cursor-cli-build-lane-2026-04-27",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "providers",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Operator capacity: Cursor is highest-capacity agent lane available. Onboard cursor as CLI transport (composer-2) and enable for all non-research job_types so the workflow runtime can route build/code/refactor work through it. Research stays on Gemini-2.5 lanes per existing exception.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Cursor enabled as CLI provider for non-research job types"
+    },
+    {
       "decided_by": "nate@praxis",
       "decision_key": "architecture-policy::providers::deepseek-research-only",
       "decision_kind": "architecture_policy",
@@ -1658,6 +1777,23 @@
         "does_not_apply_to": []
       },
       "title": "DeepSeek has exactly two permitted lanes. Never let it leak into anything else."
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::providers::default-off-for-new-route-additions",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "providers",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Operator directive: any new (provider, transport, job_type, adapter, model) route added to the access matrix lands DENIED by default. Operator must explicitly flip ON via praxis_access_control action=enable, anchored to a decision row, before the route is dispatchable. Reverses the historic default-admit posture which let new model variants leak into routing without explicit operator approval. Applies retroactively for any new onboarding from 2026-04-27 forward.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "New provider/model route additions default to OFF"
     },
     {
       "decided_by": "nate@praxis",

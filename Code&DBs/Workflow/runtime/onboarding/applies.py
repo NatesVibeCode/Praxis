@@ -343,10 +343,10 @@ _APPLY_PGVECTOR_ENABLE = GateApply(
 )
 
 
-# --- Providers: emit the exact command the operator must run ---------------
-# Provider credentials live in macOS Keychain (darwin) or env vars (linux).
-# Apply does not secretly type values on the user's behalf — it returns a
-# result whose remediation_hint contains the precise command to paste.
+# --- Providers: open the secure host capture path -------------------------
+# Provider API keys live in macOS Keychain. Apply on macOS opens a dedicated
+# hidden-input window and returns only redacted status; non-macOS stays a
+# fallback remediation path.
 
 
 def _provider_apply_factory(provider_slug: str, env_var: str, human_name: str):
@@ -367,26 +367,63 @@ def _provider_apply_factory(provider_slug: str, env_var: str, human_name: str):
         if current.status == "ok":
             return current
 
-        # Otherwise emit a remediation hint. Apply does not type keys for users.
+        # Otherwise open the secure host UI on macOS. Raw secrets never enter
+        # MCP/chat payloads; the result is redacted status only.
         if sys.platform == "darwin":
-            hint = (
-                f"Run this command with your {human_name} API key filled in, then "
-                "re-run apply to verify:\n"
-                f'  security add-generic-password -U -a "praxis" -s "{env_var}" -w "<your-key>"'
+            from runtime.operation_catalog_gateway import execute_operation_from_env
+
+            capture_payload = execute_operation_from_env(
+                env=dict(env),
+                operation_name="credential_capture_keychain",
+                payload={
+                    "action": "capture",
+                    "env_var_name": env_var,
+                    "provider_label": human_name,
+                },
             )
-        else:
-            hint = (
-                f"Export {env_var} in your shell rc with your {human_name} API key, "
-                "then re-run apply:\n"
-                f'  echo \'export {env_var}="<your-key>"\' >> ~/.bashrc && source ~/.bashrc'
+            capture = dict(capture_payload.get("credential_capture") or {})
+            capture_status = str(capture.get("status") or "").strip()
+            if capture_status == "ok":
+                return gate_result(
+                    probe,
+                    status="ok",
+                    observed_state={
+                        "env_var": env_var,
+                        "provider_slug": provider_slug,
+                        "credential_capture": capture,
+                        "operation_receipt": capture_payload.get("operation_receipt"),
+                    },
+                )
+            return gate_result(
+                probe,
+                status="missing" if capture_status in {"canceled", "missing"} else "blocked",
+                observed_state={
+                    "env_var": env_var,
+                    "provider_slug": provider_slug,
+                    "credential_capture": capture,
+                    "operation_receipt": capture_payload.get("operation_receipt"),
+                },
+                remediation_hint=(
+                    f"Praxis could not complete secure capture for {human_name}; "
+                    "retry from the host Mac secure entry window."
+                ),
             )
+        hint = (
+            f"Export {env_var} in your shell rc with your {human_name} API key, "
+            "then re-run apply:\n"
+            f'  echo \'export {env_var}="<your-key>"\' >> ~/.bashrc && source ~/.bashrc'
+        )
         return gate_result(
             probe,
             status="missing",
             observed_state={
                 "env_var": env_var,
                 "provider_slug": provider_slug,
-                "apply_emits_command_only": True,
+                "credential_capture": {
+                    "kind": "secure_key_entry",
+                    "status": "blocked",
+                    "error_code": "credential_capture.host_not_macos",
+                },
             },
             remediation_hint=hint,
         )

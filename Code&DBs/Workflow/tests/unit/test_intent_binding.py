@@ -112,6 +112,62 @@ def test_bind_data_pills_binds_namespaced_object_kind(monkeypatch) -> None:
     assert result.bound[0].field_path == "app_name"
 
 
+def test_bind_data_pills_binds_dotted_object_kind(monkeypatch) -> None:
+    _install_dictionary(
+        monkeypatch,
+        {
+            "praxis.db": [
+                {
+                    "field_path": "status",
+                    "field_kind": "text",
+                    "source": "auto",
+                    "display_order": 7,
+                }
+            ],
+        },
+    )
+
+    result = bind_data_pills(
+        "Inspect Praxis.db.status before you adjust routing windows.",
+        conn=_StubConn(),
+    )
+
+    assert len(result.bound) == 1
+    assert result.bound[0].object_kind == "praxis.db"
+    assert result.bound[0].field_path == "status"
+    assert result.bound[0].field_kind == "text"
+    assert result.unbound == []
+    assert result.ambiguous == []
+
+
+def test_bind_data_pills_binds_slash_namespaced_object_kind(monkeypatch) -> None:
+    _install_dictionary(
+        monkeypatch,
+        {
+            "dataset:slm/review": [
+                {
+                    "field_path": "score",
+                    "field_kind": "number",
+                    "source": "auto",
+                    "display_order": 5,
+                }
+            ],
+        },
+    )
+
+    result = bind_data_pills(
+        "Review dataset:slm/review.score for the weekly pass.",
+        conn=_StubConn(),
+    )
+
+    assert len(result.bound) == 1
+    assert result.bound[0].object_kind == "dataset:slm/review"
+    assert result.bound[0].field_path == "score"
+    assert result.bound[0].field_kind == "number"
+    assert result.unbound == []
+    assert result.ambiguous == []
+
+
 def test_bind_data_pills_marks_unknown_object_kind_as_unbound(monkeypatch) -> None:
     _install_dictionary(monkeypatch, {})  # no known objects
 

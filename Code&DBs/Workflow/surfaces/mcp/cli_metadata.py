@@ -35,6 +35,38 @@ def _tool(
 
 
 CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
+    "praxis_access_control": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "List, disable, or enable model-access denial rows for a "
+            "(provider × transport × job_type × model) selector without a migration."
+        ),
+        when_not_to_use=(
+            "Do not use it for provider smoke tests or onboarding — use praxis_provider_onboard. "
+            "Do not use it when you only need search or receipts."
+        ),
+        risks={
+            "default": "read",
+            "actions": {"list": "read", "disable": "write", "enable": "write"},
+        },
+        examples=[
+            _example(
+                "List denials for one provider",
+                {"action": "list", "provider_slug": "openai", "transport_type": "CLI"},
+            ),
+            _example(
+                "Disable a provider on CLI with decision provenance",
+                {
+                    "action": "disable",
+                    "provider_slug": "openai",
+                    "transport_type": "CLI",
+                    "decision_ref": "architecture-policy::routing::disable-openai-cli",
+                },
+            ),
+        ],
+    ),
     "praxis_artifacts": _tool(
         surface="evidence",
         tier="stable",
@@ -90,6 +122,46 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                         "hypothesis": "Lease renew races cancel",
                         "next_steps": ["Trace holder at timeout", "Compare with run X"],
                     },
+                },
+            ),
+        ],
+    ),
+    "praxis_credential_capture": _tool(
+        surface="setup",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use=(
+            "Request, inspect, or open the secure host API-key entry window "
+            "when a wizard/provider/setup flow needs a macOS Keychain-backed credential. "
+            "Search terms: api key credential keychain secure window."
+        ),
+        when_not_to_use=(
+            "Do not pass raw API keys to this tool. Do not use it for provider route "
+            "onboarding; use praxis_provider_onboard after credentials are present."
+        ),
+        risks={
+            "default": "read",
+            "actions": {
+                "request": "read",
+                "status": "read",
+                "capture": "write",
+            },
+        },
+        examples=[
+            _example(
+                "Show secure-entry descriptor for OpenAI",
+                {
+                    "action": "request",
+                    "env_var_name": "OPENAI_API_KEY",
+                    "provider_label": "OpenAI",
+                },
+            ),
+            _example(
+                "Check whether the OpenAI key is present in Keychain",
+                {
+                    "action": "status",
+                    "env_var_name": "OPENAI_API_KEY",
+                    "provider_label": "OpenAI",
                 },
             ),
         ],
@@ -538,6 +610,35 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Compose a plan", {"intent": "Build a connector workflow", "plan_name": "connector-build", "concurrency": 4}),
         ],
     ),
+    "praxis_compose_experiment": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Run several praxis_compose_plan_via_llm configurations in parallel on the same intent "
+            "and compare outcomes before pinning knobs in task_type_routing."
+        ),
+        when_not_to_use=(
+            "Do not use it for a single compose pass — call praxis_compose_plan_via_llm directly. "
+            "Do not use it when you cannot afford multiple LLM-backed compose receipts."
+        ),
+        risks={"default": "launch"},
+        examples=[
+            _example(
+                "Matrix two temperature overrides on one intent",
+                {
+                    "intent": "Design a two-step migration to add nullable columns safely.",
+                    "configs": [
+                        {"model_slug": "openai/gpt-4.1-mini", "temperature": 0.2},
+                        {"model_slug": "openai/gpt-4.1-mini", "temperature": 0.7},
+                    ],
+                    "plan_name": "migration-compose-ab",
+                    "concurrency": 2,
+                    "max_workers": 4,
+                },
+            ),
+        ],
+    ),
     "praxis_manifest_generate": _tool(
         surface="planning",
         tier="advanced",
@@ -752,14 +853,28 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         risks={"default": "write"},
         examples=[
             _example(
-                "Record a decision-table architecture policy",
+                "Record an explicit architecture policy with deeper why",
                 {
                     "authority_domain": "decision_tables",
                     "policy_slug": "db-native-authority",
                     "title": "Decision tables are DB-native authority",
                     "rationale": "Keep authority in Postgres.",
-                    "decided_by": "praxis-admin",
+                    "decided_by": "nate",
                     "decision_source": "cto.guidance",
+                    "decision_provenance": "explicit",
+                    "decision_why": "Authority outside the DB cannot be replayed or audited under the gateway-receipt model; surfaces drift from runtime.",
+                },
+            ),
+            _example(
+                "Record a model-inferred policy from conversation parsing",
+                {
+                    "authority_domain": "providers",
+                    "policy_slug": "no-some-model-x",
+                    "title": "Avoid model X for build tasks",
+                    "rationale": "Build tasks regress on model X per recent receipts.",
+                    "decided_by": "praxis-agent",
+                    "decision_source": "conversation",
+                    "decision_provenance": "inferred",
                 },
             ),
         ],
@@ -855,6 +970,83 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Reload process caches", {}),
         ],
     ),
+    "praxis_evolve_operation_field": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Plan how to add one optional field to an existing CQRS operation's input model "
+            "(checklist of files and edits). v1 is plan-only — you still apply diffs locally."
+        ),
+        when_not_to_use=(
+            "Do not use it to register a brand-new operation — use praxis_register_operation. "
+            "Do not expect the tool to write migrations or apply patches automatically."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Plan a new optional field on an existing op",
+                {
+                    "operation_name": "operator.architecture_policy_record",
+                    "field_name": "decision_provenance",
+                    "field_type_annotation": "str | None",
+                    "field_default_repr": "None",
+                    "field_description": "explicit | inferred provenance",
+                    "db_table": "operator_decisions",
+                    "db_column": "decision_provenance",
+                },
+            ),
+        ],
+    ),
+    "praxis_register_operation": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Register a net-new CQRS operation (gateway dispatch key + handler + Pydantic input) "
+            "through the catalog without hand-authoring a migration for the triple write."
+        ),
+        when_not_to_use=(
+            "Do not use it to tweak an existing operation's input shape — use praxis_evolve_operation_field "
+            "for planned field additions. Do not use it to soft-delete an op — use praxis_retire_operation."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Register a hypothetical read-only query op",
+                {
+                    "operation_ref": "example.query.widget_stats",
+                    "operation_name": "example_query_widget_stats",
+                    "handler_ref": "runtime.operations.queries.widget_stats.handle_widget_stats",
+                    "input_model_ref": "runtime.operations.queries.widget_stats.WidgetStatsQuery",
+                    "authority_domain_ref": "authority.example",
+                    "operation_kind": "query",
+                    "posture": "observe",
+                    "idempotency_policy": "read_only",
+                },
+            ),
+        ],
+    ),
+    "praxis_retire_operation": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Soft-retire an operation (disable gateway binding, mark authority object deprecated) "
+            "while keeping rows for receipts and audit continuity."
+        ),
+        when_not_to_use=(
+            "Do not use it when you meant to register a replacement op first — retire after the new "
+            "path is live. Do not use it for physical deletion; rows are retained by design."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Retire an obsolete operation",
+                {"operation_ref": "legacy.integration.probe_stale", "reason_code": "superseded"},
+            ),
+        ],
+    ),
     "praxis_research": _tool(
         surface="knowledge",
         tier="stable",
@@ -909,6 +1101,41 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         examples=[
             _example("Read session context", {"action": "read"}),
             _example("Write session context", {"action": "write", "context": {"step": 3}}),
+        ],
+    ),
+    "praxis_search": _tool(
+        surface="knowledge",
+        tier="stable",
+        recommended_alias="search",
+        when_to_use=(
+            "Federated search across code, decisions, knowledge, bugs, receipts, and related sources "
+            "with semantic, exact, or regex modes — prefer this as the default discovery entry point."
+        ),
+        when_not_to_use=(
+            "Do not use it for writes, workflow launches, or mutating operator state — use the "
+            "subsystem-specific tools those actions require."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Semantic search the workflow runtime",
+                {
+                    "query": "retry logic with exponential backoff",
+                    "sources": ["code"],
+                    "scope": {"paths": ["Code&DBs/Workflow/runtime/**/*.py"]},
+                },
+            ),
+            _example(
+                "Regex search with line context",
+                {
+                    "query": "/class.*Authority/",
+                    "mode": "regex",
+                    "sources": ["code"],
+                    "scope": {"paths": ["Code&DBs/Workflow/surfaces/**/*.py"]},
+                    "shape": "context",
+                    "context_lines": 3,
+                },
+            ),
         ],
     ),
     "praxis_submit_artifact_bundle": _tool(

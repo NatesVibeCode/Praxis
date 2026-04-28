@@ -96,6 +96,9 @@ _ROW_EXPECTATION_KEY_COLUMNS = {
     "workflow_definition_nodes": "workflow_definition_node_id",
     "workflow_definition_edges": "workflow_definition_edge_id",
 }
+_PRIVATE_PROVIDER_ADAPTER_TYPES = frozenset(
+    {"llm_task", "cli_llm", "api_task", "control_operator"}
+)
 _STRUCTURAL_EXPECTED_OBJECT_TYPES = frozenset(
     {"table", "index", "column", "constraint", "function", "view", "trigger"}
 )
@@ -107,29 +110,71 @@ _BOOTSTRAP_BASELINE_ANCHOR_OBJECTS = (
 )
 
 
+def _parts_for_separator(
+    value: str,
+    sep: str,
+    expected_parts: int,
+    *,
+    maxsplit: int | None = None,
+) -> tuple[str, ...] | None:
+    if maxsplit is None:
+        parts = tuple(part.strip() for part in value.split(sep))
+    else:
+        parts = tuple(part.strip() for part in value.split(sep, maxsplit))
+    if len(parts) != expected_parts or any(not part for part in parts):
+        return None
+    return parts
+
+
 def _parse_task_type_routing_row_key(row_key: str) -> tuple[str, str, str] | None:
-    task_type, sep, rest = row_key.partition("|")
-    if not sep:
+    parts = _parts_for_separator(row_key, "|", 3)
+    if parts is None:
+        parts = _parts_for_separator(row_key, ".", 3, maxsplit=2)
+    if parts is None:
         return None
-    provider_slug, sep, model_slug = rest.partition("|")
-    if not sep:
-        return None
-    task_type = task_type.strip()
-    provider_slug = provider_slug.strip()
-    model_slug = model_slug.strip()
-    if not task_type or not provider_slug or not model_slug:
-        return None
+    task_type, provider_slug, model_slug = parts
     return task_type, provider_slug, model_slug
 
 
 def _parse_private_provider_api_job_allowlist_row_key(
     row_key: str,
 ) -> tuple[str, str, str, str, str] | None:
-    parts = tuple(part.strip() for part in row_key.split("|"))
-    if len(parts) != 5 or any(not part for part in parts):
+    parts = _parts_for_separator(row_key, "|", 5)
+    if parts is not None:
+        return parts
+    dot_parts = tuple(part.strip() for part in row_key.split("."))
+    if len(dot_parts) < 4:
         return None
-    runtime_profile_ref, job_type, adapter_type, provider_slug, model_slug = parts
-    return runtime_profile_ref, job_type, adapter_type, provider_slug, model_slug
+    if any(not part for part in dot_parts):
+        return None
+
+    runtime_profile_ref, job_type, adapter_or_provider = dot_parts[:3]
+    if adapter_or_provider in _PRIVATE_PROVIDER_ADAPTER_TYPES:
+        if len(dot_parts) < 5:
+            return None
+        provider_slug = dot_parts[3]
+        model_slug = ".".join(dot_parts[4:])
+        if not provider_slug or not model_slug:
+            return None
+        return (
+            runtime_profile_ref,
+            job_type,
+            adapter_or_provider,
+            provider_slug,
+            model_slug,
+        )
+
+    provider_slug = adapter_or_provider
+    model_slug = ".".join(dot_parts[3:])
+    if not model_slug:
+        return None
+    return (
+        runtime_profile_ref,
+        job_type,
+        "llm_task",
+        provider_slug,
+        model_slug,
+    )
 
 logger = logging.getLogger(__name__)
 

@@ -38,10 +38,11 @@ from runtime.intent_lexicon import expand_query_terms, normalize_match_text
 
 # ``object_kind.field_path`` (and optional trailing ``.snake_case`` nesting for
 # field paths). Object kinds may include namespace separators such as
-# ``tool:praxis_connector``. Must start with a letter to avoid matching version
+# ``tool:praxis_connector`` or ``dataset:slm/review`` and dotted identifiers
+# like ``praxis.db``. Must start with a letter to avoid matching version
 # strings like ``1.0.2``.
 _REF_PATTERN = re.compile(
-    r"\b([a-z][a-z0-9_]*(?::[a-z][a-z0-9_]*)*)\.([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*)\b",
+    r"\b([a-z][a-z0-9_]*(?:[.:][a-z][a-z0-9_]*|:[a-z][a-z0-9_]*(?:/[a-z][a-z0-9_]*)*)*)\.([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*)\b",
     flags=re.IGNORECASE,
 )
 
@@ -61,7 +62,7 @@ _FILE_EXT_BLOCKLIST: frozenset[str] = frozenset(
         "html", "htm", "css", "scss", "sass", "less",
         "vue", "svelte",
         # Docs / data
-        "md", "mdx", "rst", "txt", "csv", "tsv", "log",
+        "md", "mdx", "rst", "txt", "csv", "tsv", "log", "db",
         "xml", "proto", "graphql", "gql",
         # Build / shell
         "sh", "bash", "zsh", "fish", "ps1", "bat",

@@ -254,6 +254,10 @@ def _validate_coverage(
         raise RuntimeError(
             f"provider_model_market_match_rules missing enabled rows for source_slug={source_slug}: "
             + ", ".join(f"{p}/{m}" for p, m in missing)
+            + ". Re-run with --auto-seed to plan+write rules from the onboarding "
+            "planner, or preview first via "
+            "`python3 scripts/seed_market_match_rules.py --source "
+            f"{source_slug}` (then re-run with --apply)."
         )
 
 def _resolve_rule_row(
@@ -336,16 +340,108 @@ def _benchmark_gap_payload(*, source_slug: str, rule: dict[str, Any], synced_at:
     }
 
 
+async def apply_benchmark_decisions(
+    conn: asyncpg.Connection,
+    *,
+    decisions: list[dict[str, Any]],
+    source_slug: str,
+    source_config: dict[str, Any],
+    decision_ref: str,
+) -> tuple[int, int]:
+    """Apply pre-computed benchmark match decisions for a single provider.
+
+    Used by the provider onboarding wizard, which has already produced a
+    plan via `_plan_benchmark_rules` and just needs the market row upsert
+    + binding + benchmark_profile write per decision. Mirrors the inner
+    loop of `run_sync` but skipped the feed/match-rule/coverage steps the
+    wizard does itself. Returns ``(bound_count, gap_count)``.
+    """
+    bound = 0
+    gaps = 0
+    fallback_synced_at = utc_now()
+    for decision in decisions:
+        candidate_ref = str(decision["candidate_ref"])
+        match_kind = str(decision["match_kind"])
+        binding_confidence = float(decision["binding_confidence"])
+        existing_profile = dict(decision.get("existing_benchmark_profile") or {})
+        rule = {
+            "match_kind": match_kind,
+            "binding_confidence": binding_confidence,
+            "provider_model_market_match_rule_id": str(decision["rule_ref"]),
+            "decision_ref": decision_ref,
+            "selection_metadata": dict(decision.get("selection_metadata") or {}),
+        }
+        market_row = decision.get("market_row")
+
+        await _clear_bindings(conn, candidate_ref=candidate_ref, source_slug=source_slug)
+
+        if not isinstance(market_row, dict):
+            gaps += 1
+            await _write_benchmark_profile(
+                conn,
+                candidate_ref=candidate_ref,
+                existing_profile=existing_profile,
+                market_benchmark=_benchmark_gap_payload(
+                    source_slug=source_slug, rule=rule, synced_at=fallback_synced_at,
+                ),
+            )
+            continue
+
+        mrow = dict(market_row)
+        await _upsert_market_row(conn, mrow)
+        await _upsert_binding(
+            conn,
+            candidate_ref=candidate_ref,
+            market_model_ref=str(mrow["market_model_ref"]),
+            binding_kind=match_kind,
+            binding_confidence=binding_confidence,
+            dec_ref=decision_ref,
+            bound_at=mrow.get("synced_at") or fallback_synced_at,
+        )
+        await _write_benchmark_profile(
+            conn,
+            candidate_ref=candidate_ref,
+            existing_profile=existing_profile,
+            market_benchmark=_benchmark_payload(
+                market_row=mrow, source_config=source_config, rule=rule,
+            ),
+        )
+        bound += 1
+    return bound, gaps
+
+
 # ---------------------------------------------------------------------------
 # Sync entrypoint
 # ---------------------------------------------------------------------------
 
+def _autoseed_via_gateway(*, source_slug: str) -> dict[str, Any]:
+    """Dispatch the registered match_rules.backfill operation through the gateway.
+
+    Each invocation records an authority_operation_receipts row and emits a
+    `match_rules.backfilled` event. Imports are deferred so this script
+    stays usable without a fully-imported runtime when gateway dispatch is
+    not desired.
+    """
+    import os
+    from runtime.operation_catalog_gateway import execute_operation_from_env
+
+    return execute_operation_from_env(
+        env=dict(os.environ),
+        operation_name="match_rules.backfill",
+        payload={"source_slug": source_slug, "dry_run": False},
+    )
+
+
 async def run_sync(*, database_url: str, source_slug: str = DEFAULT_SOURCE_SLUG,
-                   api_key: str | None = None, dry_run: bool) -> dict[str, Any]:
+                   api_key: str | None = None, dry_run: bool,
+                   auto_seed: bool = False) -> dict[str, Any]:
     conn = await db_connect(database_url)
     try:
         source_config = await _load_source_config(conn, source_slug)
         slug = str(source_config["source_slug"])
+        autoseed_summary: dict[str, Any] | None = None
+        if auto_seed and not dry_run:
+            autoseed_summary = _autoseed_via_gateway(source_slug=slug)
         match_rules = await _load_match_rules(conn, source_slug=slug)
         rows = load_market_models(source_config, api_key=_resolve_api_key(source_config, api_key))
         market_lookup = _market_row_lookup(rows)
@@ -373,6 +469,8 @@ async def run_sync(*, database_url: str, source_slug: str = DEFAULT_SOURCE_SLUG,
                 "bound_market_models": len(targeted), "coverage_gap_candidate_rows": unavailable,
                 "unmatched_market_models": len(rows) - len(targeted),
             }
+            if autoseed_summary is not None:
+                base["autoseed"] = autoseed_summary
             return {**base, **(extra or {})}
 
         if dry_run:
@@ -418,6 +516,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-key", default=None,
                         help="API key override (else uses source row's api_key_env_var).")
     add_dry_run_arg(parser)
+    parser.add_argument(
+        "--auto-seed",
+        action="store_true",
+        help=(
+            "Plan and write missing provider_model_market_match_rules in the "
+            "same transaction before validating coverage. Uses the onboarding "
+            "planner; safe defaults (exact / normalized / family / unavailable)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -426,7 +533,8 @@ def main(argv: list[str] | None = None) -> int:
     source_slug = str(args.source).strip() or DEFAULT_SOURCE_SLUG
     api_key = args.api_key.strip() if isinstance(args.api_key, str) and args.api_key.strip() else None
     return run_and_print(run_sync(database_url=require_database_url(args),
-                                  source_slug=source_slug, api_key=api_key, dry_run=args.dry_run))
+                                  source_slug=source_slug, api_key=api_key, dry_run=args.dry_run,
+                                  auto_seed=bool(args.auto_seed)))
 
 
 if __name__ == "__main__":

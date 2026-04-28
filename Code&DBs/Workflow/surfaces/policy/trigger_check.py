@@ -13,8 +13,8 @@ caller can:
 
 This module is *advisory*. It does not block. Hard blocks are navigation
 puzzles for the agent, not lessons (per /praxis-debate fork round 2).
-Enforcement-with-rejection lives at the data layer (Packet 2 — separate
-build) where it belongs: BEFORE INSERT/UPDATE triggers on authority tables
+Enforcement-with-rejection lives at the data layer (Packet 4 — policy
+authority) where it belongs: BEFORE INSERT/UPDATE triggers on authority tables
 backed by `policy_definitions` rows that are FK-bound to operator_decisions.
 
 The trigger registry itself lives at `policy/operator-decision-triggers.json`
@@ -82,6 +82,26 @@ class TriggerMatch:
     @property
     def advisory_only(self) -> bool:
         return bool(self.condition.get("advisory_only"))
+
+    @property
+    def provenance(self) -> str:
+        """Decision provenance: 'explicit' (operator unequivocally said so)
+        or 'inferred' (model guessed during conversation parsing). Default
+        'inferred' when the registry entry omits the field — registries
+        authored before migration 302 are treated as inferred until
+        promoted.
+        """
+        raw = str(self.decision.get("decision_provenance") or "").strip().lower()
+        return "explicit" if raw == "explicit" else "inferred"
+
+    @property
+    def why(self) -> str:
+        """Deeper motivation for the decision, separate from rationale.
+        Operator-authored field added in migration 302; nullable. Render
+        layers should surface this when present so consumers can drill
+        without a separate fetch.
+        """
+        return str(self.decision.get("why") or self.decision.get("decision_why") or "").strip()
 
     def trigger_repr(self) -> str:
         return str(
@@ -303,23 +323,35 @@ def render_additional_context(matches: list[TriggerMatch], tool_name: str) -> st
         return ""
     lines = ["⚠ STANDING ORDER MATCH — pause and consider:"]
     for match in matches:
-        advisory = " (advisory)" if match.advisory_only else ""
+        # Provenance + advisory badges drive how seriously the agent should
+        # weight the surface. Explicit decisions are operator-authored and
+        # binding. Inferred decisions are model-derived and advisory by
+        # default — they should be checked against the operator before
+        # being treated as load-bearing. The rationale field lives in
+        # operator_decisions and is fetched-on-demand to keep this surface
+        # cheap on tokens.
+        badges: list[str] = []
+        if match.provenance == "explicit":
+            badges.append("EXPLICIT")
+        else:
+            badges.append("inferred")
+        if match.advisory_only:
+            badges.append("advisory")
+        badge_str = f" [{' / '.join(badges)}]" if badges else ""
         lines.append("")
-        lines.append(f"• {match.title}{advisory}")
+        lines.append(f"• {match.title}{badge_str}")
         lines.append(f"  decision_key: {match.decision_key}")
-        why = (
-            match.decision.get("why")
-            or match.decision.get("$note")
-            or ""
-        ).strip()
+        why = match.why or str(match.decision.get("$note") or "").strip()
         if why:
             lines.append(f"  why: {why.split(chr(10))[0][:240]}")
         lines.append(f"  triggered by: {match.trigger_repr()}")
     lines.append("")
     lines.append(
-        f"Action proposed: {tool_name} (continuing). If you're about to "
-        "violate one of the above, pivot now and articulate why before "
-        "retrying. Full rationale: query operator_decisions or call praxis_orient."
+        f"Action proposed: {tool_name} (continuing). EXPLICIT matches are "
+        "operator-binding — pivot if you're about to violate. Inferred "
+        "matches are advisory; check before treating as load-bearing. "
+        "Drill: praxis_operator_decisions(action='get', decision_key='<key>') "
+        "for full rationale + why + scope_clamp."
     )
     return "\n".join(lines)
 

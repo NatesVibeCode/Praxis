@@ -52,10 +52,37 @@ def _workspace_manifest(workspace_root: str) -> dict[str, list[int]]:
     }
 
 
+def _normalize_scope_path(value: object) -> str:
+    """Normalize user-declared or manifest paths for scope matching.
+
+    Rules:
+      - accept Path-safe separators
+      - strip leading "./" and leading absolute-root slashes
+      - collapse container-workspace prefix, e.g. ``/workspace/...``
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    normalized = Path(text).as_posix()
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    normalized = normalized.lstrip("/")
+    if normalized.startswith("workspace/"):
+        normalized = normalized[len("workspace/"):]
+    if normalized == ".":
+        return ""
+    return normalized.rstrip("/")
+
+
 def _scope_allows_path(path: str, write_scope: Sequence[str]) -> bool:
-    normalized_path = Path(path).as_posix().lstrip("./")
+    normalized_path = _normalize_scope_path(path)
     for scope_path in write_scope:
-        normalized_scope = Path(scope_path).as_posix().lstrip("./")
+        normalized_scope = _normalize_scope_path(scope_path)
+        if not normalized_scope:
+            continue
         if normalized_path == normalized_scope:
             return True
         prefix = normalized_scope.rstrip("/")
@@ -102,10 +129,16 @@ def _measured_operations(
 ) -> tuple[list[str], list[dict[str, str]], list[str], str | None]:
     baseline_manifest_raw = baseline.get("workspace_manifest")
     baseline_manifest = {
-        str(path): tuple(value)
+        _normalize_scope_path(path): tuple(value)
         for path, value in dict(baseline_manifest_raw or {}).items()
+        if _scope_allows_path(str(path), write_scope)
+        and _normalize_scope_path(path)
     }
-    current_manifest = _workspace_manifest(workspace_root)
+    current_manifest = {
+        _normalize_scope_path(path): tuple(value)
+        for path, value in _workspace_manifest(workspace_root).items()
+        if _scope_allows_path(str(path), write_scope)
+    }
     changed_all_paths = sorted(
         {
             *baseline_manifest.keys(),
@@ -117,15 +150,15 @@ def _measured_operations(
             if tuple(baseline_manifest[path]) == tuple(current_manifest[path])
         }
     )
-    out_of_scope = [
-        path
-        for path in changed_all_paths
-        if not _scope_allows_path(path, write_scope)
-    ]
     measured_changed_paths = [
         path
         for path in changed_all_paths
         if _scope_allows_path(path, write_scope)
+    ]
+    out_of_scope = [
+        path
+        for path in changed_all_paths
+        if not _scope_allows_path(path, write_scope)
     ]
     baseline_artifacts = dict(baseline.get("scoped_artifacts") or {})
     artifact_store = ArtifactStore(conn)
