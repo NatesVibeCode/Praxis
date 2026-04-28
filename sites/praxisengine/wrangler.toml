@@ -1,0 +1,12 @@
+name = "praxisengine"
+compatibility_date = "2026-04-28"
+pages_build_output_dir = "."
+
+[[d1_databases]]
+binding = "SUBSCRIBERS_DB"
+database_name = "praxisengine-subscribers"
+database_id = "bd02acdd-662d-4633-87d1-06109816531c"
+
+[[kv_namespaces]]
+binding = "SUBSCRIBERS"
+id = "98bed6e8ef244433a19abe00bffbb323"

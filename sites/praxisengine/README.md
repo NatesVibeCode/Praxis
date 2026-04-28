@@ -21,6 +21,11 @@ sites/praxisengine/
 ├── _headers                # CF Pages security + caching headers
 ├── robots.txt
 ├── sitemap.xml
+├── schema.sql              # D1 subscriber storage schema
+├── wrangler.toml           # Pages Function bindings
+├── tools/
+│   ├── migrate_kv_to_d1.py # one-time KV → D1 subscriber migration
+│   └── subscriber_notifier.py # D1 poller, CSV appender, macOS notifier
 └── functions/
     └── api/
         └── subscribe.ts    # POST /api/subscribe — CF Pages Function
@@ -69,18 +74,69 @@ First run prompts you to create the project.
 
 ## Enable email persistence
 
-Out of the box, `/api/subscribe` validates + rate-limits but does not persist. To turn on storage:
+Out of the box, `/api/subscribe` validates but only persists when storage is
+bound. The recommended primary store is Cloudflare D1 because it is queryable,
+exportable, and lives under the same Cloudflare Pages authority as the site.
 
-1. CF dashboard → Workers & Pages → your Pages project → **Settings → Functions**
-2. Under **KV namespace bindings**, add:
-   - Variable name: `SUBSCRIBERS`
-   - KV namespace: create a new one called `praxisengine-subscribers`
-3. Redeploy.
-
-Submissions now land in the KV namespace, keyed by `email:<address>`, value is JSON `{email, source, ts, ip, ua}`. Read them back via the dashboard or:
+### Recommended: D1
 
 ```bash
-wrangler kv:key list --binding SUBSCRIBERS --preview false
+wrangler d1 create praxisengine-subscribers
+wrangler d1 execute praxisengine-subscribers --remote --file sites/praxisengine/schema.sql
+```
+
+The `wrangler.toml` file binds that database to the Pages Function as
+`SUBSCRIBERS_DB`; redeploy after changing bindings.
+
+The durable tables are:
+
+- `subscribers`: one deduped row per email with first/last source, timestamps, and submit count
+- `subscriber_events`: append-only submission events for basic auditability
+
+### Optional: KV fallback/rate limit
+
+KV is still useful for lightweight rate limiting and can serve as a persistence
+fallback when D1 is absent.
+
+1. Cloudflare dashboard → Workers & Pages → `praxisengine` → **Settings → Functions**
+2. Under **KV namespace bindings**, add:
+   - Variable name: `SUBSCRIBERS`
+   - KV namespace: create one called `praxisengine-subscribers`
+3. Redeploy.
+
+## Subscriber notifier
+
+The notifier polls D1 `subscriber_events`, appends new rows to a local CSV, and
+fires a macOS desktop notification.
+
+Defaults:
+
+- Database: `praxisengine-subscribers`
+- CSV: `~/Documents/PraxisEngine/subscribers.csv`
+- State: `~/Library/Application Support/PraxisEngine/subscriber_notifier_state.json`
+
+Run one polling pass:
+
+```bash
+python3 sites/praxisengine/tools/subscriber_notifier.py run --once
+```
+
+Install as a LaunchAgent:
+
+```bash
+python3 sites/praxisengine/tools/subscriber_notifier.py install-launch-agent
+```
+
+Stop/remove it:
+
+```bash
+python3 sites/praxisengine/tools/subscriber_notifier.py uninstall-launch-agent
+```
+
+One-time KV to D1 migration:
+
+```bash
+python3 sites/praxisengine/tools/migrate_kv_to_d1.py
 ```
 
 ### Forward to an external list (optional)

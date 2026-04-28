@@ -1,12 +1,18 @@
 // Cloudflare Pages Function: POST /api/subscribe
 //
-// Current behavior (v1):
+// Current behavior:
 //   - validates the request
 //   - rate-limits lightly by source IP (via KV if bound; otherwise best-effort)
-//   - persists to a KV namespace named SUBSCRIBERS if bound in the CF dashboard
+//   - persists to D1 when SUBSCRIBERS_DB is bound
+//   - falls back to KV when SUBSCRIBERS is bound but D1 is not
 //   - always returns 200 on accepted emails so the UI stays snappy
 //
-// To enable persistence:
+// Recommended persistence:
+//   1. Create a D1 database named praxisengine-subscribers
+//   2. Apply sites/praxisengine/schema.sql
+//   3. Bind it to this Pages project as SUBSCRIBERS_DB
+//
+// KV fallback:
 //   1. In the Cloudflare dashboard: Workers & Pages → your project → Settings → Functions
 //   2. Add a KV binding: Variable name = SUBSCRIBERS, Namespace = (create one named praxisengine-subscribers)
 //   3. Redeploy. Submissions will appear in the KV namespace keyed by email.
@@ -18,6 +24,7 @@
 
 interface Env {
   SUBSCRIBERS?: KVNamespace;
+  SUBSCRIBERS_DB?: D1Database;
   SUBSCRIBE_FORWARD_URL?: string;
   SUBSCRIBE_FORWARD_TOKEN?: string;
 }
@@ -44,9 +51,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   const source = (body.source ?? "landing").slice(0, 64);
-  const ts = typeof body.ts === "number" ? body.ts : Date.now();
+  const submittedAt = new Date().toISOString();
   const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  const ua = (request.headers.get("User-Agent") ?? "").slice(0, 256);
 
   // Best-effort rate limit: max 5 submissions / hour / IP when KV is bound.
   if (env.SUBSCRIBERS) {
@@ -58,10 +64,33 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     await env.SUBSCRIBERS.put(rlKey, String(prior + 1), { expirationTtl: 3600 });
   }
 
-  // Persist when KV bound.
-  if (env.SUBSCRIBERS) {
+  // D1 is the primary subscriber authority. It keeps the deduped subscriber
+  // record and an append-only event trail without storing IP or user-agent.
+  if (env.SUBSCRIBERS_DB) {
+    await env.SUBSCRIBERS_DB.batch([
+      env.SUBSCRIBERS_DB.prepare(`
+        INSERT INTO subscribers (
+          email,
+          first_source,
+          last_source,
+          created_at,
+          updated_at,
+          submit_count
+        )
+        VALUES (?, ?, ?, ?, ?, 1)
+        ON CONFLICT(email) DO UPDATE SET
+          last_source = excluded.last_source,
+          updated_at = excluded.updated_at,
+          submit_count = subscribers.submit_count + 1
+      `).bind(email, source, source, submittedAt, submittedAt),
+      env.SUBSCRIBERS_DB.prepare(`
+        INSERT INTO subscriber_events (email, source, created_at)
+        VALUES (?, ?, ?)
+      `).bind(email, source, submittedAt),
+    ]);
+  } else if (env.SUBSCRIBERS) {
     const key = `email:${email}`;
-    const payload = JSON.stringify({ email, source, ts, ip, ua });
+    const payload = JSON.stringify({ email, source, ts: submittedAt });
     await env.SUBSCRIBERS.put(key, payload);
   }
 
@@ -76,7 +105,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
             ? { Authorization: `Bearer ${env.SUBSCRIBE_FORWARD_TOKEN}` }
             : {}),
         },
-        body: JSON.stringify({ email, source, ts }),
+        body: JSON.stringify({ email, source, ts: submittedAt }),
       });
     } catch {
       // swallow — do not fail the user because a downstream forwarder was flaky
