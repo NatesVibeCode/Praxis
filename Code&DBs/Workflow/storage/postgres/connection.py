@@ -171,7 +171,10 @@ _HOST_DOCKER_INTERNAL = "host.docker.internal"
 _DEFAULT_HOST_SHELL_DATABASE_HOST = "localhost"
 _DEFAULT_POOL_ACQUIRE_TIMEOUT_S = 5.0
 _DEFAULT_POOL_MIN_SIZE = 1
-_DEFAULT_POOL_MAX_SIZE = 40
+# Keep the default pool small because several Praxis processes may share one
+# local Postgres. The env override still exists for genuinely higher-throughput
+# sessions, but the default should not let one process hoard most connections.
+_DEFAULT_POOL_MAX_SIZE = 8
 
 _workflow_pool: asyncpg.Pool | None = None
 _workflow_pool_dsn: str | None = None

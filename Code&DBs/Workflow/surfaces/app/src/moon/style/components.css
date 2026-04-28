@@ -1073,11 +1073,11 @@
   background: var(--moon-black-a18);
 }
 .moon-outcome-contract__field--success {
-  border-color: var(--moon-accent-a18);
+  border-color: var(--moon-accent-a20);
   background: linear-gradient(180deg, var(--moon-accent-a035), var(--moon-black-a18));
 }
 .moon-outcome-contract__field--failure {
-  border-color: var(--moon-danger-a18);
+  border-color: var(--moon-danger-a16);
   background: linear-gradient(180deg, var(--moon-danger-a06), var(--moon-black-a18));
 }
 .moon-outcome-contract__field textarea {

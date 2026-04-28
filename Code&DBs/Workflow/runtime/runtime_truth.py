@@ -107,7 +107,7 @@ def _blocker(
 def _pool_config_snapshot() -> dict[str, Any]:
     return {
         "min_size": _as_int(os.environ.get(WORKFLOW_POOL_MIN_SIZE_ENV), 1),
-        "max_size": _as_int(os.environ.get(WORKFLOW_POOL_MAX_SIZE_ENV), 40),
+        "max_size": _as_int(os.environ.get(WORKFLOW_POOL_MAX_SIZE_ENV), 8),
         "min_size_env": WORKFLOW_POOL_MIN_SIZE_ENV,
         "max_size_env": WORKFLOW_POOL_MAX_SIZE_ENV,
     }

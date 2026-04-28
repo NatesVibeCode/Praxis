@@ -77,9 +77,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"docker restart praxis-workflo
 
 ### Codex
 
-Already wired (codex-cli ≥ 0.121):
-- `.codex/hooks.json` registers `PreToolUse` on
-  `local_shell|shell|apply_patch|write_file|read_file`.
+Available but not enabled by default in project-local Codex config:
 - `.codex/hooks/preact-orient-friction.sh` invokes the Python entry.
 - `.codex/hooks/preact_orient_friction.py` imports
   `surfaces.policy.check` and emits a friction event tagged
@@ -87,11 +85,15 @@ Already wired (codex-cli ≥ 0.121):
 - Context injection is high-signal only: explicit, non-advisory decisions can
   inject hook context. No-match, malformed, cooled-down, and inferred/advisory
   paths stay stdout-silent so routine tool calls do not create transcript noise.
+- Codex Desktop currently shows a receipt for every configured PreToolUse
+  invocation even when stdout is silent, so `.codex/hooks.json` keeps only
+  SessionStart active by default. Praxis operation calls still get
+  gateway-side standing-order surfacing; raw tool policy checks are opt-in.
 
-If your codex-cli is older than 0.121 (or the project-local discovery
-isn't picking up `.codex/hooks.json`), copy the contents of
-`.codex/hooks.json` into `~/.codex/hooks.json` user-globally — the
-hook scripts work either way because they're harness-neutral.
+If a Codex lane needs raw-tool PreToolUse checks despite the receipt noise,
+register `.codex/hooks/preact-orient-friction.sh` on
+`local_shell|shell|apply_patch|write_file|read_file` in a user or plugin hook
+config. The hook scripts work either way because they're harness-neutral.
 
 Tool-name normalization: Codex's native shell tool is `local_shell`
 (argv list) and its edit tool is `apply_patch`. The matcher at

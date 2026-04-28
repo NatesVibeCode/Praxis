@@ -272,7 +272,7 @@ def test_create_workflow_pool_defaults_to_single_min_connection(monkeypatch) -> 
 
     assert isinstance(pool, _FakePool)
     assert captured["min_size"] == 1
-    assert captured["max_size"] == 40
+    assert captured["max_size"] == 8
 
 
 def test_create_workflow_pool_reads_size_overrides_from_env_mapping(monkeypatch) -> None:

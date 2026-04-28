@@ -136,6 +136,18 @@
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-contract-deps-1.queue.json",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-test-1.queue.json"
       ]
+    },
+    {
+      "wave_id": "wave_7_manifest_contract_readiness",
+      "label": "Wave 7: manifest contract readiness",
+      "depends_on": [
+        "wave_6_contract_deps_cleanup"
+      ],
+      "packet_count": 1,
+      "bug_count": 4,
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-7-manifest-contract-readiness-1.queue.json"
+      ]
     }
   ],
   "validate_order": [
@@ -187,6 +199,8 @@
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-workflow-runtime-1.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-contract-deps-1.queue.json",
     "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-6-contract-deps-cleanup-test-1.queue.json"
+    ,
+    "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/packets/wave-7-manifest-contract-readiness-1.queue.json"
   ],
   "packets": [
     {

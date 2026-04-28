@@ -1,18 +1,6 @@
 {
-  "$comment": "Codex CLI hook config. Loaded automatically when the project root contains .codex/hooks.json (codex-cli >= 0.121). For earlier codex-cli, copy this content into ~/.codex/hooks.json or reference these paths from a Codex plugin manifest. The hook records every match but only writes stdout for explicit, non-advisory context injection; no-op/advisory paths stay silent so routine tool calls do not create transcript noise. Commands are wrapped in `bash -c` with a CODEX_PROJECT_DIR -> CLAUDE_PROJECT_DIR -> $PWD fallback because Codex Desktop may not propagate CODEX_PROJECT_DIR to hook subprocesses.",
+  "$comment": "Codex Desktop shows a receipt for every matched PreToolUse hook invocation, even when the hook stdout is silent. To avoid transcript noise, project-local Codex config keeps only SessionStart active by default. The raw PreToolUse policy hook script remains available for opt-in/debug use, and Praxis operation calls still surface standing orders through the gateway.",
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "local_shell|shell|apply_patch|write_file|read_file",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash -c 'exec \"${CODEX_PROJECT_DIR:-${CLAUDE_PROJECT_DIR:-$PWD}}/.codex/hooks/preact-orient-friction.sh\"'",
-            "timeout": 6
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [

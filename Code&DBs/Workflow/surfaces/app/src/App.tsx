@@ -561,7 +561,6 @@ export function AppShell() {
             <div className="app-shell__identity-copy">
               <span>{APP_CONFIG.suiteName} · Moon</span>
               <strong>{APP_CONFIG.name}</strong>
-              <em>{activeContext.label}</em>
             </div>
           </div>
 

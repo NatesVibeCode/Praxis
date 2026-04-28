@@ -26,7 +26,7 @@ describe('MoonOutcomeContract', () => {
     render(<Harness />);
 
     expect(screen.queryByLabelText('This run succeeds if')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /run contract pattern \/ anti-pattern optional/i }));
+    fireEvent.click(screen.getByRole('button', { name: /run outcome contract, pattern and anti-pattern, optional/i }));
 
     const success = screen.getByLabelText('This run succeeds if');
     fireEvent.focus(success);
