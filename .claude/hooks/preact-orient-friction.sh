@@ -20,6 +20,17 @@ if [[ ! -f "$IMPL" ]]; then
   exit 0
 fi
 
+# Per-session cooldown directory. Each PreToolUse hook invocation is a
+# fresh subprocess so the in-process cooldown cache (in surfaces.policy)
+# can't dedupe consecutive edits to the same file. Pointing at a stable
+# per-session marker dir lets the matcher persist (decision_key, target)
+# pairs across subprocess invocations. Session boundary defaults to PPID
+# of the agent harness — close enough; the harness restarts on session
+# rollover. Cleanup is the operator's job (rm -rf at session end).
+# See BUG-3E9820C4.
+session_marker="${CLAUDE_SESSION_ID:-${PPID}}"
+export PRAXIS_SESSION_COOLDOWN_DIR="${TMPDIR:-/tmp}/praxis_cooldown_${session_marker}"
+
 # Forward stdin (hook payload) to the Python implementation. CLAUDE_PROJECT_DIR
 # is exported so the impl knows where to find the trigger registry and the
 # praxis-agent binary.

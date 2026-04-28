@@ -325,7 +325,9 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '302_operator_decisions_drillable_provenance_and_why.sql',
  '303_compile_sub_task_routing_split.sql',
  '304_compile_author_gemini_fallback.sql',
- '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql')
+ '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql',
+ '306_compile_author_cascade_flip_and_finalize_voters.sql',
+ '307_compile_author_try_kimi_primary.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -667,7 +669,9 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '302_operator_decisions_drillable_provenance_and_why.sql',
  '303_compile_sub_task_routing_split.sql',
  '304_compile_author_gemini_fallback.sql',
- '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql')
+ '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql',
+ '306_compile_author_cascade_flip_and_finalize_voters.sql',
+ '307_compile_author_try_kimi_primary.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -988,7 +992,9 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '302_operator_decisions_drillable_provenance_and_why.sql',
                '303_compile_sub_task_routing_split.sql',
                '304_compile_author_gemini_fallback.sql',
-               '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql'),
+               '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql',
+               '306_compile_author_cascade_flip_and_finalize_voters.sql',
+               '307_compile_author_try_kimi_primary.sql'),
  'bootstrap_only': ('043_workflow_runtime_notification_sync_rename.sql',
                     '045_workflow_authority_rename.sql',
                     '046_workflow_surface_rename.sql',
@@ -1333,6 +1339,8 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '303_compile_sub_task_routing_split.sql': 'canonical',
  '304_compile_author_gemini_fallback.sql': 'canonical',
  '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql': 'canonical',
+ '306_compile_author_cascade_flip_and_finalize_voters.sql': 'canonical',
+ '307_compile_author_try_kimi_primary.sql': 'canonical',
  '043_workflow_runtime_notification_sync_rename.sql': 'bootstrap_only',
  '045_workflow_authority_rename.sql': 'bootstrap_only',
  '046_workflow_surface_rename.sql': 'bootstrap_only',
@@ -4070,7 +4078,9 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
  '302_operator_decisions_drillable_provenance_and_why.sql': (),
  '303_compile_sub_task_routing_split.sql': (),
  '304_compile_author_gemini_fallback.sql': (),
- '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql': ()}
+ '305_extend_aa_creator_aliases_for_openrouter_prefixes.sql': (),
+ '306_compile_author_cascade_flip_and_finalize_voters.sql': (),
+ '307_compile_author_try_kimi_primary.sql': ()}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -6130,7 +6140,9 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
  ('302_operator_decisions_drillable_provenance_and_why.sql', ()),
  ('303_compile_sub_task_routing_split.sql', ()),
  ('304_compile_author_gemini_fallback.sql', ()),
- ('305_extend_aa_creator_aliases_for_openrouter_prefixes.sql', ()))
+ ('305_extend_aa_creator_aliases_for_openrouter_prefixes.sql', ()),
+ ('306_compile_author_cascade_flip_and_finalize_voters.sql', ()),
+ ('307_compile_author_try_kimi_primary.sql', ()))
 
 WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_task_type_route_eligibility.sql'),
  '024': ('024_authority_checkpoints.sql', '024_task_type_routing.sql'),
@@ -6187,4 +6199,7 @@ WORKFLOW_MIGRATION_TIE_BREAK_ORDER = {'012': ('012_execution_leases.sql', '012_t
          '278_register_search_query_operations.sql'),
  '279': ('279_authority_object_registry_query_kind.sql',
          '279_register_bug_triage_packet_operation.sql')}
+
+WORKFLOW_MIGRATIONS_ALWAYS_REAPPLY = ('298_policy_authority_compliance_receipts.sql',
+ '300_policy_authority_receipt_writer_bypasses_self.sql')
 

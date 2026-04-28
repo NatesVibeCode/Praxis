@@ -201,6 +201,7 @@ def _compile_prose_inner(
                     "content_hash": reusable_definition.content_hash,
                     "decision_ref": reusable_definition.decision_ref,
                 },
+                original_prose=clean_prose,
             )
 
     # Unpack compile context
@@ -418,6 +419,7 @@ def _compile_prose_inner(
         },
         matched_building_blocks=matched_refs,
         composition_plan=composition,
+        original_prose=clean_prose,
     )
 
 
@@ -495,6 +497,7 @@ def _finalize_compile_result(
     reuse_provenance: dict[str, Any] | None,
     matched_building_blocks: list[dict[str, Any]] | None = None,
     composition_plan: dict[str, Any] | None = None,
+    original_prose: str | None = None,
 ) -> dict[str, Any]:
     from runtime.build_planning_contract import (
         build_candidate_resolution_manifest,
@@ -517,6 +520,40 @@ def _finalize_compile_result(
 
     hydrated_definition = apply_authority_bundle(definition, compiled_spec=compiled_spec)
     authority_bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
+
+    # compile_finalize: voting-shaped auto-resolver for blocking binding gates.
+    # Only fires when (a) LLM was actually used to compile (no point on cache
+    # reuse where finalize already ran), (b) prose is available for grounding,
+    # and (c) at least one binding is in suggested/captured state. On any
+    # failure we keep the original ledger and let the existing blocked-state
+    # path surface — finalize must never break compile.
+    finalize_summary: dict[str, Any] | None = None
+    used_llm = bool(refinement.get("used_llm")) if isinstance(refinement, dict) else False
+    if used_llm and original_prose:
+        ledger = authority_bundle.get("binding_ledger") or []
+        try:
+            from runtime.compiler_llm import call_compile_finalize
+
+            finalize_result = call_compile_finalize(
+                binding_ledger=list(ledger),
+                original_prose=original_prose,
+            )
+            if finalize_result.get("resolved_count", 0) > 0:
+                hydrated_definition = dict(hydrated_definition)
+                hydrated_definition["binding_ledger"] = finalize_result["updated_ledger"]
+                authority_bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
+            finalize_summary = {
+                "ran": True,
+                "blocking_count": finalize_result.get("blocking_count"),
+                "resolved_count": finalize_result.get("resolved_count"),
+                "wall_s": finalize_result.get("wall_s"),
+                "decisions": finalize_result.get("decisions"),
+            }
+        except Exception as exc:
+            logger.warning("compile_finalize voting failed; keeping original ledger: %s", exc)
+            finalize_summary = {"ran": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    else:
+        finalize_summary = {"ran": False, "reason": "llm_not_used" if not used_llm else "prose_unavailable"}
     projection_status = authority_bundle["projection_status"]
     blocking_issues = [
         issue
@@ -598,6 +635,7 @@ def _finalize_compile_result(
         "compiled_spec_projection": authority_bundle["compiled_spec_projection"],
         "candidate_resolution_manifest": candidate_resolution_manifest,
         "reviewable_plan": reviewable_plan,
+        "finalize_summary": finalize_summary,
         "matched_building_blocks": matched_building_blocks or [],
         "composition_plan": composition_plan or {},
     }

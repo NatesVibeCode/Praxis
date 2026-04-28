@@ -46,6 +46,46 @@ CREATE TABLE IF NOT EXISTS task_type_routing (
     PRIMARY KEY (task_type, sub_task_type, provider_slug, model_slug, transport_type)
 );
 
+-- Defensive: if the table already exists from an older 024 apply that
+-- pre-dated migration 286's column-adds, the CREATE TABLE IF NOT EXISTS
+-- above is a no-op and `sub_task_type` / `transport_type` are absent.
+-- The ON CONFLICT clause at the bottom of this file references both
+-- columns and fails ("column does not exist") on bootstrap. ADD COLUMN
+-- IF NOT EXISTS guards make the migration idempotent across the full
+-- history of installs. See BUG-2BBCC370.
+ALTER TABLE task_type_routing
+    ADD COLUMN IF NOT EXISTS sub_task_type TEXT NOT NULL DEFAULT '*';
+ALTER TABLE task_type_routing
+    ADD COLUMN IF NOT EXISTS transport_type TEXT NOT NULL DEFAULT 'CLI';
+
+-- Widen PK to the 5-column shape if it isn't already. Older 024 applies
+-- created the table with a 4-column PK (no sub_task_type / transport_type);
+-- migration 286 was supposed to widen later, but later ON CONFLICT clauses
+-- in 091+ reference the 5-column shape and fail before 286 runs. Fix it
+-- here in 024 so the bootstrap chain can continue. Idempotent: skipped
+-- when the PK already matches the target shape.
+DO $$
+DECLARE
+    v_pk_cols text;
+    v_target_cols text := 'task_type,sub_task_type,provider_slug,model_slug,transport_type';
+BEGIN
+    SELECT string_agg(a.attname, ',' ORDER BY array_position(c.conkey, a.attnum))
+      INTO v_pk_cols
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+     WHERE n.nspname = 'public' AND t.relname = 'task_type_routing' AND c.contype = 'p';
+
+    IF v_pk_cols IS DISTINCT FROM v_target_cols THEN
+        IF v_pk_cols IS NOT NULL THEN
+            EXECUTE 'ALTER TABLE task_type_routing DROP CONSTRAINT task_type_routing_pkey';
+        END IF;
+        EXECUTE 'ALTER TABLE task_type_routing ADD CONSTRAINT task_type_routing_pkey '
+             || 'PRIMARY KEY (task_type, sub_task_type, provider_slug, model_slug, transport_type)';
+    END IF;
+END $$;
+
 DO $$
 BEGIN
     -- Defensive: only initialize a PK if none exists. With the CREATE

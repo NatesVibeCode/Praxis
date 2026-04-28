@@ -561,6 +561,166 @@ def _parse_pill_match_response(raw: str) -> dict[str, Any]:
     return {"bindings": bindings}
 
 
+def call_compile_finalize(
+    *,
+    binding_ledger: list[dict[str, Any]],
+    original_prose: str,
+    max_parallel: int = 4,
+) -> dict[str, Any]:
+    """Voting-shaped finalize: per-binding accept/reject via picker-resolved voters.
+
+    For each binding with state in {'suggested','captured'} (i.e., a blocking
+    gate), build a per-binding prompt asking voters to choose from the binding's
+    candidate_targets. Dispatch through `_call_voting_sub_task` with
+    `task_type='compile_finalize'` so the picker resolves voters from data,
+    runs them in parallel, and returns the majority answer with adaptive
+    early-stop / tiebreaker. Per-binding decisions are themselves parallelized.
+
+    Returns:
+        {"updated_ledger": [...],
+         "decisions":      [{binding_id, chosen_target_ref, decision_path, ...}, ...],
+         "wall_s":         float,
+         "blocking_count": int,
+         "resolved_count": int}
+    """
+    import concurrent.futures
+    import time as _time
+
+    blocking = [b for b in binding_ledger if isinstance(b, dict) and b.get("state") in ("suggested", "captured")]
+    if not blocking:
+        return {
+            "updated_ledger": binding_ledger,
+            "decisions": [],
+            "wall_s": 0.0,
+            "blocking_count": 0,
+            "resolved_count": 0,
+        }
+
+    t0 = _time.time()
+
+    def _resolve_one(binding: dict[str, Any]) -> dict[str, Any]:
+        prompt = _compile_finalize_prompt(binding, original_prose)
+        try:
+            result = _call_voting_sub_task(
+                task_type="compile_finalize",
+                prompt=prompt,
+                parser=_parse_finalize_response,
+                min_votes=3,
+                max_votes=5,
+                early_stop_unanimous=True,
+            )
+            return {
+                "binding_id": binding["binding_id"],
+                "chosen_target_ref": result.get("answer"),
+                "decision_path": result.get("decision_path"),
+                "vote_count": result.get("vote_count"),
+                "total_ok": result.get("total_ok"),
+                "voters": [v.get("voter") for v in result.get("votes", [])],
+            }
+        except Exception as exc:
+            return {
+                "binding_id": binding["binding_id"],
+                "chosen_target_ref": None,
+                "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            }
+
+    decisions: list[dict[str, Any]] = []
+    workers = min(max_parallel, len(blocking))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_resolve_one, b) for b in blocking]
+        for fut in concurrent.futures.as_completed(futures):
+            decisions.append(fut.result())
+
+    decisions_by_id: dict[str, dict[str, Any]] = {d["binding_id"]: d for d in decisions}
+    updated_ledger: list[dict[str, Any]] = []
+    resolved = 0
+    for binding in binding_ledger:
+        if not isinstance(binding, dict):
+            updated_ledger.append(binding)
+            continue
+        decision = decisions_by_id.get(binding.get("binding_id"))
+        if decision is None or not decision.get("chosen_target_ref"):
+            updated_ledger.append(binding)
+            continue
+        chosen_ref = decision["chosen_target_ref"]
+        accepted_target: dict[str, Any] | None = None
+        for candidate in binding.get("candidate_targets") or []:
+            if isinstance(candidate, dict) and candidate.get("target_ref") == chosen_ref:
+                accepted_target = candidate
+                break
+        if accepted_target is None:
+            updated_ledger.append(binding)
+            continue
+        new_binding = dict(binding)
+        new_binding["accepted_target"] = accepted_target
+        new_binding["state"] = "accepted"
+        new_binding["rationale"] = (
+            f"Auto-resolved by compile_finalize voting "
+            f"(path={decision.get('decision_path')}, votes={decision.get('vote_count')}/{decision.get('total_ok')})."
+        )
+        updated_ledger.append(new_binding)
+        resolved += 1
+
+    return {
+        "updated_ledger": updated_ledger,
+        "decisions": decisions,
+        "wall_s": round(_time.time() - t0, 2),
+        "blocking_count": len(blocking),
+        "resolved_count": resolved,
+    }
+
+
+def _compile_finalize_prompt(binding: dict[str, Any], original_prose: str) -> str:
+    candidates_lines = []
+    for candidate in binding.get("candidate_targets") or []:
+        if not isinstance(candidate, dict):
+            continue
+        target_ref = candidate.get("target_ref") or ""
+        kind = candidate.get("kind") or "reference"
+        label = candidate.get("label") or target_ref
+        candidates_lines.append(f"- {target_ref} ({kind}): {label}")
+    candidates_str = "\n".join(candidates_lines) or "(no candidates registered)"
+    placeholder = binding.get("source_label") or binding.get("binding_id") or ""
+    used_in = binding.get("source_node_ids") or []
+    return f"""TASK: Decide which catalog target should resolve this binding, based on the original operator intent. Pick exactly one of the candidate target_refs OR return null if none fits.
+
+ORIGINAL OPERATOR PROSE:
+{original_prose}
+
+BINDING PLACEHOLDER: {placeholder}
+USED IN STEPS: {used_in}
+
+CANDIDATE TARGETS:
+{candidates_str}
+
+OUTPUT (JSON only, no markdown fences, no other text):
+{{"chosen_target_ref": "<one of the candidate target_refs above, or null>", "confidence": <float 0-1>, "rationale": "<one short sentence>"}}"""
+
+
+def _parse_finalize_response(raw: str) -> Any:
+    """Parse one finalize voter response. Returns the chosen target_ref string or None.
+
+    The hashable return value is what the voting helper tallies — so two voters
+    that pick the same target_ref will agree, even if their confidence/rationale
+    differ.
+    """
+    try:
+        parsed = parse_json_object(raw)
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    chosen = parsed.get("chosen_target_ref")
+    if chosen is None:
+        return None
+    if isinstance(chosen, str):
+        text = chosen.strip()
+        if text == "" or text.lower() == "null":
+            return None
+        return text
+    return None
+
+
 def _resolve_app_compile_route() -> tuple[str, str]:
     """Pick the primary API-backed route for the compile task_type."""
     routes = _resolve_app_compile_routes()

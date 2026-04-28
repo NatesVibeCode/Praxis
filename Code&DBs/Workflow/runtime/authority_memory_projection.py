@@ -496,9 +496,23 @@ _PROJECTIONS: tuple[FkProjection, ...] = (
               END                                          AS target_kind,
               decision_scope_ref                            AS target_name,
               TRUE                                         AS active,
+              -- BUG-02EE0886 fix: include the columns that downstream
+              -- consumers care about. Edge metadata now carries
+              -- decision_provenance (explicit | inferred per migration 302),
+              -- decision_why (operator-authored deeper motivation, also
+              -- migration 302), and scope_clamp (per migration 264).
+              -- coalesce-to-defaults so older schemas without the columns
+              -- still produce non-null metadata. Future schema additions
+              -- to operator_decisions should be added here when they
+              -- have downstream consumers; the projector continues to
+              -- enumerate explicit columns rather than auto-introspect
+              -- because the edge shape is opinionated, not generic.
               jsonb_build_object(
                 'decision_scope_kind', decision_scope_kind,
-                'decision_scope_ref', decision_scope_ref
+                'decision_scope_ref', decision_scope_ref,
+                'decision_provenance', COALESCE(decision_provenance, 'inferred'),
+                'decision_why', decision_why,
+                'scope_clamp', scope_clamp
               )                                           AS metadata_override
             FROM operator_decisions
             WHERE decision_scope_kind IS NOT NULL

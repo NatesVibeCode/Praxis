@@ -147,6 +147,14 @@ def main() -> None:
         for policy, filenames in policy_buckets.items()
         for filename in filenames
     }
+    # Migrations whose only schema-effect is `CREATE OR REPLACE FUNCTION`
+    # (or trigger) on objects already created by an earlier migration.
+    # These re-define behavior without adding new objects, so the
+    # readiness check (which only inspects existence) can never tell the
+    # function body has drifted. The bootstrap loop must re-apply them
+    # every pass — otherwise an earlier migration's CREATE OR REPLACE
+    # silently wins on subsequent bootstraps. See BUG-193C9A50.
+    migrations_always_reapply = tuple(spec.get("migrations_always_reapply") or ())
 
     generated = "\n".join(
         [
@@ -173,6 +181,9 @@ def main() -> None:
             "",
             "WORKFLOW_MIGRATION_TIE_BREAK_ORDER = "
             + pformat(tie_break_order, width=88, sort_dicts=False),
+            "",
+            "WORKFLOW_MIGRATIONS_ALWAYS_REAPPLY = "
+            + pformat(migrations_always_reapply, width=88, sort_dicts=False),
             "",
         ]
     )

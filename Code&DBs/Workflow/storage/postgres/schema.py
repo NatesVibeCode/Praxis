@@ -16,6 +16,7 @@ import asyncpg
 from storage._generated_workflow_migration_authority import (
     WORKFLOW_FULL_BOOTSTRAP_SEQUENCE as _GENERATED_WORKFLOW_FULL_BOOTSTRAP_SEQUENCE,
     WORKFLOW_MIGRATION_POLICIES as _GENERATED_WORKFLOW_MIGRATION_POLICIES,
+    WORKFLOW_MIGRATIONS_ALWAYS_REAPPLY as _GENERATED_WORKFLOW_MIGRATIONS_ALWAYS_REAPPLY,
     WORKFLOW_SCHEMA_READINESS_SEQUENCE as _GENERATED_WORKFLOW_SCHEMA_READINESS_SEQUENCE,
 )
 from storage.migrations import (
@@ -928,10 +929,21 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
     # advisory lock. Surface startup hits this path frequently, and blocking on a
     # stale bootstrap holder when no schema work is needed makes healthy servers
     # look broken.
+    #
+    # Exception: migrations declared in `migrations_always_reapply` re-run on
+    # every bootstrap. Their CREATE OR REPLACE FUNCTION/TRIGGER bodies refresh
+    # objects created by earlier migrations; the readiness audit can't see body
+    # drift, so without forced reapply the earlier migration silently wins.
+    # See BUG-193C9A50.
+    always_reapply = frozenset(_GENERATED_WORKFLOW_MIGRATIONS_ALWAYS_REAPPLY)
     readiness = await inspect_workflow_schema(conn)
     if readiness.is_bootstrapped:
         migration_audit = await workflow_migration_audit(conn)
         if not migration_audit.missing:
+            if always_reapply:
+                for filename in _workflow_schema_manifest_filenames():
+                    if filename in always_reapply:
+                        await _bootstrap_migration(conn, filename)
             return
 
     async with conn.transaction():
@@ -956,9 +968,14 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
             for filename in _full_workflow_migration_filenames():
                 await _bootstrap_migration(conn, filename)
             return
+        # Per-bootstrap behavior: re-apply migrations whose missing_by_migration
+        # set is non-empty (the readiness check). Plus the always-reapply set
+        # (defined above) for CREATE OR REPLACE-only refresh migrations whose
+        # body drift the readiness audit can't see.
         for filename in _workflow_schema_manifest_filenames():
             missing_objects = readiness.missing_by_migration.get(filename, ())
-            if not missing_objects:
+            force = filename in always_reapply
+            if not missing_objects and not force:
                 continue
             await _bootstrap_migration(conn, filename)
 

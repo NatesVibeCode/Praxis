@@ -21,4 +21,10 @@ if [[ ! -f "$IMPL" ]]; then
   exit 0  # fail open
 fi
 
+# Per-session cooldown — see BUG-3E9820C4. Persist (decision_key, target)
+# fired pairs across subprocess hook invocations so consecutive edits to
+# the same file don't surface the same advisory repeatedly.
+session_marker="${GEMINI_SESSION_ID:-${CLAUDE_SESSION_ID:-${PPID}}}"
+export PRAXIS_SESSION_COOLDOWN_DIR="${TMPDIR:-/tmp}/praxis_cooldown_${session_marker}"
+
 GEMINI_PROJECT_DIR="$REPO_ROOT" python3 "$IMPL"

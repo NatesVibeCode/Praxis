@@ -308,3 +308,156 @@ def test_render_additional_context_format(tmp_path: Path, monkeypatch: pytest.Mo
 
 def test_render_additional_context_empty_returns_empty_string() -> None:
     assert trigger_check.render_additional_context([], "Bash") == ""
+
+
+# ─── Session cooldown (BUG-3E9820C4) ──────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _clear_cooldown_cache():
+    """The cooldown set is module-global; reset between tests so dedupe
+    behavior is deterministic per test."""
+    trigger_check._ADVISORY_FIRED.clear()
+    yield
+    trigger_check._ADVISORY_FIRED.clear()
+
+
+def test_advisory_trigger_dedupes_consecutive_same_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same advisory + same file fires once per session, not on every edit."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::advisory",
+                "title": "advisory",
+                "match": [
+                    {"tool": "Edit", "file_glob": "**/foo.py", "advisory_only": True}
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    target = {"file_path": "/tmp/foo.py", "old_string": "x", "new_string": "y"}
+    first = trigger_check.check("Edit", target)
+    second = trigger_check.check("Edit", target)
+    assert len(first) == 1
+    assert len(second) == 0  # deduped
+
+
+def test_advisory_trigger_refires_on_different_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Different file = different cooldown key — fires again."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::advisory",
+                "title": "advisory",
+                "match": [
+                    {"tool": "Edit", "file_glob": "**/*.py", "advisory_only": True}
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    a = trigger_check.check("Edit", {"file_path": "/tmp/foo.py", "old_string": "x", "new_string": "y"})
+    b = trigger_check.check("Edit", {"file_path": "/tmp/bar.py", "old_string": "x", "new_string": "y"})
+    assert len(a) == 1
+    assert len(b) == 1  # different file → different cooldown key
+
+
+def test_explicit_trigger_never_dedupes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operator-binding triggers (advisory_only != True) always fire — never silenced."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::explicit",
+                "title": "explicit",
+                "match": [
+                    # No advisory_only flag — defaults to explicit/binding.
+                    {"tool": "Bash", "regex": r"^echo"},
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    a = trigger_check.check("Bash", {"command": "echo hi"})
+    b = trigger_check.check("Bash", {"command": "echo hi"})
+    assert len(a) == 1
+    assert len(b) == 1  # explicit triggers ALWAYS fire
+
+
+def test_cross_subprocess_cooldown_via_marker_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When PRAXIS_SESSION_COOLDOWN_DIR is set, marker files persist
+    fired pairs across subprocess invocations. Simulated by clearing the
+    in-process cache between calls — the marker file should still dedupe."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::cross-subprocess",
+                "title": "cross-subprocess advisory",
+                "match": [
+                    {"tool": "Edit", "file_glob": "**/foo.py", "advisory_only": True}
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    cooldown_dir = tmp_path / "cooldown"
+    monkeypatch.setenv("PRAXIS_SESSION_COOLDOWN_DIR", str(cooldown_dir))
+
+    target = {"file_path": "/tmp/foo.py", "old_string": "x", "new_string": "y"}
+    first = trigger_check.check("Edit", target)
+    assert len(first) == 1
+    # Marker file written under the cooldown dir.
+    assert cooldown_dir.exists()
+    assert any(cooldown_dir.iterdir())
+
+    # Simulate a second subprocess: clear the in-process cache so only
+    # the marker file can drive dedupe.
+    trigger_check._ADVISORY_FIRED.clear()
+    second = trigger_check.check("Edit", target)
+    assert len(second) == 0  # marker file caused dedupe across "subprocess"
+
+
+def test_cooldown_disabled_when_marker_dir_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without PRAXIS_SESSION_COOLDOWN_DIR, only in-process cache dedupes;
+    a fresh process (simulated by clearing the set) re-fires."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::no-marker",
+                "title": "advisory",
+                "match": [
+                    {"tool": "Edit", "file_glob": "**/foo.py", "advisory_only": True}
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.delenv("PRAXIS_SESSION_COOLDOWN_DIR", raising=False)
+
+    target = {"file_path": "/tmp/foo.py", "old_string": "x", "new_string": "y"}
+    first = trigger_check.check("Edit", target)
+    assert len(first) == 1
+    # Same process — in-process cache dedupes.
+    assert len(trigger_check.check("Edit", target)) == 0
+    # Simulate fresh process (clear in-process cache, no marker dir to fall back on).
+    trigger_check._ADVISORY_FIRED.clear()
+    third = trigger_check.check("Edit", target)
+    assert len(third) == 1  # re-fires — no on-disk marker

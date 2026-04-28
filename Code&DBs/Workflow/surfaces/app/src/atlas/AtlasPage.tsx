@@ -1114,7 +1114,8 @@ const atlasStyles = [
   {
     selector: 'edge',
     style: {
-      'curve-style': 'bezier',
+      'curve-style': 'haystack',
+      'haystack-radius': 0.5,
       'line-color': '#6d6b67',
       'line-opacity': 0.16,
       'target-arrow-shape': 'none',

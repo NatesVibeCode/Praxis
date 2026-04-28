@@ -278,6 +278,69 @@ def _match_one(
     return True
 
 
+# Per-process session-scope cooldown for advisory triggers. Once an
+# (decision_key, file_path) pair fires inside the current process, suppress
+# subsequent advisory matches for the same pair — the agent has already
+# seen the surface; firing again on the very next edit is noise. EXPLICIT
+# triggers (advisory_only=False) always fire because they're operator-
+# binding signals, not advisory ones.
+#
+# Process scope = session scope: each fresh PreToolUse hook spawn is its
+# own subprocess, so this cache only suppresses within a single MCP-tier
+# invocation chain. For the per-harness hook (Bash/Edit/Write) lane, the
+# hook is a fresh subprocess each time and won't dedupe — we accept that
+# cost in v1; v2 ships a marker file under PRAXIS_SESSION_COOLDOWN_DIR
+# (env-overridable) so per-harness invocations dedupe across the session.
+# See BUG-3E9820C4.
+_ADVISORY_FIRED: set[tuple[str, str]] = set()
+
+
+def _cooldown_marker_dir() -> str | None:
+    """Directory the per-harness hook can write fired-pair markers to so
+    consecutive subprocess invocations dedupe. Operator opts in via env.
+    Returns None when not configured — cooldown stays in-process only."""
+    return os.environ.get("PRAXIS_SESSION_COOLDOWN_DIR")
+
+
+def _cooldown_key(decision_key: str, file_path: str | None, regex_target: str | None) -> str:
+    # The marker key needs to be stable across consecutive edits to the
+    # same target. For Edit/Write, the file_path is the natural key. For
+    # Bash, multiple commands in a session that match the same trigger
+    # are usually the same intent (e.g. running docker restart twice in
+    # a row), so the regex_target works. Falling back to bare key still
+    # keeps purely-semantic triggers from re-firing.
+    target = (file_path or regex_target or "").strip()
+    return f"{decision_key}::{target}"
+
+
+def _cooldown_seen(key: str) -> bool:
+    if key in _ADVISORY_FIRED:
+        return True
+    marker_dir = _cooldown_marker_dir()
+    if marker_dir:
+        try:
+            marker_path = os.path.join(marker_dir, key.replace("/", "_").replace(":", "_"))
+            if os.path.exists(marker_path):
+                _ADVISORY_FIRED.add(key)  # populate in-process cache too
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def _cooldown_record(key: str) -> None:
+    _ADVISORY_FIRED.add(key)
+    marker_dir = _cooldown_marker_dir()
+    if marker_dir:
+        try:
+            os.makedirs(marker_dir, exist_ok=True)
+            marker_path = os.path.join(marker_dir, key.replace("/", "_").replace(":", "_"))
+            with open(marker_path, "w") as fp:
+                fp.write("fired")
+        except OSError:
+            pass
+
+
 def check(
     tool_name: str,
     tool_input: dict[str, Any] | None,
@@ -289,6 +352,12 @@ def check(
     Returns a list of TriggerMatch objects, one per matching (decision,
     condition) pair. Empty list = no matches. Always non-throwing — caller
     may receive an empty list if the registry is missing/corrupt.
+
+    Advisory triggers (advisory_only=True) deduplicate on (decision_key,
+    file_path-or-regex-target) per-session via the cooldown helpers above
+    so consecutive edits to the same file don't surface the same advisory
+    repeatedly. Explicit triggers (advisory_only=False) always fire —
+    operator-binding signals are never silenced.
     """
     if not tool_name:
         return []
@@ -307,6 +376,17 @@ def check(
     for decision in decisions:
         for condition in decision.get("match") or []:
             if _match_one(condition, tool_name, regex_target, file_path, content_target):
+                # Cooldown: skip advisory matches we've already surfaced
+                # in this session for the same (decision_key, target) pair.
+                # Explicit (non-advisory) matches always fire.
+                advisory = bool(condition.get("advisory_only"))
+                decision_key = str(decision.get("decision_key") or "")
+                if advisory and decision_key:
+                    cd_key = _cooldown_key(decision_key, file_path, regex_target)
+                    if _cooldown_seen(cd_key):
+                        # Already surfaced this session — skip the duplicate.
+                        break
+                    _cooldown_record(cd_key)
                 matches.append(TriggerMatch(decision=decision, condition=condition))
                 break  # one match per decision is enough
     return matches
