@@ -331,6 +331,9 @@ def write_job_receipt(
         receipt_outputs["workspace_snapshot_cache_hit"] = bool(
             result.get("workspace_snapshot_cache_hit")
         )
+    workspace_manifest_audit = result.get("workspace_manifest_audit")
+    if isinstance(workspace_manifest_audit, Mapping) and workspace_manifest_audit:
+        receipt_outputs["workspace_manifest_audit"] = _json_safe(workspace_manifest_audit)
     # Sandbox resource observability: peak CPU% and memory bytes captured by
     # sandbox_runtime's background docker-stats poller. Forwarded here so
     # `SELECT outputs->>'container_mem_bytes' FROM receipts` yields a usable

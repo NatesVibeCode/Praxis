@@ -326,7 +326,21 @@
     "309_revert_kimi_off_synthesize.sql",
     "310_backfill_receipt_route_identity.sql",
     "311_bug_operation_receipt_provenance.sql",
-    "312_register_operator_composed_tools.sql"
+    "312_register_operator_composed_tools.sql",
+    "313_platform_pattern_authority.sql",
+    "314_compile_materialize_canonical_http_path.sql",
+    "315_register_daily_heartbeat_refresh_operation.sql",
+    "316_register_runtime_truth_operations.sql",
+    "317_register_runtime_remediation_apply.sql",
+    "318_register_object_truth_observe_record_operation.sql",
+    "319_register_authority_domain_wizard_operations.sql",
+    "320_object_truth_evidence_store.sql",
+    "321_register_object_truth_store_observed_record_operation.sql",
+    "322_object_truth_schema_snapshot_store.sql",
+    "323_register_object_truth_schema_and_compare_operations.sql",
+    "324_google_gemini_cli_yolo_trust.sql",
+    "324_object_truth_comparison_run_store.sql",
+    "325_register_object_truth_record_comparison_run_operation.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -7825,6 +7839,314 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.operator-operation-forge"
       }
+    ],
+    "313_platform_pattern_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.patterns"
+      },
+      {
+        "object_type": "table",
+        "object_name": "platform_patterns"
+      },
+      {
+        "object_type": "table",
+        "object_name": "platform_pattern_evidence_links"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_platform_patterns_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_platform_patterns_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.pattern.candidates_materialized"
+      }
+    ],
+    "314_compile_materialize_canonical_http_path.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compile.materialize"
+      }
+    ],
+    "315_register_daily_heartbeat_refresh_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.operator.daily_heartbeat_refresh"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.operator.daily_heartbeat_refresh"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator-daily-heartbeat-refresh"
+      }
+    ],
+    "316_register_runtime_truth_operations.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.operator.runtime_truth_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.operator.runtime_truth_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator-runtime-truth-snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.operator.firecheck"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.operator.firecheck"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator-firecheck"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.operator.remediation_plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.operator.remediation_plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator-remediation-plan"
+      }
+    ],
+    "317_register_runtime_remediation_apply.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.operator.remediation_apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.operator.remediation_apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator-remediation-apply"
+      }
+    ],
+    "318_register_object_truth_observe_record_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.object_truth"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_observe_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_observe_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_truth.query.observe_record"
+      }
+    ],
+    "319_register_authority_domain_wizard_operations.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.authority_domain_forge"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.authority_domain_forge"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.authority_domain.query.forge"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.authority_domain_register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.authority_domain_register"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.authority_domain.command.register"
+      }
+    ],
+    "320_object_truth_evidence_store.sql": [
+      {
+        "object_type": "table",
+        "object_name": "object_truth_object_versions"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_field_observations"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_object_truth_object_versions_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_object_truth_object_versions_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_object_versions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_field_observations"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_object_versions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_field_observations"
+      }
+    ],
+    "321_register_object_truth_store_observed_record_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.object_truth.object_version_stored"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_store_observed_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_store_observed_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_truth.command.store_observed_record"
+      }
+    ],
+    "322_object_truth_schema_snapshot_store.sql": [
+      {
+        "object_type": "table",
+        "object_name": "object_truth_schema_snapshots"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_object_truth_schema_snapshots_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_object_truth_schema_snapshots_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_schema_snapshots"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_schema_snapshots"
+      }
+    ],
+    "323_register_object_truth_schema_and_compare_operations.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.object_truth.schema_snapshot_stored"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_store_schema_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_store_schema_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object-truth-store-schema-snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_compare_versions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_compare_versions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object-truth-compare-versions"
+      }
+    ],
+    "324_google_gemini_cli_yolo_trust.sql": [
+      {
+        "object_type": "row",
+        "object_name": "provider_cli_profiles.google"
+      },
+      {
+        "object_type": "row",
+        "object_name": "provider_model_candidates.candidate.google.gemini-3-flash-preview"
+      }
+    ],
+    "324_object_truth_comparison_run_store.sql": [
+      {
+        "object_type": "table",
+        "object_name": "object_truth_comparison_runs"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_object_truth_comparison_runs_versions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_object_truth_comparison_runs_identity"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_object_truth_comparison_runs_summary_gin"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_object_truth_comparison_runs_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_object_truth_comparison_runs_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_comparison_runs"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_comparison_runs"
+      }
+    ],
+    "325_register_object_truth_record_comparison_run_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.object_truth.comparison_run_recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_record_comparison_run"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_record_comparison_run"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object-truth-record-comparison-run"
+      }
     ]
   },
   "policy_buckets": {
@@ -8155,8 +8477,22 @@
       "309_revert_kimi_off_synthesize.sql",
       "310_backfill_receipt_route_identity.sql",
       "311_bug_operation_receipt_provenance.sql",
-      "312_register_operator_composed_tools.sql"
-    ],
+      "312_register_operator_composed_tools.sql",
+      "313_platform_pattern_authority.sql",
+      "314_compile_materialize_canonical_http_path.sql",
+      "315_register_daily_heartbeat_refresh_operation.sql",
+      "316_register_runtime_truth_operations.sql",
+      "317_register_runtime_remediation_apply.sql",
+      "318_register_object_truth_observe_record_operation.sql",
+      "319_register_authority_domain_wizard_operations.sql",
+      "320_object_truth_evidence_store.sql",
+      "321_register_object_truth_store_observed_record_operation.sql",
+      "322_object_truth_schema_snapshot_store.sql",
+      "323_register_object_truth_schema_and_compare_operations.sql",
+      "324_google_gemini_cli_yolo_trust.sql",
+      "324_object_truth_comparison_run_store.sql",
+      "325_register_object_truth_record_comparison_run_operation.sql"
+  ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
       "045_workflow_authority_rename.sql",
@@ -8328,6 +8664,10 @@
     "279": [
       "279_authority_object_registry_query_kind.sql",
       "279_register_bug_triage_packet_operation.sql"
+    ],
+    "324": [
+      "324_google_gemini_cli_yolo_trust.sql",
+      "324_object_truth_comparison_run_store.sql"
     ]
   },
   "migrations_always_reapply": [

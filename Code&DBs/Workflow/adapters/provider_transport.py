@@ -270,6 +270,10 @@ def _http_retry_policy(adapter_config: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _lane_policy_is_admitted(policy: Any) -> bool:
+    return isinstance(policy, dict) and policy.get("admitted_by_policy") is True
+
+
 def resolve_lane_policy(
     provider_slug: str,
     adapter_type: str,
@@ -284,7 +288,7 @@ def resolve_lane_policy(
         return None
     lane_policies = profile.lane_policies or {}
     policy = lane_policies.get(normalized_adapter_type)
-    if not isinstance(policy, dict):
+    if not _lane_policy_is_admitted(policy):
         return None
     return dict(policy)
 
@@ -432,21 +436,10 @@ def default_adapter_type_for_provider(
         return None
 
     lane_policies = profile.lane_policies or {}
-    admitted = [
-        adapter_type
-        for adapter_type in ("cli_llm", "llm_task")
-        if isinstance(lane_policies.get(adapter_type), dict)
-        and bool(lane_policies[adapter_type].get("admitted_by_policy"))
-    ]
-    if len(admitted) == 1:
-        return admitted[0]
-    if len(admitted) > 1:
-        return "cli_llm" if "cli_llm" in admitted else admitted[0]
-
-    if resolve_lane_policy(provider_slug, "cli_llm", profiles=profiles):
-        return "cli_llm"
-    if resolve_lane_policy(provider_slug, "llm_task", profiles=profiles):
-        return "llm_task"
+    for adapter_type in ("cli_llm", "llm_task"):
+        policy = lane_policies.get(adapter_type)
+        if _lane_policy_is_admitted(policy):
+            return adapter_type
     return None
 
 
@@ -482,7 +475,7 @@ def resolve_adapter_economics_contract(
         )
 
     lane_policy = resolve_lane_policy(provider_slug, adapter_type, profiles=profiles)
-    if not lane_policy or not bool(lane_policy.get("admitted_by_policy")):
+    if not lane_policy or lane_policy.get("admitted_by_policy") is not True:
         raise AdapterEconomicsAuthorityError(
             f"provider execution registry adapter not admitted by policy for {provider_slug}/{adapter_type}"
         )
@@ -603,7 +596,7 @@ def resolve_adapter_contract(
         normalized_adapter_type,
         profiles=profiles,
     )
-    if not lane_policy or not bool(lane_policy.get("admitted_by_policy")):
+    if not lane_policy or lane_policy.get("admitted_by_policy") is not True:
         return None
     if normalized_adapter_type == "cli_llm":
         return _cli_adapter_contract(profile, failure_mappings=failure_mappings)

@@ -81,7 +81,9 @@ class TriggerMatch:
 
     @property
     def advisory_only(self) -> bool:
-        return bool(self.condition.get("advisory_only"))
+        if "advisory_only" in self.condition:
+            return bool(self.condition.get("advisory_only"))
+        return self.provenance != "explicit"
 
     @property
     def provenance(self) -> str:
@@ -213,6 +215,14 @@ def _extract_match_target(
         files or run shell commands. Praxis tool calls already record their
         own gateway receipts.)
     """
+    raw_tool_name = tool_name
+    if raw_tool_name == "apply_patch":
+        patch_text = _first_text(
+            tool_input,
+            ("patch", "input", "content", "cmd", "command", "text"),
+        )
+        return patch_text or None, "\n".join(_patch_file_paths(patch_text)), patch_text
+
     tool_name = _normalize_tool_name(tool_name)
     if tool_name == "Bash":
         cmd = str(tool_input.get("command") or "")
@@ -244,10 +254,32 @@ def _extract_match_target(
     return tool_name, None, content
 
 
+def _first_text(tool_input: dict[str, Any], keys: Iterable[str]) -> str:
+    for key in keys:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _patch_file_paths(patch_text: str) -> tuple[str, ...]:
+    paths: list[str] = []
+    for line in patch_text.splitlines():
+        match = re.match(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", line)
+        if not match:
+            continue
+        path = match.group(1).strip()
+        if path and path not in paths:
+            paths.append(path)
+    return tuple(paths)
+
+
 def _match_glob(pattern: str, file_path: str) -> bool:
     """Glob match supporting **/ — fnmatch doesn't natively understand **."""
     if not file_path:
         return False
+    if "\n" in file_path:
+        return any(_match_glob(pattern, part) for part in file_path.splitlines())
     if fnmatch.fnmatch(file_path, pattern):
         return True
     collapsed = pattern.replace("**/", "*").replace("/**", "*")
@@ -401,7 +433,7 @@ def check(
     if not isinstance(tool_input, dict):
         return []
 
-    regex_target, file_path, content_target = _extract_match_target(tool_name, tool_input)
+    regex_target, file_path, content_target = _extract_match_target(raw_tool_name, tool_input)
 
     matches: list[TriggerMatch] = []
     for decision in decisions:
@@ -409,16 +441,18 @@ def check(
             if _match_one(condition, tool_name, harness, regex_target, file_path, content_target):
                 # Cooldown: skip advisory matches we've already surfaced
                 # in this session for the same (decision_key, target) pair.
-                # Explicit (non-advisory) matches always fire.
-                advisory = bool(condition.get("advisory_only"))
+                # Explicit (non-advisory) matches always fire. Use
+                # TriggerMatch.advisory_only so old registry rows without a
+                # provenance flag default to advisory instead of noisy.
+                match = TriggerMatch(decision=decision, condition=condition)
                 decision_key = str(decision.get("decision_key") or "")
-                if advisory and decision_key:
+                if match.advisory_only and decision_key:
                     cd_key = _cooldown_key(decision_key, file_path, regex_target)
                     if _cooldown_seen(cd_key):
                         # Already surfaced this session — skip the duplicate.
                         break
                     _cooldown_record(cd_key)
-                matches.append(TriggerMatch(decision=decision, condition=condition))
+                matches.append(match)
                 break  # one match per decision is enough
     return matches
 

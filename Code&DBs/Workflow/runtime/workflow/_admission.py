@@ -1214,20 +1214,34 @@ def preview_workflow_execution(
     spec_verify_refs = _normalize_paths(raw_snapshot.get("verify_refs"))
     warnings: list[str] = []
 
-    try:
-        from runtime.task_type_router import TaskTypeRouter
-
-        TaskTypeRouter(conn).resolve_spec_jobs(
-            spec.jobs,
-            runtime_profile_ref=runtime_profile_ref or None,
+    auto_llm_jobs = [
+        str(job.get("label") or job.get("agent") or "").strip()
+        for job in spec.jobs
+        if str(job.get("agent") or "auto/build").strip().startswith("auto/")
+        and str(job.get("adapter_type") or "").strip().lower()
+        in {"", "cli_llm", "llm_task"}
+    ]
+    if auto_llm_jobs and not runtime_profile_ref:
+        warnings.append(
+            "task_type_router skipped: runtime_profile_ref is required to "
+            "resolve auto/* routes in preview; refusing to route against "
+            "the global provider candidate catalog"
         )
-    except Exception as exc:
-        if runtime_profile_ref:
-            raise RuntimeError(
-                f"workflow preview failed closed for runtime profile "
-                f"{runtime_profile_ref!r}: {exc}",
-            ) from exc
-        warnings.append(f"task_type_router unavailable: {exc}")
+    else:
+        try:
+            from runtime.task_type_router import TaskTypeRouter
+
+            TaskTypeRouter(conn).resolve_spec_jobs(
+                spec.jobs,
+                runtime_profile_ref=runtime_profile_ref or None,
+            )
+        except Exception as exc:
+            if runtime_profile_ref:
+                raise RuntimeError(
+                    f"workflow preview failed closed for runtime profile "
+                    f"{runtime_profile_ref!r}: {exc}",
+                ) from exc
+            warnings.append(f"task_type_router unavailable: {exc}")
 
     jobs: list[dict[str, object]] = []
     for index, job in enumerate(spec.jobs):

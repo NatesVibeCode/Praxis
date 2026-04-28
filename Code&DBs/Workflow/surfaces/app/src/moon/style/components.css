@@ -830,14 +830,17 @@
   margin-inline: auto;
   padding: 22px 22px 20px;
   border: 1px solid var(--moon-white-a12);
-  border-radius: 28px;
+  border-radius: 12px;
   background: linear-gradient(180deg, var(--moon-white-a05), var(--moon-black-a20));
   box-shadow: var(--moon-shadow-line-mid), var(--moon-shadow-float-soft);
+}
+.moon-compose--intro {
+  width: min(640px, calc(100vw - 36px));
 }
 .moon-compose__title {
   font-size: var(--moon-font-size-lg);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: var(--moon-fg);
   text-align: left;
 }
@@ -845,7 +848,7 @@
   width: 100%;
   background: var(--moon-compose-input-bg);
   border: 1px solid var(--moon-white-a16);
-  border-radius: 18px;
+  border-radius: 10px;
   color: var(--moon-fg);
   font-size: 15px;
   font-family: inherit;
@@ -879,7 +882,7 @@
   width: 100%;
   min-height: 44px;
   padding: 0 22px;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid var(--moon-accent-a34);
   background: linear-gradient(180deg, var(--moon-accent-a12), var(--moon-accent-a06));
   color: var(--moon-color-white);
@@ -909,6 +912,200 @@
   color: var(--moon-white-a85);
   text-align: left;
   line-height: 1.6;
+}
+.moon-outcome-contract {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--moon-accent-a24);
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, var(--moon-accent-a08), transparent 1px),
+    linear-gradient(180deg, var(--moon-white-a04), var(--moon-black-a18));
+  background-size: 42px 100%, 100% 100%;
+  box-shadow: var(--moon-shadow-line-soft);
+}
+.moon-outcome-contract-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px dashed var(--moon-white-a16);
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, var(--moon-white-a04), transparent 1px),
+    var(--moon-black-a18);
+  background-size: 36px 100%, 100% 100%;
+  color: var(--moon-fg);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.moon-outcome-contract-toggle--compact {
+  margin-top: 8px;
+}
+.moon-outcome-contract-toggle:hover {
+  border-color: var(--moon-accent-a34);
+  background:
+    linear-gradient(90deg, var(--moon-accent-a06), transparent 1px),
+    var(--moon-black-a18);
+  background-size: 36px 100%, 100% 100%;
+}
+.moon-outcome-contract-toggle span,
+.moon-outcome-contract-toggle em {
+  color: var(--moon-fg-dim);
+  font-family: var(--moon-font-mono);
+  font-size: var(--moon-font-size-xxs);
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.moon-outcome-contract-toggle strong {
+  min-width: 0;
+  font-size: var(--moon-font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.moon-outcome-contract::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, transparent 0 49.65%, var(--moon-white-a06) 49.65% 50.35%, transparent 50.35%),
+    linear-gradient(315deg, transparent 0 49.65%, var(--moon-danger-a08) 49.65% 50.35%, transparent 50.35%);
+  opacity: 0.32;
+}
+.moon-outcome-contract > * {
+  position: relative;
+  z-index: 1;
+}
+.moon-outcome-contract--dock {
+  margin-top: 8px;
+  padding: 12px;
+  border-color: var(--moon-white-a12);
+  background:
+    linear-gradient(90deg, var(--moon-white-a04), transparent 1px),
+    var(--moon-black-a18);
+  background-size: 36px 100%, 100% 100%;
+}
+.moon-outcome-contract__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.moon-outcome-contract__actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.moon-outcome-contract__mini-btn {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--moon-white-a12);
+  border-radius: 7px;
+  background: var(--moon-black-a18);
+  color: var(--moon-fg-muted);
+  cursor: pointer;
+  font-size: var(--moon-font-size-xxs);
+  font-weight: 700;
+}
+.moon-outcome-contract__mini-btn:hover:not(:disabled) {
+  border-color: var(--moon-accent-a34);
+  color: var(--moon-fg);
+}
+.moon-outcome-contract__mini-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.moon-outcome-contract__kicker,
+.moon-outcome-contract__field span {
+  color: var(--moon-fg-dim);
+  font-family: var(--moon-font-mono);
+  font-size: var(--moon-font-size-xxs);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.moon-outcome-contract__title {
+  margin-top: 4px;
+  color: var(--moon-fg);
+  font-size: var(--moon-font-size-sm);
+  font-weight: 650;
+  line-height: 1.35;
+}
+.moon-outcome-contract__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.moon-outcome-contract__field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--moon-white-a08);
+  border-radius: 8px;
+  background: var(--moon-black-a18);
+}
+.moon-outcome-contract__field--success {
+  border-color: var(--moon-accent-a24);
+  background: linear-gradient(180deg, var(--moon-accent-a05), var(--moon-black-a18));
+}
+.moon-outcome-contract__field--failure {
+  border-color: var(--moon-danger-a22);
+  background: linear-gradient(180deg, var(--moon-danger-a06), var(--moon-black-a18));
+}
+.moon-outcome-contract__field textarea {
+  width: 100%;
+  min-height: 76px;
+  padding: 10px 11px;
+  border: 1px solid var(--moon-white-a12);
+  border-radius: 8px;
+  background: var(--moon-compose-input-bg);
+  color: var(--moon-fg);
+  font: inherit;
+  font-size: var(--moon-font-size-sm);
+  line-height: 1.45;
+  resize: vertical;
+  box-shadow: inset 0 1px 0 var(--moon-white-a04);
+}
+.moon-outcome-contract--dock .moon-outcome-contract__grid {
+  grid-template-columns: 1fr;
+}
+.moon-outcome-contract--dock .moon-outcome-contract__field textarea {
+  min-height: 58px;
+}
+.moon-outcome-contract__field textarea:focus {
+  outline: none;
+  border-color: var(--moon-accent-a48);
+  box-shadow: var(--moon-accent-glow-soft);
+}
+.moon-outcome-contract__field--success textarea:focus {
+  border-color: var(--moon-success-a48);
+  box-shadow: var(--moon-success-glow-soft);
+}
+.moon-outcome-contract__field--failure textarea:focus {
+  border-color: var(--moon-danger-a45);
+  box-shadow: var(--moon-danger-glow-soft);
+}
+.moon-outcome-contract__field textarea::placeholder {
+  color: var(--moon-fg-dim);
+}
+.moon-outcome-contract__slash-menu {
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--moon-white-a08);
 }
 .moon-compose-preview {
   display: grid;
@@ -1019,6 +1216,10 @@
   .moon-compose {
     max-width: min(100%, calc(100vw - 36px));
     padding: 16px;
+  }
+
+  .moon-outcome-contract__grid {
+    grid-template-columns: 1fr;
   }
 }
 

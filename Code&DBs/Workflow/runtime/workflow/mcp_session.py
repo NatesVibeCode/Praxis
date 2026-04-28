@@ -12,7 +12,7 @@ from uuid import uuid4
 from runtime.crypto_authority import (
     CryptoAuthorityError,
     HmacKeyring,
-    canonical_digest_hex,
+    digest_bytes_hex,
     hmac_sha256_b64url,
     hmac_sha256_b64url_verify,
     load_hmac_keyring_from_env,
@@ -201,7 +201,7 @@ def verify_workflow_mcp_session_token(token: str) -> dict[str, Any]:
 
 def _session_id_from_token(token: str) -> str:
     """Derive a stable session ID from the token (first 32 chars of hash)."""
-    return canonical_digest_hex(token, purpose="workflow_mcp.session_id")[:32]
+    return digest_bytes_hex(token.encode("utf-8"), purpose="workflow_mcp.session_id")[:32]
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 ---
 name: praxis-workflow
-description: "Praxis workflow execution skill. Use to author, validate, run, inspect, retry, or cancel workflow specs through the canonical Praxis CLI and catalog-backed workflow tool surface."
+description: "Praxis workflow execution skill. Use to author, firecheck, validate, run, inspect, retry, or cancel workflow specs through the canonical Praxis CLI and catalog-backed workflow tool surface."
 ---
 
 # Praxis Workflow
@@ -10,7 +10,7 @@ description: "Praxis workflow execution skill. Use to author, validate, run, ins
 - MCP/catalog reference: `docs/MCP.md`
 - CLI reference: `docs/CLI.md`
 - API route reference: `docs/API.md`
-- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs`
 - If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
 
 Use this skill when the task is to author, validate, launch, inspect, or repair workflow execution in Praxis.
@@ -27,7 +27,22 @@ praxis workflow tools describe praxis_workflow
 
 ## Core Loop
 
-1. Validate first:
+0. Prove the runtime can actually fire before launch or retry:
+
+```text
+praxis workflow firecheck --json
+```
+
+If `can_fire` is false, do not launch and do not retry. Ask for a typed plan:
+
+```text
+praxis workflow remediation-plan --failure-type <provider.capacity|host_resource_capacity|routing.blocked|credential.missing> --json
+praxis workflow remediation-apply --failure-type <type> --dry-run --json
+```
+
+Only use `--apply --yes` for a safe local runtime repair that the plan explicitly allows, then rerun `firecheck`.
+
+1. Validate the spec only after the fire gate is clear:
 
 ```text
 praxis workflow validate <spec.json>
@@ -53,14 +68,18 @@ praxis workflow inspect <run_id>
 
 ```text
 praxis workflow cancel <run_id>
-praxis workflow retry <run_id> <label>
+praxis workflow retry <run_id> <label> --previous-failure "<what failed>" --retry-delta "<what is different this time>"
 ```
 
 ## Rules
 
 - `run` is kickoff, not wait semantics
 - `run_id` is the durable tracking handle
+- submitted is not fired; require containers/process/work/durable output before calling a run active
+- no mass retries; prove one job can fire before any fleet action
+- every retry must carry the previous failure and the retry delta
 - use `--kill-if-idle` only after `run-status` shows an unhealthy idle run
+- prefer `firecheck`, then typed remediation, then one explicit retry
 - when no direct alias fits, use `praxis workflow tools call praxis_workflow --input-json '{...}' --yes` for launch/write actions
 - if you do not know the schema, query the catalog instead of guessing
 
@@ -69,7 +88,9 @@ praxis workflow retry <run_id> <label>
 Return:
 
 1. `Spec Authority`
-2. `Launch or Inspection Action`
-3. `Run Tracking`
-4. `Validation Path`
-5. `Failure Gate`
+2. `Firecheck Evidence`
+3. `Launch or Inspection Action`
+4. `Run Tracking`
+5. `Validation Path`
+6. `Failure Gate`
+7. `Retry Delta` when retrying

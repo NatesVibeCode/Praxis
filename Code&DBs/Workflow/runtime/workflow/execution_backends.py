@@ -447,6 +447,25 @@ def _sandbox_policy_value(
     return str(value or default).strip() or default
 
 
+def _workspace_materialization_value(
+    agent_config,
+    *,
+    execution_bundle: dict[str, Any] | None,
+) -> str:
+    materialization = _sandbox_policy_value(
+        agent_config,
+        "workspace_materialization",
+        "copy",
+        execution_bundle=execution_bundle,
+    )
+    if materialization.strip().lower() == "none":
+        return "none"
+    shard_paths = _execution_shard_paths({"execution_bundle": execution_bundle or {}})
+    if shard_paths:
+        return materialization
+    return "none"
+
+
 def _sandbox_image(
     agent_config,
     *,
@@ -465,9 +484,8 @@ def _sandbox_image(
 def _parse_llm_output(stdout: str) -> tuple[str, dict[str, Any]]:
     parsed_stdout = stdout
     telemetry: dict[str, Any] = {}
-    try:
-        data = json.loads(stdout)
-    except (json.JSONDecodeError, TypeError):
+    data = _parse_llm_json(stdout)
+    if data is None:
         return parsed_stdout, telemetry
     if not isinstance(data, dict):
         return parsed_stdout, telemetry
@@ -508,6 +526,29 @@ def _parse_llm_output(stdout: str) -> tuple[str, dict[str, Any]]:
         if isinstance(errors, list):
             parsed_stdout = "\n".join(str(e) for e in errors[:5])
     return parsed_stdout, telemetry
+
+
+def _parse_llm_json(stdout: str) -> Any | None:
+    try:
+        return json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    decoder = json.JSONDecoder()
+    text = str(stdout or "").strip()
+    fallback: Any | None = None
+    for index, char in enumerate(text):
+        if char not in "{[":
+            continue
+        try:
+            data, _end = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            fallback = data
+            if any(key in data for key in ("result", "response", "output", "text", "usage", "stats", "errors")):
+                return data
+    return fallback
 
 
 def _utc_now_iso() -> str:
@@ -632,6 +673,7 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
         "sandbox_group_id": result.sandbox_group_id,
         "artifact_refs": list(result.artifact_refs),
         "artifact_scope_drift": [dict(entry) for entry in getattr(result, "artifact_scope_drift", ())],
+        "workspace_manifest_audit": dict(getattr(result, "workspace_manifest_audit", {}) or {}),
         "started_at": result.started_at,
         "finished_at": result.finished_at,
         "workspace_snapshot_ref": getattr(result, "workspace_snapshot_ref", ""),
@@ -782,18 +824,12 @@ def execute_cli(
             else "disabled",
             execution_bundle=execution_bundle,
         )
-        # Default to "copy" so the agent's nested sandbox actually contains
-        # the repo files at /workspace. The previous "none" default left the
-        # sandbox empty even when context-shard manifests advertised paths,
-        # producing the BUG-632E6F45 "review jobs can't read source files"
-        # failure. The path_filter derived from access_policy.read_scope /
-        # write_scope still scopes WHICH files are copied, so big repos are
-        # not shipped wholesale unless the bundle explicitly leaves both
-        # scopes empty.
-        workspace_materialization = _sandbox_policy_value(
+        # Copy only when the execution bundle carries an enforceable shard.
+        # Unscoped copy is blocked by SandboxRuntime; no-scope prompt-only
+        # jobs should run with an empty workspace instead of asking for legacy
+        # full-repo materialization.
+        workspace_materialization = _workspace_materialization_value(
             agent_config,
-            "workspace_materialization",
-            "copy",
             execution_bundle=execution_bundle,
         )
         sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
@@ -955,14 +991,6 @@ def execute_api(
             "provider_only",
             execution_bundle=execution_bundle,
         )
-        # Default to "copy" so the agent's nested sandbox actually contains
-        # the repo files at /workspace. The previous "none" default left the
-        # sandbox empty even when context-shard manifests advertised paths,
-        # producing the BUG-632E6F45 "review jobs can't read source files"
-        # failure. The path_filter derived from access_policy.read_scope /
-        # write_scope still scopes WHICH files are copied, so big repos are
-        # not shipped wholesale unless the bundle explicitly leaves both
-        # scopes empty.
         workspace_materialization = _sandbox_policy_value(
             agent_config,
             "workspace_materialization",

@@ -295,6 +295,91 @@ def test_file_bug_payload_dry_run_skips_insert() -> None:
     assert payload["preview"]["title"] == "Preview only"
 
 
+def test_file_bug_payload_blocks_strong_duplicate_before_insert() -> None:
+    calls: list[str] = []
+
+    class _FakeBugTracker:
+        def find_similar_bugs(self, **_kwargs):
+            return [
+                {
+                    "bug_id": "BUG-EXISTING",
+                    "title": "Existing duplicate",
+                    "status": "OPEN",
+                    "severity": "P1",
+                    "similarity": 0.91,
+                }
+            ]
+
+        def file_bug(self, **_kwargs):
+            calls.append("file_bug")
+            raise AssertionError("duplicate gate should block before insert")
+
+    payload = bug_contract.file_bug_payload(
+        bt=_FakeBugTracker(),
+        bt_mod=_FakeBugTrackerMod(),
+        body={
+            "title": "Existing duplicate",
+            "severity": "P2",
+            "category": "OTHER",
+            "description": "same failure",
+            "discovered_in_receipt_id": "receipt-123",
+        },
+        serialize_bug=_bug_to_dict,
+        filed_by_default="workflow_api",
+        source_kind_default="workflow_api",
+        include_similar_bugs=True,
+    )
+
+    assert calls == []
+    assert payload["ok"] is False
+    assert payload["filed"] is False
+    assert payload["reason_code"] == "bug.file.duplicate_candidate"
+    assert payload["similar_bugs"][0]["bug_id"] == "BUG-EXISTING"
+
+
+def test_file_bug_payload_allows_intentional_duplicate_override() -> None:
+    calls: list[str] = []
+    bug = _sample_bug()
+
+    class _FakeBugTracker:
+        def find_similar_bugs(self, **_kwargs):
+            return [
+                {
+                    "bug_id": "BUG-EXISTING",
+                    "title": "Existing duplicate",
+                    "status": "OPEN",
+                    "severity": "P1",
+                    "similarity": 0.91,
+                }
+            ]
+
+        def file_bug(self, **kwargs):
+            calls.append("file_bug")
+            return bug, []
+
+    payload = bug_contract.file_bug_payload(
+        bt=_FakeBugTracker(),
+        bt_mod=_FakeBugTrackerMod(),
+        body={
+            "title": "Existing duplicate but different root cause",
+            "severity": "P2",
+            "category": "OTHER",
+            "description": "distinct failure",
+            "discovered_in_receipt_id": "receipt-123",
+            "allow_duplicate": True,
+        },
+        serialize_bug=_bug_to_dict,
+        filed_by_default="workflow_api",
+        source_kind_default="workflow_api",
+        include_similar_bugs=True,
+    )
+
+    assert calls == ["file_bug"]
+    assert payload["ok"] is True
+    assert payload["filed"] is True
+    assert payload["similar_bugs"][0]["bug_id"] == "BUG-EXISTING"
+
+
 def test_file_bug_payload_preview_flag_aliases_dry_run() -> None:
     class _FakeBugTracker:
         def file_bug(self, **_kwargs):

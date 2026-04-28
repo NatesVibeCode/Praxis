@@ -1398,6 +1398,9 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
         coordination_path = params.get("coordination_path", "")
         if not coordination_path:
             return {"error": "coordination_path is required for action='chain'"}
+        pg, error = _load_pg_conn(action="chain")
+        if error is not None:
+            return error
 
         adopt_active = params.get("adopt_active", True)
         if not isinstance(adopt_active, bool):
@@ -1411,16 +1414,30 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
         # row + emits `workflow_chain.submitted` to authority_events.
         try:
             from runtime.operation_catalog_gateway import execute_operation_from_subsystems
-            return execute_operation_from_subsystems(
+
+            result = execute_operation_from_subsystems(
                 _subs,
                 operation_name="workflow_chain_submit",
                 payload={
                     "coordination_path": str(coordination_path),
                     "adopt_active": bool(adopt_active),
+                    "requested_by_kind": "mcp",
+                    "requested_by_ref": "praxis_workflow.chain",
                 },
             )
-        except Exception as exc:
-            return _structured_runtime_error(exc, action="chain")
+            if isinstance(result, dict) and result.get("ok") is False:
+                return _submit_workflow_chain_via_service_bus(
+                    pg,
+                    coordination_path=str(coordination_path),
+                    adopt_active=bool(adopt_active),
+                )
+            return result
+        except Exception:
+            return _submit_workflow_chain_via_service_bus(
+                pg,
+                coordination_path=str(coordination_path),
+                adopt_active=bool(adopt_active),
+            )
 
     # --- Deep job inspection ---
     if action == "inspect":
@@ -1712,7 +1729,11 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
 
         spec_mod = _workflow_spec_mod()
         spec = spec_mod.WorkflowSpec.load(spec_path)
-        result = dry_run_workflow(spec)
+        result = dry_run_workflow(
+            spec,
+            pg_conn=pg,
+            repo_root=REPO_ROOT,
+        )
         return {
             "spec_name": result.spec_name,
             "total_jobs": result.total_jobs,
@@ -1881,7 +1902,9 @@ def tool_praxis_launch_plan(params: dict) -> dict:
       payload with the spec_dict, preview (resolved agents + rendered
       prompts + execution bundles), and packet_declarations showing what
       the caller declared vs what the platform derived. No submission.
-      Use to inspect before approving the run.
+      Use to inspect before approving the run. Proof-launch approval
+      requires machine-checkable provider freshness evidence from either
+      fresh route truth or a recent provider availability refresh receipt.
     """
     approved_payload = params.get("approved_plan")
     if approved_payload is not None:
@@ -1905,6 +1928,7 @@ def tool_praxis_launch_plan(params: dict) -> dict:
                 ApprovedPlan,
                 LaunchSubmitFailedError,
                 ProposedPlan,
+                ProviderFreshnessGateError,
                 launch_approved,
             )
 
@@ -1918,6 +1942,8 @@ def tool_praxis_launch_plan(params: dict) -> dict:
                 total_jobs=int(proposed_payload.get("total_jobs") or 0),
                 packet_declarations=list(proposed_payload.get("packet_declarations") or []),
                 binding_summary=dict(proposed_payload.get("binding_summary") or {}),
+                unresolved_routes=list(proposed_payload.get("unresolved_routes") or []),
+                provider_freshness=dict(proposed_payload.get("provider_freshness") or {}),
             )
             approved = ApprovedPlan(
                 proposed=proposed,
@@ -1943,6 +1969,12 @@ def tool_praxis_launch_plan(params: dict) -> dict:
                 "submit_error_detail": exc.error_detail,
                 "spec_name": exc.spec_name,
                 "submit_result": exc.submit_result,
+            }
+        except ProviderFreshnessGateError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "reason_code": "provider_freshness.invalid",
             }
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "reason_code": "approval.invalid"}
@@ -2307,6 +2339,7 @@ def tool_praxis_approve_proposed_plan(params: dict) -> dict:
         from runtime.spec_compiler import (
             ProposedPlan,
             approve_proposed_plan,
+            ProviderFreshnessGateError,
         )
 
         proposed = ProposedPlan(
@@ -2319,12 +2352,19 @@ def tool_praxis_approve_proposed_plan(params: dict) -> dict:
             packet_declarations=list(proposed_payload.get("packet_declarations") or []),
             binding_summary=dict(proposed_payload.get("binding_summary") or {}),
             unresolved_routes=list(proposed_payload.get("unresolved_routes") or []),
+            provider_freshness=dict(proposed_payload.get("provider_freshness") or {}),
         )
         approved = approve_proposed_plan(
             proposed,
             approved_by=approved_by,
             approval_note=params.get("approval_note"),
         )
+    except ProviderFreshnessGateError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "reason_code": "provider_freshness.invalid",
+        }
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "reason_code": "approval.invalid"}
     except Exception as exc:
@@ -3162,16 +3202,18 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "plan": {
                         "type": "object",
-                        "description": (
-                            "Plan to compile and launch. Required: name PLUS either 'packets' "
-                            "(explicit list) or 'from_bugs' (bug-ID list that materializes "
-                            "packets through derive_bug_packets with wave-dependency wiring). "
-                            "Supplying both is rejected as an ambiguity error. Optional: "
-                            "workflow_id (auto-generated if absent), why (narrative), phase "
-                            "(default 'build'), workdir (defaults to caller's workdir), "
-                            "program_id (used as the bug-resolution program ID when from_bugs "
-                            "is set; defaults to 'plan.<name>')."
-                        ),
+        "description": (
+            "Plan to compile and launch. Required: name PLUS either 'packets' "
+            "(explicit list) or 'from_bugs' (bug-ID list that materializes "
+            "packets through derive_bug_packets with wave-dependency wiring). "
+            "Supplying both is rejected as an ambiguity error. Optional: "
+            "workflow_id (auto-generated if absent), why (narrative), phase "
+            "(default 'build'), workdir (defaults to caller's workdir), "
+            "program_id (used as the bug-resolution program ID when from_bugs "
+            "is set; defaults to 'plan.<name>'). Proof launches can also carry "
+            "provider_route_truth, provider_availability_refresh, or the canonical "
+            "provider_freshness payload for machine-checkable freshness evidence."
+        ),
                         "properties": {
                             "name": {"type": "string"},
                             "why": {"type": "string"},
@@ -3179,6 +3221,18 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "phase": {"type": "string"},
                             "workdir": {"type": "string"},
                             "program_id": {"type": "string"},
+                            "provider_route_truth": {
+                                "type": "object",
+                                "description": "Fresh route-truth evidence for proof-launch approval.",
+                            },
+                            "provider_availability_refresh": {
+                                "type": "object",
+                                "description": "Recent provider availability refresh receipt for proof-launch approval.",
+                            },
+                            "provider_freshness": {
+                                "type": "object",
+                                "description": "Canonical machine-checkable freshness payload; must include route truth or a refresh receipt.",
+                            },
                             "from_bugs": {
                                 "type": "array",
                                 "items": {"type": "string"},
@@ -3478,7 +3532,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "Takes the ProposedPlan payload from praxis_launch_plan(preview_only=true), "
                 "wraps it with approved_by + timestamp + hash, and returns an ApprovedPlan. "
                 "The hash binds the approval to the exact spec_dict — tampering between "
-                "approve and launch fails closed at launch time.\n\n"
+                "approve and launch fails closed at launch time. The ProposedPlan must "
+                "already carry machine-checkable provider freshness evidence.\n\n"
                 "USE WHEN: launch must be explicit and audit-friendly — agent-initiated "
                 "launches, user-facing UI confirmations, budget-gated workflows.\n\n"
                 "DO NOT USE TO: skip approval for direct launches. For those, use "

@@ -195,8 +195,13 @@ export function useChat() {
     setMessages(prev => [...prev, ...newMessages]);
   }, []);
 
-  const sendMessage = useCallback(async (content: string, selectionContext?: any[]) => {
-    if (!conversationId || !content.trim()) return;
+  const sendMessage = useCallback(async (
+    content: string,
+    selectionContext?: any[],
+    conversationIdOverride?: string | null,
+  ) => {
+    const targetConversationId = conversationIdOverride ?? conversationId;
+    if (!targetConversationId || !content.trim()) return;
 
     // Add user message optimistically
     const userMsg: ChatMessage = {
@@ -235,7 +240,7 @@ export function useChat() {
         controller.signal.addEventListener('abort', rejectAbort, { once: true });
       });
       const res = await Promise.race([
-        fetch(`/api/chat/conversations/${conversationId}/messages`, {
+        fetch(`/api/chat/conversations/${targetConversationId}/messages`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

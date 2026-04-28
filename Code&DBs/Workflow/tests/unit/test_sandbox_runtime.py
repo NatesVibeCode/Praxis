@@ -36,6 +36,15 @@ def _allow_existing_legacy_workspace_copy_tests(monkeypatch) -> None:
     monkeypatch.setenv("PRAXIS_ALLOW_LEGACY_WORKSPACE_COPY", "1")
 
 
+@pytest.fixture(autouse=True)
+def _stub_cli_auth_catalog_for_unit_tests(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sandbox_runtime,
+        "_load_cli_auth_catalog",
+        lambda: sandbox_runtime._CliAuthCatalog((), ()),
+    )
+
+
 def _test_cli_auth_catalog() -> sandbox_runtime._CliAuthCatalog:
     return sandbox_runtime._CliAuthCatalog(
         mount_specs=(
@@ -197,6 +206,12 @@ def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypat
     ) in flags
 
 
+def test_cli_auth_catalog_is_not_process_cached() -> None:
+    # Provider onboarding updates auth mount authority at runtime. The worker
+    # must not keep a stale lru_cache entry that omits newly admitted providers.
+    assert not hasattr(sandbox_runtime._load_cli_auth_catalog, "cache_clear")
+
+
 def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) -> None:
     _patch_cli_auth_catalog(monkeypatch)
     monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", AUTH_HOME)
@@ -254,7 +269,7 @@ def test_docker_local_exec_prefers_metadata_resource_limits(monkeypatch, tmp_pat
         ),
     )
     monkeypatch.setattr(sandbox_runtime, "_docker_image_available", lambda image: True)
-    monkeypatch.setattr(sandbox_runtime.threading, "Thread", _NoopThread)
+    monkeypatch.setattr(sandbox_runtime, "_STATS_THREAD_CLASS", _NoopThread)
     monkeypatch.setattr(sandbox_runtime.subprocess, "Popen", _FakePopen)
 
     provider = DockerLocalSandboxProvider()
@@ -325,7 +340,7 @@ def test_docker_local_exec_skips_auth_mounts_when_policy_is_none(monkeypatch, tm
         ),
     )
     monkeypatch.setattr(sandbox_runtime, "_docker_image_available", lambda image: True)
-    monkeypatch.setattr(sandbox_runtime.threading, "Thread", _NoopThread)
+    monkeypatch.setattr(sandbox_runtime, "_STATS_THREAD_CLASS", _NoopThread)
     monkeypatch.setattr(sandbox_runtime.subprocess, "Popen", _FakePopen)
     monkeypatch.setattr(
         sandbox_runtime,
@@ -1635,6 +1650,62 @@ def test_execution_shard_paths_returns_empty_when_bundle_missing() -> None:
     assert sandbox_runtime._execution_shard_paths(
         {"execution_bundle": {"access_policy": {}}}
     ) == ()
+
+
+def test_workspace_manifest_audit_compares_intended_hydrated_and_observed_reads() -> None:
+    receipt = sandbox_runtime.HydrationReceipt(
+        sandbox_session_id="sandbox.alpha",
+        workspace_root="/workspace",
+        hydrated_files=2,
+        workspace_materialization="copy",
+        workspace_snapshot_ref="workspace_snapshot:abc",
+        hydrated_paths=("runtime/spec_compiler.py", "runtime/context.py"),
+    )
+    result = SandboxExecutionResult(
+        sandbox_session_id="sandbox.alpha",
+        sandbox_group_id="group.alpha",
+        sandbox_provider="fake",
+        execution_transport="cli",
+        exit_code=0,
+        stdout="sed: runtime/missing.py: No such file or directory",
+        stderr="read runtime/context.py",
+        timed_out=False,
+        artifact_refs=(),
+        started_at="2026-04-09T00:00:00+00:00",
+        finished_at="2026-04-09T00:00:01+00:00",
+        network_policy="provider_only",
+        provider_latency_ms=5,
+        execution_mode="fake",
+        workspace_root="/workspace",
+    )
+
+    audit = sandbox_runtime._workspace_manifest_audit(
+        metadata={
+            "execution_bundle": {
+                "access_policy": {
+                    "write_scope": ["runtime/spec_compiler.py"],
+                    "declared_read_scope": ["runtime/context.py", "runtime/missing.py"],
+                }
+            }
+        },
+        hydration_receipt=receipt,
+        result=result,
+    )
+
+    assert audit["intended_manifest_paths"] == [
+        "runtime/context.py",
+        "runtime/missing.py",
+        "runtime/spec_compiler.py",
+    ]
+    assert audit["hydrated_manifest_paths"] == [
+        "runtime/spec_compiler.py",
+        "runtime/context.py",
+    ]
+    assert audit["missing_intended_paths"] == ["runtime/missing.py"]
+    assert audit["observed_file_read_refs"] == [
+        "runtime/context.py",
+        "runtime/missing.py",
+    ]
 
 
 def test_write_workspace_snapshot_archive_writes_only_shard(tmp_path) -> None:

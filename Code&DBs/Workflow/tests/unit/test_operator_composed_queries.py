@@ -167,4 +167,92 @@ def test_operation_forge_previews_register_payload_for_new_operation() -> None:
     assert result["state"] == "new_operation"
     assert result["ok_to_register"] is True
     assert result["register_operation_payload"]["operation_ref"] == "operator-example-truth"
+    assert result["register_operation_payload"]["posture"] == "observe"
+    assert result["register_operation_payload"]["idempotency_policy"] == "read_only"
+    assert result["api_route"]["http_method"] == "GET"
+    assert result["next_action_packet"]["register_command"].startswith(
+        "praxis workflow tools call praxis_register_operation --input-json"
+    )
+    assert any(
+        "scripts.generate_mcp_docs" in command
+        for command in result["next_action_packet"]["fast_feedback_commands"]
+    )
     assert "Do not dispatch from MCP directly into subsystem code." in result["reject_paths"]
+
+
+def test_operation_forge_defaults_command_authority_and_requires_event_type() -> None:
+    class _Conn:
+        def fetchrow(self, *_args):
+            return None
+
+    class _Subsystems:
+        def get_pg_conn(self):
+            return _Conn()
+
+    result = operator_composed.handle_query_operation_forge(
+        operator_composed.QueryOperationForge(
+            operation_name="operator.example_apply",
+            operation_kind="command",
+            tool_name="praxis_example_apply",
+            recommended_alias="example-apply",
+            handler_ref="runtime.operations.commands.example.handle_example_apply",
+            input_model_ref="runtime.operations.commands.example.ExampleApplyCommand",
+            authority_domain_ref="authority.workflow_runs",
+        ),
+        _Subsystems(),
+    )
+
+    assert result["state"] == "new_operation"
+    assert result["ok_to_register"] is False
+    assert result["register_operation_payload"]["operation_kind"] == "command"
+    assert result["register_operation_payload"]["posture"] == "operate"
+    assert result["register_operation_payload"]["idempotency_policy"] == "non_idempotent"
+    assert result["api_route"]["http_method"] == "POST"
+    assert result["tool"]["tool_name"] == "praxis_example_apply"
+    assert result["tool"]["recommended_alias"] == "example-apply"
+    assert "event_type" in result["missing_inputs"]
+    assert "event_type" not in result["register_operation_payload_compact"]
+    assert "operation_kind" in result["next_action_packet"]["register_command"]
+
+
+def test_operation_forge_returns_real_tool_binding_for_existing_operation() -> None:
+    class _Conn:
+        def fetchrow(self, *_args):
+            return {
+                "operation_ref": "catalog.operation.register",
+                "operation_name": "catalog_operation_register",
+                "operation_kind": "command",
+                "handler_ref": "runtime.operations.commands.catalog_operation_register.handle_register_operation",
+                "input_model_ref": "runtime.operations.commands.catalog_operation_register.RegisterOperationCommand",
+                "authority_domain_ref": "authority.cqrs",
+                "http_method": "POST",
+                "http_path": "/api/catalog_operation_register",
+                "enabled": True,
+            }
+
+    class _Subsystems:
+        def get_pg_conn(self):
+            return _Conn()
+
+    result = operator_composed.handle_query_operation_forge(
+        operator_composed.QueryOperationForge(
+            operation_name="catalog_operation_register",
+            authority_domain_ref="authority.cqrs",
+            operation_kind="command",
+            posture="operate",
+            idempotency_policy="idempotent",
+        ),
+        _Subsystems(),
+    )
+
+    assert result["state"] == "existing_operation"
+    assert result["tool"]["binding_state"] == "catalog_bound"
+    assert result["tool"]["tool_name"] == "praxis_register_operation"
+    assert result["tool"]["risk"] == "write"
+    assert result["tool"]["entrypoint"] == "workflow register-operation"
+    assert result["tool"]["describe_command"] == "workflow tools describe praxis_register_operation"
+    assert result["api_route"] == {
+        "http_method": "POST",
+        "http_path": "/api/catalog_operation_register",
+    }
+    assert result["tool_bindings"][0]["tool_name"] == "praxis_register_operation"

@@ -608,60 +608,35 @@ def test_step_up_event_NOT_emitted_on_first_turn(monkeypatch: pytest.MonkeyPatch
 # --- Console HTML plan-approval markers (B.3) ------------------------------
 
 
-def test_console_html_renders_plan_approval_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_console_route_redirects_to_app_chat_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
     from surfaces.api import rest
 
     monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
     with TestClient(rest.app) as client:
-        response = client.get("/console")
-    assert response.status_code == 200
-    body = response.text
-
-    # Component name exported by the page script.
-    assert "function PlanActions" in body
-    # CSS for plan-action bubbles must ship.
-    assert ".plan-actions" in body
-    # Approval-escalation table must reference both plan modes.
-    assert "PLAN_APPROVAL_ESCALATION" in body
-    assert "plan_only" in body and "auto_edits" in body
-    assert "read_only" in body and "propose_edits" in body
-    # Canned prompts must be present so the UX is deterministic.
-    assert "CANNED_APPROVE_PROMPT" in body
-    assert "CANNED_REJECT_PROMPT" in body
+        response = client.get("/console", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/app?chat=sidebar&source=console"
 
 
 # --- Console HTML live-streaming markers (B.6) -----------------------------
 
 
-def test_console_html_streams_turn_events_live(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_console_route_no_longer_serves_live_streaming_html(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
     from surfaces.api import rest
 
     monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
     with TestClient(rest.app) as client:
-        response = client.get("/console")
+        response = client.get("/console", follow_redirects=False)
     body = response.text
 
-    # Fetch-based SSE reader function must be present.
-    assert "async function streamTurnEvents" in body
-    # It must target the agent_sessions stream endpoint.
-    assert "/api/agent-sessions/agents/${id}/stream" in body
-    # It must parse SSE `data:` frames (not use EventSource).
-    assert "text/event-stream" in body
-    assert "getReader()" in body
-    # The client must carry the bearer token on the stream (browser
-    # EventSource can't, which is why we use fetch).
-    assert "headers.Authorization = `Bearer ${token}`" in body
-    # Stream must be abortable so the client can stop it when a turn ends.
-    assert "AbortController" in body
-    # Live-streaming indicator CSS + React state must ship together.
-    assert "setStreaming" in body
-    assert ".status-strip.live" in body
-    assert "@keyframes pulse" in body
+    assert response.status_code == 307
+    assert "async function streamTurnEvents" not in body
+    assert "/api/agent-sessions/agents/${id}/stream" not in body
 
 
-def test_console_html_registers_pwa_and_notifications(
+def test_console_pwa_manifest_stays_gated_while_root_redirects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fastapi.testclient import TestClient
@@ -669,18 +644,15 @@ def test_console_html_registers_pwa_and_notifications(
 
     monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
     with TestClient(rest.app) as client:
-        response = client.get("/console")
-    body = response.text
+        root = client.get("/console", follow_redirects=False)
+        manifest = client.get("/console/manifest.webmanifest")
 
-    assert 'rel="manifest"' in body
-    assert "/console/manifest.webmanifest" in body
-    assert "serviceWorker.register('/console/sw.js'" in body
-    assert "Notification.requestPermission" in body
-    assert "showConsoleNotification" in body
-    assert "Install app or Add to Home screen" in body
+    assert root.status_code == 307
+    assert manifest.status_code == 200
+    assert manifest.headers["content-type"].startswith("application/manifest+json")
 
 
-def test_console_html_language_reflects_watching_and_steering(
+def test_console_route_no_longer_serves_legacy_operator_copy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fastapi.testclient import TestClient
@@ -688,14 +660,13 @@ def test_console_html_language_reflects_watching_and_steering(
 
     monkeypatch.setenv("PRAXIS_OPERATOR_DEV_MODE", "1")
     with TestClient(rest.app) as client:
-        response = client.get("/console")
+        response = client.get("/console", follow_redirects=False)
     body = response.text
 
-    # The console is for watching + steering agents, not for chatting with an assistant.
-    assert "Watch and steer" in body
-    assert "Steer the agent" in body
-    assert "Agent idle" in body
-    assert "Pick an agent to watch" in body
-    # The old builder-shaped copy must not ship anymore.
+    assert response.status_code == 307
+    assert "Watch and steer" not in body
+    assert "Steer the agent" not in body
+    assert "Agent idle" not in body
+    assert "Pick an agent to watch" not in body
     assert "Message the agent" not in body
     assert "Type a prompt below. Cmd/Ctrl+Enter to send." not in body

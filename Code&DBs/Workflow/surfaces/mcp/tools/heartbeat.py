@@ -10,28 +10,61 @@ but not the authority.
 """
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
-from runtime.daily_heartbeat import run_daily_heartbeat
+from .operator import _execute_catalog_tool
+
+
+_VALID_SCOPES = (
+    "all",
+    "providers",
+    "connectors",
+    "credentials",
+    "mcp",
+    "model_retirement",
+)
+_VALID_TRIGGERED_BY = ("launchd", "cli", "mcp", "http", "test")
 
 
 def tool_praxis_daily_heartbeat(params: dict, _progress_emitter=None) -> dict:
     """Run one heartbeat probe cycle and return the persisted result."""
     scope = str(params.get("scope") or "all").strip() or "all"
-    if scope not in ("all", "providers", "connectors", "credentials", "mcp", "model_retirement"):
+    if scope not in _VALID_SCOPES:
         return {
+            "ok": False,
             "error": (
-                f"scope must be one of all|providers|connectors|credentials|mcp|model_retirement "
+                "scope must be one of "
+                "all|providers|connectors|credentials|mcp|model_retirement "
                 f"(got {scope!r})"
-            )
+            ),
+            "error_code": "operator.daily_heartbeat_refresh.invalid_input",
+            "operation_name": "operator.daily_heartbeat_refresh",
+        }
+
+    triggered_by = str(params.get("triggered_by") or "mcp").strip().lower() or "mcp"
+    if triggered_by not in _VALID_TRIGGERED_BY:
+        return {
+            "ok": False,
+            "error": (
+                "triggered_by must be one of launchd|cli|mcp|http|test "
+                f"(got {triggered_by!r})"
+            ),
+            "error_code": "operator.daily_heartbeat_refresh.invalid_input",
+            "operation_name": "operator.daily_heartbeat_refresh",
         }
 
     if _progress_emitter:
-        _progress_emitter.log(f"Running heartbeat scope={scope}")
+        _progress_emitter.log(
+            f"Running heartbeat scope={scope} triggered_by={triggered_by}"
+        )
 
-    result = asyncio.run(run_daily_heartbeat(scope=scope, triggered_by="mcp"))
-    return result.to_json()
+    return _execute_catalog_tool(
+        operation_name="operator.daily_heartbeat_refresh",
+        payload={
+            "scope": scope,
+            "triggered_by": triggered_by,
+        },
+    )
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
@@ -40,10 +73,10 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         {
             "description": (
                 "Run one daily-heartbeat probe cycle on demand and persist the results to "
-                "heartbeat_runs + heartbeat_probe_snapshots. Probes cover provider CLI usage "
-                "(claude/codex/gemini latency + token counts), connector liveness (catalog "
-                "health), credential expiry (keychain/env API keys + OAuth tokens), and MCP "
-                "server liveness (stdio initialize handshake).\n\n"
+                "heartbeat_runs + heartbeat_probe_snapshots through CQRS authority. Probes "
+                "cover provider CLI usage (claude/codex/gemini latency + token counts), "
+                "connector liveness (catalog health), credential expiry (keychain/env API "
+                "keys + OAuth tokens), and MCP server liveness (stdio initialize handshake).\n\n"
                 "USE WHEN: you want a fresh snapshot of external-integration health without "
                 "waiting for the 09:30 launchd run — e.g. after rotating a credential, adding "
                 "a provider, or investigating a suspected outage.\n\n"
@@ -71,6 +104,15 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "model_retirement",
                         ],
                         "default": "all",
+                    },
+                    "triggered_by": {
+                        "type": "string",
+                        "description": (
+                            "Recorded caller lane for the persisted heartbeat row. "
+                            "Defaults to mcp for direct tool calls."
+                        ),
+                        "enum": ["launchd", "cli", "mcp", "http", "test"],
+                        "default": "mcp",
                     },
                 },
             },

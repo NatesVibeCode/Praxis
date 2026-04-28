@@ -61,7 +61,9 @@ def _structured_runtime_error(exc: Exception, *, action: str) -> dict[str, Any]:
 
 def tool_praxis_bugs(params: dict) -> dict:
     """Bug tracker operations: list, file, search, stats, packet, history, replay, backfill_replay, attach_evidence, patch_resume, resolve."""
-    action = params.get("action", "list")
+    action = str(params.get("action", "list") or "list").replace("-", "_")
+    if action == "show":
+        action = "packet"
 
     # Sandboxed workflow sessions may only write bugs or look up a specific bug
     # by ID. Read-enumeration actions (list, search, stats) could expose bugs
@@ -250,8 +252,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "Operation: 'list', 'file', 'search', 'duplicate_check', 'stats', 'packet', 'history', 'replay', 'backfill_replay', 'attach_evidence', 'patch_resume', or 'resolve'. Use duplicate_check for cheap title-like dedupe; use resolve+verifier_ref to prove and close FIXED bugs in one mutation.",
-                        "enum": ["list", "file", "search", "duplicate_check", "stats", "packet", "history", "replay", "backfill_replay", "attach_evidence", "patch_resume", "resolve"],
+                        "description": "Operation: 'list', 'file', 'search', 'duplicate_check', 'stats', 'show', 'packet', 'history', 'replay', 'backfill_replay', 'attach_evidence', 'patch_resume', or 'resolve'. show is an alias for packet. Use duplicate_check for cheap title-like dedupe; use resolve+verifier_ref to prove and close FIXED bugs in one mutation.",
+                        "enum": ["list", "file", "search", "duplicate_check", "stats", "show", "packet", "history", "replay", "backfill_replay", "attach_evidence", "patch_resume", "resolve"],
                     },
                     "bug_id": {"type": "string", "description": "Bug id (for resolve)."},
                     "title": {"type": "string", "description": "Bug title (for file/search)."},
@@ -327,7 +329,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "owner_ref": {"type": "string", "description": "Bug owner reference for file actions."},
                     "source_issue_id": {
                         "type": "string",
-                        "description": "Optional linked issue id. Accepted on file and as an exact lineage filter for list/search.",
+                        "description": "Optional linked issue id. On file this must already exist in issues; do not use it as a free-form dedupe key. Accepted as an exact lineage filter for list/search.",
+                    },
+                    "allow_duplicate": {
+                        "type": "boolean",
+                        "description": "When false, action=file blocks strong similar-bug candidates before writing. Set true only when the new bug is intentionally distinct.",
+                        "default": False,
                     },
                     "receipt_limit": {"type": "integer", "description": "How many recent receipts to include in packet output.", "minimum": 1, "default": 5},
                     "evidence_kind": {"type": "string", "description": "Evidence kind for attach_evidence, such as receipt, operation_receipt, run, verification_run, or healing_run."},

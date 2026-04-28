@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """preact_orient_friction (Gemini CLI BeforeTool hook).
 
-Same shape as the Claude Code implementation. Gemini CLI's hook payload
-schema is identical (`{tool_name, tool_input}`) and the response shape
-(`hookSpecificOutput.additionalContext`) is identical too — confirmed by
-inspecting gemini-cli@0.39.1's bundle. The only difference is the env
-var name (`GEMINI_PROJECT_DIR`) and Gemini's native tool names
-(`run_shell_command`, `replace`, `write_file`, `read_file`, `MultiEdit`).
+Gemini CLI accepts the same input idea as Claude (`{tool_name, tool_input}`).
+Flooding every raw tool call with context is too expensive, so this hook records
+friction evidence for every match and injects context only for explicit,
+non-advisory operator decisions.
 
 Tool-name normalization happens inside `surfaces.policy._normalize_tool_name`
 so the trigger registry doesn't need parallel entries per harness.
@@ -32,6 +30,14 @@ def _emit(response: dict[str, Any]) -> None:
 
 def _continue() -> None:
     _emit({"continue": True})
+
+
+def _should_inject_context(matches: list[Any]) -> bool:
+    return any(
+        getattr(match, "provenance", "") == "explicit"
+        and not bool(getattr(match, "advisory_only", True))
+        for match in matches
+    )
 
 
 def _repo_root() -> str:
@@ -127,14 +133,16 @@ def main() -> None:
         tool_input,
     )
 
-    additional_context = render(matches, tool_name)
-    _emit({
-        "continue": True,
-        "hookSpecificOutput": {
-            "hookEventName": "BeforeTool",
-            "additionalContext": additional_context,
-        },
-    })
+    if _should_inject_context(matches) or os.environ.get("PRAXIS_FORCE_HOOK_CONTEXT") == "1":
+        additional_context = render(matches, tool_name)
+        _emit({
+            "continue": True,
+            "hookSpecificOutput": {
+                "hookEventName": "BeforeTool",
+                "additionalContext": additional_context,
+            },
+        })
+    _continue()
 
 
 if __name__ == "__main__":

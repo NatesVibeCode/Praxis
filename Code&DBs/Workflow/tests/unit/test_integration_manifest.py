@@ -13,9 +13,11 @@ from runtime.integration_manifest import (
     ActionSpec,
     AuthShape,
     IntegrationManifest,
+    ManifestLoadReport,
     _interpolate_template,
     _parse_manifest,
     build_manifest_handler,
+    load_manifest_report,
     load_manifests,
     manifest_to_registry_row,
     resolve_token,
@@ -95,6 +97,19 @@ class TestManifestParsing:
 
     def test_nonexistent_directory(self):
         assert load_manifests(Path("/nonexistent")) == []
+
+    def test_load_manifest_report_keeps_good_rows_and_surfaces_errors(self, tmp_path):
+        (tmp_path / "good.toml").write_text(
+            '[integration]\nid = "good"\nname = "Good"\nprovider = "http"\n'
+        )
+        (tmp_path / "bad.toml").write_text("this is not [valid toml")
+
+        report = load_manifest_report(tmp_path)
+
+        assert isinstance(report, ManifestLoadReport)
+        assert [manifest.id for manifest in report.manifests] == ["good"]
+        assert len(report.errors) == 1
+        assert "bad.toml" in report.errors[0]
 
     def test_malformed_toml_skipped(self, tmp_path):
         (tmp_path / "bad.toml").write_text("this is not [valid toml")

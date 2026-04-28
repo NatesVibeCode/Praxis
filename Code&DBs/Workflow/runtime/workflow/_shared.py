@@ -8,7 +8,6 @@ import re
 from typing import TYPE_CHECKING
 
 from runtime.native_authority import default_native_authority_refs
-from runtime.provider_authority import provider_authority_fail
 from runtime.circuit_breaker import get_circuit_breakers
 
 if TYPE_CHECKING:
@@ -77,18 +76,14 @@ def _circuit_breakers():
     try:
         return get_circuit_breakers()
     except OSError as exc:
-        raise provider_authority_fail(
-            "provider_authority.circuit_breaker_unavailable",
-            f"circuit breaker gate unavailable: {exc}",
-        ) from exc
+        logger.warning("circuit breaker gate unavailable: %s", exc)
+        return None
     except RuntimeError as exc:
         message = str(exc)
         if "requires explicit WORKFLOW_DATABASE_URL Postgres authority" not in message:
             raise
-        raise provider_authority_fail(
-            "provider_authority.circuit_breaker_unavailable",
-            f"circuit breaker gate unavailable: {message}",
-        ) from exc
+        logger.warning("circuit breaker gate unavailable: %s", message)
+        return None
 
 
 def _default_native_workspace_ref(

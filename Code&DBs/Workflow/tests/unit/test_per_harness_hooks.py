@@ -4,8 +4,8 @@ Three hooks live in different dirs (one per harness) but share a contract:
   - read JSON `{tool_name, tool_input}` from stdin
   - call `surfaces.policy.check(tool_name, tool_input)` (with harness-name
     aliasing baked into the matcher)
-  - emit JSON response with `hookSpecificOutput.additionalContext` if a
-    standing order matched, otherwise `{continue: true}`
+  - emit JSON response with `hookSpecificOutput.additionalContext` when an
+    explicit non-advisory standing order matched, otherwise `{continue: true}`
   - fail open on any error
 
 We drive the entry shell scripts as subprocesses with a fixture trigger
@@ -15,7 +15,7 @@ registry, asserting on the JSON output. This catches:
   - the response shape Claude/Gemini/Codex actually consume
 
 Each hook gets the same handful of tests:
-  - matched standing order → response carries additionalContext + correct hookEventName
+  - explicit matched standing order → response carries additionalContext + correct hookEventName
   - no match → `{continue: true}`
   - bogus stdin → fail open with `{continue: true}`
 """
@@ -36,6 +36,7 @@ TRIGGER_FIXTURE = {
         {
             "decision_key": "test::hook-bash-fixture",
             "title": "hook test fixture: docker restart",
+            "decision_provenance": "explicit",
             "match": [{"tool": "Bash", "regex": r"^\s*docker\s+restart"}],
         }
     ],

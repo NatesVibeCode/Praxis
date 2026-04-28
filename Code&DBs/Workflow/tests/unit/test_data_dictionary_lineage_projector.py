@@ -19,6 +19,7 @@ from memory.data_dictionary_lineage_projector import (
     _dedupe_edges,
     _known_by_category,
 )
+from runtime.integration_manifest import ManifestLoadReport
 
 
 # --- helpers ----------------------------------------------------------------
@@ -252,3 +253,16 @@ def test_run_reports_errors_when_projector_step_raises(monkeypatch) -> None:
     result = DataDictionaryLineageProjector(conn).run()
     assert result.ok is False
     assert "fk_edges" in (result.error or "")
+
+
+def test_project_integration_manifests_fails_closed_on_manifest_errors() -> None:
+    conn = _FakeConn({})
+    known = {"integration": set(), "tool": set()}
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "runtime.integration_manifest.load_manifest_report",
+            lambda: ManifestLoadReport(manifests=(), errors=("bad.toml: TOMLDecodeError: boom",)),
+        )
+        with pytest.raises(RuntimeError, match="malformed manifest"):
+            DataDictionaryLineageProjector(conn)._project_integration_manifests(known)

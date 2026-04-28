@@ -148,7 +148,11 @@ def _submit_workflow_launch(
     if dry_run:
         from runtime.workflow.dry_run import dry_run_workflow
 
-        result = dry_run_workflow(spec)
+        result = dry_run_workflow(
+            spec,
+            pg_conn=_get_pg_conn(),
+            repo_root=_repo_root(),
+        )
         for jr in result.job_results:
             status_icon = {"succeeded": "+", "failed": "X", "blocked": "!", "skipped": "-"}.get(str(jr.status or ""), "?")
             verify_passed = jr.verify_passed

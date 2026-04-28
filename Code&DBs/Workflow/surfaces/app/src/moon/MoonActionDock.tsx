@@ -8,6 +8,7 @@ import {
   suggestNextSteps,
 } from '../shared/buildController';
 import type { BuildPayload } from '../shared/types';
+import { useObjectTypes } from '../shared/hooks/useObjectTypes';
 import { loadCatalogEnvelope, refreshCatalogEnvelope, getCatalogEnvelope, FAMILY_LABELS } from './catalog';
 import type { CatalogEnvelope, CatalogItem, CatalogFamily } from './catalog';
 import {
@@ -23,6 +24,9 @@ import { MoonIntegrationsPanel } from './MoonIntegrationsPanel';
 import { MoonDataDictionaryPanel } from './MoonDataDictionaryPanel';
 import { MoonDecisionsPanel } from './MoonDecisionsPanel';
 import { AccessControlPanel } from '../control/AccessControlPanel';
+import { appendOutcomeContract } from './outcomeContract';
+import { MoonOutcomeContract } from './MoonOutcomeContract';
+import { buildPrimitiveContractSuggestions } from './moonContractSuggestions';
 
 interface Props {
   workflowId: string | null;
@@ -50,12 +54,16 @@ export function MoonActionDock({
   onCatalogChange,
 }: Props) {
   const [prose, setProse] = useState('');
+  const [outcomeContractOpen, setOutcomeContractOpen] = useState(false);
+  const [outcomeSuccessCriteria, setOutcomeSuccessCriteria] = useState('');
+  const [outcomeFailureCriteria, setOutcomeFailureCriteria] = useState('');
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [catalogEnvelope, setCatalogEnvelope] = useState<CatalogEnvelope>(getCatalogEnvelope());
   const [familyFilter, setFamilyFilter] = useState<CatalogFamily | null>(null);
+  const { objectTypes } = useObjectTypes();
 
   const [suggestedCatalogIds, setSuggestedCatalogIds] = useState<string[]>([]);
   const [suggestedLoading, setSuggestedLoading] = useState(false);
@@ -182,12 +190,39 @@ export function MoonActionDock({
     gateCore: surfaceSummary.edgeCounts.primary,
     gateOther: Math.max(0, catalogSummary.edgeTotal - surfaceSummary.edgeCounts.primary),
   }), [catalogSummary, surfaceSummary]);
+  const outcomeContractSuggestions = useMemo(
+    () => buildPrimitiveContractSuggestions(
+      payload?.build_graph,
+      selectedNodeId,
+      objectTypes,
+      null,
+      {
+        compiledSpec: payload?.compiled_spec_projection?.compiled_spec ?? payload?.compiled_spec ?? null,
+        buildIssues: payload?.build_issues ?? null,
+      },
+    ),
+    [
+      objectTypes,
+      payload?.build_graph,
+      payload?.build_issues,
+      payload?.compiled_spec,
+      payload?.compiled_spec_projection?.compiled_spec,
+      selectedNodeId,
+    ],
+  );
 
   const hasDefinition = !!(payload?.definition && Object.keys(payload.definition).length > 0);
   const hasGraphSteps = !!payload?.build_graph?.nodes?.some(node => (node.route || '').trim().length > 0);
   const buildState = payload?.build_state || 'draft';
   const progressiveBuild = payload?.progressive_build;
-  const progressiveSource = prose.trim()
+  const actionSource = useMemo(
+    () => appendOutcomeContract(prose, {
+      successCriteria: outcomeSuccessCriteria,
+      failureCriteria: outcomeFailureCriteria,
+    }),
+    [outcomeFailureCriteria, outcomeSuccessCriteria, prose],
+  );
+  const progressiveSource = actionSource.trim()
     || progressiveBuild?.source_prose?.trim()
     || (typeof payload?.definition?.source_prose === 'string' ? payload.definition.source_prose.trim() : '');
   const progressiveUnit = progressiveBuild?.last_unit;
@@ -205,25 +240,27 @@ export function MoonActionDock({
   }, [onPayloadChange, payload?.workflow, workflowId]);
 
   const handleRefine = useCallback(async () => {
-    if (!prose.trim()) return;
+    if (!actionSource.trim()) return;
     setLoading(true);
     setAction('refine');
     setError(null);
     setSuccess(null);
     try {
-      const result = await refineDefinition(prose.trim(), {
+      const result = await refineDefinition(actionSource.trim(), {
         workflowId: payload?.workflow?.id ?? workflowId,
         title: payload?.workflow?.name,
       });
       adoptBuildPayload(result);
       setSuccess('Definition refined');
       setProse('');
+      setOutcomeSuccessCriteria('');
+      setOutcomeFailureCriteria('');
     } catch (e: any) {
       setError(e.message || 'Refinement failed');
     } finally {
       setLoading(false);
     }
-  }, [adoptBuildPayload, payload, prose]);
+  }, [actionSource, adoptBuildPayload, payload, workflowId]);
 
   const handleProgressiveStep = useCallback(async () => {
     if (!progressiveSource) return;
@@ -243,6 +280,8 @@ export function MoonActionDock({
       const unitTitle = result.progressive_build?.last_unit?.title || 'unit';
       setSuccess(`Accepted ${unitTitle}`);
       setProse('');
+      setOutcomeSuccessCriteria('');
+      setOutcomeFailureCriteria('');
     } catch (e: any) {
       setError(e.message || 'Progressive build failed');
     } finally {
@@ -259,13 +298,13 @@ export function MoonActionDock({
   ]);
 
   const handleCompile = useCallback(async () => {
-    if (!prose.trim()) return;
+    if (!actionSource.trim()) return;
     setLoading(true);
     setAction('compile');
     setError(null);
     setSuccess(null);
     try {
-      const result = await compileDefinition(prose.trim(), {
+      const result = await compileDefinition(actionSource.trim(), {
         workflowId: payload?.workflow?.id ?? workflowId,
         title: payload?.workflow?.name,
       });
@@ -274,12 +313,14 @@ export function MoonActionDock({
       if (createdWorkflowId && createdWorkflowId !== workflowId) onWorkflowCreated?.(createdWorkflowId);
       setSuccess('Compiled');
       setProse('');
+      setOutcomeSuccessCriteria('');
+      setOutcomeFailureCriteria('');
     } catch (e: any) {
       setError(e.message || 'Compilation failed');
     } finally {
       setLoading(false);
     }
-  }, [adoptBuildPayload, onWorkflowCreated, payload?.workflow?.name, prose, workflowId]);
+  }, [actionSource, adoptBuildPayload, onWorkflowCreated, payload?.workflow?.id, payload?.workflow?.name, workflowId]);
 
   const handleCommit = useCallback(async () => {
     if (!hasDefinition && !hasGraphSteps) return;
@@ -345,12 +386,24 @@ export function MoonActionDock({
         {hasDefinition ? 'Add the next checked unit' : 'Describe the workflow'}
       </div>
       <textarea
+        aria-label={hasDefinition ? 'Next checked unit' : 'Workflow intent'}
         className="moon-dock-form__input moon-action__textarea"
         value={prose}
         onChange={e => setProse(e.target.value)}
         placeholder={hasDefinition ? 'Add detail, or keep using the original intent...' : 'Describe the workflow...'}
         rows={2}
         disabled={loading}
+      />
+      <MoonOutcomeContract
+        compact
+        open={outcomeContractOpen}
+        disabled={loading}
+        successCriteria={outcomeSuccessCriteria}
+        failureCriteria={outcomeFailureCriteria}
+        suggestions={outcomeContractSuggestions}
+        onOpenChange={setOutcomeContractOpen}
+        onSuccessChange={setOutcomeSuccessCriteria}
+        onFailureChange={setOutcomeFailureCriteria}
       />
 
       <div className="moon-action__compiler-loop">
@@ -402,11 +455,11 @@ export function MoonActionDock({
           {loading && action === 'progressive' ? 'Checking...' : hasDefinition ? 'Add checked unit' : 'Start checked build'}
         </button>
         {hasDefinition ? (
-          <button className="moon-dock-form__btn moon-dock-form__btn--secondary" onClick={handleRefine} disabled={loading || !prose.trim()}>
+          <button className="moon-dock-form__btn moon-dock-form__btn--secondary" onClick={handleRefine} disabled={loading || !actionSource.trim()}>
             {loading && action === 'refine' ? 'Resolving...' : 'Resolve all'}
           </button>
         ) : (
-          <button className="moon-dock-form__btn moon-dock-form__btn--secondary" onClick={handleCompile} disabled={loading || !prose.trim()}>
+          <button className="moon-dock-form__btn moon-dock-form__btn--secondary" onClick={handleCompile} disabled={loading || !actionSource.trim()}>
             {loading && action === 'compile' ? 'Resolving...' : 'Resolve all'}
           </button>
         )}

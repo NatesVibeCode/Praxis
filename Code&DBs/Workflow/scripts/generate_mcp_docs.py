@@ -15,6 +15,10 @@ from surfaces.api.rest import list_api_routes
 from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
 from surfaces.mcp.docs import render_mcp_markdown
 
+CANONICAL_DOCS_COMMAND = (
+    'PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs'
+)
+
 
 def _render_code_list(values: list[str] | tuple[str, ...]) -> str:
     return ", ".join(f"`{value}`" for value in values if value) or "-"
@@ -36,6 +40,7 @@ def render_cli_markdown() -> str:
         "",
         "This file is generated from the MCP/catalog metadata used by `workflow tools`.",
         "If it disagrees with runtime output, trust the runtime and regenerate this file.",
+        f"Canonical regeneration command: `{CANONICAL_DOCS_COMMAND}`.",
         "",
         "## CQRS Gateway",
         "",
@@ -109,6 +114,8 @@ def render_api_markdown() -> str:
         "",
         "This file is generated from the live FastAPI route catalog exposed by `GET /api/routes`.",
         "If it disagrees with runtime output, trust `praxis workflow routes --json` and regenerate this file.",
+        f"Canonical regeneration command: `{CANONICAL_DOCS_COMMAND}`.",
+        "Generate and test API docs in the same runtime environment; route counts are authority-sensitive.",
         "",
         "## Discovery Commands",
         "",

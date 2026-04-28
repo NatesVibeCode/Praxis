@@ -10,7 +10,7 @@ description: "Search before you build. Use this skill BEFORE implementing any ne
 - MCP/catalog reference: `docs/MCP.md`
 - CLI reference: `docs/CLI.md`
 - API route reference: `docs/API.md`
-- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs`
 - If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
 
 Every time you're about to write new code in this repo, stop and search first. The codebase is large and has extensive existing infrastructure. Duplicating what already exists wastes time and creates maintenance burden.
@@ -72,6 +72,14 @@ praxis workflow tools describe praxis_recall
 praxis workflow tools describe praxis_query
 ```
 
+For CQRS operations, ask the forge before editing wrappers or migrations:
+
+```
+praxis workflow tools call praxis_operation_forge --input-json '{"operation_name":"operator.example","operation_kind":"query"}'
+```
+
+The forge output is the action packet: use its register payload, fast-feedback commands, and reject paths as the checklist.
+
 ### 4. Direct code search (when you know what you're looking for)
 
 Use `Grep` for exact names, `Glob` for file patterns. These are faster when you already know the identifier.
@@ -89,7 +97,27 @@ After searching, decide:
 
 ## After Code Changes
 
-When you've written or modified code, update the search index:
+Use fast, local feedback before broad validation:
+
+```text
+PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m py_compile <touched-python-file>
+PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m pytest <focused-test-file> -q
+```
+
+For workflow execution, provider routing, retry, or queue changes, add:
+
+```text
+praxis workflow firecheck --json
+```
+
+For MCP/CLI/API catalog or docs changes, regenerate docs with the canonical module command and run the docs metadata test:
+
+```text
+PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs
+PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m pytest Code&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py -q
+```
+
+Then update the search index:
 
 ```
 praxis workflow discover reindex --yes

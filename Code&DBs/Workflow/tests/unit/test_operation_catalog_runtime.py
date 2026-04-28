@@ -119,6 +119,50 @@ def test_list_resolved_operation_definitions_preserves_operation_overrides(monke
     assert resolved[0].source_policy_enabled is False
 
 
+def test_get_resolved_operation_definition_canonicalizes_stale_compile_materialize_path(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        operation_catalog,
+        "_load_operation_catalog_record",
+        lambda conn, operation_ref: None,
+    )
+    monkeypatch.setattr(
+        operation_catalog,
+        "_load_operation_catalog_record_by_name",
+        lambda conn, operation_name: {
+            **_QUERY_ROW,
+            "operation_ref": "compile.materialize",
+            "operation_name": "compile_materialize",
+            "source_kind": "operation_command",
+            "operation_kind": "command",
+            "http_path": "/api/compile_materialize",
+            "posture": "operate",
+            "idempotency_policy": "idempotent",
+        },
+    )
+    monkeypatch.setattr(
+        operation_catalog,
+        "_list_operation_source_policy_records",
+        lambda conn, include_disabled=False, limit=100: [
+            {
+                **_QUERY_POLICY,
+                "policy_ref": "operation-command",
+                "source_kind": "operation_command",
+                "posture": "operate",
+                "idempotency_policy": "idempotent",
+            }
+        ],
+    )
+
+    resolved = operation_catalog.get_resolved_operation_definition(
+        object(),
+        operation_name="compile_materialize",
+    )
+
+    assert resolved.http_path == "/api/compile/materialize"
+
+
 def test_get_operation_catalog_record_requires_exactly_one_lookup_key() -> None:
     with pytest.raises(operation_catalog.OperationCatalogBoundaryError) as exc_info:
         operation_catalog.get_operation_catalog_record(

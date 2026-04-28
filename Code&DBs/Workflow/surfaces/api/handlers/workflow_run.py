@@ -145,7 +145,11 @@ def _handle_workflow(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     if dry_run:
         from runtime.workflow.dry_run import dry_run_workflow
 
-        result = dry_run_workflow(spec)
+        result = dry_run_workflow(
+            spec,
+            pg_conn=subs.get_pg_conn(),
+            repo_root=REPO_ROOT,
+        )
         return {
             "spec_name": result.spec_name,
             "total_jobs": result.total_jobs,

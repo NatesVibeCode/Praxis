@@ -9,6 +9,7 @@ from runtime.workflow._workflow_execution import (
     plan_workflow_request,
 )
 from runtime.domain import RunState
+from receipts import EvidenceRow, ReceiptV1, RouteIdentity
 
 
 class _FakePlanner:
@@ -191,3 +192,87 @@ def test_execute_workflow_request_passes_max_context_tokens(monkeypatch):
     assert failure is None
     assert execution_result == "execution"
     assert submissions[0][1]["max_context_tokens"] == 2048
+
+
+def test_graph_resume_rehydrates_only_succeeded_node_receipts() -> None:
+    from runtime.execution import orchestrator as execution_orchestrator
+
+    now = datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc)
+    route = RouteIdentity(
+        workflow_id="workflow.graph",
+        run_id="run.graph.retry",
+        request_id="request.graph.retry",
+        authority_context_ref="context.graph",
+        authority_context_digest="digest.graph",
+        claim_id="claim.graph",
+        transition_seq=1,
+    )
+
+    def _receipt(
+        *,
+        receipt_id: str,
+        receipt_type: str,
+        evidence_seq: int,
+        node_id: str,
+        status: str,
+        outputs: dict,
+    ) -> EvidenceRow:
+        return EvidenceRow(
+            kind="receipt",
+            evidence_seq=evidence_seq,
+            row_id=receipt_id,
+            route_identity=route,
+            transition_seq=evidence_seq,
+            record=ReceiptV1(
+                receipt_id=receipt_id,
+                receipt_type=receipt_type,
+                schema_version=1,
+                workflow_id="workflow.graph",
+                run_id="run.graph.retry",
+                request_id="request.graph.retry",
+                route_identity=route,
+                transition_seq=evidence_seq,
+                evidence_seq=evidence_seq,
+                started_at=now,
+                finished_at=now,
+                executor_type="test",
+                status=status,
+                inputs={"task_name": node_id},
+                outputs=outputs,
+                node_id=node_id,
+                attempt_no=1,
+                failure_code="sandbox_error" if status == "failed" else None,
+            ),
+        )
+
+    records = execution_orchestrator._completed_node_records_from_evidence(
+        (
+            _receipt(
+                receipt_id="receipt.context.start",
+                receipt_type="node_start_receipt",
+                evidence_seq=1,
+                node_id="build__context",
+                status="running",
+                outputs={},
+            ),
+            _receipt(
+                receipt_id="receipt.context.done",
+                receipt_type="node_execution_receipt",
+                evidence_seq=2,
+                node_id="build__context",
+                status="succeeded",
+                outputs={"user_message": "ready"},
+            ),
+            _receipt(
+                receipt_id="receipt.build.failed",
+                receipt_type="node_execution_receipt",
+                evidence_seq=3,
+                node_id="build",
+                status="failed",
+                outputs={"stderr": "sandbox"},
+            ),
+        )
+    )
+
+    assert [record.node_id for record in records] == ["build__context"]
+    assert records[0].completion_receipt_id == "receipt.context.done"

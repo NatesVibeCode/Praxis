@@ -5,9 +5,8 @@
   flex-direction: column;
   overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(243, 238, 228, 0.09), transparent 24%),
-    radial-gradient(circle at top right, rgba(88, 166, 255, 0.08), transparent 18%),
-    radial-gradient(circle at 50% 100%, rgba(63, 185, 80, 0.04), transparent 20%),
+    radial-gradient(circle at 18% -12%, rgba(243, 238, 228, 0.09), transparent 34%),
+    radial-gradient(circle at 82% 116%, rgba(210, 153, 34, 0.045), transparent 28%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 18%);
 }
 
@@ -16,21 +15,21 @@
   top: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr) auto;
-  gap: 16px;
+  grid-template-columns: minmax(190px, 250px) minmax(0, 1fr) auto;
+  gap: 14px;
   align-items: center;
-  padding: 16px 24px 15px;
+  padding: 10px 24px 9px;
   border-bottom: 1px solid var(--shell-border);
-  background: linear-gradient(180deg, rgba(9, 9, 9, 0.92), var(--shell-backdrop));
+  background: linear-gradient(180deg, rgba(8, 8, 8, 0.94), rgba(8, 8, 8, 0.86));
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 36px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.035), 0 18px 36px rgba(0, 0, 0, 0.16);
 }
 
 .app-shell__chrome--collapsed {
-  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(170px, 220px) minmax(0, 1fr) auto;
   gap: 12px;
-  padding: 10px 18px 9px;
+  padding: 8px 18px 7px;
 }
 
 .app-shell__chrome--collapsed .app-shell__identity {
@@ -75,14 +74,14 @@
 .app-shell__identity {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
 }
 
 .app-shell__identity-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background:
     radial-gradient(circle at top, rgba(255, 255, 255, 0.16), transparent 72%),
@@ -95,13 +94,13 @@
 .app-shell__identity-mark::after {
   content: '';
   position: absolute;
-  inset: 10px;
-  border-radius: 10px;
+  inset: 8px;
+  border-radius: 6px;
   border: 1px solid rgba(243, 238, 228, 0.42);
 }
 
 .app-shell__identity-mark::after {
-  inset: 15px;
+  inset: 13px;
   border-radius: 999px;
   background: radial-gradient(circle, rgba(243, 238, 228, 0.6), transparent 70%);
   border: 0;
@@ -111,20 +110,20 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
 .app-shell__identity-copy span {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
 .app-shell__identity-copy strong {
   color: var(--text);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   line-height: 1.25;
   white-space: nowrap;
@@ -133,13 +132,13 @@
 }
 
 .app-shell__identity-copy em {
-  color: var(--accent);
+  color: var(--text-muted);
   font-style: normal;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
-  margin-top: 4px;
+  margin-top: 0;
 }
 
 .app-shell__identity-copy p {
@@ -156,42 +155,42 @@
 
 .app-shell__tabstrip {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding-bottom: 3px;
 }
 
 .app-shell__tab {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.035);
+  padding: 2px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
   position: relative;
   transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
 .app-shell__tab--active {
-  border-color: rgba(243, 238, 228, 0.24);
-  background: rgba(243, 238, 228, 0.08);
-  box-shadow: 0 0 0 1px rgba(243, 238, 228, 0.06), 0 14px 30px rgba(0, 0, 0, 0.18);
+  border-color: rgba(243, 238, 228, 0.16);
+  background: rgba(243, 238, 228, 0.055);
+  box-shadow: none;
 }
 
 .app-shell__tab--active::after {
   content: '';
   position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: -3px;
+  left: 9px;
+  right: 9px;
+  bottom: -5px;
   height: 2px;
   background: var(--accent);
   box-shadow: 0 0 18px rgba(243, 238, 228, 0.28);
 }
 
 .app-shell__tab:hover {
-  border-color: rgba(243, 238, 228, 0.16);
+  border-color: rgba(243, 238, 228, 0.12);
   background: rgba(255, 255, 255, 0.05);
 }
 
@@ -207,13 +206,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 0 12px 0 8px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px 0 6px;
   color: var(--text);
   font-size: 13px;
   font-weight: 700;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .app-shell__tab-button:focus-visible,
@@ -225,18 +224,18 @@
 .app-shell__tab-kind {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
 .app-shell__tab-glyph {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  border-radius: 7px;
+  border-radius: 6px;
   border: 1px solid rgba(243, 238, 228, 0.16);
   background: rgba(255, 255, 255, 0.035);
   color: var(--accent);
@@ -310,7 +309,7 @@
 .app-shell__actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -322,11 +321,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 44px;
-  min-width: 108px;
-  padding: 7px 12px 7px 8px;
-  border-radius: 10px;
+  gap: 8px;
+  min-height: 36px;
+  min-width: 92px;
+  padding: 5px 10px 5px 6px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: rgba(255, 255, 255, 0.03);
   color: var(--text);
@@ -347,10 +346,10 @@
 }
 
 .app-shell__action-icon {
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
-  border-radius: 8px;
+  border-radius: 7px;
   border: 1px solid rgba(243, 238, 228, 0.16);
   background: rgba(255, 255, 255, 0.035);
   color: var(--accent);
@@ -361,26 +360,26 @@
 .app-shell__action-icon--new::after {
   content: '';
   position: absolute;
-  left: 8px;
-  right: 8px;
-  top: 14px;
+  left: 7px;
+  right: 7px;
+  top: 11px;
   height: 2px;
   border-radius: 2px;
   background: currentColor;
 }
 
 .app-shell__action-icon--new::after {
-  left: 14px;
+  left: 11px;
   right: auto;
-  top: 8px;
+  top: 7px;
   width: 2px;
-  height: 14px;
+  height: 10px;
 }
 
 .app-shell__action-icon--chat::before {
   content: '';
   position: absolute;
-  inset: 7px 6px 9px;
+  inset: 6px 5px 7px;
   border: 2px solid currentColor;
   border-radius: 6px;
 }
@@ -388,10 +387,10 @@
 .app-shell__action-icon--chat::after {
   content: '';
   position: absolute;
-  left: 10px;
-  bottom: 6px;
-  width: 7px;
-  height: 7px;
+  left: 8px;
+  bottom: 5px;
+  width: 6px;
+  height: 6px;
   border-left: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
   transform: rotate(-18deg);
@@ -420,7 +419,7 @@
 .app-shell__action-kicker {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -429,8 +428,31 @@
   flex: 1;
   min-height: 0;
   position: relative;
+  overflow: hidden; /* Changed from auto to let internal panes scroll */
+  display: flex;
+}
+
+.app-shell__main {
+  flex: 1;
+  container-name: app-main;
+  container-type: inline-size;
+  min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-shell__main--shrunk {
+  flex: 1 1 auto;
+  opacity: 1;
+  filter: none;
+  pointer-events: auto;
+}
+
+.app-shell__main--hidden {
+  flex: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 @keyframes app-shell-enter {

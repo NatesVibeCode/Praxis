@@ -18,7 +18,6 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from functools import lru_cache
 from datetime import datetime, timezone
 from posixpath import normpath
 from pathlib import Path
@@ -28,6 +27,9 @@ from uuid import uuid4
 from pathlib import PurePosixPath
 
 from .docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
+
+
+_STATS_THREAD_CLASS = threading.Thread
 from runtime.workspace_paths import (
     container_auth_seed_dir,
     container_home,
@@ -325,8 +327,14 @@ def _auth_catalog_from_rows(rows: Sequence[Mapping[str, object]]) -> _CliAuthCat
     )
 
 
-@lru_cache(maxsize=1)
 def _load_cli_auth_catalog() -> _CliAuthCatalog:
+    """Load provider CLI auth mount authority from Postgres.
+
+    Do not process-cache this. Provider onboarding can add or repair CLI
+    auth mounts while workers are already running; a stale in-process catalog
+    makes the next sandbox launch omit real credentials even though the DB
+    authority has been fixed.
+    """
     try:
         from runtime._workflow_database import resolve_runtime_database_url
         from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
@@ -488,6 +496,7 @@ class HydrationReceipt:
     workspace_materialization: str
     workspace_snapshot_ref: str = ""
     workspace_snapshot_cache_hit: bool = False
+    hydrated_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -555,6 +564,7 @@ class SandboxExecutionResult:
     # shard-suggestion feedback) rather than failing the job. Empty tuple when
     # no drift detected or the job is legacy-mode.
     artifact_scope_drift: tuple[Mapping[str, Any], ...] = ()
+    workspace_manifest_audit: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -565,6 +575,7 @@ class WorkspaceSnapshotArchive:
     archive_path: str
     hydrated_files: int
     cache_hit: bool
+    hydrated_paths: tuple[str, ...] = ()
 
 
 class SandboxProviderAdapter(Protocol):
@@ -800,6 +811,23 @@ def _workspace_file_entries(
     return entries
 
 
+def _workspace_snapshot_hydrated_paths(
+    root: str,
+    *,
+    overlay_files: Sequence[Mapping[str, str]] | None = None,
+    path_filter: Sequence[str] = (),
+) -> tuple[str, ...]:
+    normalized_overlays = _normalize_workspace_overlay_files(overlay_files)
+    overlay_paths = {overlay["relative_path"] for overlay in normalized_overlays}
+    paths = {
+        relpath
+        for relpath, _absolute in _workspace_file_entries(root, path_filter=path_filter)
+        if relpath not in overlay_paths
+    }
+    paths.update(overlay_paths)
+    return tuple(sorted(paths))
+
+
 def _workspace_snapshot_ref(
     root: str,
     *,
@@ -901,6 +929,66 @@ def _execution_shard_paths(metadata: Mapping[str, Any] | None) -> tuple[str, ...
     return tuple(sorted(union))
 
 
+def _missing_intended_manifest_paths(
+    intended_paths: Sequence[str],
+    hydrated_paths: Sequence[str],
+) -> tuple[str, ...]:
+    missing: list[str] = []
+    for intended in intended_paths:
+        text = str(intended or "").strip()
+        if not text:
+            continue
+        if any(_path_matches_filter(hydrated, (text,)) for hydrated in hydrated_paths):
+            continue
+        missing.append(text)
+    return tuple(sorted(set(missing)))
+
+
+def _observed_file_read_refs_from_output(
+    output_text: str,
+    candidate_paths: Sequence[str],
+) -> tuple[str, ...]:
+    if not output_text:
+        return ()
+    observed: list[str] = []
+    for path in candidate_paths:
+        text = str(path or "").strip()
+        if text and text in output_text and text not in observed:
+            observed.append(text)
+    return tuple(observed)
+
+
+def _workspace_manifest_audit(
+    *,
+    metadata: Mapping[str, Any] | None,
+    hydration_receipt: HydrationReceipt,
+    result: SandboxExecutionResult | None = None,
+) -> dict[str, Any]:
+    intended_paths = _execution_shard_paths(metadata)
+    hydrated_paths = tuple(str(path) for path in hydration_receipt.hydrated_paths)
+    observed_candidates = tuple(sorted(set((*intended_paths, *hydrated_paths))))
+    output_text = ""
+    if result is not None:
+        output_text = "\n".join(
+            text for text in (result.stdout, result.stderr) if isinstance(text, str)
+        )
+    return {
+        "intended_manifest_paths": list(intended_paths),
+        "hydrated_manifest_paths": list(hydrated_paths),
+        "hydrated_file_count": int(hydration_receipt.hydrated_files),
+        "missing_intended_paths": list(
+            _missing_intended_manifest_paths(intended_paths, hydrated_paths)
+        ),
+        "observed_file_read_refs": list(
+            _observed_file_read_refs_from_output(output_text, observed_candidates)
+        ),
+        "observed_file_read_mode": "provider_output_path_mentions",
+        "workspace_materialization": hydration_receipt.workspace_materialization,
+        "workspace_snapshot_ref": hydration_receipt.workspace_snapshot_ref,
+        "workspace_snapshot_cache_hit": hydration_receipt.workspace_snapshot_cache_hit,
+    }
+
+
 def _workspace_snapshot_cache_root() -> str:
     configured = os.environ.get(_SNAPSHOT_CACHE_ROOT_ENV, "").strip()
     if configured:
@@ -973,6 +1061,24 @@ def _read_snapshot_archive_metadata(metadata_path: str) -> dict[str, Any] | None
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+def _read_workspace_archive_file_paths(archive_path: str) -> tuple[str, ...]:
+    paths: list[str] = []
+    try:
+        with tarfile.open(archive_path, mode="r:gz") as archive:
+            for member in archive.getmembers():
+                if not member.isfile():
+                    continue
+                normalized_name = normpath(member.name)
+                if not normalized_name.startswith("workspace/"):
+                    continue
+                relpath = normalized_name[len("workspace/"):]
+                if relpath:
+                    paths.append(relpath)
+    except (OSError, tarfile.TarError):
+        return ()
+    return tuple(sorted(set(paths)))
 
 
 def _write_workspace_snapshot_archive(
@@ -1067,11 +1173,17 @@ def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> Workspace
     _validate_workspace_snapshot_archive_path(archive_path)
     metadata = _read_snapshot_archive_metadata(str(metadata_path))
     if archive_path.is_file() and metadata is not None:
+        hydrated_paths = tuple(
+            sorted(str(path) for path in metadata.get("hydrated_paths") or () if str(path).strip())
+        )
+        if not hydrated_paths:
+            hydrated_paths = _read_workspace_archive_file_paths(str(archive_path))
         return WorkspaceSnapshotArchive(
             workspace_snapshot_ref=snapshot_ref,
             archive_path=str(archive_path),
             hydrated_files=int(metadata.get("hydrated_files") or 0),
             cache_hit=True,
+            hydrated_paths=hydrated_paths,
         )
 
     temp_archive = cache_dir / f".{uuid4().hex}.tar.gz"
@@ -1082,11 +1194,17 @@ def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> Workspace
         overlay_files=getattr(snapshot, "overlay_files", ()),
         path_filter=path_filter,
     )
+    hydrated_paths = _workspace_snapshot_hydrated_paths(
+        snapshot.source_root,
+        overlay_files=getattr(snapshot, "overlay_files", ()),
+        path_filter=path_filter,
+    )
     temp_metadata.write_text(
         json.dumps(
             {
                 "workspace_snapshot_ref": snapshot_ref,
                 "hydrated_files": hydrated_files,
+                "hydrated_paths": list(hydrated_paths),
             },
             sort_keys=True,
         ),
@@ -1099,6 +1217,7 @@ def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> Workspace
         archive_path=str(archive_path),
         hydrated_files=hydrated_files,
         cache_hit=False,
+        hydrated_paths=hydrated_paths,
     )
 
 
@@ -1190,6 +1309,7 @@ class DockerLocalSandboxProvider:
             workspace_materialization=snapshot.materialization,
             workspace_snapshot_ref=cached_snapshot.workspace_snapshot_ref,
             workspace_snapshot_cache_hit=cached_snapshot.cache_hit,
+            hydrated_paths=cached_snapshot.hydrated_paths,
         )
 
     def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
@@ -1350,7 +1470,7 @@ class DockerLocalSandboxProvider:
                     pass
                 stats_stop.wait(timeout=2.0)
 
-        stats_thread = threading.Thread(target=_poll_stats, daemon=True, name=f"docker-stats-{container_name}")
+        stats_thread = _STATS_THREAD_CLASS(target=_poll_stats, daemon=True, name=f"docker-stats-{container_name}")
         stats_thread.start()
 
         # DEBUG: log the exact command + env keys + stdin size for root-causing
@@ -1543,6 +1663,7 @@ class CloudflareRemoteSandboxProvider:
                 response.get("workspace_snapshot_ref") or cached_snapshot.workspace_snapshot_ref
             ),
             workspace_snapshot_cache_hit=cached_snapshot.cache_hit,
+            hydrated_paths=cached_snapshot.hydrated_paths,
         )
 
     def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
@@ -1754,6 +1875,11 @@ class SandboxRuntime:
                     agent_slug=str(provider_metadata.get("provider_slug") or "").strip() or None,
                 ),
             )
+            manifest_audit = _workspace_manifest_audit(
+                metadata=provider_metadata,
+                hydration_receipt=hydration_receipt,
+                result=result,
+            )
             artifact_receipt = provider.collect_artifacts(session, before_manifest)
             artifact_refs, artifact_scope_drift = _validated_artifact_refs(
                 artifact_receipt.artifact_refs,
@@ -1845,6 +1971,7 @@ class SandboxRuntime:
                     or result.workspace_snapshot_cache_hit
                 ),
                 artifact_scope_drift=artifact_scope_drift,
+                workspace_manifest_audit=manifest_audit,
             )
         except Exception:
             disposition = "failed"

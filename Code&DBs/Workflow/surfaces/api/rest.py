@@ -49,6 +49,7 @@ from registry.provider_execution_registry import (
 )
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
+from runtime.operations.commands.compile_materialize import CompileMaterializeCommand
 from runtime.operation_catalog_bindings import (
     OperationBindingResolutionError,
     resolve_http_operation_binding,
@@ -868,6 +869,8 @@ def build_operate_catalog_payload() -> dict[str, Any]:
             "contract_version": 1,
             "authority": "operation_catalog_registry",
             "call_path": "/api/operate",
+            "operate_catalog_path": "/api/operate/catalog",
+            "operation_catalog_path": "/api/catalog/operations",
             "catalog_path": "/api/catalog/operations",
             "operations": [],
             "operation_count": 0,
@@ -881,6 +884,8 @@ def build_operate_catalog_payload() -> dict[str, Any]:
         "routed_to": "operation_catalog_gateway",
         "authority": "operation_catalog_registry",
         "call_path": "/api/operate",
+        "operate_catalog_path": "/api/operate/catalog",
+        "operation_catalog_path": "/api/catalog/operations",
         "catalog_path": "/api/catalog/operations",
         "operation_count": int(payload.get("count") or 0),
     }
@@ -4380,6 +4385,28 @@ async def post_operate(
     return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
 
 
+async def _gateway_command_response(
+    *,
+    operation_name: str,
+    command: BaseModel,
+    workflow_token: str | None,
+    idempotency_key: str | None,
+) -> JSONResponse:
+    import asyncio
+
+    status_code, payload = await asyncio.to_thread(
+        execute_operate_request,
+        OperateRequest(
+            operation=operation_name,
+            input=command.model_dump(exclude_none=True),
+            mode="command",
+        ),
+        header_workflow_token=workflow_token,
+        header_idempotency_key=idempotency_key,
+    )
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
+
+
 @app.get("/api/catalog/review-decisions")
 async def catalog_review_decisions_get(request: Request) -> Response:
     return await _route_to_handler(request)
@@ -4393,6 +4420,31 @@ async def catalog_review_decisions_post(request: Request) -> Response:
 @app.post("/api/compile/preview")
 async def compile_preview_post(request: Request) -> Response:
     return await _route_to_handler(request)
+
+
+@app.post(
+    "/api/compile_materialize",
+    include_in_schema=False,
+)
+async def compile_materialize_legacy_alias_post(
+    body: CompileMaterializeCommand,
+    x_workflow_token: str | None = Header(default=None, alias="X-Workflow-Token"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> JSONResponse:
+    """Legacy compatibility alias for stale compile materialize callers.
+
+    The catalog-backed canonical route is ``/api/compile/materialize``. Keep
+    the legacy underscore path as a thin gateway alias so older callers keep
+    landing on the same CQRS operation while discovery points new callers at
+    the compile-family path.
+    """
+
+    return await _gateway_command_response(
+        operation_name="compile_materialize",
+        command=body,
+        workflow_token=x_workflow_token,
+        idempotency_key=idempotency_key,
+    )
 
 
 # No catch-all routes — every endpoint is explicitly registered above.
@@ -4456,32 +4508,16 @@ def _operator_console_enabled(env: dict[str, str] | None = None) -> bool:
 
 @app.get("/console", response_model=None, include_in_schema=False)
 @app.get("/console/", response_model=None, include_in_schema=False)
-def operator_console_root() -> Any:
-    """Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE).
+def operator_console_root() -> Response:
+    """Compatibility doorway for the retired standalone console UI.
 
-    Reachable only when the env flag is set. The route serves a narrow PWA
-    shell designed to be installed over Tailscale from the operator's phone.
+    The Praxis app shell is the operator surface now. `/console` remains as a
+    stable muscle-memory URL, but it opens `/app` with chat already docked
+    instead of serving a second chat product.
     """
-    if not _operator_console_enabled():
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "message": "operator console is not enabled",
-                "error_code": "operator_console_disabled",
-            },
-        )
-    try:
-        body = _OPERATOR_CONSOLE_HTML.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": f"operator console asset unavailable: {exc}",
-                "error_code": "operator_console_asset_missing",
-            },
-        ) from exc
-    return HTMLResponse(
-        body,
+    return RedirectResponse(
+        url="/app?chat=sidebar&source=console",
+        status_code=307,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
             "Pragma": "no-cache",

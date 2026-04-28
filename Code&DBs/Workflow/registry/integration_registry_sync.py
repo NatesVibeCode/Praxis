@@ -123,14 +123,12 @@ def _all_integration_rows() -> tuple[list[dict[str, Any]], list[str]]:
     manifest_errors: list[str] = []
     try:
         manifest_dir = Path(getattr(integration_manifest, "_MANIFEST_DIR"))
-        if manifest_dir.is_dir():
-            parser = getattr(integration_manifest, "_parse_manifest")
-            for path in sorted(manifest_dir.glob("*.toml")):
-                try:
-                    manifest = parser(path)
-                    rows.append(integration_manifest.manifest_to_registry_row(manifest))
-                except Exception as exc:
-                    manifest_errors.append(f"{path.name}: {type(exc).__name__}: {exc}")
+        report = integration_manifest.load_manifest_report(manifest_dir)
+        rows.extend(
+            integration_manifest.manifest_to_registry_row(manifest)
+            for manifest in report.manifests
+        )
+        manifest_errors.extend(report.errors)
     except Exception as exc:
         manifest_errors.append(f"manifest directory load failed: {type(exc).__name__}: {exc}")
     try:

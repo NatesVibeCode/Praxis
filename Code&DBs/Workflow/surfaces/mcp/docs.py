@@ -8,6 +8,10 @@ from typing import Iterable
 
 from .catalog import McpToolDefinition, get_tool_catalog
 
+CANONICAL_DOCS_COMMAND = (
+    'PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs'
+)
+
 
 def render_mcp_markdown() -> str:
     catalog = get_tool_catalog()
@@ -31,6 +35,7 @@ def render_mcp_markdown() -> str:
         "- `workflow tools describe <tool|alias|entrypoint>`",
         "- `workflow tools call <tool|alias|entrypoint> --input-json '{...}'`",
         "- single-result searches print the direct describe and entrypoint commands",
+        f"- regenerate docs with `{CANONICAL_DOCS_COMMAND}`",
         "",
         "## Catalog Summary",
         "",

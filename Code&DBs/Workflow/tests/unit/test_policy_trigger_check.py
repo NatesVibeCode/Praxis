@@ -87,6 +87,28 @@ def test_check_matches_via_canonical_name(tmp_path: Path, monkeypatch: pytest.Mo
     matches = trigger_check.check("Bash", {"command": "docker restart praxis-x"})
     assert len(matches) == 1
     assert matches[0].decision_key == "test::docker-restart"
+    assert matches[0].advisory_only is True
+
+
+def test_explicit_trigger_is_not_advisory_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::explicit-docker-restart",
+                "title": "docker restart blocked",
+                "decision_provenance": "explicit",
+                "match": [{"tool": "Bash", "regex": r"^\s*docker\s+restart"}],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    matches = trigger_check.check("Bash", {"command": "docker restart praxis-x"})
+    assert len(matches) == 1
+    assert matches[0].advisory_only is False
 
 
 def test_check_matches_via_gemini_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,6 +146,71 @@ def test_check_matches_via_codex_alias(tmp_path: Path, monkeypatch: pytest.Monke
 
     matches = trigger_check.check("local_shell", {"command": "docker restart praxis-x"})
     assert len(matches) == 1
+
+
+def test_codex_apply_patch_extracts_file_paths_for_edit_triggers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::cqrs-wizard",
+                "title": "use cqrs wizard",
+                "match": [
+                    {
+                        "tool": "Edit",
+                        "file_glob": "**/runtime/operations/**/*.py",
+                        "advisory_only": True,
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    patch = """*** Begin Patch
+*** Update File: /Users/nate/Praxis/Code&DBs/Workflow/runtime/operations/queries/platform_patterns.py
+@@
++    include_hydration: bool = False
+*** End Patch
+"""
+
+    matches = trigger_check.check("apply_patch", {"patch": patch})
+    assert len(matches) == 1
+    assert matches[0].decision_key == "test::cqrs-wizard"
+
+
+def test_codex_apply_patch_string_match_sees_patch_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::cqrs-registry",
+                "title": "use cqrs wizard",
+                "match": [
+                    {
+                        "tool": "Edit",
+                        "string_match": "operation_catalog_registry",
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    patch = """*** Begin Patch
+*** Update File: /repo/migrations/workflow/999_demo.sql
+@@
++INSERT INTO operation_catalog_registry (operation_name) VALUES ('demo');
+*** End Patch
+"""
+
+    matches = trigger_check.check("apply_patch", {"content": patch})
+    assert len(matches) == 1
+    assert matches[0].decision_key == "test::cqrs-registry"
 
 
 def test_harness_scoped_trigger_matches_only_declared_harness(
@@ -407,15 +494,16 @@ def test_advisory_trigger_refires_on_different_target(
 def test_explicit_trigger_never_dedupes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Operator-binding triggers (advisory_only != True) always fire — never silenced."""
+    """Operator-binding explicit triggers always fire — never silenced."""
     registry_path = _write_registry(
         tmp_path,
         [
             {
                 "decision_key": "test::explicit",
                 "title": "explicit",
+                "decision_provenance": "explicit",
                 "match": [
-                    # No advisory_only flag — defaults to explicit/binding.
+                    # Explicit provenance defaults to binding.
                     {"tool": "Bash", "regex": r"^echo"},
                 ],
             }
@@ -427,6 +515,28 @@ def test_explicit_trigger_never_dedupes(
     b = trigger_check.check("Bash", {"command": "echo hi"})
     assert len(a) == 1
     assert len(b) == 1  # explicit triggers ALWAYS fire
+
+
+def test_inferred_trigger_without_flag_dedupes_as_advisory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Old registry rows without provenance are advisory and cooldowned."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::legacy-inferred",
+                "title": "legacy inferred row",
+                "match": [{"tool": "Bash", "regex": r"^echo"}],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    a = trigger_check.check("Bash", {"command": "echo hi"})
+    b = trigger_check.check("Bash", {"command": "echo hi"})
+    assert len(a) == 1
+    assert b == []
 
 
 def test_cross_subprocess_cooldown_via_marker_dir(

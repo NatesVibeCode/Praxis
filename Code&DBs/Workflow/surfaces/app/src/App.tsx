@@ -24,6 +24,7 @@ import {
 } from './shell/routeRegistry';
 import { useShellState } from './shell/useShellState';
 import { MenuPanel, type MenuSection } from './menu';
+import { StrategyConsole, type StrategyStage } from './dashboard/StrategyConsole';
 import './styles/app-shell.css';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error: Error | null }> {
@@ -81,6 +82,17 @@ function SurfaceFallback({ title, copy }: { title: string; copy: string }) {
   );
 }
 
+function initialStrategyStageFromLocation(): StrategyStage {
+  if (typeof window === 'undefined') return 'icon';
+  const params = new URLSearchParams(window.location.search);
+  const requested = (params.get('chat') || params.get('console') || params.get('assistant') || '').trim().toLowerCase();
+  if (requested === 'focus' || requested === 'full') return 'full';
+  if (requested === 'sidebar' || requested === 'dock' || requested === 'docked' || requested === 'open' || requested === '1') {
+    return 'sidebar';
+  }
+  return 'icon';
+}
+
 interface BuildDraftGuardState {
   dirty: boolean;
   message: string | null;
@@ -92,9 +104,8 @@ interface ShellTransitionOptions {
 
 export function AppShell() {
   const { state, routes, sessionAggregateRef, ready, dispatch } = useShellState();
-  const [chatOpen, setChatOpen] = useState(false);
+  const [strategyStage, setStrategyStage] = useState<StrategyStage>(() => initialStrategyStageFromLocation());
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
-  const [creatingSeedId, setCreatingSeedId] = useState<string | null>(null);
   const [buildDraftGuard, setBuildDraftGuard] = useState<BuildDraftGuardState>({ dirty: false, message: null });
   const commandButtonRef = useRef<HTMLButtonElement | null>(null);
   const stateRef = useRef(state);
@@ -187,7 +198,6 @@ export function AppShell() {
     [dispatch, shouldBlockBuildDraftExit],
   );
 
-  // Tab strip activation — picks the canonical route for a static surface.
   const activateStaticSurface = useCallback(
     async (
       surfaceName: 'dashboard' | 'build' | 'manifests' | 'atlas',
@@ -209,10 +219,6 @@ export function AppShell() {
   );
 
   const openDashboardCosts = useCallback(async () => {
-    // Costs is a drill-in on the dashboard surface, not a separate top-level
-    // route. activeRouteId stays at route.app.dashboard so the chrome shows
-    // 'Control plane'; renderActiveTab inspects dashboardDetail to swap in
-    // the CostsPanel component.
     await openSurface('route.app.dashboard', {
       diff: { activeTabId: 'dashboard', dashboardDetail: 'costs', moonRunId: null },
       callerRef: 'shell.dashboard.cost_drill_in',
@@ -367,20 +373,12 @@ export function AppShell() {
     [dispatch],
   );
 
-  // popstate → fire history.popped + matching surface.opened
   useEffect(() => {
     if (!ready) return undefined;
     const onPopState = () => {
       const match = matchPath(window.location.pathname, window.location.search);
       const targetRouteId = match?.route_id || 'route.app.dashboard';
       const slotValues = match?.slot_values || {};
-
-      void dispatch('shell.history.popped', {
-        target_route_id: targetRouteId,
-        slot_values: slotValues,
-        caller_ref: 'shell.history.popstate',
-      });
-
       void openSurface(targetRouteId, {
         slotValues,
         reason: 'history_pop',
@@ -390,9 +388,8 @@ export function AppShell() {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [dispatch, openSurface, ready]);
+  }, [openSurface, ready]);
 
-  // beforeunload protection for dirty build draft
   useEffect(() => {
     if (!(state.activeTabId === 'build' && buildDraftGuard.dirty)) return undefined;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -403,14 +400,13 @@ export function AppShell() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [buildDraftGuard.dirty, state.activeTabId]);
 
-  // Keyboard shortcuts — bind from registry rows + chat/menu toggles
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       if (event.metaKey || event.ctrlKey) {
-        if (key === 'k' && !event.shiftKey) {
+        if (key === 'k') {
           event.preventDefault();
-          setChatOpen((open) => !open);
+          setStrategyStage(s => s === 'icon' ? 'sidebar' : 'icon');
           setCommandMenuOpen(false);
           return;
         }
@@ -419,29 +415,17 @@ export function AppShell() {
           setCommandMenuOpen((open) => !open);
           return;
         }
-        // Look for a matching keyboard_shortcut in the registry.
-        const shortcut = `${event.metaKey || event.ctrlKey ? 'ctrl+' : ''}${key}`;
-        const row = routes.find((r) => (r.keyboard_shortcut || '').toLowerCase() === shortcut);
-        if (row && row.surface_name === 'build') {
-          event.preventDefault();
-          void openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' });
-          return;
-        }
       }
       if (event.key === 'Escape') {
         if (commandMenuOpen) {
           setCommandMenuOpen(false);
           return;
         }
-        if (chatOpen) {
-          setChatOpen(false);
-          return;
-        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [chatOpen, commandMenuOpen, openBuild, routes]);
+  }, [commandMenuOpen]);
 
   const activeRow = useMemo(
     () => routes.find((r) => r.route_id === state.activeRouteId) || null,
@@ -470,7 +454,6 @@ export function AppShell() {
       const seed = seedBundles.find((candidate) => candidate.id === seedId);
       if (!seed) return;
       const bundle = JSON.parse(JSON.stringify(seed.bundle));
-      setCreatingSeedId(seedId);
       try {
         const response = await fetch('/api/manifests/save-as', {
           method: 'POST',
@@ -489,8 +472,6 @@ export function AppShell() {
         setCommandMenuOpen(false);
       } catch (error) {
         console.error(error);
-      } finally {
-        setCreatingSeedId(null);
       }
     },
     [openManifest, seedBundles],
@@ -521,8 +502,6 @@ export function AppShell() {
         label: seed.label,
         description: seed.description,
         keywords: ['seed', 'starter', 'surface', seed.id, seed.label],
-        meta: creatingSeedId === seed.id ? 'Creating…' : 'Surface',
-        disabled: creatingSeedId !== null,
         keepOpen: true,
         onSelect: () => {
           void createSeedTab(seed.id);
@@ -541,45 +520,11 @@ export function AppShell() {
       },
     }));
 
-    const chatItem = {
-      id: 'navigate:chat',
-      label: chatOpen ? 'Close Chat' : 'Open Chat',
-      description: 'Toggle the side chat surface.',
-      keywords: ['chat', 'assistant', 'conversation'],
-      shortcut: 'Ctrl+K',
-      selected: chatOpen,
-      onSelect: () => setChatOpen((open) => !open),
-    };
-
-    const dynamicItems = state.dynamicTabs.map((tab) => ({
-      id: `tab:${tab.id}`,
-      label: tab.label,
-      description: 'Open the surface tab.',
-      keywords: ['tab', tab.kind, tab.label],
-      selected: state.activeTabId === tab.id,
-      onSelect: () => {
-        void openSurface(routeIdForDynamicTab(tab), {
-          diff: { activeTabId: tab.id },
-          callerRef: 'shell.command_menu.dynamic_tab',
-        });
-      },
-    }));
-
     return [
       { id: 'create', title: 'Create', items: createItems },
-      { id: 'navigate', title: 'Navigate', items: [...navigateItems, chatItem, ...dynamicItems] },
+      { id: 'navigate', title: 'Navigate', items: navigateItems },
     ];
-  }, [activateStaticSurface, chatOpen, createSeedTab, creatingSeedId, openBuild, openSurface, seedBundles, state, tabStripRows]);
-
-  const ChatPanel = useMemo(
-    () =>
-      React.lazy(() =>
-        import('./dashboard/ChatPanel').then((m) => ({ default: m.ChatPanel })).catch(() => ({
-          default: (_props: { open: boolean; onClose: () => void }) => <></>,
-        })),
-      ),
-    [],
-  );
+  }, [activateStaticSurface, createSeedTab, openBuild, seedBundles, state, tabStripRows]);
 
   const renderActiveTab = () => {
     if (!ready || !activeRow) {
@@ -601,7 +546,7 @@ export function AppShell() {
       openManifestEditor,
       openCompose,
       openDashboardCosts,
-      setChatOpen,
+      setChatOpen: () => setStrategyStage('sidebar'),
       handleBuildDraftStateChange,
     });
     return <Component {...props} />;
@@ -614,10 +559,9 @@ export function AppShell() {
           <div className="app-shell__identity">
             <div className="app-shell__identity-mark" aria-hidden="true" />
             <div className="app-shell__identity-copy">
-              <span>{APP_CONFIG.suiteName}</span>
+              <span>{APP_CONFIG.suiteName} · Moon</span>
               <strong>{APP_CONFIG.name}</strong>
               <em>{activeContext.label}</em>
-              <p>{activeContext.detail}</p>
             </div>
           </div>
 
@@ -711,12 +655,12 @@ export function AppShell() {
             </div>
             <button
               type="button"
-              onClick={() => setChatOpen((open) => !open)}
-              className={`app-shell__action-button ${chatOpen ? 'app-shell__action-button--active' : ''}`}
+              onClick={() => setStrategyStage(s => s === 'icon' ? 'sidebar' : 'icon')}
+              className={`app-shell__action-button ${strategyStage !== 'icon' ? 'app-shell__action-button--active' : ''}`}
             >
               <span className="app-shell__action-icon app-shell__action-icon--chat" aria-hidden="true" />
               <span className="app-shell__action-copy">
-                <span className="app-shell__action-kicker">Cmd/Ctrl + K</span>
+                <span className="app-shell__action-kicker">Assistant</span>
                 <span>Chat</span>
               </span>
             </button>
@@ -731,11 +675,15 @@ export function AppShell() {
           sections={commandMenuSections}
           onClose={() => setCommandMenuOpen(false)}
         />
-        <main className="app-shell__content">
-          {renderActiveTab()}
-        </main>
+        <div className="app-shell__content">
+          <main className={`app-shell__main ${strategyStage === 'full' ? 'app-shell__main--hidden' : ''}`}>
+            {renderActiveTab()}
+          </main>
+          {strategyStage !== 'icon' && (
+            <StrategyConsole stage={strategyStage} onStageChange={setStrategyStage} />
+          )}
+        </div>
       </div>
-      <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
     </React.Suspense>
   );
 }
@@ -758,7 +706,7 @@ interface RenderPropHelpers {
   openManifestEditor: (manifestId: string) => Promise<void>;
   openCompose: (intent: string, pillRefs?: readonly string[]) => Promise<void>;
   openDashboardCosts: () => Promise<void>;
-  setChatOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setChatOpen: () => void;
   handleBuildDraftStateChange: (draft: { dirty: boolean; message?: string | null }) => void;
 }
 
@@ -771,8 +719,8 @@ function renderPropsForRoute(routeId: string, state: ShellState, helpers: Render
         onEditWorkflow: (id: string) => helpers.openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' }),
         onEditModel: (id: string) => helpers.openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' }),
         onViewRun: (runId: string) => helpers.openRunDetail(runId),
-        onNewWorkflow: () => helpers.openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' }),
-        onChat: () => helpers.setChatOpen(true),
+        onNewWorkflow: () => helpers.openBuild({ workflowId: null, intent: null, seed: null, view: 'moon' }),
+        onChat: () => helpers.setChatOpen(),
         onDescribe: () => helpers.openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' }),
         onOpenCosts: () => helpers.openDashboardCosts(),
       };

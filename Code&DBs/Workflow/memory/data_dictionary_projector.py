@@ -208,15 +208,15 @@ class DataDictionaryProjector(HeartbeatModule):
     # -- integration manifests --------------------------------------------
 
     def _project_integration_manifests(self) -> None:
-        try:
-            from runtime.integration_manifest import load_manifests
-        except Exception:
-            return
-        try:
-            manifests = load_manifests()
-        except Exception:
-            manifests = []
-        for manifest in manifests or []:
+        from runtime.integration_manifest import load_manifest_report
+
+        report = load_manifest_report()
+        if report.errors:
+            raise RuntimeError(
+                "integration manifest projection aborted due to malformed manifest(s): "
+                + "; ".join(report.errors)
+            )
+        for manifest in report.manifests:
             entries: list[dict[str, Any]] = [
                 {
                     "field_path": "id",

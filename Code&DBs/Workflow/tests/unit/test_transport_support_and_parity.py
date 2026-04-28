@@ -196,13 +196,13 @@ def _provider_authority_rows() -> tuple[dict[str, object], ...]:
             api_endpoint="https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             api_protocol_family="google_generate_content",
             api_key_env_vars=["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-            base_flags=["-p", ".", "-o", "json"],
+            base_flags=["--yolo", "-p", ".", "-o", "json"],
             model_flag="--model",
             system_prompt_flag=None,
             json_schema_flag=None,
             output_format="json",
             output_envelope_key="response",
-            forbidden_flags=["--approval-mode", "--yolo", "-y"],
+            forbidden_flags=["--approval-mode"],
             default_timeout=600,
             lane_policies={"cli_llm": _cli_lane_policy(), "llm_task": _http_lane_policy()},
             adapter_economics={
@@ -211,6 +211,7 @@ def _provider_authority_rows() -> tuple[dict[str, object], ...]:
             },
             mcp_config_style="gemini_project_settings",
             mcp_args_template=["--allowed-mcp-server-names", "dag-workflow"],
+            sandbox_env_overrides={"set": {"GEMINI_CLI_TRUST_WORKSPACE": "true"}},
             aliases=["gemini-cli"],
         ),
     )
@@ -1559,4 +1560,3 @@ def test_api_transport_reads_execution_packet_from_dependency_inputs(monkeypatch
 
     assert result.status == "succeeded"
     assert captured["messages"] == ({"role": "user", "content": "hello from packet"},)
-

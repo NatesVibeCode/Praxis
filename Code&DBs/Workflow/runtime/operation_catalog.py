@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -103,8 +104,29 @@ def _raise_storage_boundary(exc: PostgresWriteError) -> None:
     raise OperationCatalogBoundaryError(str(exc), status_code=status_code) from exc
 
 
+def _canonicalize_operation_catalog_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Project known route repairs before surfaces consume raw catalog rows.
+
+    Migration 314 canonicalized ``compile_materialize`` from the legacy
+    ``/api/compile_materialize`` path to the compile-family front door
+    ``/api/compile/materialize``. Some runtimes can lag the migration, so the
+    read surface repairs that one stale row at projection time instead of
+    letting route discovery and capability mounting diverge.
+    """
+
+    if (
+        row.get("operation_ref") == "compile.materialize"
+        and row.get("operation_name") == "compile_materialize"
+        and row.get("http_path") == "/api/compile_materialize"
+    ):
+        repaired = deepcopy(row)
+        repaired["http_path"] = "/api/compile/materialize"
+        return repaired
+    return row
+
+
 def _operation_record_from_row(row: dict[str, Any]) -> OperationCatalogRecord:
-    return OperationCatalogRecord(**row)
+    return OperationCatalogRecord(**_canonicalize_operation_catalog_row(row))
 
 
 def _source_policy_record_from_row(row: dict[str, Any]) -> OperationSourcePolicyRecord:

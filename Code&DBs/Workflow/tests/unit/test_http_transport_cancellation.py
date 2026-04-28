@@ -163,6 +163,35 @@ def test_call_llm_interrupts_inflight_http_request_when_cancelled() -> None:
         assert result_box["error"].reason_code == "llm_client.cancelled"
 
 
+def test_resolve_adapter_contract_rejects_sparse_lane_policy() -> None:
+    profiles = {
+        "openai": ProviderCLIProfile(
+            provider_slug="openai",
+            binary="codex",
+            default_model="gpt-5.4",
+            api_endpoint="https://example.test/v1/chat/completions",
+            api_protocol_family="openai_chat_completions",
+            api_key_env_vars=("OPENAI_API_KEY",),
+            lane_policies={
+                "llm_task": {
+                    "transport_kind": "http",
+                }
+            },
+        )
+    }
+
+    assert (
+        provider_transport.resolve_adapter_contract(
+            "openai",
+            "llm_task",
+            profiles=profiles,
+            adapter_config={},
+            failure_mappings={},
+        )
+        is None
+    )
+
+
 def test_api_task_adapter_returns_cancelled_when_http_request_is_interrupted() -> None:
     control = DeterministicExecutionControl()
     adapter = APITaskAdapter()

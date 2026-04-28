@@ -1,8 +1,9 @@
 """Catalog-backed operator MCP tools."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from runtime.primitive_contracts import bug_query_default_open_only_list
 
@@ -89,17 +90,26 @@ def _bounded_limit(
     return min(limit, maximum)
 
 
-def _execute_catalog_tool(*, operation_name: str, payload: dict[str, Any]) -> dict:
+def _execute_catalog_tool(
+    *,
+    operation_name: str,
+    payload: dict[str, Any],
+    fallback: Callable[[], dict[str, Any]] | None = None,
+) -> dict:
     try:
         result = execute_operation_from_subsystems(
             _subs,
             operation_name=operation_name,
             payload=payload,
         )
+        if fallback is not None and isinstance(result, dict) and result.get("ok") is False:
+            return fallback()
         if isinstance(result, dict) and "ok" not in result:
             result["ok"] = True
         return result
     except Exception as exc:
+        if fallback is not None:
+            return fallback()
         return _structured_runtime_error(exc, operation_name=operation_name)
 
 
@@ -127,9 +137,135 @@ def _bug_query_default_open_only_backlog() -> bool:
 def tool_praxis_status_snapshot(params: dict) -> dict:
     """Read the canonical workflow status snapshot."""
 
+    def _fallback() -> dict[str, Any]:
+        from runtime.operations.queries.operator_observability import (
+            QueryOperatorStatusSnapshot,
+            handle_query_operator_status_snapshot,
+        )
+
+        since_hours = _parse_positive_int(
+            params.get("since_hours", 24),
+            field_name="since_hours",
+        )
+        return handle_query_operator_status_snapshot(
+            QueryOperatorStatusSnapshot(since_hours=since_hours),
+            _subs,
+        )
+
     return _execute_catalog_tool(
         operation_name="operator.status_snapshot",
         payload={"since_hours": params.get("since_hours", 24)},
+        fallback=_fallback,
+    )
+
+
+def tool_praxis_runtime_truth_snapshot(params: dict) -> dict:
+    """Read the runtime truth snapshot."""
+
+    operation_name = "operator.runtime_truth_snapshot"
+    try:
+        since_minutes = min(
+            _parse_positive_int(params.get("since_minutes", 60), field_name="since_minutes"),
+            24 * 60,
+        )
+        heartbeat_fresh_seconds = min(
+            _parse_positive_int(
+                params.get("heartbeat_fresh_seconds", 60),
+                field_name="heartbeat_fresh_seconds",
+            ),
+            24 * 60,
+        )
+        manifest_audit_limit = min(
+            _parse_positive_int(
+                params.get("manifest_audit_limit", 10),
+                field_name="manifest_audit_limit",
+            ),
+            100,
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "run_id": str(params.get("run_id") or "").strip() or None,
+            "since_minutes": since_minutes,
+            "heartbeat_fresh_seconds": heartbeat_fresh_seconds,
+            "manifest_audit_limit": manifest_audit_limit,
+        },
+    )
+
+
+def tool_praxis_firecheck(params: dict) -> dict:
+    """Preflight whether workflow work can actually fire now."""
+
+    operation_name = "operator.firecheck"
+    try:
+        since_minutes = min(
+            _parse_positive_int(params.get("since_minutes", 60), field_name="since_minutes"),
+            24 * 60,
+        )
+        heartbeat_fresh_seconds = min(
+            _parse_positive_int(
+                params.get("heartbeat_fresh_seconds", 60),
+                field_name="heartbeat_fresh_seconds",
+            ),
+            24 * 60,
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "run_id": str(params.get("run_id") or "").strip() or None,
+            "since_minutes": since_minutes,
+            "heartbeat_fresh_seconds": heartbeat_fresh_seconds,
+        },
+    )
+
+
+def tool_praxis_remediation_plan(params: dict) -> dict:
+    """Read the remediation plan for a typed workflow failure."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.remediation_plan",
+        payload={
+            "failure_type": str(params.get("failure_type") or "").strip() or None,
+            "failure_code": str(params.get("failure_code") or "").strip() or None,
+            "stderr": str(params.get("stderr") or "").strip() or None,
+            "run_id": str(params.get("run_id") or "").strip() or None,
+        },
+    )
+
+
+def tool_praxis_remediation_apply(params: dict) -> dict:
+    """Apply guarded runtime remediation for a typed workflow failure."""
+
+    operation_name = "operator.remediation_apply"
+    try:
+        stale_after_seconds = min(
+            _parse_positive_int(
+                params.get("stale_after_seconds", 600),
+                field_name="stale_after_seconds",
+            ),
+            24 * 60 * 60,
+        )
+        dry_run = _parse_bool(params.get("dry_run", True), field_name="dry_run")
+        confirm = _parse_bool(params.get("confirm", False), field_name="confirm")
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "failure_type": str(params.get("failure_type") or "").strip() or None,
+            "failure_code": str(params.get("failure_code") or "").strip() or None,
+            "blocker_code": str(params.get("blocker_code") or "").strip() or None,
+            "stderr": str(params.get("stderr") or "").strip() or None,
+            "run_id": str(params.get("run_id") or "").strip() or None,
+            "provider_slug": str(params.get("provider_slug") or "").strip() or None,
+            "stale_after_seconds": stale_after_seconds,
+            "dry_run": dry_run,
+            "confirm": confirm,
+        },
     )
 
 
@@ -369,6 +505,25 @@ def tool_praxis_run_graph(params: dict) -> dict:
 def tool_praxis_graph_projection(params: dict) -> dict:
     """Read the cross-domain operator graph projection."""
 
+    def _fallback() -> dict[str, Any]:
+        from runtime.operations.queries.operator_observability import (
+            QueryOperatorGraphProjection,
+            handle_query_operator_graph_projection,
+        )
+
+        as_of_raw = params.get("as_of")
+        as_of = (
+            _parse_iso_datetime(as_of_raw, field_name="as_of")
+            if as_of_raw is not None
+            else None
+        )
+        return asyncio.run(
+            handle_query_operator_graph_projection(
+                QueryOperatorGraphProjection(as_of=as_of),
+                _subs,
+            )
+        )
+
     as_of = params.get("as_of")
     return _execute_catalog_tool(
         operation_name="operator.graph_projection",
@@ -379,6 +534,7 @@ def tool_praxis_graph_projection(params: dict) -> dict:
                 else None
             ),
         },
+        fallback=_fallback,
     )
 
 
@@ -1403,20 +1559,33 @@ def tool_praxis_operation_forge(params: dict) -> dict:
             ValueError("operation_name is required"),
             operation_name=operation_name,
         )
+    operation_kind = str(params.get("operation_kind") or "query").strip().lower()
+    posture = str(params.get("posture") or "").strip() or (
+        "operate" if operation_kind == "command" else "observe"
+    )
+    idempotency_policy = str(params.get("idempotency_policy") or "").strip() or (
+        "non_idempotent" if operation_kind == "command" else "read_only"
+    )
+    http_method = str(params.get("http_method") or "").strip() or (
+        "POST" if operation_kind == "command" else "GET"
+    )
     payload = {
         "operation_name": raw_operation_name,
         "operation_ref": str(params.get("operation_ref") or "").strip() or None,
         "tool_name": str(params.get("tool_name") or "").strip() or None,
+        "recommended_alias": str(params.get("recommended_alias") or "").strip() or None,
         "handler_ref": str(params.get("handler_ref") or "").strip() or None,
         "input_model_ref": str(params.get("input_model_ref") or "").strip() or None,
         "authority_domain_ref": (
             str(params.get("authority_domain_ref") or "authority.workflow_runs").strip()
         ),
-        "operation_kind": str(params.get("operation_kind") or "query").strip().lower(),
-        "posture": str(params.get("posture") or "observe").strip(),
-        "idempotency_policy": (
-            str(params.get("idempotency_policy") or "read_only").strip()
-        ),
+        "operation_kind": operation_kind,
+        "posture": posture,
+        "idempotency_policy": idempotency_policy,
+        "event_type": str(params.get("event_type") or "").strip() or None,
+        "event_required": params.get("event_required"),
+        "http_method": http_method,
+        "http_path": str(params.get("http_path") or "").strip() or None,
         "summary": str(params.get("summary") or "").strip() or None,
     }
     return _execute_catalog_tool(operation_name=operation_name, payload=payload)
@@ -1470,6 +1639,152 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "risks": {"default": "read"},
                 "examples": [
                     {"title": "Show 24h status", "input": {"since_hours": 24}},
+                ],
+            },
+        },
+    ),
+    "praxis_runtime_truth_snapshot": (
+        tool_praxis_runtime_truth_snapshot,
+        {
+            "kind": "analytics",
+            "operation_names": ["operator.runtime_truth_snapshot"],
+            "description": (
+                "Read actual workflow runtime truth across DB authority, queue state, "
+                "worker heartbeats, provider slots, host-resource leases, Docker, "
+                "manifest hydration audit, and recent typed failures."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string"},
+                    "since_minutes": {"type": "integer", "minimum": 1, "default": 60},
+                    "heartbeat_fresh_seconds": {"type": "integer", "minimum": 1, "default": 60},
+                    "manifest_audit_limit": {"type": "integer", "minimum": 1, "default": 10},
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "when_to_use": "Inspect the observed runtime truth before launch, retry, or diagnosis.",
+                "when_not_to_use": "Do not use it to mutate leases, provider slots, or workflow state.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read runtime truth", "input": {"since_minutes": 60}},
+                    {"title": "Read one run truth", "input": {"run_id": "run_abc123"}},
+                ],
+            },
+        },
+    ),
+    "praxis_firecheck": (
+        tool_praxis_firecheck,
+        {
+            "kind": "analytics",
+            "operation_names": ["operator.firecheck"],
+            "description": (
+                "Preflight whether workflow work can actually fire now. Returns "
+                "can_fire, typed blockers, and remediation plans so submitted state "
+                "is not mistaken for runtime proof."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string"},
+                    "since_minutes": {"type": "integer", "minimum": 1, "default": 60},
+                    "heartbeat_fresh_seconds": {"type": "integer", "minimum": 1, "default": 60},
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "recommended_alias": "firecheck",
+                "when_to_use": "Run before launching or retrying workflows to prove the platform can build.",
+                "when_not_to_use": "Do not use it as a retry command; it is the proof gate before retry.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Check launch readiness", "input": {}},
+                    {"title": "Check one run", "input": {"run_id": "run_abc123"}},
+                ],
+            },
+        },
+    ),
+    "praxis_remediation_plan": (
+        tool_praxis_remediation_plan,
+        {
+            "kind": "analytics",
+            "operation_names": ["operator.remediation_plan"],
+            "description": (
+                "Return the safe remediation tier, evidence requirements, approval "
+                "gate, and retry delta for a typed workflow failure."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "failure_type": {"type": "string"},
+                    "failure_code": {"type": "string"},
+                    "stderr": {"type": "string"},
+                    "run_id": {"type": "string"},
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "when_to_use": "Explain what repair is allowed for a failure before retrying.",
+                "when_not_to_use": "Do not use it to apply repairs; it is a plan/read surface.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Plan a context repair", "input": {"failure_type": "context_not_hydrated"}},
+                    {"title": "Plan from a failure code", "input": {"failure_code": "host_resource_capacity"}},
+                ],
+            },
+        },
+    ),
+    "praxis_remediation_apply": (
+        tool_praxis_remediation_apply,
+        {
+            "kind": "write",
+            "operation_names": ["operator.remediation_apply"],
+            "description": (
+                "Apply guarded runtime remediation for a typed workflow failure. "
+                "It can clean stale provider slot counters or expired host-resource "
+                "leases, refuses human-gated repairs, and never retries workflow jobs."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "failure_type": {"type": "string"},
+                    "failure_code": {"type": "string"},
+                    "blocker_code": {"type": "string"},
+                    "stderr": {"type": "string"},
+                    "run_id": {"type": "string"},
+                    "provider_slug": {"type": "string"},
+                    "stale_after_seconds": {"type": "integer", "minimum": 1, "default": 600},
+                    "dry_run": {"type": "boolean", "default": True},
+                    "confirm": {"type": "boolean", "default": False},
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "recommended_alias": "remediation-apply",
+                "when_to_use": (
+                    "Use after firecheck or a typed failure to apply only safe local "
+                    "authority repairs before one explicit retry."
+                ),
+                "when_not_to_use": "Do not use it to retry jobs or repair credentials.",
+                "risks": {
+                    "default": "write",
+                    "dry_run": "read",
+                },
+                "examples": [
+                    {"title": "Preview stale slot cleanup", "input": {"failure_type": "provider.capacity"}},
+                    {
+                        "title": "Apply stale slot cleanup",
+                        "input": {
+                            "failure_type": "provider.capacity",
+                            "dry_run": False,
+                            "confirm": True,
+                        },
+                    },
                 ],
             },
         },
@@ -2829,6 +3144,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_evolve_operation_field": (
         tool_praxis_evolve_operation_field,
         {
+            "operation_names": ["operation.evolve_field"],
             "description": (
                 "Plan-only wizard for adding a new field to an existing CQRS operation's input model.\n\n"
                 "USE WHEN: you need to evolve an existing operation's input shape (add an optional field). "
@@ -3337,10 +3653,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_operation_forge,
         {
             "kind": "analytics",
+            "operation_names": ["operator.operation_forge"],
             "description": (
                 "Preview the canonical CQRS path for adding or evolving an operation. "
-                "Produces the registration payload, tool wrapper name, required row "
-                "chain, and reject paths before anyone hand-builds catalog drift.\n\n"
+                "Produces the registration payload, real tool binding + API route when "
+                "the operation already exists, and reject paths before anyone hand-builds "
+                "catalog drift.\n\n"
                 "USE WHEN: you are about to add a tool or operation and need the "
                 "operation_catalog/data_dictionary/authority_object path made explicit."
             ),
@@ -3351,6 +3669,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "operation_name": {"type": "string"},
                     "operation_ref": {"type": "string"},
                     "tool_name": {"type": "string"},
+                    "recommended_alias": {"type": "string"},
                     "handler_ref": {"type": "string"},
                     "input_model_ref": {"type": "string"},
                     "authority_domain_ref": {
@@ -3364,13 +3683,18 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "posture": {
                         "type": "string",
-                        "default": "observe",
+                        "enum": ["observe", "operate"],
+                        "description": "Defaults from operation_kind: observe for query, operate for command.",
                     },
                     "idempotency_policy": {
                         "type": "string",
                         "enum": ["read_only", "idempotent", "non_idempotent"],
-                        "default": "read_only",
+                        "description": "Defaults from operation_kind: read_only for query, non_idempotent for command.",
                     },
+                    "event_type": {"type": "string"},
+                    "event_required": {"type": "boolean"},
+                    "http_method": {"type": "string"},
+                    "http_path": {"type": "string"},
                     "summary": {"type": "string"},
                 },
             },

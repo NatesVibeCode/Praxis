@@ -502,7 +502,12 @@ def _workflow_retry(conn: "SyncPostgresConnection", command: Any) -> str:
         retry_guard=retry_guard,
         command_id=command.command_id,
     )
-    result = _resolve_unified_dispatch_attr("retry_job")(conn, run_id, label)
+    result = _resolve_unified_dispatch_attr("retry_job")(
+        conn,
+        run_id,
+        label,
+        retry_command_id=str(command.command_id),
+    )
     if result.get("error"):
         raise ControlCommandExecutionError(
             "control.command.workflow_retry_failed",

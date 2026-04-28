@@ -179,6 +179,7 @@ def normalize_command_parts_for_docker(command_parts: list[str]) -> list[str]:
     cmd0_name = os.path.basename(normalized[0]).strip().lower()
 
     if cmd0_name == "claude":
+        normalized[0] = cmd0_name
         # Claude CLI refuses file writes without `--permission-mode bypassPermissions`
         # when run non-interactively. Inject immediately after the binary so flag
         # ordering is stable and idempotent.
@@ -187,6 +188,7 @@ def normalize_command_parts_for_docker(command_parts: list[str]) -> list[str]:
         return normalized
 
     if cmd0_name == "codex":
+        normalized[0] = cmd0_name
         try:
             exec_idx = [part.strip().lower() for part in normalized].index("exec")
         except ValueError:
@@ -198,6 +200,9 @@ def normalize_command_parts_for_docker(command_parts: list[str]) -> list[str]:
         if "--dangerously-bypass-approvals-and-sandbox" not in normalized:
             normalized.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
         return normalized
+
+    if cmd0_name in {"gemini", "cursor-agent", "agent"}:
+        normalized[0] = cmd0_name
 
     return normalized
 

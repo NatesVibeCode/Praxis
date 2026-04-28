@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 
 import pytest
@@ -134,6 +135,65 @@ def test_sync_connection_close_delegates_to_shutdown(monkeypatch) -> None:
     assert called == [True]
 
 
+def test_run_sync_closes_coroutine_when_bridge_submission_fails(monkeypatch) -> None:
+    async def _pending():
+        return "ok"
+
+    coro = _pending()
+
+    def _fail_submit(awaitable, loop):
+        assert awaitable is coro
+        assert loop == "loop"
+        raise RuntimeError("bridge down")
+
+    monkeypatch.setattr(connection_mod, "_get_bg_loop", lambda: "loop")
+    monkeypatch.setattr(connection_mod.asyncio, "run_coroutine_threadsafe", _fail_submit)
+
+    with pytest.raises(RuntimeError, match="bridge down"):
+        connection_mod._run_sync(coro)
+
+    assert coro.cr_frame is None
+
+
+def test_run_sync_cancels_and_closes_unstarted_coroutine_on_timeout(monkeypatch) -> None:
+    async def _pending():
+        return "ok"
+
+    class _StoppedLoop:
+        def is_running(self) -> bool:
+            return False
+
+    class _TimeoutFuture:
+        cancelled = False
+
+        def result(self, timeout=None):
+            del timeout
+            raise concurrent.futures.TimeoutError()
+
+        def cancel(self) -> bool:
+            self.cancelled = True
+            return True
+
+        def done(self) -> bool:
+            return False
+
+    future = _TimeoutFuture()
+    coro = _pending()
+
+    monkeypatch.setattr(connection_mod, "_get_bg_loop", lambda: _StoppedLoop())
+    monkeypatch.setattr(
+        connection_mod.asyncio,
+        "run_coroutine_threadsafe",
+        lambda awaitable, loop: future,
+    )
+
+    with pytest.raises(concurrent.futures.TimeoutError):
+        connection_mod._run_sync(coro)
+
+    assert future.cancelled is True
+    assert coro.cr_frame is None
+
+
 def test_sync_connection_rebinds_closed_singleton_pool(monkeypatch) -> None:
     connection_mod.shutdown_workflow_pool()
     first = _FakePool("postgresql://example")
@@ -193,6 +253,49 @@ def test_register_jsonb_codec_uses_tolerant_encoder_for_json_and_jsonb() -> None
         assert registered[typename]["format"] == "text"
         assert registered[typename]["encoder"] is connection_mod._encode_json_value
         assert registered[typename]["decoder"]("[]") == []
+
+
+def test_create_workflow_pool_defaults_to_single_min_connection(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_create_pool(database_url, **kwargs):
+        captured.update({"database_url": database_url, **kwargs})
+        return _FakePool(database_url)
+
+    monkeypatch.setattr(connection_mod.asyncpg, "create_pool", _fake_create_pool)
+
+    pool = asyncio.run(
+        connection_mod.create_workflow_pool(
+            env={connection_mod.WORKFLOW_DATABASE_URL_ENV: "postgresql://pool"}
+        )
+    )
+
+    assert isinstance(pool, _FakePool)
+    assert captured["min_size"] == 1
+    assert captured["max_size"] == 40
+
+
+def test_create_workflow_pool_reads_size_overrides_from_env_mapping(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_create_pool(database_url, **kwargs):
+        captured.update({"database_url": database_url, **kwargs})
+        return _FakePool(database_url)
+
+    monkeypatch.setattr(connection_mod.asyncpg, "create_pool", _fake_create_pool)
+
+    asyncio.run(
+        connection_mod.create_workflow_pool(
+            env={
+                connection_mod.WORKFLOW_DATABASE_URL_ENV: "postgresql://pool",
+                connection_mod.WORKFLOW_POOL_MIN_SIZE_ENV: "3",
+                connection_mod.WORKFLOW_POOL_MAX_SIZE_ENV: "2",
+            }
+        )
+    )
+
+    assert captured["min_size"] == 3
+    assert captured["max_size"] == 3
 
 
 def test_resolve_workflow_authority_cache_key_sanitizes_database_identity() -> None:

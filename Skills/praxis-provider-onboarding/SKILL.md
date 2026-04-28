@@ -10,7 +10,7 @@ description: "Praxis provider onboarding skill. Use when probing or onboarding a
 - MCP/catalog reference: `docs/MCP.md`
 - CLI reference: `docs/CLI.md`
 - API route reference: `docs/API.md`
-- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs`
 - If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
 
 Use this skill when adding a provider or model route to Praxis.
@@ -25,6 +25,7 @@ Before mutating anything:
 
 - read the provider's official docs
 - run `praxis workflow recall "provider routing" --type decision`
+- run `praxis workflow firecheck --json` before using a provider route for launch proof
 - inspect the live schema with:
 
 ```text
@@ -62,6 +63,8 @@ Only after a clean probe should you run `praxis workflow tools call praxis_provi
 - do not onboard a provider you have not probed
 - do not invent model slugs
 - only set `api_key_env_var` from docs or explicit user instruction
+- if capacity/provider state is stale, use `praxis workflow remediation-plan --failure-type provider.capacity --json`
+- only clear stale provider slots with `praxis workflow remediation-apply --failure-type provider.capacity --provider <provider_slug> --apply --yes` after the plan says it is safe
 
 ## Output Contract
 

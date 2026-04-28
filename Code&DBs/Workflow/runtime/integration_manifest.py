@@ -54,19 +54,37 @@ class IntegrationManifest:
     capabilities: tuple[ActionSpec, ...]
 
 
-def load_manifests(manifest_dir: Path | None = None) -> list[IntegrationManifest]:
-    """Scan *.toml files and return parsed manifests."""
+@dataclass(frozen=True, slots=True)
+class ManifestLoadReport:
+    manifests: tuple[IntegrationManifest, ...]
+    errors: tuple[str, ...]
+
+
+def load_manifest_report(manifest_dir: Path | None = None) -> ManifestLoadReport:
+    """Scan *.toml files and return parsed manifests plus parse failures."""
     directory = manifest_dir or _MANIFEST_DIR
     if not directory.is_dir():
-        return []
+        return ManifestLoadReport(manifests=(), errors=())
 
     manifests: list[IntegrationManifest] = []
+    errors: list[str] = []
     for path in sorted(directory.glob("*.toml")):
         try:
             manifests.append(_parse_manifest(path))
         except Exception as exc:
-            logger.warning("manifest parse failed for %s: %s", path.name, exc)
-    return manifests
+            errors.append(f"{path.name}: {type(exc).__name__}: {exc}")
+    return ManifestLoadReport(
+        manifests=tuple(manifests),
+        errors=tuple(errors),
+    )
+
+
+def load_manifests(manifest_dir: Path | None = None) -> list[IntegrationManifest]:
+    """Scan *.toml files and return parsed manifests."""
+    report = load_manifest_report(manifest_dir)
+    for error in report.errors:
+        logger.warning("manifest parse failed: %s", error)
+    return list(report.manifests)
 
 
 def _validate_url_scheme(url: str) -> bool:

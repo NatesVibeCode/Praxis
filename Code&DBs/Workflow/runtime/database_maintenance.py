@@ -428,22 +428,28 @@ class DatabaseMaintenanceProcessor:
                 policy_key=policy_key,
             )
 
-        from runtime.workflow import unified
+        from runtime.control_commands import submit_workflow_command
 
-        workflow_start_result = unified.submit_workflow_inline(
-            self._conn,
-            spec_dict,
-            packet_provenance={
-                "source_kind": "database_maintenance",
-                "maintenance_policy": policy_key,
-                "maintenance_intent_id": intent.intent_id,
-                "file_inputs": {
-                    "summary": summary,
-                    "evaluation": evaluation["public"],
-                    "spec_name": spec_dict.get("name"),
-                    "job_labels": [job.get("label") for job in spec_dict.get("jobs", [])],
-                },
+        packet_provenance = {
+            "source_kind": "database_maintenance",
+            "maintenance_policy": policy_key,
+            "maintenance_intent_id": intent.intent_id,
+            "file_inputs": {
+                "summary": summary,
+                "evaluation": evaluation["public"],
+                "spec_name": spec_dict.get("name"),
+                "job_labels": [job.get("label") for job in spec_dict.get("jobs", [])],
             },
+        }
+        workflow_start_result = submit_workflow_command(
+            self._conn,
+            requested_by_kind="system",
+            requested_by_ref=f"database_maintenance.{workflow_kind}",
+            inline_spec=spec_dict,
+            packet_provenance=packet_provenance,
+            dispatch_reason=f"maintenance.{workflow_kind}.auto",
+            spec_name=str(spec_dict.get("name") or f"maintenance_{workflow_kind}"),
+            total_jobs=len(spec_dict.get("jobs") or []),
         )
         workflow_run_id = str(workflow_start_result.get("run_id") or "")
         self._record_policy_evaluation(

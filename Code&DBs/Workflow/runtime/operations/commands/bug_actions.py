@@ -40,12 +40,25 @@ class BugFileCommand(BaseModel):
     discovered_in_run_id: str | None = Field(default=None)
     discovered_in_receipt_id: str | None = Field(default=None)
     owner_ref: str | None = Field(default=None, description="Optional owner reference for the bug.")
-    source_issue_id: str | None = Field(default=None, description="Optional source issue lineage id.")
+    source_issue_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional linked issue id. This must reference an existing issues row; "
+            "do not use it as a free-form dedupe key."
+        ),
+    )
     tags: tuple[str, ...] | None = Field(default=None, description="Optional bug tags.")
     resume_context: dict[str, Any] | None = Field(default=None, description="Resume context JSON object.")
     dry_run: bool = Field(default=False, description="Preview without persisting.")
     preview: bool = Field(default=False, description="Alias for dry_run.")
     include_similar_bugs: bool = Field(default=False, description="Surface similar-bug matches.")
+    allow_duplicate: bool = Field(
+        default=False,
+        description=(
+            "When false, filing is blocked if strong duplicate candidates are found. "
+            "Set true only when the new bug is intentionally distinct."
+        ),
+    )
 
 
 class BugResolveCommand(BaseModel):

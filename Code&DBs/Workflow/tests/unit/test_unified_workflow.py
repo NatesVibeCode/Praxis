@@ -169,6 +169,11 @@ class _FakeConn:
         if "SELECT current_state" in query and "FROM workflow_runs" in query:
             state = self.existing_run_states.get(args[0])
             return [{"current_state": state}] if state else []
+        if "SELECT * FROM workflow_runs WHERE run_id = $1" in query:
+            return [
+                row for row in self.workflow_run_rows
+                if str(row.get("run_id") or "") == str(args[0])
+            ]
         if "SELECT id, label, attempt, status" in query and "FROM workflow_jobs" in query:
             row = self.existing_jobs.get((args[0], args[1]))
             if row and row.get("status") in {"failed", "dead_letter", "cancelled"}:
@@ -203,6 +208,20 @@ class _FakeConn:
                 return [{"id": row["id"], "label": row.get("label", ""), "attempt": row.get("attempt", 0) + 1}]
             return []
         if "UPDATE workflow_jobs" in query and "SET status = 'ready'" in query and len(args) == 1:
+            return []
+        if "UPDATE workflow_runs" in query and "SET current_state = 'claim_accepted'" in query:
+            for row in self.workflow_run_rows:
+                if str(row.get("run_id") or "") == str(args[0]) and row.get("current_state") in {
+                    "failed",
+                    "dead_letter",
+                    "cancelled",
+                }:
+                    row["current_state"] = "claim_accepted"
+                    row["terminal_reason_code"] = None
+                    row["finished_at"] = None
+                    return [{"run_id": args[0]}]
+            return []
+        if "SELECT pg_notify" in query:
             return []
         return []
 
@@ -3621,6 +3640,49 @@ def test_retry_job_records_dispatch_retry_idempotency(monkeypatch, caplog):
     assert "is_transient = false" in retry_updates[0]
 
 
+def test_retry_job_reopens_graph_runtime_run_from_evidence(monkeypatch):
+    from runtime.workflow import _status as status_mod
+
+    conn = _FakeConn(
+        workflow_run_rows=[
+            {
+                "run_id": "graph_retry_run",
+                "workflow_id": "graph_retry",
+                "current_state": "failed",
+                "terminal_reason_code": "sandbox_error",
+                "request_envelope": {"nodes": [], "edges": []},
+                "requested_at": datetime.now(timezone.utc),
+                "finished_at": datetime.now(timezone.utc),
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        status_mod,
+        "_graph_job_rows_from_evidence",
+        lambda *, run_row, run_id: [
+            {
+                "id": 2,
+                "label": "graph_build",
+                "status": "failed",
+                "attempt": 1,
+                "last_error_code": "sandbox_error",
+                "stdout_preview": "receipt:graph_retry_run:16",
+            }
+        ],
+    )
+
+    result = unified_workflow.retry_job(conn, "graph_retry_run", "graph_build")
+
+    assert result["status"] == "requeued"
+    assert result["execution_mode"] == "graph_runtime"
+    assert conn.workflow_run_rows[0]["current_state"] == "claim_accepted"
+    assert any(
+        "UPDATE workflow_runs" in query and "SET current_state = 'claim_accepted'" in query
+        for query, _ in conn.queries
+    )
+    assert any("SELECT pg_notify('system_event'" in query for query, _ in conn.queries)
+
+
 def test_retry_job_rejects_when_queue_is_at_critical_threshold():
     conn = _FakeConn(
         queue_depth=1000,
@@ -4012,6 +4074,13 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
             "cost_usd": 0.5,
             "workspace_snapshot_ref": "workspace_snapshot:abc123",
             "workspace_snapshot_cache_hit": True,
+            "workspace_manifest_audit": {
+                "intended_manifest_paths": ["runtime/example.py", "runtime/context.py"],
+                "hydrated_manifest_paths": ["runtime/example.py"],
+                "missing_intended_paths": ["runtime/context.py"],
+                "observed_file_read_refs": ["runtime/context.py"],
+                "observed_file_read_mode": "provider_output_path_mentions",
+            },
         },
         2500,
         repo_root="/repo",
@@ -4061,6 +4130,12 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
     assert receipt_outputs["workspace_provenance"]["workspace_root"] == "/repo"
     assert receipt_outputs["workspace_provenance"]["workspace_snapshot_ref"] == "workspace_snapshot:abc123"
     assert receipt_outputs["workspace_snapshot_cache_hit"] is True
+    assert receipt_outputs["workspace_manifest_audit"]["missing_intended_paths"] == [
+        "runtime/context.py"
+    ]
+    assert receipt_outputs["workspace_manifest_audit"]["observed_file_read_refs"] == [
+        "runtime/context.py"
+    ]
     assert receipt_outputs["git_provenance"]["available"] is False
     assert receipt_outputs["write_manifest"]["total_files"] == 1
     assert receipt_outputs["mutation_provenance"]["write_paths"] == ["runtime/example.py"]

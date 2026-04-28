@@ -222,8 +222,9 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         recommended_alias=None,
         when_to_use=(
             "Refresh provider availability through CQRS before trusting routing or launching "
-            "a proof job. Persists provider_usage probe snapshots and emits a receipt-backed "
-            "provider.availability.refreshed event."
+            "a proof job. The resulting receipt is machine-checkable evidence for proof-launch "
+            "approval when route truth is not already fresh. Persists provider_usage probe "
+            "snapshots and emits a receipt-backed provider.availability.refreshed event."
         ),
         when_not_to_use=(
             "Do not use this as a dry-run evaluator and do not fire it repeatedly to hope "
@@ -294,6 +295,70 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_runtime_truth_snapshot": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias="runtime-truth",
+        when_to_use=(
+            "Inspect observed workflow runtime truth across DB authority, queue state, "
+            "worker heartbeats, provider slots, host-resource leases, Docker, manifest "
+            "hydration audit, and recent typed failures."
+        ),
+        when_not_to_use="Do not use it to repair or retry; it is the evidence packet.",
+        risks={"default": "read"},
+        examples=[
+            _example("Read runtime truth", {"since_minutes": 60}),
+            _example("Read one run truth", {"run_id": "run_abc123"}),
+        ],
+    ),
+    "praxis_firecheck": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias="firecheck",
+        when_to_use=(
+            "Run before launching or retrying workflows to prove work can actually fire, "
+            "including typed blockers and remediation plans."
+        ),
+        when_not_to_use="Do not use it as a retry command; it is the proof gate before retry.",
+        risks={"default": "read"},
+        examples=[
+            _example("Check launch readiness", {}),
+            _example("Check one run", {"run_id": "run_abc123"}),
+        ],
+    ),
+    "praxis_remediation_plan": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias="remediation-plan",
+        when_to_use=(
+            "Explain the safe remediation tier, evidence requirements, approval gate, "
+            "and retry delta for a typed workflow failure."
+        ),
+        when_not_to_use="Do not use it to apply repairs; it only declares the allowed plan.",
+        risks={"default": "read"},
+        examples=[
+            _example("Plan a context repair", {"failure_type": "context_not_hydrated"}),
+            _example("Plan from a failure code", {"failure_code": "host_resource_capacity"}),
+        ],
+    ),
+    "praxis_remediation_apply": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias="remediation-apply",
+        when_to_use=(
+            "Apply only guarded local runtime repairs, such as stale provider slot cleanup "
+            "or expired host-resource lease cleanup, before one explicit retry."
+        ),
+        when_not_to_use="Do not use it to retry jobs, edit code, or repair credentials.",
+        risks={"default": "write", "dry_run": "read"},
+        examples=[
+            _example("Preview stale slot cleanup", {"failure_type": "provider.capacity"}),
+            _example(
+                "Apply stale slot cleanup",
+                {"failure_type": "provider.capacity", "dry_run": False, "confirm": True},
+            ),
+        ],
+    ),
     "praxis_next_work": _tool(
         surface="operator",
         tier="stable",
@@ -315,7 +380,8 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         recommended_alias=None,
         when_to_use=(
             "Check whether a provider/model/job route is runnable or blocked, including "
-            "control state and removal reasons."
+            "control state and removal reasons. Use the returned route truth as proof-launch "
+            "evidence when approving a proposed plan."
         ),
         when_not_to_use="Do not use it to change access; use praxis_access_control or praxis_circuits.",
         risks={"default": "read"},
@@ -330,10 +396,11 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
     "praxis_operation_forge": _tool(
         surface="operations",
         tier="advanced",
-        recommended_alias=None,
+        recommended_alias="operation-forge",
         when_to_use=(
             "Preview the CQRS operation/tool registration path before adding a new "
-            "operation or MCP wrapper."
+            "operation or MCP wrapper. Use it to get the exact register payload, "
+            "tool binding, fast-feedback commands, and command/query defaults."
         ),
         when_not_to_use="Do not use it as a mutation surface; it prepares the canonical payload.",
         risks={"default": "read"},
@@ -345,6 +412,19 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "handler_ref": "runtime.operations.queries.operator_composed.handle_query_example_truth",
                     "input_model_ref": "runtime.operations.queries.operator_composed.QueryExampleTruth",
                     "authority_domain_ref": "authority.workflow_runs",
+                },
+            ),
+            _example(
+                "Preview a command operation",
+                {
+                    "operation_name": "operator.example_apply",
+                    "operation_kind": "command",
+                    "tool_name": "praxis_example_apply",
+                    "recommended_alias": "example-apply",
+                    "handler_ref": "runtime.operations.commands.example.handle_example_apply",
+                    "input_model_ref": "runtime.operations.commands.example.ExampleApplyCommand",
+                    "authority_domain_ref": "authority.workflow_runs",
+                    "event_type": "operator.example.applied",
                 },
             ),
         ],
@@ -585,7 +665,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         recommended_alias="heartbeat",
         when_to_use="Run the daily external-health probe across providers, connectors, credentials, and MCP servers.",
         when_not_to_use="Do not use it for knowledge-graph maintenance; use praxis_heartbeat for that cycle.",
-        risks={"default": "read"},
+        risks={"default": "write"},
         examples=[
             _example("Run the full daily heartbeat", {"scope": "all"}),
             _example("Probe credentials only", {"scope": "credentials"}),
@@ -1095,7 +1175,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
     "praxis_evolve_operation_field": _tool(
         surface="operations",
         tier="advanced",
-        recommended_alias=None,
+        recommended_alias="evolve-operation-field",
         when_to_use=(
             "Plan how to add one optional field to an existing CQRS operation's input model "
             "(checklist of files and edits). v1 is plan-only — you still apply diffs locally."
@@ -1120,10 +1200,200 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_authority_domain_forge": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="authority-domain-forge",
+        when_to_use=(
+            "Preview authority-domain ownership before creating a new authority boundary "
+            "or attaching operations, tables, workflows, or MCP tools to it. Use this "
+            "before register-operation when the owning authority is not already explicit."
+        ),
+        when_not_to_use=(
+            "Do not use it as a mutation surface; it only prepares the canonical "
+            "authority-domain payload. Use praxis_register_authority_domain to write."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Preview object-truth domain",
+                {
+                    "authority_domain_ref": "authority.object_truth",
+                    "decision_ref": "operator_decision.architecture_policy.product_architecture.object_truth_requires_deterministic_parse_compare_substrate",
+                },
+            ),
+        ],
+    ),
+    "praxis_register_authority_domain": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="register-authority-domain",
+        when_to_use=(
+            "Register or update an authority domain after the forge confirms the domain "
+            "is the right owner of durable truth. This creates the domain before "
+            "operations, tables, workflows, or MCP tools attach to it."
+        ),
+        when_not_to_use=(
+            "Do not use it to attach operations; use praxis_register_operation after "
+            "the authority domain exists. Do not use it without a decision_ref."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Register object-truth domain",
+                {
+                    "authority_domain_ref": "authority.object_truth",
+                    "decision_ref": "operator_decision.architecture_policy.product_architecture.object_truth_requires_deterministic_parse_compare_substrate",
+                },
+            ),
+        ],
+    ),
+    "praxis_object_truth": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth",
+        when_to_use=(
+            "Build deterministic object-truth evidence for one inline external record: "
+            "identity digest, field observations, value digests, source metadata, "
+            "hierarchy signals, and redaction-safe previews."
+        ),
+        when_not_to_use=(
+            "Do not use it for multi-system sampling, durable persistence, or business "
+            "truth decisions yet. This is the read-only observe-record slice."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Observe one account record",
+                {
+                    "system_ref": "salesforce",
+                    "object_ref": "account",
+                    "record": {
+                        "id": "001",
+                        "name": "Acme",
+                        "billing": {"city": "Denver"},
+                    },
+                    "identity_fields": ["id"],
+                    "source_metadata": {"updated_at": "2026-04-28T10:00:00Z"},
+                },
+            ),
+        ],
+    ),
+    "praxis_object_truth_store": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-store",
+        when_to_use=(
+            "Persist deterministic object-truth evidence for one inline external "
+            "record after the authority domain and evidence tables exist."
+        ),
+        when_not_to_use=(
+            "Do not use for exploratory inspection when no write is intended; use "
+            "praxis_object_truth instead. Do not use it to decide business truth."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Store one account record",
+                {
+                    "system_ref": "salesforce",
+                    "object_ref": "account",
+                    "record": {
+                        "id": "001",
+                        "name": "Acme",
+                        "billing": {"city": "Denver"},
+                    },
+                    "identity_fields": ["id"],
+                    "source_metadata": {"updated_at": "2026-04-28T10:00:00Z"},
+                    "observed_by_ref": "operator:nate",
+                    "source_ref": "sample:accounts:001",
+                },
+            ),
+        ],
+    ),
+    "praxis_object_truth_store_schema_snapshot": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-store-schema",
+        when_to_use=(
+            "Persist normalized schema evidence for one external object before "
+            "record sampling or comparison work references a schema digest."
+        ),
+        when_not_to_use=(
+            "Do not use for record payloads; use praxis_object_truth_store for "
+            "object-version evidence."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Store account schema",
+                {
+                    "system_ref": "salesforce",
+                    "object_ref": "account",
+                    "raw_schema": {
+                        "fields": [
+                            {"name": "id", "type": "string", "required": True},
+                            {"name": "name", "type": "string"},
+                        ]
+                    },
+                    "observed_by_ref": "operator:nate",
+                    "source_ref": "schema:salesforce:account",
+                },
+            ),
+        ],
+    ),
+    "praxis_object_truth_compare_versions": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-compare",
+        when_to_use=(
+            "Compare two persisted object-truth object versions by digest to see "
+            "matching, different, missing, and freshness signals."
+        ),
+        when_not_to_use=(
+            "Do not use to decide final business truth by itself; it produces "
+            "deterministic evidence for a later decision layer."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Compare two stored versions",
+                {
+                    "left_object_version_digest": "left-digest",
+                    "right_object_version_digest": "right-digest",
+                },
+            ),
+        ],
+    ),
+    "praxis_object_truth_record_comparison_run": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-record-comparison",
+        when_to_use=(
+            "Persist a comparison result between two stored object versions so "
+            "future runs can query the evidence instead of recomputing it."
+        ),
+        when_not_to_use=(
+            "Do not use for ad hoc read-only inspection; use "
+            "praxis_object_truth_compare_versions when no write is intended."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record a comparison run",
+                {
+                    "left_object_version_digest": "left-digest",
+                    "right_object_version_digest": "right-digest",
+                    "observed_by_ref": "operator:nate",
+                    "source_ref": "comparison:accounts:demo",
+                },
+            ),
+        ],
+    ),
     "praxis_register_operation": _tool(
         surface="operations",
         tier="advanced",
-        recommended_alias=None,
+        recommended_alias="register-operation",
         when_to_use=(
             "Register a net-new CQRS operation (gateway dispatch key + handler + Pydantic input) "
             "through the catalog without hand-authoring a migration for the triple write."
@@ -1152,7 +1422,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
     "praxis_retire_operation": _tool(
         surface="operations",
         tier="advanced",
-        recommended_alias=None,
+        recommended_alias="retire-operation",
         when_to_use=(
             "Soft-retire an operation (disable gateway binding, mark authority object deprecated) "
             "while keeping rows for receipts and audit continuity."
@@ -1549,7 +1819,8 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "Approve a ProposedPlan so launch_approved can submit it. Wraps the "
             "proposal with approved_by + timestamp + hash; the hash binds the "
             "approval to the exact spec_dict so tampering between approve and "
-            "launch fails closed."
+            "launch fails closed. The proposed plan must already carry machine-"
+            "checkable provider freshness evidence with fresh route truth."
         ),
         when_not_to_use=(
             "Do not use it for no-approval launches — praxis_launch_plan in "
@@ -1569,6 +1840,10 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                         "total_jobs": 0,
                         "packet_declarations": [],
                         "binding_summary": {"totals": {"bound": 0, "ambiguous": 0, "unbound": 0}, "unbound_refs": [], "ambiguous_refs": []},
+                        "provider_freshness": {
+                            "route_truth_ref": "preview:deadbeef",
+                            "route_truth_checked_at": "2026-04-28T00:00:00+00:00",
+                        },
                     },
                     "approved_by": "nate@praxis",
                     "approval_note": "Looks good; proceed.",
@@ -1674,13 +1949,16 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "submit it (or preview first with preview_only=true). This is the "
             "layer-5 translation primitive — caller still owns upstream planning "
             "(extract data pills, decompose prose, reorder by data-flow, author "
-            "per-step prompts)."
+            "per-step prompts). Proof launches must carry fresh provider route "
+            "truth or a recent provider availability refresh receipt before approval."
         ),
         when_not_to_use=(
             "Do not use it to launch a pre-existing .queue.json spec from disk — "
             "use praxis_workflow action=run for that path. Do not expect it to do "
             "the planning itself (decompose prose, pick fields, reorder steps, "
-            "write real prompts) — those layers live with the caller today."
+            "write real prompts) — those layers live with the caller today. If you "
+            "intend to approve the launch, first obtain fresh provider route truth "
+            "or a recent provider availability refresh receipt."
         ),
         risks={"default": "write", "actions": {"preview": "read", "submit": "write"}},
         examples=[

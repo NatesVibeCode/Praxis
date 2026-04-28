@@ -10,7 +10,7 @@ description: "Praxis repo-local delivery method skill. Use for planning and exec
 - MCP/catalog reference: `docs/MCP.md`
 - CLI reference: `docs/CLI.md`
 - API route reference: `docs/API.md`
-- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs`
 - If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
 
 ## Application Metadata
@@ -61,11 +61,14 @@ This is a method skill, not an infrastructure skill.
 
 When this repo's workflow surfaces are involved:
 
+- run `praxis workflow firecheck --json` before launch or retry
 - validate changed workflow specs before running them
 - use `praxis workflow run <spec.json>` as async kickoff only
 - capture `run_id` and treat streaming/status as separate follow-up channels
 - use `praxis workflow run-status <run_id>` for health, failure signals, and idle detection
 - use `--kill-if-idle` only when the run is clearly unhealthy and idle
+- require one proof job before fleet launch
+- retry one failed label at a time with `--previous-failure` and `--retry-delta`
 - do not rely on legacy wait-style behavior
 - when the exact tool shape is unclear, use `praxis workflow tools describe <tool>` instead of guessing from memory
 - prefer `praxis workflow query`, `praxis workflow discover`, `praxis workflow recall`, and `praxis workflow health` as the operator-facing aliases for read-mostly work

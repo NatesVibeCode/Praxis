@@ -477,6 +477,8 @@ def _file_control_plane_bug(
     fingerprint: str,
     recent_failures: int,
     outputs: dict[str, Any],
+    discovery_evidence_kind: str | None = None,
+    discovery_evidence_ref: str | None = None,
     conn: "SyncPostgresConnection | None" = None,
 ):
     return _verifier_bug_bridge._file_control_plane_bug(
@@ -489,6 +491,8 @@ def _file_control_plane_bug(
         fingerprint=fingerprint,
         recent_failures=recent_failures,
         outputs=outputs,
+        discovery_evidence_kind=discovery_evidence_kind,
+        discovery_evidence_ref=discovery_evidence_ref,
         conn=conn,
     )
 
@@ -544,6 +548,8 @@ def _maybe_promote_verifier_bug(
             fingerprint=fingerprint,
             recent_failures=recent_failures,
             outputs=outputs,
+            discovery_evidence_kind="verification_run",
+            discovery_evidence_ref=verification_run_id,
             conn=conn,
         )
     if bug is None:
@@ -597,6 +603,8 @@ def _maybe_promote_healer_bug(
             fingerprint=fingerprint,
             recent_failures=recent_failures,
             outputs=outputs,
+            discovery_evidence_kind="healing_run",
+            discovery_evidence_ref=healing_run_id,
             conn=conn,
         )
     if bug is None:

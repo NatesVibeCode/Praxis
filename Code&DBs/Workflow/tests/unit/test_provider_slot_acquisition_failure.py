@@ -36,7 +36,10 @@ from runtime.workflow.execution_backends import (
     _provider_slot_acquisition_failure,
     provider_slot_bypass,
 )
-from runtime.host_resource_admission import HostResourceCapacityError
+from runtime.host_resource_admission import (
+    HostResourceAdmissionUnavailable,
+    HostResourceCapacityError,
+)
 
 
 # ------------------------------------------------------------------- helpers
@@ -288,3 +291,26 @@ def test_execute_cli_returns_structured_failure_on_host_resource_capacity(monkey
     assert result["status"] == "failed"
     assert result["error_code"] == "host_resource_capacity"
     assert result["host_resource_admission"]["resource_name"] == "sandbox_local_docker"
+
+
+def test_execute_cli_returns_structured_failure_on_host_resource_unavailable(monkeypatch):
+    monkeypatch.setattr(eb, "get_load_balancer", lambda: _HealthyLoadBalancer(granted=True))
+    monkeypatch.setattr(eb, "build_command", lambda **_kwargs: ["provider-cli"])
+    monkeypatch.setattr(eb, "normalize_command_parts_for_docker", lambda parts: list(parts))
+    monkeypatch.setattr(eb, "_sandbox_provider_for_execution", lambda *_args, **_kwargs: "docker_local")
+    monkeypatch.setattr(eb, "_sandbox_image", lambda *_args, **_kwargs: "praxis-worker:test")
+
+    def _admission_unavailable(*_args, **_kwargs):
+        raise HostResourceAdmissionUnavailable("lease DB unavailable")
+
+    monkeypatch.setattr(eb, "hold_host_resources_for_sandbox", _admission_unavailable)
+
+    result = eb.execute_cli(
+        _minimal_agent_config("anthropic"),
+        prompt="irrelevant",
+        workdir="/tmp",
+    )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "host_resource_admission_unavailable"
+    assert result["host_resource_admission"]["message"] == "lease DB unavailable"

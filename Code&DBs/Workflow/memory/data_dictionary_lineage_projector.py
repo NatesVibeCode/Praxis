@@ -222,18 +222,18 @@ class DataDictionaryLineageProjector(HeartbeatModule):
     # -- integration manifest edges ----------------------------------------
 
     def _project_integration_manifests(self, known: dict[str, set[str]]) -> None:
-        try:
-            from runtime.integration_manifest import load_manifests
-        except Exception:
-            return
-        try:
-            manifests = load_manifests()
-        except Exception:
-            manifests = []
+        from runtime.integration_manifest import load_manifest_report
+
+        report = load_manifest_report()
+        if report.errors:
+            raise RuntimeError(
+                "integration manifest lineage aborted due to malformed manifest(s): "
+                + "; ".join(report.errors)
+            )
         known_integrations = known.get("integration", set())
         known_tools = known.get("tool", set())
         edges: list[dict[str, Any]] = []
-        for manifest in manifests or []:
+        for manifest in report.manifests:
             src_kind = f"integration:{manifest.id}"
             if src_kind not in known_integrations:
                 continue

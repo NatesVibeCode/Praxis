@@ -280,7 +280,7 @@ describe('MoonBuildPage', () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole('textbox'), {
+    fireEvent.change(screen.getByRole('textbox', { name: /workflow intent/i }), {
       target: { value: 'Build a workflow from this prompt' },
     });
     fireEvent.click(screen.getByRole('button', { name: /compose workflow/i }));

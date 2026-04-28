@@ -212,6 +212,14 @@ def test_normalize_command_parts_for_docker_adds_codex_sandbox_flags():
     ]
 
 
+def test_normalize_command_parts_for_docker_rebases_absolute_cli_binary():
+    normalized = normalize_command_parts_for_docker(
+        ["/usr/local/bin/codex", "exec", "-", "--json", "--model", "gpt-5.4-mini"],
+    )
+
+    assert normalized[0] == "codex"
+
+
 def test_normalize_shell_command_for_docker_strips_legacy_full_auto():
     normalized = normalize_shell_command_for_docker(
         "codex exec --full-auto - --json --model gpt-5.4-mini",

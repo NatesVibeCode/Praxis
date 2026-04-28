@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from registry.sandbox_profile_authority import (
@@ -453,6 +454,29 @@ def _proof_metrics_snapshot(conn: SyncPostgresConnection) -> dict[str, object]:
     return snapshot
 
 
+def _scope_resolution_root(
+    *,
+    repo_root: str | None,
+    scope_paths: list[str],
+) -> str:
+    configured = str(repo_root or "").strip()
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured))
+    try:
+        container_root = container_workspace_root()
+    except Exception:
+        container_root = None
+    if container_root is not None and container_root not in candidates:
+        candidates.append(container_root)
+
+    normalized_scope = [path.strip().lstrip("./") for path in scope_paths if path.strip()]
+    for candidate in candidates:
+        if any((candidate / path).exists() for path in normalized_scope):
+            return str(candidate)
+    return configured
+
+
 def _job_execution_context_shard(
     *,
     conn: SyncPostgresConnection,
@@ -480,7 +504,10 @@ def _job_execution_context_shard(
     if proof_snapshot:
         shard["proof_metrics"] = json.loads(json.dumps(proof_snapshot, default=str))
 
-    normalized_repo_root = str(repo_root or "").strip()
+    normalized_repo_root = _scope_resolution_root(
+        repo_root=repo_root,
+        scope_paths=[*write_scope, *declared_read_scope],
+    )
     if not normalized_repo_root or not write_scope:
         return shard
 

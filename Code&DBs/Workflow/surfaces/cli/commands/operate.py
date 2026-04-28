@@ -60,8 +60,15 @@ def _operate_help_text() -> str:
         "       workflow operate query <operation_name> --input-json '<json>' [--idempotency-key KEY] [--json]\n"
         "       workflow operate command <operation_name> --input-json '<json>' [--idempotency-key KEY] [--json]\n"
         "\n"
-        "Thin CLI bridge over /api/operate and /api/operate/catalog. The operation catalog gateway remains the authority.\n"
+        "Thin CLI bridge over /api/operate and /api/operate/catalog. The gateway catalog is backed by /api/catalog/operations.\n"
     )
+
+
+def _normalize_operate_mode(raw_mode: object) -> str:
+    mode = str(raw_mode or "call").strip().lower().replace("-", "_")
+    if mode in {"call", "query", "command"}:
+        return mode
+    raise ValueError("mode must be one of: call, query, command")
 
 
 def _load_operate_input(input_json: str | None, input_file: str | None) -> dict[str, Any]:
@@ -82,10 +89,17 @@ def _render_operate_catalog(payload: dict[str, Any], *, as_json: bool, stdout: T
     if as_json:
         print_json(stdout, payload)
         return 0 if payload.get("ok", True) else 1
+    operate_catalog_path = payload.get("operate_catalog_path") or "/api/operate/catalog"
+    operation_catalog_path = (
+        payload.get("operation_catalog_path")
+        or payload.get("catalog_path")
+        or "/api/catalog/operations"
+    )
     stdout.write("operation catalog gateway\n")
     stdout.write(f"  authority: {payload.get('authority') or 'operation_catalog_registry'}\n")
     stdout.write(f"  call:      {payload.get('call_path') or '/api/operate'}\n")
-    stdout.write(f"  catalog:   {payload.get('catalog_path') or '/api/catalog/operations'}\n")
+    stdout.write(f"  gateway:   {operate_catalog_path}\n")
+    stdout.write(f"  catalog:   {operation_catalog_path}\n")
     stdout.write(f"  operations:{payload.get('operation_count') or payload.get('count') or 0}\n")
     stdout.write("Tip: add --json to inspect operation names and schemas.\n")
     return 0 if payload.get("ok", True) else 1
@@ -161,9 +175,19 @@ def _operate_command(args: list[str], *, stdout: TextIO) -> int:
             return 2
 
     try:
+        mode = _normalize_operate_mode(mode)
         operation_input = _load_operate_input(input_json, input_file)
     except Exception as exc:
         stdout.write(f"error: {exc}\n")
+        return 2
+
+    # Explicitly preserve CQRS intent: `query` and `command` frontdoors
+    # should not silently run in a conflicting mode.
+    if subcommand in {"query", "command"} and mode != subcommand:
+        stdout.write(
+            "error: --mode must match the selected operate subcommand "
+            f"(`{subcommand}`) when not using `workflow operate call`\n"
+        )
         return 2
 
     from surfaces.api.rest import OperateRequest, execute_operate_request
@@ -244,10 +268,10 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             "usage: workflow instances [check] [--json] [--include-routes]\n"
             "\n"
             "Show resolved API/MCP/DB authority and report any obvious instance drift.\n"
-            "Also validates CQRS route wiring for /api/operate and /api/catalog/operations when `check` is enabled.\n"
+            "Also validates CQRS route wiring for /api/operate, /api/operate/catalog, and /api/catalog/operations when `check` is enabled.\n"
             "Use `workflow instances check` to print an alignment report.\n"
             "Use `workflow instances --json` for machine-readable output.\n"
-            "Use `workflow instances --include-routes` to include the live HTTP route count.\n"
+            "Use `workflow instances --include-routes` to include the live HTTP route count from the full route catalog.\n"
         )
         return 0
 
@@ -296,13 +320,16 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
         "status": "skipped",
         "reason": "use --include-routes",
     }
+    route_visibility = "public"
     route_paths: set[str] = set()
     api_operate_route_present = None
+    api_operate_catalog_route_present = None
     api_catalog_route_present = None
     if probe_routes:
         from surfaces.api.rest import list_api_routes
 
-        route_payload = list_api_routes()
+        route_visibility = "all"
+        route_payload = list_api_routes(visibility=route_visibility)
         route_payload = dict(route_payload)
         route_paths = {
             _normalize_route_path(route.get("path"))
@@ -310,9 +337,11 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             if isinstance(route, dict)
         }
         api_operate_route_present = "/api/operate" in route_paths
+        api_operate_catalog_route_present = "/api/operate/catalog" in route_paths
         api_catalog_route_present = "/api/catalog/operations" in route_paths
         route_payload["check"] = {
             "api_operate_route_present": bool(api_operate_route_present),
+            "api_operate_catalog_route_present": bool(api_operate_catalog_route_present),
             "api_catalog_route_present": bool(api_catalog_route_present),
         }
 
@@ -399,6 +428,11 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
         )
     if api_operate_route_present is not None and not api_operate_route_present:
         alignment_errors.append("/api/operate not found in local route catalog")
+    if (
+        api_operate_catalog_route_present is not None
+        and not api_operate_catalog_route_present
+    ):
+        alignment_errors.append("/api/operate/catalog not found in local route catalog")
     if api_catalog_route_present is not None and not api_catalog_route_present:
         alignment_errors.append("/api/catalog/operations not found in local route catalog")
     if orient_exit_code != 0:
@@ -409,7 +443,7 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
         "orient": orient_data,
         "route_catalog": {
             "included": probe_routes,
-            "visibility": "public",
+            "visibility": route_visibility,
             "count": route_payload.get("count"),
             "docs_url": route_payload.get("docs_url"),
             "openapi_url": route_payload.get("openapi_url"),
@@ -451,6 +485,7 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             "operate_call_match": operate_call_match,
             "operate_catalog_match": operate_catalog_match,
             "api_operate_route_present": api_operate_route_present,
+            "api_operate_catalog_route_present": api_operate_catalog_route_present,
             "api_catalog_route_present": api_catalog_route_present,
             "db_match": db_match,
             "setup_db_match": setup_db_match,
@@ -482,6 +517,7 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     )
     route_count = route_payload.get("count")
     route_count_text = str(route_count) if isinstance(route_count, int) else "n/a"
+    route_count_label = "public_routes" if route_visibility == "public" else "all_routes"
     stdout.write("runtime instances:\n")
     stdout.write(f"  native_instance_name: {native_instance_name}\n")
     stdout.write(f"  runtime_profile_ref: {runtime_profile_ref}\n")
@@ -498,7 +534,8 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(
             "    route_contract:     "
             f"operate={ 'ok' if api_operate_route_present else 'missing' }, "
-            f"catalog={ 'ok' if api_catalog_route_present else 'missing' }\n"
+            f"gateway_catalog={ 'ok' if api_operate_catalog_route_present else 'missing' }, "
+            f"operation_catalog={ 'ok' if api_catalog_route_present else 'missing' }\n"
         )
     stdout.write(f"    db_target_setup:  {setup_db}\n")
     stdout.write(f"    db_target_bind:   {binding_db_display}\n")
@@ -509,7 +546,8 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     stdout.write(f"    catalog_tools:   {tool_count}\n")
     if include_routes:
         stdout.write("  api_contract:\n")
-        stdout.write(f"    public_routes:  {route_count_text}\n")
+        stdout.write(f"    visibility:   {route_visibility}\n")
+        stdout.write(f"    {route_count_label}:  {route_count_text}\n")
         stdout.write(f"    docs_url:       {_coerce_text(route_payload.get('docs_url'))}\n")
         stdout.write(f"    openapi_url:    {_coerce_text(route_payload.get('openapi_url'))}\n")
         stdout.write(f"    redoc_url:      {_coerce_text(route_payload.get('redoc_url'))}\n")

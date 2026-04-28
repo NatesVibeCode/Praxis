@@ -1,0 +1,14 @@
+---
+description: Use the CQRS Wizard before CQRS-shaped edits
+globs: **/Code&DBs/Workflow/runtime/operations/**/*.py, **/Code&DBs/Workflow/surfaces/mcp/tools/**/*.py, **/Code&DBs/Databases/migrations/workflow/*.sql
+alwaysApply: false
+---
+
+# Standing order — Use the CQRS Wizard before CQRS-shaped edits
+
+`decision_key`: `architecture-policy::agent-behavior::cqrs-wizard-before-cqrs-edits`
+
+Before editing CQRS operation models, handlers, MCP wrappers, or operation catalog registration paths, run praxis_operation_forge for operation path inspection and praxis_evolve_operation_field for existing input-shape changes. Manual edits are allowed only after the Wizard says the operation already exists or returns the file-by-file evolution plan. Search terms: CQRS Wizard, operation forge, evolve operation field, operation_catalog_registry, input_model_ref, handler_ref.
+
+Source: `operator_decisions` row, `decision_kind=architecture_policy`.
+Full record: `bin/praxis-agent praxis_operator_decisions --input-json '{"action":"get","decision_key":"architecture-policy::agent-behavior::cqrs-wizard-before-cqrs-edits"}'`

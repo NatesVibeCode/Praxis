@@ -293,6 +293,57 @@ def test_list_api_routes_mounts_operation_catalog_routes_before_discovery(monkey
     assert payload["routes"][0]["visibility"] == "internal"
 
 
+def test_list_api_routes_surfaces_compile_materialize_under_canonical_compile_family(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class CompileCommand(BaseModel):
+        intent: str
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="compile.materialize",
+                operation_name="compile_materialize",
+                http_method="POST",
+                http_path="/api/compile/materialize",
+                input_model_ref="runtime.operations.commands.compile_materialize.CompileMaterializeCommand",
+                handler_ref="runtime.operations.commands.compile_materialize.handle_compile_materialize",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=CompileCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/compile",
+        tag="operations",
+        visibility="all",
+    )
+
+    assert target_app.state.capabilities_mounted is True
+    assert payload["count"] == 1
+    assert payload["routes"][0]["path"] == "/api/compile/materialize"
+    assert payload["routes"][0]["name"] == "compile_materialize"
+    assert payload["routes"][0]["tags"] == ["operations"]
+
+
 def test_workflow_query_routes_do_not_import_dead_trampoline_modules() -> None:
     source = Path(workflow_query_routes.__file__).read_text(encoding="utf-8")
 
@@ -597,6 +648,57 @@ def test_mount_capabilities_raises_when_existing_route_owns_binding(monkeypatch)
 
     with pytest.raises(RuntimeError, match="capability route conflict"):
         rest.mount_capabilities(target_app)
+
+
+def test_mount_capabilities_allows_legacy_compile_alias_beside_canonical_route(
+    monkeypatch,
+) -> None:
+    class CompileCommand(BaseModel):
+        intent: str
+
+    target_app = FastAPI()
+
+    @target_app.post("/api/compile_materialize")
+    async def _legacy_compile_alias():
+        return {"route": "legacy-alias"}
+
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="compile_materialize",
+                http_method="POST",
+                http_path="/api/compile/materialize",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=CompileCommand,
+            handler=lambda command, _subs: {"intent": command.intent},
+        ),
+    )
+
+    rest.mount_capabilities(target_app)
+
+    route_paths = {
+        (route.path, tuple(sorted(item for item in (route.methods or set()) if item != "HEAD")))
+        for route in target_app.routes
+        if isinstance(route, APIRoute)
+    }
+    assert ("/api/compile_materialize", ("POST",)) in route_paths
+    assert ("/api/compile/materialize", ("POST",)) in route_paths
 
 
 def test_mount_capabilities_flattens_post_body_for_models_without_body_field(monkeypatch) -> None:

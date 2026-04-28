@@ -447,6 +447,7 @@ def test_run_registered_verifier_promotes_repeated_failures_into_bug(
 ) -> None:
     conn = _AuthorityConn()
     evidence_links: list[tuple[str, str, str, str]] = []
+    filed_bug_kwargs: dict[str, object] = {}
     monkeypatch.setattr(
         verifier_authority,
         "_run_builtin_verifier",
@@ -465,7 +466,7 @@ def test_run_registered_verifier_promotes_repeated_failures_into_bug(
     monkeypatch.setattr(
         verifier_authority,
         "_file_control_plane_bug",
-        lambda **_kwargs: SimpleNamespace(bug_id="BUG-VERIFY"),
+        lambda **kwargs: filed_bug_kwargs.update(kwargs) or SimpleNamespace(bug_id="BUG-VERIFY"),
     )
     monkeypatch.setattr(
         verifier_authority,
@@ -486,8 +487,71 @@ def test_run_registered_verifier_promotes_repeated_failures_into_bug(
     )
 
     assert payload["bug_id"] == "BUG-VERIFY"
+    assert filed_bug_kwargs["discovery_evidence_kind"] == "verification_run"
+    assert filed_bug_kwargs["discovery_evidence_ref"] == payload["verification_run_id"]
     assert evidence_links[0][0] == "BUG-VERIFY"
     assert evidence_links[0][1] == "verification_run"
+    assert evidence_links[0][3] == "observed_in"
+
+
+def test_run_registered_healer_promotes_repeated_failures_with_discovery_evidence(
+    monkeypatch,
+) -> None:
+    conn = _AuthorityConn()
+    evidence_links: list[tuple[str, str, str, str]] = []
+    filed_bug_kwargs: dict[str, object] = {}
+    monkeypatch.setattr(
+        verifier_authority,
+        "_run_builtin_healer",
+        lambda action_ref, *, inputs, conn=None: ("failed", {"summary": {"action_ref": action_ref}}),
+    )
+    monkeypatch.setattr(
+        verifier_authority,
+        "run_registered_verifier",
+        lambda verifier_ref, **_kwargs: {
+            "status": "failed",
+            "verification_run_id": "verification_run:post",
+            "verifier": {"verifier_ref": verifier_ref},
+        },
+    )
+    monkeypatch.setattr(
+        verifier_authority,
+        "_load_open_bug_by_fingerprint",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        verifier_authority,
+        "_recent_healing_failure_count",
+        lambda **_kwargs: 3,
+    )
+    monkeypatch.setattr(
+        verifier_authority,
+        "_file_control_plane_bug",
+        lambda **kwargs: filed_bug_kwargs.update(kwargs) or SimpleNamespace(bug_id="BUG-HEAL"),
+    )
+    monkeypatch.setattr(
+        verifier_authority,
+        "_link_bug_evidence",
+        lambda **kwargs: evidence_links.append(
+            (
+                kwargs["bug_id"],
+                kwargs["evidence_kind"],
+                kwargs["evidence_ref"],
+                kwargs["evidence_role"],
+            )
+        ),
+    )
+
+    payload = verifier_authority.run_registered_healer(
+        verifier_ref="verifier.platform.receipt_provenance",
+        conn=conn,
+    )
+
+    assert payload["bug_id"] == "BUG-HEAL"
+    assert filed_bug_kwargs["discovery_evidence_kind"] == "healing_run"
+    assert filed_bug_kwargs["discovery_evidence_ref"] == payload["healing_run_id"]
+    assert evidence_links[0][0] == "BUG-HEAL"
+    assert evidence_links[0][1] == "healing_run"
     assert evidence_links[0][3] == "observed_in"
 
 

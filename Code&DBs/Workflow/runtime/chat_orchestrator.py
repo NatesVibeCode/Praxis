@@ -622,6 +622,10 @@ class ChatOrchestrator:
             raise RuntimeError("task type routing returned no decisions for auto/chat")
 
         lane_policies = load_provider_lane_policies(self._pg)
+        if not lane_policies:
+            raise RuntimeError(
+                "provider lane policy authority returned no active rows for auto/chat"
+            )
         now = time.monotonic()
         routes: list[ResolvedChatRoute] = []
         rejections: list[str] = []
@@ -664,18 +668,14 @@ class ChatOrchestrator:
                 if raw_allow_payg_fallback is not None
                 else None
             )
-            admitted, reason = (
-                admit_adapter_type(
-                    lane_policies,
-                    provider,
-                    adapter_type,
-                    spend_pressure=decision_pressure,
-                    budget_authority_unreachable=decision_budget_unreachable,
-                    budget_window_data_quality_error=decision_budget_window_data_quality_error,
-                    allow_payg_fallback=decision_allow_payg_fallback,
-                )
-                if lane_policies
-                else (True, "lane.admitted.legacy_no_policy")
+            admitted, reason = admit_adapter_type(
+                lane_policies,
+                provider,
+                adapter_type,
+                spend_pressure=decision_pressure,
+                budget_authority_unreachable=decision_budget_unreachable,
+                budget_window_data_quality_error=decision_budget_window_data_quality_error,
+                allow_payg_fallback=decision_allow_payg_fallback,
             )
             if not admitted:
                 _log.info(

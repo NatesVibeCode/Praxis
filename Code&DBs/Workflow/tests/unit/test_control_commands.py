@@ -16,6 +16,7 @@ class _FakeConn:
         self.control_commands_by_key: dict[str, dict[str, object]] = {}
         self.system_events: list[dict[str, object]] = []
         self.script_calls: list[str] = []
+        self.workflow_runs: dict[str, dict[str, object]] = {}
         self.workflow_jobs: dict[tuple[str, str], dict[str, object]] = {
             ("run-7", "build_a"): {
                 "id": 17,
@@ -45,6 +46,9 @@ class _FakeConn:
             return [dict(row)] if row else []
         if normalized.startswith("SELECT id, run_id, label, status, attempt FROM workflow_jobs"):
             row = self.workflow_jobs.get((str(args[0]), str(args[1])))
+            return [dict(row)] if row else []
+        if normalized.startswith("SELECT * FROM workflow_runs WHERE run_id = $1"):
+            row = self.workflow_runs.get(str(args[0]))
             return [dict(row)] if row else []
         if "FROM control_commands" in normalized and normalized.startswith("SELECT command_id, command_type, command_status"):
             return self._list_control_commands(normalized, args)
@@ -837,6 +841,49 @@ def test_workflow_retry_idempotency_key_tracks_current_job_attempt() -> None:
     assert key_a != key_b
     assert key_a.startswith("workflow.retry.cli.run-7.failed.2.")
     assert key_b.startswith("workflow.retry.cli.run-7.cancelled.3.")
+
+
+def test_workflow_retry_guard_falls_back_to_graph_evidence(monkeypatch) -> None:
+    from runtime.workflow import _status as workflow_status
+
+    conn = _FakeConn()
+    conn.workflow_jobs.clear()
+    conn.workflow_runs["run-graph"] = {
+        "run_id": "run-graph",
+        "current_state": "failed",
+        "request_envelope": {"nodes": [], "edges": []},
+    }
+
+    monkeypatch.setattr(
+        workflow_status,
+        "_graph_job_rows_from_evidence",
+        lambda *, run_row, run_id: [
+            {
+                "id": 2,
+                "label": "graph_build",
+                "status": "failed",
+                "attempt": 1,
+            }
+        ],
+    )
+
+    payload = control_commands.workflow_retry_payload_with_guard(
+        conn,
+        {
+            "run_id": "run-graph",
+            "label": "graph_build",
+            "previous_failure": "receipt:run-graph:16 failed with sandbox_error",
+            "retry_delta": "retry after graph shard root repair",
+        },
+    )
+
+    assert payload["retry_guard"] == {
+        "run_id": "run-graph",
+        "label": "graph_build",
+        "job_id": 2,
+        "status": "failed",
+        "attempt": 1,
+    }
 
 
 def test_workflow_retry_intent_requires_failure_and_delta() -> None:

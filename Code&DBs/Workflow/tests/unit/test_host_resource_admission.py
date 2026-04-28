@@ -143,6 +143,26 @@ def test_host_resource_hold_releases_all_claims_on_exit() -> None:
     assert backend.leases == {}
 
 
+def test_disabled_host_resource_hold_does_not_touch_lease_manager(monkeypatch) -> None:
+    monkeypatch.setenv("PRAXIS_HOST_RESOURCE_ADMISSION_DISABLED", "1")
+
+    class _NoLeaseManagerAdmission(HostResourceAdmission):
+        def _lease_manager(self):
+            raise AssertionError("lease manager should not be touched when disabled")
+
+    admission = _NoLeaseManagerAdmission(
+        host_id="unit-host",
+        database_configured=True,
+    )
+
+    with admission.hold(
+        holder_id="job-one",
+        requirements=(HostResourceRequirement(RESOURCE_DOCKER_SANDBOX, capacity=1),),
+        wait_s=0,
+    ) as claim:
+        assert claim is None
+
+
 def test_sandbox_resource_requirements_only_gate_local_docker() -> None:
     assert sandbox_resource_requirements(
         sandbox_provider="cloudflare_remote",

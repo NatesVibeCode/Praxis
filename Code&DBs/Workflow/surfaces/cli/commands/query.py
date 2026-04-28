@@ -835,7 +835,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     def _write_bugs_usage() -> None:
         stdout.write(
             "usage: workflow bugs "
-            "[list|search <query>|duplicate_check <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve] "
+            "[list|search <query>|duplicate_check <query>|stats|file|show|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve] "
             "[--status S] [--severity S] [--limit N] [--json]\n"
             "\n"
             "  list               List bugs (default: open only)\n"
@@ -844,6 +844,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "                     Fast title-like duplicate check without replay or cluster enrichment\n"
             "  stats              Bug counts by category/severity/status\n"
             "  file               File a new bug (use --dry-run to validate without inserting)\n"
+            "  show               Alias for packet; show a replay packet for one bug\n"
             "  history            Show bug history and linked evidence\n"
             "  packet             Show a replay packet for one bug\n"
             "  replay             Replay a bug from canonical evidence\n"
@@ -861,10 +862,12 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "  --body TEXT        Alias for --description on filing and duplicate checks\n"
             "  --dry-run, --preview\n"
             "                     With file: validate and show preview; do not insert a bug\n"
+            "  --allow-duplicate  With file: intentionally write even when strong similar bugs exist\n"
             "\n"
             "  Examples:\n"
             "    workflow bugs list --severity P1\n"
             "    workflow bugs list --open-only --json\n"
+            "    workflow bugs show BUG-1234\n"
             "    workflow bugs history BUG-1234\n"
             "    workflow bugs duplicate_check --title 'routing timeout' --body 'worker hangs during dispatch'\n"
             "    workflow bugs duplicate_check 'routing timeout'\n"
@@ -891,6 +894,8 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     if args and not args[0].startswith("-"):
         action = args[0].replace("-", "_")
         i = 1
+        if action == "show":
+            action = "packet"
         if action in {"search", "duplicate_check"} and i < len(args) and not args[i].startswith("-"):
             search_query = args[i]
             i += 1
@@ -948,6 +953,10 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             continue
         if token in {"--dry-run", "--preview"}:
             params["dry_run"] = True
+            i += 1
+            continue
+        if token == "--allow-duplicate":
+            params["allow_duplicate"] = True
             i += 1
             continue
         if token == "--yes":

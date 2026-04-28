@@ -1,7 +1,7 @@
 {
   "$description": "Bootstrap snapshot of operator_decisions architecture_policy rows. Committed in the repo so a fresh clone can populate operator_decisions before the agent's first /orient call. Refreshed by scripts/refresh-decisions-snapshot.sh.",
   "$schema_version": 1,
-  "count": 147,
+  "count": 165,
   "decisions": [
     {
       "decided_by": "nate",
@@ -55,14 +55,14 @@
       "title": "TEST"
     },
     {
-      "decided_by": "nate",
+      "decided_by": "nate@praxis",
       "decision_key": "architecture-policy::agent-behavior::ask-catalog-before-manual-edits",
       "decision_kind": "architecture_policy",
       "decision_scope_kind": "authority_domain",
-      "decision_scope_ref": "agent_behavior",
-      "decision_source": "operator",
+      "decision_scope_ref": "agent-behavior",
+      "decision_source": "in-conversation correction 2026-04-27 - model kept missing the wizards",
       "decision_status": "decided",
-      "rationale": "Many runtime/surfaces files have wizard equivalents (praxis_register_operation for new CQRS ops, praxis_provider_onboard for providers, praxis_data_dictionary for field metadata, praxis_operate_evolve_field for evolving existing op input models). Hand-editing where a wizard exists drifts from catalog and skips receipts. The pause is to enforce the check, not block all edits.",
+      "rationale": "Many runtime/surfaces/migration edits have wizard equivalents in the catalog. Before hand-editing, check:\n\n  - New CQRS operation? -> praxis_register_operation (lands data_dictionary_objects + authority_object_registry + operation_catalog_registry rows atomically; import-resolves handler_ref + input_model_ref BEFORE writing; idempotent on operation_ref).\n  - Add an optional field to an existing op input model? -> praxis_evolve_operation_field (plan-only wizard; returns a complete file-by-file edit checklist).\n  - Provider/model onboarding? -> praxis_provider_onboard.\n  - Field metadata / data-dictionary reproject? -> praxis_data_dictionary.\n  - Soft-retire an op? -> praxis_retire_operation.\n\nHand-editing migrations to add catalog rows drifts from the wizard atomic helper, skips the import-resolve guard, and skips receipts. Hand-editing handler files where the wizard would also write the migration leaves the two out of sync. BUT - if you have checked the catalog and no wizard covers the change you need (novel runtime logic, new business rule, novel migration), the edit IS canonical.\n\nKeywords that should trigger this check: add column, register operation, new operation, add field, evolve operation, CQRS handler, catalog INSERT.",
       "scope_clamp": {
         "applies_to": [
           "pending_review"
@@ -138,6 +138,23 @@
         "does_not_apply_to": []
       },
       "title": "Every change should actively reduce complexity, not just fix the immediate issue. Collapse multi-step patterns into sing"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::agent-behavior::cqrs-wizard-before-cqrs-edits",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "agent_behavior",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Before editing CQRS operation models, handlers, MCP wrappers, or operation catalog registration paths, run the CQRS Wizard surface first: praxis_operation_forge for operation path inspection and praxis_evolve_operation_field for existing input-shape changes. Manual edits are allowed only after the wizard says the operation already exists or returns the file-by-file evolution plan.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Use the CQRS Wizard before CQRS-shaped edits"
     },
     {
       "decided_by": "nate@praxis",
@@ -361,6 +378,23 @@
       "title": "Agent skills belong in DB-backed authority, not per-harness sidecar copies"
     },
     {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::agent-skills::debate-skill-inline-no-workflow-launch",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "agent_skills",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "The praxis-debate skill is an in-conversation adversarial reasoning skill. It must use Praxis read surfaces for grounding, then run the debate inside the active agent response. It must not call praxis workflow debate, launch a workflow, or shell out to another model unless Nate explicitly asks for durable workflow execution.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Debate skill runs inline, not through workflow debate"
+    },
+    {
       "decided_by": "codex",
       "decision_key": "architecture-policy::atlas-moon-live-updates::event-stream-driven-graph-lenses",
       "decision_kind": "architecture_policy",
@@ -412,6 +446,23 @@
       "title": "When a sandbox is provisioned to run a job for a given provider, Praxis must mint or fetch a credential bound to that pr"
     },
     {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::auth::keychain-first-terminal-secret-capture",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "auth",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "API key management must use macOS Keychain as the standard authority path. When a workflow, MCP wizard, provider onboarding flow, or LLM-operated setup surface detects a missing API key, it must not ask the LLM to receive or paste the secret and must not recommend plaintext .env storage. The remediation path is a host-side terminal/default-CLI secret capture prompt that reads the key with hidden input, writes it to Keychain under account=praxis and service=<ENV_VAR_NAME>, verifies resolution through the canonical resolver, and emits only redacted receipts/status. MCP and CLI remain sibling fronts over the gateway; the MCP wizard may request/launch the host capture flow, but secret capture itself runs on the host where Keychain is available. Containers and sandboxes receive only scoped hydrated env/file material from the authorized Keychain bridge at runtime.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "API keys hydrate from macOS Keychain; missing keys are captured in a host terminal"
+    },
+    {
       "decided_by": "nate@praxis",
       "decision_key": "architecture-policy::auth::keychain-secrets",
       "decision_kind": "architecture_policy",
@@ -444,6 +495,23 @@
         "does_not_apply_to": []
       },
       "title": "Auth via docker mounts, never agent shell env"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::auth::wizard-owned-secure-key-entry-window",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "auth",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "When an MCP/LLM-operated wizard detects a missing API key, the intended user experience is an independent host-side credential entry window controlled by Praxis, not chat pasteback and not a raw command with a <your-key> placeholder. The window collects the secret in a focused private input box, writes it to macOS Keychain under account=praxis and the declared service/env-var name, verifies through the canonical credential resolver, then returns only redacted status to the wizard. Terminal/default CLI can remain the fallback transport when GUI presentation is unavailable, but the product-standard path is wizard-triggered secure host UI.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Credential wizards open a dedicated secure API-key entry window"
     },
     {
       "decided_by": "nate",
@@ -1236,6 +1304,23 @@
     },
     {
       "decided_by": "nate",
+      "decision_key": "architecture-policy::pattern-authority::failure-patterns-between-evidence-and-bugs",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "pattern_authority",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Recurring platform pain should materialize as durable, queryable pattern authority that clusters receipts, friction events, typed gaps, and bugs before creating or duplicating bug work. Bugs remain concrete fix records; patterns own recurring system shapes, evidence links, promotion rules, and intervention state so the platform becomes less reactive than bug tickets alone.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Failure patterns are durable authority between evidence and bugs"
+    },
+    {
+      "decided_by": "nate",
       "decision_key": "architecture-policy::platform-architecture::agent-operating-packet-is-primary-llm-interface",
       "decision_kind": "architecture_policy",
       "decision_scope_kind": "authority_domain",
@@ -1423,6 +1508,23 @@
     },
     {
       "decided_by": "nate",
+      "decision_key": "architecture-policy::platform-architecture::manifest-is-canonical-ephemeral-truth-bundle",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "platform_architecture",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "For Praxis operator and LLM-facing architecture, the bound moment-in-time truth object handed to or consumed by a run is called a manifest. It is explicit, inspectable, and operationally meaningful for that moment. Legacy packet terminology may remain in implementation file names, stored revisions, or migration-era helper APIs until separately migrated, but operator-facing language should prefer manifest to avoid UI metaphor drift and to better express assembled authoritative truth.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Manifest is the canonical term for the ephemeral moment-of-truth execution bundle"
+    },
+    {
+      "decided_by": "nate",
       "decision_key": "architecture-policy::platform-architecture::one-graph-many-lenses",
       "decision_kind": "architecture_policy",
       "decision_scope_kind": "authority_domain",
@@ -1488,6 +1590,23 @@
         "does_not_apply_to": []
       },
       "title": "source_refs: [] is the canonical internal shape; from: is caller convenience"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::platform-architecture::task-environment-contracts-are-append-only-evolving-manifests",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "platform_architecture",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "A task_environment_contract should not be generated from scratch every time or cached until silently stale. It is a versioned manifest of what success means for a task/business process, assembled from human knowledge, SOPs, anti-patterns, current data, historical evidence, trust constraints, and model/tool context. Each use should reference the prior contract, bind fresh evidence, compute a new hash, append a revision when material facts or rules change, and preserve failure anti-patterns and verifier outcomes as contract evolution evidence. This gives Claude Code-level on-the-fly capability a trustworthy business substrate: flexible execution over explicit, inspectable, replayable success contracts.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Task environment contracts are reused and evolved as append-only hashed manifests"
     },
     {
       "decided_by": "praxis",
@@ -1559,6 +1678,40 @@
     },
     {
       "decided_by": "nate",
+      "decision_key": "architecture-policy::product-architecture::breadth-becomes-output-hyperfocus-as-software",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "product_architecture",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Core product thesis: Praxis should not require a solo builder to manually pre-build breadth across every vertical, workflow, UI, tool, connector, and business process. The compounding loop is that each successful materialization cycle captures reusable capability residue \u2014 context, scaffold, UI shape, connector, verifier, memory, prompt pattern, taste preference, warning, or harness \u2014 so the system becomes broader through use. Praxis is hyperfocus as software: it lets a human focus intensely on the moment of work while the platform assembles the right data, shape, tools, context, agents, and verification, then distills what worked into the growing toolbox. This makes breadth a consequence of repeated focused work rather than a prerequisite for building the platform.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Breadth becomes an output, not an input; Praxis is hyperfocus as software"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::product-architecture::confidence-infrastructure-environmental-rules",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "product_architecture",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Core product/architecture doctrine: Human-facing AI collaboration should feel like chat-level flexibility backed by deterministic guardrails. Safety and business rules must become environmental constraints \u2014 read-only fields, scoped sandboxes, explicit approval gates, tool allowlists, write envelopes, verifier requirements, and auditable receipts \u2014 rather than conversational reminders the model is expected to remember. Example: for ERP updates, financial fields are read-only in the task environment unless explicit approval unlocks them; the model cannot accidentally edit them because the environment, tool schema, and write scope make the wrong move impossible. This is confidence infrastructure materialized: human judgment becomes reusable system behavior, reducing the need to repeat rules and making future agent work safer by construction.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Confidence infrastructure, materialized: rules should be environmental, not conversational"
+    },
+    {
+      "decided_by": "nate",
       "decision_key": "architecture-policy::product-architecture::llm-first-infrastructure-trust-compiler-engine",
       "decision_kind": "architecture_policy",
       "decision_scope_kind": "authority_domain",
@@ -1590,6 +1743,40 @@
         "does_not_apply_to": []
       },
       "title": "Praxis is LLM-first with humans as supervisors, not human-first workflow builders"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::product-architecture::object-truth-inference-from-cross-system-samples",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "product_architecture",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Long-term Praxis client value comes from connecting to operational systems, introspecting schemas, sampling comparable records from claimed source-of-truth and downstream systems, and using values plus metadata such as source, update timestamps, ownership hints, hierarchy, flattening, and automation touchpoints to infer the real object/process truth model. This avoids brittle rule sprawl like manually declaring which system wins for every field unless X. The platform should produce a reusable, evidence-backed map of object truth, confidence, lineage, deltas, unknowns, and process/integration edges; unresolved ambiguity becomes typed gaps or targeted questions. Tests remain useful, but the stronger foundation is current state + SOPs + historical evidence + inferred truth contracts.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Object truth should be inferred from sampled cross-system evidence, not hand-authored field precedence sprawl"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::product-architecture::object-truth-requires-deterministic-parse-compare-substrate",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "product_architecture",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Cross-system object truth work must not leave schema parsing, metadata extraction, object version modeling, identity grouping, field comparison, hierarchy/flattening detection, freshness scoring, or lineage tracking to ad hoc LLM judgment. External records and schemas should be brought into Praxis as structured primitive object versions plus dedicated metadata/evidence tables, then compared through deterministic jobs and queryable tools. LLMs may decide, explain, classify ambiguity, propose mappings, and ask targeted questions only on top of this substrate, with confidence, evidence links, and typed gaps preserved. The platform should support both automatic runs and purpose-built operator tools for these jobs so object truth contracts are reproducible, inspectable, and reusable.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Object truth inference requires deterministic parse, metadata, version, and comparison substrate before LLM judgment"
     },
     {
       "decided_by": "nate",
@@ -1760,6 +1947,23 @@
         "does_not_apply_to": []
       },
       "title": "Cursor enabled as CLI provider for non-research job types"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::providers::cursor-scrubbed-2026-04-27",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "providers",
+      "decision_source": "operator",
+      "decision_status": "decided",
+      "rationale": "Cursor has no usable lane right now: API path is Background-Agent-only (cloud sandbox + git-pull, architectural mismatch with Praxis local-sandbox + receipts model). CLI lane works at the wizard probe layer (cursor-agent binary returns) but workflow runtime sandbox dispatch fails before cursor-agent is ever invoked. Net effect: every route is admittance-without-execution. Disable everywhere; revisit only when (a) Cursor exposes a non-Background-Agent API, OR (b) the workflow sandbox dispatch lane for CLI providers is unblocked.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Cursor scrubbed across all transports and job types"
     },
     {
       "decided_by": "nate@praxis",
@@ -2239,6 +2443,23 @@
     },
     {
       "decided_by": "nate",
+      "decision_key": "architecture-policy::workflow-execution::green-state-requires-independent-proof",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_execution",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Operator surfaces must not treat green-looking state as truth by itself. Queue depth, running status, or a successful control-command response must be cross-checked against independent runtime evidence before declaring progress: container/process activity, fresh heartbeat, receipt timeline, sealed submission, artifact output, or verifier evidence. A control surface that reports success while stale authority prevents execution is more dangerous than an explicit failure.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Green-looking workflow state requires independent proof"
+    },
+    {
+      "decided_by": "nate",
       "decision_key": "architecture-policy::workflow-execution::no-token-budget-authority",
       "decision_kind": "architecture_policy",
       "decision_scope_kind": "authority_domain",
@@ -2258,6 +2479,91 @@
         ]
       },
       "title": "Token budgets are not workflow execution authority"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::workflow-execution::one-proof-before-fleet",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_execution",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Workflow fleet operations must be gated by one successful proof path before broad launch or retry. Do not mass retry, fan out, or restart a fleet until one representative job has proven the current runtime path end to end or failed with a new explicit root cause. This keeps retries diagnostic instead of duplicative and prevents queue poison from being amplified.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "One proof before fleet execution"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::workflow-execution::operator-interventions-become-runtime-improvements",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_execution",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "When Nate supplies a high-value operating truth during failure recovery, the platform should convert it into durable authority, enforcement, or observability instead of relying on future chat memory. The system should learn operational control from intervention moments: one explicit contract, one queryable record, one verifiable behavior change.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Operator interventions should become durable runtime improvements"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::workflow-execution::retry-requires-failure-and-delta",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_execution",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "A retry is an operator control action, not a duplicate launch. Every workflow.retry command must carry the receipt-backed previous failure being retried and the material difference in the next attempt, so stale replay, blind button-mashing, and repeated unchanged failures are visible and rejectable.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Workflow retries must declare prior failure and retry delta"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::workflow-execution::submitted-is-not-fired",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_execution",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Workflow state labels such as submitted, queued, requeued, or running are not sufficient proof that work is executing. A workflow is only considered fired when runtime observability shows actual work: a claimed job with fresh heartbeat, a sandbox container or provider process, and progressing durable evidence such as receipts, submissions, artifacts, or output. If nothing is building, nothing is firing.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Submitted is not fired until observable work exists"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::workflow-execution::workflow-mcp-token-shard-authority",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_execution",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Workflow model sandboxes receive scoped authority through signed workflow MCP tokens, not ambient API or DB access. Tokens carry allowed_tools plus source_refs and access_policy shard fields such as resolved_read_scope, declared_read_scope, write_scope, test_scope, and blast_radius. MCP/API tools must clamp results to that shard when they can prove native enforcement; broad router tools that cannot prove shard enforcement fail closed for scoped workflow sessions until result-level clamps exist. Repo materialization follows the same model: empty by default, scoped shard copy allowed, unscoped legacy copy requires explicit operator debug opt-in.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Workflow MCP tokens carry and enforce task shard authority"
     },
     {
       "decided_by": "nate",

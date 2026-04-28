@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # preact-orient-friction.sh (Gemini CLI BeforeTool hook)
 #
-# Mirrors the Claude Code hook one-for-one. Reads the BeforeTool payload on
-# stdin, forwards it to the harness-neutral Python implementation. Hook
-# payload shape is the same as Claude's: `{tool_name, tool_input}`. Response
-# uses `hookSpecificOutput.additionalContext`. Confirmed against
-# gemini-cli@0.39.1 bundle.
+# Gemini hook entrypoint. Reads the BeforeTool payload on stdin and forwards it
+# to the harness-neutral Python implementation. The implementation records every
+# match but injects context only for explicit, non-advisory decisions so routine
+# tool calls do not get bogged down by hook chatter.
 #
 # The Python entry handles tool-name aliasing (run_shell_command → Bash,
 # replace → Edit, write_file → Write, read_file → Read) inside

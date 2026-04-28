@@ -35,8 +35,10 @@ def test_workflow_runner_dry_run_delegates_to_runtime_authority(monkeypatch) -> 
         raw={},
     )
 
-    def _fake_dry_run_workflow(observed_spec):
+    def _fake_dry_run_workflow(observed_spec, *, pg_conn=None, repo_root=None):
         captured["spec"] = observed_spec
+        captured["pg_conn"] = pg_conn
+        captured["repo_root"] = repo_root
         return dry_run_module.DryRunResult(
             spec_name=observed_spec.name,
             total_jobs=2,
@@ -74,9 +76,13 @@ def test_workflow_runner_dry_run_delegates_to_runtime_authority(monkeypatch) -> 
     monkeypatch.setattr(_mod, "dispatch_notification_payload", notifications.append)
 
     runner = _mod.WorkflowRunner.__new__(_mod.WorkflowRunner)
+    runner._pg_conn = object()
+    runner._repo_root = "/tmp/praxis"
     result = runner.run_workflow(spec, dry_run=True, run_id="workflow_run:test")
 
     assert captured["spec"] is spec
+    assert captured["pg_conn"] is runner._pg_conn
+    assert captured["repo_root"] == "/tmp/praxis"
     assert result.total_jobs == 2
     assert result.succeeded == 1
     assert result.blocked == 1

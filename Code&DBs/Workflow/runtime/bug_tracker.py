@@ -767,27 +767,12 @@ class BugTracker:
             discovered_in_receipt_id=discovered_in_receipt_id,
         )
 
-        vec = None
         similar_bugs: list[dict] = []
         vector_query = None
         if self._vector_store is not None:
             embed_text = title + " " + description
             vector_query = self._vector_store.prepare(embed_text)
-            dup_rows = vector_query.search(
-                "bugs",
-                select_columns=("bug_id", "title", "status", "severity"),
-                limit=5,
-                min_similarity=0.85,
-                score_alias="similarity",
-            )
-            for r in dup_rows:
-                similar_bugs.append({
-                    "bug_id": r["bug_id"],
-                    "title": r["title"],
-                    "status": r["status"],
-                    "severity": r["severity"],
-                    "similarity": round(float(r["similarity"]), 4),
-                })
+            similar_bugs = self._similar_bugs_from_vector_query(vector_query, limit=5)
 
         initial_resume = resume_context if isinstance(resume_context, dict) else {}
         # Capture the gateway correlation_id at filing time so trace.walk
@@ -844,6 +829,41 @@ class BugTracker:
             )
             
         return bug, similar_bugs
+
+    @staticmethod
+    def _similar_bugs_from_vector_query(vector_query: Any, *, limit: int) -> list[dict]:
+        dup_rows = vector_query.search(
+            "bugs",
+            select_columns=("bug_id", "title", "status", "severity"),
+            limit=limit,
+            min_similarity=0.85,
+            score_alias="similarity",
+        )
+        similar_bugs: list[dict] = []
+        for row in dup_rows:
+            similar_bugs.append(
+                {
+                    "bug_id": row["bug_id"],
+                    "title": row["title"],
+                    "status": row["status"],
+                    "severity": row["severity"],
+                    "similarity": round(float(row["similarity"]), 4),
+                }
+            )
+        return similar_bugs
+
+    def find_similar_bugs(
+        self,
+        *,
+        title: str,
+        description: str = "",
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return strong semantic bug neighbors without filing a new bug."""
+        if self._vector_store is None:
+            return []
+        vector_query = self._vector_store.prepare(f"{title} {description}")
+        return self._similar_bugs_from_vector_query(vector_query, limit=max(1, limit))
 
     def merge_resume_context(self, bug_id: str, patch: dict[str, Any]) -> Bug | None:
         """Shallow-merge *patch* into bugs.resume_context (jsonb ||)."""

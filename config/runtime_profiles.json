@@ -9,12 +9,7 @@
       "docker_memory": "500m",
       "network_policy": "provider_only",
       "workspace_materialization": "none",
-      "secret_allowlist": [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY"
-      ],
+      "secret_allowlist": [],
       "auth_mount_policy": "provider_scoped",
       "timeout_profile": "default"
     },
@@ -25,12 +20,7 @@
       "docker_memory": "500m",
       "network_policy": "provider_only",
       "workspace_materialization": "copy",
-      "secret_allowlist": [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY"
-      ],
+      "secret_allowlist": [],
       "auth_mount_policy": "provider_scoped",
       "timeout_profile": "default"
     }
@@ -43,18 +33,6 @@
       "model_profile_id": "model_profile.praxis.default",
       "provider_policy_id": "provider_policy.praxis.default",
       "provider_selection_authority_ref": "projection.private_provider_job_catalog",
-      "bootstrap_seed_projection": {
-        "provider_name": "openai",
-        "provider_names": ["openai", "anthropic", "google"],
-        "allowed_models": [
-          "gpt-5.4",
-          "claude-opus-4-7",
-          "claude-sonnet-4-6",
-          "gemini-3.1-pro-preview",
-          "gpt-5.4-mini",
-          "gemini-3-flash-preview"
-        ]
-      },
       "repo_root": ".",
       "workdir": ".",
       "receipts_dir": "artifacts/runtime_receipts",

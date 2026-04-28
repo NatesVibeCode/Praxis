@@ -10,7 +10,7 @@ description: "Build a manifest-declared Praxis integration for a third-party API
 - MCP/catalog reference: `docs/MCP.md`
 - CLI reference: `docs/CLI.md`
 - API route reference: `docs/API.md`
-- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs`
 - If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
 
 Use this skill when adding a third-party API to Praxis as a declarative manifest integration. The default shape is a zero-Python TOML manifest dropped into `Code&DBs/Integrations/manifests/`; only escape to a custom adapter if the discovery phase proves the loader cannot express what's needed.

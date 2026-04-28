@@ -391,7 +391,7 @@ def _preflight_provider_availability(
     This check answers the operator-facing launch question: "is this provider
     usable at this moment?"  The durable source is the provider_usage heartbeat
     snapshots table; process-local circuit-breaker state is consulted only as
-    a second read model for manual/open-circuit decisions.
+    a best-effort second read model for manual/open-circuit decisions.
     """
     warnings: list[dict[str, Any]] = []
     provider_refs = _provider_refs_from_jobs(
@@ -498,9 +498,20 @@ def _preflight_provider_availability(
 
     if circuit_breakers is None:
         try:
-            from runtime.circuit_breaker import get_circuit_breakers
+            from runtime.workflow._shared import _circuit_breakers
 
-            circuit_breakers = get_circuit_breakers()
+            circuit_breakers = _circuit_breakers()
+            if circuit_breakers is None:
+                warnings.append({
+                    "kind": "provider_circuit_query_unavailable",
+                    "severity": "warning",
+                    "label": None,
+                    "message": (
+                        "could not load process-local circuit-breaker state; "
+                        "continued provider availability preflight using durable "
+                        "provider_usage and circuit-breaker authority only"
+                    ),
+                })
         except Exception as exc:
             warnings.append({
                 "kind": "provider_circuit_query_failed",

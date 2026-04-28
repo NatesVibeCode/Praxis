@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""Run one daily heartbeat cycle.
+"""Run one daily heartbeat cycle through the catalog-backed heartbeat surface.
 
 Usage:
   WORKFLOW_DATABASE_URL=<url> python3 scripts/daily_heartbeat.py [--scope SCOPE] [--triggered-by SRC]
 
-Scopes: all (default) | providers | connectors | credentials | mcp
+Scopes: all (default) | providers | connectors | credentials | mcp | model_retirement
 Triggered-by: launchd | cli | mcp | http | test  (default: launchd)
 
-When WORKFLOW_DATABASE_URL is absent, the script resolves the workflow database
-through the shared runtime authority resolver.
+This wrapper stays intentionally thin so launchd/manual entrypoints reuse the
+same operation-catalog path as MCP and the CLI alias.
 """
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -23,23 +21,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW_ROOT = REPO_ROOT / "Code&DBs" / "Workflow"
 sys.path.insert(0, str(WORKFLOW_ROOT))
 
-from runtime._workflow_database import resolve_runtime_database_url
-from runtime.daily_heartbeat import run_daily_heartbeat
-
-
-def _configure_workflow_database_env() -> str:
-    configured = str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip()
-    if not configured:
-        configured = str(resolve_runtime_database_url(repo_root=REPO_ROOT))
-        os.environ["WORKFLOW_DATABASE_URL"] = configured
-    return configured
+from surfaces.cli.mcp_tools import run_cli_tool
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one daily heartbeat cycle.")
     parser.add_argument(
         "--scope",
-        choices=["all", "providers", "connectors", "credentials", "mcp"],
+        choices=["all", "providers", "connectors", "credentials", "mcp", "model_retirement"],
         default="all",
     )
     parser.add_argument(
@@ -50,16 +39,20 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def main() -> int:
+def main() -> int:
     args = _parse_args()
-    _configure_workflow_database_env()
-    result = await run_daily_heartbeat(
-        scope=args.scope,
-        triggered_by=args.triggered_by,
+    exit_code, payload = run_cli_tool(
+        "praxis_daily_heartbeat",
+        {
+            "scope": args.scope,
+            "triggered_by": args.triggered_by,
+        },
     )
-    print(json.dumps(result.to_json(), indent=2, default=str))
-    return 0 if result.status in ("succeeded", "partial") else 1
+    print(json.dumps(payload, indent=2, default=str))
+    if exit_code != 0:
+        return exit_code
+    return 0 if payload.get("status") in ("succeeded", "partial") else 1
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    sys.exit(main())

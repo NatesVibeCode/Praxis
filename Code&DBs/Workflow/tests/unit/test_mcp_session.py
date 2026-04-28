@@ -66,3 +66,68 @@ def test_mint_workflow_mcp_session_token_requires_explicit_signing_secret(monkey
             job_label="job-alpha",
             allowed_tools=["praxis_context_shard"],
         )
+
+
+def test_workflow_mcp_session_token_records_key_id_and_jti(monkeypatch) -> None:
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_KEY_ID", "kid-test")
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_TOKEN_TTL_SECONDS", "600")
+    monkeypatch.setattr(mcp_session, "_current_time", lambda: 1_800_000_000)
+
+    token = mcp_session.mint_workflow_mcp_session_token(
+        run_id="run.alpha",
+        workflow_id="workflow.alpha",
+        job_label="job-alpha",
+        allowed_tools=["praxis_context_shard"],
+    )
+
+    claims = mcp_session.verify_workflow_mcp_session_token(token)
+
+    assert claims["kid"] == "kid-test"
+    assert isinstance(claims["jti"], str)
+    assert claims["jti"]
+
+
+def test_workflow_mcp_session_token_verifies_rotated_keyring(monkeypatch) -> None:
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_TOKEN_TTL_SECONDS", "600")
+    monkeypatch.setattr(mcp_session, "_current_time", lambda: 1_800_000_000)
+    monkeypatch.setenv(
+        "PRAXIS_WORKFLOW_MCP_SIGNING_KEYS_JSON",
+        '{"active_kid":"kid-old","keys":{"kid-old":"old-secret","kid-new":"new-secret"}}',
+    )
+    token = mcp_session.mint_workflow_mcp_session_token(
+        run_id="run.alpha",
+        workflow_id="workflow.alpha",
+        job_label="job-alpha",
+        allowed_tools=["praxis_context_shard"],
+    )
+
+    monkeypatch.setenv(
+        "PRAXIS_WORKFLOW_MCP_SIGNING_KEYS_JSON",
+        '{"active_kid":"kid-new","keys":{"kid-new":"new-secret","kid-old":"old-secret"}}',
+    )
+
+    claims = mcp_session.verify_workflow_mcp_session_token(token)
+
+    assert claims["kid"] == "kid-old"
+    assert claims["job_label"] == "job-alpha"
+
+
+def test_workflow_mcp_session_token_rejects_revoked_jti(monkeypatch) -> None:
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_TOKEN_TTL_SECONDS", "600")
+    monkeypatch.setattr(mcp_session, "_current_time", lambda: 1_800_000_000)
+    token = mcp_session.mint_workflow_mcp_session_token(
+        run_id="run.alpha",
+        workflow_id="workflow.alpha",
+        job_label="job-alpha",
+        allowed_tools=["praxis_context_shard"],
+    )
+    claims = mcp_session.verify_workflow_mcp_session_token(token)
+
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_REVOKED_JTIS", claims["jti"])
+
+    with pytest.raises(mcp_session.WorkflowMcpSessionError) as exc_info:
+        mcp_session.verify_workflow_mcp_session_token(token)
+
+    assert exc_info.value.reason_code == "workflow_mcp.token_revoked"

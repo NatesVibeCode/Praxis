@@ -15,6 +15,7 @@ from typing import Mapping
 
 _LAYOUT_FILENAME = "workspace_layout.json"
 _HOST_WORKSPACE_ROOT_ENV = "PRAXIS_HOST_WORKSPACE_ROOT"
+_WORKSPACE_BASE_PATH_ENV = "PRAXIS_WORKSPACE_BASE_PATH"
 _CONTAINER_WORKSPACE_ROOT_ENV = "PRAXIS_CONTAINER_WORKSPACE_ROOT"
 _CONTAINER_HOME_ENV = "PRAXIS_CONTAINER_HOME"
 _CONTAINER_AUTH_SEED_DIR_ENV = "PRAXIS_CONTAINER_AUTH_SEED_DIR"
@@ -60,6 +61,13 @@ def _subdir(name: str) -> str:
 def code_tree_root(repo_root: Path | None = None) -> Path:
     root = (repo_root or _repo_root()).resolve()
     canonical = code_tree_dirname()
+    candidates = [root / canonical, *(root / alias for alias in tree_aliases())]
+    workflow_subdir = _subdir("workflow")
+    for candidate in candidates:
+        if (candidate / workflow_subdir / "runtime").is_dir():
+            return candidate
+    if (root / canonical).exists():
+        return root / canonical
     for alias in tree_aliases():
         candidate = root / alias
         if candidate.exists():
@@ -140,6 +148,26 @@ def container_auth_seed_dir(*, env: Mapping[str, str] | None = None) -> Path:
     return Path(str(execution_mounts["container_auth_seed_dir"])).expanduser()
 
 
+def _repo_env_value(name: str) -> str | None:
+    env_path = _repo_root() / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        if key.strip() != name:
+            continue
+        value = raw_value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        return value.strip() or None
+    return None
+
+
 def authority_workspace_roots(*, env: Mapping[str, str] | None = None) -> tuple[Path, ...]:
     """Workspace roots asserted by runtime authority, ordered by precedence."""
     source = env if env is not None else os.environ
@@ -160,6 +188,8 @@ def authority_workspace_roots(*, env: Mapping[str, str] | None = None) -> tuple[
             roots.append(candidate)
 
     _append(source.get(_HOST_WORKSPACE_ROOT_ENV))
+    _append(source.get(_WORKSPACE_BASE_PATH_ENV))
+    _append(_repo_env_value(_WORKSPACE_BASE_PATH_ENV))
     try:
         from runtime.instance import native_instance_contract
         from runtime.instance import NativeInstanceResolutionError

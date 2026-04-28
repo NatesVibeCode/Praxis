@@ -128,6 +128,8 @@ def test_operate_catalog_projects_db_operations(monkeypatch) -> None:
 
     assert payload["routed_to"] == "operation_catalog_gateway"
     assert payload["call_path"] == "/api/operate"
+    assert payload["operate_catalog_path"] == "/api/operate/catalog"
+    assert payload["operation_catalog_path"] == "/api/catalog/operations"
     assert payload["catalog_path"] == "/api/catalog/operations"
     assert payload["operation_count"] == 1
     assert payload["operations"][0]["operation_name"] == "operator.echo"
@@ -225,6 +227,66 @@ def test_operate_endpoint_uses_idempotency_header_when_body_key_absent(monkeypat
     assert calls == [("operator.echo", "idem-header-456")]
 
 
+def test_compile_materialize_legacy_alias_delegates_through_gateway(monkeypatch) -> None:
+    calls: list[tuple[str, str, dict[str, Any], str | None, str | None]] = []
+    monkeypatch.setattr(rest, "mount_capabilities", lambda _app: None)
+
+    def _fake_execute(body, *, header_idempotency_key=None, header_workflow_token=None):
+        calls.append(
+            (
+                body.operation,
+                body.mode,
+                body.input,
+                header_idempotency_key,
+                header_workflow_token,
+            )
+        )
+        return 200, {
+            "ok": True,
+            "operation": body.operation,
+            "result": {"workflow_id": "wf_compile_123"},
+            "operation_receipt": {
+                "operation_name": body.operation,
+                "idempotency_key": header_idempotency_key,
+            },
+        }
+
+    monkeypatch.setattr(rest, "execute_operate_request", _fake_execute)
+
+    with TestClient(rest.app) as client:
+        response = client.post(
+            "/api/compile_materialize",
+            headers={
+                "Idempotency-Key": "idem-compile-1",
+                "X-Workflow-Token": "wf-token-1",
+            },
+            json={
+                "intent": "Build a Gmail review workflow",
+                "title": "Inbox review",
+                "match_limit": 7,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["operation"] == "compile_materialize"
+    assert payload["result"]["workflow_id"] == "wf_compile_123"
+    assert calls == [
+        (
+            "compile_materialize",
+            "command",
+            {
+                "intent": "Build a Gmail review workflow",
+                "title": "Inbox review",
+                "match_limit": 7,
+            },
+            "idem-compile-1",
+            "wf-token-1",
+        )
+    ]
+
+
 def test_workflow_operate_catalog_cli_uses_existing_gateway_catalog(monkeypatch) -> None:
     monkeypatch.setattr(
         rest,
@@ -233,6 +295,8 @@ def test_workflow_operate_catalog_cli_uses_existing_gateway_catalog(monkeypatch)
             "ok": True,
             "authority": "operation_catalog_registry",
             "call_path": "/api/operate",
+            "operate_catalog_path": "/api/operate/catalog",
+            "operation_catalog_path": "/api/catalog/operations",
             "catalog_path": "/api/catalog/operations",
             "operation_count": 1,
             "operations": [{"operation_name": "operator.echo"}],
@@ -244,7 +308,34 @@ def test_workflow_operate_catalog_cli_uses_existing_gateway_catalog(monkeypatch)
 
     payload = json.loads(stdout.getvalue())
     assert payload["call_path"] == "/api/operate"
+    assert payload["operate_catalog_path"] == "/api/operate/catalog"
     assert payload["operations"][0]["operation_name"] == "operator.echo"
+
+
+def test_workflow_operate_catalog_cli_plain_output_distinguishes_gateway_and_registry(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        rest,
+        "build_operate_catalog_payload",
+        lambda: {
+            "ok": True,
+            "authority": "operation_catalog_registry",
+            "call_path": "/api/operate",
+            "operate_catalog_path": "/api/operate/catalog",
+            "operation_catalog_path": "/api/catalog/operations",
+            "catalog_path": "/api/catalog/operations",
+            "operation_count": 1,
+            "operations": [{"operation_name": "operator.echo"}],
+        },
+    )
+
+    stdout = StringIO()
+    assert workflow_cli_main(["operate", "catalog"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "gateway:   /api/operate/catalog" in rendered
+    assert "catalog:   /api/catalog/operations" in rendered
 
 
 def test_workflow_operate_call_cli_delegates_to_existing_gateway(monkeypatch) -> None:

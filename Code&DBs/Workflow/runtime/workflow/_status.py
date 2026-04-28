@@ -1129,6 +1129,31 @@ def inspect_job(conn: SyncPostgresConnection, run_id: str, label: str | None = N
     return {'run_id': run_id, 'jobs': jobs}
 
 
+def graph_retry_guard(
+    conn: SyncPostgresConnection,
+    *,
+    run_id: str,
+    label: str,
+) -> dict[str, Any] | None:
+    """Return retry guard state for graph-runtime jobs projected from evidence."""
+
+    run_row = _load_run_row(conn, run_id)
+    if not run_row:
+        return None
+    graph_jobs = _graph_job_rows_from_evidence(run_row=run_row, run_id=run_id)
+    for job in graph_jobs:
+        if str(job.get("label") or "").strip() != label:
+            continue
+        return {
+            "run_id": run_id,
+            "label": label,
+            "job_id": job.get("id"),
+            "status": job.get("status") or "unknown",
+            "attempt": job.get("attempt") or 0,
+        }
+    return None
+
+
 def cancel_run(
     conn: SyncPostgresConnection,
     run_id: str,
@@ -1186,7 +1211,13 @@ def cancel_job(conn: SyncPostgresConnection, job_id: str | int) -> dict:
     }
 
 
-def retry_job(conn: SyncPostgresConnection, run_id: str, label: str) -> dict:
+def retry_job(
+    conn: SyncPostgresConnection,
+    run_id: str,
+    label: str,
+    *,
+    retry_command_id: str | None = None,
+) -> dict:
     """Re-queue a single failed job and resume the run."""
     from ._admission import (
         IdempotencyConflict,
@@ -1195,6 +1226,29 @@ def retry_job(conn: SyncPostgresConnection, run_id: str, label: str) -> dict:
     )
 
     from runtime.compile_artifacts import CompileArtifactStore
+
+    run_row = _load_run_row(conn, run_id)
+    if run_row:
+        graph_jobs = _graph_job_rows_from_evidence(run_row=run_row, run_id=run_id)
+        graph_job = next(
+            (
+                job
+                for job in graph_jobs
+                if str(job.get("label") or "").strip() == label
+            ),
+            None,
+        )
+        if graph_job is not None and str(graph_job.get("status") or "").strip() in {
+            "failed",
+            "dead_letter",
+            "cancelled",
+        }:
+            return _retry_graph_job(
+                conn,
+                run_id=run_id,
+                label=label,
+                retry_command_id=retry_command_id,
+            )
 
     retryable_rows = conn.execute(
         """SELECT id, label, attempt, status
@@ -1205,17 +1259,26 @@ def retry_job(conn: SyncPostgresConnection, run_id: str, label: str) -> dict:
         label,
     )
     if not retryable_rows:
-        return {'error': f'No retryable job found: {run_id}/{label}'}
+        return _retry_graph_job(
+            conn,
+            run_id=run_id,
+            label=label,
+            retry_command_id=retry_command_id,
+        )
     retryable_job = dict(retryable_rows[0])
     retry_attempt = int(retryable_job.get("attempt") or 0)
     retry_status = str(retryable_job.get("status") or "").strip()
+    retry_discriminator = str(retry_command_id or "").strip()
     idempotency_key = f"{run_id}:{label}:retry:{retry_status}:{retry_attempt}"
+    if retry_discriminator:
+        idempotency_key = f"{idempotency_key}:command:{retry_discriminator}"
     payload_hash = canonical_hash(
         {
             "run_id": run_id,
             "label": label,
             "attempt": retry_attempt,
             "status": retry_status,
+            "retry_command_id": retry_discriminator or None,
         }
     )
     result = check_idempotency(conn, "workflow.retry", idempotency_key, payload_hash)
@@ -1251,6 +1314,95 @@ def retry_job(conn: SyncPostgresConnection, run_id: str, label: str) -> dict:
         'label': label,
         'status': 'requeued',
         'attempt': job['attempt'],
+        'packet_reuse_provenance': packet_reuse_provenance,
+    }
+
+
+def _retry_graph_job(
+    conn: SyncPostgresConnection,
+    *,
+    run_id: str,
+    label: str,
+    retry_command_id: str | None = None,
+) -> dict:
+    """Reopen a graph-runtime run from evidence when workflow_jobs is absent."""
+
+    from ._admission import _enforce_queue_admission, _retry_packet_reuse_provenance
+
+    run_row = _load_run_row(conn, run_id)
+    if not run_row:
+        return {'error': f'No retryable job found: {run_id}/{label}'}
+    graph_jobs = _graph_job_rows_from_evidence(run_row=run_row, run_id=run_id)
+    retryable_job = next(
+        (
+            dict(job)
+            for job in graph_jobs
+            if str(job.get("label") or "").strip() == label
+            and str(job.get("status") or "").strip() in {"failed", "dead_letter", "cancelled"}
+        ),
+        None,
+    )
+    if retryable_job is None:
+        return {'error': f'No retryable job found: {run_id}/{label}'}
+
+    retry_attempt = int(retryable_job.get("attempt") or 0)
+    retry_status = str(retryable_job.get("status") or "").strip()
+    failure_fingerprint = canonical_hash(
+        {
+            "status": retry_status,
+            "attempt": retry_attempt,
+            "last_error_code": retryable_job.get("last_error_code"),
+            "stdout_preview": retryable_job.get("stdout_preview"),
+        }
+    )[:16]
+    retry_discriminator = str(retry_command_id or "").strip()
+    idempotency_key = (
+        f"{run_id}:{label}:graph-retry:{retry_status}:{retry_attempt}:{failure_fingerprint}"
+    )
+    if retry_discriminator:
+        idempotency_key = f"{idempotency_key}:command:{retry_discriminator}"
+    payload_hash = canonical_hash(
+        {
+            "run_id": run_id,
+            "label": label,
+            "attempt": retry_attempt,
+            "status": retry_status,
+            "failure_fingerprint": failure_fingerprint,
+            "retry_command_id": retry_discriminator or None,
+        }
+    )
+    result = check_idempotency(conn, "workflow.retry", idempotency_key, payload_hash)
+    if result.is_replay:
+        logger.info("Idempotent graph retry replay: returning existing run_id=%s", result.existing_run_id)
+        return {'run_id': run_id, 'label': label, 'status': 'replayed', 'replayed': True}
+    if result.is_conflict:
+        from ._admission import IdempotencyConflict
+
+        logger.warning("Graph retry idempotency conflict: key=%s", idempotency_key)
+        raise IdempotencyConflict(idempotency_key, result.existing_run_id, result.created_at)
+
+    packet_reuse_provenance = _retry_packet_reuse_provenance(conn, run_id=run_id)
+    _enforce_queue_admission(conn, job_count=1)
+    rows = conn.execute(
+        """UPDATE workflow_runs
+           SET current_state = 'claim_accepted',
+               terminal_reason_code = NULL,
+               finished_at = NULL
+           WHERE run_id = $1
+             AND current_state IN ('failed', 'dead_letter', 'cancelled')
+           RETURNING run_id""",
+        run_id,
+    )
+    if not rows:
+        return {'error': f'No retryable job found: {run_id}/{label}'}
+    conn.execute("SELECT pg_notify('system_event', $1)", run_id)
+    record_idempotency(conn, "workflow.retry", idempotency_key, payload_hash, run_id=run_id)
+    return {
+        'run_id': run_id,
+        'label': label,
+        'status': 'requeued',
+        'attempt': retry_attempt,
+        'execution_mode': 'graph_runtime',
         'packet_reuse_provenance': packet_reuse_provenance,
     }
 

@@ -2051,6 +2051,9 @@ def compile_plan(
     failures: list[dict[str, Any]] = []
     unresolved_stages: list[dict[str, Any]] = []
     unresolved_writes: list[dict[str, Any]] = []
+    workspace_ref: str | None = None
+    runtime_profile_ref: str | None = None
+    ref_conflicts: list[str] = []
 
     for index, packet in enumerate(plan_obj.packets):
         packet_label = (
@@ -2107,6 +2110,26 @@ def compile_plan(
                 }
             )
             continue
+
+        for field_name, value in (
+            ("workspace_ref", compiled.workspace_ref),
+            ("runtime_profile_ref", compiled.runtime_profile_ref),
+        ):
+            normalized = str(value or "").strip()
+            if not normalized:
+                continue
+            if field_name == "workspace_ref":
+                if workspace_ref and workspace_ref != normalized:
+                    ref_conflicts.append(
+                        f"{field_name}: {workspace_ref!r} != {normalized!r}"
+                    )
+                workspace_ref = workspace_ref or normalized
+            else:
+                if runtime_profile_ref and runtime_profile_ref != normalized:
+                    ref_conflicts.append(
+                        f"{field_name}: {runtime_profile_ref!r} != {normalized!r}"
+                    )
+                runtime_profile_ref = runtime_profile_ref or normalized
 
         warnings_all.extend(f"{packet_label}: {w}" for w in warnings)
         job = _packet_to_job(packet, compiled=compiled, workdir=resolved_workdir, index=index)
@@ -2171,6 +2194,11 @@ def compile_plan(
         raise err_stage
     if failures:
         raise CompilePlanError(failures)
+    if ref_conflicts:
+        raise ValueError(
+            "compile_plan resolved conflicting execution authority refs: "
+            + "; ".join(ref_conflicts)
+        )
 
     resolved_workflow_id = plan_obj.workflow_id or _deterministic_workflow_id(plan_obj)
     execution_manifest = _plan_execution_manifest(
@@ -2188,6 +2216,10 @@ def compile_plan(
         "workdir": resolved_workdir,
         "jobs": jobs,
     }
+    if workspace_ref:
+        spec_dict["workspace_ref"] = workspace_ref
+    if runtime_profile_ref:
+        spec_dict["runtime_profile_ref"] = runtime_profile_ref
     if plan_obj.why:
         spec_dict["why"] = plan_obj.why
     return spec_dict, warnings_all
@@ -2216,6 +2248,7 @@ class ProposedPlan:
     packet_declarations: list[dict[str, Any]]
     binding_summary: dict[str, Any]
     unresolved_routes: list[dict[str, Any]]
+    provider_freshness: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2228,7 +2261,134 @@ class ProposedPlan:
             "packet_declarations": list(self.packet_declarations),
             "binding_summary": dict(self.binding_summary),
             "unresolved_routes": list(self.unresolved_routes),
+            "provider_freshness": (
+                dict(self.provider_freshness) if self.provider_freshness is not None else None
+            ),
         }
+
+
+_PROVIDER_FRESHNESS_MAX_AGE_SECONDS = 30 * 60
+
+
+class ProviderFreshnessGateError(ValueError):
+    """Raised when proof-launch evidence is missing or stale."""
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _normalize_provider_freshness(
+    evidence: Any,
+    *,
+    fallback_source: str,
+) -> dict[str, Any] | None:
+    if not isinstance(evidence, dict):
+        return None
+
+    normalized: dict[str, Any] = dict(evidence)
+    for key in (
+        "provider_route_truth",
+        "route_truth",
+        "provider_availability_refresh",
+        "availability_refresh",
+        "refresh_receipt",
+    ):
+        nested = evidence.get(key)
+        if isinstance(nested, dict):
+            normalized.update(nested)
+
+    route_truth_ref = str(
+        normalized.get("route_truth_ref")
+        or normalized.get("provider_route_truth_ref")
+        or normalized.get("preview_ref")
+        or ""
+    ).strip()
+    refresh_receipt_ref = str(
+        normalized.get("refresh_receipt_ref")
+        or normalized.get("provider_availability_refresh_ref")
+        or normalized.get("receipt_ref")
+        or ""
+    ).strip()
+    route_truth_checked_at = _parse_iso_datetime(
+        normalized.get("route_truth_checked_at")
+        or normalized.get("checked_at")
+        or normalized.get("preview_checked_at")
+    )
+    refresh_receipt_issued_at = _parse_iso_datetime(
+        normalized.get("refresh_receipt_issued_at")
+        or normalized.get("issued_at")
+        or normalized.get("created_at")
+        or normalized.get("timestamp")
+    )
+
+    if not route_truth_ref and not refresh_receipt_ref:
+        return None
+
+    if route_truth_ref:
+        normalized["route_truth_ref"] = route_truth_ref
+    if refresh_receipt_ref:
+        normalized["refresh_receipt_ref"] = refresh_receipt_ref
+    if route_truth_checked_at is not None:
+        normalized["route_truth_checked_at"] = route_truth_checked_at.isoformat()
+    if refresh_receipt_issued_at is not None:
+        normalized["refresh_receipt_issued_at"] = refresh_receipt_issued_at.isoformat()
+    normalized.setdefault("source", fallback_source)
+    return normalized
+
+
+def _provider_freshness_is_recent(evidence: dict[str, Any] | None) -> bool:
+    if not evidence:
+        return False
+    now = datetime.now(timezone.utc)
+    route_truth_checked_at = _parse_iso_datetime(evidence.get("route_truth_checked_at"))
+    if evidence.get("route_truth_ref") and route_truth_checked_at is not None:
+        if (
+            now - route_truth_checked_at.astimezone(timezone.utc)
+        ).total_seconds() <= _PROVIDER_FRESHNESS_MAX_AGE_SECONDS:
+            return True
+    refresh_receipt_issued_at = _parse_iso_datetime(
+        evidence.get("refresh_receipt_issued_at")
+    )
+    if evidence.get("refresh_receipt_ref") and refresh_receipt_issued_at is not None:
+        if (
+            now - refresh_receipt_issued_at.astimezone(timezone.utc)
+        ).total_seconds() <= _PROVIDER_FRESHNESS_MAX_AGE_SECONDS:
+            return True
+    return False
+
+
+def _require_provider_freshness(
+    evidence: Any,
+    *,
+    launch_kind: str,
+) -> dict[str, Any]:
+    normalized = _normalize_provider_freshness(
+        evidence,
+        fallback_source=f"runtime.spec_compiler.{launch_kind}",
+    )
+    if normalized is None:
+        raise ProviderFreshnessGateError(
+            "proof launch requires fresh provider route truth or a recent "
+            "provider availability refresh receipt"
+        )
+    if not _provider_freshness_is_recent(normalized):
+        raise ProviderFreshnessGateError(
+            "provider freshness evidence is stale; refresh provider route truth "
+            "or provider availability before approving proof launch"
+        )
+    return normalized
 
 
 def propose_plan(
@@ -2265,6 +2425,14 @@ def propose_plan(
     from runtime.workflow._admission import preview_workflow_execution
 
     preview = preview_workflow_execution(conn, inline_spec=spec_dict)
+    provider_freshness = _require_provider_freshness(
+        {
+            "provider_route_truth": preview,
+            "route_truth_ref": f"preview:{stable_hash(preview)[:16]}",
+            "route_truth_checked_at": datetime.now(timezone.utc).isoformat(),
+        },
+        launch_kind="propose_plan",
+    )
 
     binding_totals = {"bound": 0, "ambiguous": 0, "unbound": 0}
     binding_unbound: list[dict[str, Any]] = []
@@ -2422,6 +2590,7 @@ def propose_plan(
         packet_declarations=packet_declarations,
         binding_summary=binding_summary,
         unresolved_routes=unresolved_routes,
+        provider_freshness=provider_freshness,
     )
 
 
@@ -2481,6 +2650,10 @@ def approve_proposed_plan(
     approver = str(approved_by or "").strip()
     if not approver:
         raise ValueError("approved_by is required — pick an identifier for the approver")
+    _require_provider_freshness(
+        proposed.provider_freshness,
+        launch_kind="approve_proposed_plan",
+    )
     proposal_hash = _hash_proposed_plan(proposed)
     approved_at = datetime.now(timezone.utc).isoformat()
     return ApprovedPlan(
@@ -2578,6 +2751,10 @@ def launch_approved(
             f"Expected {approved.proposal_hash!r}, got {current_hash!r}. "
             "Re-propose and re-approve before launching."
         )
+    _require_provider_freshness(
+        approved.proposed.provider_freshness,
+        launch_kind="launch_approved",
+    )
 
     receipt = launch_proposed(
         approved.proposed,

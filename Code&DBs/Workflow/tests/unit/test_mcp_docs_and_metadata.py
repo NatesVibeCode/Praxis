@@ -4,6 +4,7 @@ from pathlib import Path
 
 from surfaces.mcp.catalog import get_tool_catalog
 from surfaces.mcp.docs import render_mcp_markdown
+from scripts.generate_mcp_docs import render_api_markdown, render_cli_markdown
 
 
 def test_every_tool_has_complete_cli_metadata() -> None:
@@ -35,11 +36,35 @@ def test_provider_control_plane_owns_the_provider_control_plane_alias() -> None:
     assert catalog["praxis_provider_control_plane"].cli_entrypoint == "workflow provider-control-plane"
 
 
+def test_operation_wizard_tools_have_direct_aliases() -> None:
+    catalog = get_tool_catalog()
+
+    assert catalog["praxis_operation_forge"].cli_recommended_alias == "operation-forge"
+    assert catalog["praxis_operation_forge"].cli_entrypoint == "workflow operation-forge"
+    assert catalog["praxis_evolve_operation_field"].cli_recommended_alias == "evolve-operation-field"
+    assert catalog["praxis_register_operation"].cli_recommended_alias == "register-operation"
+    assert catalog["praxis_retire_operation"].cli_recommended_alias == "retire-operation"
+
+
 def test_checked_in_mcp_docs_match_generated_catalog() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     docs_path = repo_root / "docs" / "MCP.md"
 
     assert docs_path.read_text(encoding="utf-8") == render_mcp_markdown()
+
+
+def test_checked_in_cli_docs_match_generated_catalog() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    docs_path = repo_root / "docs" / "CLI.md"
+
+    assert docs_path.read_text(encoding="utf-8") == render_cli_markdown()
+
+
+def test_checked_in_api_docs_match_generated_catalog() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    docs_path = repo_root / "docs" / "API.md"
+
+    assert docs_path.read_text(encoding="utf-8") == render_api_markdown()
 
 
 def test_catalog_examples_match_current_tool_contracts() -> None:

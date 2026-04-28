@@ -229,6 +229,8 @@ def _file_control_plane_bug(
     fingerprint: str,
     recent_failures: int,
     outputs: dict[str, Any],
+    discovery_evidence_kind: str | None = None,
+    discovery_evidence_ref: str | None = None,
     conn: "SyncPostgresConnection | None" = None,
 ):
     db = _optional_connection(conn)
@@ -261,6 +263,22 @@ def _file_control_plane_bug(
             f"target-ref:{hashlib.sha1(target_ref.encode('utf-8')).hexdigest()[:12] if target_ref else 'none'}",
         ),
     )
+    normalized_discovery_kind = str(discovery_evidence_kind or "").strip()
+    normalized_discovery_ref = str(discovery_evidence_ref or "").strip()
+    if normalized_discovery_kind and normalized_discovery_ref:
+        from runtime.bug_evidence import EVIDENCE_ROLE_DISCOVERED_BY
+
+        _link_bug_evidence(
+            bug_id=bug.bug_id,
+            evidence_kind=normalized_discovery_kind,
+            evidence_ref=normalized_discovery_ref,
+            evidence_role=EVIDENCE_ROLE_DISCOVERED_BY,
+            notes=(
+                f"{kind.capitalize()} control-plane run that first triggered "
+                "auto-bug filing."
+            ),
+            conn=db,
+        )
     return bug
 
 
@@ -292,4 +310,3 @@ def _latest_failed_verification_fingerprint(
     ) or {}
     fingerprint = str(row.get("fingerprint") or "").strip()
     return fingerprint or None
-

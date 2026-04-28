@@ -70,6 +70,7 @@ def _sandbox_result(**overrides):
 
 @pytest.fixture(autouse=True)
 def _stub_provider_api_key_names(monkeypatch) -> None:
+    monkeypatch.setenv("PRAXIS_HOST_RESOURCE_ADMISSION_DISABLED", "1")
     mapping = {
         "cursor": ("CURSOR_API_KEY",),
         "example": ("EXAMPLE_API_KEY",),
@@ -135,7 +136,13 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     class _FakeRuntime:
         def execute_command(self, **kwargs):
             captured.update(kwargs)
-            return _sandbox_result()
+            return _sandbox_result(
+                workspace_manifest_audit={
+                    "intended_manifest_paths": ["README.md"],
+                    "hydrated_manifest_paths": ["README.md"],
+                    "missing_intended_paths": [],
+                }
+            )
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
@@ -165,6 +172,7 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     )
 
     assert captured["provider_name"] == "docker_local"
+    assert captured["workspace_materialization"] == "copy"
     assert captured["command"] == "wizard-cli --json"
     assert captured["stdin_text"] == "hello from stdin"
     assert captured["execution_transport"] == "cli"
@@ -179,6 +187,49 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert result["artifact_refs"] == ["README.md"]
     assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
     assert result["workspace_snapshot_cache_hit"] is True
+    assert result["workspace_manifest_audit"]["intended_manifest_paths"] == ["README.md"]
+
+
+def test_execute_cli_downgrades_unscoped_copy_to_empty_workspace(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return _sandbox_result(workspace_snapshot_ref=None)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
+    monkeypatch.setattr(
+        execution_backends,
+        "workflow_mcp_workspace_overlays",
+        lambda **_kwargs: [],
+    )
+
+    result = execution_backends.execute_cli(
+        _agent(),
+        "prompt has all needed context",
+        str(tmp_path),
+        execution_bundle={
+            "run_id": "run.alpha",
+            "job_label": "job.prompt_only",
+            "access_policy": {},
+        },
+    )
+
+    assert captured["workspace_materialization"] == "none"
+    assert captured["metadata"]["execution_bundle"]["access_policy"] == {}
+    assert result["status"] == "succeeded"
+    assert result["artifact_refs"] == ["README.md"]
+    assert result["workspace_snapshot_ref"] is None
 
 
 def test_execute_cli_fails_closed_when_workflow_mcp_token_mint_fails(
@@ -651,6 +702,54 @@ def test_execute_cli_parses_cursor_agent_usage_camel_case(monkeypatch, tmp_path)
     assert result["token_output"] == 45
     assert result["cache_read_tokens"] == 6
     assert result["cache_creation_tokens"] == 7
+
+
+def test_execute_cli_parses_gemini_json_after_hook_banner(monkeypatch, tmp_path) -> None:
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            del kwargs
+            return _sandbox_result(
+                stdout=(
+                    "YOLO mode is enabled. All tool calls will be automatically approved.\n"
+                    "Hook system message: standing orders active.\n"
+                    '{"response":"GEMINI_JSON_OK","stats":{"models":{"gemini-3-flash-preview":'
+                    '{"tokens":{"input":14575,"candidates":7}}}}}'
+                ),
+                artifact_refs=(),
+            )
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
+    monkeypatch.setattr(
+        execution_backends,
+        "build_command",
+        lambda provider_slug, model=None: [
+            "gemini",
+            "--yolo",
+            "-p",
+            ".",
+            "-o",
+            "json",
+            "--model",
+            model or provider_slug,
+        ],
+    )
+
+    result = execution_backends.execute_cli(
+        _agent(wrapper_command=None, provider="google", model="gemini-3-flash-preview"),
+        "hello from stdin",
+        str(tmp_path),
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["stdout"] == "GEMINI_JSON_OK"
+    assert result["token_input"] == 14575
+    assert result["token_output"] == 7
 
 
 def test_execute_cli_returns_sandbox_error_when_default_command_build_fails(monkeypatch, tmp_path) -> None:

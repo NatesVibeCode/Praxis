@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from collections.abc import Mapping
 from contextlib import contextmanager
 import hashlib
@@ -161,12 +162,16 @@ def _enforce_authority_table_write_guard(query: str) -> None:
 
 WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 WORKFLOW_POOL_ACQUIRE_TIMEOUT_ENV = "WORKFLOW_POOL_ACQUIRE_TIMEOUT_S"
+WORKFLOW_POOL_MIN_SIZE_ENV = "WORKFLOW_POOL_MIN_SIZE"
+WORKFLOW_POOL_MAX_SIZE_ENV = "WORKFLOW_POOL_MAX_SIZE"
 HOST_SHELL_DATABASE_HOST_ENV = "PRAXIS_HOST_SHELL_DATABASE_HOST"
 DISABLE_HOST_DOCKER_INTERNAL_REWRITE_ENV = "PRAXIS_DISABLE_HOST_DOCKER_INTERNAL_REWRITE"
 _POSTGRES_SCHEMES = ("postgresql://", "postgres://")
 _HOST_DOCKER_INTERNAL = "host.docker.internal"
 _DEFAULT_HOST_SHELL_DATABASE_HOST = "localhost"
 _DEFAULT_POOL_ACQUIRE_TIMEOUT_S = 5.0
+_DEFAULT_POOL_MIN_SIZE = 1
+_DEFAULT_POOL_MAX_SIZE = 40
 
 _workflow_pool: asyncpg.Pool | None = None
 _workflow_pool_dsn: str | None = None
@@ -260,6 +265,22 @@ def _pool_acquire_timeout_s() -> float:
     except (TypeError, ValueError):
         return _DEFAULT_POOL_ACQUIRE_TIMEOUT_S
     return timeout if timeout > 0 else _DEFAULT_POOL_ACQUIRE_TIMEOUT_S
+
+
+def _pool_size_env(
+    name: str,
+    default: int,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> int:
+    raw_value = env.get(name) if env is not None else None
+    if raw_value is None:
+        raw_value = os.environ.get(name)
+    try:
+        value = int(str(raw_value or "").strip())
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
 
 
 def _truthy_env(value: object) -> bool:
@@ -492,24 +513,84 @@ def _get_bg_loop() -> asyncio.AbstractEventLoop:
 def _run_sync(coro):
     """Bridge async to sync using the dedicated background loop."""
     loop = _get_bg_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=30)
+    try:
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+    except BaseException:
+        _close_unstarted_awaitable(coro)
+        raise
+    try:
+        return future.result(timeout=30)
+    except concurrent.futures.TimeoutError:
+        future.cancel()
+        _drain_cancelled_future(loop, future)
+        _close_unstarted_awaitable(coro)
+        raise
+    except BaseException:
+        if not future.done():
+            future.cancel()
+            _drain_cancelled_future(loop, future)
+        raise
+
+
+def _drain_cancelled_future(
+    loop: asyncio.AbstractEventLoop,
+    future: concurrent.futures.Future,
+) -> None:
+    """Give the bridge loop one turn to consume cancellation before shutdown."""
+
+    try:
+        future.result(timeout=1)
+    except (concurrent.futures.CancelledError, concurrent.futures.TimeoutError):
+        pass
+    except BaseException:
+        pass
+    if loop.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(asyncio.sleep(0), loop).result(timeout=1)
+        except BaseException:
+            pass
+
+
+def _close_unstarted_awaitable(awaitable: object) -> None:
+    """Close an awaitable only when the bridge never got a chance to start it."""
+
+    if not inspect.iscoroutine(awaitable):
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            close()
+        return
+    try:
+        if inspect.getcoroutinestate(awaitable) == inspect.CORO_CREATED:
+            awaitable.close()
+    except BaseException:
+        pass
 
 
 async def create_workflow_pool(
     env: Mapping[str, str] | None = None,
     *,
-    # Sized for unified dispatch worker (64 API + 4 CLI threads + heartbeat threads share this pool)
-    min_size: int = 4,
-    max_size: int = 40,
+    min_size: int | None = None,
+    max_size: int | None = None,
 ) -> asyncpg.Pool:
     """Create a shared asyncpg connection pool for the workflow database."""
     database_url = resolve_workflow_database_url(env=env)
+    resolved_min_size = (
+        _pool_size_env(WORKFLOW_POOL_MIN_SIZE_ENV, _DEFAULT_POOL_MIN_SIZE, env=env)
+        if min_size is None
+        else int(min_size)
+    )
+    resolved_max_size = (
+        _pool_size_env(WORKFLOW_POOL_MAX_SIZE_ENV, _DEFAULT_POOL_MAX_SIZE, env=env)
+        if max_size is None
+        else int(max_size)
+    )
+    if resolved_max_size < resolved_min_size:
+        resolved_max_size = resolved_min_size
     try:
         return await asyncpg.create_pool(
             database_url,
-            min_size=min_size,
-            max_size=max_size,
+            min_size=resolved_min_size,
+            max_size=resolved_max_size,
             init=_register_jsonb_codec,
         )
     except _AUTHORITY_UNAVAILABLE_EXCEPTIONS as exc:

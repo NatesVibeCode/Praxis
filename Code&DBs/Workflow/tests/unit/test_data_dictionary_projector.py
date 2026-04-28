@@ -18,6 +18,7 @@ from memory.data_dictionary_projector import (
     _json_schema_to_field_kind,
     _sql_to_field_kind,
 )
+from runtime.integration_manifest import ManifestLoadReport
 
 
 # --- helpers ----------------------------------------------------------------
@@ -281,6 +282,16 @@ def test_project_receipt_kinds_skips_when_table_missing() -> None:
 
     # Should swallow and return without raising.
     DataDictionaryProjector(_RaisingConn())._project_receipt_kinds()
+
+
+def test_project_integration_manifests_fails_closed_on_manifest_errors(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "runtime.integration_manifest.load_manifest_report",
+        lambda: ManifestLoadReport(manifests=(), errors=("bad.toml: TOMLDecodeError: boom",)),
+    )
+
+    with pytest.raises(RuntimeError, match="malformed manifest"):
+        DataDictionaryProjector(object())._project_integration_manifests()
 
 
 def test_run_collects_per_step_errors_and_reports_them(monkeypatch) -> None:

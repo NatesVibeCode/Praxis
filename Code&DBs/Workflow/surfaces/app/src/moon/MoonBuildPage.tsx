@@ -1,5 +1,6 @@
 import React, { useReducer, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useBuildPayload } from '../shared/hooks/useBuildPayload';
+import { useObjectTypes } from '../shared/hooks/useObjectTypes';
 import { compileDefinition, previewCompile } from '../shared/buildController';
 import { presentBuild } from './moonBuildPresenter';
 import type { OrbitNode, OrbitEdge, RunJobStatus } from './moonBuildPresenter';
@@ -15,6 +16,7 @@ import { MoonBindingReviewQueue } from './MoonBindingReviewQueue';
 import { MoonRunPanel } from './MoonRunPanel';
 import { MoonRunOverlay } from './MoonRunOverlay';
 import { MoonDragGhost } from './MoonDragGhost';
+import { MoonOutcomeContract } from './MoonOutcomeContract';
 import { MoonEdges, getEdgeGeometry } from './MoonEdges';
 import { useMoonDrag } from './useMoonDrag';
 import { loadCatalog, getCatalog } from './catalog';
@@ -34,6 +36,8 @@ import {
   summarizeComposeAuthority,
   type MoonComposeAuthoritySummary,
 } from './moonComposeAuthority';
+import { appendOutcomeContract } from './outcomeContract';
+import { buildPrimitiveContractSuggestions } from './moonContractSuggestions';
 import {
   getMoonAppendPosition,
   getMoonCanvasDimensions,
@@ -424,6 +428,9 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const [moonGlowProfile, setMoonGlowProfile] = useState<MoonGlowProfile>(readMoonGlowProfile);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [composeAuthority, setComposeAuthority] = useState<MoonComposeAuthoritySummary>(INITIAL_COMPOSE_AUTHORITY);
+  const [outcomeContractOpen, setOutcomeContractOpen] = useState(false);
+  const [outcomeSuccessCriteria, setOutcomeSuccessCriteria] = useState('');
+  const [outcomeFailureCriteria, setOutcomeFailureCriteria] = useState('');
   const [compilePreview, setCompilePreview] = useState<CompilePreviewPayload | null>(null);
   const [compilePreviewLoading, setCompilePreviewLoading] = useState(false);
   const [compilePreviewError, setCompilePreviewError] = useState<string | null>(null);
@@ -435,15 +442,25 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
    */
   const [branchPickerNodeId, setBranchPickerNodeId] = useState<string | null>(null);
   const { show } = useToast();
+  const { objectTypes } = useObjectTypes();
   const persistedWorkflowId = useMemo(
     () => resolvePersistedWorkflowId(workflowId, payload),
     [payload, workflowId],
+  );
+  const compileSource = useMemo(
+    () => appendOutcomeContract(state.compileProse, {
+      successCriteria: outcomeSuccessCriteria,
+      failureCriteria: outcomeFailureCriteria,
+    }),
+    [outcomeFailureCriteria, outcomeSuccessCriteria, state.compileProse],
   );
   const draftGuardState = useMemo(() => {
     const dirty = !persistedWorkflowId
       && (
         Boolean(state.selectedTrigger)
         || Boolean(state.compileProse.trim())
+        || Boolean(outcomeSuccessCriteria.trim())
+        || Boolean(outcomeFailureCriteria.trim())
         || hasLocalDraftPayload(payload)
       );
     return {
@@ -452,7 +469,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
         ? 'This draft workflow only exists locally. Save it from Action or Release before leaving, or leave anyway and discard the draft.'
         : null,
     };
-  }, [payload, persistedWorkflowId, state.compileProse, state.selectedTrigger]);
+  }, [outcomeFailureCriteria, outcomeSuccessCriteria, payload, persistedWorkflowId, state.compileProse, state.selectedTrigger]);
 
   // Load live catalog from backend on mount.
   useEffect(() => {
@@ -614,6 +631,16 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           }
         : null,
     [payload],
+  );
+  const outcomeContractSuggestions = useMemo(
+    () => buildPrimitiveContractSuggestions(
+      payload?.build_graph,
+      state.selectedNodeId,
+      objectTypes,
+      viewModel.dockContent,
+      contractSuggestionExtras,
+    ),
+    [contractSuggestionExtras, objectTypes, payload?.build_graph, state.selectedNodeId, viewModel.dockContent],
   );
 
   const runMutation = useCallback(async (subpath: string, body: Record<string, unknown>) => {
@@ -1135,11 +1162,11 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   }, [catalog, commitMoonGraphAction, handleCreateBranch, payload]);
 
   const handleCompile = useCallback(async () => {
-    if (!state.compileProse.trim()) return;
+    if (!compileSource.trim()) return;
     dispatch({ type: 'COMPILE_START' });
     try {
       const compileProse = buildAuthorityCompileProse({
-        prose: state.compileProse,
+        prose: compileSource,
         triggerLabel: state.selectedTrigger?.label,
         summary: composeAuthority,
       });
@@ -1193,7 +1220,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     } catch (e: any) {
       dispatch({ type: 'COMPILE_ERROR', error: e.message || 'Compilation failed' });
     }
-  }, [compilePreview, composeAuthority, onWorkflowCreated, setPayload, state.compileProse, state.selectedTrigger, workflowId]);
+  }, [compilePreview, compileSource, composeAuthority, onWorkflowCreated, setPayload, state.selectedTrigger, workflowId]);
 
   const handleTriggerSelect = useCallback((item: CatalogItem) => {
     const trigger = {
@@ -1635,7 +1662,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const hasNodes = viewModel.nodes.length > 0;
   const showComposePanel = !hasNodes && state.emptyMode === 'compose';
   useEffect(() => {
-    const prose = state.compileProse.trim();
+    const prose = compileSource.trim();
     if (!showComposePanel || prose.length < 3) {
       setCompilePreview(null);
       setCompilePreviewError(null);
@@ -1663,7 +1690,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [showComposePanel, state.compileProse]);
+  }, [compileSource, showComposePanel]);
   const compilePreviewLabels = useMemo(
     () => compilePreviewChipLabels(compilePreview),
     [compilePreview],
@@ -1892,12 +1919,13 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       Name the outcome, the authority it should trust, and the proof that should exist after release.
                     </div>
                     <textarea
+                      aria-label="Workflow intent"
                       value={state.compileProse}
                       onChange={(e) => dispatch({ type: 'SET_PROSE', prose: e.target.value })}
                       onKeyDown={(event) => {
                         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                           event.preventDefault();
-                          if (!compiling && state.compileProse.trim()) {
+                          if (!compiling && compileSource.trim()) {
                             void handleCompile();
                           }
                         }
@@ -1906,6 +1934,16 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       rows={4}
                       disabled={compiling}
                       autoFocus
+                    />
+                    <MoonOutcomeContract
+                      open={outcomeContractOpen}
+                      disabled={compiling}
+                      successCriteria={outcomeSuccessCriteria}
+                      failureCriteria={outcomeFailureCriteria}
+                      suggestions={outcomeContractSuggestions}
+                      onOpenChange={setOutcomeContractOpen}
+                      onSuccessChange={setOutcomeSuccessCriteria}
+                      onFailureChange={setOutcomeFailureCriteria}
                     />
                     {(compilePreviewLoading || compilePreviewError || compilePreview) && (
                       <div className="moon-compose-preview" aria-live="polite">
@@ -1954,7 +1992,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       </div>
                     )}
                     <div className="moon-compose__actions">
-                      <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !state.compileProse.trim()}>
+                      <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !compileSource.trim()}>
                         {compiling ? 'Composing... (synthesis + 20 parallel forks)' : 'Compose workflow'}
                       </button>
                       <button

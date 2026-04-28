@@ -50,7 +50,7 @@ from observability import inspect_run as build_inspection_view
 from observability import replay_run as build_replay_view
 from observability.read_models import InspectionReadModel, OperatorFrameReadModel, ReplayReadModel
 from policy.domain import AdmissionDecisionKind
-from receipts import EvidenceRow
+from receipts import EvidenceRow, ReceiptV1
 from receipts.evidence import TransitionProofV1
 
 from ..context_accumulator import ContextAccumulator
@@ -251,6 +251,51 @@ def _current_run_state(
         return None
     normalized = str(state).strip().lower()
     return normalized or None
+
+
+def _completed_node_records_from_evidence(
+    evidence_rows: Sequence[EvidenceRow],
+) -> tuple[NodeExecutionRecord, ...]:
+    """Rehydrate succeeded node records for deterministic graph resume.
+
+    Graph-runtime retry reopens the same run from canonical evidence instead of
+    cloning a second run. Succeeded node receipts are safe to seed into
+    dependency resolution; failed, cancelled, or skipped terminal receipts stay
+    pending so retry starts at the unfinished boundary.
+    """
+
+    start_receipts_by_node: dict[str, str] = {}
+    completed_by_node: dict[str, NodeExecutionRecord] = {}
+    order: list[str] = []
+    for row in evidence_rows:
+        record = getattr(row, "record", None)
+        if not isinstance(record, ReceiptV1):
+            continue
+        node_id = str(record.node_id or "").strip()
+        if not node_id:
+            continue
+        if record.receipt_type == NODE_START_RECEIPT_TYPE:
+            start_receipts_by_node[node_id] = record.receipt_id
+            continue
+        if record.receipt_type != NODE_EXECUTION_RECEIPT_TYPE:
+            continue
+        if record.status != "succeeded":
+            completed_by_node.pop(node_id, None)
+            continue
+        if node_id not in order:
+            order.append(node_id)
+        completed_by_node[node_id] = NodeExecutionRecord(
+            node_id=node_id,
+            task_name=str(record.outputs.get("task_name") or record.inputs.get("task_name") or node_id),
+            status=record.status,
+            outputs=dict(record.outputs),
+            started_at=record.started_at,
+            finished_at=record.finished_at,
+            start_receipt_id=start_receipts_by_node.get(node_id, record.receipt_id),
+            completion_receipt_id=record.receipt_id,
+            failure_code=record.failure_code,
+        )
+    return tuple(completed_by_node[node_id] for node_id in order if node_id in completed_by_node)
 
 
 class _NullRunCancellationSignal:
@@ -1283,24 +1328,66 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         max_parallel_nodes: int | None,
         accumulate_context: bool,
         max_context_tokens: int | None,
+        resume_completed_nodes: Sequence[NodeExecutionRecord] | None = None,
+        resume_already_started: bool = False,
     ) -> RunExecutionResult:
         node_results: list[NodeExecutionRecord] = []
-        queue_transition = LifecycleTransition(
-            route_identity=cursor.identity_for_current_transition(),
-            from_state=cursor.current_state,
-            to_state=RunState.QUEUED,
-            reason_code="runtime.execution_ready",
-            evidence_seq=cursor.next_evidence_seq,
-            event_type=WORKFLOW_QUEUED_EVENT_TYPE,
-            receipt_type=WORKFLOW_QUEUE_RECEIPT_TYPE,
-            occurred_at=_now(),
-        )
-        queue_result = self.advance_run(
-            transition=queue_transition,
-            evidence_writer=evidence_writer,
-        )
-        cursor.advance(result=queue_result, new_state=RunState.QUEUED)
-        if cancel_signal.cancel_requested() or (
+        if not resume_already_started:
+            queue_transition = LifecycleTransition(
+                route_identity=cursor.identity_for_current_transition(),
+                from_state=cursor.current_state,
+                to_state=RunState.QUEUED,
+                reason_code="runtime.execution_ready",
+                evidence_seq=cursor.next_evidence_seq,
+                event_type=WORKFLOW_QUEUED_EVENT_TYPE,
+                receipt_type=WORKFLOW_QUEUE_RECEIPT_TYPE,
+                occurred_at=_now(),
+            )
+            queue_result = self.advance_run(
+                transition=queue_transition,
+                evidence_writer=evidence_writer,
+            )
+            cursor.advance(result=queue_result, new_state=RunState.QUEUED)
+            if cancel_signal.cancel_requested() or (
+                _current_run_state(
+                    run_id=intake_outcome.run_id,
+                    run_state_reader=run_state_reader,
+                )
+                == RunState.CANCELLED.value
+            ):
+                cancel_signal.close()
+                return self._cancel_run(
+                    request=request,
+                    intake_outcome=intake_outcome,
+                    writer=writer,
+                    cursor=cursor,
+                    node_results=node_results,
+                    cancel_reason=_FailureReason(
+                        reason_code="workflow_cancelled",
+                        details={
+                            "run_id": intake_outcome.run_id,
+                            "pending_node_ids": (),
+                            "completed_node_ids": (),
+                        },
+                    ),
+                )
+
+            start_transition = LifecycleTransition(
+                route_identity=cursor.identity_for_current_transition(),
+                from_state=cursor.current_state,
+                to_state=RunState.RUNNING,
+                reason_code="runtime.execution_started",
+                evidence_seq=cursor.next_evidence_seq,
+                event_type=WORKFLOW_STARTED_EVENT_TYPE,
+                receipt_type=WORKFLOW_START_RECEIPT_TYPE,
+                occurred_at=_now(),
+            )
+            start_result = self.advance_run(
+                transition=start_transition,
+                evidence_writer=evidence_writer,
+            )
+            cursor.advance(result=start_result, new_state=RunState.RUNNING)
+        elif cancel_signal.cancel_requested() or (
             _current_run_state(
                 run_id=intake_outcome.run_id,
                 run_state_reader=run_state_reader,
@@ -1324,30 +1411,19 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                 ),
             )
 
-        start_transition = LifecycleTransition(
-            route_identity=cursor.identity_for_current_transition(),
-            from_state=cursor.current_state,
-            to_state=RunState.RUNNING,
-            reason_code="runtime.execution_started",
-            evidence_seq=cursor.next_evidence_seq,
-            event_type=WORKFLOW_STARTED_EVENT_TYPE,
-            receipt_type=WORKFLOW_START_RECEIPT_TYPE,
-            occurred_at=_now(),
-        )
-        start_result = self.advance_run(
-            transition=start_transition,
-            evidence_writer=evidence_writer,
-        )
-        cursor.advance(result=start_result, new_state=RunState.RUNNING)
-
-        completed_nodes: dict[str, NodeExecutionRecord] = {}
+        completed_nodes: dict[str, NodeExecutionRecord] = {
+            record.node_id: record
+            for record in (resume_completed_nodes or ())
+            if record.status == "succeeded"
+        }
+        node_results.extend(completed_nodes.values())
         pending_nodes = {
             node.node_id: node
             for node in _node_order(request)
-            if node.template_owner_node_id is None
+            if node.template_owner_node_id is None and node.node_id not in completed_nodes
         }
         inbound_edges = _inbound_edges(request=request)
-        execution_order: list[str] = []
+        execution_order: list[str] = [record.node_id for record in completed_nodes.values()]
         context_accumulator = self._context_accumulator_for_request(
             request=request,
             pending_nodes=pending_nodes,
@@ -1623,10 +1699,18 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             run_id=intake_outcome.run_id,
             run_state_reader=run_state_reader,
         )
-        if persisted_state != RunState.CLAIM_ACCEPTED.value:
+        if persisted_state not in {
+            RunState.CLAIM_ACCEPTED.value,
+            RunState.RUNNING.value,
+        }:
             raise RuntimeLifecycleError(
                 f"runtime.execution_resume_expected_claim_accepted:{persisted_state or 'missing'}"
             )
+        resume_state = (
+            RunState.RUNNING
+            if persisted_state == RunState.RUNNING.value
+            else RunState.CLAIM_ACCEPTED
+        )
         cancel_signal = _run_cancellation_signal_for_execution(
             run_id=intake_outcome.run_id,
             evidence_writer=evidence_writer,
@@ -1638,7 +1722,10 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             run_id=intake_outcome.run_id,
             route_identity=intake_outcome.route_identity,
             evidence_writer=evidence_writer,
-            current_state=RunState.CLAIM_ACCEPTED,
+            current_state=resume_state,
+        )
+        resume_completed_nodes = _completed_node_records_from_evidence(
+            tuple(evidence_writer.evidence_timeline(intake_outcome.run_id))
         )
         operator_frame_repository.clear_for_run(run_id=intake_outcome.run_id)
         return self._execute_admitted_run(
@@ -1653,6 +1740,8 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             max_parallel_nodes=max_parallel_nodes,
             accumulate_context=accumulate_context,
             max_context_tokens=max_context_tokens,
+            resume_completed_nodes=resume_completed_nodes,
+            resume_already_started=resume_state is RunState.RUNNING,
         )
 
     def _cancel_run(

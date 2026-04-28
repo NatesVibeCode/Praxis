@@ -4,6 +4,8 @@ The HTTP API is a client surface over Praxis runtime authority.
 
 This file is generated from the live FastAPI route catalog exposed by `GET /api/routes`.
 If it disagrees with runtime output, trust `praxis workflow routes --json` and regenerate this file.
+Canonical regeneration command: `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs`.
+Generate and test API docs in the same runtime environment; route counts are authority-sensitive.
 
 ## Discovery Commands
 
@@ -30,7 +32,7 @@ If it disagrees with runtime output, trust `praxis workflow routes --json` and r
 
 ## All Routes
 
-Public route count: `8`. All route count: `343`.
+Public route count: `8`. All route count: `358`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -47,6 +49,8 @@ Public route count: `8`. All route count: `343`.
 | `GET` | `/api/audit/plan` | `internal` | - | audit_plan_get |
 | `GET` | `/api/audit/playbook` | `internal` | - | audit_playbook_get |
 | `GET` | `/api/audit/registered` | `internal` | - | audit_registered_get |
+| `POST` | `/api/authority-domain/forge` | `internal` | `operations` | authority_domain_forge |
+| `POST` | `/api/authority-domain/register` | `internal` | `operations` | authority_domain_register |
 | `GET` | `/api/authority/objects` | `internal` | `operations` | authority.objects.list |
 | `GET` | `/api/authority/objects/adoption` | `internal` | `operations` | authority.objects.adoption |
 | `GET` | `/api/authority/objects/domain-summary` | `internal` | `operations` | authority.objects.domain_summary |
@@ -75,8 +79,9 @@ Public route count: `8`. All route count: `343`.
 | `POST` | `/api/circuits` | `internal` | `operations` | operator.circuit_override |
 | `GET` | `/api/circuits/history` | `internal` | `operations` | operator.circuit_history |
 | `POST` | `/api/cli_auth_doctor` | `internal` | `operations` | cli_auth_doctor |
+| `POST` | `/api/compile/materialize` | `internal` | `operations` | compile_materialize |
 | `POST` | `/api/compile/preview` | `internal` | - | compile_preview_post |
-| `POST` | `/api/compile_materialize` | `internal` | `operations` | compile_materialize |
+| `POST` | `/api/compile_materialize` | `internal` | - | Legacy compatibility alias for stale compile materialize callers. |
 | `POST` | `/api/compliance.list_receipts` | `internal` | `operations` | compliance.list_receipts |
 | `POST` | `/api/compose_experiment` | `internal` | `operations` | compose_experiment |
 | `POST` | `/api/compose_plan` | `internal` | `operations` | compose_plan |
@@ -180,6 +185,11 @@ Public route count: `8`. All route count: `343`.
 | `GET` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_get |
 | `POST` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_post |
 | `GET` | `/api/moon/pickers/{rest_of_path:path}` | `internal` | - | moon_pickers_get |
+| `GET` | `/api/object-truth/compare-versions` | `internal` | `operations` | object_truth_compare_versions |
+| `POST` | `/api/object-truth/observe-record` | `internal` | `operations` | object_truth_observe_record |
+| `POST` | `/api/object-truth/record-comparison-run` | `internal` | `operations` | object_truth_record_comparison_run |
+| `POST` | `/api/object-truth/store-observed-record` | `internal` | `operations` | object_truth_store_observed_record |
+| `POST` | `/api/object-truth/store-schema-snapshot` | `internal` | `operations` | object_truth_store_schema_snapshot |
 | `GET` | `/api/object-types` | `internal` | `operations` | object_schema.type_list |
 | `POST` | `/api/object-types` | `internal` | `operations` | object_schema.type_upsert |
 | `DELETE` | `/api/object-types/{type_id}` | `internal` | `operations` | object_schema.type_delete |
@@ -204,11 +214,13 @@ Public route count: `8`. All route count: `343`.
 | `POST` | `/api/operator.next` | `internal` | `operations` | operator.next |
 | `POST` | `/api/operator/architecture-policy` | `internal` | `operations` | operator.architecture_policy_record |
 | `GET` | `/api/operator/bug-triage-packet` | `internal` | `operations` | operator.bug_triage_packet |
+| `POST` | `/api/operator/daily-heartbeat-refresh` | `internal` | `operations` | operator.daily_heartbeat_refresh |
 | `GET` | `/api/operator/data-dictionary` | `internal` | `operations` | operator.data_dictionary |
 | `POST` | `/api/operator/decision` | `internal` | `operations` | operator.decision_record |
 | `GET` | `/api/operator/decisions` | `internal` | `operations` | operator.decision_list |
 | `POST` | `/api/operator/execution-proof` | `internal` | `operations` | operator.execution_proof |
 | `GET` | `/api/operator/execution-truth` | `internal` | `operations` | operator.execution_truth |
+| `GET` | `/api/operator/firecheck` | `internal` | `operations` | operator.firecheck |
 | `POST` | `/api/operator/functional-area` | `internal` | `operations` | operator.functional_area_record |
 | `GET` | `/api/operator/graph` | `internal` | `operations` | operator.graph_projection |
 | `POST` | `/api/operator/ideas` | `internal` | `operations` | operator.ideas |
@@ -228,6 +240,8 @@ Public route count: `8`. All route count: `343`.
 | `POST` | `/api/operator/provider-onboarding` | `internal` | `operations` | operator.provider_onboarding |
 | `GET` | `/api/operator/provider-route-truth` | `internal` | `operations` | operator.provider_route_truth |
 | `GET` | `/api/operator/refactor-heatmap` | `internal` | `operations` | operator.refactor_heatmap |
+| `POST` | `/api/operator/remediation-apply` | `internal` | `operations` | operator.remediation_apply |
+| `GET` | `/api/operator/remediation-plan` | `internal` | `operations` | operator.remediation_plan |
 | `GET` | `/api/operator/replay-ready-bugs` | `internal` | `operations` | operator.replay_ready_bugs |
 | `POST` | `/api/operator/roadmap-write` | `internal` | `operations` | operator.roadmap_write |
 | `GET` | `/api/operator/roadmap/tree/{root_roadmap_item_id}` | `internal` | `operations` | operator.roadmap_tree |
@@ -235,11 +249,14 @@ Public route count: `8`. All route count: `343`.
 | `GET` | `/api/operator/runs/{run_id}/lineage` | `internal` | `operations` | operator.run_lineage |
 | `GET` | `/api/operator/runs/{run_id}/scoreboard` | `internal` | `operations` | operator.run_scoreboard |
 | `GET` | `/api/operator/runs/{run_id}/status` | `internal` | `operations` | operator.run_status |
+| `GET` | `/api/operator/runtime-truth` | `internal` | `operations` | operator.runtime_truth_snapshot |
 | `POST` | `/api/operator/task-route-eligibility` | `internal` | `operations` | operator.task_route_eligibility |
 | `POST` | `/api/operator/transport-support` | `internal` | `operations` | operator.transport_support |
 | `GET` | `/api/operator/ui/experience-graph` | `internal` | `operations` | operator.ui_experience_graph |
 | `GET` | `/api/operator/work-assignment-matrix` | `internal` | `operations` | operator.work_assignment_matrix |
 | `POST` | `/api/operator/work-item-closeout` | `internal` | `operations` | operator.work_item_closeout |
+| `POST` | `/api/operator_patterns` | `internal` | `operations` | operator_patterns |
+| `POST` | `/api/pattern_materialize_candidates` | `internal` | `operations` | pattern_materialize_candidates |
 | `GET` | `/api/platform-overview` | `internal` | - | platform_overview_get |
 | `POST` | `/api/policy.list` | `internal` | `operations` | policy.list |
 | `GET` | `/api/primitives` | `internal` | `operations` | primitive.list |
@@ -337,8 +354,8 @@ Public route count: `8`. All route count: `343`.
 | `GET` | `/app/{path:path}` | `internal` | - | launcher_app_path |
 | `POST` | `/artifacts` | `internal` | - | artifacts_post |
 | `POST` | `/bugs` | `internal` | - | bugs_post |
-| `GET` | `/console` | `internal` | - | Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE). |
-| `GET` | `/console/` | `internal` | - | Serve the operator console chat UI (gated on PRAXIS_OPERATOR_DEV_MODE). |
+| `GET` | `/console` | `internal` | - | Compatibility doorway for the retired standalone console UI. |
+| `GET` | `/console/` | `internal` | - | Compatibility doorway for the retired standalone console UI. |
 | `GET` | `/console/icon-{size}.png` | `internal` | - | Serve Android/Chrome installability icons. |
 | `GET` | `/console/icon.svg` | `internal` | - | Serve the real Praxis logo SVG for the installed phone console. |
 | `GET` | `/console/manifest.webmanifest` | `internal` | - | Serve the installable operator-console PWA manifest. |

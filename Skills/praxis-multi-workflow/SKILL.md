@@ -10,7 +10,7 @@ description: "Praxis batch workflow coordination skill. Use when multiple workfl
 - MCP/catalog reference: `docs/MCP.md`
 - CLI reference: `docs/CLI.md`
 - API route reference: `docs/API.md`
-- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python Code&DBs/Workflow/scripts/generate_mcp_docs.py`
+- Regenerate all three with `PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m scripts.generate_mcp_docs`
 - If generated docs disagree with runtime output, trust `praxis workflow tools describe ...` and `praxis workflow routes --json`
 
 Use this skill when one run is not enough and the work needs batch coordination.
@@ -59,6 +59,9 @@ praxis workflow tools call praxis_wave --input-json '{"action":"record","wave_id
 
 - do not use wave state when plain parallel launch is enough
 - keep an explicit map of `spec -> run_id`
+- run `praxis workflow firecheck --json` before launching a batch
+- prove one representative job can fire before expanding to the fleet
+- never mass-retry; each retry needs the failed label, previous failure, and retry delta
 - use `praxis workflow active` and `praxis workflow run-status <run_id>` for live health
 - use `praxis workflow tools call praxis_workflow --input-json '{"action":"list"}'` when you need a catalog-backed batch view
 

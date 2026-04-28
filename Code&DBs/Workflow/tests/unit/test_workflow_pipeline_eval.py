@@ -82,6 +82,10 @@ def test_pipeline_eval_blocks_scratch_scope_for_durable_artifact() -> None:
     assert "scratch_fallback_with_artifact_paths" in kinds
     assert "artifact_job_uses_code_change_submission" in kinds
     assert "prompt_tool_not_allowed" in kinds
+    assert result.phase_progress[-1]["phase"] == "provider_freshness_preflight"
+    assert result.phase_progress[-1]["required_before_launch"] is True
+    assert result.quarantine_candidates[0]["reason_code"] == "pipeline_eval.errors_present"
+    assert result.directory_summary["directories"][0]["errors"] > 0
 
 
 def test_pipeline_eval_blocks_scoped_broad_tool_instruction() -> None:
@@ -139,3 +143,7 @@ def test_pipeline_eval_allows_matching_artifact_bundle_contract() -> None:
 
     assert result.ok
     assert result.error_count == 0
+    payload = result.to_dict()
+    assert payload["launch_preflight"]["provider_freshness"]["status"] == "required_before_launch"
+    assert payload["phase_progress"][-1]["phase"] == "provider_freshness_preflight"
+    assert payload["quarantine_candidates"] == []

@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """preact_orient_friction (Codex CLI PreToolUse hook).
 
-Codex CLI's hook protocol is structurally identical to Claude Code's
-(`hookEventName`, `tool_name`, `tool_input`, `hookSpecificOutput.additionalContext`)
-per the binary's wire types (`PreToolUseCommandOutputWire` etc.). The
-only differences are Codex's native tool names (`local_shell`,
-`apply_patch`) and the env var convention (`CODEX_PROJECT_DIR` /
-`CODEX_HOME`).
+Codex supports hook prompts, but flooding every raw tool call with context is
+too expensive. This hook records friction evidence for every match and injects
+context only for explicit, non-advisory operator decisions.
 
 Tool-name normalization happens inside `surfaces.policy._normalize_tool_name`
 so the trigger registry stays harness-neutral.
@@ -32,6 +29,14 @@ def _emit(response: dict[str, Any]) -> None:
 
 def _continue() -> None:
     _emit({"continue": True})
+
+
+def _should_inject_context(matches: list[Any]) -> bool:
+    return any(
+        getattr(match, "provenance", "") == "explicit"
+        and not bool(getattr(match, "advisory_only", True))
+        for match in matches
+    )
 
 
 def _repo_root() -> str:
@@ -137,14 +142,16 @@ def main() -> None:
         tool_input,
     )
 
-    additional_context = render(matches, tool_name)
-    _emit({
-        "continue": True,
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": additional_context,
-        },
-    })
+    if _should_inject_context(matches) or os.environ.get("PRAXIS_FORCE_HOOK_CONTEXT") == "1":
+        additional_context = render(matches, tool_name)
+        _emit({
+            "continue": True,
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "additionalContext": additional_context,
+            },
+        })
+    _continue()
 
 
 if __name__ == "__main__":

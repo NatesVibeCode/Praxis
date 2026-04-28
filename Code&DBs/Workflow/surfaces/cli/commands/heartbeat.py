@@ -7,12 +7,9 @@ single probe kind; default is ``all``. Output is JSON by default, pretty by
 from __future__ import annotations
 
 import argparse
-import asyncio
-import json
 from typing import TextIO
 
-from runtime.daily_heartbeat import run_daily_heartbeat
-from surfaces.cli.mcp_tools import print_json
+from surfaces.cli.mcp_tools import print_json, run_cli_tool
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -69,18 +66,20 @@ def _heartbeat_command(args: list[str], *, stdout: TextIO) -> int:
     if isinstance(parsed, int):
         return parsed
 
-    result = asyncio.run(
-        run_daily_heartbeat(scope=parsed.scope, triggered_by="cli")
+    exit_code, payload = run_cli_tool(
+        "praxis_daily_heartbeat",
+        {"scope": parsed.scope, "triggered_by": "cli"},
     )
-    payload = result.to_json()
 
-    if parsed.pretty:
+    if parsed.pretty and isinstance(payload, dict) and payload.get("heartbeat_run_id"):
         _pretty(payload, stdout)
     else:
         print_json(stdout, payload)
 
-    if result.status == "succeeded":
-        return 0
-    if result.status == "partial":
+    if exit_code != 0:
+        return exit_code
+
+    status = str(payload.get("status") or "")
+    if status in {"succeeded", "partial"}:
         return 0
     return 1

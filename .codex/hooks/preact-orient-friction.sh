@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # preact-orient-friction.sh (Codex CLI PreToolUse hook)
 #
-# Codex CLI hook schema mirrors Claude Code's at the wire level
-# (`PreToolUse` / `additionalContext` / `hookSpecificOutput`). Confirmed
-# against codex-cli@0.121.0's bundled binary strings — same Rust
-# `PreToolUseCommandOutputWire` shape, same `hookEventName` discriminator.
+# Codex hook entrypoint. The Python implementation records every match but
+# injects context only for explicit, non-advisory decisions so routine tool
+# calls do not get bogged down by hook chatter.
 #
 # The Python entry handles tool-name aliasing
 # (`local_shell` → Bash, `apply_patch` → Edit) so the trigger registry

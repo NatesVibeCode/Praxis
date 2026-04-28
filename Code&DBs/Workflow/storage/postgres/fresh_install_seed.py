@@ -291,10 +291,10 @@ def _optional_text(value: object) -> str | None:
 
 
 def _json_text_array(value: object, *, field_name: str) -> str:
-    if not isinstance(value, list) or not value:
+    if not isinstance(value, list):
         raise FreshInstallSeedError(
             "fresh_install_seed.config_invalid",
-            f"{field_name} must be a non-empty array",
+            f"{field_name} must be an array",
             details={"field_name": field_name, "value_type": type(value).__name__},
         )
     result: list[str] = []
@@ -531,12 +531,14 @@ async def _seed_runtime_profiles(
                 runtime_profile_ref,
                 model_profile_id,
                 provider_policy_id,
-                sandbox_profile_ref
-            ) VALUES ($1, $2, $3, $4)
+                sandbox_profile_ref,
+                provider_selection_authority_ref
+            ) VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (runtime_profile_ref) DO UPDATE
             SET model_profile_id = EXCLUDED.model_profile_id,
                 provider_policy_id = EXCLUDED.provider_policy_id,
                 sandbox_profile_ref = EXCLUDED.sandbox_profile_ref,
+                provider_selection_authority_ref = EXCLUDED.provider_selection_authority_ref,
                 recorded_at = now()
             """,
             profile_ref,
@@ -552,7 +554,9 @@ async def _seed_runtime_profiles(
                 profile.get("sandbox_profile_ref"),
                 field_name=f"{profile_ref}.sandbox_profile_ref",
             ),
+            _optional_text(profile.get("provider_selection_authority_ref")),
         )
+        projection = _bootstrap_provider_projection(profile)
         await conn.execute(
             """
             INSERT INTO registry_native_runtime_profile_authority (
@@ -581,17 +585,14 @@ async def _seed_runtime_profiles(
                 profile.get("instance_name"),
                 field_name=f"{profile_ref}.instance_name",
             ),
-            _require_text(
-                _bootstrap_provider_projection(profile).get("provider_name"),
-                field_name=f"{profile_ref}.bootstrap_seed_projection.provider_name",
+            _optional_text(projection.get("provider_name")),
+            _json_text_array(
+                projection.get("provider_names", []),
+                field_name=f"{profile_ref}.provider_names",
             ),
             _json_text_array(
-                _bootstrap_provider_projection(profile).get("provider_names"),
-                field_name=f"{profile_ref}.bootstrap_seed_projection.provider_names",
-            ),
-            _json_text_array(
-                _bootstrap_provider_projection(profile).get("allowed_models"),
-                field_name=f"{profile_ref}.bootstrap_seed_projection.allowed_models",
+                projection.get("allowed_models", []),
+                field_name=f"{profile_ref}.allowed_models",
             ),
             _require_text(profile.get("receipts_dir"), field_name=f"{profile_ref}.receipts_dir"),
             _require_text(profile.get("topology_dir"), field_name=f"{profile_ref}.topology_dir"),

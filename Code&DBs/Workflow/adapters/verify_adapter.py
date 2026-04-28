@@ -9,11 +9,24 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from .deterministic import DeterministicTaskRequest, DeterministicTaskResult, BaseNodeAdapter
+from .deterministic import (
+    BaseNodeAdapter,
+    DeterministicTaskRequest,
+    DeterministicTaskResult,
+    _translate_host_path_to_container,
+)
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _execution_workdir(payload: dict) -> str | None:
+    raw = str(payload.get("workdir") or "").strip()
+    if not raw:
+        return None
+    translated = _translate_host_path_to_container(raw)
+    return str(translated or raw)
 
 
 class VerifyAdapter(BaseNodeAdapter):
@@ -25,10 +38,10 @@ class VerifyAdapter(BaseNodeAdapter):
         self, *, request: DeterministicTaskRequest,
     ) -> DeterministicTaskResult:
         started_at = _utc_now()
-        payload = dict(request.input_payload)
+        payload = self._merge_inputs(request)
 
         bindings = payload.get("bindings", [])
-        workdir = payload.get("workdir")
+        workdir = _execution_workdir(payload)
 
         if not bindings:
             return DeterministicTaskResult(
@@ -48,7 +61,9 @@ class VerifyAdapter(BaseNodeAdapter):
             from storage.postgres.connection import ensure_postgres_available
 
             conn = ensure_postgres_available()
-            results = list(run_verify(resolve_verify_commands(conn, list(bindings)), workdir=workdir))
+            results = list(
+                run_verify(resolve_verify_commands(conn, list(bindings)), workdir=workdir)
+            )
         except Exception as exc:
             results = [{
                 "label": "verification_registry",
@@ -70,9 +85,10 @@ class VerifyAdapter(BaseNodeAdapter):
             status=status,
             reason_code="adapter.execution_succeeded" if all_passed else "verifier.failed",
             executor_type=self.executor_type,
-            inputs={"bindings": len(bindings)},
+            inputs={"bindings": len(bindings), "workdir": workdir},
             outputs={
                 "all_passed": all_passed,
+                "workdir": workdir,
                 "results": [
                     result.to_json() if hasattr(result, "to_json") else result
                     for result in results

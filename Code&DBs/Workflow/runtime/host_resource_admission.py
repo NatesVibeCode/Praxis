@@ -343,6 +343,8 @@ class HostResourceAdmission:
             time.sleep(min(0.25, remaining))
 
     def release(self, claim: HostResourceBundleClaim | None) -> None:
+        if claim is None or not claim.claims:
+            return
         self._release_with_manager(self._lease_manager(), claim)
 
     @contextmanager

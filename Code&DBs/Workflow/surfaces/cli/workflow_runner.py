@@ -117,6 +117,7 @@ class WorkflowRunner:
         self._receipts_dir = receipts_dir
         self._db_path = db_path
         self._pg_conn = pg_conn
+        self._repo_root = os.getcwd()
 
         # Load agent registry — prefer Postgres, fall back to JSON
         from registry.agent_config import AgentRegistry
@@ -126,17 +127,9 @@ class WorkflowRunner:
             agents_json = os.path.join(config_root, "agents.json")
             self._agent_registry = AgentRegistry.load(agents_json)
 
-        # Initialize workflow pipeline components
-        import runtime.workflow_pipeline as dp
-        self._pipeline = dp.WorkflowPipeline(
-            governance=dp.GovernanceFilter(),
-            conflict_resolver=dp.ConflictResolver(),
-            loop_detector=dp.LoopDetector(),
-            auto_retry=None,
-            retry_context_builder=dp.RetryContextBuilder(),
-            posture_enforcer=dp.PostureEnforcer(dp.Posture.BUILD),
-        )
-        self._dp = dp
+        from runtime.governance import GovernanceFilter
+
+        self._governance = GovernanceFilter()
 
         # Constraint ledger — prefer Postgres, fall back to SQLite
         self._constraint_ledger = None
@@ -272,43 +265,26 @@ class WorkflowRunner:
                         retry_count=0,
                     )
                 else:
-                    gate = self._pipeline.pre_dispatch({
-                        "job_label": label,
-                        "label": label,
-                        "prompt": job.get("prompt", ""),
-                        "agent_slug": str(job.get("agent", "")),
-                    })
-                    if not gate.passed:
+                    execution_job = dict(job)
+                    execution_job["prompt"] = self._inject_similarity_context(
+                        job.get("prompt", ""),
+                        job,
+                    )
+                    prompt = self._inject_platform_context(execution_job)
+                    governance_result = self._governance.scan_prompt(prompt)
+                    if not governance_result.passed:
                         result = JobExecution(
                             job_label=label,
                             agent_slug=str(job["agent"]),
                             status="blocked",
                             exit_code=None,
                             stdout="",
-                            stderr="; ".join(gate.blocked_by),
-                            duration_seconds=0.0,
-                            verify_passed=None,
-                            retry_count=0,
-                        )
-                    elif dry_run:
-                        result = JobExecution(
-                            job_label=label,
-                            agent_slug=str(job["agent"]),
-                            status="succeeded",
-                            exit_code=0,
-                            stdout=f"[dry-run] Would execute workflow job '{label}'",
-                            stderr="",
+                            stderr=str(governance_result.blocked_reason or "Governance blocked prompt"),
                             duration_seconds=0.0,
                             verify_passed=None,
                             retry_count=0,
                         )
                     else:
-                        execution_job = dict(job)
-                        execution_job["prompt"] = self._inject_similarity_context(
-                            job.get("prompt", ""),
-                            job,
-                        )
-                        prompt = self._inject_platform_context(execution_job)
                         agent_slug = job["agent"]
                         agent_config = self._agent_registry.get(agent_slug)
                         timeout = int(job.get("timeout", getattr(agent_config, "timeout_seconds", 900)) or 900)
@@ -402,7 +378,11 @@ class WorkflowRunner:
     def _run_dry_run_workflow(self, spec: WorkflowSpec) -> RunResult:
         from runtime.workflow.dry_run import dry_run_workflow
 
-        dry_run_result = dry_run_workflow(spec)
+        dry_run_result = dry_run_workflow(
+            spec,
+            pg_conn=self._pg_conn,
+            repo_root=str(getattr(self, "_repo_root", os.getcwd()) or os.getcwd()),
+        )
         job_results = tuple(
             JobExecution(
                 job_label=job_result.job_label,
@@ -561,7 +541,7 @@ class WorkflowRunner:
             result = execute_api_in_sandbox(
                 agent_config,
                 prompt,
-                workdir=str(self._repo_root),
+                workdir=str(getattr(self, "_repo_root", os.getcwd()) or os.getcwd()),
             )
         except Exception as exc:
             duration = time.monotonic() - start

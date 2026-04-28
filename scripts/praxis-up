@@ -99,9 +99,9 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
   echo "→ docker compose up -d --force-recreate ${SERVICES[*]}"
   docker compose up -d --force-recreate "${SERVICES[@]}"
 
-  echo "→ waiting for praxis-api-server to come back online..."
+  echo "→ waiting for the api-server service to come back online..."
   for _ in $(seq 1 30); do
-    if docker exec praxis-api-server-1 python3 -c "print(1)" >/dev/null 2>&1; then
+    if docker compose exec -T api-server python3 -c "print(1)" >/dev/null 2>&1; then
       break
     fi
     sleep 1
@@ -110,9 +110,9 @@ fi
 
 # Run the auth doctor inside the worker — that's the container that
 # actually executes LLM jobs, so its auth state is the real authority.
-echo "→ running praxis_cli_auth_doctor inside praxis-workflow-worker-1"
+echo "→ running praxis_cli_auth_doctor inside the workflow-worker service"
 DOCTOR_OUT="$(
-  docker exec -i praxis-workflow-worker-1 python3 - <<'PY'
+  docker compose exec -T workflow-worker python3 - <<'PY'
 import json
 from surfaces.mcp.tools.provider_onboard import tool_praxis_cli_auth_doctor
 result = tool_praxis_cli_auth_doctor({})

@@ -125,6 +125,38 @@ def test_default_provider_slug_raises_without_configured_priority_provider(monke
         execution_registry.default_provider_slug()
 
 
+def test_default_adapter_type_for_provider_requires_admitted_lane_policy() -> None:
+    profiles = {
+        "openai": ProviderCLIProfile(
+            provider_slug="openai",
+            binary="codex",
+            lane_policies={
+                "cli_llm": {"transport_kind": "cli"},
+                "llm_task": {"admitted_by_policy": False, "transport_kind": "http"},
+            },
+        ),
+        "anthropic": ProviderCLIProfile(
+            provider_slug="anthropic",
+            binary="claude",
+            lane_policies={
+                "llm_task": {
+                    "admitted_by_policy": True,
+                    "transport_kind": "http",
+                }
+            },
+        ),
+    }
+
+    assert provider_transport.default_adapter_type_for_provider(
+        "openai",
+        profiles=profiles,
+    ) is None
+    assert provider_transport.default_adapter_type_for_provider(
+        "anthropic",
+        profiles=profiles,
+    ) == "llm_task"
+
+
 def test_transport_no_longer_exposes_orphaned_default_provider_helper() -> None:
     assert not hasattr(provider_transport, "builtin_default_provider_slug")
     assert not hasattr(provider_transport, "BUILTIN_PROVIDER_PROFILES")

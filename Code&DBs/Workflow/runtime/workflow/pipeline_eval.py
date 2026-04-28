@@ -75,6 +75,10 @@ class PipelineEvalResult:
     warning_count: int
     findings: tuple[PipelineEvalFinding, ...]
     provider_probe: dict[str, Any]
+    phase_progress: tuple[dict[str, Any], ...]
+    directory_summary: dict[str, Any]
+    quarantine_candidates: tuple[dict[str, Any], ...]
+    launch_preflight: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,6 +90,10 @@ class PipelineEvalResult:
             "warning_count": self.warning_count,
             "findings": [finding.to_dict() for finding in self.findings],
             "provider_probe": dict(self.provider_probe),
+            "phase_progress": [dict(item) for item in self.phase_progress],
+            "directory_summary": dict(self.directory_summary),
+            "quarantine_candidates": [dict(item) for item in self.quarantine_candidates],
+            "launch_preflight": dict(self.launch_preflight),
         }
 
 
@@ -158,6 +166,121 @@ def _looks_artifact_only(paths: Sequence[str]) -> bool:
 def _job_by_label(spec: Any) -> dict[str, dict[str, Any]]:
     jobs = getattr(spec, "jobs", ()) or ()
     return {str(job.get("label") or f"job_{index}"): dict(job) for index, job in enumerate(jobs)}
+
+
+def _path_dir(path: str) -> str:
+    normalized = path.strip().lstrip("./")
+    if not normalized:
+        return "."
+    if "/" not in normalized:
+        return "."
+    return normalized.rsplit("/", 1)[0]
+
+
+def _finding_paths(finding: PipelineEvalFinding) -> list[str]:
+    evidence = finding.evidence or {}
+    paths: list[str] = []
+    for key in ("path",):
+        value = evidence.get(key)
+        if isinstance(value, str) and value.strip():
+            paths.append(value.strip())
+    for key in ("artifact_paths", "write_scope"):
+        paths.extend(_text_list(evidence.get(key)))
+    return paths
+
+
+def _directory_summary(findings: Sequence[PipelineEvalFinding]) -> dict[str, Any]:
+    by_directory: dict[str, dict[str, Any]] = {}
+    unscoped = {"errors": 0, "warnings": 0, "kinds": set()}
+    for finding in findings:
+        paths = _finding_paths(finding)
+        target_dirs = sorted({_path_dir(path) for path in paths}) or ["."]
+        if not paths:
+            unscoped["errors" if finding.severity == "error" else "warnings"] += 1
+            unscoped["kinds"].add(finding.kind)
+        for directory in target_dirs:
+            item = by_directory.setdefault(
+                directory,
+                {"directory": directory, "errors": 0, "warnings": 0, "kinds": set()},
+            )
+            item["errors" if finding.severity == "error" else "warnings"] += 1
+            item["kinds"].add(finding.kind)
+    entries = []
+    for item in by_directory.values():
+        entries.append(
+            {
+                "directory": item["directory"],
+                "errors": item["errors"],
+                "warnings": item["warnings"],
+                "kinds": sorted(item["kinds"]),
+            }
+        )
+    entries.sort(key=lambda item: (-int(item["errors"]), -int(item["warnings"]), item["directory"]))
+    return {
+        "directories": entries,
+        "unscoped": {
+            "errors": unscoped["errors"],
+            "warnings": unscoped["warnings"],
+            "kinds": sorted(unscoped["kinds"]),
+        },
+    }
+
+
+def _phase_progress(
+    *,
+    validation: Mapping[str, Any],
+    preview: Mapping[str, Any],
+    error_count: int,
+    warning_count: int,
+    provider_probe: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    validation_status = (
+        "not_run"
+        if not validation
+        else ("passed" if bool(validation.get("valid")) else "failed")
+    )
+    preview_warnings = preview.get("warnings") or ()
+    preview_status = "degraded" if preview_warnings else "completed"
+    return (
+        {"phase": "load_spec", "status": "completed"},
+        {"phase": "validate_spec", "status": validation_status},
+        {
+            "phase": "build_execution_preview",
+            "status": preview_status,
+            "warning_count": len(preview_warnings),
+        },
+        {
+            "phase": "evaluate_contract",
+            "status": "passed" if error_count == 0 else "failed",
+            "error_count": error_count,
+            "warning_count": warning_count,
+        },
+        {
+            "phase": "provider_freshness_preflight",
+            "status": str(provider_probe.get("status") or provider_probe.get("mode") or "not_run"),
+            "required_before_launch": True,
+        },
+    )
+
+
+def _quarantine_candidates(
+    *,
+    workflow_id: str | None,
+    findings: Sequence[PipelineEvalFinding],
+) -> tuple[dict[str, Any], ...]:
+    errors = [finding for finding in findings if finding.severity == "error"]
+    if not errors:
+        return ()
+    return (
+        {
+            "kind": "workflow_spec",
+            "workflow_id": workflow_id,
+            "reason_code": "pipeline_eval.errors_present",
+            "error_count": len(errors),
+            "top_findings": [finding.kind for finding in errors[:5]],
+            "recommended_action": "quarantine_or_recompile_before_retry",
+        },
+    )
 
 
 def evaluate_pipeline_preview(
@@ -340,20 +463,48 @@ def evaluate_pipeline_preview(
     warning_count = sum(1 for finding in findings if finding.severity == "warning")
     provider_probe = {
         "mode": "not_run",
+        "status": "required_before_launch",
         "reason": (
             "pipeline eval is read-only. Refresh provider availability through "
             "the canonical heartbeat/provider-probe surface as an explicit operation."
         ),
+        "repair_action": {
+            "kind": "canonical_operator_action",
+            "command": "praxis workflow tools call praxis_provider_availability_refresh --input-json '{\"max_concurrency\":4,\"refresh_control_plane\":true}' --yes",
+            "reason_code": "provider_freshness.required_before_launch",
+        },
     }
+    workflow_id = str(preview.get("workflow_id") or getattr(spec, "workflow_id", "") or "").strip() or None
+    launch_preflight = {
+        "ready_without_provider_freshness": error_count == 0,
+        "provider_freshness": dict(provider_probe),
+        "required_before_launch": ["provider_freshness"],
+    }
+    directory_summary = _directory_summary(findings)
+    quarantine_candidates = _quarantine_candidates(
+        workflow_id=workflow_id,
+        findings=findings,
+    )
+    phase_progress = _phase_progress(
+        validation=validation,
+        preview=preview,
+        error_count=error_count,
+        warning_count=warning_count,
+        provider_probe=provider_probe,
+    )
     return PipelineEvalResult(
         ok=error_count == 0,
         spec_name=str(preview.get("spec_name") or getattr(spec, "name", "") or ""),
-        workflow_id=str(preview.get("workflow_id") or getattr(spec, "workflow_id", "") or "").strip() or None,
+        workflow_id=workflow_id,
         total_jobs=int(preview.get("total_jobs") or len(getattr(spec, "jobs", []) or [])),
         error_count=error_count,
         warning_count=warning_count,
         findings=tuple(findings),
         provider_probe=provider_probe,
+        phase_progress=phase_progress,
+        directory_summary=directory_summary,
+        quarantine_candidates=quarantine_candidates,
+        launch_preflight=launch_preflight,
     )
 
 

@@ -67,6 +67,10 @@ vi.mock('./dashboard/ChatPanel', () => ({
   ChatPanel: ({ open }: { open: boolean }) => (open ? <div>Chat Surface</div> : null),
 }));
 
+vi.mock('./dashboard/StrategyConsole', () => ({
+  StrategyConsole: ({ stage }: { stage: string }) => <div data-testid="strategy-console">Strategy Console {stage}</div>,
+}));
+
 vi.mock('./grid/ManifestEditorPage', () => ({
   ManifestEditorPage: () => <div>Manifest Editor Surface</div>,
 }));
@@ -322,6 +326,16 @@ describe('AppShell', () => {
     await screen.findByText('Costs Surface');
     expect(screen.getByText('Control plane')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /overview/i })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('opens chat docked when the URL asks for the console entry state', async () => {
+    window.history.replaceState(null, '', '/app?chat=sidebar&source=console');
+
+    render(<AppShell />);
+
+    await screen.findByText('Dashboard Surface');
+    expect(screen.getByTestId('strategy-console')).toHaveTextContent('sidebar');
+    expect(screen.getByRole('button', { name: /assistant chat/i })).toHaveClass('app-shell__action-button--active');
   });
 
   test('does not leave the builder when escape is pressed', async () => {

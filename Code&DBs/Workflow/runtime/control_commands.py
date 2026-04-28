@@ -675,6 +675,20 @@ def workflow_retry_guard(
                 "reason": "connection has no execute method",
             },
         )
+    graph_guard_error: Exception | None = None
+    try:
+        from runtime.workflow._status import graph_retry_guard
+
+        graph_guard = graph_retry_guard(
+            conn,
+            run_id=normalized_run_id,
+            label=normalized_label,
+        )
+    except Exception as exc:
+        graph_guard_error = exc
+    else:
+        if graph_guard is not None:
+            return _normalize_retry_guard(graph_guard, field_name="retry_guard")
     try:
         rows = conn.execute(
             """SELECT id, run_id, label, status, attempt
@@ -696,6 +710,16 @@ def workflow_retry_guard(
             },
         ) from exc
     if not rows:
+        if graph_guard_error is not None:
+            raise ControlCommandError(
+                "control.command.workflow_retry_state_unreadable",
+                "workflow retry requires readable graph job state before command creation",
+                details={
+                    "run_id": normalized_run_id,
+                    "label": normalized_label,
+                    "error": str(graph_guard_error),
+                },
+            ) from graph_guard_error
         return {
             "run_id": normalized_run_id,
             "label": normalized_label,

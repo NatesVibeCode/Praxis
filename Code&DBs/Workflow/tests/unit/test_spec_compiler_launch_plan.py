@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
@@ -93,6 +94,8 @@ def test_compile_plan_translates_packets_into_multi_job_spec(monkeypatch) -> Non
     ]
     assert spec_dict["phase"] == "build"
     assert spec_dict["workdir"] == "/repo"
+    assert spec_dict["workspace_ref"] == "workspace.default"
+    assert spec_dict["runtime_profile_ref"] == "runtime.default"
     assert len(spec_dict["jobs"]) == 2
 
     first, second = spec_dict["jobs"]
@@ -309,6 +312,8 @@ def test_propose_plan_returns_spec_preview_and_declarations_without_submit(monke
     # Preview stub — replicates the preview_workflow_execution payload shape
     # we care about without needing a real Postgres connection.
     def _fake_preview(conn, *, inline_spec, **_kwargs):
+        assert inline_spec["workspace_ref"] == "workspace.default"
+        assert inline_spec["runtime_profile_ref"] == "runtime.default"
         return {
             "action": "preview",
             "jobs": [
@@ -1340,6 +1345,60 @@ def test_approve_proposed_plan_rejects_empty_approver(monkeypatch) -> None:
         approve_proposed_plan(proposed, approved_by="   ")
 
 
+def test_approve_proposed_plan_requires_provider_freshness_gate() -> None:
+    proposed = ProposedPlan(
+        spec_dict={"name": "proof_gate", "jobs": []},
+        preview={},
+        warnings=[],
+        workflow_id="plan.proof_gate",
+        spec_name="proof_gate",
+        total_jobs=0,
+        packet_declarations=[],
+        binding_summary={"totals": {"bound": 0, "ambiguous": 0, "unbound": 0}, "unbound_refs": [], "ambiguous_refs": []},
+        unresolved_routes=[],
+    )
+
+    with pytest.raises(
+        spec_compiler.ProviderFreshnessGateError,
+        match="fresh provider route truth or a recent provider availability refresh receipt",
+    ):
+        approve_proposed_plan(proposed, approved_by="nate@praxis")
+
+
+def test_approve_proposed_plan_accepts_recent_refresh_receipt_evidence() -> None:
+    proposed = ProposedPlan(
+        spec_dict={"name": "proof_gate", "jobs": []},
+        preview={},
+        warnings=[],
+        workflow_id="plan.proof_gate",
+        spec_name="proof_gate",
+        total_jobs=0,
+        packet_declarations=[],
+        binding_summary={"totals": {"bound": 0, "ambiguous": 0, "unbound": 0}, "unbound_refs": [], "ambiguous_refs": []},
+        unresolved_routes=[],
+        provider_freshness={
+            "refresh_receipt_ref": "receipt:provider_availability_refresh:abc123",
+            "refresh_receipt_issued_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+    approved = approve_proposed_plan(proposed, approved_by="nate@praxis")
+
+    assert approved.approved_by == "nate@praxis"
+
+
+def test_approve_proposed_plan_accepts_preview_route_truth_freshness(monkeypatch) -> None:
+    proposed = _build_proposed_for_approval(monkeypatch)
+
+    assert proposed.provider_freshness is not None
+    assert proposed.provider_freshness["route_truth_ref"].startswith("preview:")
+    assert proposed.provider_freshness["route_truth_checked_at"]
+
+    approved = approve_proposed_plan(proposed, approved_by="nate@praxis")
+
+    assert approved.approved_by == "nate@praxis"
+
+
 def test_launch_approved_submits_on_matching_hash(monkeypatch) -> None:
     proposed = _build_proposed_for_approval(monkeypatch)
     approved = approve_proposed_plan(proposed, approved_by="nate@praxis")
@@ -1367,6 +1426,28 @@ def test_launch_approved_submits_on_matching_hash(monkeypatch) -> None:
     assert captured["kwargs"]["requested_by_kind"] == "workflow"
     # requested_by_ref defaults to approved_by for audit trail.
     assert captured["kwargs"]["requested_by_ref"] == "nate@praxis"
+
+
+def test_launch_approved_rejects_stale_provider_freshness(monkeypatch) -> None:
+    proposed = _build_proposed_for_approval(monkeypatch)
+    approved = approve_proposed_plan(proposed, approved_by="nate@praxis")
+
+    # BUG-72420B56 evidence: freshness must remain machine-checkable at launch,
+    # not only at approval time.
+    approved.proposed.provider_freshness["route_truth_checked_at"] = "2020-01-01T00:00:00+00:00"
+
+    def _forbid_submit(*_args, **_kwargs):
+        raise AssertionError("submit_workflow_command should not run on stale freshness evidence")
+
+    import runtime.control_commands as control_commands_mod
+
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _forbid_submit)
+
+    with pytest.raises(
+        spec_compiler.ProviderFreshnessGateError,
+        match="provider freshness evidence is stale",
+    ):
+        launch_approved(approved, conn=_FakeConn())
 
 
 def test_launch_approved_fails_closed_on_tampered_spec(monkeypatch) -> None:

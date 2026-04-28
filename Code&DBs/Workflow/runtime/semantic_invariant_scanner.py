@@ -17,13 +17,14 @@ Initial supported policy shapes (under ``propagation_policy``):
 
 The scanner returns structured findings; callers render or assert.
 
-Today's scan is grep-style on Python source.  Future iterations could
-parse the AST or walk import graphs, but the simple form catches the
-class of regressions this audit addressed.
+The scanner is intentionally lightweight, but it now uses Python's AST so
+module-alias imports such as ``from runtime.workflow import unified`` are
+resolved instead of silently bypassing the invariant.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -47,53 +48,88 @@ def _scan_layers(workflow_root: Path, layers: Iterable[str]) -> list[Path]:
 def _file_imports_or_uses_callsite(source: str, callsite: str) -> list[int]:
     """Return line numbers where ``callsite`` is used in the file.
 
-    Detects two shapes:
+    Detects three shapes:
 
-    1. The full dotted path appearing on a line (``runtime.x.y.foo(...)``).
-    2. ``from runtime.x.y import foo`` followed anywhere in the file by a
-       bare ``foo(`` call or use.  In that case both the import line and
-       any usage line are reported.
+    1. The full dotted call appears directly (``runtime.x.y.foo(...)``).
+    2. The callable is imported by name and used bare later
+       (``from runtime.x.y import foo`` then ``foo(...)``).
+    3. The module or one of its parents is imported under an alias and the
+       callable is reached through that alias
+       (``from runtime.x import y`` then ``y.foo(...)``).
     """
     if "." not in callsite:
         return []
     module_path, _, callable_name = callsite.rpartition(".")
-    lines = source.splitlines()
-    findings: list[int] = []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        lines = source.splitlines()
+        return sorted(
+            {
+                line_no
+                for line_no, line in enumerate(lines, start=1)
+                if callsite in line or f"{callable_name}(" in line
+            }
+        )
 
-    # Check for full dotted reference.
-    for line_no, line in enumerate(lines, start=1):
-        if callsite in line:
-            findings.append(line_no)
+    findings: set[int] = set()
+    callable_aliases: set[str] = set()
+    module_aliases: dict[str, str] = {}
 
-    # Check for bare-name imports of the callable.
-    import_patterns = (
-        f"from {module_path} import",
-    )
-    imports_callable = False
-    import_line_no: int | None = None
-    for line_no, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if any(stripped.startswith(p) for p in import_patterns) and callable_name in stripped:
-            # Confirm callable_name appears as a token (comma- or whitespace-separated).
-            after_import = stripped.split("import", 1)[1]
-            tokens = [t.strip().strip("()") for t in after_import.split(",")]
-            tokens = [t.split(" as ")[0].strip() for t in tokens]
-            if callable_name in tokens:
-                imports_callable = True
-                import_line_no = line_no
-                findings.append(line_no)
-                break
+    def _bind_module_alias(bound_name: str, resolved_module: str, line_no: int) -> None:
+        if not bound_name:
+            return
+        module_aliases[bound_name] = resolved_module
+        if module_path == resolved_module or module_path.startswith(f"{resolved_module}."):
+            findings.add(line_no)
 
-    if imports_callable:
-        for line_no, line in enumerate(lines, start=1):
-            if line_no == import_line_no:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if not node.module:
                 continue
-            # Bare-name usage as ``foo(`` somewhere on the line.
-            if f"{callable_name}(" in line:
-                findings.append(line_no)
+            for alias in node.names:
+                local_name = alias.asname or alias.name
+                imported_module = f"{node.module}.{alias.name}"
+                if node.module == module_path and alias.name == callable_name:
+                    callable_aliases.add(local_name)
+                    findings.add(node.lineno)
+                    continue
+                _bind_module_alias(local_name, imported_module, node.lineno)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                local_name = alias.asname or alias.name.split(".", 1)[0]
+                _bind_module_alias(local_name, alias.name, node.lineno)
 
-    # Dedupe + sort.
-    return sorted(set(findings))
+    def _attribute_chain_name(node: ast.AST) -> str | None:
+        parts: list[str] = []
+        current = node
+        while isinstance(current, ast.Attribute):
+            parts.append(current.attr)
+            current = current.value
+        if not isinstance(current, ast.Name):
+            return None
+        parts.append(current.id)
+        return ".".join(reversed(parts))
+
+    def _expand_alias(dotted_name: str) -> str:
+        head, dot, tail = dotted_name.partition(".")
+        if not dot:
+            return module_aliases.get(head, dotted_name)
+        resolved_head = module_aliases.get(head, head)
+        return f"{resolved_head}.{tail}"
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in callable_aliases:
+            findings.add(node.lineno)
+            continue
+        dotted_name = _attribute_chain_name(func)
+        if dotted_name and _expand_alias(dotted_name) == callsite:
+            findings.add(node.lineno)
+
+    return sorted(findings)
 
 
 def _allowed_authority_paths(workflow_root: Path, allowed: Iterable[str]) -> set[Path]:

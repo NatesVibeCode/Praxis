@@ -326,6 +326,23 @@ def test_instances_check_uses_fast_orient_and_compares_cli_mcp_db(
 
     monkeypatch.setattr(setup_wizard, "setup_payload_for_cli", _fake_setup_payload_for_cli)
     monkeypatch.setattr(operate_commands, "run_cli_tool", _fake_run_cli_tool)
+    captured_routes: dict[str, object] = {}
+
+    def _fake_list_api_routes(**kwargs):
+        captured_routes.update(kwargs)
+        return {
+            "count": 3,
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+            "redoc_url": "/redoc",
+            "routes": [
+                {"path": "/api/operate", "methods": ["POST"], "visibility": "internal"},
+                {"path": "/api/operate/catalog", "methods": ["GET"], "visibility": "internal"},
+                {"path": "/api/catalog/operations", "methods": ["GET"], "visibility": "internal"},
+            ],
+        }
+
+    monkeypatch.setattr(rest, "list_api_routes", _fake_list_api_routes)
     monkeypatch.setattr(
         workflow_database,
         "workflow_database_authority_for_repo",
@@ -353,8 +370,12 @@ def test_instances_check_uses_fast_orient_and_compares_cli_mcp_db(
         "skip_engineering_observability": True,
         "compact": True,
     }
-    assert payload["route_catalog"]["included"] is False
-    assert payload["route_catalog"]["status"] == "skipped"
+    assert captured_routes == {"visibility": "all"}
+    assert payload["route_catalog"]["included"] is True
+    assert payload["route_catalog"]["visibility"] == "all"
+    assert payload["checks"]["api_operate_route_present"] is True
+    assert payload["checks"]["api_operate_catalog_route_present"] is True
+    assert payload["checks"]["api_catalog_route_present"] is True
     assert payload["instances"]["cli_db"] == "postgresql://postgres:***@localhost:5432/praxis"
     assert payload["instances"]["mcp_db"] == "postgresql://postgres:***@localhost:5432/praxis"
     assert payload["instances"]["db_signatures"]["setup"] == (
@@ -410,6 +431,20 @@ def test_instances_check_fails_on_mcp_db_drift(monkeypatch: pytest.MonkeyPatch) 
         ),
     )
     monkeypatch.setattr(
+        rest,
+        "list_api_routes",
+        lambda **_kwargs: {
+            "count": 2,
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+            "redoc_url": "/redoc",
+            "routes": [
+                {"path": "/api/operate", "methods": ["POST"], "visibility": "internal"},
+                {"path": "/api/catalog/operations", "methods": ["GET"], "visibility": "internal"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
         workflow_database,
         "workflow_database_authority_for_repo",
         lambda repo_root, env: SimpleNamespace(
@@ -433,6 +468,96 @@ def test_instances_check_fails_on_mcp_db_drift(monkeypatch: pytest.MonkeyPatch) 
     assert payload["checks"]["cli_mcp_db_match"] is False
     assert payload["checks"]["db_match"] is False
     assert any("cli=" in error and "mcp=" in error for error in payload["checks"]["errors"])
+
+
+def test_instances_check_uses_full_route_catalog_for_cqrs_alignment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import runtime.setup_wizard as setup_wizard
+    import surfaces._workflow_database as workflow_database
+    import surfaces.mcp.subsystems as mcp_subsystems
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        setup_wizard,
+        "setup_payload_for_cli",
+        lambda mode, *, repo_root=None, apply=False: {
+            "ok": True,
+            "runtime_target": {
+                "api_authority": "http://127.0.0.1:8420",
+                "db_authority": "postgresql://postgres:***@localhost:5432/praxis",
+            },
+            "native_instance": {
+                "praxis_instance_name": "praxis",
+                "praxis_runtime_profile": "praxis",
+                "repo_root": "/repo",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        operate_commands,
+        "run_cli_tool",
+        lambda tool_name, params: (
+            0,
+            {
+                "authority_envelope": {
+                    "primitive_contracts": {
+                        "runtime_binding": {
+                            "http_endpoints": {"api_base_url": "http://127.0.0.1:8420"},
+                            "database": {
+                                "redacted_url": "postgresql://postgres:***@localhost:5432/praxis",
+                            },
+                        }
+                    }
+                },
+                "native_instance": {"status": "skipped", "reason": "orient_fast_path"},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_database,
+        "workflow_database_authority_for_repo",
+        lambda repo_root, env: SimpleNamespace(
+            database_url="postgresql://postgres:secret@localhost:5432/praxis",
+            source="test",
+        ),
+    )
+    monkeypatch.setattr(
+        mcp_subsystems,
+        "workflow_database_env",
+        lambda: {
+            "WORKFLOW_DATABASE_URL": "postgresql://postgres:secret@localhost:5432/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "test",
+        },
+    )
+
+    def _fake_list_api_routes(**kwargs):
+        captured.update(kwargs)
+        return {
+            "count": 3,
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+            "redoc_url": "/redoc",
+            "filters": {"visibility": "all"},
+            "routes": [
+                {"path": "/api/operate"},
+                {"path": "/api/operate/catalog"},
+                {"path": "/api/catalog/operations"},
+            ],
+        }
+
+    monkeypatch.setattr(rest, "list_api_routes", _fake_list_api_routes)
+
+    stdout = StringIO()
+    assert workflow_cli_main(["instances", "check", "--include-routes", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert captured == {"visibility": "all"}
+    assert payload["route_catalog"]["visibility"] == "all"
+    assert payload["checks"]["api_operate_route_present"] is True
+    assert payload["checks"]["api_operate_catalog_route_present"] is True
+    assert payload["checks"]["api_catalog_route_present"] is True
 
 
 def test_global_launcher_resolution_flags_other_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2279,6 +2404,162 @@ def test_active_frontdoor_uses_operator_status_snapshot(
     assert payload["count"] == 1
     assert payload["runs"][0]["workflow_name"] == "Live Workflow"
     assert payload["queue"]["running"] == 1
+
+
+def test_firecheck_frontdoor_fails_closed_when_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object]):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {
+            "can_fire": False,
+            "blockers": [{"code": "queued_without_fresh_worker_heartbeat"}],
+        }
+
+    monkeypatch.setattr(workflow_commands, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            [
+                "firecheck",
+                "--run-id",
+                "run_123",
+                "--since-minutes",
+                "30",
+                "--heartbeat-fresh-seconds",
+                "45",
+            ],
+            stdout=stdout,
+        )
+        == 1
+    )
+
+    assert captured == {
+        "tool_name": "praxis_firecheck",
+        "params": {
+            "run_id": "run_123",
+            "since_minutes": 30,
+            "heartbeat_fresh_seconds": 45,
+        },
+    }
+    assert json.loads(stdout.getvalue())["can_fire"] is False
+
+
+def test_runtime_truth_frontdoor_routes_to_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object]):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"view": "runtime_truth_snapshot", "truth_state": "ready"}
+
+    monkeypatch.setattr(workflow_commands, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            ["runtime-truth", "--run-id", "run_123", "--manifest-audit-limit", "8"],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured == {
+        "tool_name": "praxis_runtime_truth_snapshot",
+        "params": {"run_id": "run_123", "manifest_audit_limit": 8},
+    }
+    assert json.loads(stdout.getvalue())["view"] == "runtime_truth_snapshot"
+
+
+def test_remediation_plan_frontdoor_routes_to_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object]):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"failure_type": "host_resource_capacity"}
+
+    monkeypatch.setattr(workflow_commands, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            ["remediation-plan", "--failure-type", "host_resource_capacity"],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured == {
+        "tool_name": "praxis_remediation_plan",
+        "params": {"failure_type": "host_resource_capacity"},
+    }
+    assert json.loads(stdout.getvalue())["failure_type"] == "host_resource_capacity"
+
+
+def test_remediation_apply_frontdoor_requires_confirmation_for_apply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object]):
+        calls.append((tool_name, params))
+        return 0, {"status": "applied"}
+
+    monkeypatch.setattr(workflow_commands, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            ["remediation-apply", "--failure-type", "provider.capacity", "--apply"],
+            stdout=stdout,
+        )
+        == 2
+    )
+
+    assert "error: --yes is required with --apply" in stdout.getvalue()
+    assert calls == []
+
+
+def test_remediation_apply_frontdoor_routes_to_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object]):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"status": "applied"}
+
+    monkeypatch.setattr(workflow_commands, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            [
+                "remediation-apply",
+                "--failure-type",
+                "provider.capacity",
+                "--provider",
+                "openai",
+                "--apply",
+                "--yes",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured == {
+        "tool_name": "praxis_remediation_apply",
+        "params": {
+            "dry_run": False,
+            "confirm": True,
+            "failure_type": "provider.capacity",
+            "provider_slug": "openai",
+        },
+    }
+    assert json.loads(stdout.getvalue())["status"] == "applied"
 
 
 def test_generate_frontdoor_uses_direct_compat_handler(monkeypatch: pytest.MonkeyPatch) -> None:

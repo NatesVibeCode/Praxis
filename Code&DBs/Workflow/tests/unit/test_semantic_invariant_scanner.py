@@ -91,6 +91,32 @@ def test_scanner_respects_allowed_authority_directory(tmp_path: Path) -> None:
     assert findings == []
 
 
+def test_scanner_detects_alias_import_of_forbidden_module_callsite(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "runtime" / "alias_rogue.py",
+        "from runtime.workflow import unified\n"
+        "unified.submit_workflow_inline(conn, spec)\n",
+    )
+    predicate = {
+        "predicate_slug": "workflow_launch.flow_through_command_bus",
+        "predicate_kind": "invariant",
+        "propagation_policy": {
+            "forbidden_callsites_outside_command_bus": [
+                "runtime.workflow.unified.submit_workflow_inline",
+            ],
+            "allowed_authorities": [
+                "runtime.control_commands.submit_workflow_command",
+            ],
+            "scan_layers": ["runtime"],
+        },
+    }
+
+    findings = scan_invariant_predicate(predicate=predicate, workflow_root=tmp_path)
+
+    assert findings, "expected the alias import to count as a forbidden callsite"
+    assert {finding["path"] for finding in findings} == {"runtime/alias_rogue.py"}
+
+
 def test_scanner_skips_non_invariant_predicates(tmp_path: Path) -> None:
     _write(tmp_path / "runtime" / "rogue.py", "submit_workflow_inline(conn, spec)\n")
     findings = scan_all_invariant_predicates(

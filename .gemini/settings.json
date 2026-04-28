@@ -1,5 +1,5 @@
 {
-  "$comment": "Gemini CLI hook config. Commands are wrapped in `bash -c` with a GEMINI_PROJECT_DIR -> CLAUDE_PROJECT_DIR -> $PWD fallback, mirroring the .codex/hooks.json pattern, because some Gemini CLI launchers (esp. Gemini Desktop / app-bundled launches) don't propagate GEMINI_PROJECT_DIR to hook subprocesses, which collapses the unwrapped path to /.gemini/... and yields exit 127. The Praxis dotfile loader (PRAXIS_HOST_WORKSPACE_ROOT or CLAUDE_PROJECT_DIR) provides the same anchor for the policy registry on the inside.",
+  "$comment": "Gemini CLI hook config. Commands are wrapped in `bash -c` with a GEMINI_PROJECT_DIR -> CLAUDE_PROJECT_DIR -> $PWD fallback, mirroring the .codex/hooks.json pattern, because some Gemini launchers don't propagate GEMINI_PROJECT_DIR to hook subprocesses. The hook records every match but injects context only for explicit, non-advisory decisions so routine tool calls stay fast.",
   "hooks": {
     "BeforeTool": [
       {

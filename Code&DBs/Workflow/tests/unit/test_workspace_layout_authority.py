@@ -54,6 +54,22 @@ def test_workflow_root_exists() -> None:
     assert workflow_root().is_dir()
 
 
+def test_code_tree_root_ignores_placeholder_alias_when_canonical_is_real(tmp_path: Path) -> None:
+    canonical = code_tree_dirname()
+    alias = tree_aliases()[0]
+    (tmp_path / canonical / "Workflow" / "runtime").mkdir(parents=True)
+    (tmp_path / alias / "Workflow" / "artifacts").mkdir(parents=True)
+
+    assert code_tree_root(tmp_path) == tmp_path / canonical
+
+
+def test_code_tree_root_accepts_live_alias_when_canonical_is_absent(tmp_path: Path) -> None:
+    alias = tree_aliases()[0]
+    (tmp_path / alias / "Workflow" / "runtime").mkdir(parents=True)
+
+    assert code_tree_root(tmp_path) == tmp_path / alias
+
+
 def test_databases_root_exists() -> None:
     assert databases_root().is_dir()
 

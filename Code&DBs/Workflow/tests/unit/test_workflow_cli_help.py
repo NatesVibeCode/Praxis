@@ -124,9 +124,10 @@ def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
     rendered = capsys.readouterr().out
     assert (
         "workflow bugs "
-        "[list|search <query>|duplicate_check <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve]"
+        "[list|search <query>|duplicate_check <query>|stats|file|show|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve]"
     ) in rendered
     assert "file               File a new bug" in rendered
+    assert "show               Alias for packet" in rendered
     assert "duplicate_check <query>" in rendered
     assert "attach_evidence    Attach canonical evidence to a bug" in rendered
     assert "resolve            Mark a bug fixed, fix-pending-verification, deferred, or won't-fix" in rendered
@@ -159,6 +160,26 @@ def test_bugs_history_accepts_positional_bug_id(monkeypatch) -> None:
     assert captured == {
         "tool_name": "praxis_bugs",
         "params": {"bug_id": "BUG-1234", "action": "history", "limit": 25},
+    }
+
+
+def test_bugs_show_aliases_packet_with_positional_bug_id(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"ok": True, "packet": {"bug": {"bug_id": params["bug_id"]}}}
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._bugs_command(["show", "BUG-1234"], stdout=stdout)
+
+    assert rc == 0
+    assert captured == {
+        "tool_name": "praxis_bugs",
+        "params": {"bug_id": "BUG-1234", "action": "packet", "limit": 25},
     }
 
 

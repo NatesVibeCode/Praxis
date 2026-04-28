@@ -1185,22 +1185,38 @@ def test_daily_maintenance_review_starts_backlog_summary(monkeypatch: pytest.Mon
     entity_id = f"maintenance_review_entity_{suffix}"
     captured: dict[str, object] = {}
 
-    import runtime.workflow.unified as unified
+    import runtime.control_commands as control_commands_mod
 
-    def _fake_submit(conn_arg, spec_dict, run_id=None, parent_run_id=None, trigger_depth=0, packet_provenance=None):
+    def _fake_submit(
+        conn_arg,
+        *,
+        requested_by_kind,
+        requested_by_ref,
+        inline_spec=None,
+        packet_provenance=None,
+        dispatch_reason=None,
+        spec_name=None,
+        total_jobs=None,
+        **_kwargs,
+    ):
         captured["conn"] = conn_arg
-        captured["spec_dict"] = spec_dict
+        captured["requested_by_kind"] = requested_by_kind
+        captured["requested_by_ref"] = requested_by_ref
+        captured["spec_dict"] = inline_spec
         captured["packet_provenance"] = packet_provenance
+        captured["dispatch_reason"] = dispatch_reason
+        captured["spec_name"] = spec_name
+        captured["total_jobs"] = total_jobs
         return {
             "run_id": f"workflow_maintenance_review_{suffix}",
             "status": "queued",
-            "total_jobs": 1,
-            "spec_name": spec_dict.get("name"),
+            "total_jobs": total_jobs,
+            "spec_name": spec_name,
             "workflow_id": "workflow.maintenance.daily.review",
             "replayed_jobs": [],
         }
 
-    monkeypatch.setattr(unified, "submit_workflow_inline", _fake_submit)
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _fake_submit)
 
     try:
         conn.execute(
@@ -1269,12 +1285,17 @@ def test_daily_maintenance_review_starts_backlog_summary(monkeypatch: pytest.Mon
             for finding in run.findings
         )
         assert captured["conn"] is conn
+        assert captured["requested_by_kind"] == "system"
+        assert captured["requested_by_ref"] == "database_maintenance.review"
         spec_dict = captured["spec_dict"]
         assert spec_dict["name"] == "maintenance_daily_review"
         assert spec_dict["jobs"][0]["label"] == "maintenance_review"
         assert spec_dict["jobs"][0]["agent"] == "openai/gpt-5.4-mini"
         assert '"pending_by_kind": {' in spec_dict["jobs"][0]["prompt"]
         assert '"review_needed": true' in spec_dict["jobs"][0]["prompt"]
+        assert captured["dispatch_reason"] == "maintenance.review.auto"
+        assert captured["spec_name"] == "maintenance_daily_review"
+        assert captured["total_jobs"] == 1
 
         intent_rows = conn.execute(
             """
@@ -1337,12 +1358,12 @@ def test_daily_maintenance_review_can_skip_when_policy_is_clean_only(
         max_attempts=3,
     )
 
-    import runtime.workflow.unified as unified
+    import runtime.control_commands as control_commands_mod
 
     def _unexpected_submit(*args, **kwargs):
         raise AssertionError("start should not run for a clean-only skip")
 
-    monkeypatch.setattr(unified, "submit_workflow_inline", _unexpected_submit)
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _unexpected_submit)
 
     monkeypatch.setattr(
         processor,
@@ -1482,12 +1503,12 @@ def test_daily_maintenance_review_skips_same_dirty_fingerprint_within_repeat_win
     evaluation = processor._evaluate_maintenance_state(summary=summary, config=config)
     current_time = conn.fetchrow("SELECT now() AS current_time")["current_time"]
 
-    import runtime.workflow.unified as unified
+    import runtime.control_commands as control_commands_mod
 
     def _unexpected_submit(*args, **kwargs):
         raise AssertionError("start should not run when the dirty fingerprint is unchanged")
 
-    monkeypatch.setattr(unified, "submit_workflow_inline", _unexpected_submit)
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _unexpected_submit)
     monkeypatch.setattr(processor, "_collect_maintenance_review_summary", lambda *, intent_id: summary)
     monkeypatch.setattr(
         processor,
@@ -1520,22 +1541,38 @@ def test_auto_repair_starts_when_severe_dirty_state_is_detected(
     entity_id = f"maintenance_repair_entity_{suffix}"
     captured: dict[str, object] = {}
 
-    import runtime.workflow.unified as unified
+    import runtime.control_commands as control_commands_mod
 
-    def _fake_submit(conn_arg, spec_dict, run_id=None, parent_run_id=None, trigger_depth=0, packet_provenance=None):
+    def _fake_submit(
+        conn_arg,
+        *,
+        requested_by_kind,
+        requested_by_ref,
+        inline_spec=None,
+        packet_provenance=None,
+        dispatch_reason=None,
+        spec_name=None,
+        total_jobs=None,
+        **_kwargs,
+    ):
         captured["conn"] = conn_arg
-        captured["spec_dict"] = spec_dict
+        captured["requested_by_kind"] = requested_by_kind
+        captured["requested_by_ref"] = requested_by_ref
+        captured["spec_dict"] = inline_spec
         captured["packet_provenance"] = packet_provenance
+        captured["dispatch_reason"] = dispatch_reason
+        captured["spec_name"] = spec_name
+        captured["total_jobs"] = total_jobs
         return {
             "run_id": f"workflow_maintenance_repair_{suffix}",
             "status": "queued",
-            "total_jobs": 1,
-            "spec_name": spec_dict.get("name"),
+            "total_jobs": total_jobs,
+            "spec_name": spec_name,
             "workflow_id": "workflow.maintenance.auto.repair",
             "replayed_jobs": [],
         }
 
-    monkeypatch.setattr(unified, "submit_workflow_inline", _fake_submit)
+    monkeypatch.setattr(control_commands_mod, "submit_workflow_command", _fake_submit)
 
     try:
         conn.execute(

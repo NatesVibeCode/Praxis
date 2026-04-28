@@ -100,6 +100,43 @@ def _path_like_target_ref(inputs: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _file_similar_bugs(
+    *,
+    bt: Any,
+    title: str,
+    description: str,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Return filing-time duplicate candidates without mutating bug authority."""
+    finder = getattr(bt, "find_similar_bugs", None)
+    if callable(finder):
+        return [
+            dict(item)
+            for item in (
+                finder(title=title, description=description, limit=limit)
+                or []
+            )
+            if isinstance(item, Mapping)
+        ]
+    search = getattr(bt, "search", None)
+    if callable(search):
+        found = search(
+            title,
+            limit=limit,
+            open_only=bug_query_default_open_only_list(),
+        )
+        return [
+            {
+                "bug_id": bug.bug_id,
+                "title": bug.title,
+                "status": bug.status.value,
+                "severity": bug.severity.value,
+            }
+            for bug in found
+        ]
+    return []
+
+
 def _require_discovery_authority(body: Mapping[str, Any]) -> None:
     discovered_in_run_id = _optional_text(body.get("discovered_in_run_id"))
     discovered_in_receipt_id = _optional_text(body.get("discovered_in_receipt_id"))
@@ -304,11 +341,20 @@ def file_bug_payload(
         raise ValueError("title is required to file a bug")
     _require_discovery_authority(body)
     dry_run = bool(body.get("dry_run") or body.get("preview"))
+    allow_duplicate = bool(body.get("allow_duplicate"))
     category = parse_category(bt_mod, body.get("category")) or bt_mod.BugCategory.OTHER
     resume_ctx = body.get("resume_context")
     if resume_ctx is not None and not isinstance(resume_ctx, dict):
         raise ValueError("resume_context must be a JSON object when provided")
     severity = parse_severity(bt_mod, body.get("severity")) or bt_mod.BugSeverity.P2
+    description = str(body.get("description") or "")
+    similar: list[dict[str, Any]] = []
+    if include_similar_bugs:
+        similar = _file_similar_bugs(
+            bt=bt,
+            title=title,
+            description=description,
+        )
     if dry_run:
         provenance_check = getattr(bt, "_validate_bug_provenance", None)
         if callable(provenance_check):
@@ -316,24 +362,6 @@ def file_bug_payload(
                 discovered_in_run_id=_optional_text(body.get("discovered_in_run_id")),
                 discovered_in_receipt_id=_optional_text(body.get("discovered_in_receipt_id")),
             )
-        similar: list[dict[str, Any]] = []
-        if include_similar_bugs:
-            search = getattr(bt, "search", None)
-            if callable(search):
-                found = search(
-                    title,
-                    limit=5,
-                    open_only=bug_query_default_open_only_list(),
-                )
-                for bug in found:
-                    similar.append(
-                        {
-                            "bug_id": bug.bug_id,
-                            "title": bug.title,
-                            "status": bug.status.value,
-                            "severity": bug.severity.value,
-                        }
-                    )
         filed_by = str(body.get("filed_by") or filed_by_default).strip() or filed_by_default
         source_kind = (
             str(body.get("source_kind") or source_kind_default).strip() or source_kind_default
@@ -342,7 +370,7 @@ def file_bug_payload(
             "title": title,
             "severity": severity.value,
             "category": category.value,
-            "description": str(body.get("description") or ""),
+            "description": description,
             "filed_by": filed_by,
             "source_kind": source_kind,
             "decision_ref": str(body.get("decision_ref") or "").strip(),
@@ -359,11 +387,22 @@ def file_bug_payload(
             "preview": preview,
             "similar_bugs": similar,
         }
+    if similar and not allow_duplicate:
+        return {
+            "ok": False,
+            "filed": False,
+            "reason_code": "bug.file.duplicate_candidate",
+            "error": (
+                "similar open bug candidate exists; pass allow_duplicate=true "
+                "only when this is intentionally distinct"
+            ),
+            "similar_bugs": similar,
+        }
     filed = bt.file_bug(
         title=title,
         severity=severity,
         category=category,
-        description=str(body.get("description") or ""),
+        description=description,
         filed_by=str(body.get("filed_by") or filed_by_default).strip() or filed_by_default,
         source_kind=str(body.get("source_kind") or source_kind_default).strip() or source_kind_default,
         decision_ref=str(body.get("decision_ref") or "").strip(),
@@ -376,8 +415,14 @@ def file_bug_payload(
     )
     bug = filed[0] if isinstance(filed, tuple) else filed
     payload: dict[str, Any] = {"ok": True, "filed": True, "bug": serialize_bug(bug)}
-    if include_similar_bugs and isinstance(filed, tuple) and len(filed) > 1 and filed[1]:
-        payload["similar_bugs"] = filed[1]
+    if include_similar_bugs:
+        filed_similar = (
+            filed[1]
+            if isinstance(filed, tuple) and len(filed) > 1 and filed[1]
+            else similar
+        )
+        if filed_similar:
+            payload["similar_bugs"] = filed_similar
     return payload
 
 

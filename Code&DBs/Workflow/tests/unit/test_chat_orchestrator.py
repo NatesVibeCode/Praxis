@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from adapters.llm_client import LLMClientError
 import runtime.chat_orchestrator as chat_orchestrator_mod
+from runtime.lane_policy import ProviderLanePolicy
 from runtime.chat_orchestrator import (
     ChatOrchestrator,
     ResolvedChatRoute,
@@ -15,6 +18,17 @@ from runtime.chat_orchestrator import (
 import pathlib
 
 _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
+
+
+def _lane_policies(*provider_specs: tuple[str, tuple[str, ...]]) -> dict[str, ProviderLanePolicy]:
+    return {
+        provider: ProviderLanePolicy(
+            provider_slug=provider,
+            allowed_adapter_types=frozenset(adapter_types),
+            overridable=True,
+        )
+        for provider, adapter_types in provider_specs
+    }
 
 
 class _FakeRouter:
@@ -76,7 +90,7 @@ def test_resolve_model_accepts_single_route_chain_entry(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "runtime.lane_policy.load_provider_lane_policies",
-        lambda _pg: {},
+        lambda _pg: _lane_policies(("openai", ("llm_task",))),
     )
     _FakeRouter.result = [
         SimpleNamespace(
@@ -264,7 +278,10 @@ def test_resolve_route_chain_reads_endpoint_from_registry_without_hardcoded_fall
     )
     monkeypatch.setattr(
         "runtime.lane_policy.load_provider_lane_policies",
-        lambda _pg: {},
+        lambda _pg: _lane_policies(
+            ("google", ("llm_task",)),
+            ("anthropic", ("llm_task",)),
+        ),
     )
     _FakeRouter.result = [
         SimpleNamespace(provider_slug="google", model_slug="gemini-2.5-pro", adapter_type="llm_task"),
@@ -297,7 +314,7 @@ def test_resolve_route_chain_rejects_provider_with_no_registered_endpoint(monkey
     )
     monkeypatch.setattr(
         "runtime.lane_policy.load_provider_lane_policies",
-        lambda _pg: {},
+        lambda _pg: _lane_policies(("unregistered", ("llm_task",))),
     )
     _FakeRouter.result = [
         SimpleNamespace(provider_slug="unregistered", model_slug="model-x", adapter_type="llm_task"),
@@ -311,6 +328,26 @@ def test_resolve_route_chain_rejects_provider_with_no_registered_endpoint(monkey
         assert "no_registered_endpoint" in str(exc)
     else:  # pragma: no cover - must not pass
         raise AssertionError("expected RuntimeError with no_registered_endpoint rejection")
+
+
+def test_resolve_route_chain_fails_closed_when_provider_lane_policy_authority_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        chat_orchestrator_mod.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(TaskTypeRouter=_FakeRouter),
+    )
+    monkeypatch.setattr(
+        "runtime.lane_policy.load_provider_lane_policies",
+        lambda _pg: {},
+    )
+    _FakeRouter.result = [
+        SimpleNamespace(provider_slug="openai", model_slug="gpt-5.4", adapter_type="llm_task"),
+    ]
+
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT)
+
+    with pytest.raises(RuntimeError, match="provider lane policy authority returned no active rows"):
+        orchestrator._resolve_route_chain()
 
 
 def test_chat_orchestrator_has_no_hardcoded_endpoints_constant() -> None:

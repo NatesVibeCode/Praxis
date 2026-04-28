@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -68,6 +69,42 @@ def _component_receipts(components: Mapping[str, Any]) -> list[dict[str, Any]]:
                     }
                 )
     return receipts
+
+
+def _tool_bindings_for_operation(operation_name: str) -> list[dict[str, Any]]:
+    from surfaces.mcp.catalog import get_tool_catalog
+
+    matches: list[dict[str, Any]] = []
+    target = str(operation_name or "").strip()
+    if not target:
+        return matches
+    for definition in get_tool_catalog().values():
+        raw_names = definition.metadata.get("operation_names")
+        operation_names: list[str] = []
+        if isinstance(raw_names, str):
+            operation_names = [raw_names]
+        elif isinstance(raw_names, list):
+            operation_names = [str(value).strip() for value in raw_names if str(value).strip()]
+        if target not in operation_names:
+            continue
+        matches.append(
+            {
+                "tool_name": definition.name,
+                "entrypoint": definition.cli_entrypoint,
+                "describe_command": definition.cli_describe_command,
+                "recommended_alias": definition.cli_recommended_alias,
+                "surface": definition.cli_surface,
+                "tier": definition.cli_tier,
+                "primary_risk": definition.risk_for_params({}),
+            }
+        )
+    matches.sort(
+        key=lambda item: (
+            item.get("recommended_alias") is None,
+            str(item.get("tool_name") or ""),
+        )
+    )
+    return matches
 
 
 def _priority_rank(value: object) -> int:
@@ -211,23 +248,32 @@ class QueryOperationForge(BaseModel):
     operation_name: str
     operation_ref: str | None = None
     tool_name: str | None = None
+    recommended_alias: str | None = None
     handler_ref: str | None = None
     input_model_ref: str | None = None
     authority_domain_ref: str = "authority.workflow_runs"
     operation_kind: str = "query"
-    posture: str = "observe"
-    idempotency_policy: str = "read_only"
+    posture: str | None = None
+    idempotency_policy: str | None = None
+    event_type: str | None = None
+    event_required: bool | None = None
+    http_method: str | None = None
+    http_path: str | None = None
     summary: str | None = None
 
     @field_validator(
         "operation_name",
         "operation_ref",
         "tool_name",
+        "recommended_alias",
         "handler_ref",
         "input_model_ref",
         "authority_domain_ref",
         "posture",
         "idempotency_policy",
+        "event_type",
+        "http_method",
+        "http_path",
         "summary",
         mode="before",
     )
@@ -250,6 +296,110 @@ class QueryOperationForge(BaseModel):
         if normalized not in {"command", "query"}:
             raise ValueError("operation_kind must be command or query")
         return normalized
+
+    @field_validator("posture", mode="before")
+    @classmethod
+    def _normalize_posture(cls, value: object) -> str | None:
+        if value in (None, ""):
+            return None
+        if not isinstance(value, str):
+            raise ValueError("posture must be observe or operate")
+        normalized = value.strip().lower()
+        if normalized not in {"observe", "operate"}:
+            raise ValueError("posture must be observe or operate")
+        return normalized
+
+    @field_validator("idempotency_policy", mode="before")
+    @classmethod
+    def _normalize_idempotency_policy(cls, value: object) -> str | None:
+        if value in (None, ""):
+            return None
+        if not isinstance(value, str):
+            raise ValueError("idempotency_policy must be read_only, idempotent, or non_idempotent")
+        normalized = value.strip().lower()
+        if normalized not in {"read_only", "idempotent", "non_idempotent"}:
+            raise ValueError("idempotency_policy must be read_only, idempotent, or non_idempotent")
+        return normalized
+
+    @field_validator("http_method", mode="before")
+    @classmethod
+    def _normalize_http_method(cls, value: object) -> str | None:
+        if value in (None, ""):
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("http_method must be a non-empty string when provided")
+        return value.strip().upper()
+
+    @model_validator(mode="after")
+    def _apply_kind_defaults(self) -> "QueryOperationForge":
+        if self.operation_kind == "command":
+            if self.posture is None:
+                self.posture = "operate"
+            if self.idempotency_policy is None:
+                self.idempotency_policy = "non_idempotent"
+            if self.http_method is None:
+                self.http_method = "POST"
+        else:
+            if self.posture is None:
+                self.posture = "observe"
+            if self.idempotency_policy is None:
+                self.idempotency_policy = "read_only"
+            if self.http_method is None:
+                self.http_method = "GET"
+        return self
+
+
+def _compact_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in payload.items() if value is not None}
+
+
+def _shell_json(payload: Mapping[str, Any]) -> str:
+    return "'" + json.dumps(_compact_payload(payload), sort_keys=True) + "'"
+
+
+def _handler_file_from_ref(handler_ref: str | None) -> str | None:
+    if not handler_ref or "." not in handler_ref:
+        return None
+    module_ref = handler_ref.rsplit(".", 1)[0]
+    if not module_ref:
+        return None
+    return "Code&DBs/Workflow/" + module_ref.replace(".", "/") + ".py"
+
+
+def _forge_verification_commands(
+    *,
+    handler_ref: str | None,
+    tool_name: str,
+    recommended_alias: str | None,
+) -> list[str]:
+    commands: list[str] = []
+    handler_file = _handler_file_from_ref(handler_ref)
+    if handler_file:
+        commands.append(
+            'PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m py_compile '
+            f"{handler_file}"
+        )
+    commands.extend(
+        [
+            (
+                'PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m pytest '
+                "Code&DBs/Workflow/tests/unit/test_operation_catalog_parity.py "
+                "Code&DBs/Workflow/tests/unit/test_operator_mcp_execution_gateway.py -q"
+            ),
+            (
+                'PYTHONPATH="Code&DBs/Workflow" .venv/bin/python '
+                "-m scripts.generate_mcp_docs"
+            ),
+            (
+                'PYTHONPATH="Code&DBs/Workflow" .venv/bin/python -m pytest '
+                "Code&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py -q"
+            ),
+            f"praxis workflow tools describe {tool_name}",
+        ]
+    )
+    if recommended_alias:
+        commands.append(f"praxis workflow help {recommended_alias}")
+    return commands
 
 
 def handle_query_execution_truth(
@@ -553,11 +703,10 @@ def handle_query_operation_forge(
 ) -> dict[str, Any]:
     conn = subsystems.get_pg_conn()
     operation_ref = query.operation_ref or query.operation_name.replace(".", "-").replace("_", "-")
-    tool_name = query.tool_name or "praxis_" + query.operation_name.replace(".", "_")
     existing = conn.fetchrow(
         """
         SELECT operation_ref, operation_name, operation_kind, handler_ref,
-               input_model_ref, authority_domain_ref, enabled
+               input_model_ref, authority_domain_ref, http_method, http_path, enabled
         FROM operation_catalog_registry
         WHERE operation_ref = $1 OR operation_name = $2
         LIMIT 1
@@ -566,6 +715,23 @@ def handle_query_operation_forge(
         query.operation_name,
     )
     existing_payload = _as_dict(existing)
+    tool_bindings = _tool_bindings_for_operation(query.operation_name)
+    predicted_tool_name = query.tool_name or "praxis_" + query.operation_name.replace(".", "_")
+    primary_binding = tool_bindings[0] if tool_bindings else None
+    tool_name = str(primary_binding.get("tool_name") or predicted_tool_name) if primary_binding else predicted_tool_name
+    tool_risk = str(primary_binding.get("primary_risk") or "").strip() if primary_binding else ""
+    if not tool_risk:
+        tool_risk = "write" if str(existing_payload.get("operation_kind") or query.operation_kind) == "command" else "read"
+    recommended_alias = (
+        str(primary_binding.get("recommended_alias") or "").strip()
+        if primary_binding
+        else str(query.recommended_alias or "").strip()
+    ) or None
+    http_method = str(existing_payload.get("http_method") or query.http_method or "").strip() or None
+    http_path = (
+        str(existing_payload.get("http_path") or query.http_path or "").strip()
+        or f"/api/{query.operation_name.replace('.', '_')}"
+    )
     register_payload = {
         "operation_ref": operation_ref,
         "operation_name": query.operation_name,
@@ -575,6 +741,10 @@ def handle_query_operation_forge(
         "operation_kind": query.operation_kind,
         "posture": query.posture,
         "idempotency_policy": query.idempotency_policy,
+        "event_type": query.event_type,
+        "event_required": query.event_required,
+        "http_method": http_method,
+        "http_path": http_path,
         "summary": query.summary,
     }
     missing = [
@@ -582,21 +752,85 @@ def handle_query_operation_forge(
         for key in ("handler_ref", "input_model_ref", "authority_domain_ref")
         if not register_payload.get(key)
     ]
+    if query.operation_kind == "command" and query.event_required is not False and not query.event_type:
+        missing.append("event_type")
+    compact_register_payload = _compact_payload(register_payload)
+    register_command = (
+        "praxis workflow tools call praxis_register_operation --input-json "
+        f"{_shell_json(register_payload)} --yes"
+    )
+    fast_feedback_commands = _forge_verification_commands(
+        handler_ref=query.handler_ref,
+        tool_name=tool_name,
+        recommended_alias=recommended_alias,
+    )
     return {
         "operation": "operator.operation_forge",
         "view": "operation_forge",
         "authority": "operation_catalog_registry + data_dictionary_objects + authority_object_registry",
         "state": "existing_operation" if existing_payload else "new_operation",
         "existing_operation": existing_payload or None,
+        "api_route": (
+            {
+                "http_method": existing_payload.get("http_method"),
+                "http_path": existing_payload.get("http_path"),
+            }
+            if existing_payload
+            else {
+                "http_method": http_method,
+                "http_path": http_path,
+                "binding_state": "proposed",
+            }
+        ),
         "tool": {
             "tool_name": tool_name,
             "mcp_wrapper": f"tool_{tool_name}",
-            "risk": "write" if query.operation_kind == "command" else "read",
+            "risk": tool_risk,
+            "binding_state": "catalog_bound" if primary_binding else "predicted",
+            "entrypoint": (
+                str(primary_binding.get("entrypoint") or f"workflow tools call {tool_name}")
+                if primary_binding
+                else f"workflow tools call {tool_name}"
+            ),
+            "describe_command": (
+                str(primary_binding.get("describe_command") or f"workflow tools describe {tool_name}")
+                if primary_binding
+                else f"workflow tools describe {tool_name}"
+            ),
+            "recommended_alias": recommended_alias,
         },
+        "tool_bindings": tool_bindings,
         "register_operation_payload": register_payload,
+        "register_operation_payload_compact": compact_register_payload,
+        "next_action_packet": {
+            "intent": {
+                "operation_name": query.operation_name,
+                "operation_kind": query.operation_kind,
+                "tool_name": tool_name,
+                "recommended_alias": recommended_alias,
+            },
+            "write_order": [
+                "Add or reuse the handler and Pydantic input model.",
+                "Run the handler import/compile check before catalog mutation.",
+                "Register the operation through praxis_register_operation or a numbered migration that calls register_operation_atomic.",
+                "Add a thin MCP/CLI wrapper only after the operation exists and dispatches through the gateway.",
+                "Regenerate surface docs with the canonical module command.",
+                "Run focused catalog, wrapper, and docs tests before any broad suite.",
+            ],
+            "register_command": register_command,
+            "fast_feedback_commands": fast_feedback_commands,
+            "success_evidence": [
+                "operation catalog row exists with the requested operation_kind",
+                "authority_object_registry.object_kind matches operation_kind",
+                "data_dictionary_objects.category matches operation_kind",
+                "MCP wrapper delegates through operation_catalog_gateway",
+                "checked-in MCP/CLI/API docs match generated output",
+            ],
+        },
         "missing_inputs": missing,
         "recommended_path": [
             "Add or reuse the handler and Pydantic input model.",
+            "Reuse the already-bound tool and API route when they exist; do not invent a sibling wrapper.",
             "Register through praxis_register_operation or a numbered workflow migration using register_operation_atomic.",
             "Add only a thin MCP wrapper that dispatches to the gateway operation.",
             "Describe the tool through TOOLS metadata and regenerate docs.",
@@ -606,6 +840,8 @@ def handle_query_operation_forge(
             "Do not dispatch from MCP directly into subsystem code.",
             "Do not hand-write only operation_catalog_registry without the authority/data-dictionary chain.",
             "Do not add action-specific hidden schemas behind one broad selector.",
+            "Do not register a command with query/read_only defaults; operation_kind must drive posture and idempotency.",
+            "Do not trust a predicted tool name when the caller supplied an explicit tool_name or alias.",
         ],
         "ok_to_register": not existing_payload and not missing,
     }

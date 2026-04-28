@@ -1,6 +1,6 @@
 {
   "$schema_version": 1,
-  "$description": "Sidecar trigger index for operator_decisions standing orders. Authored alongside (not inside) operator_decisions because that table's scope_clamp is preserved verbatim per architecture-policy::*::scope_clamp_preserved_verbatim. Each entry maps a decision_key to one or more match conditions. The PreToolUse hook reads this file, matches tool inputs, emits a FrictionEvent tagged with the decision_key, and injects the order's title + rationale via additionalContext.",
+  "$description": "Sidecar trigger index for operator_decisions standing orders. Authored alongside (not inside) operator_decisions because that table's scope_clamp is preserved verbatim per architecture-policy::*::scope_clamp_preserved_verbatim. Each entry maps a decision_key to one or more match conditions. The PreToolUse hook reads this file, matches tool inputs, emits a FrictionEvent tagged with the decision_key, and injects context only for explicit, non-advisory decisions.",
   "$why": "Tonight (2026-04-27) the operator filed 11 architecture_policy decisions covering patterns the agent kept repeating. Eleven memos with no surfacing layer is the same as zero memos. This file is the surfacing layer.",
   "$replay_target": "When tonight's session is replayed against this file + the preact-orient-friction hook, at least 8 of the 11 corrections must fire as friction events the FIRST time the wrong action is attempted, not the third or fifth.",
   "$update_protocol": "When operator files a new architecture_policy decision via praxis_operator_decisions, add a corresponding entry here with structurally matchable triggers. If the policy is purely semantic (no shell pattern, no file glob), leave triggers empty; the entry still exists for /orient surfacing.",
@@ -135,6 +135,48 @@
         {
           "tool": "Bash",
           "regex": "(?im)^\\s*(?:INSERT\\s+INTO|UPDATE)\\s+(?:operation_catalog_registry|authority_object_registry|data_dictionary_objects)\\b"
+        }
+      ]
+    },
+    {
+      "decision_key": "architecture-policy::agent-behavior::cqrs-wizard-before-cqrs-edits",
+      "title": "Use the CQRS Wizard before CQRS-shaped edits",
+      "why": "Before editing CQRS operation models, handlers, MCP wrappers, or operation catalog registration paths, run praxis_operation_forge for operation path inspection and praxis_evolve_operation_field for existing input-shape changes. Manual edits are allowed only after the Wizard says the operation already exists or returns the file-by-file evolution plan. Search terms: CQRS Wizard, operation forge, evolve operation field, operation_catalog_registry, input_model_ref, handler_ref.",
+      "decision_provenance": "explicit",
+      "match": [
+        {
+          "tool": "Edit",
+          "file_glob": "**/Code&DBs/Workflow/runtime/operations/**/*.py",
+          "advisory_only": true
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/Code&DBs/Workflow/runtime/operations/**/*.py",
+          "advisory_only": true
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/Code&DBs/Workflow/surfaces/mcp/tools/**/*.py",
+          "string_match": "operation_name=|execute_operation_from_subsystems|inputSchema|type_contract",
+          "advisory_only": true
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/Code&DBs/Workflow/surfaces/mcp/tools/**/*.py",
+          "string_match": "operation_name=|execute_operation_from_subsystems|inputSchema|type_contract",
+          "advisory_only": true
+        },
+        {
+          "tool": "Edit",
+          "file_glob": "**/Code&DBs/Databases/migrations/workflow/*.sql",
+          "string_match": "operation_catalog_registry|authority_object_registry|data_dictionary_objects|register_operation_atomic",
+          "advisory_only": true
+        },
+        {
+          "tool": "Write",
+          "file_glob": "**/Code&DBs/Databases/migrations/workflow/*.sql",
+          "string_match": "operation_catalog_registry|authority_object_registry|data_dictionary_objects|register_operation_atomic",
+          "advisory_only": true
         }
       ]
     },

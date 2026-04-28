@@ -1,10 +1,20 @@
-"""Dry-run simulation for workflow specs without invoking the legacy runner."""
+"""Dry-run simulation for workflow specs.
+
+When Postgres authority is available, dry-run delegates route/admission shape
+to ``preview_workflow_execution`` so the simulation reflects the live runtime
+lane instead of the retired ``workflow_pipeline`` facade.
+"""
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from dataclasses import dataclass
+from typing import Any
 from typing import Optional
+
+from runtime.governance import GovernanceFilter
 
 
 @dataclass(frozen=True)
@@ -31,23 +41,101 @@ class DryRunResult:
     job_results: tuple[DryRunJobResult, ...]
 
 
-def _pipeline():
-    import runtime.workflow_pipeline as dp
+def _spec_snapshot(spec: Any) -> dict[str, Any]:
+    raw = dict(getattr(spec, "_raw", {}) or {})
+    if raw:
+        return json.loads(json.dumps(raw, default=str))
+    snapshot: dict[str, Any] = {
+        "name": getattr(spec, "name", "inline"),
+        "workflow_id": getattr(spec, "workflow_id", "workflow.inline"),
+        "phase": getattr(spec, "phase", "build"),
+        "jobs": list(getattr(spec, "jobs", []) or []),
+        "verify_refs": list(getattr(spec, "verify_refs", []) or []),
+        "outcome_goal": getattr(spec, "outcome_goal", ""),
+        "anti_requirements": list(getattr(spec, "anti_requirements", []) or []),
+    }
+    workspace_ref = getattr(spec, "workspace_ref", None)
+    runtime_profile_ref = getattr(spec, "runtime_profile_ref", None)
+    if workspace_ref:
+        snapshot["workspace_ref"] = workspace_ref
+    if runtime_profile_ref:
+        snapshot["runtime_profile_ref"] = runtime_profile_ref
+    return json.loads(json.dumps(snapshot, default=str))
 
-    return dp.WorkflowPipeline(
-        governance=dp.GovernanceFilter(),
-        conflict_resolver=dp.ConflictResolver(),
-        loop_detector=dp.LoopDetector(),
-        auto_retry=dp.AutoRetryManager(),
-        retry_context_builder=dp.RetryContextBuilder(),
-        posture_enforcer=dp.PostureEnforcer(dp.Posture.BUILD),
+
+def _ensure_preview_workdir(spec_snapshot: dict[str, Any], repo_root: str) -> dict[str, Any]:
+    normalized = json.loads(json.dumps(spec_snapshot, default=str))
+    jobs = normalized.get("jobs")
+    if not isinstance(jobs, list):
+        return normalized
+    has_explicit_workdir = any(
+        isinstance(job, dict) and str(job.get("workdir") or "").strip()
+        for job in jobs
     )
+    top_level_workdir = str(normalized.get("workdir") or "").strip()
+    if not top_level_workdir and not has_explicit_workdir:
+        normalized["workdir"] = repo_root
+    return normalized
 
 
-def dry_run_workflow(spec) -> DryRunResult:
-    """Simulate one workflow spec through governance/dependency gates only."""
+def _preview_jobs_by_label(
+    spec,
+    *,
+    pg_conn: Any,
+    repo_root: str,
+) -> dict[str, dict[str, Any]]:
+    from runtime.workflow.unified import preview_workflow_execution
+
+    preview_payload = preview_workflow_execution(
+        pg_conn,
+        inline_spec=_ensure_preview_workdir(_spec_snapshot(spec), repo_root),
+        repo_root=repo_root,
+    )
+    preview_jobs = preview_payload.get("jobs")
+    if not isinstance(preview_jobs, list):
+        return {}
+    return {
+        str(job.get("label") or ""): dict(job)
+        for job in preview_jobs
+        if isinstance(job, dict) and str(job.get("label") or "").strip()
+    }
+
+
+def _job_blocked_by_authority(
+    preview_job: dict[str, Any] | None,
+    *,
+    job: dict[str, Any],
+    governance: GovernanceFilter,
+) -> bool:
+    if preview_job is not None:
+        if str(preview_job.get("route_status") or "").strip() == "unresolved":
+            return True
+        rendered_prompt = str(
+            preview_job.get("rendered_full_prompt")
+            or preview_job.get("rendered_prompt")
+            or preview_job.get("prompt")
+            or job.get("prompt")
+            or ""
+        )
+        return not governance.scan_prompt(rendered_prompt).passed
+    return not governance.scan_prompt(str(job.get("prompt") or "")).passed
+
+
+def dry_run_workflow(
+    spec,
+    *,
+    pg_conn: Any = None,
+    repo_root: str | None = None,
+) -> DryRunResult:
+    """Simulate one workflow spec through runtime preview and dependency gates."""
     started = time.monotonic()
-    pipeline = _pipeline()
+    preview_repo_root = str(repo_root or os.getcwd()).strip() or os.getcwd()
+    governance = GovernanceFilter()
+    preview_jobs = (
+        _preview_jobs_by_label(spec, pg_conn=pg_conn, repo_root=preview_repo_root)
+        if pg_conn is not None
+        else {}
+    )
     job_results: list[DryRunJobResult] = []
     receipts_written: list[str] = []
     completed: dict[str, DryRunJobResult] = {}
@@ -72,23 +160,33 @@ def dry_run_workflow(spec) -> DryRunResult:
                     retry_count=0,
                 )
             else:
-                gate = pipeline.pre_dispatch(
-                    {
-                        "job_label": label,
-                        "label": label,
-                        "prompt": job.get("prompt", ""),
-                        "agent_slug": str(agent_slug or ""),
-                    }
-                )
                 result = DryRunJobResult(
                     job_label=label,
                     agent_slug=agent_slug,
-                    status="succeeded" if gate.passed else "blocked",
-                    exit_code=0 if gate.passed else None,
+                    status=(
+                        "blocked"
+                        if _job_blocked_by_authority(
+                            preview_jobs.get(label),
+                            job=job,
+                            governance=governance,
+                        )
+                        else "succeeded"
+                    ),
+                    exit_code=0,
                     duration_seconds=0.0,
                     verify_passed=None,
                     retry_count=0,
                 )
+                if result.status == "blocked":
+                    result = DryRunJobResult(
+                        job_label=result.job_label,
+                        agent_slug=result.agent_slug,
+                        status=result.status,
+                        exit_code=None,
+                        duration_seconds=result.duration_seconds,
+                        verify_passed=result.verify_passed,
+                        retry_count=result.retry_count,
+                    )
 
             completed[label] = result
             job_results.append(result)

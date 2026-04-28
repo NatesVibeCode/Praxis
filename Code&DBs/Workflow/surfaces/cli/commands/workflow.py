@@ -1573,12 +1573,37 @@ def _pipeline_eval_command(args: list[str], *, stdout: TextIO) -> int:
     stdout.write(f"Errors:      {result.error_count}\n")
     stdout.write(f"Warnings:    {result.warning_count}\n")
     stdout.write("\n")
+    stdout.write("Phase progress:\n")
+    for phase in result.phase_progress:
+        required = " (required before launch)" if phase.get("required_before_launch") else ""
+        stdout.write(
+            f"- {phase.get('phase')}: {phase.get('status')}{required}\n"
+        )
+    stdout.write("\n")
     for finding in result.findings:
         label = f" [{finding.label}]" if finding.label else ""
         stdout.write(f"- {finding.severity.upper()} {finding.kind}{label}: {finding.message}\n")
     if not result.findings:
         stdout.write("No contract findings.\n")
-    stdout.write("\nProvider probes: not run; this evaluator is read-only.\n")
+    directories = result.directory_summary.get("directories") or []
+    if directories:
+        stdout.write("\nDirectory summary:\n")
+        for item in directories[:8]:
+            stdout.write(
+                f"- {item.get('directory')}: "
+                f"{item.get('errors', 0)} error(s), {item.get('warnings', 0)} warning(s)\n"
+            )
+    if result.quarantine_candidates:
+        stdout.write("\nQuarantine candidates:\n")
+        for item in result.quarantine_candidates:
+            stdout.write(
+                f"- {item.get('workflow_id') or result.workflow_id or '-'}: "
+                f"{item.get('reason_code')} ({item.get('error_count', 0)} error(s))\n"
+            )
+    stdout.write(
+        "\nProvider freshness: required before launch; refresh through "
+        "praxis_provider_availability_refresh if stale or unknown.\n"
+    )
     return 0 if result.ok else 1
 
 
@@ -2592,6 +2617,192 @@ def _work_command(args: list[str], *, stdout: TextIO) -> int:
 
     stdout.write(f"unknown work subcommand: {subcommand}\n")
     return 2
+
+
+def _parse_positive_cli_int(value: str, *, field_name: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a positive integer, got: {value}") from exc
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be a positive integer, got: {value}")
+    return parsed
+
+
+def _parse_runtime_truth_args(
+    args: list[str],
+    *,
+    include_manifest_audit_limit: bool,
+) -> dict[str, object]:
+    params: dict[str, object] = {}
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--json":
+            i += 1
+            continue
+        if token == "--run-id" and i + 1 < len(args):
+            params["run_id"] = args[i + 1]
+            i += 2
+            continue
+        if token == "--since-minutes" and i + 1 < len(args):
+            params["since_minutes"] = _parse_positive_cli_int(
+                args[i + 1],
+                field_name="since_minutes",
+            )
+            i += 2
+            continue
+        if token == "--heartbeat-fresh-seconds" and i + 1 < len(args):
+            params["heartbeat_fresh_seconds"] = _parse_positive_cli_int(
+                args[i + 1],
+                field_name="heartbeat_fresh_seconds",
+            )
+            i += 2
+            continue
+        if include_manifest_audit_limit and token == "--manifest-audit-limit" and i + 1 < len(args):
+            params["manifest_audit_limit"] = _parse_positive_cli_int(
+                args[i + 1],
+                field_name="manifest_audit_limit",
+            )
+            i += 2
+            continue
+        raise ValueError(f"unknown argument: {token}")
+    return params
+
+
+def _runtime_truth_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow runtime-truth`."""
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow runtime-truth [--run-id ID] [--since-minutes N] "
+            "[--heartbeat-fresh-seconds N] [--manifest-audit-limit N] [--json]\n"
+        )
+        return 0
+    try:
+        params = _parse_runtime_truth_args(args, include_manifest_audit_limit=True)
+    except ValueError as exc:
+        stdout.write(f"error: {exc}\n")
+        return 2
+    exit_code, payload = run_cli_tool("praxis_runtime_truth_snapshot", params)
+    print_json(stdout, payload)
+    return exit_code
+
+
+def _firecheck_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow firecheck`."""
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow firecheck [--run-id ID] [--since-minutes N] "
+            "[--heartbeat-fresh-seconds N] [--json]\n"
+        )
+        return 0
+    try:
+        params = _parse_runtime_truth_args(args, include_manifest_audit_limit=False)
+    except ValueError as exc:
+        stdout.write(f"error: {exc}\n")
+        return 2
+    exit_code, payload = run_cli_tool("praxis_firecheck", params)
+    print_json(stdout, payload)
+    if exit_code != 0:
+        return exit_code
+    if isinstance(payload, dict) and payload.get("can_fire") is False:
+        return 1
+    if isinstance(payload, dict) and payload.get("ok") is False:
+        return 1
+    return 0
+
+
+def _remediation_plan_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow remediation-plan`."""
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow remediation-plan [--failure-type TYPE] [--failure-code CODE] "
+            "[--stderr TEXT] [--run-id ID] [--json]\n"
+        )
+        return 0
+    params: dict[str, object] = {}
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--json":
+            i += 1
+            continue
+        if token in {"--failure-type", "--failure-code", "--stderr", "--run-id"} and i + 1 < len(args):
+            params[token[2:].replace("-", "_")] = args[i + 1]
+            i += 2
+            continue
+        stdout.write(f"error: unknown argument: {token}\n")
+        return 2
+    exit_code, payload = run_cli_tool("praxis_remediation_plan", params)
+    print_json(stdout, payload)
+    return exit_code
+
+
+def _remediation_apply_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow remediation-apply`."""
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow remediation-apply [--failure-type TYPE] [--failure-code CODE] "
+            "[--blocker-code CODE] [--stderr TEXT] [--run-id ID] [--provider SLUG] "
+            "[--stale-after-seconds N] [--dry-run|--apply --yes] [--json]\n"
+        )
+        return 0
+    params: dict[str, object] = {"dry_run": True, "confirm": False}
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--json":
+            i += 1
+            continue
+        if token == "--dry-run":
+            params["dry_run"] = True
+            i += 1
+            continue
+        if token == "--apply":
+            params["dry_run"] = False
+            i += 1
+            continue
+        if token == "--yes":
+            params["confirm"] = True
+            i += 1
+            continue
+        if token in {
+            "--failure-type",
+            "--failure-code",
+            "--blocker-code",
+            "--stderr",
+            "--run-id",
+        } and i + 1 < len(args):
+            params[token[2:].replace("-", "_")] = args[i + 1]
+            i += 2
+            continue
+        if token == "--provider" and i + 1 < len(args):
+            params["provider_slug"] = args[i + 1]
+            i += 2
+            continue
+        if token == "--stale-after-seconds" and i + 1 < len(args):
+            try:
+                params["stale_after_seconds"] = _parse_positive_cli_int(
+                    args[i + 1],
+                    field_name="stale_after_seconds",
+                )
+            except ValueError as exc:
+                stdout.write(f"error: {exc}\n")
+                return 2
+            i += 2
+            continue
+        stdout.write(f"error: unknown argument: {token}\n")
+        return 2
+    if params.get("dry_run") is False and params.get("confirm") is not True:
+        stdout.write("error: --yes is required with --apply\n")
+        return 2
+    exit_code, payload = run_cli_tool("praxis_remediation_apply", params)
+    print_json(stdout, payload)
+    return exit_code
 
 
 def _active_command(*, stdout: TextIO) -> int:

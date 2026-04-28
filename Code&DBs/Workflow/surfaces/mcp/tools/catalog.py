@@ -93,10 +93,145 @@ def tool_praxis_retire_operation(params: dict, _progress_emitter=None) -> dict:
     return result
 
 
+def tool_praxis_authority_domain_forge(params: dict, _progress_emitter=None) -> dict:
+    """Preview authority-domain ownership before creating or attaching work."""
+
+    payload = {key: value for key, value in params.items() if value is not None}
+    if _progress_emitter:
+        _progress_emitter.emit(
+            progress=0,
+            total=1,
+            message=f"Forging authority domain {payload.get('authority_domain_ref') or '?'}",
+        )
+    result = execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name="authority_domain_forge",
+        payload=payload,
+    )
+    if _progress_emitter:
+        status = "ok" if result.get("ok") else "failed"
+        _progress_emitter.emit(
+            progress=1,
+            total=1,
+            message=f"Done — authority-domain forge {status}",
+        )
+    return result
+
+
+def tool_praxis_register_authority_domain(params: dict, _progress_emitter=None) -> dict:
+    """Register or update one authority domain through the CQRS gateway."""
+
+    payload = {key: value for key, value in params.items() if value is not None}
+    if _progress_emitter:
+        _progress_emitter.emit(
+            progress=0,
+            total=1,
+            message=f"Registering authority domain {payload.get('authority_domain_ref') or '?'}",
+        )
+    result = execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name="authority_domain_register",
+        payload=payload,
+    )
+    if _progress_emitter:
+        status = "ok" if result.get("ok") else "failed"
+        _progress_emitter.emit(
+            progress=1,
+            total=1,
+            message=f"Done — authority-domain register {status}",
+        )
+    return result
+
+
 TOOLS: dict[str, tuple[callable, dict[str, object]]] = {
+    "praxis_authority_domain_forge": (
+        tool_praxis_authority_domain_forge,
+        {
+            "operation_names": ["authority_domain_forge"],
+            "description": (
+                "Preview the authority-domain ownership path before creating a new "
+                "authority boundary or attaching operations, tables, workflows, or "
+                "tools to it. Returns existing domain state, nearby domains, attached "
+                "operations, authority objects, missing inputs, reject paths, and the "
+                "safe register payload.\n\n"
+                "USE WHEN: a new capability needs a home for durable truth and you "
+                "need to decide whether to reuse an existing authority domain or create "
+                "a new one.\n\n"
+                "GUARDS: read-only. It does not create domains. Use "
+                "praxis_register_authority_domain only after the forge shows "
+                "ok_to_register=true."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["authority_domain_ref"],
+                "properties": {
+                    "authority_domain_ref": {
+                        "type": "string",
+                        "description": "Authority domain ref, e.g. 'authority.object_truth'.",
+                    },
+                    "owner_ref": {"type": "string", "default": "praxis.engine"},
+                    "event_stream_ref": {
+                        "type": "string",
+                        "description": "Defaults to 'stream.<authority_domain_ref>'.",
+                    },
+                    "current_projection_ref": {"type": "string"},
+                    "storage_target_ref": {
+                        "type": "string",
+                        "default": "praxis.primary_postgres",
+                    },
+                    "decision_ref": {
+                        "type": "string",
+                        "description": "Decision/policy ref justifying a new domain.",
+                    },
+                },
+            },
+        },
+    ),
+    "praxis_register_authority_domain": (
+        tool_praxis_register_authority_domain,
+        {
+            "operation_names": ["authority_domain_register"],
+            "description": (
+                "Register or update an authority domain through a receipt-backed CQRS "
+                "command before operations, tables, workflows, or MCP tools are attached "
+                "to it.\n\n"
+                "USE WHEN: praxis_authority_domain_forge has shown that a new authority "
+                "boundary is needed and the decision_ref/storage target are explicit.\n\n"
+                "GUARDS: verifies storage_target_ref exists and writes only through the "
+                "authority_domain_register gateway operation. Emits "
+                "authority.domain.registered on completed command receipts."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["authority_domain_ref", "decision_ref"],
+                "properties": {
+                    "authority_domain_ref": {
+                        "type": "string",
+                        "description": "Authority domain ref, e.g. 'authority.object_truth'.",
+                    },
+                    "owner_ref": {"type": "string", "default": "praxis.engine"},
+                    "event_stream_ref": {
+                        "type": "string",
+                        "description": "Defaults to 'stream.<authority_domain_ref>'.",
+                    },
+                    "current_projection_ref": {"type": "string"},
+                    "storage_target_ref": {
+                        "type": "string",
+                        "default": "praxis.primary_postgres",
+                    },
+                    "decision_ref": {
+                        "type": "string",
+                        "description": "Decision/policy ref justifying this authority boundary.",
+                    },
+                    "enabled": {"type": "boolean", "default": True},
+                },
+            },
+        },
+    ),
     "praxis_register_operation": (
         tool_praxis_register_operation,
         {
+            "operation_names": ["catalog_operation_register"],
             "description": (
                 "Register a new CQRS operation in the catalog from CLI / MCP / HTTP "
                 "without authoring a migration. Lands the data_dictionary_objects + "
@@ -187,6 +322,7 @@ TOOLS: dict[str, tuple[callable, dict[str, object]]] = {
     "praxis_retire_operation": (
         tool_praxis_retire_operation,
         {
+            "operation_names": ["catalog_operation_retire"],
             "description": (
                 "Soft-retire a CQRS operation. Sets operation_catalog_registry.enabled "
                 "to FALSE so the gateway stops binding it, and flips the matching "

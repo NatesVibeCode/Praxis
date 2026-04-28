@@ -12,6 +12,7 @@ from surfaces.cli.main import main as workflow_cli_main
 from surfaces.cli.commands import operate as operate_commands
 from surfaces.cli.commands import query as query_commands
 from surfaces.cli.commands import tools as tools_commands
+from surfaces.mcp.cli_metadata import CLI_TOOL_METADATA
 from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
 
 
@@ -184,6 +185,16 @@ def test_tools_describe_deprecated_alias_shows_replacement() -> None:
     assert "deprecated-alias" in rendered
     assert "replacement: workflow tools call praxis_run --input-json" in rendered
     assert '"action":"status"' in rendered
+
+
+def test_launch_plan_metadata_requires_provider_freshness_gate() -> None:
+    launch_plan_meta = CLI_TOOL_METADATA["praxis_launch_plan"]
+    approve_plan_meta = CLI_TOOL_METADATA["praxis_approve_proposed_plan"]
+
+    assert "fresh provider route truth" in launch_plan_meta["when_to_use"].lower()
+    assert "provider availability refresh receipt" in launch_plan_meta["when_to_use"].lower()
+    assert "provider freshness evidence" in approve_plan_meta["when_to_use"].lower()
+    assert "fresh route truth" in approve_plan_meta["when_to_use"].lower()
 
 
 def test_tools_help_can_describe_a_tool_alias() -> None:
@@ -495,6 +506,9 @@ def test_tools_describe_praxis_bugs_smoke() -> None:
     assert "entrypoint: workflow bugs" in rendered
     assert "describe_command: workflow tools describe praxis_bugs" in rendered
     assert "resolve+verifier_ref" in rendered
+    assert "must already exist in issues" in rendered
+    assert "allow_duplicate" in rendered
+    assert "show is an alias for packet" in rendered
 
 
 def test_tools_describe_accepts_unique_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
