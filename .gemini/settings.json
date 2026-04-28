@@ -1,5 +1,5 @@
 {
-  "$comment": "Gemini CLI hook config. Commands are wrapped in `bash -c` with a GEMINI_PROJECT_DIR -> CLAUDE_PROJECT_DIR -> $PWD fallback, mirroring the .codex/hooks.json pattern, because some Gemini launchers don't propagate GEMINI_PROJECT_DIR to hook subprocesses. The hook records every match but injects context only for explicit, non-advisory decisions so routine tool calls stay fast.",
+  "$comment": "Gemini CLI hook config. Commands are wrapped in `bash -c` with a GEMINI_PROJECT_DIR -> CLAUDE_PROJECT_DIR -> $PWD fallback, mirroring the .codex/hooks.json pattern, because some Gemini launchers don't propagate GEMINI_PROJECT_DIR to hook subprocesses. The hook records every match but only writes stdout for explicit, non-advisory context injection; no-op/advisory paths stay silent so routine tool calls do not create transcript noise.",
   "hooks": {
     "BeforeTool": [
       {

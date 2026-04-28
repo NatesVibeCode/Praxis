@@ -5,7 +5,9 @@ Three hooks live in different dirs (one per harness) but share a contract:
   - call `surfaces.policy.check(tool_name, tool_input)` (with harness-name
     aliasing baked into the matcher)
   - emit JSON response with `hookSpecificOutput.additionalContext` when an
-    explicit non-advisory standing order matched, otherwise `{continue: true}`
+    explicit non-advisory standing order matched
+  - otherwise stay silent and fail open so routine tool calls do not create
+    transcript noise
   - fail open on any error
 
 We drive the entry shell scripts as subprocesses with a fixture trigger
@@ -16,8 +18,8 @@ registry, asserting on the JSON output. This catches:
 
 Each hook gets the same handful of tests:
   - explicit matched standing order → response carries additionalContext + correct hookEventName
-  - no match → `{continue: true}`
-  - bogus stdin → fail open with `{continue: true}`
+  - no match → silent success
+  - bogus stdin → silent fail-open success
 """
 
 from __future__ import annotations
@@ -106,7 +108,7 @@ def test_claude_hook_match_emits_additional_context(fixture_registry: Path) -> N
     assert "test::hook-bash-fixture" in hso["additionalContext"]
 
 
-def test_claude_hook_no_match_returns_continue(fixture_registry: Path) -> None:
+def test_claude_hook_no_match_stays_silent(fixture_registry: Path) -> None:
     if not CLAUDE_HOOK.exists():
         pytest.skip(f"hook missing: {CLAUDE_HOOK}")
     rc, stdout, _ = _run_hook(
@@ -116,8 +118,7 @@ def test_claude_hook_no_match_returns_continue(fixture_registry: Path) -> None:
         fixture_registry,
     )
     assert rc == 0
-    body = json.loads(stdout)
-    assert body == {"continue": True}
+    assert stdout == ""
 
 
 def test_claude_hook_bogus_stdin_fails_open(fixture_registry: Path) -> None:
@@ -130,8 +131,7 @@ def test_claude_hook_bogus_stdin_fails_open(fixture_registry: Path) -> None:
         fixture_registry,
     )
     assert rc == 0
-    body = json.loads(stdout)
-    assert body == {"continue": True}
+    assert stdout == ""
 
 
 # =============================================================================
@@ -163,7 +163,7 @@ def test_gemini_hook_match_via_run_shell_command_alias(fixture_registry: Path) -
     assert "test::hook-bash-fixture" in hso["additionalContext"]
 
 
-def test_gemini_hook_no_match_returns_continue(fixture_registry: Path) -> None:
+def test_gemini_hook_no_match_stays_silent(fixture_registry: Path) -> None:
     if not GEMINI_HOOK.exists():
         pytest.skip(f"hook missing: {GEMINI_HOOK}")
     rc, stdout, _ = _run_hook(
@@ -173,8 +173,7 @@ def test_gemini_hook_no_match_returns_continue(fixture_registry: Path) -> None:
         fixture_registry,
     )
     assert rc == 0
-    body = json.loads(stdout)
-    assert body == {"continue": True}
+    assert stdout == ""
 
 
 def test_gemini_hook_bogus_stdin_fails_open(fixture_registry: Path) -> None:
@@ -187,8 +186,7 @@ def test_gemini_hook_bogus_stdin_fails_open(fixture_registry: Path) -> None:
         fixture_registry,
     )
     assert rc == 0
-    body = json.loads(stdout)
-    assert body == {"continue": True}
+    assert stdout == ""
 
 
 # =============================================================================
@@ -236,14 +234,14 @@ def test_codex_hook_local_shell_argv_list_collapsed(fixture_registry: Path) -> N
         fixture_registry,
     )
     body = json.loads(stdout)
-    # If argv collapse is broken, the regex won't match and we get
-    # {continue: true} with no additionalContext.
+    # If argv collapse is broken, the regex won't match and the hook will
+    # stay silent with no additionalContext.
     hso = body.get("hookSpecificOutput")
     assert hso is not None, "argv-list command was not collapsed into a string"
     assert "STANDING ORDER MATCH" in hso.get("additionalContext", "")
 
 
-def test_codex_hook_no_match_returns_continue(fixture_registry: Path) -> None:
+def test_codex_hook_no_match_stays_silent(fixture_registry: Path) -> None:
     if not CODEX_HOOK.exists():
         pytest.skip(f"hook missing: {CODEX_HOOK}")
     rc, stdout, _ = _run_hook(
@@ -253,8 +251,7 @@ def test_codex_hook_no_match_returns_continue(fixture_registry: Path) -> None:
         fixture_registry,
     )
     assert rc == 0
-    body = json.loads(stdout)
-    assert body == {"continue": True}
+    assert stdout == ""
 
 
 def test_codex_hook_bogus_stdin_fails_open(fixture_registry: Path) -> None:
@@ -267,8 +264,7 @@ def test_codex_hook_bogus_stdin_fails_open(fixture_registry: Path) -> None:
         fixture_registry,
     )
     assert rc == 0
-    body = json.loads(stdout)
-    assert body == {"continue": True}
+    assert stdout == ""
 
 
 # =============================================================================

@@ -89,7 +89,7 @@ function OutcomeCriteriaInput({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onFocus={() => setFocused(true)}
-        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+        onBlur={() => globalThis.setTimeout(() => setFocused(false), 120)}
         placeholder={placeholder}
         rows={2}
         disabled={disabled}
@@ -140,10 +140,14 @@ export function MoonOutcomeContract({
       <button
         type="button"
         className={`moon-outcome-contract-toggle${compact ? ' moon-outcome-contract-toggle--compact' : ''}`}
+        aria-label={`Run outcome contract, pattern and anti-pattern, ${activeCount > 0 ? `${activeCount} active` : 'optional'}`}
         onClick={() => onOpenChange(true)}
       >
-        <span>Run contract</span>
-        <strong>Pattern / anti-pattern</strong>
+        <span className="moon-outcome-contract-toggle__mark" aria-hidden="true" />
+        <span className="moon-outcome-contract-toggle__copy">
+          <span>Outcome contract</span>
+          <strong>{activeCount > 0 ? `${activeCount} condition${activeCount === 1 ? '' : 's'}` : 'Pattern / anti-pattern'}</strong>
+        </span>
         <em>{activeCount > 0 ? `${activeCount} active` : 'Optional'}</em>
       </button>
     );
@@ -153,8 +157,8 @@ export function MoonOutcomeContract({
     <div className={`moon-outcome-contract${compact ? ' moon-outcome-contract--dock' : ''}`}>
       <div className="moon-outcome-contract__head">
         <div>
-          <div className="moon-outcome-contract__kicker">Run contract</div>
-          <div className="moon-outcome-contract__title">Pattern / anti-pattern</div>
+          <div className="moon-outcome-contract__kicker">Pattern / anti-pattern</div>
+          <div className="moon-outcome-contract__title">Outcome contract</div>
         </div>
         <div className="moon-outcome-contract__actions">
           {hasCriteria ? (
@@ -183,19 +187,19 @@ export function MoonOutcomeContract({
       <div className="moon-outcome-contract__grid">
         <OutcomeCriteriaInput
           tone="success"
-          label="Pattern: succeeds if"
+          label="Success pattern"
           value={successCriteria}
           onChange={onSuccessChange}
-          placeholder="Type / for data pills, then set the value"
+          placeholder="{receipt.ok} = true"
           suggestions={mergedSuggestions}
           disabled={disabled}
         />
         <OutcomeCriteriaInput
           tone="failure"
-          label="Anti-pattern: fails if"
+          label="Failure anti-pattern"
           value={failureCriteria}
           onChange={onFailureChange}
-          placeholder="Type / for data pills, then set the value"
+          placeholder="{missing_receipt} = true"
           suggestions={mergedSuggestions}
           disabled={disabled}
         />

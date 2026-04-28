@@ -6,7 +6,7 @@
 # friction emission, and additionalContext shaping.
 #
 # Exit codes:
-#   0  — hook ran cleanly. stdout is the JSON hook response.
+#   0  — hook ran cleanly. stdout is silent unless context is injected.
 #   non-zero — hook errored. Claude Code treats hook errors as no-op
 #              continue=true. We choose to fail open by default.
 

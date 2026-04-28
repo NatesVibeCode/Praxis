@@ -3,8 +3,8 @@
 #
 # Gemini hook entrypoint. Reads the BeforeTool payload on stdin and forwards it
 # to the harness-neutral Python implementation. The implementation records every
-# match but injects context only for explicit, non-advisory decisions so routine
-# tool calls do not get bogged down by hook chatter.
+# match but writes stdout only for explicit, non-advisory context injection so
+# routine tool calls do not create transcript noise.
 #
 # The Python entry handles tool-name aliasing (run_shell_command → Bash,
 # replace → Edit, write_file → Write, read_file → Read) inside

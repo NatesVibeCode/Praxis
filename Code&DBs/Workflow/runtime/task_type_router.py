@@ -888,6 +888,71 @@ class TaskTypeRouter:
             self._runtime_profile_candidate_cache[runtime_profile_ref] = cached
         return [dict(candidate) for candidate in cached]
 
+    def _effective_runtime_profile_ref(
+        self,
+        runtime_profile_ref: str | None,
+    ) -> str | None:
+        normalized = str(runtime_profile_ref or "").strip()
+        if normalized:
+            return normalized
+        try:
+            from registry.native_runtime_profile_sync import (
+                default_native_runtime_profile_ref,
+            )
+
+            return str(default_native_runtime_profile_ref(self._conn) or "").strip() or None
+        except Exception:
+            return None
+
+    def _apply_effective_provider_job_catalog_filter(
+        self,
+        task_type: str,
+        rows: list[dict[str, Any]],
+        *,
+        runtime_profile_ref: str | None,
+    ) -> list[dict[str, Any]]:
+        if not rows:
+            return rows
+        effective_runtime_profile_ref = self._effective_runtime_profile_ref(runtime_profile_ref)
+        if not effective_runtime_profile_ref:
+            return rows
+
+        from storage.postgres import PostgresProviderControlPlaneRepository
+
+        catalog_rows = PostgresProviderControlPlaneRepository(
+            self._conn
+        ).list_provider_control_plane_rows(
+            runtime_profile_ref=effective_runtime_profile_ref,
+            job_type=task_type,
+        )
+        allowed = {
+            f"{row.provider_slug}/{row.model_slug}"
+            for row in catalog_rows
+            if row.is_runnable
+        }
+        if not allowed:
+            raise provider_authority_fail(
+                "provider_authority.effective_catalog_empty",
+                "effective provider job catalog returned no runnable candidates",
+                runtime_profile_ref=effective_runtime_profile_ref,
+                task_type=task_type,
+            )
+        filtered = [
+            row
+            for row in rows
+            if f"{row.get('provider_slug')}/{row.get('model_slug')}" in allowed
+        ]
+        dropped = len(rows) - len(filtered)
+        if dropped:
+            logger.info(
+                "effective provider job catalog narrowed auto/%s chain: "
+                "dropped %d disabled/unadmitted candidate(s) for runtime_profile_ref=%s",
+                task_type,
+                dropped,
+                effective_runtime_profile_ref,
+            )
+        return filtered
+
     def _load_task_route_rows(self, task_type: str) -> list[dict[str, Any]]:
         rows = self._routing_repository.load_routes_for_task(task_type=task_type)
         if not rows:
@@ -1128,13 +1193,19 @@ class TaskTypeRouter:
             raise TaskRouteAuthorityError(
                 f"task_type_route_profiles authority is missing task_type '{task_type}'",
             )
+        effective_runtime_profile_ref = self._effective_runtime_profile_ref(runtime_profile_ref)
 
         rows = self._build_profile_task_rows(
             task_type,
             profile,
-            runtime_profile_ref=runtime_profile_ref,
+            runtime_profile_ref=effective_runtime_profile_ref,
         )
         rows = self._apply_route_eligibility(task_type, rows, as_of=self._now_factory())
+        rows = self._apply_effective_provider_job_catalog_filter(
+            task_type,
+            rows,
+            runtime_profile_ref=effective_runtime_profile_ref,
+        )
         # BUG-DD1D48B1: drop candidates whose default adapter transport is
         # denied by provider_transport_admissions (e.g. anthropic.llm_task
         # under the CLI-only standing order). Keeps auto/review from being
@@ -1169,7 +1240,10 @@ class TaskTypeRouter:
     ) -> list[TaskRouteDecision]:
         profile = self._task_profiles.get(profile_value)
         rows: list[dict[str, Any]] = []
-        catalog_candidates = list(self._load_catalog_candidates(runtime_profile_ref=runtime_profile_ref))
+        effective_runtime_profile_ref = self._effective_runtime_profile_ref(runtime_profile_ref)
+        catalog_candidates = list(
+            self._load_catalog_candidates(runtime_profile_ref=effective_runtime_profile_ref)
+        )
         budget_authority = self._load_budget_authority_snapshot()
         for candidate in catalog_candidates:
             if _normalize_auto_route_key(str(candidate.get(profile_column) or "")) != profile_value:
@@ -1227,6 +1301,11 @@ class TaskTypeRouter:
                 **economics,
             })
         rows = self._apply_route_eligibility(profile_value, rows, as_of=self._now_factory())
+        rows = self._apply_effective_provider_job_catalog_filter(
+            profile_value,
+            rows,
+            runtime_profile_ref=effective_runtime_profile_ref,
+        )
         # BUG-DD1D48B1: same admission filter as _resolve_chain — auto/*
         # profile resolution is the hot path for auto/review routes, so the
         # filter must live here too, not only on explicit task-type routes.

@@ -28,7 +28,9 @@ def _emit(response: dict[str, Any]) -> None:
 
 
 def _continue() -> None:
-    _emit({"continue": True})
+    if os.environ.get("PRAXIS_HOOK_VERBOSE") == "1":
+        _emit({"continue": True})
+    sys.exit(0)
 
 
 def _should_inject_context(matches: list[Any]) -> bool:

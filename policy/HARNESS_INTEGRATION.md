@@ -64,6 +64,9 @@ Already wired:
 - `.claude/hooks/preact_orient_friction.py` imports
   `surfaces.policy.check` from `Code&DBs/Workflow/surfaces/policy/` and
   emits a friction event via `bin/praxis-agent praxis_friction`.
+- Context injection is high-signal only: explicit, non-advisory decisions can
+  inject hook context. No-match, malformed, cooled-down, and inferred/advisory
+  paths stay stdout-silent so routine tool calls do not create transcript noise.
 
 Verify with:
 ```bash
@@ -82,8 +85,8 @@ Already wired (codex-cli ≥ 0.121):
   `surfaces.policy.check` and emits a friction event tagged
   `harness=codex_cli`.
 - Context injection is high-signal only: explicit, non-advisory decisions can
-  inject hook context; inferred/advisory matches record quietly so routine tool
-  calls do not get bogged down.
+  inject hook context. No-match, malformed, cooled-down, and inferred/advisory
+  paths stay stdout-silent so routine tool calls do not create transcript noise.
 
 If your codex-cli is older than 0.121 (or the project-local discovery
 isn't picking up `.codex/hooks.json`), copy the contents of
@@ -112,8 +115,8 @@ Already wired (gemini-cli ≥ 0.39):
   `surfaces.policy.check` and emits a friction event tagged
   `harness=gemini_cli`.
 - Context injection is high-signal only: explicit, non-advisory decisions can
-  inject hook context; inferred/advisory matches record quietly so routine tool
-  calls do not get bogged down.
+  inject hook context. No-match, malformed, cooled-down, and inferred/advisory
+  paths stay stdout-silent so routine tool calls do not create transcript noise.
 
 Tool-name normalization: Gemini's native shell tool is `run_shell_command`
 and its edit/write/read tools are `replace`/`write_file`/`read_file`.

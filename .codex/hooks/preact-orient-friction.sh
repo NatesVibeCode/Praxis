@@ -2,8 +2,8 @@
 # preact-orient-friction.sh (Codex CLI PreToolUse hook)
 #
 # Codex hook entrypoint. The Python implementation records every match but
-# injects context only for explicit, non-advisory decisions so routine tool
-# calls do not get bogged down by hook chatter.
+# writes stdout only for explicit, non-advisory context injection so routine
+# tool calls do not create transcript noise.
 #
 # The Python entry handles tool-name aliasing
 # (`local_shell` → Bash, `apply_patch` → Edit) so the trigger registry

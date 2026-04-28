@@ -384,6 +384,79 @@ def test_resolve_spec_jobs_uses_explicit_prefer_cost_when_enabled() -> None:
 
 class _ScopedProfileConn(_CatalogProfileConn):
     def execute(self, sql: str, *params):
+        if "FROM private_provider_control_plane_snapshot" in sql:
+            return [
+                {
+                    "runtime_profile_ref": params[0],
+                    "job_type": params[1] or "build",
+                    "transport_type": "CLI",
+                    "adapter_type": "cli_llm",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4",
+                    "model_version": "gpt-5.4",
+                    "cost_structure": "subscription_included",
+                    "cost_metadata": {},
+                    "control_enabled": True,
+                    "control_state": "on",
+                    "control_scope": "test",
+                    "control_is_explicit": False,
+                    "control_reason_code": "catalog.available",
+                    "control_decision_ref": "decision.test",
+                    "control_operator_message": "",
+                    "credential_availability_state": "unknown",
+                    "credential_sources": [],
+                    "credential_observations": [],
+                    "mechanical_capability_state": "runnable",
+                    "mechanical_is_runnable": True,
+                    "capability_state": "runnable",
+                    "is_runnable": True,
+                    "effective_dispatch_state": "runnable",
+                    "breaker_state": "CLOSED",
+                    "manual_override_state": None,
+                    "primary_removal_reason_code": None,
+                    "removal_reasons": [],
+                    "candidate_ref": "candidate.gpt-5.4",
+                    "provider_ref": "provider.openai",
+                    "source_refs": [],
+                    "projected_at": None,
+                    "projection_ref": "projection.test",
+                },
+                {
+                    "runtime_profile_ref": params[0],
+                    "job_type": params[1] or "build",
+                    "transport_type": "CLI",
+                    "adapter_type": "cli_llm",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4-mini",
+                    "model_version": "gpt-5.4-mini",
+                    "cost_structure": "subscription_included",
+                    "cost_metadata": {},
+                    "control_enabled": True,
+                    "control_state": "on",
+                    "control_scope": "test",
+                    "control_is_explicit": False,
+                    "control_reason_code": "catalog.available",
+                    "control_decision_ref": "decision.test",
+                    "control_operator_message": "",
+                    "credential_availability_state": "unknown",
+                    "credential_sources": [],
+                    "credential_observations": [],
+                    "mechanical_capability_state": "runnable",
+                    "mechanical_is_runnable": True,
+                    "capability_state": "runnable",
+                    "is_runnable": True,
+                    "effective_dispatch_state": "runnable",
+                    "breaker_state": "CLOSED",
+                    "manual_override_state": None,
+                    "primary_removal_reason_code": None,
+                    "removal_reasons": [],
+                    "candidate_ref": "candidate.gpt-5.4-mini",
+                    "provider_ref": "provider.openai",
+                    "source_refs": [],
+                    "projected_at": None,
+                    "projection_ref": "projection.test",
+                },
+            ]
         if "FROM registry_runtime_profile_authority" in sql:
             return [{
                 "model_profile_id": "model_profile.build",
@@ -471,6 +544,23 @@ def test_runtime_profile_scopes_auto_chain_to_admitted_candidates() -> None:
     assert [entry.model_slug for entry in chain] == ["gpt-5.4", "gpt-5.4-mini"]
     assert [entry.prefer_prepaid for entry in chain] == [True, True]
     assert [entry.allow_payg_fallback for entry in chain] == [True, True]
+
+
+def test_effective_provider_catalog_filter_drops_disabled_candidates() -> None:
+    router = TaskTypeRouter(_ScopedProfileConn())
+
+    rows = [
+        {"provider_slug": "openai", "model_slug": "gpt-5.4"},
+        {"provider_slug": "anthropic", "model_slug": "claude-opus-4-7"},
+    ]
+
+    filtered = router._apply_effective_provider_job_catalog_filter(
+        "build",
+        rows,
+        runtime_profile_ref="runtime_profile.build",
+    )
+
+    assert filtered == [{"provider_slug": "openai", "model_slug": "gpt-5.4"}]
 
 
 def test_runtime_profile_does_not_override_explicit_slug() -> None:
