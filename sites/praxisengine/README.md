@@ -7,8 +7,17 @@ Cloudflare Pages Function for email capture.
 
 ```
 sites/praxisengine/
-├── index.html              # the page (all CSS + JS inline)
+├── index.html              # the page shell
 ├── favicon.svg
+├── praxis-tokens.css       # shared design tokens
+├── page.css                # page layout styles
+├── sections.css            # interactive section styles
+├── app.jsx                 # React source
+├── contract.jsx            # contract demo source
+├── canary.jsx              # refund batch demo source
+├── loop.jsx                # anti-pattern loop source
+├── app.js                  # generated browser bundle served in production
+├── vendor/                 # local React runtime files
 ├── _headers                # CF Pages security + caching headers
 ├── robots.txt
 ├── sitemap.xml
@@ -17,7 +26,8 @@ sites/praxisengine/
         └── subscribe.ts    # POST /api/subscribe — CF Pages Function
 ```
 
-Nothing to build. Whatever's in this directory is what gets served.
+Cloudflare still has nothing to build. Whatever's in this directory is what
+gets served. When the JSX source changes, regenerate `app.js` before deploy.
 
 ## Local preview
 
@@ -29,7 +39,7 @@ cd sites/praxisengine && python3 -m http.server 4173
 # → http://localhost:4173
 
 # Option B — wrangler (also runs the Pages Function)
-npx wrangler pages dev sites/praxisengine
+cd sites/praxisengine && npx wrangler pages dev .
 # → http://localhost:8788
 ```
 
@@ -87,17 +97,29 @@ The function POSTs `{email, source, ts}` to that URL. Failures are swallowed so 
 
 ## Changing copy
 
-All content lives in `index.html`:
+The page shell lives in `index.html`; content and interaction live in the JSX
+source files:
 
-- **Headline:** look for `<h1>`
-- **Subhead:** `<p class="lede">`
-- **Status chips:** `<div class="meta">`
+- **Headline:** look for `Hero` in `app.jsx`
+- **Subhead:** look for `className="lede"` in `app.jsx`
+- **Contract demo:** `contract.jsx`
+- **Refund batch demo:** `canary.jsx`
+- **Loop demo:** `loop.jsx`
 - **Footer:** `<footer>`
 
-Colors are CSS variables at the top of the `<style>` block (`--bg`, `--fg`, etc.).
+Colors are CSS variables in `praxis-tokens.css`.
+
+## Regenerating app.js
+
+The production page does not run Babel in the browser. Regenerate the checked-in
+bundle after changing JSX:
+
+```bash
+node -e "const fs=require('fs'); for (const f of ['sites/praxisengine/contract.jsx','sites/praxisengine/canary.jsx','sites/praxisengine/loop.jsx','sites/praxisengine/app.jsx']) process.stdout.write(fs.readFileSync(f,'utf8')+'\n');" | npx --yes esbuild@0.25.12 --loader=jsx --jsx-factory=React.createElement --jsx-fragment=React.Fragment --format=iife --target=es2018 --minify > sites/praxisengine/app.js
+```
 
 ## Notes
 
 - CSP is strict: only allows Google Fonts and same-origin scripts/styles. If you add analytics or an external form provider, update `_headers`.
-- The page intentionally does not load a JS framework or bundler. Keep it that way until it has more than ~5 pages — at that point, migrate to Astro.
+- React is vendored locally and `app.js` is checked in so Cloudflare Pages can stay zero-build.
 - Custom domain uses Cloudflare's native DNS → no AWS/Vercel/Netlify needed.
