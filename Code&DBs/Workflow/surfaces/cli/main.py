@@ -84,8 +84,10 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {"command": "workflow repair <run_id>", "description": "Repair post-run sync state"},
     {"command": "workflow work <claim|acknowledge>", "description": "Claim or acknowledge worker work"},
     {"command": "workflow tools [list|search|describe|call|help]", "description": "Discover and call catalog-backed MCP tools"},
+    {"command": "workflow search <text>", "description": "Recommended alias for the default federated search tool"},
+    {"command": "workflow operate <catalog|call|query|command>", "description": "Call the CQRS operation-catalog gateway"},
     {"command": "workflow orient", "description": "Return the canonical /orient authority envelope"},
-    {"command": "workflow instances [check] [--json]", "description": "Compare runtime setup targets vs discovered API/MCP/DB instances"},
+    {"command": "workflow instances [check] [--json] [--include-routes]", "description": "Compare runtime setup/API/MCP/DB targets and validate CQRS /api/operate binding"},
     {"command": "workflow authority [--json] [--check] [--instance]", "description": "Compare CLI, MCP, and API authority targets"},
     {"command": "workflow setup <doctor|plan|apply>", "description": "Runtime-target setup client for API/MCP authority and native instance contract"},
     {"command": "workflow integrations", "description": "Scoped route discovery for /api/integrations"},
@@ -142,6 +144,7 @@ _COMMAND_INDEX_TIPS: list[str] = [
     "run `workflow integration` for integration management",
     "run `workflow instances` for resolved API/MCP/DB instance mapping",
     "run `workflow instances check` to fail fast on authority mapping drift",
+    "run `workflow instances --include-routes` to validate /api/operate and /api/catalog/operations route wiring",
     "run `workflow authority --check` to verify CLI, MCP, and API authority alignment",
     "run `workflow authority --instance` to print resolved native instance details before running CQRS surfaces",
     "run `workflow help tools` or `workflow mcp` for catalog-backed tool discovery",
@@ -281,7 +284,12 @@ def _lazy_prefixed_args_command(
 def _launcher_command(args: list[str], *, stdout: TextIO) -> int:
     import importlib
     launcher_module = importlib.import_module("runtime.launcher_authority")
-    return getattr(launcher_module, "launcher_cli")(args, stdout=stdout)
+    with contextlib.redirect_stdout(stdout):
+        try:
+            return getattr(launcher_module, "launcher_cli")(args, stdout=stdout)
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 0
+            return code
 
 
 def _compile_command(args: list[str], *, stdout: TextIO) -> int:
@@ -368,6 +376,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "health": _lazy_args_command(".commands.operate", "_health_command"),
         "authority": _lazy_args_command(".commands.operate", "_authority_command"),
         "orient": _lazy_args_command(".commands.operate", "_orient_command"),
+        "operate": _lazy_args_command(".commands.operate", "_operate_command"),
         "heartbeat": _lazy_args_command(".commands.heartbeat", "_heartbeat_command"),
         "receipts": _lazy_args_command(".commands.query", "_receipts_command"),
         "diagnose": _lazy_workflow_args_command("_diagnose_command"),
@@ -415,6 +424,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "supervisor": _lazy_args_command(".commands.operate", "_supervisor_command"),
         "setup": _lazy_args_command(".commands.setup", "_setup_command"),
         "tools": _lazy_args_command(".commands.tools", "_tools_command"),
+        "search": _lazy_args_command(".commands.tools", "_tools_search_alias_command"),
         "dictionary": _lazy_args_command(".commands.authority", "_data_dictionary_command"),
         "authority-memory": _lazy_args_command(".commands.authority", "_authority_memory_command"),
         "instances": _lazy_args_command(".commands.operate", "_instances_command"),
@@ -436,6 +446,69 @@ _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
     "slots": _lazy_stdout_command(".commands.operate", "_slots_command"),
     "active": _lazy_workflow_stdout_command("_active_command"),
 }
+
+
+def _catalog_root_aliases() -> dict[str, str]:
+    from surfaces.mcp.catalog import get_tool_catalog
+
+    aliases: dict[str, str] = {}
+    arg_commands = _workflow_arg_commands()
+    blocked = {
+        "mcp",
+        "native-operator",
+        "inspect",
+        "replay",
+        "graph-topology",
+        "topology",
+        "graph-lineage",
+        "lineage",
+        *arg_commands.keys(),
+        *_STDOUT_COMMANDS.keys(),
+    }
+    for definition in get_tool_catalog().values():
+        alias = definition.cli_recommended_alias
+        if not alias or alias in blocked:
+            continue
+        aliases[alias] = definition.name
+    return aliases
+
+
+def _catalog_alias_index_entries() -> list[dict[str, str]]:
+    return [
+        {
+            "command": f"workflow {alias}",
+            "description": f"Catalog alias for {tool_name}",
+        }
+        for alias, tool_name in sorted(_catalog_root_aliases().items())
+    ]
+
+
+def _catalog_alias_input_args(alias: str, args: list[str]) -> list[str]:
+    if not args or any(arg.startswith("--") for arg in args):
+        return ["call", alias, *args]
+
+    from surfaces.mcp.catalog import get_tool_catalog
+
+    tool_name = _catalog_root_aliases().get(alias)
+    if tool_name is None:
+        return ["call", alias, *args]
+    definition = get_tool_catalog()[tool_name]
+    required_args = list(definition.required_args)
+    if len(required_args) != 1:
+        return ["call", alias, *args]
+    payload = {required_args[0]: " ".join(args)}
+    return [
+        "call",
+        alias,
+        "--input-json",
+        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+    ]
+
+
+def _catalog_alias_command(alias: str, args: list[str], *, stdout: TextIO) -> int:
+    if args and args[0] in {"-h", "--help", "help"}:
+        return _workflow_arg_commands()["tools"](["describe", alias], stdout=stdout)
+    return _workflow_arg_commands()["tools"](_catalog_alias_input_args(alias, list(args)), stdout=stdout)
 
 
 def _usage() -> str:
@@ -514,7 +587,7 @@ def _commands_index_text() -> str:
         "",
         "Command index:",
     ]
-    for entry in _COMMAND_INDEX_ENTRIES:
+    for entry in [*_COMMAND_INDEX_ENTRIES, *_catalog_alias_index_entries()]:
         lines.append(f"  {entry['command']:<45} {entry['description']}")
     lines.extend(["", *[f"Tip: {tip}." for tip in _COMMAND_INDEX_TIPS]])
     return "\n".join(lines)
@@ -523,7 +596,7 @@ def _commands_index_text() -> str:
 def _commands_index_payload() -> dict[str, object]:
     return {
         "usage": "workflow commands",
-        "entries": list(_COMMAND_INDEX_ENTRIES),
+        "entries": [*_COMMAND_INDEX_ENTRIES, *_catalog_alias_index_entries()],
         "tips": list(_COMMAND_INDEX_TIPS),
     }
 
@@ -570,6 +643,7 @@ def _help_text() -> str:
             "  workflow integration help",
             "  workflow help routes",
             "  workflow tools list",
+            "  workflow operate catalog",
             "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
             "  workflow api routes",
             "  workflow api help",
@@ -640,6 +714,7 @@ def _help_text() -> str:
             "Tip: run `workflow commands` or `workflow help commands` for the full command index.",
             "Tip: run `workflow commands --json` when you want machine-readable discovery.",
             "Tip: run `workflow api help` or `workflow help api` for HTTP route discovery.",
+            "Tip: run `workflow operate catalog` to inspect the CQRS operation gateway.",
             "Tip: run `workflow help run-status` for per-run status and idle recovery.",
             "Tip: run `workflow integrations` or `workflow api integrations` for the integration route scope.",
             "Tip: run `workflow integration` for integration management.",
@@ -674,6 +749,8 @@ def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
     if topic == "routes":
         stdout.write(_api_help_text() + "\n")
         return 0
+    if topic in _catalog_root_aliases():
+        return _workflow_arg_commands()["tools"](["describe", topic], stdout=stdout)
     if topic == "tools":
         _workflow_arg_commands()["tools"](["--help"], stdout=stdout)
         return 0
@@ -730,6 +807,7 @@ def _known_root_commands() -> set[str]:
         "lineage",
         *(_workflow_arg_commands().keys()),
         *(_STDOUT_COMMANDS.keys()),
+        *(_catalog_root_aliases().keys()),
     }
 
 
@@ -927,6 +1005,8 @@ def _main_impl(
         return native_operator.main(args[1:], env=env, stdout=stdout)
     if args and args[0] == "mcp":
         return _workflow_arg_commands()["tools"](args[1:], stdout=stdout)
+    if args and args[0] in _catalog_root_aliases():
+        return _catalog_alias_command(args[0], list(args[1:]), stdout=stdout)
 
     if args[0] not in _known_root_commands():
         if args[0] == "defs":

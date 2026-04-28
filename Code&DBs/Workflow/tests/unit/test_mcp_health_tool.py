@@ -116,6 +116,11 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
     monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
     monkeypatch.setattr(
         health_tool,
+        "build_trend_observability",
+        lambda: {"summary": {"critical_trends": 0}},
+    )
+    monkeypatch.setattr(
+        health_tool,
         "get_route_outcomes",
         lambda: SimpleNamespace(
             summary=lambda **_kwargs: {
@@ -372,6 +377,14 @@ def test_tool_dag_health_reports_projection_freshness_sla(monkeypatch) -> None:
 
     result = health_tool.tool_dag_health({})
 
+    assert result["preflight"]["overall"] == "degraded"
+    assert result["preflight"]["probe_overall"] == "healthy"
+    assert result["preflight"]["operational_overrides"][0]["source"] == (
+        "projection_freshness_sla"
+    )
+    assert result["preflight"]["operational_overrides"][0]["reason_code"] == (
+        "projection_freshness_sla.read_side_circuit_open"
+    )
     assert result["projection_freshness_sla"]["status"] == "critical"
     assert result["projection_freshness_sla"]["read_side_circuit_breaker"] == "open"
     assert result["projection_freshness_sla"]["policy"]["policy_source"] == "platform_config"
@@ -384,6 +397,100 @@ def test_tool_dag_health_reports_projection_freshness_sla(monkeypatch) -> None:
             "staleness_seconds": 901.0,
             "lag_events": 2,
             "read_side_circuit_breaker": "open",
+        }
+    ]
+
+
+def test_tool_dag_health_degrades_when_route_outcomes_have_no_healthy_provider(monkeypatch) -> None:
+    monkeypatch.setattr(
+        health_tool,
+        "dependency_truth_report",
+        lambda scope="all": {"ok": True, "scope": scope},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "workflow_database_url_for_repo",
+        lambda repo_root, env=None: "postgresql://repo.test/workflow",
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "get_context_cache",
+        lambda: SimpleNamespace(stats=lambda: {"hit_rate": 0.0}),
+    )
+    monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
+    monkeypatch.setattr(
+        health_tool,
+        "build_trend_observability",
+        lambda: {"summary": {"critical_trends": 0}},
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "query_transport_support",
+        lambda **_kwargs: {
+            "default_provider_slug": "openai",
+            "default_adapter_type": "cli_llm",
+            "support_basis": "provider_execution_registry",
+            "providers": [],
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+        },
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "get_route_outcomes",
+        lambda: SimpleNamespace(
+            summary=lambda **_kwargs: {
+                "provider_count": 1,
+                "healthy_provider_count": 0,
+                "unhealthy_provider_count": 1,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        health_tool,
+        "_subs",
+        SimpleNamespace(
+            get_health_mod=lambda: SimpleNamespace(
+                PostgresProbe=lambda db_url: _FakeProbe(("postgres", db_url)),
+                PostgresConnectivityProbe=lambda db_url: _FakeProbe(
+                    ("postgres_connectivity", db_url)
+                ),
+                DiskSpaceProbe=lambda path: _FakeProbe(("disk", path)),
+                ProviderTransportProbe=lambda provider_slug, adapter_type: _FakeProbe(
+                    ("provider_transport", provider_slug, adapter_type)
+                ),
+                PreflightRunner=_FakePreflightRunner,
+            ),
+            get_pg_conn=lambda: "pg-conn",
+            get_operator_panel=lambda: _FakePanel(),
+            get_memory_engine=lambda: None,
+        ),
+    )
+
+    result = health_tool.tool_dag_health({})
+
+    assert result["preflight"]["overall"] == "degraded"
+    assert result["preflight"]["probe_overall"] == "healthy"
+    assert result["preflight"]["operational_overrides"] == [
+        {
+            "source": "route_outcomes",
+            "effective_status": "degraded",
+            "reason_code": "route_outcomes.no_healthy_provider",
+            "provider_count": 1,
+            "healthy_provider_count": 0,
+            "unhealthy_provider_count": 1,
         }
     ]
 

@@ -290,39 +290,41 @@ def test_clear_override_404_when_segments_mismatched() -> None:
 
 
 def test_reproject_runs_projector_and_returns_status(monkeypatch) -> None:
-    fake_result = SimpleNamespace(ok=True, duration_ms=12.5, error=None)
-
-    class _FakeProjector:
-        def __init__(self, conn: Any) -> None:
-            self.conn = conn
-
-        def run(self) -> Any:
-            return fake_result
-
-    import sys
-    fake_module = type(sys)("memory.data_dictionary_projector")
-    fake_module.DataDictionaryProjector = _FakeProjector
-    monkeypatch.setitem(sys.modules, "memory.data_dictionary_projector", fake_module)
+    monkeypatch.setattr(
+        handler,
+        "refresh_data_dictionary_authority",
+        lambda conn: {
+            "ok": True,
+            "duration_ms": 12.5,
+            "error": None,
+            "modules": [{"name": "data_dictionary_projector", "ok": True}],
+        },
+    )
 
     stub = _RequestStub("/api/data-dictionary/reproject")
     handler._handle_reproject(stub, stub.path)
-    assert stub.sent == (200, {"ok": True, "duration_ms": 12.5, "error": None})
+    assert stub.sent == (
+        200,
+        {
+            "ok": True,
+            "duration_ms": 12.5,
+            "error": None,
+            "modules": [{"name": "data_dictionary_projector", "ok": True}],
+        },
+    )
 
 
 def test_reproject_reports_errors_from_projector(monkeypatch) -> None:
-    fake_result = SimpleNamespace(ok=False, duration_ms=5.0, error="tables: boom")
-
-    class _FakeProjector:
-        def __init__(self, conn: Any) -> None:
-            pass
-
-        def run(self) -> Any:
-            return fake_result
-
-    import sys
-    fake_module = type(sys)("memory.data_dictionary_projector")
-    fake_module.DataDictionaryProjector = _FakeProjector
-    monkeypatch.setitem(sys.modules, "memory.data_dictionary_projector", fake_module)
+    monkeypatch.setattr(
+        handler,
+        "refresh_data_dictionary_authority",
+        lambda conn: {
+            "ok": False,
+            "duration_ms": 5.0,
+            "error": "DataDictionaryProjector: tables: boom",
+            "modules": [{"name": "data_dictionary_projector", "ok": False}],
+        },
+    )
 
     stub = _RequestStub("/api/data-dictionary/reproject")
     handler._handle_reproject(stub, stub.path)

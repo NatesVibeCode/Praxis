@@ -22,6 +22,7 @@ ALTER TABLE data_dictionary_objects
             'tool',
             'object',
             'command',
+            'query',
             'event',
             'projection',
             'service_bus_channel',
@@ -73,6 +74,7 @@ CREATE TABLE IF NOT EXISTS authority_object_registry (
             'table',
             'column',
             'command',
+            'query',
             'event',
             'projection',
             'service_bus_channel',
@@ -436,7 +438,7 @@ INSERT INTO data_dictionary_objects (
 SELECT
     'operation.' || operation_name,
     operation_name,
-    'command',
+    operation_kind,
     'Operation catalog entry owned by ' || authority_domain_ref,
     jsonb_build_object('source', 'operation_catalog_registry', 'operation_ref', operation_ref),
     jsonb_build_object('authority_domain_ref', authority_domain_ref, 'operation_kind', operation_kind)
@@ -583,7 +585,7 @@ INSERT INTO authority_object_registry (
 )
 SELECT
     'operation.' || operation_name,
-    'command',
+    operation_kind,
     operation_name,
     NULL,
     authority_domain_ref,

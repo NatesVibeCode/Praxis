@@ -39,7 +39,13 @@ class _FakeAuthorityConn:
         self.transaction_rollbacks = 0
 
     def fetchrow(self, query, *args):
-        if "FROM authority_operation_receipts" in query:
+        normalized = " ".join(str(query).split())
+        if (
+            "FROM authority_operation_receipts" in normalized
+            and "WHERE receipt_id = $1::uuid" in normalized
+        ):
+            return self.receipts.get(str(args[0]))
+        if "FROM authority_operation_receipts" in normalized:
             idempotency_key = args[1]
             for receipt in self.receipts.values():
                 if receipt.get("idempotency_key") == idempotency_key:
@@ -72,6 +78,8 @@ class _FakeAuthorityConn:
                 "duration_ms": args[19],
                 "binding_revision": args[20],
                 "decision_ref": args[21],
+                "cause_receipt_id": args[22],
+                "correlation_id": args[23],
             }
             return "INSERT 0 1"
         if "INSERT INTO authority_events" in query:
@@ -236,6 +244,53 @@ def test_mount_capabilities_skips_invalid_bindings_without_losing_valid_routes(m
             "error": "missing runtime module",
         }
     ]
+
+
+def test_list_api_routes_mounts_operation_catalog_routes_before_discovery(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class GoodCommand(BaseModel):
+        pass
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="good-op",
+                operation_name="good_operation",
+                http_method="POST",
+                http_path="/api/good_operation",
+                input_model_ref="tests.GoodCommand",
+                handler_ref="tests.handle_good",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=GoodCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(tag="operations", visibility="all")
+
+    assert target_app.state.capabilities_mounted is True
+    assert payload["count"] == 1
+    assert payload["routes"][0]["path"] == "/api/good_operation"
+    assert payload["routes"][0]["name"] == "good_operation"
+    assert payload["routes"][0]["visibility"] == "internal"
 
 
 def test_workflow_query_routes_do_not_import_dead_trampoline_modules() -> None:

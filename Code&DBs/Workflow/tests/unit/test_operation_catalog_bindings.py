@@ -104,6 +104,11 @@ def test_resolve_http_operation_binding_rejects_missing_reference() -> None:
             "runtime.operations.queries.structured_documents.handle_list_context_selection_receipts",
             "ListStructuredDocumentContextSelectionsQuery",
         ),
+        (
+            "runtime.operations.commands.promote_experiment_winner_command.PromoteExperimentWinnerCommand",
+            "runtime.operations.commands.promote_experiment_winner_command.handle_promote_experiment_winner",
+            "PromoteExperimentWinnerCommand",
+        ),
     ],
 )
 def test_resolve_http_operation_binding_loads_catalog_migrated_bindings(

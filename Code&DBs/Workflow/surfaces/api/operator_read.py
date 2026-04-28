@@ -143,8 +143,11 @@ class ProviderControlPlaneFrontdoor:
                     "credential_observations": [
                         dict(item) for item in row.credential_observations
                     ],
+                    "mechanical_capability_state": row.mechanical_capability_state,
+                    "mechanical_is_runnable": row.mechanical_is_runnable,
                     "capability_state": row.capability_state,
                     "is_runnable": row.is_runnable,
+                    "effective_dispatch_state": row.effective_dispatch_state,
                     "breaker_state": row.breaker_state,
                     "manual_override_state": row.manual_override_state,
                     "primary_removal_reason_code": row.primary_removal_reason_code,

@@ -368,7 +368,20 @@ def capture_submission_baseline_for_job(
     )
     active_shard = dict(existing_shard or execution_context_shard or {})
     active_bundle = dict(existing_bundle or execution_bundle or {})
-    normalized_write_scope = _normalize_scope_paths(write_scope or active_shard.get("write_scope"))
+    bundle_access_policy = (
+        active_bundle.get("access_policy")
+        if isinstance(active_bundle.get("access_policy"), Mapping)
+        else {}
+    )
+    normalized_write_scope = _normalize_scope_paths(
+        write_scope
+        or active_shard.get("write_scope")
+        or (
+            bundle_access_policy.get("write_scope")
+            if isinstance(bundle_access_policy, Mapping)
+            else []
+        )
+    )
     completion_contract = _completion_contract(active_bundle)
     if not completion_contract.get("submission_required"):
         return {"status": "skipped", "reason": "submission_not_required"}
@@ -410,6 +423,8 @@ def capture_submission_baseline_for_job(
         "workspace_manifest": scoped_workspace_manifest,
         "scoped_artifacts": scoped_artifacts,
     }
+    if normalized_write_scope and not _normalize_scope_paths(active_shard.get("write_scope")):
+        active_shard["write_scope"] = list(normalized_write_scope)
     submission_protocol = _submission_protocol_state(active_shard)
     submission_protocol["baseline"] = baseline
     updated_shard = _set_submission_protocol_state(active_shard, submission_protocol)
@@ -799,6 +814,34 @@ def _submit_submission(
             details={"paths": out_of_scope, "write_scope": list(write_scope)},
         )
     if not changed_paths:
+        access_policy = (
+            execution_bundle.get("access_policy")
+            if isinstance(execution_bundle, Mapping)
+            else None
+        )
+        if (
+            isinstance(access_policy, Mapping)
+            and str(access_policy.get("workspace_mode") or "").strip()
+            == "docker_packet_only"
+        ):
+            return {
+                "submission_id": None,
+                "status": "pending_auto_seal",
+                "reason_code": "workflow_submission.pending_auto_seal",
+                "comparison_status": "pending_sandbox_dehydration",
+                "summary": normalized_summary,
+                "primary_paths": normalized_primary_paths,
+                "result_kind": normalized_result_kind,
+                "changed_paths": [],
+                "operation_set": [],
+                "artifact_refs": [],
+                "verification_artifact_refs": [],
+                "notes": (
+                    "Sandbox-side submission accepted for post-exit auto-seal; "
+                    "the final submission gate will still fail if no in-scope "
+                    "workspace changes are measured after dehydration."
+                ),
+            }
         raise WorkflowSubmissionServiceError(
             "workflow_submission.phantom_ship",
             "submission claims completion but no files were changed on disk",

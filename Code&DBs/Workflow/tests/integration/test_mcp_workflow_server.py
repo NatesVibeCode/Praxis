@@ -30,6 +30,7 @@ from _pg_test_conn import ensure_test_database_ready
 from runtime import bug_tracker as _bug_tracker_mod
 from surfaces.mcp.protocol import handle_request
 from surfaces.mcp.subsystems import _subs
+from surfaces.mcp.tools import bugs as mcp_bugs
 from storage.postgres.connection import shutdown_workflow_pool
 
 
@@ -518,7 +519,7 @@ class _FakeBugTracker:
         }
         if evidence_kind not in allowed_refs:
             raise ValueError(
-                "evidence_kind must be one of governance_scan, receipt, run, verification_run, healing_run"
+                "evidence_kind must be one of governance_scan, healing_run, operation_receipt, receipt, run, verification_run"
             )
         if evidence_ref not in allowed_refs[evidence_kind]:
             raise ValueError(f"unknown {evidence_kind} reference: {evidence_ref}")
@@ -833,6 +834,16 @@ class _FakePGConn:
             or "FROM workflow_jobs wj" in sql
         ):
             return self._dispatch_jobs_rows
+        if "SELECT id, run_id, label, status, attempt" in sql and "FROM workflow_jobs" in sql:
+            return [
+                {
+                    "id": 177,
+                    "run_id": args[0],
+                    "label": args[1],
+                    "status": "failed",
+                    "attempt": 2,
+                }
+            ]
         if "COALESCE(SUM(cost_usd)" in sql:
             return self._dispatch_totals_row
         raise AssertionError(f"Unexpected SQL in test stub: {sql}")
@@ -906,6 +917,37 @@ def _isolated_subsystems(tmp_path, monkeypatch):
     subs._pg_conn = None
     subs._bug_tracker = fake_bug_tracker
     monkeypatch.setattr(subs, "_build_bug_tracker", lambda: fake_bug_tracker, raising=False)
+
+    def _fake_bug_gateway(subsystems, *, operation_name: str, payload):
+        from runtime.operations.commands import bug_actions
+
+        if operation_name == "bug_file":
+            return bug_actions.handle_bug_file(
+                bug_actions.BugFileCommand(**payload),
+                subsystems,
+            )
+        if operation_name == "bug_attach_evidence":
+            return bug_actions.handle_bug_attach_evidence(
+                bug_actions.BugAttachEvidenceCommand(**payload),
+                subsystems,
+            )
+        if operation_name == "bug_resolve":
+            return bug_actions.handle_bug_resolve(
+                bug_actions.BugResolveCommand(**payload),
+                subsystems,
+            )
+        if operation_name == "bug_patch_resume":
+            return bug_actions.handle_bug_patch_resume(
+                bug_actions.BugPatchResumeCommand(**payload),
+                subsystems,
+            )
+        raise AssertionError(f"unexpected bug operation: {operation_name}")
+
+    monkeypatch.setattr(
+        mcp_bugs,
+        "execute_operation_from_subsystems",
+        _fake_bug_gateway,
+    )
 
     # Point to temp paths
     subs.receipts_dir = str(tmp_path / "receipts")
@@ -1191,6 +1233,7 @@ class TestDagBugs:
             "severity": "P2",
             "category": "RUNTIME",
             "filed_by": "mcp-client",
+            "discovered_in_receipt_id": "receipt-123",
         })
         assert filed["filed"] is True
         assert filed["bug"]["title"] == "Test bug from MCP"
@@ -1214,6 +1257,7 @@ class TestDagBugs:
                 "title": "Issue-linked bug from MCP",
                 "severity": "P2",
                 "source_issue_id": "issue.dispatch-gap",
+                "discovered_in_receipt_id": "receipt-123",
             },
         )
         assert filed["bug"]["source_issue_id"] == "issue.dispatch-gap"
@@ -1245,6 +1289,7 @@ class TestDagBugs:
             "title": "Category filtered MCP bug",
             "severity": "P2",
             "category": "RUNTIME",
+            "discovered_in_receipt_id": "receipt-123",
         })
         result = _call_tool("praxis_bugs", {"action": "list", "category": "RUNTIME"})
         assert result["count"] >= 1
@@ -1258,7 +1303,14 @@ class TestDagBugs:
 
     def test_search_bug(self):
         # File then search
-        _call_tool("praxis_bugs", {"action": "file", "title": "Unique dispatch failure XYZ"})
+        _call_tool(
+            "praxis_bugs",
+            {
+                "action": "file",
+                "title": "Unique dispatch failure XYZ",
+                "discovered_in_receipt_id": "receipt-123",
+            },
+        )
         found = _call_tool("praxis_bugs", {"action": "search", "title": "dispatch failure"})
         assert found["count"] >= 1
 
@@ -1272,6 +1324,7 @@ class TestDagBugs:
             "action": "file",
             "title": "Packet me from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
         result = _call_tool(
             "praxis_bugs",
@@ -1287,6 +1340,7 @@ class TestDagBugs:
             "action": "file",
             "title": "History from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
         result = _call_tool(
             "praxis_bugs",
@@ -1301,6 +1355,7 @@ class TestDagBugs:
             "action": "file",
             "title": "Replay me from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
         result = _call_tool(
             "praxis_bugs",
@@ -1324,6 +1379,7 @@ class TestDagBugs:
             "action": "file",
             "title": "Attach evidence from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
         result = _call_tool(
             "praxis_bugs",
@@ -1344,6 +1400,7 @@ class TestDagBugs:
             "action": "file",
             "title": "Resolve with verifier from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
         observed: dict[str, object] = {}
 
@@ -1394,6 +1451,7 @@ class TestDagBugs:
             "action": "file",
             "title": "Resolve with failing verifier from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
 
         monkeypatch.setattr(
@@ -1426,15 +1484,26 @@ class TestDagBugs:
             "action": "file",
             "title": "Bad category from MCP",
             "category": "NOT_A_REAL_CATEGORY",
+            "discovered_in_receipt_id": "receipt-123",
         })
         assert "error" in result
         assert "category must be one of" in result["error"]
+
+    def test_file_rejects_underlinked_bug_action(self):
+        result = _call_tool("praxis_bugs", {
+            "action": "file",
+            "title": "No discovery anchor from MCP",
+        })
+        assert "error" in result
+        assert "discovered_in_run_id" in result["error"]
+        assert "discovered_in_receipt_id" in result["error"]
 
     def test_attach_evidence_rejects_invalid_reference(self):
         filed = _call_tool("praxis_bugs", {
             "action": "file",
             "title": "Evidence error from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
         result = _call_tool(
             "praxis_bugs",
@@ -1450,8 +1519,24 @@ class TestDagBugs:
         assert "unknown receipt reference" in result["error"]
 
     def test_list_by_severity(self):
-        _call_tool("praxis_bugs", {"action": "file", "title": "P0 critical", "severity": "P0"})
-        _call_tool("praxis_bugs", {"action": "file", "title": "P3 minor", "severity": "P3"})
+        _call_tool(
+            "praxis_bugs",
+            {
+                "action": "file",
+                "title": "P0 critical",
+                "severity": "P0",
+                "discovered_in_receipt_id": "receipt-123",
+            },
+        )
+        _call_tool(
+            "praxis_bugs",
+            {
+                "action": "file",
+                "title": "P3 minor",
+                "severity": "P3",
+                "discovered_in_receipt_id": "receipt-123",
+            },
+        )
         result = _call_tool("praxis_bugs", {"action": "list", "severity": "P0"})
         for b in result["bugs"]:
             assert b["severity"] == "P0"
@@ -1462,6 +1547,7 @@ class TestDagBugs:
                 "action": "file",
                 "title": f"Count bug {index}",
                 "severity": "P2",
+                "discovered_in_receipt_id": "receipt-123",
             })
 
         result = _call_tool("praxis_bugs", {"action": "list", "limit": 25})
@@ -1481,6 +1567,7 @@ class TestDagBugs:
             "action": "file",
             "title": "Resolve me from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
         bug_id = filed["bug"]["bug_id"]
 
@@ -1499,6 +1586,7 @@ class TestDagBugs:
             "action": "file",
             "title": "Do not reopen from resolve",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
 
         result = _call_tool("praxis_bugs", {
@@ -1516,6 +1604,7 @@ class TestDagBugs:
             "action": "file",
             "title": "Still isolated from MCP",
             "severity": "P2",
+            "discovered_in_receipt_id": "receipt-123",
         })
 
         assert filed["bug"]["bug_id"].startswith("BUG-TEST")
@@ -1816,7 +1905,13 @@ class TestDagDispatchDryRun:
 
         retry_result = _call_tool(
             "praxis_workflow",
-            {"action": "retry", "run_id": "dispatch_retry", "label": "build_a"},
+            {
+                "action": "retry",
+                "run_id": "dispatch_retry",
+                "label": "build_a",
+                "previous_failure": "dispatch_retry/build_a failed with provider.capacity",
+                "retry_delta": "retry after provider slot repair",
+            },
         )
         cancel_result = _call_tool(
             "praxis_workflow",
@@ -1828,7 +1923,23 @@ class TestDagDispatchDryRun:
         )
 
         assert captured == [
-            ("workflow.retry", {"run_id": "dispatch_retry", "label": "build_a"}, "mcp.praxis_workflow.retry"),
+            (
+                "workflow.retry",
+                {
+                    "run_id": "dispatch_retry",
+                    "label": "build_a",
+                    "previous_failure": "dispatch_retry/build_a failed with provider.capacity",
+                    "retry_delta": "retry after provider slot repair",
+                    "retry_guard": {
+                        "run_id": "dispatch_retry",
+                        "label": "build_a",
+                        "job_id": 177,
+                        "status": "failed",
+                        "attempt": 2,
+                    },
+                },
+                "mcp.praxis_workflow.retry",
+            ),
             ("workflow.cancel", {"run_id": "dispatch_cancel", "include_running": True}, "mcp.praxis_workflow.cancel"),
             ("sync.repair", {"run_id": "dispatch_repair"}, "mcp.praxis_workflow.repair"),
         ]

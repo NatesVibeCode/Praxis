@@ -69,20 +69,48 @@ PreflightResult = _health_mod.PreflightResult
 
 
 # ---------------------------------------------------------------------------
-# ReceiptIngester — loads receipt JSON files from a directory
+# ReceiptIngester — reads canonical receipt authority
 # ---------------------------------------------------------------------------
 
 
 class ReceiptIngester:
-    """Loads and summarizes workflow receipt JSON files from a directory."""
+    """Loads and summarizes workflow receipts from canonical storage."""
 
-    def __init__(self, receipts_dir: str) -> None:
+    def __init__(
+        self,
+        receipts_dir: str = "",
+        *,
+        receipt_loader=None,
+        allow_directory_fallback: bool = False,
+    ) -> None:
         self._receipts_dir = receipts_dir
+        self._receipt_loader = receipt_loader
+        self._allow_directory_fallback = allow_directory_fallback
 
     def load_recent(self, since_hours: int = 1) -> list:
-        """Load receipt JSON files modified within the last *since_hours*."""
+        """Load recent receipts from Postgres, unless legacy fallback is explicit."""
+        if self._allow_directory_fallback and self._receipt_loader is None:
+            return self._load_legacy_directory_receipts(since_hours=since_hours)
+        try:
+            loader = self._receipt_loader or self._load_canonical_receipts
+            return list(loader(since_hours=since_hours))
+        except Exception:
+            if not self._allow_directory_fallback:
+                return []
+        return self._load_legacy_directory_receipts(since_hours=since_hours)
+
+    @staticmethod
+    def _load_canonical_receipts(*, since_hours: int) -> list[dict[str, Any]]:
+        from runtime.receipt_store import list_receipts
+
+        return [
+            record.to_dict()
+            for record in list_receipts(limit=500, since_hours=since_hours)
+        ]
+
+    def _load_legacy_directory_receipts(self, *, since_hours: int) -> list[dict[str, Any]]:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
-        results: list = []
+        results: list[dict[str, Any]] = []
         if not os.path.isdir(self._receipts_dir):
             return results
         for name in os.listdir(self._receipts_dir):

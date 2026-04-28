@@ -44,6 +44,7 @@ _BUCKET_SKILLS: dict[str, tuple[str, ...]] = {
 
 _TASK_PROFILE_ALIASES: dict[str, str] = {
     "build": "code_generation",
+    "fix": "code_edit",
     "implement": "code_generation",
     "code_generation": "code_generation",
     "code_edit": "code_edit",
@@ -56,7 +57,7 @@ _TASK_PROFILE_ALIASES: dict[str, str] = {
     "architecture": "architecture",
 }
 
-_INTERNAL_WORKFLOW_MCP_TOOLS: tuple[str, ...] = ("praxis_context_shard",)
+_INTERNAL_WORKFLOW_MCP_TOOLS: tuple[str, ...] = ("praxis_context_shard", "praxis_orient")
 _SUBMISSION_REVIEW_TASK_TYPES = frozenset(
     {
         "review",
@@ -129,7 +130,7 @@ def _bucket_from_task(
         return "analysis"
     if lowered_task_type in {"architecture"}:
         return "architecture"
-    if lowered_task_type in {"build", "implement", "code_generation", "code_edit"}:
+    if lowered_task_type in {"build", "fix", "implement", "code_generation", "code_edit"}:
         return "build"
     if verify_refs:
         return "build"
@@ -216,7 +217,7 @@ def _submission_result_kind(*, task_type: str, bucket: str) -> str:
 
 
 _VERIFICATION_REQUIRED_TASK_TYPES = frozenset({
-    "build", "implement", "code_generation", "code_edit",
+    "build", "fix", "implement", "code_generation", "code_edit",
     "refactor", "test", "wiring",
 })
 
@@ -326,11 +327,15 @@ def _orient_hint(
     # .codex/config.toml, etc.) with a single shell-callable binary the
     # agent can invoke from any CLI's native Bash/shell tool.
     cli_subcommand = normalized_entrypoint.removeprefix("praxis_") or "query"
+    if normalized_entrypoint == "praxis_orient":
+        start_note = "Call tools via the `praxis` shell command. Start with `praxis orient` before broader tool use."
+    else:
+        start_note = f"Call tools via the `praxis` shell command. Start with `praxis {cli_subcommand} \"...\"` before broader tool use."
     return {
         "entrypoint_tool": normalized_entrypoint,
         "suggested_question": question,
         "notes": [
-            f"Call tools via the `praxis` shell command. Start with `praxis {cli_subcommand} \"...\"` before broader tool use.",
+            start_note,
             "Every tool in mcp_tool_names is callable as `praxis <subcommand> ...`. Run `praxis --help` for the full list.",
             "At the end of mutating jobs, submit results via `praxis submit_code_change` or `praxis submit_artifact_bundle` — the sealed submission is the authoritative deliverable.",
             "Stay inside the declared read/write boundary and verification refs.",
@@ -412,6 +417,20 @@ def build_execution_bundle(
     # SandboxRuntime — it is NOT itself evidence of mutation intent.
     # Force submission/verification only from task_type defaults unless the
     # caller explicitly overrides completion_contract values.
+    #
+    # Default a per-run scratch path when caller didn't supply one. The
+    # MCP schema marks write_scope optional, but the sandbox rejects
+    # empty access_policy.write_scope ("must be a non-empty relative path"),
+    # so an unset write_scope made step_1 fail in 7s every time on the E2E
+    # path. Per-run scratch gives each run its own isolated boundary
+    # without leaking across runs.
+    if not normalized_write_scope:
+        scratch_run_token = (
+            str(run_id or "").strip()
+            or str(workflow_id or "").strip()
+            or "default"
+        )
+        normalized_write_scope = (f"scratch/{scratch_run_token}",)
     mutation_requires_submission = (
         _default_submission_required(normalized_task_type)
     )
@@ -487,6 +506,7 @@ def build_execution_bundle(
         (
             tool_name
             for tool_name in (
+                "praxis_orient",
                 "praxis_query",
                 "praxis_status_snapshot",
                 "praxis_integration",

@@ -192,7 +192,7 @@ export function MoonDataDictionaryPanel() {
     setSuccess(null);
     try {
       await postReproject();
-      setSuccess('Reprojected.');
+      setSuccess('Refreshed dictionary authority.');
       await reloadObjects();
       if (selected) await reloadDetail(selected);
     } catch (e: any) {

@@ -67,7 +67,29 @@ CREATE TABLE provider_model_candidates (
     effective_from timestamptz NOT NULL,
     effective_to timestamptz,
     decision_ref text NOT NULL,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    cli_config jsonb NOT NULL DEFAULT '{}'::jsonb,
+    route_tier text NOT NULL DEFAULT 'medium',
+    route_tier_rank integer NOT NULL DEFAULT 99,
+    latency_class text NOT NULL DEFAULT 'reasoning',
+    latency_rank integer NOT NULL DEFAULT 99,
+    reasoning_control jsonb NOT NULL DEFAULT '{}'::jsonb,
+    task_affinities jsonb NOT NULL DEFAULT '{}'::jsonb,
+    benchmark_profile jsonb NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT provider_model_candidates_route_tier_check
+        CHECK (route_tier IN ('high', 'medium', 'low')),
+    CONSTRAINT provider_model_candidates_route_tier_rank_check
+        CHECK (route_tier_rank >= 1),
+    CONSTRAINT provider_model_candidates_latency_class_check
+        CHECK (latency_class IN ('reasoning', 'instant')),
+    CONSTRAINT provider_model_candidates_latency_rank_check
+        CHECK (latency_rank >= 1),
+    CONSTRAINT provider_model_candidates_reasoning_control_object_check
+        CHECK (jsonb_typeof(reasoning_control) = 'object'),
+    CONSTRAINT provider_model_candidates_task_affinities_object_check
+        CHECK (jsonb_typeof(task_affinities) = 'object'),
+    CONSTRAINT provider_model_candidates_benchmark_profile_object_check
+        CHECK (jsonb_typeof(benchmark_profile) = 'object')
 );
 
 CREATE INDEX provider_model_candidates_provider_ref_status_idx

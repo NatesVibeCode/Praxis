@@ -231,7 +231,12 @@ def _block_descendants(conn: SyncPostgresConnection, parent_job_id: int, error_c
             _block_descendants(conn, child_id, error_code or "dependency_blocked")
 
 
-def _recompute_workflow_run_state(conn: SyncPostgresConnection, run_id: str) -> str:
+def _recompute_workflow_run_state(
+    conn: SyncPostgresConnection,
+    run_id: str,
+    *,
+    allow_terminal_reopen: bool = False,
+) -> str:
     rows = conn.execute(
         """SELECT status, COUNT(*) AS count
            FROM workflow_jobs
@@ -288,7 +293,11 @@ def _recompute_workflow_run_state(conn: SyncPostgresConnection, run_id: str) -> 
         new_state = "queued"
         terminal_reason = None
 
-    if prior_state in _WORKFLOW_TERMINAL_STATES and new_state not in _WORKFLOW_TERMINAL_STATES:
+    if (
+        prior_state in _WORKFLOW_TERMINAL_STATES
+        and new_state not in _WORKFLOW_TERMINAL_STATES
+        and not allow_terminal_reopen
+    ):
         return prior_state
 
     conn.execute(

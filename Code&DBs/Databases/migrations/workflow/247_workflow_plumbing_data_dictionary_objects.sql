@@ -47,6 +47,7 @@ ALTER TABLE data_dictionary_objects
             'tool',
             'object',
             'command',
+            'query',
             'event',
             'projection',
             'service_bus_channel',

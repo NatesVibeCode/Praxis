@@ -102,9 +102,19 @@ def materialize_workflow(
     workflow_id: str | None = None,
     title: str | None = None,
     enable_llm: bool | None = None,
+    enable_full_compose: bool | None = None,
     match_limit: int = 5,
 ) -> dict[str, Any]:
-    """Command side: create/update workflow build state from compile intent."""
+    """Command side: create/update workflow build state from compile intent.
+
+    `enable_full_compose` selects which compile pipeline runs:
+      - True (or omitted): full fork-out compose (compose_plan_via_llm with
+        plan_synthesis + plan_fork_author task types).
+      - False: the compile_prose chain (compile_synthesize → compile_pill_match
+        → compile_author → compile_finalize). Use when the operator wants the
+        sub-task-routed compile path (e.g., to exercise compile_finalize voting
+        for binding-gate auto-resolution).
+    """
 
     clean_intent = _text(intent)
     if not clean_intent:
@@ -147,6 +157,8 @@ def materialize_workflow(
     }
     if enable_llm is not None:
         mutation_body["enable_llm"] = bool(enable_llm)
+    if enable_full_compose is not None:
+        mutation_body["enable_full_compose"] = bool(enable_full_compose)
 
     mutation = mutate_workflow_build(
         conn,

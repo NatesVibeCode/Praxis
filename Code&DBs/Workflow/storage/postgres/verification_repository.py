@@ -11,6 +11,7 @@ from .validators import (
     _optional_text,
     _require_mapping,
     _require_nonnegative_int,
+    _require_positive_int,
     _require_text,
     _require_utc,
     PostgresWriteError,
@@ -103,6 +104,83 @@ def _normalize_verify_ref_rows(
                 _require_text(
                     payload.get("decision_ref"),
                     field_name=f"verify_refs[{index}].decision_ref",
+                ),
+            )
+        )
+    return tuple(normalized_rows)
+
+
+def _normalize_verification_registry_rows(
+    verification_registry: object,
+) -> tuple[tuple[str, str, str, str, str, str, int, str, bool, str], ...]:
+    if not isinstance(verification_registry, Sequence) or isinstance(
+        verification_registry,
+        (str, bytes, bytearray),
+    ):
+        raise PostgresWriteError(
+            "postgres.invalid_submission",
+            "verification_registry must be a sequence of mappings",
+            details={"field": "verification_registry"},
+        )
+
+    normalized_rows: list[tuple[str, str, str, str, str, str, int, str, bool, str]] = []
+    for index, row in enumerate(verification_registry):
+        payload = _require_mapping(row, field_name=f"verification_registry[{index}]")
+        executor_kind = _require_text(
+            payload.get("executor_kind"),
+            field_name=f"verification_registry[{index}].executor_kind",
+        )
+        if executor_kind != "argv":
+            raise PostgresWriteError(
+                "postgres.invalid_submission",
+                f"verification_registry[{index}].executor_kind must be argv",
+                details={"field": f"verification_registry[{index}].executor_kind"},
+            )
+        normalized_rows.append(
+            (
+                _require_text(
+                    payload.get("verification_ref"),
+                    field_name=f"verification_registry[{index}].verification_ref",
+                ),
+                _require_text(
+                    payload.get("display_name"),
+                    field_name=f"verification_registry[{index}].display_name",
+                ),
+                str(payload.get("description", "")),
+                executor_kind,
+                _encode_jsonb(
+                    list(
+                        _require_text_sequence(
+                            payload.get("argv_template"),
+                            field_name=f"verification_registry[{index}].argv_template",
+                        )
+                    ),
+                    field_name=f"verification_registry[{index}].argv_template",
+                ),
+                _encode_jsonb(
+                    list(
+                        _require_text_sequence(
+                            payload.get("template_inputs") or [],
+                            field_name=f"verification_registry[{index}].template_inputs",
+                        )
+                    ),
+                    field_name=f"verification_registry[{index}].template_inputs",
+                ),
+                _require_positive_int(
+                    payload.get("default_timeout_seconds", 60),
+                    field_name=f"verification_registry[{index}].default_timeout_seconds",
+                ),
+                _require_text(
+                    payload.get("workdir_policy") or "job",
+                    field_name=f"verification_registry[{index}].workdir_policy",
+                ),
+                _require_bool(
+                    payload.get("enabled", True),
+                    field_name=f"verification_registry[{index}].enabled",
+                ),
+                _require_text(
+                    payload.get("decision_ref"),
+                    field_name=f"verification_registry[{index}].decision_ref",
                 ),
             )
         )
@@ -244,6 +322,46 @@ class PostgresVerificationRepository:
                 inputs = EXCLUDED.inputs,
                 enabled = EXCLUDED.enabled,
                 binding_revision = EXCLUDED.binding_revision,
+                decision_ref = EXCLUDED.decision_ref,
+                updated_at = now()
+            """,
+            list(normalized_rows),
+        )
+        return len(normalized_rows)
+
+    def upsert_verification_registry(
+        self,
+        *,
+        verification_registry: Sequence[Mapping[str, object]],
+    ) -> int:
+        normalized_rows = _normalize_verification_registry_rows(verification_registry)
+        if not normalized_rows:
+            return 0
+        self._conn.execute_many(
+            """
+            INSERT INTO verification_registry (
+                verification_ref,
+                display_name,
+                description,
+                executor_kind,
+                argv_template,
+                template_inputs,
+                default_timeout_seconds,
+                workdir_policy,
+                enabled,
+                decision_ref
+            ) VALUES (
+                $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10
+            )
+            ON CONFLICT (verification_ref) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                description = EXCLUDED.description,
+                executor_kind = EXCLUDED.executor_kind,
+                argv_template = EXCLUDED.argv_template,
+                template_inputs = EXCLUDED.template_inputs,
+                default_timeout_seconds = EXCLUDED.default_timeout_seconds,
+                workdir_policy = EXCLUDED.workdir_policy,
+                enabled = EXCLUDED.enabled,
                 decision_ref = EXCLUDED.decision_ref,
                 updated_at = now()
             """,

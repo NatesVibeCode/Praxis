@@ -197,6 +197,8 @@ class ImportGraph:
                 ) from exc
             if relative in self._forward:
                 return relative
+            if (root / relative).exists():
+                return relative
             raise ScopeResolutionError(
                 "scope.file_ref_unresolved",
                 f"scope file reference {raw!r} is under {root} but is not in the Python import graph",
@@ -206,10 +208,14 @@ class ImportGraph:
         # Already relative and exists as a key
         if raw in self._forward:
             return raw
+        if (root / raw).exists():
+            return raw
 
         # Normalise separators
         normalised = raw.replace("\\", "/").lstrip("./")
         if normalised in self._forward:
+            return normalised
+        if (root / normalised).exists():
             return normalised
 
         suffix_matches = [f for f in self._all_files if f.endswith(normalised)]

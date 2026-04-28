@@ -391,6 +391,25 @@ def _tools_command(args: list[str], *, stdout: TextIO) -> int:
     return 2
 
 
+def _tools_search_alias_command(args: list[str], *, stdout: TextIO) -> int:
+    """Run the recommended ``search`` alias through the tool catalog.
+
+    The CLI front door should expose the direct alias when it exists, but
+    still fall back to the catalog-backed tool invocation so the alias stays
+    discoverable from the command line as well as from `workflow tools`.
+    """
+
+    if not args or args[0] in {"-h", "--help"}:
+        return _tools_describe_command(["search"], stdout=stdout)
+
+    query = " ".join(arg for arg in args if arg and not arg.startswith("--")).strip()
+    if not query:
+        return _tools_describe_command(["search"], stdout=stdout)
+
+    payload = json.dumps({"query": query}, separators=(",", ":"))
+    return _tools_command(["call", "search", "--input-json", payload], stdout=stdout)
+
+
 def _filtered_tools(
     *,
     surface: str | None = None,
@@ -592,6 +611,8 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"{definition.name} [{format_badges(definition)}]\n")
         stdout.write(f"  entrypoint: {definition.cli_entrypoint}\n")
         stdout.write(f"  describe: {definition.cli_describe_command}\n")
+        if definition.cli_replacement:
+            stdout.write(f"  replacement: {definition.cli_replacement}\n")
         stdout.write(f"  {definition.cli_when_to_use or definition.description.splitlines()[0]}\n")
     best_definition = None
     if len(definitions) == 1:
@@ -662,6 +683,8 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
     stdout.write(f"badges: {format_badges(definition)}\n")
     stdout.write(f"entrypoint: {definition.cli_entrypoint}\n")
     stdout.write(f"describe_command: {definition.cli_describe_command}\n")
+    if definition.cli_replacement:
+        stdout.write(f"replacement: {definition.cli_replacement}\n")
     stdout.write(f"description: {definition.description.splitlines()[0]}\n")
     if definition.cli_when_to_use:
         stdout.write(f"when_to_use: {definition.cli_when_to_use}\n")

@@ -185,6 +185,54 @@ class _CancelConn:
         raise AssertionError(f"unexpected query: {query}")
 
 
+class _RetryGuardConn:
+    _states = {
+        ("dispatch_chat_retry", "build_a"): {"id": 101, "status": "failed", "attempt": 2},
+        ("dispatch_mcp_retry", "build_b"): {"id": 102, "status": "failed", "attempt": 3},
+        ("dispatch_cli_retry", "build_c"): {"id": 103, "status": "cancelled", "attempt": 4},
+        ("dispatch_legacy_retry", "build_d"): {"id": 104, "status": "dead_letter", "attempt": 5},
+    }
+
+    @classmethod
+    def guard_for(cls, run_id: str, label: str) -> dict[str, Any]:
+        state = cls._states[(run_id, label)]
+        return {
+            "run_id": run_id,
+            "label": label,
+            "job_id": state["id"],
+            "status": state["status"],
+            "attempt": state["attempt"],
+        }
+
+    @classmethod
+    def payload_for(cls, run_id: str, label: str) -> dict[str, Any]:
+        return {
+            "run_id": run_id,
+            "label": label,
+            "previous_failure": f"{run_id}/{label} failed with provider.capacity",
+            "retry_delta": "retry after runtime retry guard repair",
+            "retry_guard": cls.guard_for(run_id, label),
+        }
+
+    def execute(self, query: str, *params: Any):
+        normalized = " ".join(query.split())
+        if normalized.startswith("SELECT id, run_id, label, status, attempt FROM workflow_jobs"):
+            run_id, label = params
+            state = self._states.get((run_id, label))
+            if state is None:
+                return []
+            return [
+                {
+                    "id": state["id"],
+                    "run_id": run_id,
+                    "label": label,
+                    "status": state["status"],
+                    "attempt": state["attempt"],
+                }
+            ]
+        raise AssertionError(f"unexpected query: {query}")
+
+
 def _write_queue_spec(tmp_path: Path, *, name: str = "cli run smoke") -> str:
     path = tmp_path / "cli-run.queue.json"
     path.write_text(
@@ -530,6 +578,7 @@ def test_run_submit_surfaces_share_the_same_queued_envelope(tmp_path, monkeypatc
 
 def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monkeypatch) -> None:
     recorder = _AuthorityRecorder()
+    retry_guard_conn = _RetryGuardConn()
     cancel_proof = {
         "cancelled_jobs": 1,
         "labels": ["build_a"],
@@ -562,13 +611,18 @@ def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monk
     monkeypatch.setattr(
         mcp_workflow,
         "_subs",
-        SimpleNamespace(get_pg_conn=lambda: object()),
+        SimpleNamespace(get_pg_conn=lambda: retry_guard_conn),
     )
 
     chat_retry = chat_tools.execute_tool(
         "retry_job",
-        {"run_id": "dispatch_chat_retry", "label": "build_a"},
-        object(),
+        {
+            "run_id": "dispatch_chat_retry",
+            "label": "build_a",
+            "previous_failure": "dispatch_chat_retry/build_a failed with provider.capacity",
+            "retry_delta": "retry after runtime retry guard repair",
+        },
+        retry_guard_conn,
         "/repo",
     )
     chat_cancel = chat_tools.execute_tool(
@@ -578,7 +632,13 @@ def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monk
         "/repo",
     )
     mcp_retry = mcp_workflow.tool_praxis_workflow(
-        {"action": "retry", "run_id": "dispatch_mcp_retry", "label": "build_b"},
+        {
+            "action": "retry",
+            "run_id": "dispatch_mcp_retry",
+            "label": "build_b",
+            "previous_failure": "dispatch_mcp_retry/build_b failed with provider.capacity",
+            "retry_delta": "retry after runtime retry guard repair",
+        },
     )
     mcp_cancel = mcp_workflow.tool_praxis_workflow(
         {"action": "cancel", "run_id": "dispatch_mcp_cancel"},
@@ -587,11 +647,16 @@ def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monk
         {"action": "repair", "run_id": "dispatch_mcp_repair"},
     )
     api_cancel_response = rest.cancel_queue_job("42")
-    monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
+    monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: retry_guard_conn)
     cli_retry_stdout = StringIO()
     with redirect_stdout(cli_retry_stdout):
         cli_retry_exit = workflow_cli.cmd_retry(
-            SimpleNamespace(run_id="dispatch_cli_retry", label="build_c")
+            SimpleNamespace(
+                run_id="dispatch_cli_retry",
+                label="build_c",
+                previous_failure="dispatch_cli_retry/build_c failed with provider.capacity",
+                retry_delta="retry after runtime retry guard repair",
+            )
         )
     cli_retry = json.loads(cli_retry_stdout.getvalue())
     cli_stdout = StringIO()
@@ -604,7 +669,14 @@ def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monk
     cli_repair = json.loads(cli_repair_stdout.getvalue())
     legacy_retry_stdout = StringIO()
     legacy_retry_exit = workflow_commands._retry_command(
-        ["dispatch_legacy_retry", "build_d"],
+        [
+            "dispatch_legacy_retry",
+            "build_d",
+            "--previous-failure",
+            "dispatch_legacy_retry/build_d failed with provider.capacity",
+            "--retry-delta",
+            "retry after runtime retry guard repair",
+        ],
         stdout=legacy_retry_stdout,
     )
     legacy_retry = json.loads(legacy_retry_stdout.getvalue())
@@ -738,7 +810,7 @@ def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monk
             "requested_by_kind": "chat",
             "requested_by_ref": "chat.workspace",
             "idempotency_key": recorder.request_calls[0]["idempotency_key"],
-            "payload": {"run_id": "dispatch_chat_retry", "label": "build_a"},
+            "payload": _RetryGuardConn.payload_for("dispatch_chat_retry", "build_a"),
         },
         {
             "command_type": "workflow.cancel",
@@ -756,7 +828,7 @@ def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monk
             "requested_by_ref": "praxis_workflow.retry",
             "approved_by": "mcp.praxis_workflow.retry",
             "idempotency_key": recorder.execute_calls[0]["idempotency_key"],
-            "payload": {"run_id": "dispatch_mcp_retry", "label": "build_b"},
+            "payload": _RetryGuardConn.payload_for("dispatch_mcp_retry", "build_b"),
         },
         {
             "command_type": "workflow.cancel",
@@ -787,8 +859,8 @@ def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monk
             "requested_by_kind": "cli",
             "requested_by_ref": "workflow_cli.retry",
             "approved_by": "cli.workflow.retry",
-            "idempotency_key": "workflow.retry.cli.dispatch_cli_retry.build_c",
-            "payload": {"run_id": "dispatch_cli_retry", "label": "build_c"},
+            "idempotency_key": recorder.execute_calls[4]["idempotency_key"],
+            "payload": _RetryGuardConn.payload_for("dispatch_cli_retry", "build_c"),
         },
         {
             "command_type": "workflow.cancel",
@@ -811,8 +883,8 @@ def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monk
             "requested_by_kind": "cli",
             "requested_by_ref": "workflow_cli.retry",
             "approved_by": "cli.workflow.retry",
-            "idempotency_key": "workflow.retry.cli.dispatch_legacy_retry.build_d",
-            "payload": {"run_id": "dispatch_legacy_retry", "label": "build_d"},
+            "idempotency_key": recorder.execute_calls[7]["idempotency_key"],
+            "payload": _RetryGuardConn.payload_for("dispatch_legacy_retry", "build_d"),
         },
         {
             "command_type": "workflow.cancel",
@@ -960,6 +1032,8 @@ def test_legacy_cli_retry_frontdoor_delegates_to_the_bus_backed_cli(monkeypatch)
     def _fake_cmd_retry(args):
         captured["run_id"] = args.run_id
         captured["label"] = args.label
+        captured["previous_failure"] = args.previous_failure
+        captured["retry_delta"] = args.retry_delta
         print(
             json.dumps(
                 {
@@ -978,12 +1052,24 @@ def test_legacy_cli_retry_frontdoor_delegates_to_the_bus_backed_cli(monkeypatch)
     monkeypatch.setattr(workflow_cli, "cmd_retry", _fake_cmd_retry)
 
     stdout = StringIO()
-    exit_code = workflow_commands._retry_command(["dispatch_legacy_retry", "build_x"], stdout=stdout)
+    exit_code = workflow_commands._retry_command(
+        [
+            "dispatch_legacy_retry",
+            "build_x",
+            "--previous-failure",
+            "receipt-backed failure",
+            "--retry-delta",
+            "changed condition",
+        ],
+        stdout=stdout,
+    )
     result = json.loads(stdout.getvalue())
 
     assert exit_code == 0
     assert captured["run_id"] == "dispatch_legacy_retry"
     assert captured["label"] == "build_x"
+    assert captured["previous_failure"] == "receipt-backed failure"
+    assert captured["retry_delta"] == "changed condition"
     assert result == {
         "run_id": "dispatch_legacy_retry",
         "label": "build_x",

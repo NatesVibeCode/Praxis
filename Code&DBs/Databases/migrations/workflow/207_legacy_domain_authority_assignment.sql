@@ -80,7 +80,7 @@ INSERT INTO data_dictionary_objects (
     (
         'authority.objects.domain_summary',
         'List authority domain assignment summary',
-        'command',
+        'query',
         'Query operation for domain-ranked legacy CQRS adoption state.',
         '{"migration":"207_legacy_domain_authority_assignment.sql"}'::jsonb,
         '{"authority_domain_ref":"authority.cqrs"}'::jsonb
@@ -134,7 +134,7 @@ INSERT INTO authority_object_registry (
     ),
     (
         'operation.authority.objects.domain_summary',
-        'command',
+        'query',
         'authority.objects.domain_summary',
         NULL,
         'authority.cqrs',

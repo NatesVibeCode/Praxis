@@ -25,7 +25,12 @@ from runtime.host_resource_admission import (
     HostResourceCapacityError,
     hold_host_resources_for_sandbox,
 )
-from runtime.sandbox_runtime import SandboxRuntime, derive_sandbox_identity
+from runtime.sandbox_runtime import (
+    SandboxRuntime,
+    derive_sandbox_identity,
+    _execution_shard_paths,
+    _path_matches_filter,
+)
 from runtime.workflow.mcp_bridge import (
     augment_cli_command_for_workflow_mcp,
     workflow_mcp_workspace_overlays,
@@ -54,6 +59,16 @@ _PROVIDER_SLOT_BYPASS: ContextVar[bool] = ContextVar(
     "workflow_provider_slot_bypass",
     default=False,
 )
+
+
+class WorkflowMcpSessionTokenError(RuntimeError):
+    """Raised when workflow MCP tools were requested but auth could not be minted."""
+
+    reason_code = "workflow_mcp.session_token_unavailable"
+
+    def __init__(self, message: str, *, details: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.details = details
 
 
 def _env_flag_enabled(name: str, *, default: bool) -> bool:
@@ -108,15 +123,27 @@ def _sanitize_base_env() -> dict[str, str]:
     return env
 
 
-def _ripgrep_config_for_workdir(workdir: str) -> str | None:
+def _ripgrep_config_for_workdir(
+    workdir: str,
+    *,
+    execution_bundle: dict[str, Any] | None = None,
+) -> str | None:
     current = Path(workdir).resolve()
+    shard_filter = _execution_shard_paths({"execution_bundle": execution_bundle or {}})
     for directory in (current, *current.parents):
         candidate = directory / ".ripgreprc"
         if candidate.is_file():
             try:
-                return os.path.relpath(candidate, current)
+                relpath = os.path.relpath(candidate, current)
             except ValueError:
-                return str(candidate)
+                relpath = str(candidate)
+            if shard_filter and (
+                relpath.startswith("..")
+                or os.path.isabs(relpath)
+                or not _path_matches_filter(relpath, shard_filter)
+            ):
+                return None
+            return relpath
         if (directory / ".git").exists():
             break
     return None
@@ -198,13 +225,35 @@ def _build_execution_env(
                         workflow_id=str(execution_bundle.get("workflow_id") or "").strip() or None,
                         job_label=str(execution_bundle.get("job_label") or "").strip(),
                         allowed_tools=[str(name) for name in mcp_tool_names],
+                        source_refs=[
+                            str(ref)
+                            for ref in execution_bundle.get("source_refs", [])
+                            if str(ref).strip()
+                        ]
+                        if isinstance(execution_bundle.get("source_refs"), list)
+                        else [],
+                        access_policy=execution_bundle.get("access_policy")
+                        if isinstance(execution_bundle.get("access_policy"), dict)
+                        else {},
                         agent_slug=provider_slug,
                     )
-                except Exception:
-                    # Token minting is non-fatal: fallback is the legacy
-                    # per-provider MCP path (if the provider has one). Worker
-                    # logs the exception via the standard execution receipt.
-                    pass
+                except Exception as exc:
+                    raise WorkflowMcpSessionTokenError(
+                        (
+                            "workflow MCP session token minting failed; refusing "
+                            "legacy MCP fallback"
+                        ),
+                        details={
+                            "reason_code": WorkflowMcpSessionTokenError.reason_code,
+                            "provider_slug": provider_slug,
+                            "run_id": str(execution_bundle.get("run_id") or ""),
+                            "workflow_id": str(execution_bundle.get("workflow_id") or ""),
+                            "job_label": str(execution_bundle.get("job_label") or ""),
+                            "allowed_tools": [str(name) for name in mcp_tool_names],
+                            "cause_type": type(exc).__name__,
+                            "cause": str(exc),
+                        },
+                    ) from exc
         skill_refs = execution_bundle.get("skill_refs")
         if isinstance(skill_refs, list) and skill_refs:
             sandbox_env[_ALLOWED_SKILLS_ENV] = ",".join(str(name) for name in skill_refs)
@@ -221,7 +270,10 @@ def _build_execution_env(
             sandbox_env["HOME"] = os.path.expanduser("~")
     sandbox_env["PYTHONPATH"] = str(workflow_root())
     sandbox_env["PATH"] = env["PATH"]
-    ripgrep_config = _ripgrep_config_for_workdir(workdir)
+    ripgrep_config = _ripgrep_config_for_workdir(
+        workdir,
+        execution_bundle=execution_bundle,
+    )
     if ripgrep_config:
         sandbox_env["RIPGREP_CONFIG_PATH"] = ripgrep_config
     return sandbox_env
@@ -361,6 +413,18 @@ def _host_resource_admission_failure(exc: HostResourceAdmissionError) -> dict[st
         "stderr": str(exc),
         "error_code": exc.reason_code,
         "host_resource_admission": exc.to_dict(),
+    }
+
+
+def _workflow_mcp_session_token_failure(exc: WorkflowMcpSessionTokenError) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": str(exc),
+        "error_code": exc.reason_code,
+        "reason_code": exc.reason_code,
+        "workflow_mcp_session": dict(exc.details),
     }
 
 
@@ -654,11 +718,14 @@ def execute_cli(
         if not acquired:
             return _provider_capacity_failure(provider_slug)
 
-        env = _build_execution_env(
-            agent_config,
-            workdir=workdir,
-            execution_bundle=execution_bundle,
-        )
+        try:
+            env = _build_execution_env(
+                agent_config,
+                workdir=workdir,
+                execution_bundle=execution_bundle,
+            )
+        except WorkflowMcpSessionTokenError as exc:
+            return _workflow_mcp_session_token_failure(exc)
 
         stdin_text = prompt
         if getattr(agent_config, "wrapper_command", None):
@@ -838,11 +905,14 @@ def execute_api(
         if not acquired:
             return _provider_capacity_failure(provider_slug)
 
-        env = _build_execution_env(
-            agent_config,
-            workdir=resolved_workdir,
-            execution_bundle=execution_bundle,
-        )
+        try:
+            env = _build_execution_env(
+                agent_config,
+                workdir=resolved_workdir,
+                execution_bundle=execution_bundle,
+            )
+        except WorkflowMcpSessionTokenError as exc:
+            return _workflow_mcp_session_token_failure(exc)
         selected_api_key_env = _resolve_api_key_env_name(provider_slug, env)
         model_slug = str(getattr(agent_config, "model", "") or "").strip()
         max_output_tokens = int(getattr(agent_config, "max_output_tokens", 4096) or 4096)

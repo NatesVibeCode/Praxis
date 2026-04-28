@@ -33,6 +33,7 @@ from runtime.workflow.execution_bundle import (
     build_execution_bundle,
     render_execution_bundle,
 )
+from runtime.workflow.artifact_contracts import infer_artifact_write_scope
 from runtime.workflow.decision_context import (
     explicit_authority_domains_for_job,
     resolve_job_decision_pack,
@@ -399,7 +400,10 @@ def _normalized_job_write_scope(job: dict[str, object]) -> list[str]:
         scoped = _normalize_paths(scope.get("write"))
         if scoped:
             return scoped
-    return _normalize_paths(job.get("write"))
+    write_scope = _normalize_paths(job.get("write"))
+    if write_scope:
+        return write_scope
+    return infer_artifact_write_scope(job)
 
 
 def _normalized_job_read_scope(job: dict[str, object]) -> list[str]:
@@ -1058,10 +1062,15 @@ def _capture_submission_baseline_if_required(
 ) -> dict[str, object] | None:
     if not _submission_required_for_bundle(execution_bundle):
         return None
-    write_scope = _normalize_paths(
-        (execution_context_shard or {}).get("write_scope")
-        if isinstance(execution_context_shard, dict)
-        else []
+    shard = execution_context_shard if isinstance(execution_context_shard, dict) else {}
+    bundle_access_policy = (
+        execution_bundle.get("access_policy")
+        if isinstance(execution_bundle, dict)
+        and isinstance(execution_bundle.get("access_policy"), dict)
+        else {}
+    )
+    write_scope = _normalize_paths(shard.get("write_scope")) or _normalize_paths(
+        bundle_access_policy.get("write_scope") if isinstance(bundle_access_policy, dict) else []
     )
     return _submission_capture_baseline_for_job(
         conn,

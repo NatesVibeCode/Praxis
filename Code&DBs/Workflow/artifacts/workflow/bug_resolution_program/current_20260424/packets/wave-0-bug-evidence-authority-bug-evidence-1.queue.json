@@ -31,6 +31,17 @@
       "label": "Plan bug_evidence packet",
       "agent": "openai/gpt-5.4-mini",
       "task_type": "review",
+      "read_scope": [
+        "AGENTS.md",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424",
+        "Code&DBs/Workflow/runtime",
+        "Code&DBs/Workflow/surfaces",
+        "Code&DBs/Workflow/storage",
+        "Code&DBs/Workflow/tests"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-0-bug-evidence-authority-bug-evidence-1/PLAN.md"
+      ],
       "prefer_cost": true,
       "prompt": "Orient from Praxis.db standing orders first. Then use praxis workflow discover/recall as needed to plan this packet.\n\nBugs in scope:\n- BUG-175EB9F3 [P1/ARCHITECTURE]: Bug tracking and resolution lifecycle is spread across runtime, surfaces, scripts, evidence, and packet artifacts\n- BUG-1D9FAF57 [P1/ARCHITECTURE]: [hygiene-2026-04-22/bug-evidence] Bug file action accepts underlinked rows despite evidence authority requirement\n- BUG-1DBACCD8 [P1/ARCHITECTURE]: [hygiene-2026-04-22/db-authority] Bug surface and documented Postgres fallback read different bug tables\n- BUG-9B812B32 [P1/ARCHITECTURE]: [hygiene-2026-04-23/operation-receipts] Operation catalog execution receipts are response decoration instead of atomic durable proof\n- BUG-A84383D1 [P2/RUNTIME]: [hygiene-2026-04-23/reload-workaround-authority] praxis_reload mutates live process state without durable operational receipt\n\nWrite Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-0-bug-evidence-authority-bug-evidence-1/PLAN.md with: authority model, files to read, files allowed to change, verification path, stop boundary, and per-bug intended outcome. Do not edit code in this job.",
       "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-0-bug-evidence-authority-bug-evidence-1/PLAN.md"
@@ -40,6 +51,21 @@
       "label": "Execute bug_evidence packet",
       "agent": "openai/gpt-5.4",
       "task_type": "refactor",
+      "read_scope": [
+        "AGENTS.md",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424",
+        "Code&DBs/Workflow/runtime",
+        "Code&DBs/Workflow/surfaces",
+        "Code&DBs/Workflow/storage",
+        "Code&DBs/Workflow/tests"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-0-bug-evidence-authority-bug-evidence-1/EXECUTION.md",
+        "Code&DBs/Workflow/runtime",
+        "Code&DBs/Workflow/surfaces",
+        "Code&DBs/Workflow/storage",
+        "Code&DBs/Workflow/tests"
+      ],
       "prefer_cost": false,
       "depends_on": [
         "plan_packet"
@@ -55,6 +81,18 @@
       "label": "Verify and resolve bug_evidence packet",
       "agent": "openai/gpt-5.4-mini",
       "task_type": "test",
+      "read_scope": [
+        "AGENTS.md",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424",
+        "Code&DBs/Workflow/runtime",
+        "Code&DBs/Workflow/surfaces",
+        "Code&DBs/Workflow/storage",
+        "Code&DBs/Workflow/tests",
+        "scripts/test.sh"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-0-bug-evidence-authority-bug-evidence-1/CLOSEOUT.md"
+      ],
       "prefer_cost": true,
       "depends_on": [
         "execute_packet"

@@ -5,7 +5,6 @@ Exercises the action dispatch table (`list`, `describe`, `set_override`,
 """
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
 from typing import Any
 
@@ -114,16 +113,16 @@ def test_clear_override_action_delegates(monkeypatch) -> None:
 
 
 def test_reproject_action_invokes_projector(monkeypatch) -> None:
-    class _FakeProjector:
-        def __init__(self, conn: Any) -> None:
-            pass
-
-        def run(self) -> Any:
-            return SimpleNamespace(ok=True, duration_ms=7.0, error=None)
-
-    fake_module = type(sys)("memory.data_dictionary_projector")
-    fake_module.DataDictionaryProjector = _FakeProjector
-    monkeypatch.setitem(sys.modules, "memory.data_dictionary_projector", fake_module)
+    monkeypatch.setattr(
+        tool_mod,
+        "refresh_data_dictionary_authority",
+        lambda conn: {
+            "ok": True,
+            "duration_ms": 7.0,
+            "error": None,
+            "modules": [{"name": "data_dictionary_projector", "ok": True}],
+        },
+    )
 
     result = tool_praxis_data_dictionary({"action": "reproject"})
     assert result == {
@@ -131,6 +130,7 @@ def test_reproject_action_invokes_projector(monkeypatch) -> None:
         "ok": True,
         "duration_ms": 7.0,
         "error": None,
+        "modules": [{"name": "data_dictionary_projector", "ok": True}],
     }
 
 

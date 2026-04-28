@@ -299,3 +299,50 @@ def test_mcp_bug_tool_returns_structured_error_when_bug_authority_unavailable(
         "error_code": "postgres.authority_unavailable",
         "details": {"operation": "get_bug_tracker"},
     }
+
+
+def test_mcp_bug_tool_marks_database_authority_drift_as_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Tracker:
+        def __init__(self) -> None:
+            self._conn = type(
+                "_Conn",
+                (),
+                {"_database_url": "postgresql://stale.example:5432/praxis"},
+            )()
+
+        def stats(self):
+            return {"total": 1, "open_count": 1}
+
+    class _Subs:
+        def _postgres_env(self):
+            return {
+                "WORKFLOW_DATABASE_URL": "postgresql://live.example:5432/praxis",
+                "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "repo_env:/repo/.env",
+            }
+
+        def get_bug_tracker(self):
+            return _Tracker()
+
+        def get_bug_tracker_mod(self):
+            return _mod
+
+    monkeypatch.setattr(mcp_bugs, "_subs", _Subs())
+
+    payload = mcp_bugs.tool_praxis_bugs({"action": "stats"})
+
+    assert payload["observability_state"] == "degraded"
+    assert payload["warnings"] == [
+        "Resolved workflow DB authority does not match the live surface connection "
+        "fingerprint; treat results as degraded until the surface is rebound to "
+        "the canonical authority."
+    ]
+    assert payload["database_authority"]["status"] == "degraded"
+    assert payload["database_authority"]["authority_source"] == "repo_env:/repo/.env"
+    assert payload["database_authority"]["fingerprint"].startswith("workflow_pool:")
+    assert payload["database_authority"]["observed_fingerprint"].startswith("workflow_pool:")
+    assert (
+        payload["database_authority"]["fingerprint"]
+        != payload["database_authority"]["observed_fingerprint"]
+    )

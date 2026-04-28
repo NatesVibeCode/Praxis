@@ -157,11 +157,19 @@ def test_list_returns_integrations(monkeypatch) -> None:
 def test_reload_returns_synced_count(monkeypatch) -> None:
     stub = _RequestStub(path="/api/integrations/reload", conn=_FakeConn())
     monkeypatch.setattr(
-        "registry.integration_registry_sync.sync_integration_registry",
-        lambda conn: 7,
+        integrations_admin,
+        "sync_registries",
+        lambda conn: (["integration_registry", "connector_registry"], []),
     )
     integrations_admin._handle_reload(stub, "/api/integrations/reload")
-    assert stub.sent == (200, {"synced": 7})
+    assert stub.sent == (
+        200,
+        {
+            "synced": 2,
+            "components": ["integration_registry", "connector_registry"],
+            "failures": [],
+        },
+    )
 
 
 def test_describe_404_when_missing(monkeypatch) -> None:

@@ -52,23 +52,13 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
     apply_ref = _extract_flag_value(args, "--apply-ref")
 
     if mode == "apply":
-        from runtime.setup_wizard import setup_apply_payload
-
-        payload = setup_apply_payload(
-            approved=approved,
-            gate_ref=gate_ref,
-            apply_ref=apply_ref,
-            repo_root=workspace_repo_root(),
-            authority_surface="cli",
-        )
-    elif mode == "apply" and (gate_ref or apply_ref):
         payload = setup_apply_gate_payload(
             gate_ref=gate_ref,
             apply_ref=apply_ref,
             repo_root=workspace_repo_root(),
             approved=approved,
             applied_by="cli_setup_apply",
-            authority_surface="local_bootstrap_diagnostic",
+            authority_surface="cli",
         )
     else:
         payload = setup_payload_for_cli(mode, repo_root=workspace_repo_root(), apply=approved)

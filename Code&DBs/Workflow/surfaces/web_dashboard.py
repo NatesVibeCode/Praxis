@@ -161,13 +161,60 @@ class DashboardAssembler:
         }
 
 
-class LiveDataFeed:
-    """Loads receipt JSON files from a directory and assembles dashboards."""
+def _dashboard_receipt_from_raw(raw: dict) -> dict:
+    """Adapt canonical receipt-store payloads to the legacy dashboard shape."""
 
-    def __init__(self, receipts_dir: str) -> None:
+    status = str(raw.get("status") or "").strip().lower()
+    duration = raw.get("duration", raw.get("duration_seconds"))
+    if duration is None and raw.get("latency_ms") is not None:
+        duration = float(raw.get("latency_ms") or 0) / 1000.0
+    return {
+        **raw,
+        "agent": raw.get("agent") or raw.get("agent_slug") or "unknown",
+        "status": "success" if status in {"success", "succeeded", "passed"} else status,
+        "duration": float(duration or 0.0),
+        "cost": float(raw.get("cost", raw.get("total_cost_usd", 0.0)) or 0.0),
+        "timestamp": raw.get("timestamp") or raw.get("finished_at") or raw.get("started_at") or "",
+        "label": raw.get("label") or raw.get("job_label") or raw.get("node_id") or "",
+        "code": raw.get("code") or raw.get("failure_code") or "",
+    }
+
+
+class LiveDataFeed:
+    """Loads canonical workflow receipts and assembles dashboards."""
+
+    def __init__(
+        self,
+        receipts_dir: str = "",
+        *,
+        receipt_loader: Callable[..., list[dict]] | None = None,
+        allow_directory_fallback: bool = False,
+    ) -> None:
         self._receipts_dir = receipts_dir
+        self._receipt_loader = receipt_loader
+        self._allow_directory_fallback = allow_directory_fallback
 
     def load_receipts(self, since_hours: int = 24) -> list[dict]:
+        if self._allow_directory_fallback and self._receipt_loader is None:
+            return self._load_legacy_directory_receipts(since_hours=since_hours)
+        try:
+            loader = self._receipt_loader or self._load_canonical_receipts
+            return list(loader(since_hours=since_hours))
+        except Exception:
+            if not self._allow_directory_fallback:
+                return []
+        return self._load_legacy_directory_receipts(since_hours=since_hours)
+
+    @staticmethod
+    def _load_canonical_receipts(*, since_hours: int) -> list[dict]:
+        from runtime.receipt_store import list_receipts
+
+        return [
+            _dashboard_receipt_from_raw(record.to_dict())
+            for record in list_receipts(limit=500, since_hours=since_hours)
+        ]
+
+    def _load_legacy_directory_receipts(self, *, since_hours: int) -> list[dict]:
         dirpath = Path(self._receipts_dir)
         if not dirpath.is_dir():
             return []

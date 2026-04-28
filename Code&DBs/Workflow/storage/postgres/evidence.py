@@ -23,7 +23,8 @@ from .validators import PostgresStorageError
 
 _MISSING_LINEAGE_HINT = (
     "row predates the route_identity contract — backfill required to restore "
-    "full lineage; inspect surface continues to render with a sentinel"
+    "full lineage; inspect surface continues to render with a sentinel and "
+    "does not synthesize provenance from row fallback ids"
 )
 _MISSING_LINEAGE_SENTINEL = "missing"
 
@@ -201,9 +202,9 @@ def _route_identity_from_lineage(
             )
         )
         sentinel = RouteIdentity(
-            workflow_id=fallback_workflow_id,
-            run_id=fallback_run_id,
-            request_id=fallback_request_id,
+            workflow_id=_MISSING_LINEAGE_SENTINEL,
+            run_id=_MISSING_LINEAGE_SENTINEL,
+            request_id=_MISSING_LINEAGE_SENTINEL,
             authority_context_ref=_MISSING_LINEAGE_SENTINEL,
             authority_context_digest=_MISSING_LINEAGE_SENTINEL,
             claim_id=_MISSING_LINEAGE_SENTINEL,
@@ -265,9 +266,9 @@ def _route_identity_from_lineage(
         return int(value)
 
     route_identity = RouteIdentity(
-        workflow_id=_required_str("workflow_id", fallback_workflow_id),
-        run_id=_required_str("run_id", fallback_run_id),
-        request_id=_required_str("request_id", fallback_request_id),
+        workflow_id=_required_str("workflow_id", _MISSING_LINEAGE_SENTINEL),
+        run_id=_required_str("run_id", _MISSING_LINEAGE_SENTINEL),
+        request_id=_required_str("request_id", _MISSING_LINEAGE_SENTINEL),
         authority_context_ref=_required_str(
             "authority_context_ref", _MISSING_LINEAGE_SENTINEL
         ),

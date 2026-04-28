@@ -253,6 +253,7 @@ _PRAXIS_READ_TOOLS = frozenset(
         "praxis_health",
         "praxis_status_snapshot",
         "praxis_run",
+        "praxis_next",
     }
 )
 _TOGETHER_TIMESTAMP_JUNK_RE = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)\b")

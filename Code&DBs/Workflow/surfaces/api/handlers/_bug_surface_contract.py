@@ -100,6 +100,88 @@ def _path_like_target_ref(inputs: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _require_discovery_authority(body: Mapping[str, Any]) -> None:
+    discovered_in_run_id = _optional_text(body.get("discovered_in_run_id"))
+    discovered_in_receipt_id = _optional_text(body.get("discovered_in_receipt_id"))
+    if discovered_in_run_id or discovered_in_receipt_id:
+        return
+    raise ValueError(
+        "bug file action requires discovered_in_run_id or discovered_in_receipt_id "
+        "so the bug cannot be filed as an underlinked row"
+    )
+
+
+def bug_surface_database_authority(
+    *,
+    subs: Any | None,
+    bt: Any | None,
+) -> dict[str, Any] | None:
+    """Best-effort authority block for bug-surface responses."""
+
+    from runtime._workflow_database import (
+        workflow_database_authority_payload,
+        workflow_database_authority_payload_from_env,
+    )
+
+    postgres_env = getattr(subs, "_postgres_env", None)
+    env: Mapping[str, str] | None = None
+    if callable(postgres_env):
+        try:
+            raw_env = postgres_env() or {}
+        except Exception:
+            raw_env = {}
+        if isinstance(raw_env, Mapping):
+            env = {str(key): str(value) for key, value in raw_env.items()}
+    observed_database_url = _optional_text(
+        getattr(getattr(bt, "_conn", None), "_database_url", None)
+    )
+    if env is not None:
+        return workflow_database_authority_payload_from_env(
+            env,
+            observed_database_url=observed_database_url,
+        )
+    if observed_database_url:
+        return workflow_database_authority_payload(
+            database_url=observed_database_url,
+            source="live_connection",
+            observed_database_url=observed_database_url,
+        )
+    return None
+
+
+def attach_database_authority(
+    payload: Mapping[str, Any],
+    *,
+    database_authority: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Attach the DB authority block and degrade visibly on fingerprint drift."""
+
+    shaped = dict(payload)
+    if database_authority is None:
+        return shaped
+    authority = dict(database_authority)
+    shaped["database_authority"] = authority
+    if authority.get("status") != "degraded":
+        return shaped
+    warnings = shaped.get("warnings")
+    warning_list: list[Any]
+    if isinstance(warnings, list):
+        warning_list = list(warnings)
+    elif isinstance(warnings, tuple):
+        warning_list = list(warnings)
+    elif warnings in (None, ""):
+        warning_list = []
+    else:
+        warning_list = [warnings]
+    message = _optional_text(authority.get("message"))
+    if message and message not in warning_list:
+        warning_list.append(message)
+    if warning_list:
+        shaped["warnings"] = warning_list
+    shaped["observability_state"] = "degraded"
+    return shaped
+
+
 def annotate_bug_dicts_with_replay_state(
     bt: Any,
     bugs: Sequence[Any],
@@ -220,6 +302,7 @@ def file_bug_payload(
     title = str(body.get("title") or "").strip()
     if not title:
         raise ValueError("title is required to file a bug")
+    _require_discovery_authority(body)
     dry_run = bool(body.get("dry_run") or body.get("preview"))
     category = parse_category(bt_mod, body.get("category")) or bt_mod.BugCategory.OTHER
     resume_ctx = body.get("resume_context")
@@ -658,7 +741,9 @@ def patch_resume_payload(
 __all__ = [
     "annotate_bug_dicts_with_replay_state",
     "attach_evidence_payload",
+    "attach_database_authority",
     "backfill_replay_payload",
+    "bug_surface_database_authority",
     "duplicate_check_payload",
     "file_bug_payload",
     "history_payload",

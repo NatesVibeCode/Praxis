@@ -169,6 +169,16 @@ class _FakeConn:
         if "SELECT current_state" in query and "FROM workflow_runs" in query:
             state = self.existing_run_states.get(args[0])
             return [{"current_state": state}] if state else []
+        if "SELECT id, label, attempt, status" in query and "FROM workflow_jobs" in query:
+            row = self.existing_jobs.get((args[0], args[1]))
+            if row and row.get("status") in {"failed", "dead_letter", "cancelled"}:
+                return [{
+                    "id": row.get("id"),
+                    "label": row.get("label", ""),
+                    "attempt": row.get("attempt", 0),
+                    "status": row.get("status", ""),
+                }]
+            return []
         if "SELECT id, prompt, agent_slug, resolved_agent, status FROM workflow_jobs" in query:
             row = self.existing_jobs.get((args[0], args[1]))
             return [row] if row else []
@@ -3595,6 +3605,11 @@ def test_retry_job_records_dispatch_retry_idempotency(monkeypatch, caplog):
         "INSERT INTO idempotency_ledger" in query and args[0] == "workflow.retry"
         for query, args in conn.queries
     )
+    retry_ledger = [
+        args for query, args in conn.queries
+        if "INSERT INTO idempotency_ledger" in query and args[0] == "workflow.retry"
+    ]
+    assert retry_ledger[0][1] == "dispatch_test:build_a:retry:failed:2"
     retry_updates = [
         query for query, args in conn.queries
         if "UPDATE workflow_jobs" in query and "SET status = 'ready'" in query and args == ("dispatch_test", "build_a")
@@ -4672,6 +4687,46 @@ def test_recompute_workflow_run_state_backfills_start_time_for_terminal_runs():
     ]
     assert event_inserts == ["workflow.failed", "run.failed"]
     assert any(query.startswith("SELECT pg_notify('run_complete', $1)") for query, _ in conn.queries)
+
+
+def test_recompute_workflow_run_state_can_reopen_terminal_run_for_retry():
+    class _RecomputeRetryConn:
+        def __init__(self) -> None:
+            self.queries: list[tuple[str, tuple]] = []
+
+        def execute(self, query: str, *args):
+            self.queries.append((query, args))
+            normalized = " ".join(query.split())
+            if "FROM workflow_jobs" in normalized and "GROUP BY status" in normalized:
+                return [{"status": "succeeded", "count": 1}, {"status": "ready", "count": 1}]
+            if normalized.startswith("SELECT current_state, workflow_id, request_envelope, started_at, admitted_at, requested_at FROM workflow_runs"):
+                return [{
+                    "current_state": "failed",
+                    "workflow_id": "workflow.retry",
+                    "request_envelope": {},
+                    "started_at": datetime(2026, 4, 8, 18, 0, tzinfo=timezone.utc),
+                    "admitted_at": datetime(2026, 4, 8, 17, 59, tzinfo=timezone.utc),
+                    "requested_at": datetime(2026, 4, 8, 17, 58, tzinfo=timezone.utc),
+                }]
+            if normalized.startswith("UPDATE workflow_runs"):
+                return []
+            raise AssertionError(query)
+
+    blocked_conn = _RecomputeRetryConn()
+    assert unified_workflow._recompute_workflow_run_state(blocked_conn, "run-1") == "failed"
+    assert not any(query.startswith("UPDATE workflow_runs") for query, _ in blocked_conn.queries)
+
+    reopen_conn = _RecomputeRetryConn()
+    assert unified_workflow._recompute_workflow_run_state(
+        reopen_conn,
+        "run-1",
+        allow_terminal_reopen=True,
+    ) == "queued"
+    update_query, update_args = next(
+        (query, args) for query, args in reopen_conn.queries if query.startswith("UPDATE workflow_runs")
+    )
+    assert update_args == ("run-1", "queued", None)
+    assert "finished_at = CASE" in update_query
 
 
 def test_run_worker_loop_starts_job_heartbeat(monkeypatch):

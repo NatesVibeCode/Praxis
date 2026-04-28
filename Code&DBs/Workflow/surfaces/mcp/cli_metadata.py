@@ -22,8 +22,9 @@ def _tool(
     when_not_to_use: str,
     risks: dict[str, Any],
     examples: list[dict[str, Any]],
+    replacement: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    metadata = {
         "surface": surface,
         "tier": tier,
         "recommended_alias": recommended_alias,
@@ -32,6 +33,9 @@ def _tool(
         "risks": risks,
         "examples": examples,
     }
+    if replacement:
+        metadata["replacement"] = replacement
+    return metadata
 
 
 CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
@@ -193,7 +197,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
     "praxis_provider_control_plane": _tool(
         surface="operations",
         tier="stable",
-        recommended_alias=None,
+        recommended_alias="provider-control-plane",
         when_to_use=(
             "Inspect the private provider/job/model matrix, including CLI/API type, cost, version, "
             "runnable state, breaker state, credential state, and removal reasons."
@@ -209,6 +213,28 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "job_type": "compile",
                     "transport_type": "API",
                 },
+            ),
+        ],
+    ),
+    "praxis_provider_availability_refresh": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Refresh provider availability through CQRS before trusting routing or launching "
+            "a proof job. Persists provider_usage probe snapshots and emits a receipt-backed "
+            "provider.availability.refreshed event."
+        ),
+        when_not_to_use=(
+            "Do not use this as a dry-run evaluator and do not fire it repeatedly to hope "
+            "capacity changes. Use it once when provider availability authority is stale or unknown."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example("Refresh admitted provider availability", {"max_concurrency": 4}),
+            _example(
+                "Refresh one provider",
+                {"provider_slugs": ["openai"], "max_concurrency": 1},
             ),
         ],
     ),
@@ -248,6 +274,79 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Read open assignment matrix", {"open_only": True}),
             _example("Read frontier work", {"recommended_model_tier": "frontier"}),
             _example("Read one audit group", {"audit_group": "A_provider_catalog_authority"}),
+        ],
+    ),
+    "praxis_execution_truth": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use=(
+            "Check whether workflow work is actually firing by combining status, run views, "
+            "and causal trace evidence."
+        ),
+        when_not_to_use="Do not use it to launch, retry, or mutate workflow state.",
+        risks={"default": "read"},
+        examples=[
+            _example("Read platform execution truth", {"since_hours": 24}),
+            _example(
+                "Read one run with trace proof",
+                {"run_id": "run_abc123", "include_trace": True},
+            ),
+        ],
+    ),
+    "praxis_next_work": _tool(
+        surface="operator",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use=(
+            "Choose the next bounded work item from refactor heatmap, bug triage, "
+            "assignment matrix, and runtime status."
+        ),
+        when_not_to_use="Do not use it to resolve bugs or mutate roadmap authority.",
+        risks={"default": "read"},
+        examples=[
+            _example("Read top next work", {"limit": 10}),
+            _example("Read more bug-heavy work", {"bug_limit": 50, "work_limit": 20}),
+        ],
+    ),
+    "praxis_provider_route_truth": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use=(
+            "Check whether a provider/model/job route is runnable or blocked, including "
+            "control state and removal reasons."
+        ),
+        when_not_to_use="Do not use it to change access; use praxis_access_control or praxis_circuits.",
+        risks={"default": "read"},
+        examples=[
+            _example("Read all route truth", {"runtime_profile_ref": "praxis"}),
+            _example(
+                "Read compile API route truth",
+                {"job_type": "compile", "transport_type": "API"},
+            ),
+        ],
+    ),
+    "praxis_operation_forge": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Preview the CQRS operation/tool registration path before adding a new "
+            "operation or MCP wrapper."
+        ),
+        when_not_to_use="Do not use it as a mutation surface; it prepares the canonical payload.",
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Preview a query operation",
+                {
+                    "operation_name": "operator.example_truth",
+                    "handler_ref": "runtime.operations.queries.operator_composed.handle_query_example_truth",
+                    "input_model_ref": "runtime.operations.queries.operator_composed.QueryExampleTruth",
+                    "authority_domain_ref": "authority.workflow_runs",
+                },
+            ),
         ],
     ),
     "praxis_connector": _tool(
@@ -635,6 +734,29 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "plan_name": "migration-compose-ab",
                     "concurrency": 2,
                     "max_workers": 4,
+                },
+            ),
+        ],
+    ),
+    "praxis_promote_experiment_winner": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Promote the winning compose_experiment leg back into the canonical task_type_routing row "
+            "after you have inspected the experiment receipt and picked a winner."
+        ),
+        when_not_to_use=(
+            "Do not use it without a source compose_experiment receipt and config index. "
+            "Do not use it to auto-apply provider/model identity changes; those stay visible only in the diff."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Promote a winning experiment leg",
+                {
+                    "source_experiment_receipt_id": "receipt:compose-experiment:1234",
+                    "source_config_index": 0,
                 },
             ),
         ],
@@ -1135,6 +1257,20 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "shape": "context",
                     "context_lines": 3,
                 },
+            ),
+        ],
+    ),
+    "praxis_next_actions": _tool(
+        surface="operator",
+        tier="stable",
+        recommended_alias="next-actions",
+        when_to_use="Legacy alias only; prefer praxis_next(action='next').",
+        when_not_to_use="Do not build new workflows against this name.",
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Legacy next-actions call",
+                {"intent": "Fix workflow retries so every retry declares the failed receipt and retry delta."},
             ),
         ],
     ),

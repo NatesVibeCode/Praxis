@@ -61,6 +61,33 @@ BEGIN
 END;
 $$;
 
+INSERT INTO data_dictionary_objects (
+    object_kind,
+    label,
+    category,
+    summary,
+    origin_ref,
+    metadata
+) VALUES (
+    'table:private_provider_control_plane_snapshot',
+    'Private provider control plane snapshot table',
+    'table',
+    'Table-backed private provider control-plane projection with credential availability fields.',
+    '{"source":"migration.271_provider_control_plane_credential_columns"}'::jsonb,
+    '{
+        "authority_domain_ref": "authority.provider_onboarding",
+        "read_model_object_ref": "table.public.private_provider_control_plane_snapshot",
+        "projection_ref": "projection.private_provider_control_plane_snapshot"
+    }'::jsonb
+)
+ON CONFLICT (object_kind) DO UPDATE SET
+    label = EXCLUDED.label,
+    category = EXCLUDED.category,
+    summary = EXCLUDED.summary,
+    origin_ref = EXCLUDED.origin_ref,
+    metadata = EXCLUDED.metadata,
+    updated_at = now();
+
 INSERT INTO data_dictionary_entries (
     object_kind,
     field_path,

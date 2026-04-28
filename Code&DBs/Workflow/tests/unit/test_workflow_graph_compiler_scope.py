@@ -19,6 +19,25 @@ def test_job_write_scope_infers_artifact_paths_from_output_contract() -> None:
     ]
 
 
+def test_job_write_scope_infers_repo_relative_artifact_paths() -> None:
+    job = {
+        "label": "plan_packet",
+        "prompt": (
+            "Write Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/"
+            "current_20260424/wave-0-provider-routing/PLAN.md."
+        ),
+        "verify_command": (
+            "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/"
+            "current_20260424/wave-0-provider-routing/PLAN.md"
+        ),
+    }
+
+    assert _job_write_scope(job) == [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/"
+        "current_20260424/wave-0-provider-routing/PLAN.md"
+    ]
+
+
 def test_job_write_scope_does_not_infer_code_paths_from_prompt() -> None:
     job = {
         "label": "code_edit",

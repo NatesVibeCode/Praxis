@@ -283,7 +283,11 @@ def claim_one(conn: SyncPostgresConnection, worker_id: str) -> dict | None:
             resolved_agent,
         )
         if rows:
-            _recompute_workflow_run_state(conn, str(rows[0]["run_id"]))
+            _recompute_workflow_run_state(
+                conn,
+                str(rows[0]["run_id"]),
+                allow_terminal_reopen=True,
+            )
             return dict(rows[0])
     return None
 
@@ -295,7 +299,11 @@ def mark_running(conn: SyncPostgresConnection, job_id: int) -> None:
     )
     run_row = conn.execute("SELECT run_id FROM workflow_jobs WHERE id = $1", job_id)
     if run_row:
-        _recompute_workflow_run_state(conn, str(run_row[0]["run_id"]))
+        _recompute_workflow_run_state(
+            conn,
+            str(run_row[0]["run_id"]),
+            allow_terminal_reopen=True,
+        )
 
 
 def complete_job(

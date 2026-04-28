@@ -58,6 +58,13 @@ def test_normalize_tool_name_canonical_passthrough() -> None:
         assert trigger_check._normalize_tool_name(name) == name
 
 
+def test_infer_harness_from_native_tool_names() -> None:
+    assert trigger_check._infer_harness("Bash") == "claude_code"
+    assert trigger_check._infer_harness("local_shell") == "codex_cli"
+    assert trigger_check._infer_harness("run_shell_command") == "gemini_cli"
+    assert trigger_check._infer_harness("praxis_search") == ""
+
+
 def test_normalize_tool_name_unknown_passthrough() -> None:
     """Unknown tool names pass through unchanged — no normalization."""
     for name in ("praxis_search", "some_random_tool", ""):
@@ -117,6 +124,32 @@ def test_check_matches_via_codex_alias(tmp_path: Path, monkeypatch: pytest.Monke
 
     matches = trigger_check.check("local_shell", {"command": "docker restart praxis-x"})
     assert len(matches) == 1
+
+
+def test_harness_scoped_trigger_matches_only_declared_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::claude-only",
+                "title": "Claude-only standing order",
+                "match": [
+                    {
+                        "harness": "claude_code",
+                        "tool": "Bash",
+                        "regex": r"^\s*praxis\s+workflow\b",
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    assert len(trigger_check.check("Bash", {"command": "praxis workflow bugs list"})) == 1
+    assert trigger_check.check("local_shell", {"command": "praxis workflow bugs list"}) == []
+    assert trigger_check.check("run_shell_command", {"command": "praxis workflow bugs list"}) == []
 
 
 def test_check_file_glob_via_gemini_write_file_alias(

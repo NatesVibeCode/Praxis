@@ -283,24 +283,34 @@ class SystemEventsCleanupModule(HeartbeatModule):
             rows = self._conn.execute(
                 "SELECT to_regprocedure('cleanup_system_events(integer)') AS procedure_name"
             )
-        except Exception:
+        except Exception as exc:
             self._cleanup_function_available = False
-            return False
+            raise RuntimeError(
+                f"maintenance_function_probe_failed: cleanup_system_events(integer): {exc}"
+            ) from exc
         procedure_name = rows[0]["procedure_name"] if rows else None
         self._cleanup_function_available = procedure_name is not None
         return self._cleanup_function_available
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
-        if not self._has_cleanup_function():
-            return _ok(self.name, t0)
         try:
+            if not self._has_cleanup_function():
+                return _fail(
+                    self.name,
+                    t0,
+                    "maintenance_function_unavailable: cleanup_system_events(integer)",
+                )
             self._conn.execute("SELECT cleanup_system_events(30) as deleted")
         except Exception as e:
             if "cleanup_system_events" in str(e) and "does not exist" in str(e):
                 self._cleanup_function_available = False
-                return _ok(self.name, t0)
-            raise
+                return _fail(
+                    self.name,
+                    t0,
+                    "maintenance_function_unavailable: cleanup_system_events(integer)",
+                )
+            return _fail(self.name, t0, str(e))
         return _ok(self.name, t0)
 
 
@@ -322,23 +332,33 @@ class _IdempotencyLedgerReaperModule(HeartbeatModule):
             rows = self._conn.execute(
                 "SELECT to_regprocedure('reap_expired_idempotency_keys()') AS procedure_name"
             )
-        except Exception:
+        except Exception as exc:
             self._reaper_function_available = False
-            return False
+            raise RuntimeError(
+                f"maintenance_function_probe_failed: reap_expired_idempotency_keys(): {exc}"
+            ) from exc
         procedure_name = rows[0]["procedure_name"] if rows else None
         self._reaper_function_available = procedure_name is not None
         return self._reaper_function_available
 
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
-        if not self._has_reaper_function():
-            return _ok(self.name, t0)
         try:
+            if not self._has_reaper_function():
+                return _fail(
+                    self.name,
+                    t0,
+                    "maintenance_function_unavailable: reap_expired_idempotency_keys()",
+                )
             self._conn.execute("SELECT reap_expired_idempotency_keys() AS reaped")
         except Exception as exc:
             if "reap_expired_idempotency_keys" in str(exc) and "does not exist" in str(exc):
                 self._reaper_function_available = False
-                return _ok(self.name, t0)
+                return _fail(
+                    self.name,
+                    t0,
+                    "maintenance_function_unavailable: reap_expired_idempotency_keys()",
+                )
             return _fail(self.name, t0, str(exc))
         return _ok(self.name, t0)
 

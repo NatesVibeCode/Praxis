@@ -120,6 +120,8 @@ def _handle_mcp_post(request: Any, path: str) -> None:
             job_label=str(claims.get("job_label") or "").strip(),
             allowed_tools=allowed_tool_names,
             expires_at=int(claims.get("exp") or 0),
+            source_refs=claims.get("source_refs") or [],
+            access_policy=claims.get("access_policy") or {},
         ):
             try:
                 response = handle_request(

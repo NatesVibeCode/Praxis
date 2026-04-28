@@ -171,3 +171,33 @@ def test_invoke_tool_enforces_allowed_tools_from_workflow_token(monkeypatch: pyt
             },
         }
     ]
+
+
+def test_invoke_tool_rejects_unclamped_router_for_scoped_workflow_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    definition = _definition(name="praxis_query")
+    monkeypatch.setattr(invocation, "get_tool_catalog", lambda: {"praxis_query": definition})
+    monkeypatch.setattr(invocation, "resolve_tool_entry", lambda _name: (lambda **_kw: {"ok": True}, {}))
+    monkeypatch.setattr(
+        invocation,
+        "verify_workflow_mcp_session_token",
+        lambda _token: {
+            "run_id": "run-1",
+            "workflow_id": "wf-1",
+            "job_label": "job-1",
+            "allowed_tools": ["praxis_query"],
+            "source_refs": ["BUG-123"],
+            "access_policy": {"resolved_read_scope": ["Code&DBs/Workflow/runtime/example.py"]},
+            "exp": 9999999999,
+        },
+    )
+
+    with pytest.raises(invocation.ToolInvocationError) as exc_info:
+        invocation.invoke_tool(
+            "praxis_query",
+            {"question": "what is failing?"},
+            workflow_token="signed-token",
+        )
+
+    assert exc_info.value.reason_code == "workflow_mcp.tool_scope_not_enforced"

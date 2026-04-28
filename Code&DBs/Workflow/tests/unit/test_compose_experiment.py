@@ -1,9 +1,9 @@
 """Unit tests for runtime.compose_experiment.
 
-The runner orchestrates parallel ``compose_plan_via_llm`` calls. Tests
-mock that function with synchronous stubs so the matrix logic — config
-validation, ranking, error handling — is exercised without live LLM
-calls or DB connections.
+The runner orchestrates parallel gateway-backed compose calls. Tests mock the
+operation gateway with synchronous stubs so the matrix logic — config
+validation, ranking, error handling — is exercised without live LLM calls or DB
+connections.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import types
 import pytest
 
 from runtime import compose_experiment
+import runtime.operation_catalog_gateway as gateway_mod
 from runtime.compose_experiment import (
     ComposeExperimentReport,
     ComposeExperimentRun,
@@ -40,10 +41,7 @@ def _empty_atoms() -> SuggestedAtoms:
 
 
 class _FakeSubsystems:
-    """Stub subsystems for the runner. Returns a no-op pg conn so the
-    runner's gateway-dispatch branch fails fast and falls back to the
-    direct ``compose_plan_via_llm`` call (which the tests stub via
-    monkeypatch)."""
+    """Stub subsystems for the runner."""
 
     def get_pg_conn(self):
         return object()
@@ -83,6 +81,20 @@ def _make_result(*, ok: bool, packets: int = 0, usage_calls: int = 1) -> Compose
         validation=_empty_validation(),
         plan_packets=[{"label": f"p{i}"} for i in range(packets)],
     )
+
+
+def _gateway_payload(
+    result: ComposeViaLLMResult,
+    *,
+    receipt_id: str = "receipt.child.test",
+) -> dict:
+    payload = result.to_dict()
+    payload["operation_receipt"] = {
+        "receipt_id": receipt_id,
+        "operation_ref": "compose.plan_via_llm",
+        "execution_status": "completed",
+    }
+    return payload
 
 
 def test_normalize_config_flat_legacy_shape():
@@ -187,8 +199,11 @@ def test_run_compose_experiment_fans_out_in_parallel(monkeypatch):
 
     call_log: list[dict] = []
 
-    def stub_compose(intent, *, conn, plan_name=None, why=None,
-                    concurrency=5, hydrate_env=None, llm_overrides=None):
+    def stub_gateway(subsystems, *, operation_name, payload):
+        del subsystems
+        assert operation_name == "compose_plan_via_llm"
+        intent = payload["intent"]
+        llm_overrides = payload["llm_overrides"]
         call_log.append({
             "intent": intent, "overrides": dict(llm_overrides or {}),
         })
@@ -196,9 +211,12 @@ def test_run_compose_experiment_fans_out_in_parallel(monkeypatch):
         # Vary outcome per config so ranking is exercised
         ok = (llm_overrides or {}).get("model_slug") != "broken/v1"
         packets = 2 if ok else 0
-        return _make_result(ok=ok, packets=packets)
+        return _gateway_payload(
+            _make_result(ok=ok, packets=packets),
+            receipt_id=f"receipt.child.{len(call_log)}",
+        )
 
-    monkeypatch.setattr(compose_experiment, "compose_plan_via_llm", stub_compose)
+    monkeypatch.setattr(gateway_mod, "execute_operation_from_subsystems", stub_gateway)
 
     started = time.monotonic()
     report = run_compose_experiment(
@@ -226,16 +244,17 @@ def test_run_compose_experiment_fans_out_in_parallel(monkeypatch):
 
 
 def test_run_compose_experiment_captures_exceptions_per_run(monkeypatch):
-    """A handler that raises in one worker should NOT poison other runs."""
+    """A gateway failure in one worker should NOT poison other runs."""
 
-    def stub_compose(intent, *, conn, plan_name=None, why=None,
-                    concurrency=5, hydrate_env=None, llm_overrides=None):
+    def stub_gateway(subsystems, *, operation_name, payload):
+        del subsystems, operation_name
+        llm_overrides = payload["llm_overrides"]
         slug = (llm_overrides or {}).get("model_slug")
         if slug == "raise/v1":
             raise RuntimeError("synthetic kaboom")
-        return _make_result(ok=True, packets=1)
+        return _gateway_payload(_make_result(ok=True, packets=1))
 
-    monkeypatch.setattr(compose_experiment, "compose_plan_via_llm", stub_compose)
+    monkeypatch.setattr(gateway_mod, "execute_operation_from_subsystems", stub_gateway)
 
     report = run_compose_experiment(
         "probe-intent",
@@ -250,10 +269,68 @@ def test_run_compose_experiment_captures_exceptions_per_run(monkeypatch):
     failed = next(r for r in report.runs if r.config_index == 0)
     assert failed.ok is False
     assert "synthetic kaboom" in (failed.error or "")
+    assert "gateway.dispatch_failed" in (failed.error or "")
     # Other run still succeeded.
     succeeded = next(r for r in report.runs if r.config_index == 1)
     assert succeeded.ok is True
     assert succeeded.result is not None and succeeded.result.ok is True
+    assert succeeded.child_receipt_id == "receipt.child.test"
+
+
+def test_gateway_failure_fails_closed_without_direct_compose(monkeypatch):
+    """Gateway authority is mandatory; no direct compose fallback is allowed."""
+
+    direct_calls: list[str] = []
+
+    def direct_compose(*_args, **_kwargs):
+        direct_calls.append("called")
+        raise AssertionError("direct compose fallback must not run")
+
+    def broken_gateway(*_args, **_kwargs):
+        raise LookupError("operation binding missing")
+
+    import runtime.compose_plan_via_llm as compose_plan_mod
+
+    monkeypatch.setattr(compose_plan_mod, "compose_plan_via_llm", direct_compose)
+    monkeypatch.setattr(gateway_mod, "execute_operation_from_subsystems", broken_gateway)
+
+    report = run_compose_experiment(
+        "probe-intent",
+        configs=[{"model_slug": "good/v1"}],
+        subsystems=_FakeSubsystems(),
+        max_workers=1,
+    )
+
+    run = report.runs[0]
+    assert direct_calls == []
+    assert run.ok is False
+    assert run.result is None
+    assert run.child_receipt_id is None
+    assert "gateway.dispatch_failed" in (run.error or "")
+    assert report.notes
+    assert "did not run via direct fallback" in report.notes[-1]
+
+
+def test_missing_child_receipt_fails_child(monkeypatch):
+    """A useful payload without durable receipt proof is not success."""
+
+    def receiptless_gateway(*_args, **_kwargs):
+        return _make_result(ok=True, packets=1).to_dict()
+
+    monkeypatch.setattr(gateway_mod, "execute_operation_from_subsystems", receiptless_gateway)
+
+    report = run_compose_experiment(
+        "probe-intent",
+        configs=[{"model_slug": "good/v1"}],
+        subsystems=_FakeSubsystems(),
+        max_workers=1,
+    )
+
+    run = report.runs[0]
+    assert run.ok is False
+    assert run.result is None
+    assert run.child_receipt_id is None
+    assert "gateway.receipt_missing" in (run.error or "")
 
 
 def test_run_compose_experiment_rejects_empty_configs():
@@ -276,11 +353,10 @@ def test_report_to_dict_shape(monkeypatch):
     """The serialized report carries enough to render a comparison
     table without needing the in-memory dataclass."""
 
-    def stub_compose(intent, *, conn, plan_name=None, why=None,
-                    concurrency=5, hydrate_env=None, llm_overrides=None):
-        return _make_result(ok=True, packets=2)
+    def stub_gateway(*_args, **_kwargs):
+        return _gateway_payload(_make_result(ok=True, packets=2))
 
-    monkeypatch.setattr(compose_experiment, "compose_plan_via_llm", stub_compose)
+    monkeypatch.setattr(gateway_mod, "execute_operation_from_subsystems", stub_gateway)
 
     report = run_compose_experiment(
         "intent",
@@ -293,6 +369,7 @@ def test_report_to_dict_shape(monkeypatch):
     assert isinstance(d["summary_table"], list) and len(d["summary_table"]) == 1
     assert isinstance(d["ranked_summary"], list) and len(d["ranked_summary"]) == 1
     row = d["summary_table"][0]
+    assert row["child_receipt_id"] == "receipt.child.test"
     # Matrix rows carry the comprehensive trace shape — top-level
     # convenience keys + grouped detail blocks.
     top_level = ("config", "ok", "wall_seconds", "compose_ok", "reason_code",

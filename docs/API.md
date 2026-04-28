@@ -30,11 +30,12 @@ If it disagrees with runtime output, trust `praxis workflow routes --json` and r
 
 ## All Routes
 
-Public route count: `8`. All route count: `224`.
+Public route count: `8`. All route count: `343`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
 | `GET` | `/` | `internal` | - | root_redirect |
+| `POST` | `/api/access_control` | `internal` | `operations` | access_control |
 | `GET` | `/api/agent-sessions` | `internal` | - | agent_sessions_index_get |
 | `GET` | `/api/atlas.html` | `internal` | - | Send legacy Atlas artifact traffic to the live Atlas surface. |
 | `GET` | `/api/atlas/graph` | `internal` | - | Return the canonical Atlas graph payload for native app rendering. |
@@ -46,12 +47,22 @@ Public route count: `8`. All route count: `224`.
 | `GET` | `/api/audit/plan` | `internal` | - | audit_plan_get |
 | `GET` | `/api/audit/playbook` | `internal` | - | audit_playbook_get |
 | `GET` | `/api/audit/registered` | `internal` | - | audit_registered_get |
+| `GET` | `/api/authority/objects` | `internal` | `operations` | authority.objects.list |
+| `GET` | `/api/authority/objects/adoption` | `internal` | `operations` | authority.objects.adoption |
+| `GET` | `/api/authority/objects/domain-summary` | `internal` | `operations` | authority.objects.domain_summary |
+| `GET` | `/api/authority/objects/drift` | `internal` | `operations` | authority.objects.drift |
+| `POST` | `/api/bug_attach_evidence` | `internal` | `operations` | bug_attach_evidence |
+| `POST` | `/api/bug_file` | `internal` | `operations` | bug_file |
+| `POST` | `/api/bug_patch_resume` | `internal` | `operations` | bug_patch_resume |
+| `POST` | `/api/bug_resolve` | `internal` | `operations` | bug_resolve |
 | `GET` | `/api/bugs` | `internal` | - | bugs_get |
 | `GET` | `/api/bugs/replay-ready` | `internal` | - | bugs_replay_ready_get |
 | `GET` | `/api/catalog` | `internal` | - | Return live catalog items from platform registries + static primitives. |
 | `GET` | `/api/catalog/operations` | `internal` | - | Return DB-backed CQRS operation definitions and source policies. |
 | `GET` | `/api/catalog/review-decisions` | `internal` | - | catalog_review_decisions_get |
 | `POST` | `/api/catalog/review-decisions` | `internal` | - | catalog_review_decisions_post |
+| `POST` | `/api/catalog_operation_register` | `internal` | `operations` | catalog_operation_register |
+| `POST` | `/api/catalog_operation_retire` | `internal` | `operations` | catalog_operation_retire |
 | `GET` | `/api/chat/conversations` | `internal` | - | chat_conversations_get |
 | `POST` | `/api/chat/conversations` | `internal` | - | chat_conversations_post |
 | `GET` | `/api/chat/conversations/{conversation_id}` | `internal` | - | chat_conversation_get |
@@ -60,8 +71,17 @@ Public route count: `8`. All route count: `224`.
 | `POST` | `/api/checkpoints` | `internal` | - | checkpoints_post |
 | `GET` | `/api/checkpoints/{checkpoint_id}` | `internal` | - | checkpoints_detail_get |
 | `POST` | `/api/checkpoints/{checkpoint_id}/approve` | `internal` | - | checkpoints_approve_post |
+| `GET` | `/api/circuits` | `internal` | `operations` | operator.circuit_states |
+| `POST` | `/api/circuits` | `internal` | `operations` | operator.circuit_override |
+| `GET` | `/api/circuits/history` | `internal` | `operations` | operator.circuit_history |
+| `POST` | `/api/cli_auth_doctor` | `internal` | `operations` | cli_auth_doctor |
 | `POST` | `/api/compile/preview` | `internal` | - | compile_preview_post |
+| `POST` | `/api/compile_materialize` | `internal` | `operations` | compile_materialize |
+| `POST` | `/api/compliance.list_receipts` | `internal` | `operations` | compliance.list_receipts |
+| `POST` | `/api/compose_experiment` | `internal` | `operations` | compose_experiment |
+| `POST` | `/api/compose_plan` | `internal` | `operations` | compose_plan |
 | `GET` | `/api/costs` | `internal` | - | Return the cost summary from the Postgres-backed cost tracker. |
+| `POST` | `/api/credential/capture/keychain` | `internal` | `operations` | credential_capture_keychain |
 | `GET` | `/api/dashboard` | `internal` | - | dashboard_get |
 | `GET` | `/api/data-dictionary` | `internal` | - | data_dictionary_list_get |
 | `DELETE` | `/api/data-dictionary/classifications` | `internal` | - | data_dictionary_classifications_clear_delete |
@@ -116,6 +136,9 @@ Public route count: `8`. All route count: `224`.
 | `POST` | `/api/documents` | `internal` | - | documents_post |
 | `POST` | `/api/documents/{doc_id}/attach` | `internal` | - | documents_attach_post |
 | `GET` | `/api/events` | `internal` | - | Return recent platform events from the durable event log. |
+| `POST` | `/api/experiment_promote_winner` | `internal` | `operations` | experiment_promote_winner |
+| `GET` | `/api/feedback/events` | `internal` | `operations` | feedback.list |
+| `POST` | `/api/feedback/events` | `internal` | `operations` | feedback.record |
 | `GET` | `/api/files` | `internal` | - | files_get |
 | `POST` | `/api/files` | `internal` | - | files_post |
 | `DELETE` | `/api/files/{rest_of_path:path}` | `internal` | - | files_path_delete |
@@ -133,6 +156,7 @@ Public route count: `8`. All route count: `224`.
 | `PUT` | `/api/integrations/{integration_id}/secret` | `internal` | - | integrations_secret_put |
 | `POST` | `/api/integrations/{integration_id}/test` | `internal` | - | integrations_test_post |
 | `GET` | `/api/intent/analyze` | `internal` | - | intent_analyze_get |
+| `POST` | `/api/launch_plan` | `internal` | `operations` | launch_plan |
 | `POST` | `/api/launcher/recover` | `internal` | - | Run bounded launcher recovery through the preferred launcher command. |
 | `GET` | `/api/launcher/resolve` | `internal` | - | Return launcher workspace/base-path authority for the global command. |
 | `GET` | `/api/launcher/status` | `internal` | - | launcher_status_get |
@@ -146,6 +170,7 @@ Public route count: `8`. All route count: `224`.
 | `POST` | `/api/manifests/save` | `internal` | - | manifests_save_post |
 | `POST` | `/api/manifests/save-as` | `internal` | - | manifests_save_as_post |
 | `GET` | `/api/manifests/{manifest_id}` | `internal` | - | manifests_get |
+| `POST` | `/api/match_rules.backfill` | `internal` | `operations` | match_rules.backfill |
 | `GET` | `/api/metrics` | `internal` | - | Return the core metrics summary for the last N days. |
 | `GET` | `/api/metrics/heatmap` | `internal` | - | Return the failure code x provider heatmap for the last N days. |
 | `GET` | `/api/metrics/surface-usage` | `internal` | - | Return durable frontdoor surface-usage counters for the last N days. |
@@ -155,6 +180,14 @@ Public route count: `8`. All route count: `224`.
 | `GET` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_get |
 | `POST` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_post |
 | `GET` | `/api/moon/pickers/{rest_of_path:path}` | `internal` | - | moon_pickers_get |
+| `GET` | `/api/object-types` | `internal` | `operations` | object_schema.type_list |
+| `POST` | `/api/object-types` | `internal` | `operations` | object_schema.type_upsert |
+| `DELETE` | `/api/object-types/{type_id}` | `internal` | `operations` | object_schema.type_delete |
+| `GET` | `/api/object-types/{type_id}` | `internal` | `operations` | object_schema.type_get |
+| `PUT` | `/api/object-types/{type_id}` | `internal` | `operations` | object_schema.type_upsert_by_id |
+| `GET` | `/api/object-types/{type_id}/fields` | `internal` | `operations` | object_schema.field_list |
+| `POST` | `/api/object-types/{type_id}/fields` | `internal` | `operations` | object_schema.field_upsert |
+| `DELETE` | `/api/object-types/{type_id}/fields/{field_name}` | `internal` | `operations` | object_schema.field_retire |
 | `GET` | `/api/objects` | `internal` | - | objects_get |
 | `POST` | `/api/objects` | `internal` | - | objects_post |
 | `DELETE` | `/api/objects/delete` | `internal` | - | objects_delete |
@@ -167,7 +200,52 @@ Public route count: `8`. All route count: `224`.
 | `GET` | `/api/observability/platform` | `internal` | - | Return operator-facing platform probe status with lane cues and degraded causes. |
 | `POST` | `/api/operate` | `internal` | - | Call one catalog-backed operator operation through the unified gateway. |
 | `GET` | `/api/operate/catalog` | `internal` | - | Return the unified operator gateway catalog. |
+| `POST` | `/api/operation.evolve_field` | `internal` | `operations` | operation.evolve_field |
+| `POST` | `/api/operator.next` | `internal` | `operations` | operator.next |
+| `POST` | `/api/operator/architecture-policy` | `internal` | `operations` | operator.architecture_policy_record |
+| `GET` | `/api/operator/bug-triage-packet` | `internal` | `operations` | operator.bug_triage_packet |
+| `GET` | `/api/operator/data-dictionary` | `internal` | `operations` | operator.data_dictionary |
+| `POST` | `/api/operator/decision` | `internal` | `operations` | operator.decision_record |
+| `GET` | `/api/operator/decisions` | `internal` | `operations` | operator.decision_list |
+| `POST` | `/api/operator/execution-proof` | `internal` | `operations` | operator.execution_proof |
+| `GET` | `/api/operator/execution-truth` | `internal` | `operations` | operator.execution_truth |
+| `POST` | `/api/operator/functional-area` | `internal` | `operations` | operator.functional_area_record |
+| `GET` | `/api/operator/graph` | `internal` | `operations` | operator.graph_projection |
+| `POST` | `/api/operator/ideas` | `internal` | `operations` | operator.ideas |
+| `GET` | `/api/operator/issue-backlog` | `internal` | `operations` | operator.issue_backlog |
+| `POST` | `/api/operator/legal-tools` | `internal` | `operations` | operator.legal_tools |
+| `POST` | `/api/operator/maintenance/backfill-bug-replay-provenance` | `internal` | `operations` | operator.bug_replay_provenance_backfill |
+| `POST` | `/api/operator/maintenance/backfill-semantic-bridges` | `internal` | `operations` | operator.semantic_bridges_backfill |
+| `POST` | `/api/operator/maintenance/refresh-semantic-projection` | `internal` | `operations` | operator.semantic_projection_refresh |
+| `POST` | `/api/operator/maintenance/reset-metrics` | `internal` | `operations` | operator.metrics_reset |
+| `GET` | `/api/operator/model-access-control-matrix` | `internal` | `operations` | operator.model_access_control_matrix |
+| `POST` | `/api/operator/native-primary-cutover-gate` | `internal` | `operations` | operator.native_primary_cutover_gate |
+| `GET` | `/api/operator/next-work` | `internal` | `operations` | operator.next_work |
+| `POST` | `/api/operator/object-relation` | `internal` | `operations` | operator.object_relation_record |
+| `GET` | `/api/operator/operation-forge` | `internal` | `operations` | operator.operation_forge |
+| `POST` | `/api/operator/provider-availability-refresh` | `internal` | `operations` | operator.provider_availability_refresh |
+| `GET` | `/api/operator/provider-control-plane` | `internal` | `operations` | operator.provider_control_plane |
+| `POST` | `/api/operator/provider-onboarding` | `internal` | `operations` | operator.provider_onboarding |
+| `GET` | `/api/operator/provider-route-truth` | `internal` | `operations` | operator.provider_route_truth |
+| `GET` | `/api/operator/refactor-heatmap` | `internal` | `operations` | operator.refactor_heatmap |
+| `GET` | `/api/operator/replay-ready-bugs` | `internal` | `operations` | operator.replay_ready_bugs |
+| `POST` | `/api/operator/roadmap-write` | `internal` | `operations` | operator.roadmap_write |
+| `GET` | `/api/operator/roadmap/tree/{root_roadmap_item_id}` | `internal` | `operations` | operator.roadmap_tree |
+| `GET` | `/api/operator/runs/{run_id}/graph` | `internal` | `operations` | operator.run_graph |
+| `GET` | `/api/operator/runs/{run_id}/lineage` | `internal` | `operations` | operator.run_lineage |
+| `GET` | `/api/operator/runs/{run_id}/scoreboard` | `internal` | `operations` | operator.run_scoreboard |
+| `GET` | `/api/operator/runs/{run_id}/status` | `internal` | `operations` | operator.run_status |
+| `POST` | `/api/operator/task-route-eligibility` | `internal` | `operations` | operator.task_route_eligibility |
+| `POST` | `/api/operator/transport-support` | `internal` | `operations` | operator.transport_support |
+| `GET` | `/api/operator/ui/experience-graph` | `internal` | `operations` | operator.ui_experience_graph |
+| `GET` | `/api/operator/work-assignment-matrix` | `internal` | `operations` | operator.work_assignment_matrix |
+| `POST` | `/api/operator/work-item-closeout` | `internal` | `operations` | operator.work_item_closeout |
 | `GET` | `/api/platform-overview` | `internal` | - | platform_overview_get |
+| `POST` | `/api/policy.list` | `internal` | `operations` | policy.list |
+| `GET` | `/api/primitives` | `internal` | `operations` | primitive.list |
+| `POST` | `/api/primitives` | `internal` | `operations` | primitive.record |
+| `GET` | `/api/primitives/scan-consistency` | `internal` | `operations` | primitive.scan_consistency |
+| `GET` | `/api/primitives/{primitive_slug}` | `internal` | `operations` | primitive.get |
 | `GET` | `/api/projections/{projection_ref}` | `internal` | - | projection_get |
 | `POST` | `/api/queue/cancel/{job_id}` | `internal` | - | Cancel a queue-backed workflow through the workflow command bus. |
 | `GET` | `/api/queue/jobs` | `internal` | - | List workflow jobs, optionally filtered by status. |
@@ -184,11 +262,49 @@ Public route count: `8`. All route count: `224`.
 | `GET` | `/api/runs/{run_id}/jobs/{job_id}` | `internal` | - | Return one workflow job with best-available output content. |
 | `GET` | `/api/scope` | `internal` | - | Resolve read scope, blast radius, and test scope for write-scope files. |
 | `GET` | `/api/search` | `internal` | - | search_get |
+| `POST` | `/api/search/bugs` | `internal` | `operations` | search.bugs |
+| `POST` | `/api/search/code` | `internal` | `operations` | search.code |
+| `POST` | `/api/search/db` | `internal` | `operations` | search.db |
+| `POST` | `/api/search/decisions` | `internal` | `operations` | search.decisions |
+| `POST` | `/api/search/federated` | `internal` | `operations` | search.federated |
+| `POST` | `/api/search/files` | `internal` | `operations` | search.files |
+| `POST` | `/api/search/git-history` | `internal` | `operations` | search.git_history |
+| `POST` | `/api/search/knowledge` | `internal` | `operations` | search.knowledge |
+| `POST` | `/api/search/receipts` | `internal` | `operations` | search.receipts |
+| `POST` | `/api/search/research` | `internal` | `operations` | search.research |
+| `GET` | `/api/semantic-invariants/scan` | `internal` | `operations` | semantic_invariant.scan |
+| `GET` | `/api/semantic-predicates` | `internal` | `operations` | semantic_predicate.list |
+| `POST` | `/api/semantic-predicates` | `internal` | `operations` | semantic_predicate.record |
+| `GET` | `/api/semantic-predicates/{predicate_slug}` | `internal` | `operations` | semantic_predicate.get |
+| `POST` | `/api/semantic/assertion` | `internal` | `operations` | semantic_assertions.record |
+| `POST` | `/api/semantic/assertion/retract` | `internal` | `operations` | semantic_assertions.retract |
+| `GET` | `/api/semantic/assertions` | `internal` | `operations` | semantic_assertions.list |
+| `POST` | `/api/semantic/predicate` | `internal` | `operations` | semantic_assertions.register_predicate |
+| `POST` | `/api/service-lifecycle/desired-state` | `internal` | `operations` | service.lifecycle.declare_desired_state |
+| `POST` | `/api/service-lifecycle/events` | `internal` | `operations` | service.lifecycle.record_event |
+| `GET` | `/api/service-lifecycle/projection/{service_ref}/{runtime_target_ref}` | `internal` | `operations` | service.lifecycle.get_projection |
+| `POST` | `/api/service-lifecycle/services` | `internal` | `operations` | service.lifecycle.register_service |
+| `GET` | `/api/service-lifecycle/targets` | `internal` | `operations` | service.lifecycle.list_targets |
+| `POST` | `/api/service-lifecycle/targets` | `internal` | `operations` | service.lifecycle.register_target |
+| `POST` | `/api/setup/apply` | `internal` | `operations` | runtime.setup.apply |
+| `GET` | `/api/setup/doctor` | `internal` | `operations` | runtime.setup.doctor |
 | `GET` | `/api/setup/graph` | `internal` | - | setup_graph_get |
+| `GET` | `/api/setup/plan` | `internal` | `operations` | runtime.setup.plan |
+| `POST` | `/api/shell/draft-guard/consulted` | `internal` | `operations` | shell.draft.guard.consulted |
+| `POST` | `/api/shell/history/popped` | `internal` | `operations` | shell.history.popped |
 | `GET` | `/api/shell/routes` | `internal` | - | shell_routes_get |
+| `POST` | `/api/shell/session/bootstrapped` | `internal` | `operations` | shell.session.bootstrapped |
 | `GET` | `/api/shell/state/stream` | `internal` | - | Stream session-scoped shell-navigation events from authority_events. |
+| `POST` | `/api/shell/surface/opened` | `internal` | `operations` | shell.surface.opened |
+| `POST` | `/api/shell/tab/closed` | `internal` | `operations` | shell.tab.closed |
 | `GET` | `/api/source-options` | `internal` | - | source_options_get |
+| `GET` | `/api/status` | `internal` | `operations` | operator.status_snapshot |
+| `GET` | `/api/structured-documents/context-selections` | `internal` | `operations` | structured_documents.list_context_selection_receipts |
+| `POST` | `/api/structured-documents/context-selections` | `internal` | `operations` | structured_documents.record_context_selection |
+| `POST` | `/api/surface/action` | `internal` | `operations` | surface.action.performed |
+| `POST` | `/api/surface/templates` | `internal` | `operations` | surface.template.register |
 | `GET` | `/api/templates` | `internal` | - | templates_get |
+| `POST` | `/api/trace.walk` | `internal` | `operations` | trace.walk |
 | `POST` | `/api/trigger/{rest_of_path:path}` | `internal` | - | trigger_post |
 | `GET` | `/api/trust` | `internal` | - | Return ELO-based trust scores for all (provider, model) pairs. |
 | `POST` | `/api/webhooks/endpoints` | `internal` | `webhooks` | Register a new webhook endpoint. Auto-creates workflow_trigger if target_workflow_id is set. |
@@ -204,6 +320,7 @@ Public route count: `8`. All route count: `224`.
 | `POST` | `/api/workflow-triggers` | `internal` | - | workflow_triggers_post |
 | `PUT` | `/api/workflow-triggers` | `internal` | - | workflow_triggers_put |
 | `PUT` | `/api/workflow-triggers/{rest_of_path:path}` | `internal` | - | workflow_triggers_path_put |
+| `POST` | `/api/workflow_chain_submit` | `internal` | `operations` | workflow_chain_submit |
 | `GET` | `/api/workflows` | `internal` | - | workflows_get |
 | `POST` | `/api/workflows` | `internal` | - | workflows_post |
 | `POST` | `/api/workflows/run` | `internal` | - | workflows_run_post |
@@ -211,6 +328,8 @@ Public route count: `8`. All route count: `224`.
 | `GET` | `/api/workflows/{rest_of_path:path}` | `internal` | - | workflows_path_get |
 | `POST` | `/api/workflows/{rest_of_path:path}` | `internal` | - | workflows_path_post |
 | `PUT` | `/api/workflows/{rest_of_path:path}` | `internal` | - | workflows_path_put |
+| `POST` | `/api/workflows/{workflow_id}/build/suggest-next` | `internal` | `operations` | workflow_build.suggest_next |
+| `POST` | `/api/workflows/{workflow_id}/build/{subpath:path}` | `internal` | `operations` | workflow_build.mutate |
 | `GET` | `/app` | `internal` | - | launcher_app_root |
 | `GET` | `/app/` | `internal` | - | launcher_app_root_slash |
 | `GET` | `/app/manifest.webmanifest` | `internal` | - | launcher_manifest |

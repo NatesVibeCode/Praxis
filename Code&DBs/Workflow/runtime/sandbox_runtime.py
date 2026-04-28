@@ -39,6 +39,7 @@ _DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 _CLI_AUTH_HOME_ENV = "PRAXIS_CLI_AUTH_HOME"
 _SNAPSHOT_CACHE_ROOT_ENV = "PRAXIS_SANDBOX_SNAPSHOT_CACHE_DIR"
+_ALLOW_LEGACY_WORKSPACE_COPY_ENV = "PRAXIS_ALLOW_LEGACY_WORKSPACE_COPY"
 
 
 def _parse_docker_mem_str(mem_str: str) -> int:
@@ -731,15 +732,20 @@ def _path_matches_filter(relpath: str, path_filter: Sequence[str]) -> bool:
     """Return True if relpath matches any entry in path_filter.
 
     Each filter entry is either an exact relative path or an fnmatch-style
-    glob (e.g. "adapters/*.py", "runtime/**/execution_*.py"). Empty filter
-    means "no filter" — callers should short-circuit before calling.
+    glob (e.g. "adapters/*.py", "runtime/**/execution_*.py"). Directory
+    entries admit their descendants so scoped workflow packets can declare a
+    shard directory without spelling every file. Empty filter means "no
+    filter" — callers should short-circuit before calling.
     """
     import fnmatch
+    relpath = PurePosixPath(str(relpath).replace("\\", "/").lstrip("./")).as_posix()
     for pattern in path_filter:
-        pattern = str(pattern).strip()
+        pattern = PurePosixPath(str(pattern).strip().replace("\\", "/").lstrip("./")).as_posix()
         if not pattern:
             continue
         if pattern == relpath:
+            return True
+        if relpath.startswith(f"{pattern.rstrip('/')}/"):
             return True
         if fnmatch.fnmatchcase(relpath, pattern):
             return True
@@ -840,6 +846,31 @@ def _workspace_snapshot_ref(
 
 def _uses_empty_workspace_materialization(value: object) -> bool:
     return str(value or "").strip().lower() == _EMPTY_WORKSPACE_MATERIALIZATION
+
+
+def _env_flag_enabled(name: str) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _validate_workspace_materialization_allowed(
+    value: object,
+    metadata: Mapping[str, Any] | None,
+) -> str:
+    materialization = str(value or "").strip().lower() or _EMPTY_WORKSPACE_MATERIALIZATION
+    if materialization == _EMPTY_WORKSPACE_MATERIALIZATION:
+        return materialization
+    if _execution_shard_paths(metadata):
+        return materialization
+    if _env_flag_enabled(_ALLOW_LEGACY_WORKSPACE_COPY_ENV):
+        return materialization
+    raise RuntimeError(
+        "unscoped workspace materialization is disabled by default. "
+        f"Set {_ALLOW_LEGACY_WORKSPACE_COPY_ENV}=1 only for an explicit operator "
+        "debug run; normal model sandboxes must use workspace_materialization=none "
+        "or declare a scoped access_policy shard through resolved_read_scope, "
+        "declared_read_scope, write_scope, test_scope, or blast_radius."
+    )
 
 
 def _execution_shard_paths(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
@@ -1639,6 +1670,10 @@ class SandboxRuntime:
     ) -> SandboxExecutionResult:
         provider = self._provider(provider_name)
         provider_metadata = dict(metadata or {})
+        workspace_materialization = _validate_workspace_materialization_allowed(
+            workspace_materialization,
+            provider_metadata,
+        )
         write_scope = _execution_write_scope(provider_metadata)
         submission_required = _submission_required(provider_metadata)
         session = provider.create_session(

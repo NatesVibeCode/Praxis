@@ -165,7 +165,7 @@ SELECT
     9,
     'explicit'
 FROM (VALUES ('chat'), ('build'), ('review'), ('analysis')) AS t(task_type)
-ON CONFLICT (task_type, model_slug, provider_slug) DO UPDATE SET
+ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     rationale = EXCLUDED.rationale,

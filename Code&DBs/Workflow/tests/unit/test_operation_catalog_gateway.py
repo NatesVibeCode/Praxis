@@ -29,8 +29,15 @@ class _FakeTransaction:
 
 
 class _FakeAuthorityConn:
-    def __init__(self, *, cached_result: dict[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        cached_result: dict[str, object] | None = None,
+        readback_overrides: dict[str, object] | None = None,
+    ) -> None:
         self.cached_result = cached_result
+        self.readback_overrides = dict(readback_overrides or {})
+        self.receipts: dict[str, dict[str, object]] = {}
         self.fetchrow_calls: list[tuple[str, tuple[object, ...]]] = []
         self.execute_calls: list[tuple[str, tuple[object, ...]]] = []
         self.transaction_enters = 0
@@ -40,7 +47,16 @@ class _FakeAuthorityConn:
 
     def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
         self.fetchrow_calls.append((query, args))
-        if "FROM authority_operation_receipts" in query:
+        normalized = " ".join(query.split())
+        if (
+            "FROM authority_operation_receipts" in normalized
+            and "WHERE receipt_id = $1::uuid" in normalized
+        ):
+            receipt = self.receipts.get(str(args[0]))
+            if receipt is None:
+                return None
+            return {**receipt, **self.readback_overrides}
+        if "FROM authority_operation_receipts" in normalized:
             return self.cached_result
         raise AssertionError(f"unexpected fetchrow: {query}")
 
@@ -48,6 +64,33 @@ class _FakeAuthorityConn:
         self.execute_calls.append((query, args))
         if self.raise_on_sql and self.raise_on_sql in query:
             raise RuntimeError("injected proof write failure")
+        if "INSERT INTO authority_operation_receipts" in query:
+            self.receipts[str(args[0])] = {
+                "receipt_id": args[0],
+                "operation_ref": args[1],
+                "operation_name": args[2],
+                "operation_kind": args[3],
+                "authority_domain_ref": args[4],
+                "authority_ref": args[5],
+                "projection_ref": args[6],
+                "storage_target_ref": args[7],
+                "input_hash": args[8],
+                "output_hash": args[9],
+                "idempotency_key": args[10],
+                "caller_ref": args[11],
+                "execution_status": args[12],
+                "result_status": args[13],
+                "error_code": args[14],
+                "error_detail": args[15],
+                "event_ids": args[16],
+                "projection_freshness": args[17],
+                "result_payload": args[18],
+                "duration_ms": args[19],
+                "binding_revision": args[20],
+                "decision_ref": args[21],
+                "cause_receipt_id": args[22],
+                "correlation_id": args[23],
+            }
         return []
 
     def executed_sql(self) -> str:
@@ -114,6 +157,50 @@ def test_execute_operation_from_subsystems_resolves_and_invokes_binding(monkeypa
     assert conn.transaction_rollbacks == 0
     assert captured["command"].value == "authoritative"
     assert captured["subsystems"] is subsystems
+
+
+def test_operation_receipt_response_is_durable_readback(monkeypatch) -> None:
+    binding = SimpleNamespace(
+        operation_ref="operator.example",
+        operation_name="operator.example",
+        source_kind="operation_command",
+        operation_kind="command",
+        command_class=_ExampleCommand,
+        handler=lambda command, _subsystems: {"status": "recorded", "value": command.value},
+        authority_ref="authority.example",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="non_idempotent",
+        binding_revision="binding.operation.example.20260416",
+        decision_ref="decision.operation.example.20260416",
+    )
+
+    conn = _FakeAuthorityConn(readback_overrides={"duration_ms": 4242})
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.example",
+        payload={"value": "authoritative"},
+    )
+
+    receipt = result["operation_receipt"]
+    assert receipt["duration_ms"] == 4242
+    assert receipt["operation_name"] == "operator.example"
+    assert receipt["source_kind"] == "operation_command"
+    assert any(
+        "WHERE receipt_id = $1::uuid" in " ".join(query.split())
+        for query, _args in conn.fetchrow_calls
+    )
 
 
 def test_execute_operation_from_env_builds_env_backed_subsystems(monkeypatch) -> None:

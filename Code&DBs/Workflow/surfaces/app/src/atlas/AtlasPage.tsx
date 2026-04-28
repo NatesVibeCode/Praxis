@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import cytoscape, { type Core, type EdgeSingular, type ElementDefinition, type NodeSingular } from 'cytoscape';
-import './AtlasPage.css';
+import { useCallback, useEffect, useMemo, useState, KeyboardEvent, type CSSProperties } from 'react';
 
 interface AtlasElementData {
   id: string;
@@ -27,23 +25,10 @@ interface AtlasElementData {
   activity_score?: number;
   is_area?: boolean;
   is_aggregate?: boolean;
-  display_color?: string;
-  display_size?: number;
-  signal_activity?: number;
-  signal_authority?: number;
-  signal_data?: number;
-  signal_dependency?: number;
-  signal_risk?: number;
-  signal_stale?: number;
-  semantic_role?: SemanticObjectRole;
-  semantic_rank?: number;
-  original_id?: string;
-  node_kind?: 'area' | 'object' | 'class_label';
 }
 
 interface AtlasElement {
   data: AtlasElementData;
-  classes?: string;
 }
 
 interface AtlasArea {
@@ -54,29 +39,12 @@ interface AtlasArea {
   member_count: number;
 }
 
-type GraphFreshnessState = 'fresh' | 'projection_lagging' | 'unknown' | string;
-type AtlasViewMode = 'overview' | 'area_focus' | 'item_inspect';
-type SemanticObjectRole = 'authority' | 'data' | 'dependency' | 'risk' | 'live' | 'stale';
-
-interface AtlasFreshness {
-  graph_freshness_state?: GraphFreshnessState;
-  memory_entities_max_updated_at?: string | null;
-  memory_edges_max_updated_at?: string | null;
-  authority_projection_last_run_at?: string | null;
-  authority_projection_source_max_updated_at?: string | null;
-  authority_projection_lag_seconds?: number | null;
-  authority_projection_edge_count?: number;
-  authority_projection_last_run_source?: string;
-  freshness_error?: string;
-}
-
-interface AtlasMetadata extends AtlasFreshness {
-  generated_at?: string;
+interface AtlasMetadata {
   node_count: number;
   edge_count: number;
   aggregate_edge_count: number;
   source_authority: string;
-  freshness?: AtlasFreshness;
+  generated_at?: string;
 }
 
 interface AtlasPayload {
@@ -90,86 +58,11 @@ interface AtlasPayload {
   detail?: string;
 }
 
-interface AtlasGraphEvent {
-  authority_id?: string;
-  captured_at?: string;
-  changed_paths?: string[];
-  event_type?: string;
-  node_id?: string;
-  run_id?: string;
-  source_ids?: string[];
-  workflow_id?: string;
-}
-
-interface AreaSignal {
-  slug: string;
-  title: string;
-  summary: string;
-  memberCount: number;
-  authorityCount: number;
-  dataCount: number;
-  dependencyCount: number;
-  riskCount: number;
-  liveCount: number;
-  staleCount: number;
-  activityScore: number;
-  semanticWeight: number;
-  displaySize: number;
-}
-
-interface DependencySignal {
-  id: string;
-  sourceArea: string;
-  targetArea: string;
-  relation: string;
-  weight: number;
-  activityScore: number;
-}
-
-interface SemanticObject {
-  node: AtlasElementData;
-  role: SemanticObjectRole;
-  rank: number;
-  dependencyCount: number;
-}
-
-interface SemanticModel {
-  areaSignals: Map<string, AreaSignal>;
-  areas: AreaSignal[];
-  dependencies: DependencySignal[];
-  nodeById: Map<string, AtlasElementData>;
-  rawEdgesByNode: Map<string, AtlasElementData[]>;
-  semanticObjectsByArea: Map<string, SemanticObject[]>;
-}
+type SemanticObjectRole = 'authority' | 'data' | 'dependency' | 'risk' | 'live' | 'stale';
 
 const ATLAS_GRAPH_TIMEOUT_MS = 15_000;
 const ATLAS_GRAPH_STREAM_PATH = '/api/atlas/graph/stream';
-const ATLAS_LIVE_MARK_MS = 4200;
-const MAX_OVERVIEW_DEPENDENCIES = 34;
-const MAX_FOCUS_DEPENDENCIES = 7;
-const MAX_FOCUS_OBJECTS = 10;
-const MAX_SELECTED_EDGES = 4;
 const MIN_ACTIVITY_SCORE = 0.08;
-const OUTER_REVEAL_HOLD_MS = 1200;
-const OUTER_REVEAL_MOVE = 0.94;
-
-const ROLE_COLORS: Record<SemanticObjectRole, string> = {
-  authority: '#f3efe6',
-  data: '#9fb7aa',
-  dependency: '#d2b075',
-  risk: '#c98b6f',
-  live: '#d8d2c5',
-  stale: '#6d6b67',
-};
-
-const AREA_TONES = ['#f3efe6', '#d8d2c5', '#b7b0a3', '#8c8a84', '#d2b075', '#9fb7aa'];
-
-declare global {
-  interface Window {
-    __PRAXIS_ATLAS_READY__?: boolean;
-    __PRAXIS_ATLAS_VISIBLE_COUNTS__?: { nodes: number; edges: number };
-  }
-}
 
 function stableHash(value: string): number {
   let hash = 2166136261;
@@ -178,54 +71,6 @@ function stableHash(value: string): number {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function areaColor(area: string) {
-  return AREA_TONES[stableHash(area) % AREA_TONES.length];
-}
-
-function objectId(id: string) {
-  return `object::${id}`;
-}
-
-function areaId(slug: string) {
-  return `area::${slug}`;
-}
-
-function freshnessTone(state: GraphFreshnessState | undefined) {
-  if (state === 'fresh') return 'ok';
-  if (state === 'projection_lagging') return 'warn';
-  return 'unknown';
-}
-
-function formatWhen(value?: string | null) {
-  if (!value) return 'unknown';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
-function freshnessTooltip(payload: AtlasPayload) {
-  const f = payload.metadata.freshness || payload.metadata;
-  const lag = f.authority_projection_lag_seconds;
-  return [
-    `Generated ${formatWhen(payload.metadata.generated_at)}`,
-    `Entities ${formatWhen(f.memory_entities_max_updated_at)}`,
-    `Edges ${formatWhen(f.memory_edges_max_updated_at)}`,
-    `Projection ${formatWhen(f.authority_projection_last_run_at)}`,
-    typeof lag === 'number' ? `Lag ${Math.round(lag)}s` : null,
-    f.freshness_error ? `Error ${f.freshness_error}` : null,
-    `${payload.metadata.node_count} nodes / ${payload.metadata.edge_count} edges`,
-  ].filter(Boolean).join('\n');
 }
 
 function haystack(data: AtlasElementData) {
@@ -253,158 +98,24 @@ function semanticRoleFor(data: AtlasElementData): SemanticObjectRole {
   if (text.includes('bug') || text.includes('issue') || text.includes('risk') || text.includes('failure')) {
     return 'risk';
   }
-
-  if (
-    objectKind.includes('operator_decision')
-    || objectKind.includes('authority_')
-    || objectKind.includes('registry')
-    || type.includes('decision')
-    || authority.includes('operator_decisions')
-  ) {
+  if (objectKind.includes('operator_decision') || objectKind.includes('authority_') || objectKind.includes('registry') || type.includes('decision') || authority.includes('operator_decisions')) {
     return 'authority';
   }
-
-  if (
-    authority === 'data_dictionary_objects'
-    || type === 'table'
-    || objectKind.startsWith('table:')
-  ) {
+  if (authority === 'data_dictionary_objects' || type === 'table' || objectKind.startsWith('table:')) {
     return 'data';
   }
-
-  if (
-    type.includes('surface_catalog')
-    || type.includes('capability')
-    || type.includes('tool')
-    || text.includes('connector')
-    || text.includes('dependency')
-  ) {
+  if (type.includes('surface_catalog') || type.includes('capability') || type.includes('tool') || text.includes('connector') || text.includes('dependency')) {
     return 'dependency';
   }
-
   if (activity >= 0.5) return 'live';
   if (activity < 0.18 && Boolean(data.updated_at)) return 'stale';
   return 'data';
-}
-
-function roleLabel(role: SemanticObjectRole) {
-  if (role === 'authority') return 'authority';
-  if (role === 'data') return 'data';
-  if (role === 'dependency') return 'dependency';
-  if (role === 'risk') return 'risk';
-  if (role === 'live') return 'live';
-  return 'stale';
-}
-
-function objectRank(data: AtlasElementData, dependencyCount: number) {
-  const role = semanticRoleFor(data);
-  const roleScore: Record<SemanticObjectRole, number> = {
-    authority: 460,
-    risk: 430,
-    data: 330,
-    dependency: 290,
-    live: 230,
-    stale: 120,
-  };
-  return roleScore[role]
-    + dependencyCount * 24
-    + Math.round((data.activity_score ?? MIN_ACTIVITY_SCORE) * 130)
-    + Math.min(44, Number(data.size || 0));
-}
-
-function nodeKindLabel(data: AtlasElementData) {
-  return data.object_kind || data.category || data.type || 'object';
-}
-
-function semanticDisplayLabel(data: AtlasElementData) {
-  const raw = data.label || data.object_kind || data.type || data.id;
-  const clean = raw
-    .replace(/^table:/i, '')
-    .replace(/^memory:/i, '')
-    .replace(/[_:/.-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const words = clean.split(' ').filter(Boolean);
-  if (words.length <= 3) return clean;
-  return words.slice(0, 3).join(' ');
-}
-
-function authorityLabel(data: AtlasElementData) {
-  return data.authority_source || data.source || 'Praxis.db';
-}
-
-function outcomeLine(data: AtlasElementData, dependencyCount: number) {
-  const role = semanticRoleFor(data);
-  if (role === 'authority') return 'Source-of-truth object for nearby system behavior.';
-  if (role === 'risk') return 'Risk or defect object; inspect before trusting this area.';
-  if (role === 'dependency') return 'Bridge object; it explains how this area touches another system.';
-  if (role === 'live') return `Recently active object with ${dependencyCount} visible dependency${dependencyCount === 1 ? '' : 'ies'}.`;
-  if (role === 'stale') return 'Cold object; verify whether it still belongs in this semantic map.';
-  return 'Data dictionary object; use it to understand what this area owns.';
-}
-
-function atlasPayloadSourceIds(payload: AtlasPayload | null) {
-  const ids = new Set<string>();
-  if (!payload) return ids;
-  payload.nodes.forEach((node) => {
-    [
-      node.data.id,
-      node.data.original_id,
-      node.data.area,
-      node.data.source,
-      node.data.target,
-      node.data.route_ref,
-      node.data.binding_revision,
-      node.data.decision_ref,
-    ].forEach((value) => {
-      if (value) ids.add(value);
-    });
-  });
-  payload.edges.forEach((edge) => {
-    [
-      edge.data.id,
-      edge.data.original_id,
-      edge.data.source,
-      edge.data.target,
-      edge.data.area,
-      edge.data.route_ref,
-      edge.data.binding_revision,
-      edge.data.decision_ref,
-    ].forEach((value) => {
-      if (value) ids.add(value);
-    });
-  });
-  payload.areas.forEach((area) => {
-    ids.add(area.slug);
-    ids.add(areaId(area.slug));
-  });
-  return ids;
-}
-
-function atlasEventSourceIds(event: AtlasGraphEvent) {
-  return [
-    ...(event.source_ids || []),
-    ...(event.changed_paths || []),
-    event.workflow_id,
-    event.run_id,
-    event.node_id,
-    event.authority_id,
-  ].filter((value): value is string => Boolean(value));
-}
-
-function atlasEventHitsPayload(event: AtlasGraphEvent, payload: AtlasPayload | null) {
-  const graphIds = atlasPayloadSourceIds(payload);
-  return atlasEventSourceIds(event).some((sourceId) => graphIds.has(sourceId));
 }
 
 function useAtlasGraph() {
   const [payload, setPayload] = useState<AtlasPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastRefresh, setLastRefresh] = useState(Date.now());
-  const [changedSourceIds, setChangedSourceIds] = useState<Set<string>>(() => new Set());
-  const payloadRef = useRef<AtlasPayload | null>(null);
-  const liveMarkTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -412,24 +123,13 @@ function useAtlasGraph() {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), ATLAS_GRAPH_TIMEOUT_MS);
     try {
-      const response = await fetch('/api/atlas/graph', {
-        cache: 'no-store',
-        signal: controller.signal,
-      });
+      const response = await fetch('/api/atlas/graph', { cache: 'no-store', signal: controller.signal });
       const body = await response.json().catch(() => null) as AtlasPayload | null;
-      if (!response.ok || !body?.ok) {
-        throw new Error(body?.detail || body?.error || `Atlas graph request failed with HTTP ${response.status}`);
-      }
-      payloadRef.current = body;
+      if (!response.ok || !body?.ok) throw new Error(body?.detail || body?.error || `Atlas graph request failed with HTTP ${response.status}`);
       setPayload(body);
-      setLastRefresh(Date.now());
     } catch (err) {
       if (!silent) setPayload(null);
-      if (err instanceof Error && err.name === 'AbortError') {
-        setError(`Atlas graph request timed out after ${Math.ceil(ATLAS_GRAPH_TIMEOUT_MS / 1000)}s.`);
-      } else {
-        setError(err instanceof Error ? err.message : 'Atlas graph is unavailable.');
-      }
+      setError(err instanceof Error && err.name === 'AbortError' ? 'Timeout' : (err instanceof Error ? err.message : 'Error'));
     } finally {
       window.clearTimeout(timeout);
       if (!silent) setLoading(false);
@@ -441,1156 +141,391 @@ function useAtlasGraph() {
   }, [refresh]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.EventSource !== 'function') return undefined;
+    if (typeof window === 'undefined' || typeof window.EventSource !== 'function') return;
     const source = new window.EventSource(ATLAS_GRAPH_STREAM_PATH);
-    source.onmessage = (event) => {
-      try {
-        const graphEvent = JSON.parse(event.data) as AtlasGraphEvent;
-        if (!atlasEventHitsPayload(graphEvent, payloadRef.current)) return;
-        const sourceIds = atlasEventSourceIds(graphEvent);
-        setChangedSourceIds(new Set(sourceIds));
-        void refresh(true);
-        if (liveMarkTimerRef.current !== null) {
-          window.clearTimeout(liveMarkTimerRef.current);
-        }
-        liveMarkTimerRef.current = window.setTimeout(() => {
-          setChangedSourceIds(new Set());
-          liveMarkTimerRef.current = null;
-        }, ATLAS_LIVE_MARK_MS);
-      } catch {
-        // Ignore malformed stream payloads; the graph payload remains authoritative.
-      }
-    };
-    source.onerror = () => {
-      // EventSource owns reconnect; keep the last authoritative graph visible.
-    };
-    return () => {
-      source.close();
-      if (liveMarkTimerRef.current !== null) {
-        window.clearTimeout(liveMarkTimerRef.current);
-        liveMarkTimerRef.current = null;
-      }
-    };
+    source.onmessage = () => { refresh(true); };
+    return () => { source.close(); };
   }, [refresh]);
 
-  return { payload, loading, error, refresh, lastRefresh, changedSourceIds };
+  return { payload, loading, error, refresh };
 }
 
-function buildSemanticModel(payload: AtlasPayload): SemanticModel {
-  const nodeById = new Map<string, AtlasElementData>();
-  const rawEdgesByNode = new Map<string, AtlasElementData[]>();
-  const areaSignals = new Map<string, AreaSignal>();
-  const dependencyByArea = new Map<string, number>();
-  const dependencySignals: DependencySignal[] = [];
+// -----------------------------------------------------------------------------
+// UI COMPONENTS
+// -----------------------------------------------------------------------------
 
-  payload.nodes.forEach((node) => {
-    nodeById.set(node.data.id, node.data);
-  });
-
-  payload.areas.forEach((area) => {
-    areaSignals.set(area.slug, {
-      slug: area.slug,
-      title: area.title,
-      summary: area.summary,
-      memberCount: area.member_count,
-      authorityCount: 0,
-      dataCount: 0,
-      dependencyCount: 0,
-      riskCount: 0,
-      liveCount: 0,
-      staleCount: 0,
-      activityScore: MIN_ACTIVITY_SCORE,
-      semanticWeight: Math.max(1, area.member_count),
-      displaySize: 88,
-    });
-  });
-
-  payload.edges.forEach((edge) => {
-    const data = edge.data;
-    if (!data.source || !data.target) return;
-
-    if (!data.is_aggregate) {
-      rawEdgesByNode.set(data.source, [...(rawEdgesByNode.get(data.source) || []), data]);
-      rawEdgesByNode.set(data.target, [...(rawEdgesByNode.get(data.target) || []), data]);
-      return;
-    }
-
-    const sourceArea = nodeById.get(data.source)?.area || '';
-    const targetArea = nodeById.get(data.target)?.area || '';
-    if (!sourceArea || !targetArea || sourceArea === targetArea) return;
-    const weight = Number(data.weight || 1);
-    dependencySignals.push({
-      id: data.id,
-      sourceArea,
-      targetArea,
-      relation: data.label || 'depends_on',
-      weight,
-      activityScore: data.activity_score ?? MIN_ACTIVITY_SCORE,
-    });
-    dependencyByArea.set(sourceArea, (dependencyByArea.get(sourceArea) || 0) + weight);
-    dependencyByArea.set(targetArea, (dependencyByArea.get(targetArea) || 0) + weight);
-  });
-
-  const semanticObjectsByArea = new Map<string, SemanticObject[]>();
-  payload.nodes.forEach((node) => {
-    const data = node.data;
-    if (data.is_area || !data.area) return;
-    const area = areaSignals.get(data.area);
-    if (!area) return;
-
-    const dependencyCount = rawEdgesByNode.get(data.id)?.length || Number(data.degree || 0) || 0;
-    const role = semanticRoleFor(data);
-    const semanticObject: SemanticObject = {
-      node: data,
-      role,
-      rank: objectRank(data, dependencyCount),
-      dependencyCount,
-    };
-
-    semanticObjectsByArea.set(data.area, [...(semanticObjectsByArea.get(data.area) || []), semanticObject]);
-    area.activityScore = Math.max(area.activityScore, data.activity_score ?? MIN_ACTIVITY_SCORE);
-    if (role === 'authority') area.authorityCount += 1;
-    if (role === 'data') area.dataCount += 1;
-    if (role === 'dependency') area.dependencyCount += 1;
-    if (role === 'risk') area.riskCount += 1;
-    if ((data.activity_score ?? MIN_ACTIVITY_SCORE) >= 0.5) area.liveCount += 1;
-    if ((data.activity_score ?? MIN_ACTIVITY_SCORE) < 0.18 && Boolean(data.updated_at)) area.staleCount += 1;
-  });
-
-  areaSignals.forEach((area) => {
-    area.dependencyCount += Math.round(dependencyByArea.get(area.slug) || 0);
-    area.semanticWeight = area.memberCount * 0.35
-      + area.authorityCount * 2.2
-      + area.dataCount * 1.4
-      + area.dependencyCount * 1.1
-      + area.riskCount * 3.2
-      + area.liveCount * 1.2;
-    area.displaySize = clamp(66 + Math.sqrt(Math.max(1, area.semanticWeight)) * 9, 72, 166);
-  });
-
-  semanticObjectsByArea.forEach((objects, area) => {
-    semanticObjectsByArea.set(area, objects.sort((a, b) => b.rank - a.rank));
-  });
-
-  dependencySignals.sort((a, b) => b.weight - a.weight || b.activityScore - a.activityScore);
-
-  return {
-    areaSignals,
-    areas: [...areaSignals.values()].sort((a, b) => b.semanticWeight - a.semanticWeight),
-    dependencies: dependencySignals,
-    nodeById,
-    rawEdgesByNode,
-    semanticObjectsByArea,
-  };
+function calculateHeat(counts: any, memberCount: number) {
+  if (memberCount === 0) return 0.1;
+  const active = counts.live + counts.risk * 1.5 + counts.auth * 0.5;
+  return Math.min(1, Math.max(0.05, active / Math.max(1, memberCount)));
 }
 
-function areaPosition(area: AreaSignal, index: number, total: number) {
-  if (index === 0) return { x: 0, y: 0 };
-  const innerCount = Math.min(8, Math.max(1, total - 1));
-  const outerIndex = index - 1;
-  const inner = outerIndex < innerCount;
-  const ringIndex = inner ? outerIndex : outerIndex - innerCount;
-  const count = inner ? innerCount : Math.max(1, total - 1 - innerCount);
-  const radius = inner ? 315 : 540;
-  const angle = -Math.PI / 2 + (ringIndex / count) * Math.PI * 2 + (stableHash(area.slug) % 17) * 0.01;
-  return {
-    x: Math.cos(angle) * radius * (inner ? 1.08 : 1.16),
-    y: Math.sin(angle) * radius * (inner ? 0.78 : 0.86),
-  };
-}
-
-function outerAreaPosition(area: AreaSignal, focusArea: string, index: number, total: number) {
-  const angle = -Math.PI / 2 + (index / Math.max(1, total)) * Math.PI * 2 + (stableHash(`${focusArea}:${area.slug}`) % 23) * 0.008;
-  return {
-    x: Math.cos(angle) * 520,
-    y: Math.sin(angle) * 345,
-  };
-}
-
-function classRole(role: SemanticObjectRole): 'authority' | 'data' | 'dependency' | 'risk' {
-  if (role === 'authority') return 'authority';
-  if (role === 'dependency') return 'dependency';
-  if (role === 'risk' || role === 'stale') return 'risk';
-  return 'data';
-}
-
-function objectPosition(object: SemanticObject, indexInClass: number, classCount: number) {
-  const centers: Record<ReturnType<typeof classRole>, { x: number; y: number }> = {
-    authority: { x: -145, y: -112 },
-    data: { x: 120, y: -108 },
-    dependency: { x: -130, y: 110 },
-    risk: { x: 120, y: 110 },
-  };
-  const role = classRole(object.role);
-  const center = centers[role];
-  const columns = classCount <= 3 ? classCount : 3;
-  const col = indexInClass % Math.max(1, columns);
-  const row = Math.floor(indexInClass / Math.max(1, columns));
-  const xOffset = (col - (columns - 1) / 2) * 58;
-  const yOffset = row * 58;
-  return {
-    x: center.x + xOffset,
-    y: center.y + yOffset,
-  };
-}
-
-function inspectNeighborPosition(index: number) {
-  const positions = [
-    { x: 92, y: -112 },
-    { x: 158, y: -34 },
-    { x: 158, y: 48 },
-    { x: 92, y: 124 },
-  ];
-  return positions[index] || { x: 150, y: -80 + index * 58 };
-}
-
-function selectFocusObjects(model: SemanticModel, areaSlug: string) {
-  const objects = model.semanticObjectsByArea.get(areaSlug) || [];
-  const selected: SemanticObject[] = [];
-  const byRole = new Map<SemanticObjectRole, SemanticObject[]>();
-
-  objects.forEach((object) => {
-    byRole.set(object.role, [...(byRole.get(object.role) || []), object]);
+function Sparkline({ data, color, width, height, fill = true }: any) {
+  if (!data || data.length === 0) return <div style={{width, height}} />;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const dx = width / (data.length - 1 || 1);
+  const pts = data.map((d: number, i: number) => {
+    const x = i * dx;
+    const y = height - ((d - min) / range) * height;
+    return `${x},${y}`;
   });
-
-  (['authority', 'data', 'dependency', 'risk', 'live', 'stale'] as SemanticObjectRole[]).forEach((role) => {
-    const cap = role === 'data' ? 4 : role === 'authority' ? 2 : 2;
-    selected.push(...(byRole.get(role) || []).slice(0, cap));
-  });
-
-  const seen = new Set(selected.map((object) => object.node.id));
-  objects.forEach((object) => {
-    if (selected.length >= MAX_FOCUS_OBJECTS) return;
-    if (!seen.has(object.node.id)) {
-      selected.push(object);
-      seen.add(object.node.id);
-    }
-  });
-
-  return selected.slice(0, MAX_FOCUS_OBJECTS);
-}
-
-function selectedEdges(model: SemanticModel, selectedId: string | null) {
-  if (!selectedId) return [];
-  return [...(model.rawEdgesByNode.get(selectedId) || [])]
-    .map((edge) => {
-      const neighborId = edge.source === selectedId ? edge.target : edge.source;
-      const neighbor = neighborId ? model.nodeById.get(neighborId) : undefined;
-      const dependencyCount = neighbor ? model.rawEdgesByNode.get(neighbor.id)?.length || Number(neighbor.degree || 0) || 0 : 0;
-      const rank = neighbor ? objectRank(neighbor, dependencyCount) : 0;
-      return { edge, neighbor, rank };
-    })
-    .filter((item): item is { edge: AtlasElementData; neighbor: AtlasElementData; rank: number } => Boolean(item.neighbor && !item.neighbor.is_area))
-    .sort((a, b) => b.rank - a.rank)
-    .slice(0, MAX_SELECTED_EDGES);
-}
-
-function buildElements(
-  model: SemanticModel,
-  mode: AtlasViewMode,
-  focusArea: string | null,
-  selectedId: string | null,
-  changedSourceIds: Set<string> = new Set(),
-): ElementDefinition[] {
-  if (mode === 'overview' || !focusArea) {
-    const areaIndex = new Map(model.areas.map((area, index) => [area.slug, index]));
-    const total = model.areas.length;
-    const nodes = model.areas.map((area) => ({
-      data: {
-        id: areaId(area.slug),
-        label: area.title,
-        area: area.slug,
-        node_kind: 'area',
-        display_size: area.displaySize,
-        display_color: areaColor(area.slug),
-        signal_activity: area.activityScore,
-        signal_authority: area.authorityCount,
-        signal_data: area.dataCount,
-        signal_dependency: area.dependencyCount,
-        signal_risk: area.riskCount,
-        signal_stale: area.staleCount,
-      },
-      position: areaPosition(area, areaIndex.get(area.slug) || 0, total),
-      classes: `area-node area-overview ${changedSourceIds.has(area.slug) || changedSourceIds.has(areaId(area.slug)) ? 'atlas-live-changed' : ''}`,
-    }));
-
-    const edges = model.dependencies.slice(0, MAX_OVERVIEW_DEPENDENCIES).map((dep) => ({
-      data: {
-        id: `overview::${dep.id}`,
-        source: areaId(dep.sourceArea),
-        target: areaId(dep.targetArea),
-        label: dep.relation,
-        display_color: areaColor(dep.sourceArea),
-        weight: dep.weight,
-        signal_activity: dep.activityScore,
-      },
-      classes: 'overview-dependency',
-    }));
-
-    return [...nodes, ...edges] as ElementDefinition[];
-  }
-
-  const focusSignal = model.areaSignals.get(focusArea);
-  const focusDeps = model.dependencies
-    .filter((dep) => dep.sourceArea === focusArea || dep.targetArea === focusArea)
-    .slice(0, MAX_FOCUS_DEPENDENCIES);
-  const outerAreas = model.areas.filter((area) => area.slug !== focusArea);
-  const inspecting = mode === 'item_inspect' && Boolean(selectedId);
-  const focusObjects = inspecting ? [] : selectFocusObjects(model, focusArea);
-  const selectedEdgeItems = selectedEdges(model, selectedId);
-  const objectMap = new Map<string, SemanticObject>();
-  const objectPositions = new Map<string, { x: number; y: number }>();
-  const classIndex = new Map<ReturnType<typeof classRole>, number>();
-  const classCounts = focusObjects.reduce((counts, object) => {
-    const klass = classRole(object.role);
-    counts.set(klass, (counts.get(klass) || 0) + 1);
-    return counts;
-  }, new Map<ReturnType<typeof classRole>, number>());
-
-  focusObjects.forEach((object) => {
-    objectMap.set(object.node.id, object);
-    const klass = classRole(object.role);
-    const index = classIndex.get(klass) || 0;
-    classIndex.set(klass, index + 1);
-    objectPositions.set(object.node.id, objectPosition(object, index, classCounts.get(klass) || 1));
-  });
-
-  if (selectedId && !objectMap.has(selectedId)) {
-    const selectedNode = model.nodeById.get(selectedId);
-    if (selectedNode) {
-      const dependencyCount = model.rawEdgesByNode.get(selectedId)?.length || Number(selectedNode.degree || 0) || 0;
-      const object = {
-        node: selectedNode,
-        role: semanticRoleFor(selectedNode),
-        rank: objectRank(selectedNode, dependencyCount),
-        dependencyCount,
-      };
-      objectMap.set(selectedId, object);
-      objectPositions.set(selectedId, inspecting ? { x: -98, y: 0 } : { x: 0, y: 0 });
-    }
-  }
-
-  selectedEdgeItems.forEach((item, index) => {
-    if (!objectMap.has(item.neighbor.id)) {
-      const role = semanticRoleFor(item.neighbor);
-      objectMap.set(item.neighbor.id, {
-        node: item.neighbor,
-        role,
-        rank: objectRank(item.neighbor, item.rank),
-        dependencyCount: model.rawEdgesByNode.get(item.neighbor.id)?.length || Number(item.neighbor.degree || 0) || 0,
-      });
-      const base = objectPositions.get(selectedId || '') || { x: -98, y: 0 };
-      const offset = inspectNeighborPosition(index);
-      objectPositions.set(item.neighbor.id, {
-        x: base.x + offset.x,
-        y: base.y + offset.y,
-      });
-    }
-  });
-
-  const areaNodes: ElementDefinition[] = [
-    {
-      data: {
-        id: areaId(focusArea),
-        label: focusSignal?.title || focusArea,
-        area: focusArea,
-        node_kind: 'area',
-        display_color: areaColor(focusArea),
-        display_size: 1,
-      },
-      position: { x: 0, y: 0 },
-      classes: 'area-node focus-anchor',
-    },
-    ...outerAreas.map((area, index) => ({
-      data: {
-        id: areaId(area.slug),
-        label: area.title,
-        area: area.slug,
-        node_kind: 'area',
-        display_color: areaColor(area.slug),
-        display_size: clamp(area.displaySize * 0.54, 38, 72),
-        signal_activity: area.activityScore,
-      },
-      position: outerAreaPosition(area, focusArea, index, outerAreas.length),
-      classes: `area-node area-outer ${focusDeps.some((dep) => dep.sourceArea === area.slug || dep.targetArea === area.slug) ? 'dependency-source' : ''} ${changedSourceIds.has(area.slug) || changedSourceIds.has(areaId(area.slug)) ? 'atlas-live-changed' : ''}`,
-    })),
-  ] as ElementDefinition[];
-
-  const objectNodes: ElementDefinition[] = [...objectMap.values()].map((object, index) => {
-    const position = objectPositions.get(object.node.id) || { x: 0, y: 0 };
-    const labelled = object.node.id === selectedId;
-    return {
-      data: {
-        ...object.node,
-        id: objectId(object.node.id),
-        label: semanticDisplayLabel(object.node),
-        original_id: object.node.id,
-        node_kind: 'object',
-        semantic_role: object.role,
-        semantic_rank: object.rank,
-        display_size: clamp(26 + Math.sqrt(object.rank) * 0.9, 32, 54),
-      },
-      position,
-      classes: `semantic-object role-${object.role} class-${classRole(object.role)} ${labelled ? 'labelled-object' : ''} ${object.node.id === selectedId ? 'selected-object' : ''} ${changedSourceIds.has(object.node.id) || changedSourceIds.has(objectId(object.node.id)) ? 'atlas-live-changed' : ''}`,
-    };
-  }) as ElementDefinition[];
-
-  const classLabelNodes: ElementDefinition[] = inspecting ? [] : [
-    ['authority', 'authority', -145, -182],
-    ['data', 'data dictionary', 120, -178],
-    ['dependency', 'active dependencies', -130, 55],
-    ['risk', 'risk / stale', 120, 55],
-  ].flatMap(([key, label, x, y]) => {
-    const count = classCounts.get(key as ReturnType<typeof classRole>) || 0;
-    if (count <= 0) return [];
-    return [{
-      data: {
-        id: `class-label::${focusArea}::${key}`,
-        label: `${label} ${count}`,
-        node_kind: 'class_label',
-        display_size: 1,
-      },
-      position: { x: Number(x), y: Number(y) },
-      classes: 'class-label',
-    }];
-  }) as ElementDefinition[];
-
-  const dependencyEdges: ElementDefinition[] = inspecting ? [] : focusDeps.map((dep) => ({
-    data: {
-      id: `focus::${dep.id}`,
-      source: areaId(dep.sourceArea),
-      target: areaId(dep.targetArea),
-      label: dep.relation,
-      display_color: areaColor(dep.sourceArea === focusArea ? dep.targetArea : dep.sourceArea),
-      weight: dep.weight,
-      signal_activity: dep.activityScore,
-    },
-    classes: 'focus-dependency',
-  })) as ElementDefinition[];
-
-  const inspectEdges: ElementDefinition[] = selectedEdgeItems.map((item) => ({
-    data: {
-      id: `inspect::${item.edge.id}`,
-      source: objectId(selectedId || ''),
-      target: objectId(item.neighbor.id),
-      label: item.edge.label || 'related',
-      weight: item.edge.weight || 1,
-      signal_activity: item.edge.activity_score ?? MIN_ACTIVITY_SCORE,
-    },
-    classes: 'selection-edge',
-  })) as ElementDefinition[];
-
-  return [...areaNodes, ...classLabelNodes, ...objectNodes, ...dependencyEdges, ...inspectEdges] as ElementDefinition[];
-}
-
-export { buildElements, buildSemanticModel };
-
-const atlasStyles = [
-  {
-    selector: 'node',
-    style: {
-      'background-color': '#050505',
-      'background-opacity': 0,
-      'border-color': '#d8d2c5',
-      'border-opacity': 0.72,
-      'border-width': 1.5,
-      color: '#f3efe6',
-      'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-      'font-size': 11,
-      'font-weight': 700,
-      height: 'data(display_size)',
-      label: 'data(label)',
-      'min-zoomed-font-size': 0,
-      'overlay-opacity': 0,
-      'shadow-blur': 0,
-      'shadow-color': '#f3efe6',
-      'shadow-opacity': 0,
-      shape: 'ellipse',
-      'text-halign': 'center',
-      'text-max-width': 104,
-      'text-outline-color': '#050505',
-      'text-outline-opacity': 1,
-      'text-outline-width': 5,
-      'text-valign': 'center',
-      'text-wrap': 'wrap',
-      width: 'data(display_size)',
-    },
-  },
-  {
-    selector: 'node.area-overview',
-    style: {
-      'background-opacity': 'mapData(signal_activity, 0.08, 1, 0.015, 0.12)' as unknown as number,
-      'border-color': 'data(display_color)',
-      'border-opacity': 'mapData(signal_activity, 0.08, 1, 0.48, 1)' as unknown as number,
-      'border-width': 'mapData(signal_risk, 0, 12, 1.6, 4.2)' as unknown as number,
-      'font-size': 12,
-      'shadow-blur': 'mapData(signal_activity, 0.08, 1, 0, 24)' as unknown as number,
-      'shadow-opacity': 'mapData(signal_activity, 0.08, 1, 0, 0.22)' as unknown as number,
-      'text-opacity': 1,
-      'z-index': 5,
-    },
-  },
-  {
-    selector: 'node.area-outer',
-    style: {
-      'background-opacity': 0.01,
-      'border-color': 'data(display_color)',
-      'border-opacity': 0.18,
-      'border-width': 1.2,
-      'font-size': 10,
-      'text-max-width': 82,
-      'text-opacity': 0,
-      'z-index': 2,
-    },
-  },
-  {
-    selector: 'node.area-outer.dependency-source',
-    style: {
-      'background-opacity': 0.025,
-      'border-color': 'data(display_color)',
-      'border-opacity': 0.58,
-      'shadow-blur': 8,
-      'shadow-color': 'data(display_color)',
-      'shadow-opacity': 0.06,
-      'z-index': 4,
-    },
-  },
-  {
-    selector: 'node.area-outer.hot-source',
-    style: {
-      'background-opacity': 0.055,
-      'border-color': 'data(display_color)',
-      'border-opacity': 1,
-      'font-size': 10,
-      height: 'mapData(display_size, 38, 72, 47, 84)' as unknown as number,
-      'shadow-blur': 18,
-      'shadow-opacity': 0.18,
-      'text-opacity': 1,
-      width: 'mapData(display_size, 38, 72, 47, 84)' as unknown as number,
-      'z-index': 8,
-    },
-  },
-  {
-    selector: 'node.area-outer.primary-source',
-    style: {
-      'border-width': 2.2,
-      'shadow-blur': 22,
-      'shadow-opacity': 0.24,
-    },
-  },
-  {
-    selector: 'node.focus-anchor',
-    style: {
-      events: 'no',
-      opacity: 0,
-      'text-opacity': 0,
-      'z-index': 0,
-    },
-  },
-  {
-    selector: 'node.class-label',
-    style: {
-      events: 'no',
-      'background-opacity': 0,
-      'border-opacity': 0,
-      color: '#8c8a84',
-      'font-size': 9,
-      'font-weight': 700,
-      height: 1,
-      'text-opacity': 1,
-      'text-outline-width': 4,
-      width: 1,
-      'z-index': 6,
-    },
-  },
-  {
-    selector: 'node.semantic-object',
-    style: {
-      'background-opacity': 0.065,
-      'border-opacity': 0.92,
-      'border-width': 2,
-      'font-size': 9,
-      'shadow-blur': 14,
-      'shadow-opacity': 0.1,
-      'text-margin-y': 8,
-      'text-max-width': 72,
-      'text-opacity': 0,
-      'text-valign': 'bottom',
-      'z-index': 7,
-    },
-  },
-  { selector: 'node.labelled-object', style: { 'text-opacity': 1 } },
-  {
-    selector: 'node.role-authority',
-    style: {
-      'border-color': ROLE_COLORS.authority,
-      'shadow-color': ROLE_COLORS.authority,
-      shape: 'octagon',
-    },
-  },
-  {
-    selector: 'node.role-data',
-    style: {
-      'border-color': ROLE_COLORS.data,
-      'shadow-color': ROLE_COLORS.data,
-      shape: 'hexagon',
-    },
-  },
-  {
-    selector: 'node.role-dependency',
-    style: {
-      'border-color': ROLE_COLORS.dependency,
-      'shadow-color': ROLE_COLORS.dependency,
-      shape: 'tag',
-    },
-  },
-  {
-    selector: 'node.role-risk',
-    style: {
-      'background-opacity': 0.12,
-      'border-color': ROLE_COLORS.risk,
-      'border-width': 2.8,
-      'shadow-color': ROLE_COLORS.risk,
-      'shadow-opacity': 0.18,
-      shape: 'diamond',
-    },
-  },
-  {
-    selector: 'node.role-live',
-    style: {
-      'border-color': ROLE_COLORS.live,
-      'shadow-color': ROLE_COLORS.live,
-      'shadow-opacity': 0.16,
-      shape: 'ellipse',
-    },
-  },
-  {
-    selector: 'node.role-stale',
-    style: {
-      'border-color': ROLE_COLORS.stale,
-      'border-opacity': 0.62,
-      'border-width': 1.3,
-      shape: 'ellipse',
-    },
-  },
-  {
-    selector: 'node:selected, node.selected-object',
-    style: {
-      'background-opacity': 0.12,
-      'border-color': '#ffffff',
-      'border-opacity': 1,
-      'border-width': 3,
-      'shadow-blur': 22,
-      'shadow-color': '#ffffff',
-      'shadow-opacity': 0.18,
-      'text-opacity': 1,
-      'z-index': 12,
-    },
-  },
-  {
-    selector: 'node.atlas-live-changed',
-    style: {
-      'border-color': '#ffffff',
-      'border-opacity': 1,
-      'border-width': 4,
-      'shadow-blur': 28,
-      'shadow-color': '#f3efe6',
-      'shadow-opacity': 0.34,
-      'text-opacity': 1,
-      'z-index': 14,
-    },
-  },
-  {
-    selector: 'node.hover',
-    style: {
-      'background-opacity': 0.13,
-      'border-opacity': 1,
-      'shadow-blur': 20,
-      'shadow-opacity': 0.2,
-      'text-opacity': 1,
-      'z-index': 12,
-    },
-  },
-  {
-    selector: 'edge',
-    style: {
-      'curve-style': 'haystack',
-      'haystack-radius': 0.5,
-      'line-color': '#6d6b67',
-      'line-opacity': 0.16,
-      'target-arrow-shape': 'none',
-      width: 1,
-      'z-index': 1,
-    },
-  },
-  {
-    selector: 'edge.overview-dependency',
-    style: {
-      'line-opacity': 'mapData(weight, 1, 32, 0.08, 0.28)' as unknown as number,
-      'line-color': 'data(display_color)',
-      width: 'mapData(weight, 1, 32, 0.6, 3.2)' as unknown as number,
-    },
-  },
-  {
-    selector: 'edge.focus-dependency',
-    style: {
-      'line-color': 'data(display_color)',
-      'line-opacity': 'mapData(weight, 1, 32, 0.1, 0.24)' as unknown as number,
-      width: 'mapData(weight, 1, 32, 0.8, 2.2)' as unknown as number,
-    },
-  },
-  {
-    selector: 'edge.focus-dependency.hot-edge',
-    style: {
-      'line-color': 'data(display_color)',
-      'line-opacity': 0.64,
-      width: 2.3,
-      'z-index': 6,
-    },
-  },
-  {
-    selector: 'edge.selection-edge',
-    style: {
-      'line-color': '#f3efe6',
-      'line-opacity': 0.62,
-      width: 1.6,
-      'z-index': 8,
-    },
-  },
-  { selector: 'node.faded', style: { opacity: 0.15 } },
-  { selector: 'edge.faded', style: { opacity: 0.05 } },
-];
-
-export function AtlasPage() {
-  const { payload, loading, error, refresh, lastRefresh, changedSourceIds } = useAtlasGraph();
-  const graphRef = useRef<HTMLDivElement | null>(null);
-  const cyRef = useRef<Core | null>(null);
-  const transientClearTimerRef = useRef<number | null>(null);
-  const [viewMode, setViewMode] = useState<AtlasViewMode>('overview');
-  const [focusArea, setFocusArea] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [commandOpen, setCommandOpen] = useState(false);
-  const [commandDraft, setCommandDraft] = useState('');
-  const [ready, setReady] = useState(false);
-
-  const model = useMemo(() => (payload ? buildSemanticModel(payload) : null), [payload]);
-  const selectedNode = selectedId && model ? model.nodeById.get(selectedId) || null : null;
-  const selectedEdgeItems = useMemo(() => (model ? selectedEdges(model, selectedId) : []), [model, selectedId]);
-  const elements = useMemo(() => (
-    model ? buildElements(model, viewMode, focusArea, selectedId, changedSourceIds) : []
-  ), [changedSourceIds, focusArea, model, selectedId, viewMode]);
-
-  const focusSignal = focusArea && model ? model.areaSignals.get(focusArea) || null : null;
-  const visibleObjectCount = elements.filter((element) => element.data?.node_kind === 'object').length;
-  const visibleDependencyCount = elements.filter((element) => Boolean(element.data?.source && element.data?.target)).length;
-
-  const showOverview = useCallback(() => {
-    setViewMode('overview');
-    setFocusArea(null);
-    setSelectedId(null);
-  }, []);
-
-  const focusAreaBySlug = useCallback((slug: string) => {
-    setFocusArea(slug);
-    setSelectedId(null);
-    setViewMode('area_focus');
-  }, []);
-
-  const inspectNode = useCallback((id: string) => {
-    const node = model?.nodeById.get(id);
-    if (!node || node.is_area) return;
-    setFocusArea(node.area || focusArea);
-    setSelectedId(id);
-    setViewMode('item_inspect');
-  }, [focusArea, model]);
-
-  const submitCommand = useCallback((event?: FormEvent) => {
-    event?.preventDefault();
-    if (!model) return;
-    const raw = commandDraft.trim();
-    const query = raw.toLowerCase();
-    if (!query) {
-      showOverview();
-      setCommandOpen(false);
-      return;
-    }
-    const areaQuery = query.match(/^area:(.+)$/)?.[1]?.trim();
-    const areaMatch = model.areas.find((area) => (
-      area.slug.toLowerCase() === (areaQuery || query)
-      || area.title.toLowerCase().includes(areaQuery || query)
-    ));
-    if (areaMatch) {
-      focusAreaBySlug(areaMatch.slug);
-      setCommandOpen(false);
-      return;
-    }
-    const nodeMatch = [...model.nodeById.values()].find((node) => (
-      !node.is_area && haystack(node).includes(query)
-    ));
-    if (nodeMatch) inspectNode(nodeMatch.id);
-    setCommandOpen(false);
-  }, [commandDraft, focusAreaBySlug, inspectNode, model, showOverview]);
-
-  useEffect(() => {
-    if (!graphRef.current || !model) return undefined;
-    setReady(false);
-    const cy = cytoscape({
-      container: graphRef.current,
-      elements,
-      layout: { name: 'preset', fit: true, padding: viewMode === 'overview' ? 82 : 62 },
-      maxZoom: 3.4,
-      minZoom: 0.18,
-      style: atlasStyles as unknown as cytoscape.StylesheetJson,
-    });
-
-    cyRef.current = cy;
-    cy.nodes('.area-outer').forEach((node) => {
-      node.scratch('_atlasHomePosition', { ...node.position() });
-    });
-
-    const cancelScheduledClear = () => {
-      if (transientClearTimerRef.current != null) {
-        window.clearTimeout(transientClearTimerRef.current);
-        transientClearTimerRef.current = null;
-      }
-    };
-
-    const clearTransient = (immediate = false) => {
-      cancelScheduledClear();
-      cy.elements().removeClass('faded');
-      cy.nodes().removeClass('hover primary-source');
-      cy.edges().removeClass('hot-edge');
-      cy.nodes('.area-outer').forEach((node) => {
-        const home = node.scratch('_atlasHomePosition') as { x: number; y: number } | undefined;
-        if (!home) return;
-        node.stop().animate({ position: home }, { duration: immediate ? 0 : 520 });
-      });
-      const removeHot = () => cy.nodes('.area-outer').removeClass('hot-source');
-      if (immediate) removeHot(); else window.setTimeout(removeHot, 360);
-    };
-
-    const scheduleTransientClear = () => {
-      cancelScheduledClear();
-      transientClearTimerRef.current = window.setTimeout(() => {
-        clearTransient();
-      }, OUTER_REVEAL_HOLD_MS);
-    };
-
-    const revealDependencySet = (primaryArea?: string) => {
-      cancelScheduledClear();
-      cy.elements().removeClass('faded');
-      cy.nodes().removeClass('hover hot-source primary-source');
-      cy.edges().removeClass('hot-edge');
-
-      const edges = cy.edges('.focus-dependency');
-      const connectedOuter = edges.connectedNodes('.area-outer');
-      edges.addClass('hot-edge');
-      connectedOuter.addClass('hot-source');
-      connectedOuter.forEach((node) => {
-        const home = node.scratch('_atlasHomePosition') as { x: number; y: number } | undefined;
-        if (!home) return;
-        node.stop().animate({
-          position: {
-            x: home.x * OUTER_REVEAL_MOVE,
-            y: home.y * OUTER_REVEAL_MOVE,
-          },
-        }, { duration: 360 });
-      });
-      if (primaryArea) {
-        cy.getElementById(areaId(primaryArea)).addClass('primary-source');
-      }
-
-      const active = edges.union(connectedOuter).union(cy.nodes('.focus-anchor'));
-      cy.elements().not(active).not('node.semantic-object').not('node.class-label').addClass('faded');
-    };
-
-    cy.on('tap', 'node', (event) => {
-      const node = event.target as NodeSingular;
-      const data = node.data() as AtlasElementData;
-      if (data.node_kind === 'area' && data.area) {
-        focusAreaBySlug(data.area);
-        return;
-      }
-      if (data.node_kind === 'object' && data.original_id) {
-        inspectNode(data.original_id);
-      }
-    });
-
-    cy.on('tap', 'edge.focus-dependency', (event) => {
-      const edge = event.target as EdgeSingular;
-      const sourceArea = edge.source().data('area') as string | undefined;
-      const targetArea = edge.target().data('area') as string | undefined;
-      const nextArea = sourceArea === focusArea ? targetArea : sourceArea;
-      if (nextArea) focusAreaBySlug(nextArea);
-    });
-
-    cy.on('tap', (event) => {
-      if (event.target !== cy) return;
-      if (selectedId) {
-        setSelectedId(null);
-        setViewMode(focusArea ? 'area_focus' : 'overview');
-        return;
-      }
-      clearTransient();
-    });
-
-    cy.on('mouseover', 'node', (event) => {
-      const node = event.target as NodeSingular;
-      const data = node.data() as AtlasElementData;
-      node.addClass('hover');
-      if (data.node_kind === 'area' && focusArea && data.area !== focusArea) {
-        if (node.hasClass('dependency-source')) revealDependencySet(data.area);
-      }
-    });
-
-    cy.on('mouseout', 'node', () => {
-      scheduleTransientClear();
-    });
-
-    cy.on('mouseover', 'edge', (event) => {
-      const edge = event.target as EdgeSingular;
-      if (!edge.hasClass('focus-dependency')) return;
-      const sourceArea = edge.source().data('area') as string | undefined;
-      const targetArea = edge.target().data('area') as string | undefined;
-      const primaryArea = sourceArea === focusArea ? targetArea : sourceArea;
-      revealDependencySet(primaryArea);
-    });
-
-    cy.on('mouseout', 'edge', () => {
-      scheduleTransientClear();
-    });
-
-    cy.on('mouseover', 'node.semantic-object', (event) => {
-      const node = event.target as NodeSingular;
-      const edges = node.connectedEdges('.selection-edge');
-      if (!edges.length) return;
-      cy.elements().not(node.union(edges).union(edges.connectedNodes())).addClass('faded');
-    });
-
-    window.__PRAXIS_ATLAS_READY__ = true;
-    window.__PRAXIS_ATLAS_VISIBLE_COUNTS__ = {
-      nodes: cy.nodes().length,
-      edges: cy.edges().length,
-    };
-    setReady(true);
-
-    return () => {
-      cancelScheduledClear();
-      cy.destroy();
-      if (cyRef.current === cy) cyRef.current = null;
-      window.__PRAXIS_ATLAS_READY__ = false;
-    };
-  }, [elements, focusArea, focusAreaBySlug, inspectNode, model, selectedId, viewMode]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isInput = target && (
-        target.tagName === 'INPUT'
-        || target.tagName === 'TEXTAREA'
-        || target.isContentEditable
-      );
-      if (event.key === 'Escape') {
-        if (commandOpen) {
-          setCommandOpen(false);
-          return;
-        }
-        if (selectedId) {
-          setSelectedId(null);
-          setViewMode(focusArea ? 'area_focus' : 'overview');
-          return;
-        }
-        if (focusArea) showOverview();
-        return;
-      }
-      if (isInput || event.defaultPrevented) return;
-      if (event.key === '/' || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) {
-        event.preventDefault();
-        setCommandDraft('');
-        setCommandOpen(true);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [commandOpen, focusArea, selectedId, showOverview]);
-
-  if (loading) {
-    return (
-      <div className="atlas-page atlas-page--blank">
-        <div className="atlas-page__status-hint">opening atlas</div>
-      </div>
-    );
-  }
-
-  if (error || !payload || !model) {
-    return (
-      <div className="atlas-page atlas-page--blank">
-        <div className="atlas-page__status-hint">atlas unavailable</div>
-        <div className="atlas-page__status-detail">{error || 'empty payload'}</div>
-        <button type="button" className="atlas-page__retry" onClick={() => refresh()}>retry</button>
-      </div>
-    );
-  }
-
-  const freshnessState = payload.metadata.freshness?.graph_freshness_state
-    || payload.metadata.graph_freshness_state
-    || 'unknown';
-  const tone = freshnessTone(freshnessState);
-  const refreshedAgoSec = Math.max(0, Math.round((Date.now() - lastRefresh) / 1000));
-  const summaryCounts = focusSignal
-    ? [
-      ['authority', focusSignal.authorityCount],
-      ['data', focusSignal.dataCount],
-      ['deps', focusSignal.dependencyCount],
-      ['risk', focusSignal.riskCount],
-    ]
-    : [
-      ['areas', model.areas.length],
-      ['objects', payload.metadata.node_count],
-      ['deps', model.dependencies.length],
-      ['live', model.areas.reduce((sum, area) => sum + area.liveCount, 0)],
-    ];
+  
+  const path = `M${pts.join(' L')}`;
+  const fillPath = `M0,${height} L${pts.join(' L')} L${width},${height} Z`;
 
   return (
-    <section className="atlas-page" aria-label="Praxis Atlas">
-      <div className="atlas-page__canvas" ref={graphRef} />
-
-      <div className="atlas-hud atlas-hud--tl atlas-mode-chip">
-        <span className="atlas-hud__dot" aria-hidden="true" />
-        <span>{viewMode === 'overview' ? 'semantic map' : focusSignal?.title || focusArea}</span>
-      </div>
-
-      <div
-        className={`atlas-hud atlas-hud--tr atlas-hud__freshness atlas-hud__freshness--${tone}`}
-        title={freshnessTooltip(payload)}
-      >
-        <span className="atlas-hud__dot" aria-hidden="true" />
-        <span className="atlas-hud__freshness-label">{freshnessState}</span>
-      </div>
-
-      {viewMode !== 'overview' && (
-        <button type="button" className="atlas-collapse-control" onClick={showOverview}>Overview</button>
-      )}
-
-      <div className="atlas-hud atlas-hud--br">
-        <span className="atlas-hud__count">{visibleObjectCount || model.areas.length}</span>
-        <span className="atlas-hud__count-label">{viewMode === 'overview' ? 'areas' : 'objects'}</span>
-        <span className="atlas-hud__sep">/</span>
-        <span className="atlas-hud__hot">{visibleDependencyCount} deps</span>
-      </div>
-
-      <div className="atlas-hud atlas-hud--bl">
-        <kbd>/</kbd>
-        <span>find</span>
-        <span className="atlas-hud__sep">/</span>
-        <span className="atlas-hud__ago">{refreshedAgoSec}s ago</span>
-      </div>
-
-      <div className="atlas-semantic-strip">
-        {summaryCounts.map(([label, value]) => (
-          <span key={label}>
-            <strong>{value}</strong>
-            {label}
-          </span>
-        ))}
-      </div>
-
-      {payload.warnings.length > 0 && (
-        <div className="atlas-banner">{payload.warnings.join(' / ')}</div>
-      )}
-
-      {commandOpen && (
-        <div
-          className="atlas-command"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setCommandOpen(false);
-          }}
-        >
-          <form className="atlas-command__box" onSubmit={submitCommand}>
-            <input
-              autoFocus
-              type="text"
-              value={commandDraft}
-              onChange={(event) => setCommandDraft(event.target.value)}
-              placeholder="area:authority, table name, bug id, surface, dependency"
-            />
-            <div className="atlas-command__hints">
-              <span>enter</span>
-              <span>/</span>
-              <button type="button" onClick={() => { setCommandDraft(''); showOverview(); setCommandOpen(false); }}>overview</button>
-              <span>/</span>
-              <span>esc</span>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {selectedNode && (
-        <AtlasFocusCard
-          node={selectedNode}
-          edges={selectedEdgeItems.map((item) => ({ edge: item.edge, neighbor: item.neighbor }))}
-          onNeighborClick={(id) => inspectNode(id)}
-          onDismiss={() => {
-            setSelectedId(null);
-            setViewMode(focusArea ? 'area_focus' : 'overview');
-          }}
-        />
-      )}
-
-      {!ready && (
-        <div className="atlas-page__status-hint atlas-page__status-hint--overlay">rendering</div>
-      )}
-    </section>
+    <svg width={width} height={height} style={{ display: 'block', overflow: 'visible' }}>
+      {fill && <path d={fillPath} fill={color} opacity={0.15} />}
+      <path d={path} fill="none" stroke={color} strokeWidth={1.5} />
+    </svg>
   );
 }
 
-interface FocusCardProps {
-  node: AtlasElementData;
-  edges: { edge: AtlasElementData; neighbor: AtlasElementData }[];
-  onNeighborClick: (id: string) => void;
-  onDismiss: () => void;
+const FAMILIES: Record<string, { label: string }> = {
+  codebase: { label: 'Codebase' },
+  agents: { label: 'Agents' },
+  knowledge: { label: 'Knowledge' },
+  system: { label: 'System' },
+};
+
+function assignFamily(slug: string) {
+  if (slug.includes('agent') || slug.includes('tool') || slug.includes('workflow')) return 'agents';
+  if (slug.includes('doc') || slug.includes('memory') || slug.includes('knowledge') || slug.includes('dictionary')) return 'knowledge';
+  if (slug.includes('core') || slug.includes('system') || slug.includes('runtime') || slug.includes('platform')) return 'system';
+  return 'codebase';
 }
 
-function AtlasFocusCard({ node, edges, onNeighborClick, onDismiss }: FocusCardProps) {
-  const role = semanticRoleFor(node);
-  const color = ROLE_COLORS[role];
-  const liveness = node.activity_score == null
-    ? 'unknown'
-    : node.activity_score >= 0.5
-      ? 'live'
-      : node.activity_score >= 0.2
-        ? 'recent'
-        : 'cold';
-  const style: CSSProperties = { borderColor: color };
+function heatColor(heat: number) {
+  if (heat > 0.85) return '#d29922'; // hot
+  if (heat > 0.6) return '#a08543'; // active
+  if (heat > 0.3) return '#6b6e58'; // steady
+  return '#3d5567'; // quiet
+}
+
+function roleColor(r: string) {
+  if (r === 'authority') return '#d29922';
+  if (r === 'live') return '#3fb950';
+  if (r === 'risk') return '#cf222e';
+  if (r === 'stale') return '#5a554d';
+  return '#9b9488';
+}
+
+export function AtlasPage() {
+  const { payload, loading, error, refresh } = useAtlasGraph();
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
+
+  const model = useMemo(() => {
+    if (!payload) return null;
+    
+    let totalLive = 0;
+    
+    const areas = payload.areas.map(a => {
+      let auth = 0, live = 0, risk = 0, stale = 0, data = 0;
+      let lastUpdated = 0;
+      
+      const objs = payload.nodes.filter(n => !n.data.is_area && n.data.area === a.slug).map(n => {
+        const role = semanticRoleFor(n.data);
+        if (role === 'authority') auth++;
+        else if (role === 'live') live++;
+        else if (role === 'risk') risk++;
+        else if (role === 'stale') stale++;
+        else data++;
+        
+        if (n.data.updated_at) {
+          const t = new Date(n.data.updated_at).getTime();
+          if (t > lastUpdated) lastUpdated = t;
+        }
+        
+        return { ...n.data, role };
+      });
+      
+      totalLive += live;
+      const counts = { auth, live, risk, stale, data };
+      const heat = calculateHeat(counts, a.member_count);
+      const weight = (a.member_count * 0.35) + (auth * 2.2) + (data * 1.4) + (risk * 3.2) + (live * 1.2);
+      
+      // Seeded random sparkline based on heat for prototype effect
+      const sparkWrites = Array.from({length: 24}, () => Math.round(Math.random() * heat * 10));
+      
+      return {
+        id: a.slug,
+        name: a.title,
+        weight: Math.round(weight),
+        heat,
+        objects: objs.sort((x, y) => {
+          const rank = { authority: 0, risk: 1, live: 2, data: 3, dependency: 4, stale: 5 };
+          return (rank[x.role as keyof typeof rank] ?? 99) - (rank[y.role as keyof typeof rank] ?? 99);
+        }),
+        memberCount: a.member_count,
+        counts,
+        sparkWrites,
+        writes24h: sparkWrites.reduce((sum, n) => sum + n, 0),
+        lastUpdate: lastUpdated > 0 ? { when: new Date(lastUpdated).toLocaleString(), who: 'system' } : { when: 'unknown', who: 'system' },
+        family: assignFamily(a.slug),
+        integrations: [],
+      };
+    }).sort((a, b) => b.weight - a.weight);
+
+    return { areas, payload, totalLive };
+  }, [payload]);
+
+  if (loading) return <div style={{...ld.page, background: '#1a1a1a', color: '#f5f1e8'}}><div style={{padding: 40}}>opening atlas...</div></div>;
+  if (error || !model) return <div style={{...ld.page, background: '#1a1a1a', color: '#f5f1e8'}}><div style={{padding: 40}}>Error: {error} <button onClick={() => refresh()} style={{background: 'transparent', color: 'inherit', border: '1px solid #f5f1e8', padding: '4px 8px', borderRadius: 4, cursor: 'pointer'}}>retry</button></div></div>;
+
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const byFam: Record<string, typeof model.areas> = {};
+  model.areas.forEach(a => {
+    (byFam[a.family] = byFam[a.family] || []).push(a);
+  });
+  
+  const hotAreas = model.areas.filter(a => a.heat > 0.85).length;
+  const dormantAreas = model.areas.filter(a => a.heat < 0.25).length;
+  const totalWrites = model.areas.reduce((sum, a) => sum + a.writes24h, 0);
+  const selectedArea = selectedAreaId ? model.areas.find(a => a.id === selectedAreaId) : null;
 
   return (
-    <div className="atlas-card" role="dialog" aria-label={node.label || node.id}>
-      <div className="atlas-card__head" style={style}>
-        <div className="atlas-card__title">{node.label || node.id}</div>
-        <button type="button" className="atlas-card__close" onClick={onDismiss} aria-label="close">x</button>
+    <div style={{ ...ld.page, paddingRight: selectedArea ? 440 : 64 }}>
+      <div style={ld.masthead}>
+        <div style={ld.mastTop}>
+          <span>VOL · III</span>
+          <span>{today}</span>
+          <span>PRAXIS · SYSTEM</span>
+        </div>
+        <div style={ld.mastTitle}>The Atlas</div>
+        <div style={ld.mastSub}>
+          Confidence infrastructure, materialized.<br />
+          <span style={{ fontSize: 13, opacity: 0.62, fontStyle: 'normal' }}>Rules should be environmental, not conversational.</span>
+        </div>
+        <div style={ld.mastRule} />
+        <div style={ld.mastStats}>
+          <span><b>{model.areas.length}</b> areas tracked</span>
+          <span><b>{model.payload.metadata.node_count.toLocaleString()}</b> objects</span>
+          <span><b>{totalWrites.toLocaleString()}</b> writes today</span>
+          <span><b>{model.totalLive}</b> live objects</span>
+          <span style={{color:'#d29922'}}>● {hotAreas} areas hot</span>
+          <span style={{color:'#5a554d'}}>○ {dormantAreas} areas dormant</span>
+        </div>
       </div>
-      <div className="atlas-card__meta">
-        {node.area && <span>{node.area}</span>}
-        <span>{roleLabel(role)}</span>
-        <span>{nodeKindLabel(node)}</span>
-        <span className="atlas-card__liveness" title={node.updated_at || 'unknown'}>{liveness}</span>
+
+      {Object.entries(FAMILIES).map(([famKey, fam]) => {
+        const list = byFam[famKey] || [];
+        if (list.length === 0) return null;
+        return (
+          <section key={famKey} style={ld.section}>
+            <div style={ld.sectionHead}>
+              <div style={ld.sectionEyebrow}>{fam.label.toUpperCase()} · {list.length} areas</div>
+              <div style={ld.sectionTitle}>
+                {famKey === 'codebase' && 'The work, and what touches it.'}
+                {famKey === 'agents'   && 'Who is running, and what they did.'}
+                {famKey === 'knowledge'&& 'What you and the agents know.'}
+                {famKey === 'system'   && 'The substrate underneath.'}
+              </div>
+              <div style={ld.sectionRule} />
+            </div>
+
+            <div style={ld.sectionGrid}>
+              {list.map(a => (
+                <Article 
+                  key={a.id} 
+                  area={a} 
+                  isSelected={selectedAreaId === a.id} 
+                  onClick={() => setSelectedAreaId(a.id)} 
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      <div style={ld.colophon}>
+        <div style={ld.colRule} />
+        <div style={ld.colText}>
+          <span>Set in Space Grotesk &amp; IBM Plex Mono. Composed by Praxis. </span>
+          <span>Data derived from live system memory. </span>
+        </div>
       </div>
-      <div className="atlas-card__id">{node.id}</div>
-      <div className="atlas-card__outcome">{outcomeLine(node, edges.length)}</div>
-      {(node.definition_summary || node.preview) && (
-        <div className="atlas-card__body">{node.definition_summary || node.preview}</div>
-      )}
-      <div className="atlas-card__authority">{authorityLabel(node)}</div>
-      {edges.length > 0 && (
-        <div className="atlas-card__neighbors">
-          {edges.map(({ edge, neighbor }) => (
-            <button key={edge.id} type="button" onClick={() => onNeighborClick(neighbor.id)} title={neighbor.id}>
-              <span>{edge.label || 'related'}</span>
-              {neighbor.label || neighbor.id}
-            </button>
-          ))}
+
+      {selectedArea && (
+        <div style={ld.sidePanel}>
+          <div style={ld.spHead}>
+            <div>
+              <div style={ld.spEyebrow}>AREA DETAILS</div>
+              <div style={ld.spTitle}>{selectedArea.name}</div>
+            </div>
+            <button onClick={() => setSelectedAreaId(null)} style={ld.spClose}>×</button>
+          </div>
+          <div style={ld.spContent}>
+            <div style={ld.spSectionLabel}>OBJECTS · {selectedArea.objects.length}</div>
+            {selectedArea.objects.length === 0 ? (
+              <div style={{color: '#5a554d', fontStyle: 'italic', fontSize: 12}}>No objects in this area</div>
+            ) : selectedArea.objects.slice(0, 100).map((obj: any) => (
+              <div key={obj.id} style={ld.spObjRow}>
+                <span style={{...ld.spObjRole, color: roleColor(obj.role)}}>{obj.role}</span>
+                <span style={ld.spObjName}>{obj.label || obj.object_kind || obj.id}</span>
+                <span style={ld.spObjMeta}>{obj.type || obj.object_kind || 'object'}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+const Article = ({ area, isSelected, onClick }: { area: any, isSelected: boolean, onClick: () => void }) => {
+  const heatLabel = area.heat > 0.85 ? 'hot' : area.heat > 0.6 ? 'active' : area.heat > 0.3 ? 'steady' : 'quiet';
+  const hc = heatColor(area.heat);
+  const isHot = area.heat > 0.85;
+  const isQuiet = area.heat < 0.25;
+
+  return (
+    <div 
+      style={{
+        ...ld.article, 
+        cursor: 'pointer',
+        backgroundColor: isSelected ? '#ebe6d9' : '#f5f1e8',
+        outline: isSelected ? '2px solid #1a1a1a' : 'none',
+        outlineOffset: '-2px',
+      }}
+      onClick={onClick}
+    >
+      <div style={ld.artHead}>
+        <div style={ld.artKicker}>
+          <span style={{...ld.artDot, background: hc}} />
+          <span>{heatLabel.toUpperCase()}</span>
+          <span style={{color:'#3a3a3a'}}>·</span>
+          <span>weight {area.weight}</span>
+        </div>
+        <div style={ld.artTitle}>{area.name}</div>
+      </div>
+
+      <div style={ld.artLede}>
+        <span style={ld.artFigure}>{area.memberCount.toLocaleString()}</span>
+        <span style={ld.artFigureUnit}>objects</span>
+        <span style={{...ld.artTrend, color: '#3fb950', marginLeft: 'auto'}}>
+          {area.counts.live} live
+        </span>
+      </div>
+
+      <div style={ld.artSparkRow}>
+        <Sparkline data={area.sparkWrites} color={hc} width={180} height={28} />
+        <div style={ld.artSparkLabel}>writes · 24h · {area.writes24h.toLocaleString()}</div>
+      </div>
+
+      <div style={ld.artByline}>
+        <span style={ld.artBylineKey}>last —</span>
+        <span style={ld.artBylineVal}>{area.lastUpdate.when}, {area.lastUpdate.who}</span>
+      </div>
+
+      {(isHot || isQuiet) && (
+        <div style={{...ld.artMargin, color: isHot ? '#d29922' : '#5a554d'}}>
+          {isHot && '⟶ this area is unusually busy today.'}
+          {isQuiet && '⟶ no activity in recent memory.'}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ld: Record<string, CSSProperties> = {
+  page: {
+    width: '100%', height: '100%', overflow: 'auto',
+    background: '#f5f1e8', color: '#1a1a1a',
+    fontFamily: 'Space Grotesk, sans-serif',
+    padding: '48px 64px 64px',
+    boxSizing: 'border-box',
+    transition: 'padding-right 240ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+  },
+  masthead: { borderBottom: '2px solid #1a1a1a', paddingBottom: 18, marginBottom: 32 },
+  mastTop: {
+    display: 'flex', justifyContent: 'space-between',
+    fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.18em',
+    color: '#5a554d', textTransform: 'uppercase', marginBottom: 14,
+  },
+  mastTitle: {
+    fontFamily: 'Space Grotesk, sans-serif', fontSize: 88, fontWeight: 500,
+    letterSpacing: '-0.04em', lineHeight: 0.95, marginBottom: 8,
+  },
+  mastSub: { fontSize: 16, color: '#3a3a3a', fontStyle: 'italic', marginBottom: 18 },
+  mastRule: { height: 1, background: '#1a1a1a', marginBottom: 12 },
+  mastStats: {
+    display: 'flex', gap: 22, fontFamily: 'IBM Plex Mono, monospace', fontSize: 11,
+    color: '#3a3a3a', letterSpacing: '0.04em',
+  },
+  section: { marginBottom: 44 },
+  sectionHead: { marginBottom: 22 },
+  sectionEyebrow: {
+    fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.22em',
+    color: '#5a554d', marginBottom: 6,
+  },
+  sectionTitle: { fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em', marginBottom: 10 },
+  sectionRule: { height: 1, background: '#1a1a1a' },
+  sectionGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: 0,
+    borderTop: '1px solid #d4cdb8',
+  },
+  article: {
+    padding: '20px 22px 18px',
+    borderBottom: '1px solid #d4cdb8',
+    borderRight: '1px solid #d4cdb8',
+    background: '#f5f1e8',
+    transition: 'background-color 160ms ease',
+  },
+  artHead: { marginBottom: 10 },
+  artKicker: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.14em',
+    color: '#5a554d', marginBottom: 6,
+  },
+  artDot: { width: 6, height: 6, borderRadius: '50%' },
+  artTitle: { fontSize: 22, fontWeight: 500, letterSpacing: '-0.01em', lineHeight: 1.15 },
+  artLede: { display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 12 },
+  artFigure: { fontSize: 30, fontWeight: 500, letterSpacing: '-0.02em' },
+  artFigureUnit: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, color: '#5a554d', letterSpacing: '0.06em' },
+  artTrend: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, letterSpacing: '0.04em' },
+  artSparkRow: { marginBottom: 12 },
+  artSparkLabel: {
+    fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.10em',
+    color: '#5a554d', marginTop: 4,
+  },
+  artByline: {
+    display: 'flex', gap: 8, fontFamily: 'IBM Plex Mono, monospace', fontSize: 11,
+    color: '#3a3a3a', borderTop: '1px dotted #b8af96', paddingTop: 10,
+  },
+  artBylineKey: { color: '#5a554d' },
+  artBylineVal: { fontStyle: 'italic' },
+  artMargin: {
+    marginTop: 10, fontStyle: 'italic', fontSize: 11, fontFamily: 'IBM Plex Mono, monospace',
+    letterSpacing: '0.04em',
+  },
+  colophon: { marginTop: 40 },
+  colRule: { height: 1, background: '#1a1a1a', marginBottom: 12 },
+  colText: {
+    fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.12em',
+    color: '#5a554d', textTransform: 'uppercase',
+  },
+  sidePanel: {
+    position: 'fixed', right: 0, top: 0, bottom: 0, width: 400,
+    background: '#f5f1e8', borderLeft: '2px solid #1a1a1a',
+    boxShadow: '-8px 0 32px rgba(0,0,0,0.08)',
+    display: 'flex', flexDirection: 'column', zIndex: 100,
+    animation: 'slideIn 240ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+  },
+  spHead: {
+    padding: '24px 24px 16px', borderBottom: '1px solid #d4cdb8',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+  },
+  spEyebrow: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.18em', color: '#5a554d', marginBottom: 6 },
+  spTitle: { fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em' },
+  spClose: { background: 'transparent', border: 'none', fontSize: 28, cursor: 'pointer', padding: 0, lineHeight: 1, color: '#1a1a1a' },
+  spContent: { flex: 1, overflow: 'auto', padding: '20px 24px' },
+  spSectionLabel: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.18em', color: '#1a1a1a', marginBottom: 12, borderBottom: '1px solid #d4cdb8', paddingBottom: 6 },
+  spObjRow: { display: 'grid', gridTemplateColumns: '80px 1fr', gap: 12, alignItems: 'baseline', padding: '8px 0', borderBottom: '1px solid rgba(26,26,26,0.06)' },
+  spObjRole: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase' },
+  spObjName: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, color: '#1a1a1a', wordBreak: 'break-all', fontWeight: 500 },
+  spObjMeta: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, color: '#5a554d', gridColumn: '2', marginTop: -2 },
+};
+

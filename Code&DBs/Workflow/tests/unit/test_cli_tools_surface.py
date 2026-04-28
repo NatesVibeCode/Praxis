@@ -175,6 +175,17 @@ def test_tools_describe_daily_heartbeat_smoke() -> None:
     assert "alias:heartbeat" in rendered
 
 
+def test_tools_describe_deprecated_alias_shows_replacement() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "describe", "praxis_run_status"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "deprecated-alias" in rendered
+    assert "replacement: workflow tools call praxis_run --input-json" in rendered
+    assert '"action":"status"' in rendered
+
+
 def test_tools_help_can_describe_a_tool_alias() -> None:
     stdout = StringIO()
 

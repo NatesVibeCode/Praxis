@@ -34,6 +34,7 @@ from runtime.command_signatures import (
     _json_dumps,
     _record_payload_signature,
 )
+from runtime.idempotency import canonical_hash
 from runtime.command_handlers import (
     _emit_system_event,
     _event_type_for_status,
@@ -598,6 +599,204 @@ def _normalize_payload(value: object, *, field_name: str) -> dict[str, Any]:
     return cast(dict[str, Any], dict(json_value))
 
 
+def _normalize_workflow_retry_explanation(
+    payload: Mapping[str, Any],
+    *,
+    field_name: str,
+) -> dict[str, Any]:
+    normalized = dict(payload)
+    previous_failure = _normalize_text(
+        normalized.get("previous_failure"),
+        field_name=f"{field_name}.previous_failure",
+    )
+    retry_delta = _normalize_text(
+        normalized.get("retry_delta"),
+        field_name=f"{field_name}.retry_delta",
+    )
+    normalized["previous_failure"] = previous_failure
+    normalized["retry_delta"] = retry_delta
+    return normalized
+
+
+def _normalize_retry_guard(value: object, *, field_name: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ControlCommandError(
+            "control.command.invalid_value",
+            f"{field_name} must be a mapping",
+            details={"field": field_name, "value_type": type(value).__name__},
+        )
+    run_id = _normalize_text(value.get("run_id"), field_name=f"{field_name}.run_id")
+    label = _normalize_text(value.get("label"), field_name=f"{field_name}.label")
+    status = _normalize_text(value.get("status"), field_name=f"{field_name}.status")
+    try:
+        attempt = int(value.get("attempt") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ControlCommandError(
+            "control.command.invalid_value",
+            f"{field_name}.attempt must be an integer",
+            details={"field": f"{field_name}.attempt", "value": value.get("attempt")},
+        ) from exc
+    job_id = value.get("job_id")
+    if job_id is not None:
+        try:
+            job_id = int(job_id)
+        except (TypeError, ValueError) as exc:
+            raise ControlCommandError(
+                "control.command.invalid_value",
+                f"{field_name}.job_id must be an integer or null",
+                details={"field": f"{field_name}.job_id", "value": value.get("job_id")},
+            ) from exc
+    return {
+        "run_id": run_id,
+        "label": label,
+        "job_id": job_id,
+        "status": status,
+        "attempt": attempt,
+    }
+
+
+def workflow_retry_guard(
+    conn: "SyncPostgresConnection",
+    *,
+    run_id: str,
+    label: str,
+) -> dict[str, Any]:
+    """Return the current job state a retry command must bind to."""
+
+    normalized_run_id = _normalize_text(run_id, field_name="run_id")
+    normalized_label = _normalize_text(label, field_name="label")
+    if not hasattr(conn, "execute"):
+        raise ControlCommandError(
+            "control.command.workflow_retry_state_unreadable",
+            "workflow retry requires readable job state before command creation",
+            details={
+                "run_id": normalized_run_id,
+                "label": normalized_label,
+                "reason": "connection has no execute method",
+            },
+        )
+    try:
+        rows = conn.execute(
+            """SELECT id, run_id, label, status, attempt
+               FROM workflow_jobs
+               WHERE run_id = $1 AND label = $2
+               ORDER BY id ASC
+               LIMIT 1""",
+            normalized_run_id,
+            normalized_label,
+        )
+    except Exception as exc:
+        raise ControlCommandError(
+            "control.command.workflow_retry_state_unreadable",
+            "workflow retry requires readable job state before command creation",
+            details={
+                "run_id": normalized_run_id,
+                "label": normalized_label,
+                "error": str(exc),
+            },
+        ) from exc
+    if not rows:
+        return {
+            "run_id": normalized_run_id,
+            "label": normalized_label,
+            "job_id": None,
+            "status": "missing",
+            "attempt": 0,
+        }
+    row = dict(rows[0])
+    return _normalize_retry_guard(
+        {
+            "run_id": row.get("run_id") or normalized_run_id,
+            "label": row.get("label") or normalized_label,
+            "job_id": row.get("id"),
+            "status": row.get("status") or "unknown",
+            "attempt": row.get("attempt") or 0,
+        },
+        field_name="retry_guard",
+    )
+
+
+def workflow_retry_payload_with_guard(
+    conn: "SyncPostgresConnection",
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Attach the moment-in-time job state to a workflow.retry payload."""
+
+    normalized = _normalize_payload(payload, field_name="payload")
+    normalized = _normalize_workflow_retry_explanation(
+        normalized,
+        field_name="payload",
+    )
+    run_id = _normalize_text(normalized.get("run_id"), field_name="payload.run_id")
+    label = _normalize_text(normalized.get("label"), field_name="payload.label")
+    guarded = dict(normalized)
+    guarded["retry_guard"] = workflow_retry_guard(conn, run_id=run_id, label=label)
+    return guarded
+
+
+def workflow_retry_idempotency_key(
+    *,
+    requested_by_kind: str,
+    payload: Mapping[str, Any],
+) -> str:
+    """Build a retry key bound to the job state observed by the command."""
+
+    requester = _normalize_text(requested_by_kind, field_name="requested_by_kind")
+    normalized = _normalize_payload(payload, field_name="payload")
+    normalized = _normalize_workflow_retry_explanation(
+        normalized,
+        field_name="payload",
+    )
+    run_id = _normalize_text(normalized.get("run_id"), field_name="payload.run_id")
+    guard = _normalize_retry_guard(
+        normalized.get("retry_guard"),
+        field_name="payload.retry_guard",
+    )
+    guard_hash = canonical_hash(
+        {
+            "run_id": run_id,
+            "label": guard["label"],
+            "retry_guard": guard,
+            "previous_failure": normalized["previous_failure"],
+            "retry_delta": normalized["retry_delta"],
+        }
+    )[:24]
+    return f"workflow.retry.{requester}.{run_id}.{guard['status']}.{guard['attempt']}.{guard_hash}"
+
+
+def assert_workflow_retry_guard_current(
+    conn: "SyncPostgresConnection",
+    *,
+    run_id: str,
+    label: str,
+    retry_guard: Mapping[str, Any],
+    command_id: str | None = None,
+) -> dict[str, Any]:
+    """Fail a retry command when its bound job-state snapshot is stale."""
+
+    expected = _normalize_retry_guard(retry_guard, field_name="payload.retry_guard")
+    current = workflow_retry_guard(conn, run_id=run_id, label=label)
+    mismatches = {
+        key: {"expected": expected.get(key), "actual": current.get(key)}
+        for key in ("run_id", "label", "job_id", "status", "attempt")
+        if expected.get(key) != current.get(key)
+    }
+    if mismatches:
+        raise ControlCommandExecutionError(
+            "control.command.workflow_retry_guard_stale",
+            "workflow retry command was created for stale job state",
+            details={
+                "command_id": command_id,
+                "run_id": run_id,
+                "label": label,
+                "mismatches": mismatches,
+                "expected_retry_guard": expected,
+                "actual_retry_guard": current,
+            },
+        )
+    return current
+
+
 def _ensure_transition_allowed(previous_status: str, next_status: str) -> None:
     if previous_status == next_status:
         return
@@ -737,6 +936,15 @@ class ControlIntent:
         requested_by_ref = _normalize_text(self.requested_by_ref, field_name="requested_by_ref")
         idempotency_key = _normalize_text(self.idempotency_key, field_name="idempotency_key")
         payload = _normalize_payload(self.payload, field_name="payload")
+        if command_type == ControlCommandType.WORKFLOW_RETRY.value:
+            payload = _normalize_workflow_retry_explanation(
+                payload,
+                field_name="payload",
+            )
+            _normalize_retry_guard(
+                payload.get("retry_guard"),
+                field_name="payload.retry_guard",
+            )
         risk_level = _normalize_enum_value(
             self.risk_level,
             field_name="risk_level",
@@ -1462,6 +1670,7 @@ __all__ = [
     "ControlPolicyDecision",
     "ControlRiskLevel",
     "accept_control_command",
+    "assert_workflow_retry_guard_current",
     "bootstrap_control_commands_schema",
     "classify_control_intent",
     "complete_control_command",
@@ -1490,5 +1699,8 @@ __all__ = [
     "stamp_control_intent",
     "start_control_command",
     "workflow_cancel_proof",
+    "workflow_retry_guard",
+    "workflow_retry_idempotency_key",
+    "workflow_retry_payload_with_guard",
     "update_control_command",
 ]

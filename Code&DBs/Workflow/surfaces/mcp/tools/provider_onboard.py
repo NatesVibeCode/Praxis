@@ -232,7 +232,7 @@ def _provider_auth_remediation(provider_slug: str) -> dict[str, Any]:
     }
 
 
-def tool_praxis_cli_auth_doctor(params: dict, _progress_emitter=None) -> dict:
+def run_cli_auth_doctor(params: dict, _progress_emitter=None) -> dict:
     """Probe claude / codex / gemini CLI auth health and report structured per-provider state.
 
     Returns a per-provider report with auth_state, healthy bool, summary, and
@@ -299,6 +299,29 @@ def tool_praxis_cli_auth_doctor(params: dict, _progress_emitter=None) -> dict:
             message=("OK" if overall_ok else f"{len(unhealthy)} unhealthy"),
         )
     return response
+
+
+def tool_praxis_cli_auth_doctor(params: dict, _progress_emitter=None) -> dict:
+    """Route CLI auth diagnosis through the CQRS operation catalog."""
+
+    requested = params.get("providers")
+    payload: dict[str, Any] = {}
+    if isinstance(requested, list) and requested:
+        payload["providers"] = list(requested)
+    elif isinstance(requested, str) and requested.strip():
+        payload["providers"] = [requested.strip()]
+
+    if _progress_emitter:
+        _progress_emitter.emit(progress=0, total=1, message="Dispatching CLI auth doctor through gateway")
+    result = execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name="cli_auth_doctor",
+        payload=payload,
+    )
+    if _progress_emitter:
+        status = "ok" if result.get("ok") else "failed"
+        _progress_emitter.emit(progress=1, total=1, message=f"CLI auth doctor {status}")
+    return result
 
 
 TOOLS: dict[str, tuple[callable, dict[str, object]]] = {

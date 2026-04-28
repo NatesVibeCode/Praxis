@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -515,6 +516,35 @@ def test_event_emission_failures_do_not_break_primary_flow(monkeypatch) -> None:
         workdir="/repo",
     )
     assert proposed.total_jobs == 2
+    assert any("plan.composed event emission failed" in warning for warning in proposed.warnings)
+
+
+def test_compose_and_launch_surfaces_event_emission_warnings(monkeypatch) -> None:
+    _install_quiet_preview_and_binding(monkeypatch)
+    _install_submit_command_stub(monkeypatch, run_id="workflow_events_002")
+    events = _install_event_capture(monkeypatch)
+
+    def _failing_emit(*_args, **_kwargs):
+        raise RuntimeError("event bus is down")
+
+    import runtime.intent_composition as composition_mod
+    import runtime.system_events as system_events_mod
+
+    monkeypatch.setattr(composition_mod, "emit_system_event", _failing_emit)
+    monkeypatch.setattr(system_events_mod, "emit_system_event", _failing_emit)
+
+    receipt = compose_and_launch(
+        "1. Step one\n2. Step two",
+        conn=_FakeConn(),
+        approved_by="ci@praxis",
+    )
+
+    assert receipt.run_id == "workflow_events_002"
+    assert any("plan.composed event emission failed" in warning for warning in receipt.warnings)
+    assert any("plan.approved event emission failed" in warning for warning in receipt.warnings)
+    assert any("plan.launched event emission failed" in warning for warning in receipt.warnings)
+    # The primary flow still completes even though the event bus failed.
+    assert [event["event_type"] for event in events] == []
 
 
 def test_reorder_packets_serializes_write_write_conflicts() -> None:
@@ -646,49 +676,54 @@ def test_compose_plan_serialization_off_by_default(monkeypatch) -> None:
 
 
 class _EventsConn:
-    """Conn that returns pre-canned system_events rows on query."""
+    """Conn that returns pre-canned authority_events rows on query."""
 
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self._rows = rows
 
     def execute(self, query, *params):
-        assert query.startswith("SELECT id, event_type"), f"unexpected query: {query!r}"
+        assert query.startswith("SELECT event_id, event_type"), f"unexpected query: {query!r}"
+        assert "FROM authority_events" in query
+        assert "system_events" not in query
         # params is (workflow_id,); filter client-side so the stub matches real behavior.
         wf = params[0]
-        return [row for row in self._rows if row.get("source_id") == wf]
+        filtered = []
+        for row in self._rows:
+            payload = row.get("event_payload")
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            if isinstance(payload, dict) and payload.get("workflow_id") == wf:
+                filtered.append(row)
+        return filtered
 
 
 def test_get_plan_lifecycle_returns_ordered_events_for_one_workflow_id() -> None:
     conn = _EventsConn(
         [
             {
-                "id": 1,
+                "event_id": "11111111-1111-1111-1111-111111111111",
                 "event_type": "plan.composed",
-                "source_id": "plan.alpha",
-                "payload": {"spec_name": "alpha", "step_count": 2},
-                "created_at": "2026-04-24T10:00:00+00:00",
+                "event_payload": {"workflow_id": "plan.alpha", "spec_name": "alpha", "step_count": 2},
+                "emitted_at": "2026-04-24T10:00:00+00:00",
             },
             {
-                "id": 2,
+                "event_id": "22222222-2222-2222-2222-222222222222",
                 "event_type": "plan.approved",
-                "source_id": "plan.alpha",
-                "payload": {"approved_by": "ci@praxis"},
-                "created_at": "2026-04-24T10:00:05+00:00",
+                "event_payload": {"workflow_id": "plan.alpha", "approved_by": "ci@praxis"},
+                "emitted_at": "2026-04-24T10:00:05+00:00",
             },
             {
-                "id": 3,
+                "event_id": "33333333-3333-3333-3333-333333333333",
                 "event_type": "plan.launched",
-                "source_id": "plan.alpha",
-                "payload": {"run_id": "workflow_abc"},
-                "created_at": "2026-04-24T10:00:10+00:00",
+                "event_payload": {"workflow_id": "plan.alpha", "run_id": "workflow_abc"},
+                "emitted_at": "2026-04-24T10:00:10+00:00",
             },
             # Unrelated plan.composed event for a different workflow_id — filtered out.
             {
-                "id": 4,
+                "event_id": "44444444-4444-4444-4444-444444444444",
                 "event_type": "plan.composed",
-                "source_id": "plan.beta",
-                "payload": {},
-                "created_at": "2026-04-24T10:00:07+00:00",
+                "event_payload": {"workflow_id": "plan.beta"},
+                "emitted_at": "2026-04-24T10:00:07+00:00",
             },
         ]
     )
@@ -719,11 +754,10 @@ def test_get_plan_lifecycle_handles_jsonb_serialized_as_string() -> None:
     conn = _EventsConn(
         [
             {
-                "id": 1,
+                "event_id": "11111111-1111-1111-1111-111111111111",
                 "event_type": "plan.blocked",
-                "source_id": "plan.alpha",
-                "payload": '{"blocked_reasons": [{"kind": "unbound_pills"}]}',
-                "created_at": "2026-04-24T10:00:00+00:00",
+                "event_payload": '{"workflow_id": "plan.alpha", "blocked_reasons": [{"kind": "unbound_pills"}]}',
+                "emitted_at": "2026-04-24T10:00:00+00:00",
             }
         ]
     )

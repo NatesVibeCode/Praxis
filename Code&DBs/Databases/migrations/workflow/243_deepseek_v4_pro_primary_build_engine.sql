@@ -179,7 +179,7 @@ INSERT INTO task_type_routing (
     'instant',
     9,
     'explicit'
-) ON CONFLICT (task_type, model_slug, provider_slug) DO UPDATE SET
+) ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
     permitted = EXCLUDED.permitted,
     rank = EXCLUDED.rank,
     rationale = EXCLUDED.rationale,

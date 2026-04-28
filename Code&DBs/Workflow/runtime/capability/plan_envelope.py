@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from runtime._helpers import _json_compatible
+from runtime.crypto_authority import canonical_digest_hex, canonical_json
 
 _AUTHORITY_PAYLOAD_KEYS = frozenset(
     {
@@ -23,11 +22,7 @@ _AUTHORITY_PAYLOAD_KEYS = frozenset(
 
 
 def _canonical_json(value: object) -> str:
-    return json.dumps(
-        _json_compatible(value),
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    return canonical_json(value)
 
 
 def _payload_without_authority_keys(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -42,7 +37,7 @@ def canonical_payload_digest(payload: Mapping[str, Any]) -> str:
     """Return a stable digest of the operator-requested payload only."""
 
     stripped = _payload_without_authority_keys(payload)
-    return hashlib.sha256(_canonical_json(stripped).encode("utf-8")).hexdigest()
+    return canonical_digest_hex(stripped, purpose="plan_envelope.payload_digest")
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +66,7 @@ class PlanEnvelope:
 
     @property
     def plan_hash(self) -> str:
-        digest = hashlib.sha256(_canonical_json(self.to_payload()).encode("utf-8")).hexdigest()
+        digest = canonical_digest_hex(self.to_payload(), purpose="plan_envelope.plan_hash")
         return f"plan:v1:{digest}"
 
 

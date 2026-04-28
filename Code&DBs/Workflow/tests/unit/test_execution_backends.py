@@ -181,6 +181,47 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert result["workspace_snapshot_cache_hit"] is True
 
 
+def test_execute_cli_fails_closed_when_workflow_mcp_token_mint_fails(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    class _ForbiddenRuntime:
+        def execute_command(self, **kwargs):
+            raise AssertionError(f"sandbox runtime should not run without MCP token: {kwargs}")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_URL", "http://mcp.local/mcp")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _ForbiddenRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "mint_workflow_mcp_session_token",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("signing key unavailable")),
+    )
+
+    result = execution_backends.execute_cli(
+        _agent(),
+        "hello from stdin",
+        str(tmp_path),
+        execution_bundle={
+            "run_id": "run.alpha",
+            "workflow_id": "workflow.alpha",
+            "job_label": "job.alpha",
+            "mcp_tool_names": ["praxis_query", "praxis_discover"],
+        },
+    )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "workflow_mcp.session_token_unavailable"
+    assert result["reason_code"] == "workflow_mcp.session_token_unavailable"
+    assert "refusing legacy MCP fallback" in result["stderr"]
+    assert result["workflow_mcp_session"]["run_id"] == "run.alpha"
+    assert result["workflow_mcp_session"]["allowed_tools"] == [
+        "praxis_query",
+        "praxis_discover",
+    ]
+    assert result["workflow_mcp_session"]["cause"] == "signing key unavailable"
+
+
 def test_execute_cli_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
     load_balancer = _FakeLoadBalancer(acquired=True)
@@ -401,6 +442,48 @@ def test_execute_cli_exports_ripgrep_config_path(monkeypatch, tmp_path) -> None:
     execution_backends.execute_cli(_agent(), "hello", str(workdir))
 
     assert captured["env"]["RIPGREP_CONFIG_PATH"] == "../../.ripgreprc"
+
+
+def test_execute_cli_omits_ripgrep_config_path_outside_scoped_shard(
+    monkeypatch, tmp_path
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return _sandbox_result()
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    (repo_root / ".ripgreprc").write_text(
+        "--glob=!**/artifacts/workflow_outputs/**\n",
+        encoding="utf-8",
+    )
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "target.py").write_text("print('ok')\n", encoding="utf-8")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
+
+    execution_backends.execute_cli(
+        _agent(),
+        "hello",
+        str(repo_root),
+        execution_bundle={
+            "run_id": "run.alpha",
+            "job_label": "job.alpha",
+            "access_policy": {"write_scope": ["src/target.py"]},
+        },
+    )
+
+    assert "RIPGREP_CONFIG_PATH" not in captured["env"]
 
 
 def test_execute_cli_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -> None:

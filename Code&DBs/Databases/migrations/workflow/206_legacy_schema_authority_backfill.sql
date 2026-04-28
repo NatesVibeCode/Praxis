@@ -88,7 +88,7 @@ INSERT INTO data_dictionary_objects (
     (
         'authority.objects.adoption',
         'List authority adoption state',
-        'command',
+        'query',
         'Query operation for table and column CQRS adoption status.',
         '{"migration":"206_legacy_schema_authority_backfill.sql"}'::jsonb,
         '{"authority_domain_ref":"authority.cqrs"}'::jsonb
@@ -362,7 +362,7 @@ INSERT INTO authority_object_registry (
     ),
     (
         'operation.authority.objects.adoption',
-        'command',
+        'query',
         'authority.objects.adoption',
         NULL,
         'authority.cqrs',

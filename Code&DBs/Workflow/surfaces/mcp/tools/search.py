@@ -14,6 +14,7 @@ keeps working — but the receipt path is the canonical one.
 """
 from __future__ import annotations
 
+from fnmatch import fnmatch
 from typing import Any
 
 from runtime.operation_catalog_gateway import execute_operation_from_subsystems
@@ -23,9 +24,96 @@ from runtime.operations.queries.search import (
 )
 
 from ..subsystems import _subs
+from ..runtime_context import get_current_workflow_mcp_context
 
 
 _OPERATION_NAME = "search.federated"
+_SCOPE_PATH_KEYS = (
+    "resolved_read_scope",
+    "declared_read_scope",
+    "write_scope",
+    "test_scope",
+    "blast_radius",
+)
+
+
+def _normalize_paths(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def _path_is_inside(candidate: str, scope_path: str) -> bool:
+    candidate = candidate.strip().strip("/")
+    scope_path = scope_path.strip().strip("/")
+    if not candidate or not scope_path:
+        return False
+    if candidate == scope_path:
+        return True
+    if any(ch in candidate for ch in "*?[]"):
+        return fnmatch(scope_path, candidate)
+    if any(ch in scope_path for ch in "*?[]"):
+        return fnmatch(candidate, scope_path)
+    return candidate.startswith(scope_path.rstrip("/") + "/")
+
+
+def _intersect_requested_paths_with_shard(
+    requested_paths: list[str],
+    shard_paths: list[str],
+) -> list[str]:
+    if not shard_paths:
+        return requested_paths
+    if not requested_paths:
+        return shard_paths
+    scoped: list[str] = []
+    for requested in requested_paths:
+        for shard_path in shard_paths:
+            if _path_is_inside(shard_path, requested):
+                if shard_path not in scoped:
+                    scoped.append(shard_path)
+            elif _path_is_inside(requested, shard_path):
+                if requested not in scoped:
+                    scoped.append(requested)
+    return scoped
+
+
+def _workflow_search_shard_paths() -> list[str]:
+    context = get_current_workflow_mcp_context()
+    if context is None or not isinstance(context.access_policy, dict):
+        return []
+    scoped: list[str] = []
+    for key in _SCOPE_PATH_KEYS:
+        for path in _normalize_paths(context.access_policy.get(key)):
+            if path not in scoped:
+                scoped.append(path)
+    return scoped
+
+
+def _apply_workflow_search_scope(payload: dict[str, Any]) -> dict[str, Any]:
+    shard_paths = _workflow_search_shard_paths()
+    if not shard_paths:
+        return payload
+    scoped_payload = dict(payload)
+    raw_scope = scoped_payload.get("scope")
+    scope = dict(raw_scope) if isinstance(raw_scope, dict) else {}
+    requested_paths = _normalize_paths(scope.get("paths"))
+    scoped_paths = _intersect_requested_paths_with_shard(requested_paths, shard_paths)
+    if not scoped_paths:
+        return {
+            "ok": False,
+            "error": "workflow MCP search scope is outside the admitted shard",
+            "reason_code": "workflow_mcp.search_scope_outside_shard",
+            "requested_paths": requested_paths,
+            "admitted_paths": shard_paths,
+        }
+    scope["paths"] = scoped_paths
+    scoped_payload["scope"] = scope
+    return scoped_payload
 
 
 def _suggested_refinements(
@@ -85,7 +173,9 @@ def _attach_refinements(payload: dict[str, Any]) -> dict[str, Any]:
 def tool_praxis_search(params: dict, _progress_emitter=None) -> dict:
     """Dispatch federated search through the operation catalog gateway."""
 
-    payload = dict(params or {})
+    payload = _apply_workflow_search_scope(dict(params or {}))
+    if payload.get("reason_code") == "workflow_mcp.search_scope_outside_shard":
+        return payload
     try:
         result = execute_operation_from_subsystems(
             _subs,

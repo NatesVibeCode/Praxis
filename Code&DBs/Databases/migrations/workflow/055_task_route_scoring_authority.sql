@@ -240,6 +240,6 @@ ALTER TABLE task_type_routing
 
 ALTER TABLE task_type_routing
     ADD CONSTRAINT task_type_routing_pkey
-    PRIMARY KEY (task_type, provider_slug, model_slug);
+    PRIMARY KEY (task_type, sub_task_type, provider_slug, model_slug, transport_type);
 
 COMMIT;

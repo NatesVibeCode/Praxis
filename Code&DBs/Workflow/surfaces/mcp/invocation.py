@@ -26,6 +26,19 @@ _EMBEDDING_PREWARM_TOOLS = frozenset(
     }
 )
 
+_WORKFLOW_SCOPED_REQUIRES_NATIVE_CLAMP = frozenset(
+    {
+        "praxis_query",
+        "praxis_discover",
+        "praxis_recall",
+        "praxis_graph",
+        "praxis_research",
+        "praxis_bugs",
+        "praxis_receipts",
+        "praxis_status_snapshot",
+    }
+)
+
 
 def _subsystems():
     from .subsystems import _subs
@@ -156,6 +169,10 @@ def invoke_tool(
                     reason_code="workflow_mcp.tool_not_allowed",
                 )
             allowed = token_allowed if allowed is None else allowed & token_allowed
+            _enforce_workflow_shard_tool_contract(
+                canonical_name=canonical_name,
+                claims=claims,
+            )
 
         if allowed is not None and canonical_name not in allowed:
             raise ToolInvocationError(
@@ -251,6 +268,51 @@ def _context_manager_for_claims(claims: dict[str, Any] | None):
         job_label=str(claims.get("job_label") or "").strip(),
         allowed_tools=claims.get("allowed_tools") or [],
         expires_at=int(claims.get("exp") or 0),
+        source_refs=claims.get("source_refs") or [],
+        access_policy=claims.get("access_policy") or {},
+    )
+
+
+def _claims_have_shard_scope(claims: dict[str, Any] | None) -> bool:
+    if not isinstance(claims, dict):
+        return False
+    if claims.get("source_refs"):
+        return True
+    access_policy = claims.get("access_policy")
+    if not isinstance(access_policy, dict):
+        return False
+    for key in (
+        "resolved_read_scope",
+        "declared_read_scope",
+        "write_scope",
+        "test_scope",
+        "blast_radius",
+        "allowed_record_refs",
+        "allowed_entity_refs",
+    ):
+        value = access_policy.get(key)
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            if any(str(item).strip() for item in value):
+                return True
+    return False
+
+
+def _enforce_workflow_shard_tool_contract(
+    *,
+    canonical_name: str,
+    claims: dict[str, Any] | None,
+) -> None:
+    if not _claims_have_shard_scope(claims):
+        return
+    if canonical_name not in _WORKFLOW_SCOPED_REQUIRES_NATIVE_CLAMP:
+        return
+    raise ToolInvocationError(
+        f"Tool cannot prove workflow shard enforcement yet: {canonical_name}",
+        reason_code="workflow_mcp.tool_scope_not_enforced",
+        details={
+            "tool": canonical_name,
+            "allowed_alternatives": ["praxis_context_shard", "praxis_search"],
+        },
     )
 
 

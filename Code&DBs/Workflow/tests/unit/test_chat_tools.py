@@ -37,6 +37,22 @@ class _PlatformDataConn:
         ]
 
 
+class _RetryStateConn:
+    def execute(self, query: str, *args):
+        normalized = " ".join(query.split())
+        if normalized.startswith("SELECT id, run_id, label, status, attempt FROM workflow_jobs"):
+            return [
+                {
+                    "id": 77,
+                    "run_id": args[0],
+                    "label": args[1],
+                    "status": "failed",
+                    "attempt": 2,
+                }
+            ]
+        raise AssertionError(f"Unexpected SQL: {query}")
+
+
 def _fake_command(
     *,
     command_id: str,
@@ -195,8 +211,14 @@ def test_retry_and_cancel_route_to_control_commands(monkeypatch) -> None:
 
     retry_result = chat_tools.execute_tool(
         "retry_job",
-        {"run_id": "run-7", "label": "build_a", "model_override": "openai/gpt-5.4"},
-        object(),
+        {
+            "run_id": "run-7",
+            "label": "build_a",
+            "previous_failure": "run-7/build_a failed with provider.capacity",
+            "retry_delta": "retry on openai/gpt-5.4",
+            "model_override": "openai/gpt-5.4",
+        },
+        _RetryStateConn(),
         _REPO_ROOT,
     )
     cancel_result = chat_tools.execute_tool(
@@ -209,6 +231,8 @@ def test_retry_and_cancel_route_to_control_commands(monkeypatch) -> None:
     assert captured[0]["command_type"] == chat_tools.ControlCommandType.WORKFLOW_RETRY
     assert captured[0]["payload"]["run_id"] == "run-7"
     assert captured[0]["payload"]["label"] == "build_a"
+    assert captured[0]["payload"]["previous_failure"] == "run-7/build_a failed with provider.capacity"
+    assert captured[0]["payload"]["retry_delta"] == "retry on openai/gpt-5.4"
     assert captured[0]["payload"]["model_override"] == "openai/gpt-5.4"
     assert retry_result["type"] == "status"
     assert retry_result["data"]["status"] == "approval_required"

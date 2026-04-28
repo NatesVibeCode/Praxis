@@ -62,6 +62,16 @@ class _CleanupProbeErrorConn(_Conn):
         return super().execute(query, *args)
 
 
+class _ReaperMissingConn(_Conn):
+    def execute(self, query: str, *args):
+        if "to_regprocedure('reap_expired_idempotency_keys()')" in query:
+            self.calls.append((query, args))
+            return [{"procedure_name": None}]
+        if "reap_expired_idempotency_keys()" in query:
+            raise RuntimeError("function reap_expired_idempotency_keys() does not exist")
+        return super().execute(query, *args)
+
+
 class _Engine:
     def __init__(self, *args, **kwargs) -> None:
         pass
@@ -346,22 +356,35 @@ def test_trigger_evaluator_module_runs_runtime_trigger_loop(monkeypatch):
     assert result.ok is True
 
 
-def test_system_events_cleanup_skips_missing_function():
+def test_system_events_cleanup_reports_missing_function_as_failure():
     conn = _CleanupMissingConn([])
     result = heartbeat_runner.SystemEventsCleanupModule(conn).run()
 
     assert result.module_name == "system_events_cleanup"
-    assert result.ok is True
+    assert result.ok is False
+    assert result.error == "maintenance_function_unavailable: cleanup_system_events(integer)"
     assert not any("cleanup_system_events(30)" in query for query, _ in conn.calls)
 
 
-def test_system_events_cleanup_fails_closed_on_probe_error():
+def test_system_events_cleanup_reports_probe_error_as_failure():
     conn = _CleanupProbeErrorConn([])
     result = heartbeat_runner.SystemEventsCleanupModule(conn).run()
 
     assert result.module_name == "system_events_cleanup"
-    assert result.ok is True
+    assert result.ok is False
+    assert "maintenance_function_probe_failed: cleanup_system_events(integer)" in (
+        result.error or ""
+    )
     assert not any("cleanup_system_events(30)" in query for query, _ in conn.calls)
+
+
+def test_idempotency_reaper_reports_missing_function_as_failure():
+    conn = _ReaperMissingConn([])
+    result = heartbeat_runner._IdempotencyLedgerReaperModule(conn).run()
+
+    assert result.module_name == "idempotency_ledger_reaper"
+    assert result.ok is False
+    assert result.error == "maintenance_function_unavailable: reap_expired_idempotency_keys()"
 
 
 def test_database_maintenance_module_drains_multiple_batches(monkeypatch):

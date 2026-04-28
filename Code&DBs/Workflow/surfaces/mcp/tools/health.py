@@ -59,6 +59,91 @@ def _projection_freshness_sla_policy():
         )
 
 
+_HEALTH_STATUS_RANK = {
+    "healthy": 0,
+    "unknown": 1,
+    "degraded": 1,
+    "unhealthy": 2,
+}
+
+
+def _health_status_max(*statuses: str) -> str:
+    winner = "healthy"
+    winner_rank = _HEALTH_STATUS_RANK[winner]
+    for status in statuses:
+        normalized = str(status or "").strip().lower() or "unknown"
+        rank = _HEALTH_STATUS_RANK.get(normalized, _HEALTH_STATUS_RANK["unknown"])
+        if rank > winner_rank:
+            winner = normalized if normalized in _HEALTH_STATUS_RANK else "unknown"
+            winner_rank = rank
+    return winner
+
+
+def _int_field(payload: Any, field_name: str) -> int:
+    if not isinstance(payload, dict):
+        return 0
+    try:
+        return int(payload.get(field_name) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _operational_health_overrides(
+    *,
+    projection_freshness_sla: Any,
+    route_outcomes_summary: Any,
+    trend_observability: Any,
+) -> list[dict[str, Any]]:
+    overrides: list[dict[str, Any]] = []
+    if isinstance(projection_freshness_sla, dict):
+        freshness_status = str(projection_freshness_sla.get("status") or "").strip().lower()
+        breaker_state = str(
+            projection_freshness_sla.get("read_side_circuit_breaker") or ""
+        ).strip().lower()
+        if freshness_status in {"warning", "critical"} or breaker_state == "open":
+            overrides.append(
+                {
+                    "source": "projection_freshness_sla",
+                    "effective_status": "degraded",
+                    "reason_code": (
+                        "projection_freshness_sla.read_side_circuit_open"
+                        if breaker_state == "open"
+                        else f"projection_freshness_sla.{freshness_status}"
+                    ),
+                    "status": freshness_status or "unknown",
+                    "read_side_circuit_breaker": breaker_state or "unknown",
+                }
+            )
+    if isinstance(route_outcomes_summary, dict):
+        provider_count = _int_field(route_outcomes_summary, "provider_count")
+        healthy_provider_count = _int_field(route_outcomes_summary, "healthy_provider_count")
+        unhealthy_provider_count = _int_field(route_outcomes_summary, "unhealthy_provider_count")
+        if provider_count > 0 and healthy_provider_count == 0 and unhealthy_provider_count > 0:
+            overrides.append(
+                {
+                    "source": "route_outcomes",
+                    "effective_status": "degraded",
+                    "reason_code": "route_outcomes.no_healthy_provider",
+                    "provider_count": provider_count,
+                    "healthy_provider_count": healthy_provider_count,
+                    "unhealthy_provider_count": unhealthy_provider_count,
+                }
+            )
+    if isinstance(trend_observability, dict):
+        summary = trend_observability.get("summary")
+        critical_trends = _int_field(summary, "critical_trends")
+        if critical_trends > 0:
+            overrides.append(
+                {
+                    "source": "trend_observability",
+                    "effective_status": "degraded",
+                    "reason_code": "trend_observability.critical_trends",
+                    "critical_trends": critical_trends,
+                }
+            )
+    return overrides
+
+
 def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     """Run health probes, return preflight + operator snapshot + lane recommendation."""
     hs_mod = _subs.get_health_mod()
@@ -188,9 +273,22 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     except Exception as exc:
         route_outcomes_summary = {"status": "error", "reason": str(exc)}
 
+    probe_overall = preflight.overall.value
+    operational_overrides = _operational_health_overrides(
+        projection_freshness_sla=projection_freshness_sla,
+        route_outcomes_summary=route_outcomes_summary,
+        trend_observability=trend_observability,
+    )
+    effective_overall = _health_status_max(
+        probe_overall,
+        *(str(item.get("effective_status") or "unknown") for item in operational_overrides),
+    )
+
     return {
         "preflight": {
-            "overall": preflight.overall.value,
+            "overall": effective_overall,
+            "probe_overall": probe_overall,
+            "operational_overrides": operational_overrides,
             "checks": [
                 {
                     "name": c.name,
@@ -488,6 +586,18 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_dag_health,
         {
             "description": "Backwards-compatible alias for praxis_health.",
+            "kind": "alias",
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "replacement": "workflow health",
+                "when_to_use": "Run a full preflight before workflow launch or when the platform feels degraded.",
+                "when_not_to_use": "Do not use it to inspect one specific workflow run.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Run the full health check", "input": {}},
+                ],
+            },
             "inputSchema": {
                 "type": "object",
                 "properties": {},

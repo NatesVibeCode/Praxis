@@ -18,7 +18,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
-from typing import Any
+from typing import Any, Mapping
 import uuid
 
 from registry.provider_execution_registry import (
@@ -44,6 +44,15 @@ from runtime.verification import sync_verify_refs
 # ---------------------------------------------------------------------------
 
 VALID_STAGES = frozenset(("build", "fix", "review", "test", "research"))
+
+_AGENT_STAGE_ROUTE_ALIASES: dict[str, str] = {
+    "fix": "build",
+}
+
+_REPO_PATH_PATTERN = re.compile(
+    r"(?:Code&DBs/Workflow|scripts|config|policy|Skills|README\.md|SETUP\.md)"
+    r"[A-Za-z0-9_./&@+=-]*"
+)
 
 # Stage → tier mapping
 _STAGE_TO_TIER: dict[str, str] = {
@@ -307,6 +316,81 @@ def _generate_label(stage: str, description: str) -> str:
     slug = '-'.join(w.lower() for w in words if w.isalnum() or w == '-')
     slug = re.sub(r'-+', '-', slug).strip('-')
     return f"{stage}:{slug}"
+
+
+def _agent_route_stage(stage: str) -> str:
+    """Map prompt stages onto admitted route lanes."""
+    return _AGENT_STAGE_ROUTE_ALIASES.get(stage.strip().lower(), stage)
+
+
+def _clean_repo_path_candidate(raw: str) -> str | None:
+    path = raw.strip().strip("`'\"[](){}<>,;.")
+    if not path or path.startswith("/") or ".." in path.split("/"):
+        return None
+    path = path.split("::", 1)[0].split("#", 1)[0].strip().strip("`'\"[](){}<>,;.")
+    basename = path.rsplit("/", 1)[-1]
+    if path not in {"README.md", "SETUP.md"} and ("." not in basename or "/" not in path):
+        return None
+    return path
+
+
+def _iter_text_fragments(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        fragments: list[str] = []
+        for nested in value.values():
+            fragments.extend(_iter_text_fragments(nested))
+        return fragments
+    if isinstance(value, (list, tuple, set)):
+        fragments = []
+        for nested in value:
+            fragments.extend(_iter_text_fragments(nested))
+        return fragments
+    return [str(value)]
+
+
+def _repo_paths_from_bug_row(bug: Mapping[str, Any]) -> list[str]:
+    """Extract concrete repo paths from bug authority text.
+
+    Bug descriptions often carry audit evidence like
+    ``Code&DBs/Workflow/runtime/foo.py::symbol``. Treat those paths as the
+    best available source shard before falling back to workspace root.
+    """
+    fragments: list[str] = []
+    for key in ("description", "summary", "resume_context"):
+        fragments.extend(_iter_text_fragments(bug.get(key)))
+
+    paths: list[str] = []
+    seen: set[str] = set()
+    for fragment in fragments:
+        for match in _REPO_PATH_PATTERN.finditer(fragment):
+            path = _clean_repo_path_candidate(match.group(0))
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            paths.append(path)
+    return sorted(paths)
+
+
+def _repo_paths_for_bug_ids(
+    bugs_by_id: Mapping[str, Mapping[str, Any]],
+    bug_ids: list[str],
+) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for bug_id in bug_ids:
+        bug = bugs_by_id.get(bug_id)
+        if not bug:
+            continue
+        for path in _repo_paths_from_bug_row(bug):
+            if path in seen:
+                continue
+            seen.add(path)
+            paths.append(path)
+    return sorted(paths)
 
 
 def _generate_prompt(
@@ -871,7 +955,7 @@ def _emit_plan_launched_event(
     policy::platform-architecture::expected-envelope-vs-actual-truth-
     separation, this event marks the pre-run envelope crossing into
     runtime — downstream projections (future Phase 2/3) wire it into Moon
-    observability and the agent operating packet's "what changed recently"
+    observability and the agent operating manifest's "what changed recently"
     question.
 
     Best-effort: emission failures are returned as an error string rather
@@ -1084,11 +1168,14 @@ def _plan_packets_from_bugs(
 
     placeholders = ", ".join(f"${i+1}" for i in range(len(deduped)))
     rows = conn.execute(
-        f"SELECT bug_id, title, category, severity, status, replay_ready, "
-        f"replay_reason_code FROM bugs WHERE bug_id IN ({placeholders})",
+        f"SELECT bug_id, title, category, severity, status, summary, description, resume_context "
+        f"FROM bugs WHERE bug_id IN ({placeholders})",
         *deduped,
     )
-    bugs = [dict(row) for row in rows or []]
+    bugs = _annotate_bug_rows_for_packet_derivation(
+        conn=conn,
+        bugs=[dict(row) for row in rows or []],
+    )
     if not bugs:
         return []
 
@@ -1098,6 +1185,11 @@ def _plan_packets_from_bugs(
     if not derived:
         return []
 
+    bugs_by_id: dict[str, dict[str, Any]] = {
+        str(bug.get("bug_id") or ""): bug
+        for bug in bugs
+        if str(bug.get("bug_id") or "").strip()
+    }
     # Map wave_id → set of packet labels in that wave, for depends_on wiring.
     wave_to_labels: dict[str, list[str]] = {}
     for packet in derived:
@@ -1107,6 +1199,7 @@ def _plan_packets_from_bugs(
     for packet in derived:
         cluster_label = str(packet["cluster"]["label"])
         bug_ids_for_packet = list(packet["bug_ids"])
+        derived_scope_paths = _repo_paths_for_bug_ids(bugs_by_id, bug_ids_for_packet)
         done_criteria = list(packet.get("done_criteria") or [])
         description_lines = [
             f"Resolve bug cluster: {cluster_label}",
@@ -1115,6 +1208,9 @@ def _plan_packets_from_bugs(
             f"Lane: {packet.get('lane_label')} (wave {packet.get('wave_id')})",
             f"Verification surface: {packet.get('verification_surface')}",
         ]
+        if derived_scope_paths:
+            description_lines.append("Derived repo scope:")
+            description_lines.extend(f"  - {path}" for path in derived_scope_paths)
         if done_criteria:
             description_lines.append("Done when all of:")
             description_lines.extend(f"  - {criterion}" for criterion in done_criteria)
@@ -1134,20 +1230,63 @@ def _plan_packets_from_bugs(
         plan_packets.append(
             PlanPacket(
                 description=description,
-                # No explicit write scope — bug-resolution packets discover
-                # scope at runtime from bug evidence / registry paths. Use
-                # workspace root as the safe-but-broad default; ProposedPlan
-                # surfaces this as a warning so caller can narrow before
-                # launching if they have a tighter scope in mind.
-                write=["."],
-                stage="fix",
+                # Prefer concrete repo paths named by bug evidence. Only
+                # fall back to workspace root when the bug record carries no
+                # path evidence; ProposedPlan surfaces that broad shard so
+                # the caller can narrow before launch.
+                write=derived_scope_paths or ["."],
+                # Bug packets are "fix" semantically, but route authority
+                # has no task_type_route_profiles row for a fix lane. Use
+                # the canonical coding route instead of emitting auto/fix.
+                stage="build",
                 label=own_label,
+                read=derived_scope_paths or None,
                 depends_on=depends_on_labels or None,
                 bug_ref=bug_ids_for_packet[0] if bug_ids_for_packet else None,
                 bug_refs=bug_ids_for_packet or None,
             )
         )
     return plan_packets
+
+
+def _annotate_bug_rows_for_packet_derivation(
+    *,
+    conn: Any,
+    bugs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach derived replay state without treating it as bug-row authority."""
+
+    needs_replay_state = [
+        bug
+        for bug in bugs
+        if "replay_ready" not in bug or "replay_reason_code" not in bug
+    ]
+    if not needs_replay_state:
+        return bugs
+
+    try:
+        from runtime.bug_tracker import BugTracker
+
+        tracker = BugTracker(conn)
+    except Exception:
+        tracker = None
+
+    for bug in needs_replay_state:
+        hint: Mapping[str, Any] | None = None
+        if tracker is not None:
+            try:
+                hint = tracker.replay_hint(
+                    str(bug.get("bug_id") or ""),
+                    receipt_limit=1,
+                    allow_backfill=False,
+                )
+            except Exception:
+                hint = None
+        bug["replay_ready"] = bool(hint and hint.get("available"))
+        bug["replay_reason_code"] = (
+            str((hint or {}).get("reason_code") or "bug.replay_hint_unavailable")
+        )
+    return bugs
 
 
 def _plan_packets_from_roadmap_items(
@@ -1634,7 +1773,7 @@ def _packet_to_job(
     CompiledSpec fields get mapped onto the job shape submit expects.
     """
     label = packet.label or compiled.label or f"packet_{index}"
-    agent = packet.agent or f"auto/{packet.stage}"
+    agent = packet.agent or f"auto/{_agent_route_stage(packet.stage)}"
     effective_bug_refs = (
         list(packet.bug_refs)
         if packet.bug_refs
@@ -1817,6 +1956,69 @@ def _deterministic_workflow_id(plan_obj: Plan) -> str:
     return f"plan.{stable_hash(payload)[:16]}"
 
 
+def _plan_execution_manifest(
+    *,
+    plan_obj: Plan,
+    workflow_id: str,
+    jobs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    manifest_jobs: list[dict[str, Any]] = []
+    verify_refs: list[str] = []
+    write_scope: list[str] = []
+    read_scope: list[str] = []
+    for job in jobs:
+        job_verify_refs = list(job.get("verify_refs") or [])
+        job_write_scope = list(job.get("write_scope") or [])
+        job_read_scope = list(job.get("read_scope") or [])
+        verify_refs.extend(str(ref) for ref in job_verify_refs if str(ref).strip())
+        write_scope.extend(str(path) for path in job_write_scope if str(path).strip())
+        read_scope.extend(str(path) for path in job_read_scope if str(path).strip())
+        manifest_jobs.append(
+            {
+                "label": job.get("label"),
+                "agent": job.get("agent"),
+                "task_type": job.get("task_type"),
+                "write_scope": job_write_scope,
+                "read_scope": job_read_scope,
+                "verify_refs": job_verify_refs,
+                "bug_ref": job.get("bug_ref"),
+                "bug_refs": list(job.get("bug_refs") or []),
+                "depends_on": list(job.get("depends_on") or []),
+                "consumes": list(job.get("consumes") or []),
+                "consumes_any": list(job.get("consumes_any") or []),
+                "produces": list(job.get("produces") or []),
+            }
+        )
+    manifest_payload = {
+        "manifest_kind": "launch_plan_inline_execution_manifest",
+        "plan_name": plan_obj.name,
+        "workflow_id": workflow_id,
+        "phase": plan_obj.phase,
+        "why": plan_obj.why,
+        "source_refs": list(plan_obj.source_refs or []),
+        "jobs": manifest_jobs,
+        "write_scope": list(dict.fromkeys(write_scope)),
+        "declared_read_scope": list(dict.fromkeys(read_scope)),
+        "verify_refs": list(dict.fromkeys(verify_refs)),
+    }
+    definition_revision = f"definition.{stable_hash(manifest_payload)[:16]}"
+    manifest_revision = f"manifest.{stable_hash({**manifest_payload, 'definition_revision': definition_revision})[:16]}"
+    execution_manifest_ref = f"execution_manifest:{workflow_id}:{definition_revision}:{manifest_revision}"
+    return {
+        "execution_manifest_version": 1,
+        "execution_manifest_ref": execution_manifest_ref,
+        "definition_revision": definition_revision,
+        "manifest_revision": manifest_revision,
+        **manifest_payload,
+        "hardening_report": {
+            "status": "inline_compiled",
+            "source": "runtime.spec_compiler.compile_plan",
+            "job_count": len(jobs),
+            "verify_ref_count": len(manifest_payload["verify_refs"]),
+        },
+    }
+
+
 def compile_plan(
     plan: Plan | dict,
     *,
@@ -1971,9 +2173,17 @@ def compile_plan(
         raise CompilePlanError(failures)
 
     resolved_workflow_id = plan_obj.workflow_id or _deterministic_workflow_id(plan_obj)
+    execution_manifest = _plan_execution_manifest(
+        plan_obj=plan_obj,
+        workflow_id=resolved_workflow_id,
+        jobs=jobs,
+    )
     spec_dict: dict[str, Any] = {
         "name": plan_obj.name,
         "workflow_id": resolved_workflow_id,
+        "definition_revision": execution_manifest["definition_revision"],
+        "execution_manifest_ref": execution_manifest["execution_manifest_ref"],
+        "execution_manifest": execution_manifest,
         "phase": plan_obj.phase,
         "workdir": resolved_workdir,
         "jobs": jobs,

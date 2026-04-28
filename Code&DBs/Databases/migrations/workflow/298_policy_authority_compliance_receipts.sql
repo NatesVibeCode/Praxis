@@ -50,8 +50,6 @@
 
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS dblink;
-
 -- ============================================================
 -- 1. Compliance-receipt helper (autonomous write)
 -- ============================================================

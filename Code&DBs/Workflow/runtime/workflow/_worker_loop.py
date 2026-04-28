@@ -39,6 +39,9 @@ _WORKER_CONCURRENCY_ENV_KEYS = (
     "PRAXIS_WORKER_MAX_PARALLEL",
     "PRAXIS_WORKFLOW_MAX_CONCURRENT_NODES",
 )
+_HOST_RESOURCE_DISABLED_ENV = "PRAXIS_HOST_RESOURCE_ADMISSION_DISABLED"
+_HOST_DOCKER_SANDBOX_SLOTS_ENV = "PRAXIS_HOST_DOCKER_SANDBOX_SLOTS"
+_DEFAULT_HOST_DOCKER_SANDBOX_SLOTS = 2
 
 
 def _read_text_file(path: str) -> str | None:
@@ -57,6 +60,43 @@ def _parse_positive_int(raw: object, *, label: str) -> int:
     if value < 1:
         raise ValueError(f"{label} must be a positive integer, got: {raw}")
     return value
+
+
+def _env_truthy(env: Mapping[str, str], name: str) -> bool:
+    return str(env.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _host_docker_sandbox_slot_budget(env: Mapping[str, str] | None = None) -> int | None:
+    """Return the local Docker sandbox slot cap enforced by host admission."""
+
+    resolved_env = os.environ if env is None else env
+    if _env_truthy(resolved_env, _HOST_RESOURCE_DISABLED_ENV):
+        return None
+    raw = str(resolved_env.get(_HOST_DOCKER_SANDBOX_SLOTS_ENV) or "").strip()
+    if not raw:
+        return _DEFAULT_HOST_DOCKER_SANDBOX_SLOTS
+    try:
+        return _parse_positive_int(raw, label=_HOST_DOCKER_SANDBOX_SLOTS_ENV)
+    except ValueError:
+        logger.warning(
+            "Invalid %s=%r; using default host sandbox slots=%d",
+            _HOST_DOCKER_SANDBOX_SLOTS_ENV,
+            raw,
+            _DEFAULT_HOST_DOCKER_SANDBOX_SLOTS,
+        )
+        return _DEFAULT_HOST_DOCKER_SANDBOX_SLOTS
+
+
+def _cap_local_slots_to_host_admission(
+    slots: int,
+    env: Mapping[str, str] | None = None,
+) -> int:
+    """Keep worker admission aligned with the downstream host-resource gate."""
+
+    host_slots = _host_docker_sandbox_slot_budget(env)
+    if host_slots is None:
+        return max(1, slots)
+    return max(1, min(slots, host_slots))
 
 
 def _parse_cgroup_memory_limit(raw: str | None) -> int | None:
@@ -672,17 +712,21 @@ def run_worker_loop(
 
     def _local_slot_budget() -> int:
         if not resource_managed_slots:
-            return local_pool_max_workers
+            return _cap_local_slots_to_host_admission(local_pool_max_workers)
         try:
             decision = resolve_worker_concurrency(env={})
-            return max(1, min(local_pool_max_workers, int(decision["max_concurrent"])))
+            return _cap_local_slots_to_host_admission(
+                max(1, min(local_pool_max_workers, int(decision["max_concurrent"])))
+            )
         except Exception as exc:
             logger.warning(
                 "Worker resource concurrency refresh failed; using startup budget: %s",
                 exc,
                 exc_info=True,
             )
-            return max(1, min(local_pool_max_workers, initial_local_slot_budget))
+            return _cap_local_slots_to_host_admission(
+                max(1, min(local_pool_max_workers, initial_local_slot_budget))
+            )
 
     try:
         while True:

@@ -482,6 +482,7 @@ def _workflow_chain_submit(conn: "SyncPostgresConnection", command: Any) -> str:
 def _workflow_retry(conn: "SyncPostgresConnection", command: Any) -> str:
     from runtime.control_commands import (
         ControlCommandExecutionError,
+        assert_workflow_retry_guard_current,
         _normalize_text as _nt,
     )
 
@@ -492,6 +493,14 @@ def _workflow_retry(conn: "SyncPostgresConnection", command: Any) -> str:
     label = _nt(
         _command_payload_value(command, "label"),
         field_name="payload.label",
+    )
+    retry_guard = _command_payload_value(command, "retry_guard")
+    assert_workflow_retry_guard_current(
+        conn,
+        run_id=run_id,
+        label=label,
+        retry_guard=retry_guard,
+        command_id=command.command_id,
     )
     result = _resolve_unified_dispatch_attr("retry_job")(conn, run_id, label)
     if result.get("error"):

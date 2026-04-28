@@ -41,3 +41,12 @@ def test_resolve_scope_accepts_exact_relative_ref(tmp_path: Path) -> None:
 
     assert resolution.write_scope == ["main.py"]
     assert resolution.computed_read_scope == ["support.py"]
+
+
+def test_resolve_scope_accepts_exact_non_python_artifact_ref(tmp_path: Path) -> None:
+    _write(tmp_path / "artifacts" / "report.md", "# report\n")
+
+    resolution = resolve_scope(["artifacts/report.md"], root_dir=str(tmp_path))
+
+    assert resolution.write_scope == ["artifacts/report.md"]
+    assert resolution.computed_read_scope == []

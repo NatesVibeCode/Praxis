@@ -2,19 +2,33 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
 import os
+import secrets
 import time
 from typing import Any
+from uuid import uuid4
+
+from runtime.crypto_authority import (
+    CryptoAuthorityError,
+    HmacKeyring,
+    canonical_digest_hex,
+    hmac_sha256_b64url,
+    hmac_sha256_b64url_verify,
+    load_hmac_keyring_from_env,
+    urlsafe_b64decode,
+    urlsafe_b64encode,
+)
 
 
 _TOKEN_VERSION = 1
 _TOKEN_AUDIENCE = "workflow-mcp"
 _SIGNING_SECRET_ENV = "PRAXIS_WORKFLOW_MCP_SIGNING_SECRET"
+_SIGNING_KEY_ID_ENV = "PRAXIS_WORKFLOW_MCP_SIGNING_KEY_ID"
+_SIGNING_KEYRING_ENV = "PRAXIS_WORKFLOW_MCP_SIGNING_KEYS_JSON"
 _TOKEN_TTL_ENV = "PRAXIS_WORKFLOW_MCP_TOKEN_TTL_SECONDS"
+_REVOKED_JTIS_ENV = "PRAXIS_WORKFLOW_MCP_REVOKED_JTIS"
+_DEFAULT_SIGNING_KID = "workflow-mcp.env.v1"
 
 
 class WorkflowMcpSessionError(RuntimeError):
@@ -23,31 +37,44 @@ class WorkflowMcpSessionError(RuntimeError):
         self.reason_code = reason_code
 
 
-def _urlsafe_b64encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
-
-
-def _urlsafe_b64decode(data: str) -> bytes:
-    padding = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode((data + padding).encode("ascii"))
-
-
-def _signing_secret() -> bytes:
-    secret_seed = str(os.environ.get(_SIGNING_SECRET_ENV, "")).strip()
-    if not secret_seed:
+def _signing_keyring() -> HmacKeyring:
+    try:
+        return load_hmac_keyring_from_env(
+            os.environ,
+            secret_env=_SIGNING_SECRET_ENV,
+            key_id_env=_SIGNING_KEY_ID_ENV,
+            keyring_json_env=_SIGNING_KEYRING_ENV,
+            default_kid=_DEFAULT_SIGNING_KID,
+        )
+    except CryptoAuthorityError as exc:
         raise WorkflowMcpSessionError(
             "workflow_mcp.signing_secret_missing",
-            f"{_SIGNING_SECRET_ENV} is required for workflow MCP session tokens",
+            str(exc),
+        ) from exc
+
+
+def _sign(payload: bytes, *, kid: str | None = None) -> str:
+    keyring = _signing_keyring()
+    key = keyring.key_for(kid)
+    if key is None:
+        raise WorkflowMcpSessionError(
+            "workflow_mcp.token_invalid",
+            "workflow MCP token signing key is unavailable",
         )
-    return hashlib.sha256(secret_seed.encode("utf-8")).digest()
-
-
-def _sign(payload: bytes) -> str:
-    return _urlsafe_b64encode(hmac.new(_signing_secret(), payload, hashlib.sha256).digest())
+    return hmac_sha256_b64url(payload, secret_seed=key.secret_seed)
 
 
 def _current_time() -> int:
     return int(time.time())
+
+
+def _token_jti() -> str:
+    return f"{uuid4().hex}.{secrets.token_urlsafe(12)}"
+
+
+def _revoked_jtis() -> set[str]:
+    raw = str(os.environ.get(_REVOKED_JTIS_ENV, "") or "")
+    return {item.strip() for item in raw.split(",") if item.strip()}
 
 
 def mint_workflow_mcp_session_token(
@@ -56,24 +83,40 @@ def mint_workflow_mcp_session_token(
     workflow_id: str | None,
     job_label: str,
     allowed_tools: list[str],
+    source_refs: list[str] | None = None,
+    access_policy: dict[str, Any] | None = None,
     conn: Any | None = None,
     agent_slug: str = "",
 ) -> str:
+    keyring = _signing_keyring()
+    active_key = keyring.active_key
     normalized_allowed_tools = [str(tool).strip() for tool in allowed_tools if str(tool).strip()]
+    normalized_source_refs = [
+        str(ref).strip() for ref in (source_refs or []) if str(ref).strip()
+    ]
+    normalized_access_policy = (
+        json.loads(json.dumps(access_policy, sort_keys=True, default=str))
+        if isinstance(access_policy, dict)
+        else {}
+    )
     issued_at = _current_time()
     ttl_seconds = max(60, int(str(os.environ.get(_TOKEN_TTL_ENV, "3600")).strip() or "3600"))
     payload = {
         "v": _TOKEN_VERSION,
         "aud": _TOKEN_AUDIENCE,
+        "kid": active_key.kid,
+        "jti": _token_jti(),
         "iat": issued_at,
         "exp": issued_at + ttl_seconds,
         "run_id": str(run_id or "").strip() or None,
         "workflow_id": str(workflow_id or "").strip() or None,
         "job_label": str(job_label or "").strip(),
         "allowed_tools": normalized_allowed_tools,
+        "source_refs": normalized_source_refs,
+        "access_policy": normalized_access_policy,
     }
     payload_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-    token = f"{_urlsafe_b64encode(payload_bytes)}.{_sign(payload_bytes)}"
+    token = f"{urlsafe_b64encode(payload_bytes)}.{_sign(payload_bytes, kid=active_key.kid)}"
 
     # Persist session row if we have a database connection.
     if conn is not None:
@@ -103,23 +146,32 @@ def verify_workflow_mcp_session_token(token: str) -> dict[str, Any]:
 
     payload_part, signature_part = token_text.split(".", 1)
     try:
-        payload_bytes = _urlsafe_b64decode(payload_part)
+        payload_bytes = urlsafe_b64decode(payload_part)
     except Exception as exc:  # pragma: no cover - defensive
         raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token payload is invalid") from exc
-
-    expected_signature = _sign(payload_bytes)
-    if not hmac.compare_digest(expected_signature, signature_part):
-        raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token signature is invalid")
 
     try:
         payload = json.loads(payload_bytes.decode("utf-8"))
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
         raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token payload is invalid") from exc
 
+    keyring = _signing_keyring()
+    kid = payload.get("kid")
+    if kid is not None and not isinstance(kid, str):
+        raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token key id is invalid")
+    key = keyring.key_for(kid)
+    if key is None:
+        raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token signing key is unavailable")
+    if not hmac_sha256_b64url_verify(payload_bytes, signature_part, secret_seed=key.secret_seed):
+        raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token signature is invalid")
+
     if str(payload.get("aud") or "") != _TOKEN_AUDIENCE:
         raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token audience is invalid")
     if int(payload.get("v") or 0) != _TOKEN_VERSION:
         raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token version is invalid")
+    jti = payload.get("jti")
+    if isinstance(jti, str) and jti.strip() and jti.strip() in _revoked_jtis():
+        raise WorkflowMcpSessionError("workflow_mcp.token_revoked", "workflow MCP token has been revoked")
     if int(payload.get("exp") or 0) < _current_time():
         raise WorkflowMcpSessionError("workflow_mcp.token_expired", "workflow MCP token has expired")
     if not str(payload.get("job_label") or "").strip():
@@ -128,6 +180,18 @@ def verify_workflow_mcp_session_token(token: str) -> dict[str, Any]:
     if not isinstance(allowed_tools, list):
         raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token allowed tools are invalid")
     payload["allowed_tools"] = [str(tool).strip() for tool in allowed_tools if str(tool).strip()]
+    source_refs = payload.get("source_refs")
+    if source_refs is None:
+        payload["source_refs"] = []
+    elif isinstance(source_refs, list):
+        payload["source_refs"] = [str(ref).strip() for ref in source_refs if str(ref).strip()]
+    else:
+        raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token source refs are invalid")
+    access_policy = payload.get("access_policy")
+    if access_policy is None:
+        payload["access_policy"] = {}
+    elif not isinstance(access_policy, dict):
+        raise WorkflowMcpSessionError("workflow_mcp.token_invalid", "workflow MCP token access policy is invalid")
     return payload
 
 
@@ -137,7 +201,7 @@ def verify_workflow_mcp_session_token(token: str) -> dict[str, Any]:
 
 def _session_id_from_token(token: str) -> str:
     """Derive a stable session ID from the token (first 32 chars of hash)."""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
+    return canonical_digest_hex(token, purpose="workflow_mcp.session_id")[:32]
 
 
 # ---------------------------------------------------------------------------

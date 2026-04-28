@@ -40,3 +40,20 @@ def test_bug_authority_reference_uses_praxis_bugs() -> None:
     assert "workflow tools call praxis_bugs" in text
     assert "praxis_bugs(action=\"file\"" in text
     assert "dag_bugs" not in text
+
+
+def test_praxis_debate_skill_does_not_delegate_to_workflow_debate() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    debate_text = (
+        repo_root / "Skills" / "praxis-debate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    multi_debate_text = (
+        repo_root / "Skills" / "praxis-multi-debate" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Do not call `praxis workflow debate`" in debate_text
+    assert "Run the debate yourself in the current conversation" in debate_text
+    assert "perspectives are reasoning lenses inside this answer" in debate_text
+    assert "use `praxis-debate` inline" in multi_debate_text
+    assert "praxis workflow debate \"<topic>\"" not in debate_text
+    assert "praxis workflow debate \"<topic>\"" not in multi_debate_text

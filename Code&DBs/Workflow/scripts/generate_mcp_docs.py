@@ -37,6 +37,15 @@ def render_cli_markdown() -> str:
         "This file is generated from the MCP/catalog metadata used by `workflow tools`.",
         "If it disagrees with runtime output, trust the runtime and regenerate this file.",
         "",
+        "## CQRS Gateway",
+        "",
+        "The operation catalog gateway is the CQRS write/read front door when you already know the operation name.",
+        "",
+        "- `praxis workflow operate catalog`",
+        "- `praxis workflow operate call <operation_name> --input-json '{...}'`",
+        "- `praxis workflow operate query <operation_name> --input-json '{...}'`",
+        "- `praxis workflow operate command <operation_name> --input-json '{...}'`",
+        "",
         "## Discovery Commands",
         "",
         "- `praxis workflow tools list`",
@@ -44,6 +53,7 @@ def render_cli_markdown() -> str:
         "- `praxis workflow tools describe <tool|alias|entrypoint>`",
         "- `praxis workflow tools call <tool|alias|entrypoint> --input-json '{...}'`",
         "- `praxis workflow routes --json` for the live HTTP API route catalog",
+        "- `praxis workflow instances --include-routes` to validate `/api/operate` and `/api/catalog/operations` wiring",
         "",
         "## Stable Aliases",
         "",
@@ -71,8 +81,8 @@ def render_cli_markdown() -> str:
                 lines.append("")
             current_surface = definition.cli_surface
             lines.extend([f"### {current_surface.title()}", ""])
-            lines.append("| Entrypoint | Tool | Tier | Selector | Risks |")
-            lines.append("| --- | --- | --- | --- | --- |")
+            lines.append("| Entrypoint | Tool | Tier | Selector | Risks | Replacement |")
+            lines.append("| --- | --- | --- | --- | --- | --- |")
         selector = definition.selector_field or "-"
         if definition.selector_field and definition.selector_enum:
             selector = f"{definition.selector_field}: {', '.join(definition.selector_enum)}"
@@ -82,7 +92,8 @@ def render_cli_markdown() -> str:
             f"`{definition.name}` | "
             f"`{definition.cli_tier}` | "
             f"{selector} | "
-            f"{_render_code_list(definition.risk_levels)} |"
+            f"{_render_code_list(definition.risk_levels)} | "
+            f"{definition.cli_replacement or '-'} |"
         )
 
     return "\n".join(lines).rstrip() + "\n"

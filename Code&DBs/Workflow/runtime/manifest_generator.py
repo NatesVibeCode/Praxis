@@ -459,8 +459,11 @@ class ManifestGenerator:
                     idempotency_key=None,
                 ),
             )
-        except Exception:
-            logger.warning("manifest refinement feedback authority intake failed", exc_info=True)
+        except Exception as exc:
+            raise RuntimeError(
+                "manifest_refinement.feedback_authority_failed: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
         # Load current manifest JSON
         row = self._conn.fetchrow(

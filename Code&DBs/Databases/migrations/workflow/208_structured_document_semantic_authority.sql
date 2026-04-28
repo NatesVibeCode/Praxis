@@ -6,7 +6,8 @@
 
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS vector;
+-- pgvector is enabled by the bootstrap/onboarding platform gate before
+-- workflow migrations run. This migration consumes the vector type only.
 
 INSERT INTO authority_domains (
     authority_domain_ref,

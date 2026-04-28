@@ -42,6 +42,35 @@ CREATE TABLE IF NOT EXISTS task_type_routing (
     max_concurrent  INTEGER DEFAULT 5,
     -- Notes for humans
     rationale       TEXT DEFAULT '',
+    route_tier      TEXT NOT NULL DEFAULT 'medium'
+        CHECK (route_tier IN ('high', 'medium', 'low')),
+    route_tier_rank INTEGER NOT NULL DEFAULT 99
+        CHECK (route_tier_rank >= 1),
+    latency_class   TEXT NOT NULL DEFAULT 'reasoning'
+        CHECK (latency_class IN ('reasoning', 'instant')),
+    latency_rank    INTEGER NOT NULL DEFAULT 99
+        CHECK (latency_rank >= 1),
+    reasoning_control JSONB NOT NULL DEFAULT '{}'::jsonb,
+    route_health_score DOUBLE PRECISION NOT NULL DEFAULT 0.65
+        CHECK (route_health_score >= 0.0 AND route_health_score <= 1.0),
+    observed_completed_count INTEGER NOT NULL DEFAULT 0,
+    observed_execution_failure_count INTEGER NOT NULL DEFAULT 0,
+    observed_external_failure_count INTEGER NOT NULL DEFAULT 0,
+    observed_config_failure_count INTEGER NOT NULL DEFAULT 0,
+    observed_downstream_failure_count INTEGER NOT NULL DEFAULT 0,
+    observed_downstream_bug_count INTEGER NOT NULL DEFAULT 0,
+    consecutive_internal_failures INTEGER NOT NULL DEFAULT 0,
+    last_failure_category TEXT,
+    last_failure_zone TEXT,
+    last_outcome_at TIMESTAMPTZ,
+    last_reviewed_at TIMESTAMPTZ,
+    recent_successes INTEGER NOT NULL DEFAULT 0,
+    recent_failures INTEGER NOT NULL DEFAULT 0,
+    last_failure_at TIMESTAMPTZ,
+    last_success_at TIMESTAMPTZ,
+    route_source    TEXT NOT NULL DEFAULT 'explicit',
+    temperature     NUMERIC(4,3),
+    max_tokens      INTEGER,
     updated_at      TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (task_type, sub_task_type, provider_slug, model_slug, transport_type)
 );
@@ -57,6 +86,36 @@ ALTER TABLE task_type_routing
     ADD COLUMN IF NOT EXISTS sub_task_type TEXT NOT NULL DEFAULT '*';
 ALTER TABLE task_type_routing
     ADD COLUMN IF NOT EXISTS transport_type TEXT NOT NULL DEFAULT 'CLI';
+ALTER TABLE task_type_routing
+    ADD COLUMN IF NOT EXISTS route_tier TEXT NOT NULL DEFAULT 'medium'
+        CHECK (route_tier IN ('high', 'medium', 'low')),
+    ADD COLUMN IF NOT EXISTS route_tier_rank INTEGER NOT NULL DEFAULT 99
+        CHECK (route_tier_rank >= 1),
+    ADD COLUMN IF NOT EXISTS latency_class TEXT NOT NULL DEFAULT 'reasoning'
+        CHECK (latency_class IN ('reasoning', 'instant')),
+    ADD COLUMN IF NOT EXISTS latency_rank INTEGER NOT NULL DEFAULT 99
+        CHECK (latency_rank >= 1),
+    ADD COLUMN IF NOT EXISTS reasoning_control JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS route_health_score DOUBLE PRECISION NOT NULL DEFAULT 0.65
+        CHECK (route_health_score >= 0.0 AND route_health_score <= 1.0),
+    ADD COLUMN IF NOT EXISTS observed_completed_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS observed_execution_failure_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS observed_external_failure_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS observed_config_failure_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS observed_downstream_failure_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS observed_downstream_bug_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS consecutive_internal_failures INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS last_failure_category TEXT,
+    ADD COLUMN IF NOT EXISTS last_failure_zone TEXT,
+    ADD COLUMN IF NOT EXISTS last_outcome_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS last_reviewed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS recent_successes INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS recent_failures INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS route_source TEXT NOT NULL DEFAULT 'explicit',
+    ADD COLUMN IF NOT EXISTS temperature NUMERIC(4,3),
+    ADD COLUMN IF NOT EXISTS max_tokens INTEGER;
 
 -- Widen PK to the 5-column shape if it isn't already. Older 024 applies
 -- created the table with a 4-column PK (no sub_task_type / transport_type);

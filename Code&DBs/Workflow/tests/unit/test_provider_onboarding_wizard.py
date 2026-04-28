@@ -15,7 +15,7 @@ import registry.provider_onboarding._probe as provider_onboarding_probe
 import registry.provider_onboarding._report as provider_onboarding_report
 import surfaces.mcp.tools.provider_onboard as provider_onboard_tool
 from surfaces.cli import native_operator
-from surfaces.mcp.tools.provider_onboard import tool_praxis_provider_onboard
+from surfaces.mcp.tools.provider_onboard import tool_praxis_cli_auth_doctor, tool_praxis_provider_onboard
 
 LOCALCLI_BINARY_PATH = str(Path(tempfile.gettempdir()) / "praxis-cli" / "localcli-agent")
 
@@ -423,6 +423,49 @@ def test_provider_onboarding_mcp_tool_does_not_force_cli_transport(monkeypatch) 
     )
 
     assert captured["payload"] == {"provider_slug": "cursor", "dry_run": True}
+
+
+def test_cli_auth_doctor_mcp_tool_uses_operation_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        provider_onboard_tool,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://example.test/workflow", "PATH": ""},
+    )
+
+    def _execute(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True, "operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(provider_onboard_tool, "execute_operation_from_env", _execute)
+
+    payload = tool_praxis_cli_auth_doctor({"providers": ["openai"]})
+
+    assert payload["ok"] is True
+    assert captured["operation_name"] == "cli_auth_doctor"
+    assert captured["payload"] == {"providers": ["openai"]}
+
+
+def test_cli_auth_doctor_operation_handler_uses_core_implementation(monkeypatch) -> None:
+    from runtime.operations.commands.cli_auth_doctor import (
+        CliAuthDoctorCommand,
+        handle_cli_auth_doctor,
+    )
+
+    captured: dict[str, object] = {}
+
+    def _run(params):
+        captured["params"] = params
+        return {"ok": True, "providers_checked": params["providers"]}
+
+    monkeypatch.setattr(provider_onboard_tool, "run_cli_auth_doctor", _run)
+
+    payload = handle_cli_auth_doctor(CliAuthDoctorCommand(providers=["openai"]), None)
+
+    assert payload == {"ok": True, "providers_checked": ["openai"]}
+    assert captured["params"] == {"providers": ["openai"]}
 
 
 def test_provider_onboarding_resolve_spec_infers_single_declared_api_transport(monkeypatch) -> None:

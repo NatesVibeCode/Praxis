@@ -14,6 +14,11 @@ from typing import Any
 
 _VALID_REVIEW_DECISIONS = frozenset({"approve", "request_changes", "reject"})
 _MISSING = object()
+_ARTIFACT_WRITE_SCOPE_RE = re.compile(
+    r"(?<![\w./&+-])"
+    r"((?:[A-Za-z0-9._@:+&-]+/)*"
+    r"artifacts/[A-Za-z0-9._@:+&-]+(?:/[A-Za-z0-9._@:+&-]+)*/?)"
+)
 
 
 def _json_safe(value: object) -> Any:
@@ -49,6 +54,48 @@ def _dedupe_strings(values: Sequence[str]) -> list[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
+
+
+def _artifact_scope_texts(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        texts: list[str] = []
+        for nested in value.values():
+            texts.extend(_artifact_scope_texts(nested))
+        return texts
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        texts: list[str] = []
+        for nested in value:
+            texts.extend(_artifact_scope_texts(nested))
+        return texts
+    return []
+
+
+def infer_artifact_write_scope(job: Mapping[str, Any]) -> list[str]:
+    """Infer artifact write scope from explicit job output contracts only."""
+
+    candidates: list[str] = []
+    for field_name in (
+        "outcome_goal",
+        "output_goal",
+        "output_path",
+        "description",
+        "prompt",
+        "expected_outputs",
+        "authoring_contract",
+        "acceptance_contract",
+        "verify_command",
+    ):
+        for text in _artifact_scope_texts(job.get(field_name)):
+            for match in _ARTIFACT_WRITE_SCOPE_RE.finditer(text):
+                path = match.group(1).rstrip("`'\"),;:.")
+                path = path.rstrip("/")
+                if path and path not in candidates:
+                    candidates.append(path)
+    return candidates
 
 
 def _normalize_output_schema(value: object | None) -> dict[str, Any]:
@@ -645,6 +692,7 @@ def evaluate_submission_acceptance(
 
 __all__ = [
     "evaluate_submission_acceptance",
+    "infer_artifact_write_scope",
     "normalize_acceptance_contract",
     "normalize_authoring_contract",
     "render_acceptance_contract",

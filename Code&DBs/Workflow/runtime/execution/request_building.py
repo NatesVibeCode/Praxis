@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from hashlib import sha256
-import json
 from typing import Any
 
 from adapters import DeterministicTaskRequest
 from contracts.domain import WorkflowNodeContract, WorkflowRequest
 
 from runtime._helpers import _json_compatible
+from runtime.crypto_authority import canonical_digest_hex
 from ..domain import RuntimeBoundaryError
 from ..intake import WorkflowIntakeOutcome
 
@@ -60,8 +59,7 @@ def _workflow_request_payload(request: WorkflowRequest) -> dict[str, Any]:
 
 
 def _authority_payload_hash(payload: Mapping[str, Any]) -> str:
-    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return sha256(payload_json.encode("utf-8")).hexdigest()
+    return canonical_digest_hex(payload, purpose="execution_boundary.authority_payload")
 
 
 def _execution_boundary_ref(*, intake_outcome: WorkflowIntakeOutcome) -> str:

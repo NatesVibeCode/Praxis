@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Any, Iterator
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +16,8 @@ class WorkflowMcpRequestContext:
     job_label: str
     allowed_tools: tuple[str, ...]
     expires_at: int
+    source_refs: tuple[str, ...] = ()
+    access_policy: Mapping[str, Any] | None = None
 
 
 _CURRENT_CONTEXT: ContextVar[WorkflowMcpRequestContext | None] = ContextVar(
@@ -36,6 +38,8 @@ def workflow_mcp_request_context(
     job_label: str,
     allowed_tools: Sequence[str],
     expires_at: int,
+    source_refs: Sequence[str] | None = None,
+    access_policy: Mapping[str, Any] | None = None,
 ) -> Iterator[WorkflowMcpRequestContext]:
     context = WorkflowMcpRequestContext(
         run_id=str(run_id or "").strip() or None,
@@ -43,10 +47,11 @@ def workflow_mcp_request_context(
         job_label=str(job_label or "").strip(),
         allowed_tools=tuple(str(tool).strip() for tool in allowed_tools if str(tool).strip()),
         expires_at=int(expires_at),
+        source_refs=tuple(str(ref).strip() for ref in (source_refs or []) if str(ref).strip()),
+        access_policy=dict(access_policy or {}),
     )
     token = _CURRENT_CONTEXT.set(context)
     try:
         yield context
     finally:
         _CURRENT_CONTEXT.reset(token)
-

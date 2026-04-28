@@ -140,7 +140,7 @@ _PUBLIC_FUNCTIONAL_AREAS: tuple[dict[str, str], ...] = (
     {
         "area_slug": "sandbox",
         "title": "Sandbox Runtime",
-        "summary": "Owns isolated execution sessions, execution packets, workspace materialization, and runtime boundaries.",
+        "summary": "Owns isolated execution sessions, execution manifests, workspace materialization, and runtime boundaries.",
     },
     {
         "area_slug": "routing",

@@ -114,6 +114,11 @@ class McpToolDefinition:
         return value or None
 
     @property
+    def cli_replacement(self) -> str | None:
+        value = str(self.cli_metadata.get("replacement") or "").strip()
+        return value or None
+
+    @property
     def cli_entrypoint(self) -> str:
         alias = self.cli_recommended_alias
         if alias:
@@ -184,6 +189,8 @@ class McpToolDefinition:
         badges = [self.cli_tier, self.cli_surface]
         if self.cli_recommended_alias:
             badges.append(f"alias:{self.cli_recommended_alias}")
+        if self.kind == "alias":
+            badges.append("deprecated-alias")
         if self.requires_workflow_token:
             badges.append("session-only")
         if "write" in self.risk_levels:
@@ -201,6 +208,7 @@ class McpToolDefinition:
             self.description,
             self.cli_surface,
             self.cli_tier,
+            self.cli_replacement or "",
             self.cli_when_to_use,
             self.cli_when_not_to_use,
         ]

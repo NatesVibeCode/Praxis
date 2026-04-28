@@ -53,6 +53,134 @@ def _api_discovery_text() -> str:
     )
 
 
+def _operate_help_text() -> str:
+    return (
+        "usage: workflow operate catalog [--json]\n"
+        "       workflow operate call <operation_name> --input-json '<json>' [--mode call|query|command] [--idempotency-key KEY] [--json]\n"
+        "       workflow operate query <operation_name> --input-json '<json>' [--idempotency-key KEY] [--json]\n"
+        "       workflow operate command <operation_name> --input-json '<json>' [--idempotency-key KEY] [--json]\n"
+        "\n"
+        "Thin CLI bridge over /api/operate and /api/operate/catalog. The operation catalog gateway remains the authority.\n"
+    )
+
+
+def _load_operate_input(input_json: str | None, input_file: str | None) -> dict[str, Any]:
+    if input_json is not None and input_file is not None:
+        raise ValueError("pass only one of --input-json or --input-file")
+    if input_json is None and input_file is None:
+        return {}
+    if input_json is not None:
+        decoded = json.loads(input_json)
+    else:
+        decoded = json.loads(Path(str(input_file)).read_text(encoding="utf-8"))
+    if not isinstance(decoded, dict):
+        raise ValueError("operation input must be a JSON object")
+    return dict(decoded)
+
+
+def _render_operate_catalog(payload: dict[str, Any], *, as_json: bool, stdout: TextIO) -> int:
+    if as_json:
+        print_json(stdout, payload)
+        return 0 if payload.get("ok", True) else 1
+    stdout.write("operation catalog gateway\n")
+    stdout.write(f"  authority: {payload.get('authority') or 'operation_catalog_registry'}\n")
+    stdout.write(f"  call:      {payload.get('call_path') or '/api/operate'}\n")
+    stdout.write(f"  catalog:   {payload.get('catalog_path') or '/api/catalog/operations'}\n")
+    stdout.write(f"  operations:{payload.get('operation_count') or payload.get('count') or 0}\n")
+    stdout.write("Tip: add --json to inspect operation names and schemas.\n")
+    return 0 if payload.get("ok", True) else 1
+
+
+def _operate_command(args: list[str], *, stdout: TextIO) -> int:
+    if not args or args[0] in {"-h", "--help", "help"}:
+        stdout.write(_operate_help_text())
+        return 0
+
+    subcommand = args[0].strip().lower()
+    tail = args[1:]
+    if subcommand == "catalog":
+        unknown = [arg for arg in tail if arg not in {"--json"}]
+        if unknown:
+            stdout.write(f"error: unknown argument: {unknown[0]}\n")
+            return 2
+        from surfaces.api.rest import build_operate_catalog_payload
+
+        return _render_operate_catalog(
+            build_operate_catalog_payload(),
+            as_json="--json" in tail,
+            stdout=stdout,
+        )
+
+    if subcommand not in {"call", "query", "command"}:
+        stdout.write(f"error: unknown operate subcommand: {subcommand}\n")
+        stdout.write(_operate_help_text())
+        return 2
+    if not tail or tail[0].startswith("--"):
+        stdout.write("error: operation_name is required\n")
+        stdout.write(_operate_help_text())
+        return 2
+
+    operation_name = tail[0]
+    input_json = None
+    input_file = None
+    idempotency_key = None
+    mode = subcommand if subcommand in {"query", "command"} else "call"
+    as_json = False
+    i = 1
+    while i < len(tail):
+        arg = tail[i]
+        if arg == "--input-json":
+            if i + 1 >= len(tail):
+                stdout.write("error: --input-json requires a value\n")
+                return 2
+            input_json = tail[i + 1]
+            i += 2
+        elif arg == "--input-file":
+            if i + 1 >= len(tail):
+                stdout.write("error: --input-file requires a value\n")
+                return 2
+            input_file = tail[i + 1]
+            i += 2
+        elif arg == "--mode":
+            if i + 1 >= len(tail):
+                stdout.write("error: --mode requires a value\n")
+                return 2
+            mode = tail[i + 1]
+            i += 2
+        elif arg == "--idempotency-key":
+            if i + 1 >= len(tail):
+                stdout.write("error: --idempotency-key requires a value\n")
+                return 2
+            idempotency_key = tail[i + 1]
+            i += 2
+        elif arg == "--json":
+            as_json = True
+            i += 1
+        else:
+            stdout.write(f"error: unknown argument: {arg}\n")
+            return 2
+
+    try:
+        operation_input = _load_operate_input(input_json, input_file)
+    except Exception as exc:
+        stdout.write(f"error: {exc}\n")
+        return 2
+
+    from surfaces.api.rest import OperateRequest, execute_operate_request
+
+    status_code, payload = execute_operate_request(
+        OperateRequest(
+            operation=operation_name,
+            input=operation_input,
+            mode=mode,
+            idempotency_key=idempotency_key,
+        ),
+        header_idempotency_key=idempotency_key,
+    )
+    print_json(stdout, payload)
+    return 0 if status_code < 400 and payload.get("ok") is not False else 1
+
+
 def _as_dict(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -60,6 +188,29 @@ def _as_dict(value: object) -> dict[str, Any]:
 def _coerce_text(value: object, fallback: str = "<unset>") -> str:
     text = str(value or "").strip()
     return text if text else fallback
+
+
+def _join_api_path(base: str, *parts: str) -> str:
+    base_text = str(base or "").strip().rstrip("/")
+    if not base_text or base_text == "<unset>":
+        return "<unset>"
+    normalized_parts = [
+        str(part or "").strip().lstrip("/").rstrip("/")
+        for part in parts
+        if str(part or "").strip()
+    ]
+    if not normalized_parts:
+        return base_text
+    return f"{base_text}/{'/'.join(normalized_parts)}"
+
+
+def _normalize_route_path(value: object) -> str:
+    value_text = str(value or "").strip()
+    if not value_text:
+        return ""
+    if not value_text.startswith("/"):
+        value_text = f"/{value_text}"
+    return value_text.rstrip("/") or "/"
 
 
 def _endpoint_signature(raw: str) -> str:
@@ -93,6 +244,7 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             "usage: workflow instances [check] [--json] [--include-routes]\n"
             "\n"
             "Show resolved API/MCP/DB authority and report any obvious instance drift.\n"
+            "Also validates CQRS route wiring for /api/operate and /api/catalog/operations when `check` is enabled.\n"
             "Use `workflow instances check` to print an alignment report.\n"
             "Use `workflow instances --json` for machine-readable output.\n"
             "Use `workflow instances --include-routes` to include the live HTTP route count.\n"
@@ -139,11 +291,30 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     if native_instance.get("status") == "skipped":
         native_instance = _as_dict(setup_payload.get("native_instance"))
 
-    route_payload: dict[str, object] = {"status": "skipped", "reason": "use --include-routes"}
-    if include_routes:
+    probe_routes = perform_check or include_routes
+    route_payload: dict[str, object] = {
+        "status": "skipped",
+        "reason": "use --include-routes",
+    }
+    route_paths: set[str] = set()
+    api_operate_route_present = None
+    api_catalog_route_present = None
+    if probe_routes:
         from surfaces.api.rest import list_api_routes
 
         route_payload = list_api_routes()
+        route_payload = dict(route_payload)
+        route_paths = {
+            _normalize_route_path(route.get("path"))
+            for route in route_payload.get("routes", [])
+            if isinstance(route, dict)
+        }
+        api_operate_route_present = "/api/operate" in route_paths
+        api_catalog_route_present = "/api/catalog/operations" in route_paths
+        route_payload["check"] = {
+            "api_operate_route_present": bool(api_operate_route_present),
+            "api_catalog_route_present": bool(api_catalog_route_present),
+        }
 
     cli_surface = _as_dict(orient_data.get("cli_surface"))
     tool_count = 0
@@ -176,6 +347,12 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     mcp_db_display = _coerce_text(redact_url(mcp_env.get("WORKFLOW_DATABASE_URL")))
     mcp_db_source = _coerce_text(mcp_env.get("WORKFLOW_DATABASE_AUTHORITY_SOURCE"))
     api_match = _endpoint_signature(setup_api) == _endpoint_signature(binding_api)
+    setup_operate_call = _join_api_path(setup_api, "api/operate")
+    bind_operate_call = _join_api_path(binding_api, "api/operate")
+    setup_catalog_call = _join_api_path(setup_api, "api/catalog/operations")
+    bind_catalog_call = _join_api_path(binding_api, "api/catalog/operations")
+    operate_call_match = _coerce_text(setup_operate_call) == _coerce_text(bind_operate_call)
+    operate_catalog_match = _coerce_text(setup_catalog_call) == _coerce_text(bind_catalog_call)
     setup_db_match = (
         _database_authority_signature(setup_db)
         == _database_authority_signature(binding_db_display)
@@ -212,6 +389,18 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             alignment_errors.append(
                 f"DB authority mismatch: cli={cli_db_display} orient={binding_db_display}"
             )
+    if not operate_call_match:
+        alignment_errors.append(
+            "CQRS operate route target mismatch: expected /api/operate under different API base"
+        )
+    if not operate_catalog_match:
+        alignment_errors.append(
+            "CQRS catalog route target mismatch: expected /api/catalog/operations under different API base"
+        )
+    if api_operate_route_present is not None and not api_operate_route_present:
+        alignment_errors.append("/api/operate not found in local route catalog")
+    if api_catalog_route_present is not None and not api_catalog_route_present:
+        alignment_errors.append("/api/catalog/operations not found in local route catalog")
     if orient_exit_code != 0:
         alignment_errors.append("praxis_orient call failed")
 
@@ -219,7 +408,7 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
         "setup": setup_payload,
         "orient": orient_data,
         "route_catalog": {
-            "included": include_routes,
+            "included": probe_routes,
             "visibility": "public",
             "count": route_payload.get("count"),
             "docs_url": route_payload.get("docs_url"),
@@ -233,6 +422,10 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
             "runtime_binding": runtime_binding,
             "setup_api": setup_api,
             "bind_api": binding_api,
+            "setup_operate_call": setup_operate_call,
+            "bind_operate_call": bind_operate_call,
+            "setup_operate_catalog": setup_catalog_call,
+            "bind_operate_catalog": bind_catalog_call,
             "setup_db": setup_db,
             "bind_db": binding_db_display,
             "cli_db": cli_db_display,
@@ -255,6 +448,10 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
         "checks": {
             "do_check": perform_check,
             "api_match": api_match,
+            "operate_call_match": operate_call_match,
+            "operate_catalog_match": operate_catalog_match,
+            "api_operate_route_present": api_operate_route_present,
+            "api_catalog_route_present": api_catalog_route_present,
             "db_match": db_match,
             "setup_db_match": setup_db_match,
             "cli_mcp_db_match": cli_mcp_db_match,
@@ -292,6 +489,17 @@ def _instances_command(args: list[str], *, stdout: TextIO) -> int:
     stdout.write("  authority_targets:\n")
     stdout.write(f"    api_target_setup: {setup_api}\n")
     stdout.write(f"    api_target_bind:  {binding_api}\n")
+    stdout.write("  cqrs_targets:\n")
+    stdout.write(f"    operate_call_setup: {setup_operate_call}\n")
+    stdout.write(f"    operate_call_bind:  {bind_operate_call}\n")
+    stdout.write(f"    catalog_path_setup: {setup_catalog_call}\n")
+    stdout.write(f"    catalog_path_bind:  {bind_catalog_call}\n")
+    if api_operate_route_present is not None:
+        stdout.write(
+            "    route_contract:     "
+            f"operate={ 'ok' if api_operate_route_present else 'missing' }, "
+            f"catalog={ 'ok' if api_catalog_route_present else 'missing' }\n"
+        )
     stdout.write(f"    db_target_setup:  {setup_db}\n")
     stdout.write(f"    db_target_bind:   {binding_db_display}\n")
     stdout.write(f"    db_target_cli:    {cli_db_display} ({cli_db_source})\n")

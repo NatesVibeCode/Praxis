@@ -282,7 +282,7 @@ INSERT INTO data_dictionary_objects (
     ('authority_feedback_streams', 'Authority feedback streams', 'table', 'Registered feedback intake streams.', '{"migration":"205_feedback_authority.sql"}'::jsonb, '{"authority_domain_ref":"authority.feedback"}'::jsonb),
     ('authority_feedback_events', 'Authority feedback events', 'table', 'Immutable feedback intake events.', '{"migration":"205_feedback_authority.sql"}'::jsonb, '{"authority_domain_ref":"authority.feedback"}'::jsonb),
     ('feedback.record', 'Record feedback', 'command', 'Cataloged command for immutable feedback intake.', '{"migration":"205_feedback_authority.sql"}'::jsonb, '{"authority_domain_ref":"authority.feedback"}'::jsonb),
-    ('feedback.list', 'List feedback events', 'command', 'Cataloged query for feedback intake projection.', '{"migration":"205_feedback_authority.sql"}'::jsonb, '{"authority_domain_ref":"authority.feedback"}'::jsonb),
+    ('feedback.list', 'List feedback events', 'query', 'Cataloged query for feedback intake projection.', '{"migration":"205_feedback_authority.sql"}'::jsonb, '{"authority_domain_ref":"authority.feedback"}'::jsonb),
     ('projection.feedback.events', 'Feedback event projection', 'projection', 'Read model over authority feedback events.', '{"migration":"205_feedback_authority.sql"}'::jsonb, '{"authority_domain_ref":"authority.feedback"}'::jsonb),
     ('event.feedback_recorded', 'Feedback recorded event', 'event', 'Authority feedback event emitted when feedback is recorded.', '{"migration":"205_feedback_authority.sql"}'::jsonb, '{"authority_domain_ref":"authority.feedback"}'::jsonb)
 ON CONFLICT (object_kind) DO UPDATE SET
@@ -337,7 +337,7 @@ INSERT INTO authority_object_registry (
     ('table.public.authority_feedback_streams', 'table', 'authority_feedback_streams', 'public', 'authority.feedback', 'authority_feedback_streams', 'active', 'registry', 'praxis.engine', 'decision.cqrs_authority_unification.20260422', '{}'::jsonb),
     ('table.public.authority_feedback_events', 'table', 'authority_feedback_events', 'public', 'authority.feedback', 'authority_feedback_events', 'active', 'feedback', 'praxis.engine', 'decision.cqrs_authority_unification.20260422', '{}'::jsonb),
     ('operation.feedback.record', 'command', 'feedback.record', NULL, 'authority.feedback', 'feedback.record', 'active', 'command_model', 'praxis.engine', 'decision.cqrs_authority_unification.20260422', '{}'::jsonb),
-    ('operation.feedback.list', 'command', 'feedback.list', NULL, 'authority.feedback', 'feedback.list', 'active', 'read_model', 'praxis.engine', 'decision.cqrs_authority_unification.20260422', '{}'::jsonb),
+    ('operation.feedback.list', 'query', 'feedback.list', NULL, 'authority.feedback', 'feedback.list', 'active', 'read_model', 'praxis.engine', 'decision.cqrs_authority_unification.20260422', '{}'::jsonb),
     ('projection.projection.feedback.events', 'projection', 'projection.feedback.events', NULL, 'authority.feedback', 'projection.feedback.events', 'active', 'projection', 'praxis.engine', 'decision.cqrs_authority_unification.20260422', '{}'::jsonb),
     ('event.feedback_recorded', 'event', 'feedback_recorded', NULL, 'authority.feedback', 'event.feedback_recorded', 'active', 'event_stream', 'praxis.engine', 'decision.cqrs_authority_unification.20260422', '{}'::jsonb)
 ON CONFLICT (object_ref) DO UPDATE SET

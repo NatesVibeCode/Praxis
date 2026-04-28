@@ -2,9 +2,8 @@
 --
 -- Enables vector similarity search over codebase modules so agents can
 -- discover functionally equivalent implementations before building new ones.
--- Uses pgvector (CREATE EXTENSION vector) for cosine similarity via HNSW index.
-
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Requires pgvector to be enabled by the bootstrap/onboarding platform gate.
+-- Migrations consume the extension; they do not own privileged extension setup.
 
 -- Core table: one row per indexable code unit (module, class, function)
 CREATE TABLE IF NOT EXISTS module_embeddings (

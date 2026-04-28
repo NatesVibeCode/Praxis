@@ -137,6 +137,55 @@ class TestFileAndGet:
         assert bug.owner_ref == "owner-789"
         assert bug.tags == ("api", "metadata")
 
+    def test_file_accepts_operation_receipt_discovery_provenance(self, tracker: BugTracker):
+        receipt_id = str(_uuid.uuid4())
+        tracker._conn.execute(
+            "ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_discovered_in_receipt_fkey"
+        )
+        tracker._conn.execute(
+            """
+            INSERT INTO authority_operation_receipts (
+                receipt_id,
+                operation_ref,
+                operation_name,
+                operation_kind,
+                authority_domain_ref,
+                authority_ref,
+                storage_target_ref,
+                input_hash,
+                output_hash,
+                caller_ref,
+                execution_status,
+                binding_revision,
+                decision_ref
+            ) VALUES (
+                $1, 'search-federated', 'search.federated', 'query',
+                'authority.workflow_runs', 'authority.workflow_runs',
+                'praxis.primary_postgres', 'input-hash', 'output-hash',
+                'test', 'completed', 'binding.test', 'decision.test'
+            )
+            """,
+            receipt_id,
+        )
+
+        bug, similar_bugs = tracker.file_bug(
+            title="Operation receipt provenance bug",
+            severity=BugSeverity.P2,
+            category=BugCategory.ARCHITECTURE,
+            description="Bug was discovered through a CQRS operation receipt.",
+            filed_by="workflow_api",
+            source_kind="operator_surface",
+            discovered_in_receipt_id=receipt_id,
+        )
+
+        assert similar_bugs == []
+        assert bug.discovered_in_receipt_id == receipt_id
+        links = tracker.list_evidence(bug.bug_id)
+        assert {
+            (link["evidence_kind"], link["evidence_ref"], link["evidence_role"])
+            for link in links
+        } >= {("operation_receipt", receipt_id, "discovered_by")}
+
     def test_link_evidence_rejects_unknown_role(self, tracker: BugTracker, sample_bug: Bug):
         with pytest.raises(ValueError, match="evidence_role"):
             tracker.link_evidence(

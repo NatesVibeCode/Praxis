@@ -29,6 +29,7 @@ def test_commands_delegates_to_modern_command_index(capsys) -> None:
     assert legacy_rendered == modern_rendered
     assert "workflow commands" in legacy_rendered
     assert "workflow tools [list|search|describe|call|help]" in legacy_rendered
+    assert "workflow operate <catalog|call|query|command>" in legacy_rendered
     assert "workflow decompose <objective...>" in legacy_rendered
 
 
@@ -72,6 +73,17 @@ def test_help_topic_tools_delegates_to_modern_discovery_frontdoor(capsys) -> Non
     assert "workflow tools list" in legacy_rendered
     assert "workflow tools describe <tool|alias>" in legacy_rendered
     assert "workflow tools call <tool|alias> --input-json '<json>' --yes" in legacy_rendered
+
+
+def test_help_topic_operate_delegates_to_modern_cqrs_gateway(capsys) -> None:
+    legacy_rc, legacy_rendered = _run_legacy(["help", "operate"], capsys)
+    modern_rc, modern_rendered = _run_modern(["help", "operate"])
+
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "usage: workflow operate catalog [--json]" in legacy_rendered
+    assert "Thin CLI bridge over /api/operate and /api/operate/catalog" in legacy_rendered
+    assert "workflow operate command <operation_name>" in legacy_rendered
 
 
 def test_help_topic_mcp_is_an_alias_for_tools(capsys) -> None:

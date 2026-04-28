@@ -189,6 +189,43 @@ def test_mcp_bug_triage_packet_uses_operation_catalog_gateway(monkeypatch) -> No
     }
 
 
+def test_mcp_refactor_heatmap_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"view": "refactor_heatmap"}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_refactor_heatmap(
+        {
+            "limit": 10,
+            "include_tests": True,
+            "include_domains": ["provider_routing_admission"],
+            "bug_limit": 100,
+            "long_symbol_threshold": 80,
+            "open_only": True,
+        }
+    )
+
+    assert result["view"] == "refactor_heatmap"
+    assert result["ok"] is True
+    assert captured["operation_name"] == "operator.refactor_heatmap"
+    assert captured["payload"] == {
+        "limit": 10,
+        "include_tests": True,
+        "include_domains": ["provider_routing_admission"],
+        "bug_limit": 100,
+        "long_symbol_threshold": 80,
+        "open_only": True,
+    }
+
+
 def test_mcp_operator_ideas_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -562,6 +599,128 @@ def test_mcp_status_snapshot_uses_operation_catalog_gateway(monkeypatch) -> None
     assert captured["payload"] == {"since_hours": 24}
 
 
+def test_mcp_execution_truth_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_execution_truth(
+        {"since_hours": 12, "run_id": "run_123", "include_trace": True}
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.execution_truth"
+    assert captured["operation_name"] == "operator.execution_truth"
+    assert captured["payload"] == {
+        "since_hours": 12,
+        "run_id": "run_123",
+        "include_trace": True,
+    }
+
+
+def test_mcp_next_work_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_next_work(
+        {
+            "limit": 5,
+            "since_hours": 48,
+            "domain_limit": 7,
+            "bug_limit": 11,
+            "work_limit": 13,
+            "open_only": True,
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.next_work"
+    assert captured["operation_name"] == "operator.next_work"
+    assert captured["payload"] == {
+        "limit": 5,
+        "since_hours": 48,
+        "domain_limit": 7,
+        "bug_limit": 11,
+        "work_limit": 13,
+        "open_only": True,
+    }
+
+
+def test_mcp_provider_route_truth_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_provider_route_truth(
+        {
+            "runtime_profile_ref": "praxis",
+            "provider_slug": "OpenAI",
+            "job_type": "compile",
+            "transport_type": "api",
+            "model_slug": "gpt-x",
+            "limit": 25,
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.provider_route_truth"
+    assert captured["operation_name"] == "operator.provider_route_truth"
+    assert captured["payload"] == {
+        "runtime_profile_ref": "praxis",
+        "provider_slug": "openai",
+        "job_type": "compile",
+        "transport_type": "API",
+        "model_slug": "gpt-x",
+        "limit": 25,
+    }
+
+
+def test_mcp_operation_forge_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operation_forge(
+        {
+            "operation_name": "operator.example_truth",
+            "handler_ref": "runtime.operations.queries.example.handle_query",
+            "input_model_ref": "runtime.operations.queries.example.QueryExample",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.operation_forge"
+    assert captured["operation_name"] == "operator.operation_forge"
+    assert captured["payload"]["operation_name"] == "operator.example_truth"
+    assert captured["payload"]["operation_kind"] == "query"
+    assert captured["payload"]["idempotency_policy"] == "read_only"
+
+
 def test_mcp_metrics_reset_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(operator, "_subs", object())
@@ -683,6 +842,36 @@ def test_mcp_run_status_uses_operation_catalog_gateway(monkeypatch) -> None:
     assert result["operation_receipt"]["operation_name"] == "operator.run_status"
     assert captured["operation_name"] == "operator.run_status"
     assert captured["payload"] == {"run_id": "run_123"}
+
+
+def test_mcp_run_accepts_view_alias_for_cqrs_parity(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_run({"run_id": "run_123", "view": "graph"})
+
+    assert result["operation_receipt"]["operation_name"] == "operator.run_graph"
+    assert captured["operation_name"] == "operator.run_graph"
+    assert captured["payload"] == {"run_id": "run_123"}
+
+
+def test_mcp_run_rejects_conflicting_action_and_view(monkeypatch) -> None:
+    monkeypatch.setattr(operator, "_subs", object())
+
+    result = operator.tool_praxis_run(
+        {"run_id": "run_123", "action": "status", "view": "graph"}
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "operator.run.invalid_input"
 
 
 def test_mcp_issue_backlog_uses_operation_catalog_gateway(monkeypatch) -> None:

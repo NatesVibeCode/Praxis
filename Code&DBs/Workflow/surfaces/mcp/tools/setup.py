@@ -28,7 +28,7 @@ def tool_praxis_setup(params: dict, _progress_emitter=None) -> dict:
 
     gate_ref = str(params.get("gate") or params.get("gate_ref") or "").strip() or None
     apply_ref = str(params.get("apply_ref") or "").strip() or None
-    if action == "apply" and (gate_ref or apply_ref):
+    if action == "apply":
         return setup_apply_gate_payload(
             gate_ref=gate_ref,
             apply_ref=apply_ref,

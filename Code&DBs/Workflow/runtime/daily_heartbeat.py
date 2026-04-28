@@ -482,7 +482,24 @@ async def _probe_provider(
     )
 
 
-async def probe_providers(conn: asyncpg.Connection, *, timeout_s: int) -> list[ProbeSnapshot]:
+def _normalized_text_filter(values: Sequence[str] | None) -> set[str]:
+    if values is None:
+        return set()
+    return {
+        text
+        for value in values
+        if (text := str(value or "").strip().lower())
+    }
+
+
+async def probe_providers(
+    conn: asyncpg.Connection,
+    *,
+    timeout_s: int,
+    provider_slugs: Sequence[str] | None = None,
+    adapter_types: Sequence[str] | None = None,
+    max_concurrency: int = 4,
+) -> list[ProbeSnapshot]:
     # Pre-fetch all admissions and profiles in one serial pass; asyncpg
     # connections are not safe for concurrent use, so we load everything first
     # and then fan out the subprocess calls (which don't touch the DB).
@@ -494,7 +511,23 @@ async def probe_providers(conn: asyncpg.Connection, *, timeout_s: int) -> list[P
          ORDER BY provider_slug, adapter_type
         """
     )
-    provider_slugs = sorted({row["provider_slug"] for row in admissions})
+    provider_filter = _normalized_text_filter(provider_slugs)
+    adapter_filter = _normalized_text_filter(adapter_types)
+    if provider_filter or adapter_filter:
+        admissions = [
+            row
+            for row in admissions
+            if (
+                not provider_filter
+                or str(row["provider_slug"]).strip().lower() in provider_filter
+            )
+            and (
+                not adapter_filter
+                or str(row["adapter_type"]).strip().lower() in adapter_filter
+            )
+        ]
+
+    admitted_provider_slugs = sorted({row["provider_slug"] for row in admissions})
     profile_rows = await conn.fetch(
         """
         SELECT provider_slug, binary_name, base_flags, model_flag, default_model,
@@ -503,17 +536,25 @@ async def probe_providers(conn: asyncpg.Connection, *, timeout_s: int) -> list[P
           FROM provider_cli_profiles
          WHERE status = 'active' AND provider_slug = ANY($1::text[])
         """,
-        provider_slugs,
+        admitted_provider_slugs,
     )
     profiles_by_slug: dict[str, Mapping[str, Any]] = {
         r["provider_slug"]: r for r in profile_rows
     }
 
+    concurrency = max(1, int(max_concurrency or 1))
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _guarded_probe(row: Mapping[str, Any]) -> ProbeSnapshot:
+        async with semaphore:
+            return await _probe_provider(
+                row,
+                profiles_by_slug.get(row["provider_slug"]),
+                timeout_s=timeout_s,
+            )
+
     results = await asyncio.gather(
-        *(
-            _probe_provider(row, profiles_by_slug.get(row["provider_slug"]), timeout_s=timeout_s)
-            for row in admissions
-        ),
+        *(_guarded_probe(row) for row in admissions),
         return_exceptions=True,
     )
     snapshots: list[ProbeSnapshot] = []
@@ -1039,6 +1080,9 @@ async def run_daily_heartbeat(
     env: Mapping[str, str] | None = None,
     timeouts_s: Mapping[str, int] | None = None,
     mcp_config_path: Path | None = None,
+    provider_slugs: Sequence[str] | None = None,
+    adapter_types: Sequence[str] | None = None,
+    provider_concurrency: int = 4,
 ) -> HeartbeatRunResult:
     """Run one heartbeat cycle across the requested scope(s)."""
     started = datetime.now(timezone.utc)
@@ -1056,7 +1100,17 @@ async def run_daily_heartbeat(
         scope_tasks: dict[HeartbeatScope, Any] = {}
         for s in _resolved_scopes(scope):
             if s == "providers":
-                scope_tasks[s] = probe_providers(conn, timeout_s=timeouts["providers"])
+                provider_kwargs: dict[str, Any] = {"timeout_s": timeouts["providers"]}
+                if provider_slugs is not None:
+                    provider_kwargs["provider_slugs"] = provider_slugs
+                if adapter_types is not None:
+                    provider_kwargs["adapter_types"] = adapter_types
+                if provider_concurrency != 4:
+                    provider_kwargs["max_concurrency"] = provider_concurrency
+                scope_tasks[s] = probe_providers(
+                    conn,
+                    **provider_kwargs,
+                )
             elif s == "connectors":
                 scope_tasks[s] = probe_connectors(conn)
             elif s == "credentials":

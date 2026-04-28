@@ -237,6 +237,16 @@ def _normalize_tag_value(value: object) -> str:
     return normalized or "none"
 
 
+def _auto_bug_source_issue_id(*, failure_code: str, node_id: str) -> str:
+    """Return the stable issue authority for receipt-failure auto bugs."""
+
+    return (
+        "receipt.failure:"
+        f"{_normalize_tag_value(failure_code)}:"
+        f"{_normalize_tag_value(node_id or 'unknown')}"
+    )
+
+
 def _receipt_failure_category(payload: dict[str, Any]) -> str:
     direct = str(payload.get("failure_category") or "").strip().lower()
     if direct:
@@ -357,21 +367,34 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
             source_kind="receipt_store",
         )
         tracker = BugTracker(conn)
+        source_issue_id = _auto_bug_source_issue_id(
+            failure_code=failure_code,
+            node_id=node_id or identity,
+        )
         signature_tags = (
             "auto-filed",
             f"failure_code:{_normalize_tag_value(failure_code)}",
             f"job_label:{_normalize_tag_value(identity)}",
+            f"node_id:{_normalize_tag_value(node_id or identity)}",
             f"failure_category:{_normalize_tag_value(failure_category or 'unknown')}",
             f"provider:{_normalize_tag_value(str(payload.get('provider_slug') or 'unknown'))}",
             f"model:{_normalize_tag_value(str(payload.get('model_slug') or 'unknown'))}",
-            f"signature:{_normalize_tag_value(str(signature.get('fingerprint') or 'unknown'))}",
         )
         dedupe_tags = (
             "auto-filed",
             f"failure_code:{_normalize_tag_value(failure_code)}",
             f"job_label:{_normalize_tag_value(identity)}",
         )
-        existing = tracker.list_bugs(open_only=True, tags=dedupe_tags, limit=1)
+        existing = tracker.list_bugs(
+            open_only=True,
+            source_issue_id=source_issue_id,
+            limit=1,
+        )
+        if not existing:
+            # Backward compatibility for bugs filed before source_issue_id became
+            # the auto-filer authority. This prevents one more duplicate row
+            # while old open bugs are still carrying only aggregation tags.
+            existing = tracker.list_bugs(open_only=True, tags=dedupe_tags, limit=1)
         failure_count = int(
             conn.fetchval(
                 """
@@ -400,7 +423,18 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
                 source_kind="receipt_store",
                 discovered_in_run_id=run_id or None,
                 discovered_in_receipt_id=receipt_id or None,
+                source_issue_id=source_issue_id,
                 tags=signature_tags,
+                resume_context={
+                    "auto_bug_identity": {
+                        "source_issue_id": source_issue_id,
+                        "authority": "receipts.failure_code+node_id",
+                        "aggregation_fields": ["failure_code", "node_id"],
+                        "failure_count": failure_count,
+                        "threshold": _AUTO_BUG_THRESHOLD,
+                        "signature_fingerprint": signature.get("fingerprint"),
+                    }
+                },
             )
             bug_id = bug.bug_id
         if bug_id:

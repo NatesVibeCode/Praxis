@@ -84,6 +84,7 @@ services:
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+      FIREWORKS_API_KEY: ${FIREWORKS_API_KEY:-}
       ARTIFICIAL_ANALYSIS_API_KEY: ${ARTIFICIAL_ANALYSIS_API_KEY:-}
       # Provider auth single-authority: blank stale Anthropic API-key rails so
       # the OAuth subscription rail (CLAUDE_CODE_OAUTH_TOKEN) wins if the bridge
@@ -168,6 +169,7 @@ services:
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      FIREWORKS_API_KEY: ${FIREWORKS_API_KEY:-}
       ARTIFICIAL_ANALYSIS_API_KEY: ${ARTIFICIAL_ANALYSIS_API_KEY:-}
       PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
       PRAXIS_WORKSPACE_BASE_PATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"

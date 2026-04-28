@@ -551,10 +551,13 @@ class PostgresReceiptRepository:
             SELECT wr.workflow_id,
                    wr.request_id,
                    wr.request_envelope,
+                   wr.authority_context_digest,
+                   wr.context_bundle_id,
                    j.attempt,
                    j.started_at,
                    j.finished_at,
-                   j.touch_keys
+                   j.touch_keys,
+                   j.claimed_by
             FROM workflow_jobs j
             JOIN workflow_runs wr ON wr.run_id = j.run_id
             WHERE j.id = $1 AND j.run_id = $2

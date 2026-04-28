@@ -11,6 +11,7 @@ from runtime.data_dictionary import (
     list_object_kinds,
     set_operator_override,
 )
+from memory.data_dictionary_refresh import refresh_data_dictionary_authority
 from ..subsystems import _subs
 
 
@@ -73,15 +74,13 @@ def tool_praxis_data_dictionary(params: dict[str, Any]) -> dict[str, Any]:
             return {"action": "clear_override", **result}
 
         if action == "reproject":
-            from memory.data_dictionary_projector import DataDictionaryProjector
-
-            projector = DataDictionaryProjector(_subs.get_pg_conn())
-            result = projector.run()
+            result = refresh_data_dictionary_authority(_subs.get_pg_conn())
             return {
                 "action": "reproject",
-                "ok": getattr(result, "ok", True),
-                "duration_ms": getattr(result, "duration_ms", None),
-                "error": getattr(result, "error", None),
+                "ok": bool(result.get("ok", True)),
+                "duration_ms": result.get("duration_ms"),
+                "error": result.get("error"),
+                "modules": result.get("modules", []),
             }
 
         return {"error": f"unknown action: {action}"}
@@ -105,7 +104,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  describe       — merged field list for one `object_kind` (pass `include_layers` to see per-source rows).\n"
                 "  set_override   — write/update the operator layer for (object_kind, field_path).\n"
                 "  clear_override — drop the operator row; projector/inferred layers are unaffected.\n"
-                "  reproject      — run the projector now (normally scheduled by heartbeat).\n\n"
+                "  reproject      — refresh the full data-dictionary authority now.\n\n"
                 "CATEGORIES: table, object_type, integration, dataset, ingest, decision, receipt, tool, object."
             ),
             "inputSchema": {

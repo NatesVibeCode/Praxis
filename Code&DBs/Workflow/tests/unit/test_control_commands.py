@@ -16,6 +16,15 @@ class _FakeConn:
         self.control_commands_by_key: dict[str, dict[str, object]] = {}
         self.system_events: list[dict[str, object]] = []
         self.script_calls: list[str] = []
+        self.workflow_jobs: dict[tuple[str, str], dict[str, object]] = {
+            ("run-7", "build_a"): {
+                "id": 17,
+                "run_id": "run-7",
+                "label": "build_a",
+                "status": "failed",
+                "attempt": 2,
+            }
+        }
 
     def execute_script(self, sql: str) -> None:
         self.script_calls.append(sql)
@@ -33,6 +42,9 @@ class _FakeConn:
             return [dict(row)] if row else []
         if "FROM control_commands WHERE idempotency_key = $1 LIMIT 1" in normalized:
             row = self.control_commands_by_key.get(str(args[0]))
+            return [dict(row)] if row else []
+        if normalized.startswith("SELECT id, run_id, label, status, attempt FROM workflow_jobs"):
+            row = self.workflow_jobs.get((str(args[0]), str(args[1])))
             return [dict(row)] if row else []
         if "FROM control_commands" in normalized and normalized.startswith("SELECT command_id, command_type, command_status"):
             return self._list_control_commands(normalized, args)
@@ -185,7 +197,19 @@ def _retry_intent() -> control_commands.ControlIntent:
         requested_by_kind="operator",
         requested_by_ref="operator.console",
         idempotency_key="idem.retry.1",
-        payload={"run_id": "run-7", "label": "build_a"},
+        payload={
+            "run_id": "run-7",
+            "label": "build_a",
+            "previous_failure": "receipt:run-7:build_a:2 failed with provider.capacity",
+            "retry_delta": "retry after provider slot repair",
+            "retry_guard": {
+                "run_id": "run-7",
+                "label": "build_a",
+                "job_id": 17,
+                "status": "failed",
+                "attempt": 2,
+            },
+        },
     )
 
 
@@ -771,6 +795,109 @@ def test_control_command_confirmation_required_handlers_execute_after_approval(
         assert called == [((conn, "run-7"), {"include_running": True})]
     else:
         assert called == [((conn, "run-7", "build_a"), {})]
+
+
+def test_workflow_retry_idempotency_key_tracks_current_job_attempt() -> None:
+    conn = _FakeConn()
+
+    payload_a = control_commands.workflow_retry_payload_with_guard(
+        conn,
+        {
+            "run_id": "run-7",
+            "label": "build_a",
+            "previous_failure": "receipt:run-7:build_a:2 failed with provider.capacity",
+            "retry_delta": "retry after provider slot repair",
+        },
+    )
+    key_a = control_commands.workflow_retry_idempotency_key(
+        requested_by_kind="cli",
+        payload=payload_a,
+    )
+
+    conn.workflow_jobs[("run-7", "build_a")]["status"] = "cancelled"
+    conn.workflow_jobs[("run-7", "build_a")]["attempt"] = 3
+    payload_b = control_commands.workflow_retry_payload_with_guard(
+        conn,
+        {
+            "run_id": "run-7",
+            "label": "build_a",
+            "previous_failure": "receipt:run-7:build_a:2 failed with provider.capacity",
+            "retry_delta": "retry after provider slot repair",
+        },
+    )
+    key_b = control_commands.workflow_retry_idempotency_key(
+        requested_by_kind="cli",
+        payload=payload_b,
+    )
+
+    assert payload_a["retry_guard"]["status"] == "failed"
+    assert payload_a["retry_guard"]["attempt"] == 2
+    assert payload_b["retry_guard"]["status"] == "cancelled"
+    assert payload_b["retry_guard"]["attempt"] == 3
+    assert key_a != key_b
+    assert key_a.startswith("workflow.retry.cli.run-7.failed.2.")
+    assert key_b.startswith("workflow.retry.cli.run-7.cancelled.3.")
+
+
+def test_workflow_retry_intent_requires_failure_and_delta() -> None:
+    with pytest.raises(control_commands.ControlCommandError) as exc_info:
+        control_commands.ControlIntent(
+            command_type=control_commands.ControlCommandType.WORKFLOW_RETRY,
+            requested_by_kind="cli",
+            requested_by_ref="workflow_cli.retry",
+            idempotency_key="idem.retry.missing-explanation",
+            payload={
+                "run_id": "run-7",
+                "label": "build_a",
+                "retry_guard": {
+                    "run_id": "run-7",
+                    "label": "build_a",
+                    "job_id": 17,
+                    "status": "failed",
+                    "attempt": 2,
+                },
+            },
+        )
+
+    assert exc_info.value.reason_code == "control.command.invalid_value"
+    assert "payload.previous_failure" in str(exc_info.value)
+
+
+def test_workflow_retry_command_fails_when_retry_guard_is_stale(monkeypatch) -> None:
+    conn = _FakeConn()
+    intent = _retry_intent()
+
+    monkeypatch.setattr(
+        control_commands.unified_dispatch,
+        "retry_job",
+        lambda *_args, **_kwargs: pytest.fail("stale retry guard must block retry execution"),
+    )
+
+    requested = control_commands.create_control_command(
+        conn,
+        intent,
+        command_id="control.command.retry.stale",
+        requested_at=_fixed_clock(),
+        auto_execute=False,
+    )
+    approved = control_commands.accept_control_command(
+        conn,
+        requested.command_id,
+        approved_by="operator.console",
+        approved_at=_fixed_clock(),
+    )
+
+    conn.workflow_jobs[("run-7", "build_a")]["status"] = "running"
+    conn.workflow_jobs[("run-7", "build_a")]["attempt"] = 3
+
+    final = control_commands.execute_control_command(conn, approved.command_id)
+    loaded = control_commands.load_control_command(conn, approved.command_id)
+
+    assert final.command_status == "failed"
+    assert final.error_code == "control.command.workflow_retry_guard_stale"
+    assert loaded is not None
+    assert loaded.command_status == "failed"
+    assert loaded.error_code == "control.command.workflow_retry_guard_stale"
 
 
 def test_control_command_cancel_handler_fails_closed_when_run_state_is_not_cancelled(monkeypatch):

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from surfaces._boot import sync_registries
 from ..subsystems import workflow_database_env
 from storage.postgres import get_workflow_pool
 from storage.postgres.connection import SyncPostgresConnection
@@ -230,9 +231,12 @@ def _set_secret(params: dict, conn: SyncPostgresConnection) -> dict:
 
 
 def _reload(conn: SyncPostgresConnection) -> dict:
-    from registry.integration_registry_sync import sync_integration_registry
-    n = sync_integration_registry(conn)
-    return {"synced": n}
+    succeeded, failures = sync_registries(conn)
+    return {
+        "synced": len(succeeded),
+        "components": succeeded,
+        "failures": failures,
+    }
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {

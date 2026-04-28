@@ -17,7 +17,7 @@ INSERT INTO data_dictionary_objects (
 ) VALUES (
     'operation.operator.bug_triage_packet',
     'LLM bug triage packet',
-    'command',
+    'query',
     'Read-only packet that classifies bugs for future LLM runs as live defects, evidence debt, stale projections, platform friction, fixed-pending-verification, or inactive.',
     jsonb_build_object(
         'source', 'migration.279_register_bug_triage_packet_operation',
@@ -53,7 +53,7 @@ INSERT INTO authority_object_registry (
     metadata
 ) VALUES (
     'operation.operator.bug_triage_packet',
-    'command',
+    'query',
     'operator.bug_triage_packet',
     NULL,
     'authority.bugs',
@@ -68,6 +68,7 @@ INSERT INTO authority_object_registry (
     )
 )
 ON CONFLICT (object_ref) DO UPDATE SET
+    object_kind                  = EXCLUDED.object_kind,
     authority_domain_ref         = EXCLUDED.authority_domain_ref,
     data_dictionary_object_kind  = EXCLUDED.data_dictionary_object_kind,
     lifecycle_status             = EXCLUDED.lifecycle_status,

@@ -750,7 +750,7 @@ class OperatorRoadmapSemanticNeighborRecord:
 
 @dataclass(frozen=True, slots=True)
 class OperatorWorkflowRunPacketInspectionRecord:
-    """Shadow packet inspection surfaced for one workflow run."""
+    """Shadow manifest inspection surfaced for one workflow run."""
 
     workflow_run_id: str
     workflow_id: str
@@ -1365,7 +1365,7 @@ def _operator_query_instruction_authority(
             ),
         },
         "directive": (
-            "Read roadmap-backed rows, queue refs, work-item assessments, closeout recommendations, packet inspections, and operator-frame summaries here before using repo files or prior chat state."
+            "Read roadmap-backed rows, queue refs, work-item assessments, closeout recommendations, manifest inspections, and operator-frame summaries here before using repo files or prior chat state."
             if has_run_observability
             else "Read roadmap-backed rows, queue refs, work-item assessments, and closeout recommendations here before using repo files or prior chat state."
         ),
@@ -2422,7 +2422,7 @@ class NativeOperatorQueryFrontdoor:
             if _missing_packet_inspection_column_error(exc):
                 raise _packet_inspection_unavailable(
                     "schema",
-                    "workflow run packet inspection authority is unavailable",
+                    "workflow run manifest inspection authority is unavailable",
                     error=exc,
                 ) from exc
             elif _missing_run_operator_frames_table_error(exc):
@@ -2436,14 +2436,14 @@ class NativeOperatorQueryFrontdoor:
                     if _missing_packet_inspection_column_error(no_frames_exc):
                         raise _packet_inspection_unavailable(
                             "schema",
-                            "workflow run packet inspection authority is unavailable",
+                            "workflow run manifest inspection authority is unavailable",
                             error=no_frames_exc,
                         ) from no_frames_exc
                     raise
             else:
                 raise _packet_inspection_unavailable(
                     "query",
-                    "workflow run packet inspection query failed",
+                    "workflow run manifest inspection query failed",
                     error=exc,
                 ) from exc
 
@@ -2482,7 +2482,7 @@ class NativeOperatorQueryFrontdoor:
                         except Exception as import_exc:
                             raise _packet_inspection_unavailable(
                                 "import",
-                                "workflow run packet inspection helpers are unavailable",
+                                "workflow run manifest inspection helpers are unavailable",
                                 error=import_exc,
                                 workflow_run_id=str(row.get("run_id") or "").strip() or None,
                             ) from import_exc
@@ -2492,7 +2492,7 @@ class NativeOperatorQueryFrontdoor:
                     except Exception as derive_exc:
                         raise _packet_inspection_unavailable(
                             "derive",
-                            "workflow run packet inspection derivation failed",
+                            "workflow run manifest inspection derivation failed",
                             error=derive_exc,
                             workflow_run_id=str(row.get("run_id") or "").strip() or None,
                         ) from derive_exc

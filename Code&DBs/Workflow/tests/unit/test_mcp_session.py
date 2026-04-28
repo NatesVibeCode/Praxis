@@ -15,6 +15,11 @@ def test_mint_and_verify_workflow_mcp_session_token(monkeypatch) -> None:
         workflow_id="workflow.alpha",
         job_label="job-alpha",
         allowed_tools=["praxis_context_shard", "praxis_query"],
+        source_refs=["BUG-123"],
+        access_policy={
+            "resolved_read_scope": ["Code&DBs/Workflow/runtime/example.py"],
+            "write_scope": ["Code&DBs/Workflow/tests/unit/test_example.py"],
+        },
     )
 
     claims = mcp_session.verify_workflow_mcp_session_token(token)
@@ -23,6 +28,10 @@ def test_mint_and_verify_workflow_mcp_session_token(monkeypatch) -> None:
     assert claims["workflow_id"] == "workflow.alpha"
     assert claims["job_label"] == "job-alpha"
     assert claims["allowed_tools"] == ["praxis_context_shard", "praxis_query"]
+    assert claims["source_refs"] == ["BUG-123"]
+    assert claims["access_policy"]["resolved_read_scope"] == [
+        "Code&DBs/Workflow/runtime/example.py"
+    ]
 
 
 def test_verify_workflow_mcp_session_token_rejects_expired_token(monkeypatch) -> None:

@@ -279,6 +279,12 @@ def build_runtime_binding_contract(
 
     database_url = _clean_text(env.get(_DATABASE_URL_ENV))
     database_source = _clean_text(env.get(_DATABASE_AUTHORITY_SOURCE_ENV)) or "unknown"
+    if database_url:
+        from runtime._workflow_database import workflow_database_authority_fingerprint
+
+        database_fingerprint = workflow_database_authority_fingerprint(database_url)
+    else:
+        database_fingerprint = None
     native_contract = dict(native_instance or {})
 
     binding = {
@@ -289,7 +295,14 @@ def build_runtime_binding_contract(
         "database": {
             "env_ref": _DATABASE_URL_ENV,
             "configured": bool(database_url),
+            "status": (
+                "degraded"
+                if workflow_env_error
+                else ("ready" if database_url else "unconfigured")
+            ),
             "authority_source": database_source,
+            "fingerprint": database_fingerprint,
+            "comparison_field": "fingerprint",
             "redacted_url": redact_url(database_url),
             "secret_policy": "never emit raw DSN in orient; consumers resolve by env_ref",
         },

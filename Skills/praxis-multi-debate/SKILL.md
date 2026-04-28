@@ -40,7 +40,7 @@ Keep each debate explicit, inspectable, and bounded.
 1. Sharpen each topic:
    - `praxis workflow discover "<topic>"`
    - `praxis workflow recall "<topic>"`
-   - `praxis workflow debate "<topic>"` when a quick council baseline helps
+   - use `praxis-debate` inline when a quick adversarial baseline helps
 2. Design the debate (see below).
 3. Package each debate as its own bounded run or explicit job set.
 4. Use `praxis-workflow` for run mechanics. Use `praxis-multi-workflow` only when wave sequencing matters.

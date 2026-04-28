@@ -1,9 +1,9 @@
 """In-app integration management — create, secret, test, reload.
 
 Exposes the previously orphaned runtime primitives (``upsert_integration``,
-``keychain_set``, ``resolve_token``, ``sync_integration_registry``) as HTTP
-routes so Moon and other clients can add a third-party integration without
-authoring a TOML manifest or running the builder workflow.
+``keychain_set``, ``resolve_token``, ``sync_registries``) as HTTP routes so
+Moon and other clients can add a third-party integration without authoring a
+TOML manifest or running the builder workflow.
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from typing import Any
 from urllib.parse import unquote, urlparse
+
+from surfaces._boot import sync_registries
 
 from ._shared import RouteEntry, _exact, _prefix, _read_json_body
 
@@ -275,13 +277,16 @@ def _handle_test(request: Any, path: str) -> None:
 def _handle_reload(request: Any, path: str) -> None:
     del path
     try:
-        from registry.integration_registry_sync import sync_integration_registry
         pg = request.subsystems.get_pg_conn()
-        n = sync_integration_registry(pg)
+        succeeded, failures = sync_registries(pg)
     except Exception as exc:
         request._send_json(500, {"error": f"{type(exc).__name__}: {exc}"})
         return
-    request._send_json(200, {"synced": n})
+    request._send_json(200, {
+        "synced": len(succeeded),
+        "components": succeeded,
+        "failures": failures,
+    })
 
 
 # ── Route tables ─────────────────────────────────────────────────────

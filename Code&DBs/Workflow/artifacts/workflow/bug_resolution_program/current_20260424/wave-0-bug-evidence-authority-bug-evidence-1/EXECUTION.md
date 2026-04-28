@@ -2,98 +2,111 @@
 
 ## Summary
 
-Smallest durable fix implemented for `BUG-1D9FAF57`: external bug filing now fails closed unless the caller supplies authoritative discovery provenance (`discovered_in_run_id` or `discovered_in_receipt_id`).
+Implemented the smallest durable fix for `BUG-1D9FAF57`: the bug-file action now fails closed unless the caller supplies `discovered_in_run_id` or `discovered_in_receipt_id`, so the public filing path cannot create a new underlinked bug row.
 
-I did not resolve any bug rows in this job.
+I did not resolve any bug row in this job. The broader architecture bugs remain deferred in this packet because they span larger authority seams than this contained action-layer fix.
 
 ## Changed files
 
 - `Code&DBs/Workflow/surfaces/api/handlers/_bug_surface_contract.py`
-- `Code&DBs/Workflow/surfaces/mcp/tools/bugs.py`
-- `Code&DBs/Workflow/surfaces/mcp/cli_metadata.py`
 - `Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py`
+- `Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py`
+- `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-0-bug-evidence-authority-bug-evidence-1/EXECUTION.md`
 
-## Commands run
+## Discovery and orientation evidence
 
-1. Read packet plan and authority files:
-   - `sed -n '1,220p' Code\&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-0-bug-evidence-authority-bug-evidence-1/PLAN.md`
-   - `sed -n '1,220p' Code\&DBs/Workflow/runtime/bug_tracker.py`
-   - `sed -n '1,320p' Code\&DBs/Workflow/surfaces/api/handlers/_bug_surface_contract.py`
-   - `sed -n '1,260p' Code\&DBs/Workflow/surfaces/mcp/tools/bugs.py`
-   - `sed -n '1,220p' Code\&DBs/Workflow/runtime/bug_resolution_program.py`
-   - `sed -n '200,230p' Code\&DBs/Workflow/runtime/operation_catalog_gateway.py`
-   - `sed -n '429,566p' Code\&DBs/Workflow/runtime/operation_catalog_gateway.py`
-   - `sed -n '300,399p' Code\&DBs/Workflow/surfaces/mcp/tools/health.py`
+1. Read the packet plan first:
+   - `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-0-bug-evidence-authority-bug-evidence-1/PLAN.md`
 
-2. Discover before code changes:
-   - Raw MCP JSON-RPC call to `praxis_discover` with query: `bug filing discovery provenance authority bug surface contract underlinked remediation`
+2. Attempted required orientation and discovery surfaces:
+   - `praxis workflow tools call praxis_operator_decisions ...`
+   - `curl --max-time 5 -X POST http://host.docker.internal:8420/orient ...`
+   - repo-local CLI bootstrap through `python3` and `surfaces.cli.main`
 
-3. Static verification:
-   - `PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile Code\&DBs/Workflow/surfaces/api/handlers/_bug_surface_contract.py Code\&DBs/Workflow/surfaces/mcp/tools/bugs.py Code\&DBs/Workflow/surfaces/mcp/cli_metadata.py Code\&DBs/Workflow/tests/unit/test_workflow_query_handlers.py`
+3. Environment proof for the blocked tool path:
+   - the packaged `praxis` CLI fails with `ModuleNotFoundError: No module named 'json'`
+   - direct `python3` imports of stdlib `json` fail with the same error
+   - `psql`, `rg`, and `git` are not installed in this container
+   - `/orient` timed out from the shell
 
-4. Submission attempts:
-   - Raw MCP JSON-RPC call to `praxis_submit_code_change`
-   - Raw MCP JSON-RPC call to `praxis_get_submission`
+4. Because the mandated tool path was not executable in this container, I used direct source inspection of the scoped runtime/surface/test files to keep the change grounded in the local authority code.
 
-## Evidence collected
+## Code evidence collected
 
-### Implemented fix: `BUG-1D9FAF57`
+### `BUG-1D9FAF57`
 
-- The shared bug filing contract now rejects provenance-free submissions before calling `bt.file_bug(...)`.
-  - Evidence: `Code&DBs/Workflow/surfaces/api/handlers/_bug_surface_contract.py:208-245`
-  - Exact behavior:
-    - reads `discovered_in_run_id`
-    - reads `discovered_in_receipt_id`
-    - raises `ValueError("file bug requires discovered_in_run_id or discovered_in_receipt_id so the bug is not underlinked")` when both are absent
-- The MCP tool contract and examples now reflect the requirement instead of advertising underlinked filing.
-  - Evidence: `Code&DBs/Workflow/surfaces/mcp/tools/bugs.py:199-203`
-  - Evidence: `Code&DBs/Workflow/surfaces/mcp/tools/bugs.py:279-286`
-  - Evidence: `Code&DBs/Workflow/surfaces/mcp/cli_metadata.py:72-83`
-- Unit coverage added for both fail-closed behavior and provenance pass-through.
-  - Evidence: `Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py:5126-5195`
-- Syntax compilation passed for all changed files.
+- `runtime/bug_tracker.py` shows the current tracker still allows direct `file_bug(...)` calls with no discovery anchor, and `stats()` explicitly counts rows with no `discovered_in_run_id`, no `discovered_in_receipt_id`, and no `bug_evidence_links` as `underlinked_count`.
+- `surfaces/api/handlers/_bug_surface_contract.py` is the public bug-file action seam used by `workflow_query_core.handle_bugs(...)` and by the gateway command wrapper in `runtime/operations/commands/bug_actions.py`.
+- The smallest durable fix is therefore to reject underlinked payloads in `file_bug_payload(...)` before the tracker inserts the bug row.
 
-### Deferred architecture proof: `BUG-175EB9F3`
+### `BUG-9B812B32`
 
-- The bug-resolution lifecycle is still intentionally spread across packeting/program logic and runtime authority logic.
-  - Evidence: `Code&DBs/Workflow/runtime/bug_resolution_program.py:17-57`
-  - Evidence: packet plan authority model and file lists in `PLAN.md`
-- This packet-sized fix did not attempt to collapse runtime, packet, evidence, receipt, and surface responsibilities into a single lifecycle owner.
+- `runtime/operation_catalog_gateway.py` persists the receipt through `_persist_operation_outcome(...)` after the handler returns.
+- That is a larger architectural receipt-timing issue than this packet's smallest fix and was not changed here.
 
-### Deferred DB-authority alignment: `BUG-1DBACCD8`
+### `BUG-175EB9F3`, `BUG-1DBACCD8`, `BUG-A84383D1`
 
-- Read surfaces still directly query `bugs` from multiple locations and will need coordinated verification against the documented fallback story.
-  - Evidence: `Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py:1114-1130`
-  - Evidence: `Code&DBs/Workflow/runtime/bug_tracker.py:2179-2188` (underlinked count query over `bugs` plus `bug_evidence_links`)
-- I did not change any bug read-path SQL in this job.
+- Source inspection confirms these remain cross-cutting:
+  - lifecycle spread touches runtime, API handlers, MCP tools, tests, and packet artifacts
+  - bug read authority alignment spans query surfaces and documented fallback behavior
+  - reload authority is covered in dedicated reload runtime code/tests
+- None of those can be closed responsibly as a side effect of the filing gate fix.
 
-### Deferred operation-receipt authority: `BUG-9B812B32`
+## Implementation details
 
-- The runtime persists operation receipts durably, but also strips or re-attaches them as response decoration in separate helpers.
-  - Evidence: cached result body removes `operation_receipt` in `Code&DBs/Workflow/runtime/operation_catalog_gateway.py:210-213`
-  - Evidence: durable proof write path in `Code&DBs/Workflow/runtime/operation_catalog_gateway.py:429-509`
-  - Evidence: response decoration path in `Code&DBs/Workflow/runtime/operation_catalog_gateway.py:512-566`
-- Proving or changing atomicity across cached responses, authority events, and HTTP/MCP envelopes is broader than the filing-contract repair landed here.
+1. Added `_require_discovery_authority(body)` to `surfaces/api/handlers/_bug_surface_contract.py`.
+2. Called that guard at the top of `file_bug_payload(...)`, after title validation and before dry-run or persistence.
+3. Added a unit regression in `tests/unit/test_workflow_query_handlers.py` proving the bug-file action now rejects an underlinked request and never reaches `BugTracker.file_bug(...)`.
+4. Updated MCP integration tests in `tests/integration/test_mcp_workflow_server.py` so valid bug-file calls include `discovered_in_receipt_id: "receipt-123"`, and added a regression that the MCP bug-file action rejects a request with no discovery anchor.
 
-### Deferred reload operational-proof authority: `BUG-A84383D1`
+## Verification status
 
-- `praxis_reload` currently mutates caches/runtime modules first, then records a `system_event` audit flag in the returned payload.
-  - Evidence: `Code&DBs/Workflow/surfaces/mcp/tools/health.py:300-332`
-  - Evidence: `Code&DBs/Workflow/surfaces/mcp/tools/health.py:335-397`
-- This is still a reload-specific audit path, not an operation-catalog receipt path, so I did not claim it fixed.
-
-## Environment limits
-
-- `pytest` is not installed in this container: `/usr/bin/python3: No module named pytest`
-- `git` is not installed in this container: `/bin/bash: git: command not found`
-- The bundled `praxis` shim is present but not executable and the container Python cannot import stdlib `json`, so I used raw MCP JSON-RPC over `curl` for discovery/submission duties.
-- Because of the missing stdlib `json` import in the runtime Python image, I could not execute live Python imports of the workflow modules; verification is limited to static source inspection plus `py_compile`.
-- The required submission seal is currently blocked by the platform returning `workflow_submission.baseline_missing` for run `workflow_b88858ea2e3f`, job `Execute bug_evidence packet`, attempt `1`. Follow-up `praxis_get_submission` returned `workflow_submission.not_found`.
+- Intended verifier scope:
+  - `tests/unit/test_workflow_query_handlers.py`
+  - `tests/integration/test_mcp_workflow_server.py`
+- I could not execute Python-based verification in this container because `python3` cannot import stdlib `json`, which also breaks the local `praxis` CLI.
+- I therefore have code-level proof by source inspection and targeted regression additions, but not an executed test run from this environment.
+- Required workflow verify ref remains pending downstream:
+  - `verify.bug_resolution_current_20260424.wave-0-bug-evidence-authority-bug-evidence-1.execute_packet`
 
 ## Intended terminal status per bug
 
-- `BUG-1D9FAF57`: intended `FIXED` after independent verifier confirms the new fail-closed filing contract on the canonical bug surface.
-- `BUG-175EB9F3`: intended `DEFERRED` for a dedicated architecture packet; proof gathered that the lifecycle is still multi-surface and broader than this fix.
-- `BUG-1DBACCD8`: intended `DEFERRED` pending coordinated read-path authority alignment across bug surfaces and documented fallback.
-- `BUG-9B812B32`: intended `DEFERRED` pending end-to-end proof that operation receipts are authoritative across persistence, cache, and response envelopes.
-- `BUG-A84383D1`: intended `DEFERRED` pending migration of reload proof from ad hoc audit event reporting to canonical durable operational receipts.
+### `BUG-1D9FAF57` [P1/ARCHITECTURE]
+
+- Intended terminal status: `FIX_PENDING_VERIFICATION`
+- Basis:
+  - public bug-file action now rejects the underlinked shape that `stats().underlinked_count` classifies as non-authoritative
+  - unit and MCP integration regressions were added for the failure-closed behavior
+  - runtime verification is still required in a container with a working Python toolchain
+
+### `BUG-175EB9F3` [P1/ARCHITECTURE]
+
+- Intended terminal status: `DEFERRED`
+- Basis:
+  - lifecycle convergence is broader than the action-layer fix and still spans runtime, surfaces, scripts, evidence, and artifacts
+
+### `BUG-1DBACCD8` [P1/ARCHITECTURE]
+
+- Intended terminal status: `DEFERRED`
+- Basis:
+  - this packet did not change the bug-surface read path or the documented Postgres fallback; canonical table alignment still needs its own proof pass
+
+### `BUG-9B812B32` [P1/ARCHITECTURE]
+
+- Intended terminal status: `DEFERRED`
+- Basis:
+  - receipt atomicity is centered in `runtime/operation_catalog_gateway.py` and requires a broader architectural change than the smallest contained fix
+
+### `BUG-A84383D1` [P2/RUNTIME]
+
+- Intended terminal status: `DEFERRED`
+- Basis:
+  - reload receipt-backing lives on a separate runtime surface and was not changed in this packet
+
+## Submission note
+
+- The execution bundle requires a sealed submission through `praxis submit_code_change` / `praxis_submit_code_change`.
+- The packaged CLI path is broken in this container, so I called `praxis_submit_code_change` directly over `/mcp`.
+- That submit attempt returned `workflow_submission.service_error` with a server-side `workflow_outbox.transition_seq` null-constraint failure.
+- A follow-up `praxis_get_submission` call still returned a sealed submission for this job label, but its measured `changed_paths` point at unrelated files (`storage/_generated_workflow_migration_authority.py`, `tests/unit/test_workflow_migration_idempotence.py`) rather than the files changed in this run.
+- Treat the sealed-submission state as inconsistent until the workflow submission service is repaired or the harness re-seals this job cleanly.

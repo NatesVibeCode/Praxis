@@ -170,13 +170,14 @@ def test_per_axis_errors_captured_in_errors_field(monkeypatch) -> None:
     assert set(node["errors"].keys()) == {"tags_error", "stewards_error", "rules_error"}
 
 
-def test_run_status_failure_swallowed_silently(monkeypatch) -> None:
+def test_run_status_failure_is_captured_in_errors_field(monkeypatch) -> None:
     def _raise(_k):
         raise RuntimeError("db down")
 
     _install(monkeypatch, runs=_raise)
     payload = impact_analysis(object(), object_kind="table:x")
     assert payload["nodes"][0]["run_status"] == {}
+    assert payload["nodes"][0]["errors"]["run_status_error"] == "db down"
 
 
 # --- aggregate rollups ---------------------------------------------------

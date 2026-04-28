@@ -46,12 +46,12 @@ def _best_effort_emit(
     event_type: str,
     source_id: str,
     payload: dict[str, Any],
-) -> None:
-    """Emit a plan-lifecycle system event, never failing the primary flow.
+) -> str | None:
+    """Emit a plan-lifecycle system event, returning a warning on failure.
 
-    Observability should never break planning. A degraded event bus (or a
-    test using a conn stub that doesn't implement record_system_event) is
-    allowed to silently skip the emit — primary flow continues.
+    Observability should never break planning, but the caller still needs a
+    durable signal when the emit path fails so the failure can be surfaced in
+    warnings instead of disappearing into a silent fallback.
     """
     try:
         emit_system_event(
@@ -61,8 +61,9 @@ def _best_effort_emit(
             source_type="plan",
             payload=payload,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        return f"{event_type} event emission failed: {type(exc).__name__}: {exc}"
+    return None
 
 
 def _adapt_plan_jobs_to_type_flow_request(spec_dict: dict[str, Any]) -> dict[str, Any]:
@@ -261,7 +262,7 @@ def compose_plan_from_intent(
         except Exception:
             pass
 
-    _best_effort_emit(
+    event_error = _best_effort_emit(
         conn,
         event_type="plan.composed",
         source_id=proposed.workflow_id,
@@ -277,6 +278,8 @@ def compose_plan_from_intent(
             "type_flow_error_count": len(type_flow_errors),
         },
     )
+    if event_error:
+        proposed = replace(proposed, warnings=[*proposed.warnings, event_error])
     return proposed
 
 
@@ -473,7 +476,7 @@ def compose_and_launch(
             )
 
     if blocked:
-        _best_effort_emit(
+        event_error = _best_effort_emit(
             conn,
             event_type="plan.blocked",
             source_id=proposed.workflow_id,
@@ -483,6 +486,14 @@ def compose_and_launch(
                 "blocked_reasons": blocked,
             },
         )
+        if event_error:
+            blocked.append(
+                {
+                    "kind": "plan_event_emit_failure",
+                    "count": 1,
+                    "detail": [event_error],
+                }
+            )
         raise ComposeAndLaunchBlocked(blocked)
 
     approved = approve_proposed_plan(
@@ -490,7 +501,7 @@ def compose_and_launch(
         approved_by=approved_by,
         approval_note=approval_note,
     )
-    _best_effort_emit(
+    approved_event_error = _best_effort_emit(
         conn,
         event_type="plan.approved",
         source_id=proposed.workflow_id,
@@ -506,7 +517,10 @@ def compose_and_launch(
         conn=conn,
         requested_by_kind="workflow",
     )
-    _best_effort_emit(
+    warnings = list(receipt.warnings)
+    if approved_event_error:
+        warnings.append(approved_event_error)
+    launch_event_error = _best_effort_emit(
         conn,
         event_type="plan.launched",
         source_id=proposed.workflow_id,
@@ -517,14 +531,16 @@ def compose_and_launch(
             "approved_by": approved.approved_by,
         },
     )
-    return receipt
+    if launch_event_error:
+        warnings.append(launch_event_error)
+    return replace(receipt, warnings=warnings)
 
 
 @dataclass(frozen=True)
 class PlanLifecycleEvent:
-    """One plan.* event from the system_events log."""
+    """One plan.* event from the canonical authority event stream."""
 
-    event_id: int | None
+    event_id: str | int | None
     event_type: str
     created_at: str
     payload: dict[str, Any]
@@ -540,12 +556,13 @@ class PlanLifecycleEvent:
 
 @dataclass(frozen=True)
 class PlanLifecycle:
-    """Ordered read of every plan.* system_event for one workflow_id.
+    """Ordered read of every plan.* authority event for one workflow_id.
 
-    Q-side of the planning stack's CQRS pattern: the C path emits
-    plan.composed / plan.approved / plan.launched / plan.blocked via
-    compose_and_launch; this dataclass pulls them back for Moon, CLI, or
-    ad-hoc inspection.
+    Q-side of the planning stack's CQRS pattern: command paths emit
+    plan.composed / plan.launched through the gateway-backed
+    ``authority_events`` stream; this dataclass pulls them back for Moon,
+    CLI, or ad-hoc inspection without consulting the legacy observability
+    sidecar.
     """
 
     workflow_id: str
@@ -564,7 +581,7 @@ class PlanLifecycle:
 
 
 def get_plan_lifecycle(workflow_id: str, *, conn: Any) -> PlanLifecycle:
-    """Read every plan.* system_event for one workflow_id in order.
+    """Read every plan.* authority event for one workflow_id in order.
 
     Returns :class:`PlanLifecycle` with events sorted oldest → newest so a
     reader sees compose → approve → launch (or blocked) in the order they
@@ -575,17 +592,18 @@ def get_plan_lifecycle(workflow_id: str, *, conn: Any) -> PlanLifecycle:
         raise ValueError("workflow_id is required")
 
     rows = conn.execute(
-        "SELECT id, event_type, payload, created_at "
-        "FROM system_events "
-        "WHERE source_type = 'plan' AND source_id = $1 "
-        "ORDER BY created_at ASC, id ASC",
+        "SELECT event_id, event_type, event_payload, emitted_at "
+        "FROM authority_events "
+        "WHERE event_type IN ('plan.composed', 'plan.approved', 'plan.launched', 'plan.blocked') "
+        "AND event_payload->>'workflow_id' = $1 "
+        "ORDER BY emitted_at ASC, event_sequence ASC",
         normalized,
     )
 
     events: list[PlanLifecycleEvent] = []
     for row in rows or []:
         row_dict = dict(row)
-        payload = row_dict.get("payload") or {}
+        payload = row_dict.get("event_payload") or {}
         if isinstance(payload, str):
             import json as _json
 
@@ -593,12 +611,12 @@ def get_plan_lifecycle(workflow_id: str, *, conn: Any) -> PlanLifecycle:
                 payload = _json.loads(payload)
             except (TypeError, ValueError):
                 payload = {}
-        created_at = row_dict.get("created_at")
+        created_at = row_dict.get("emitted_at")
         if hasattr(created_at, "isoformat"):
             created_at = created_at.isoformat()
         events.append(
             PlanLifecycleEvent(
-                event_id=row_dict.get("id"),
+                event_id=row_dict.get("event_id"),
                 event_type=str(row_dict.get("event_type") or ""),
                 created_at=str(created_at or ""),
                 payload=payload if isinstance(payload, dict) else {},

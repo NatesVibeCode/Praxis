@@ -373,6 +373,13 @@ def list_api_routes(
                 "supported": ["public", "internal", "all"],
             },
         )
+    try:
+        mount_capabilities(app)
+    except Exception:
+        logger.exception(
+            "operation-catalog capability mount failed during route discovery; "
+            "returning currently registered routes"
+        )
     routes = [
         _api_route_record(route)
         for route in app.routes
@@ -924,6 +931,17 @@ def execute_operate_request(
             payload=operation_input,
             idempotency_key_override=idempotency_key,
             requested_mode=mode,
+        )
+    except OperationBindingResolutionError as exc:
+        return (
+            500,
+            {
+                "ok": False,
+                "routed_to": "operation_catalog_gateway",
+                "operation": operation_name,
+                "error": str(exc),
+                "reason_code": "operate.binding_resolution_failed",
+            },
         )
     except OperationCatalogBoundaryError as exc:
         return (

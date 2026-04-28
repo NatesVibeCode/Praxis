@@ -709,7 +709,7 @@ class NativeWorkflowFrontdoor:
             if "workflow_runs.packet_inspection_column_missing" in metadata.contract_drift_refs:
                 raise NativeFrontdoorError(
                     "frontdoor.packet_inspection_unavailable",
-                    "workflow run packet inspection authority is unavailable",
+                    "workflow run manifest inspection authority is unavailable",
                     details={
                         "stage": "schema",
                         "run_id": run_id,
@@ -721,7 +721,7 @@ class NativeWorkflowFrontdoor:
             except Exception as exc:
                 raise NativeFrontdoorError(
                     "frontdoor.packet_inspection_unavailable",
-                    "workflow run packet inspection query failed",
+                    "workflow run manifest inspection query failed",
                     details={
                         "stage": "query",
                         "run_id": run_id,
@@ -755,7 +755,7 @@ class NativeWorkflowFrontdoor:
                 except Exception as exc:
                     raise NativeFrontdoorError(
                         "frontdoor.packet_inspection_unavailable",
-                        "workflow run packet inspection helpers are unavailable",
+                        "workflow run manifest inspection helpers are unavailable",
                         details={
                             "stage": "import",
                             "run_id": run_id,
@@ -773,7 +773,7 @@ class NativeWorkflowFrontdoor:
                 except Exception as exc:
                     raise NativeFrontdoorError(
                         "frontdoor.packet_inspection_unavailable",
-                        "workflow run packet inspection derivation failed",
+                        "workflow run manifest inspection derivation failed",
                         details={
                             "stage": "derive",
                             "run_id": run_id,

@@ -16,6 +16,8 @@ from runtime.control_commands import (
     ControlIntent,
     bootstrap_control_commands_schema,
     request_control_command,
+    workflow_retry_idempotency_key,
+    workflow_retry_payload_with_guard,
 )
 from runtime.idempotency import canonical_hash
 
@@ -118,9 +120,11 @@ CHAT_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "run_id": {"type": "string", "description": "The workflow run ID"},
                 "label": {"type": "string", "description": "The job label to retry"},
+                "previous_failure": {"type": "string", "description": "Receipt-backed failure being retried"},
+                "retry_delta": {"type": "string", "description": "What is materially different about this attempt"},
                 "model_override": {"type": "string", "description": "Optional: use a different model (e.g., anthropic/claude-opus-4-7)"},
             },
-            "required": ["run_id", "label"],
+            "required": ["run_id", "label", "previous_failure", "retry_delta"],
         },
     },
     {
@@ -218,12 +222,20 @@ def _request_workflow_command(
     target: str,
     spec_name: str | None = None,
 ) -> dict[str, Any]:
+    command_payload = dict(arguments)
+    idempotency_key = _workflow_command_idempotency_key(command_type, command_payload)
+    if command_type == ControlCommandType.WORKFLOW_RETRY:
+        command_payload = workflow_retry_payload_with_guard(pg_conn, command_payload)
+        idempotency_key = workflow_retry_idempotency_key(
+            requested_by_kind=_CHAT_REQUESTED_BY_KIND,
+            payload=command_payload,
+        )
     intent = ControlIntent(
         command_type=command_type,
         requested_by_kind=_CHAT_REQUESTED_BY_KIND,
         requested_by_ref=_CHAT_REQUESTED_BY_REF,
-        idempotency_key=_workflow_command_idempotency_key(command_type, arguments),
-        payload=arguments,
+        idempotency_key=idempotency_key,
+        payload=command_payload,
     )
     command = request_control_command(pg_conn, intent)
     return _render_workflow_command_result(
@@ -512,6 +524,8 @@ def _retry_job(args: dict[str, Any], pg_conn: Any) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
         "label": label,
+        "previous_failure": args.get("previous_failure"),
+        "retry_delta": args.get("retry_delta"),
     }
     if args.get("model_override"):
         payload["model_override"] = args.get("model_override")

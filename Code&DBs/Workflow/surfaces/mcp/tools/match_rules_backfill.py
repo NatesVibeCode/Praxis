@@ -74,6 +74,25 @@ TOOLS: dict[str, tuple[callable, dict[str, object]]] = {
                 "emits a match_rules.backfilled event on success."
             ),
             "kind": "write",
+            "cli": {
+                "surface": "integration",
+                "tier": "advanced",
+                "when_to_use": (
+                    "Backfill benchmark rules for newly added providers or candidates "
+                    "when selection is falling back to capability tags and priority."
+                ),
+                "when_not_to_use": (
+                    "Do not use it for ordinary model selection, provider onboarding "
+                    "smoke tests, or read-only route inspection."
+                ),
+                "risks": {"default": "write"},
+                "examples": [
+                    {
+                        "title": "Preview a match-rule backfill",
+                        "input": {"source_slug": "artificial_analysis", "dry_run": True},
+                    },
+                ],
+            },
             "inputSchema": {
                 "type": "object",
                 "properties": {

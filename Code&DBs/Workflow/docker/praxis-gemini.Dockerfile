@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         gnupg \
+        ripgrep \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -55,4 +56,4 @@ RUN useradd -m -d "${PRAXIS_CONTAINER_HOME}" -u 1100 -s /bin/bash praxis-agent \
 
 # Smoke test — verify Python 3.14, Node, gemini CLI, and the praxis shim
 # are all reachable.
-RUN bash -lc "python3 --version && node --version && which gemini && which praxis && id praxis-agent"
+RUN bash -lc "python3 --version && python3 -c 'import json' && rg --version >/dev/null && node --version && which gemini && which praxis && id praxis-agent"

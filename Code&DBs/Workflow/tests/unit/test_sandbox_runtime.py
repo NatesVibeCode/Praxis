@@ -31,6 +31,11 @@ CONTAINER_HOME = str(container_home())
 OPENAI_AUTH_SEED_PATH = str(container_auth_seed_dir() / "openai-auth.json")
 
 
+@pytest.fixture(autouse=True)
+def _allow_existing_legacy_workspace_copy_tests(monkeypatch) -> None:
+    monkeypatch.setenv("PRAXIS_ALLOW_LEGACY_WORKSPACE_COPY", "1")
+
+
 def _test_cli_auth_catalog() -> sandbox_runtime._CliAuthCatalog:
     return sandbox_runtime._CliAuthCatalog(
         mount_specs=(
@@ -545,6 +550,71 @@ def test_sandbox_runtime_none_materialization_uses_empty_workspace_without_copyb
     assert (tmp_path / ".sandbox" / "changed.txt").read_text(encoding="utf-8") == "updated"
     assert not (tmp_path / "changed.txt").exists()
     assert result.artifact_refs == ("changed.txt",)
+    assert result.workspace_snapshot_ref.startswith("workspace_snapshot:")
+
+
+def test_sandbox_runtime_rejects_legacy_workspace_copy_without_operator_opt_in(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("PRAXIS_ALLOW_LEGACY_WORKSPACE_COPY", raising=False)
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
+
+    runtime = SandboxRuntime()
+    runtime._providers = {"fake": _RecordingProvider()}  # type: ignore[attr-defined]
+
+    with pytest.raises(RuntimeError, match="PRAXIS_ALLOW_LEGACY_WORKSPACE_COPY=1"):
+        runtime.execute_command(
+            provider_name="fake",
+            sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+            sandbox_group_id="group:run.alpha",
+            workdir=str(tmp_path),
+            command="echo hi",
+            stdin_text="payload",
+            env={},
+            timeout_seconds=15,
+            network_policy="provider_only",
+            workspace_materialization="copy",
+            execution_transport="cli",
+        )
+
+
+def test_sandbox_runtime_allows_scoped_workspace_copy_without_operator_opt_in(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("PRAXIS_ALLOW_LEGACY_WORKSPACE_COPY", raising=False)
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
+
+    runtime = SandboxRuntime()
+    fake = _RecordingProvider()
+    runtime._providers = {"fake": fake}  # type: ignore[attr-defined]
+
+    result = runtime.execute_command(
+        provider_name="fake",
+        sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+        sandbox_group_id="group:run.alpha",
+        workdir=str(tmp_path),
+        command="echo hi",
+        stdin_text="payload",
+        env={},
+        timeout_seconds=15,
+        network_policy="provider_only",
+        workspace_materialization="copy",
+        execution_transport="cli",
+        metadata={
+            "execution_bundle": {
+                "access_policy": {
+                    "resolved_read_scope": ["seed.txt"],
+                    "write_scope": ["changed.txt"],
+                }
+            }
+        },
+    )
+
+    hydrate_snapshot = fake.calls[1][1]
+    assert getattr(hydrate_snapshot, "materialization") == "copy"
+    assert getattr(hydrate_snapshot, "path_filter") == ("changed.txt", "seed.txt")
     assert result.workspace_snapshot_ref.startswith("workspace_snapshot:")
 
 
@@ -1485,6 +1555,28 @@ def test_workspace_file_entries_exact_path_filter(tmp_path) -> None:
     )
     relpaths = {r for r, _ in entries}
     assert relpaths == {"a.py"}
+
+
+def test_workspace_file_entries_directory_path_filter_includes_descendants(tmp_path) -> None:
+    (tmp_path / "Code&DBs" / "Workflow" / "runtime").mkdir(parents=True)
+    (tmp_path / "Code&DBs" / "Workflow" / "runtime" / "sandbox_runtime.py").write_text(
+        "runtime", encoding="utf-8"
+    )
+    (tmp_path / "Code&DBs" / "Workflow" / "artifacts").mkdir(parents=True)
+    (tmp_path / "Code&DBs" / "Workflow" / "artifacts" / "PLAN.md").write_text(
+        "plan", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text("drop", encoding="utf-8")
+
+    entries = sandbox_runtime._workspace_file_entries(
+        str(tmp_path),
+        path_filter=("Code&DBs/Workflow",),
+    )
+    relpaths = {r for r, _ in entries}
+    assert relpaths == {
+        "Code&DBs/Workflow/artifacts/PLAN.md",
+        "Code&DBs/Workflow/runtime/sandbox_runtime.py",
+    }
 
 
 def test_workspace_file_entries_fnmatch_glob_filter(tmp_path) -> None:

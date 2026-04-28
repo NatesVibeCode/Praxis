@@ -62,10 +62,12 @@
       "title": "Claude Code agent: MCP only, no bash praxis CLI",
       "match": [
         {
+          "harness": "claude_code",
           "tool": "Bash",
           "regex": "^\\s*praxis\\s+workflow\\b"
         },
         {
+          "harness": "claude_code",
           "tool": "Bash",
           "regex": "^\\s*praxis\\s+(?:query|bugs|recall|discover|artifacts|health)\\b"
         }

@@ -58,7 +58,7 @@ def test_load_receipt_payload_reads_from_postgres_and_normalizes(monkeypatch):
     assert payload["total_cost_usd"] == 0.25
 
 
-def test_post_receipt_hooks_dedupe_auto_bug_by_aggregation_tags(monkeypatch):
+def test_post_receipt_hooks_dedupe_auto_bug_by_source_issue_id(monkeypatch):
     observed: dict[str, object] = {}
 
     class _NoopFrictionLedger:
@@ -72,11 +72,15 @@ def test_post_receipt_hooks_dedupe_auto_bug_by_aggregation_tags(monkeypatch):
         def __init__(self, conn):
             self.conn = conn
 
-        def list_bugs(self, *, open_only, tags, limit):
-            observed["dedupe_tags"] = tags
+        def list_bugs(self, *, open_only, source_issue_id=None, tags=None, limit):
+            observed.setdefault("lookups", []).append(
+                {"source_issue_id": source_issue_id, "tags": tags}
+            )
             assert open_only is True
             assert limit == 1
-            return [SimpleNamespace(bug_id="BUG-existing")]
+            if source_issue_id == "receipt.failure:sandbox_error:wave0_integrated_design":
+                return [SimpleNamespace(bug_id="BUG-existing")]
+            return []
 
         def file_bug(self, **_kwargs):
             raise AssertionError("existing aggregation bug should be reused")
@@ -105,12 +109,89 @@ def test_post_receipt_hooks_dedupe_auto_bug_by_aggregation_tags(monkeypatch):
         conn=_Conn(),
     )
 
-    assert observed["dedupe_tags"] == (
-        "auto-filed",
-        "failure_code:sandbox_error",
-        "job_label:wave0_integrated_design",
-    )
+    assert observed["lookups"] == [
+        {
+            "source_issue_id": "receipt.failure:sandbox_error:wave0_integrated_design",
+            "tags": None,
+        }
+    ]
     assert ("BUG-existing",) == tuple({bug_id for bug_id, _ in observed["links"]})
+
+
+def test_post_receipt_hooks_files_auto_bug_with_stable_source_issue_id(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _NoopFrictionLedger:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def record(self, **_kwargs):
+            return None
+
+    class _FakeTracker:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def list_bugs(self, **kwargs):
+            captured.setdefault("lookups", []).append(kwargs)
+            return []
+
+        def file_bug(self, **kwargs):
+            captured["file_bug"] = kwargs
+            return SimpleNamespace(bug_id="BUG-new"), []
+
+        def link_evidence(self, bug_id, **kwargs):
+            captured.setdefault("links", []).append((bug_id, kwargs))
+
+    class _Conn:
+        def fetchval(self, query, *args):
+            captured["count_args"] = args
+            return 3
+
+    monkeypatch.setattr(receipt_store, "FrictionLedger", _NoopFrictionLedger)
+    monkeypatch.setattr(receipt_store, "BugTracker", _FakeTracker)
+    monkeypatch.setattr(receipt_store, "emit_system_event", lambda *_args, **_kwargs: None)
+
+    receipt_store._run_post_receipt_hooks(
+        {
+            "status": "failed",
+            "failure_code": "Provider Capacity",
+            "failure_category": "capacity",
+            "job_label": "Plan Runtime Packet",
+            "node_id": "Plan Runtime Packet",
+            "provider_slug": "openai",
+            "model_slug": "gpt-5.4-mini",
+            "receipt_id": "receipt:workflow_3:1:1",
+            "run_id": "workflow_3",
+        },
+        conn=_Conn(),
+    )
+
+    assert captured["count_args"] == ("Provider Capacity", "Plan Runtime Packet")
+    assert captured["lookups"][0] == {
+        "open_only": True,
+        "source_issue_id": "receipt.failure:provider-capacity:plan-runtime-packet",
+        "limit": 1,
+    }
+    filed = captured["file_bug"]
+    assert filed["source_issue_id"] == "receipt.failure:provider-capacity:plan-runtime-packet"
+    assert filed["tags"] == (
+        "auto-filed",
+        "failure_code:provider-capacity",
+        "job_label:plan-runtime-packet",
+        "node_id:plan-runtime-packet",
+        "failure_category:capacity",
+        "provider:openai",
+        "model:gpt-5.4-mini",
+    )
+    assert all(not tag.startswith("signature:") for tag in filed["tags"])
+    assert filed["resume_context"]["auto_bug_identity"]["authority"] == (
+        "receipts.failure_code+node_id"
+    )
+    assert filed["resume_context"]["auto_bug_identity"]["aggregation_fields"] == [
+        "failure_code",
+        "node_id",
+    ]
 
 
 def test_post_receipt_hooks_emit_events_for_evidence_link_failures(monkeypatch):
@@ -162,6 +243,112 @@ def test_post_receipt_hooks_emit_events_for_evidence_link_failures(monkeypatch):
     hooks = {event["payload"]["hook"] for event in events}
     assert {"bug_evidence.receipt", "bug_evidence.run"} <= hooks
     assert {event["event_type"] for event in events} == {"post_receipt_hook.failed"}
+
+
+def test_post_receipt_hooks_emit_event_for_friction_ledger_failures(monkeypatch):
+    events: list[dict[str, object]] = []
+
+    class _FailingFrictionLedger:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def record(self, **_kwargs):
+            raise RuntimeError("ledger unavailable")
+
+    class _FakeTracker:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def list_bugs(self, **_kwargs):
+            return []
+
+        def file_bug(self, **_kwargs):
+            raise AssertionError("failure count is below auto-file threshold")
+
+        def link_evidence(self, *_args, **_kwargs):
+            raise AssertionError("no bug was filed or found")
+
+    class _Conn:
+        def fetchval(self, *_args):
+            return 0
+
+    def _emit_system_event(_conn, **kwargs):
+        events.append(kwargs)
+
+    monkeypatch.setattr(receipt_store, "FrictionLedger", _FailingFrictionLedger)
+    monkeypatch.setattr(receipt_store, "BugTracker", _FakeTracker)
+    monkeypatch.setattr(receipt_store, "emit_system_event", _emit_system_event)
+
+    receipt_store._run_post_receipt_hooks(
+        {
+            "status": "failed",
+            "failure_code": "provider.capacity",
+            "job_label": "plan",
+            "node_id": "plan",
+            "receipt_id": "receipt:workflow_4:1:1",
+            "run_id": "workflow_4",
+        },
+        conn=_Conn(),
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "post_receipt_hook.failed"
+    assert event["payload"]["hook"] == "friction_ledger.record"
+    assert event["payload"]["receipt_id"] == "receipt:workflow_4:1:1"
+    assert event["payload"]["run_id"] == "workflow_4"
+    assert event["payload"]["failure_code"] == "provider.capacity"
+    assert event["payload"]["error_type"] == "RuntimeError"
+
+
+def test_post_receipt_hooks_emit_event_for_auto_bug_failures(monkeypatch):
+    events: list[dict[str, object]] = []
+
+    class _NoopFrictionLedger:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def record(self, **_kwargs):
+            return None
+
+    class _FailingTracker:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def list_bugs(self, **_kwargs):
+            raise RuntimeError("bug authority unavailable")
+
+    class _Conn:
+        def fetchval(self, *_args):
+            raise AssertionError("bug lookup should fail before counting receipts")
+
+    def _emit_system_event(_conn, **kwargs):
+        events.append(kwargs)
+
+    monkeypatch.setattr(receipt_store, "FrictionLedger", _NoopFrictionLedger)
+    monkeypatch.setattr(receipt_store, "BugTracker", _FailingTracker)
+    monkeypatch.setattr(receipt_store, "emit_system_event", _emit_system_event)
+
+    receipt_store._run_post_receipt_hooks(
+        {
+            "status": "failed",
+            "failure_code": "workflow_submission.required_missing",
+            "job_label": "execute",
+            "node_id": "execute",
+            "receipt_id": "receipt:workflow_5:1:1",
+            "run_id": "workflow_5",
+        },
+        conn=_Conn(),
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["event_type"] == "post_receipt_hook.failed"
+    assert event["payload"]["hook"] == "auto_bug_threshold"
+    assert event["payload"]["receipt_id"] == "receipt:workflow_5:1:1"
+    assert event["payload"]["run_id"] == "workflow_5"
+    assert event["payload"]["failure_code"] == "workflow_submission.required_missing"
+    assert event["payload"]["error_type"] == "RuntimeError"
 
 
 def test_apply_receipt_provenance_rewrites_legacy_git_payload_when_repo_snapshot_is_available(

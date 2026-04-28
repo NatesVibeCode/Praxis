@@ -21,6 +21,8 @@ from runtime.bug_evidence import (
     ALLOWED_EVIDENCE_KINDS as _ALLOWED_EVIDENCE_KINDS,
     ALLOWED_EVIDENCE_ROLES as _ALLOWED_EVIDENCE_ROLES,
     EVIDENCE_KIND_GOVERNANCE_SCAN,
+    EVIDENCE_KIND_OPERATION_RECEIPT,
+    EVIDENCE_KIND_RECEIPT,
     EVIDENCE_ROLE_VALIDATES_FIX,
 )
 from runtime.primitive_contracts import (
@@ -438,6 +440,25 @@ class BugTracker:
         except Exception:
             return False
 
+    def _workflow_receipt_exists(self, receipt_id: str) -> bool:
+        return self._record_exists(
+            "SELECT 1 FROM receipts WHERE receipt_id = $1",
+            receipt_id,
+        )
+
+    def _operation_receipt_exists(self, receipt_id: str) -> bool:
+        return self._record_exists(
+            "SELECT 1 FROM authority_operation_receipts WHERE receipt_id::text = $1",
+            receipt_id,
+        )
+
+    def _receipt_evidence_kind(self, receipt_id: str) -> str:
+        if self._workflow_receipt_exists(receipt_id):
+            return EVIDENCE_KIND_RECEIPT
+        if self._operation_receipt_exists(receipt_id):
+            return EVIDENCE_KIND_OPERATION_RECEIPT
+        return EVIDENCE_KIND_RECEIPT
+
     def _validate_bug_provenance(
         self,
         *,
@@ -449,9 +470,9 @@ class BugTracker:
             discovered_in_run_id,
         ):
             raise ValueError(f"unknown discovered_in_run_id: {discovered_in_run_id}")
-        if discovered_in_receipt_id and not self._record_exists(
-            "SELECT 1 FROM receipts WHERE receipt_id = $1",
-            discovered_in_receipt_id,
+        if discovered_in_receipt_id and not (
+            self._workflow_receipt_exists(discovered_in_receipt_id)
+            or self._operation_receipt_exists(discovered_in_receipt_id)
         ):
             raise ValueError(
                 f"unknown discovered_in_receipt_id: {discovered_in_receipt_id}"
@@ -466,11 +487,10 @@ class BugTracker:
         if evidence_kind not in _ALLOWED_EVIDENCE_KINDS:
             allowed = ", ".join(sorted(_ALLOWED_EVIDENCE_KINDS))
             raise ValueError(f"evidence_kind must be one of {allowed}")
-        if evidence_kind == "receipt":
-            exists = self._record_exists(
-                "SELECT 1 FROM receipts WHERE receipt_id = $1",
-                evidence_ref,
-            )
+        if evidence_kind == EVIDENCE_KIND_RECEIPT:
+            exists = self._workflow_receipt_exists(evidence_ref)
+        elif evidence_kind == EVIDENCE_KIND_OPERATION_RECEIPT:
+            exists = self._operation_receipt_exists(evidence_ref)
         elif evidence_kind == "run":
             exists = self._record_exists(
                 "SELECT 1 FROM workflow_runs WHERE run_id = $1",
@@ -800,13 +820,18 @@ class BugTracker:
         
         # Automatically link discovery evidence
         if discovered_in_receipt_id:
+            evidence_kind = self._receipt_evidence_kind(discovered_in_receipt_id)
             self.link_evidence(
                 bug_id,
-                evidence_kind="receipt",
+                evidence_kind=evidence_kind,
                 evidence_ref=discovered_in_receipt_id,
                 evidence_role=_bug_evidence.EVIDENCE_ROLE_DISCOVERED_BY,
                 created_by=filed_by,
-                notes="Discovery receipt captured during bug filing.",
+                notes=(
+                    "Discovery operation receipt captured during bug filing."
+                    if evidence_kind == EVIDENCE_KIND_OPERATION_RECEIPT
+                    else "Discovery receipt captured during bug filing."
+                ),
             )
         if discovered_in_run_id:
             self.link_evidence(
@@ -2364,11 +2389,17 @@ async def afile_bug(
         if exists is None:
             raise ValueError(f"unknown discovered_in_run_id: {discovered_in_run_id}")
     if discovered_in_receipt_id:
-        exists = await conn.fetchrow(
+        workflow_receipt = await conn.fetchrow(
             "SELECT 1 FROM receipts WHERE receipt_id = $1",
             discovered_in_receipt_id,
         )
-        if exists is None:
+        operation_receipt = None
+        if workflow_receipt is None:
+            operation_receipt = await conn.fetchrow(
+                "SELECT 1 FROM authority_operation_receipts WHERE receipt_id::text = $1",
+                discovered_in_receipt_id,
+            )
+        if workflow_receipt is None and operation_receipt is None:
             raise ValueError(f"unknown discovered_in_receipt_id: {discovered_in_receipt_id}")
 
     async with conn.transaction():
@@ -2404,6 +2435,11 @@ async def afile_bug(
 
         # Automatically link discovery evidence
         if discovered_in_receipt_id:
+            evidence_kind = (
+                _bug_evidence.EVIDENCE_KIND_OPERATION_RECEIPT
+                if workflow_receipt is None
+                else _bug_evidence.EVIDENCE_KIND_RECEIPT
+            )
             await conn.execute(
                 """INSERT INTO bug_evidence_links
                     (bug_evidence_link_id, bug_id, evidence_kind, evidence_ref,
@@ -2411,11 +2447,15 @@ async def afile_bug(
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
                 f"bug_evidence_link:{uuid.uuid4().hex}",
                 bug_id,
-                "receipt",
+                evidence_kind,
                 discovered_in_receipt_id,
                 _bug_evidence.EVIDENCE_ROLE_DISCOVERED_BY,
                 filed_by,
-                "Discovery receipt captured during bug filing.",
+                (
+                    "Discovery operation receipt captured during bug filing."
+                    if evidence_kind == _bug_evidence.EVIDENCE_KIND_OPERATION_RECEIPT
+                    else "Discovery receipt captured during bug filing."
+                ),
                 now,
             )
         if discovered_in_run_id:

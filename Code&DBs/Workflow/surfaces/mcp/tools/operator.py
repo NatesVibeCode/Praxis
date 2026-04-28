@@ -133,6 +133,90 @@ def tool_praxis_status_snapshot(params: dict) -> dict:
     )
 
 
+def tool_praxis_legal_tools(params: dict) -> dict:
+    """Deprecated alias for praxis_next(action='unlock_frontier')."""
+
+    operation_name = "operator.next"
+    try:
+        limit = _bounded_limit(params, default=20, maximum=100)
+        include_blocked = _parse_bool(
+            params.get("include_blocked", True),
+            field_name="include_blocked",
+        )
+        include_mutating = _parse_bool(
+            params.get("include_mutating", False),
+            field_name="include_mutating",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+
+    result = _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "action": "unlock_frontier",
+            "detail": params.get("detail") or "standard",
+            "intent": params.get("intent"),
+            "run_id": params.get("run_id"),
+            "state": params.get("state") or {},
+            "allowed_tools": params.get("allowed_tools"),
+            "include_blocked": include_blocked,
+            "include_mutating": include_mutating,
+            "limit": limit,
+        },
+    )
+    if isinstance(result, dict):
+        result["deprecated_alias"] = {
+            "tool": "praxis_legal_tools",
+            "replacement": "praxis_next",
+            "replacement_input": {"action": "unlock_frontier"},
+        }
+        legality = result.get("tool_legality")
+        if isinstance(legality, dict):
+            for key in (
+                "legal_action_count",
+                "blocked_action_count",
+                "legal_actions",
+                "blocked_actions",
+                "typed_gaps",
+                "repair_actions",
+                "state",
+                "authority_sources",
+            ):
+                if key in legality:
+                    result.setdefault(key, legality[key])
+    return result
+
+
+def tool_praxis_execution_proof(params: dict) -> dict:
+    """Prove whether a run or trace anchor produced runtime execution evidence."""
+
+    operation_name = "operator.execution_proof"
+    try:
+        stale_after_seconds = _parse_positive_int(
+            params.get("stale_after_seconds", 180),
+            field_name="stale_after_seconds",
+        )
+        include_trace = _parse_bool(
+            params.get("include_trace", True),
+            field_name="include_trace",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "run_id": params.get("run_id"),
+            "receipt_id": params.get("receipt_id"),
+            "event_id": params.get("event_id"),
+            "correlation_id": params.get("correlation_id"),
+            "bug_id": params.get("bug_id"),
+            "stale_after_seconds": stale_after_seconds,
+            "include_trace": include_trace,
+        },
+    )
+
+
 def tool_praxis_orient(params: dict) -> dict:
     """Return the canonical orientation payload for a fresh agent or operator.
 
@@ -341,10 +425,20 @@ def tool_praxis_run(params: dict) -> dict:
     ``_lineage`` — those four tools were each a 4-line wrapper around
     the same gateway dispatch with a different operation_name. The old
     names continue to work as aliases for one window per the no-shims
-    standing order.
+    standing order. ``action`` is canonical; ``view`` is accepted as a
+    selector alias so HTTP and MCP callers can point at the same CQRS
+    authority without translating vocabulary by hand.
     """
 
-    action = str(params.get("action") or "status").strip().lower()
+    raw_action = str(params.get("action") or "").strip().lower()
+    raw_view = str(params.get("view") or "").strip().lower()
+    if raw_action and raw_view and raw_action != raw_view:
+        return _structured_input_error(
+            ValueError("action and view must match when both are provided"),
+            operation_name="operator.run",
+        )
+
+    action = raw_action or raw_view or "status"
     operation = _RUN_ACTION_OPERATIONS.get(action)
     if operation is None:
         return {
@@ -492,6 +586,40 @@ def tool_praxis_bug_triage_packet(params: dict) -> dict:
             "open_only": open_only,
             "classification": params.get("classification"),
             "include_inactive": include_inactive,
+        },
+    )
+
+
+def tool_praxis_refactor_heatmap(params: dict) -> dict:
+    """Read the ranked refactor heatmap."""
+
+    operation_name = "operator.refactor_heatmap"
+    try:
+        limit = _bounded_limit(params, default=15, maximum=50)
+        bug_limit = _bounded_limit(
+            {"limit": params.get("bug_limit", 250)},
+            default=250,
+            maximum=1000,
+        )
+        include_tests = _parse_bool(
+            params.get("include_tests", False),
+            field_name="include_tests",
+        )
+        open_only = _parse_bool(
+            params.get("open_only", True),
+            field_name="open_only",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "limit": limit,
+            "include_tests": include_tests,
+            "include_domains": params.get("include_domains"),
+            "bug_limit": bug_limit,
+            "long_symbol_threshold": params.get("long_symbol_threshold", 120),
+            "open_only": open_only,
         },
     )
 
@@ -1040,6 +1168,61 @@ def tool_praxis_provider_control_plane(params: dict) -> dict:
     )
 
 
+def _text_sequence_param(params: dict[str, Any], field_name: str) -> list[str]:
+    value = params.get(field_name)
+    if value is None or value == "":
+        return []
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    else:
+        raw_values = list(value)
+    return [
+        text
+        for item in raw_values
+        if (text := str(item or "").strip())
+    ]
+
+
+def tool_praxis_provider_availability_refresh(params: dict) -> dict:
+    """Refresh provider availability through CQRS authority."""
+
+    try:
+        timeout_s = _parse_positive_int(params.get("timeout_s", 60), field_name="timeout_s")
+        max_concurrency = _parse_positive_int(
+            params.get("max_concurrency", 4),
+            field_name="max_concurrency",
+        )
+        refresh_control_plane = (
+            _parse_bool(params.get("refresh_control_plane"), field_name="refresh_control_plane")
+            if "refresh_control_plane" in params
+            else True
+        )
+        include_snapshots = (
+            _parse_bool(params.get("include_snapshots"), field_name="include_snapshots")
+            if "include_snapshots" in params
+            else True
+        )
+    except ValueError as exc:
+        return _structured_input_error(
+            exc,
+            operation_name="operator.provider_availability_refresh",
+        )
+
+    payload = {
+        "provider_slugs": _text_sequence_param(params, "provider_slugs"),
+        "adapter_types": _text_sequence_param(params, "adapter_types"),
+        "timeout_s": timeout_s,
+        "max_concurrency": max_concurrency,
+        "refresh_control_plane": refresh_control_plane,
+        "runtime_profile_ref": str(params.get("runtime_profile_ref") or "").strip() or None,
+        "include_snapshots": include_snapshots,
+    }
+    return _execute_catalog_tool(
+        operation_name="operator.provider_availability_refresh",
+        payload=payload,
+    )
+
+
 def tool_praxis_model_access_control_matrix(params: dict) -> dict:
     """Read the live ON/OFF switchboard that drives provider catalog projection."""
 
@@ -1127,6 +1310,118 @@ def tool_praxis_work_assignment_matrix(params: dict) -> dict:
     )
 
 
+def tool_praxis_execution_truth(params: dict) -> dict:
+    """Read a composed proof packet for workflow execution truth."""
+
+    operation_name = "operator.execution_truth"
+    try:
+        since_hours = min(
+            _parse_positive_int(params.get("since_hours", 24), field_name="since_hours"),
+            24 * 30,
+        )
+        include_trace = _parse_bool(
+            params.get("include_trace", True),
+            field_name="include_trace",
+        )
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    payload = {
+        "since_hours": since_hours,
+        "run_id": str(params.get("run_id") or "").strip() or None,
+        "include_trace": include_trace,
+    }
+    return _execute_catalog_tool(operation_name=operation_name, payload=payload)
+
+
+def tool_praxis_next_work(params: dict) -> dict:
+    """Read the composed next-work packet."""
+
+    operation_name = "operator.next_work"
+    try:
+        limit = _bounded_limit(params, default=10, maximum=100)
+        domain_limit = min(
+            _parse_positive_int(
+                params.get("domain_limit", 8),
+                field_name="domain_limit",
+            ),
+            100,
+        )
+        bug_limit = min(
+            _parse_positive_int(params.get("bug_limit", 25), field_name="bug_limit"),
+            100,
+        )
+        work_limit = min(
+            _parse_positive_int(params.get("work_limit", 25), field_name="work_limit"),
+            100,
+        )
+        since_hours = min(
+            _parse_positive_int(params.get("since_hours", 24), field_name="since_hours"),
+            24 * 30,
+        )
+        open_only = _parse_bool(params.get("open_only", True), field_name="open_only")
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    return _execute_catalog_tool(
+        operation_name=operation_name,
+        payload={
+            "limit": limit,
+            "since_hours": since_hours,
+            "domain_limit": domain_limit,
+            "bug_limit": bug_limit,
+            "work_limit": work_limit,
+            "open_only": open_only,
+        },
+    )
+
+
+def tool_praxis_provider_route_truth(params: dict) -> dict:
+    """Read composed provider-route legal/runnable truth."""
+
+    operation_name = "operator.provider_route_truth"
+    try:
+        limit = _bounded_limit(params, default=100, maximum=1000)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+    payload = {
+        "runtime_profile_ref": str(params.get("runtime_profile_ref") or "praxis").strip(),
+        "provider_slug": str(params.get("provider_slug") or "").strip().lower() or None,
+        "job_type": str(params.get("job_type") or "").strip() or None,
+        "transport_type": str(params.get("transport_type") or "").strip().upper() or None,
+        "model_slug": str(params.get("model_slug") or "").strip() or None,
+        "limit": limit,
+    }
+    return _execute_catalog_tool(operation_name=operation_name, payload=payload)
+
+
+def tool_praxis_operation_forge(params: dict) -> dict:
+    """Preview the canonical CQRS path for adding or evolving an operation."""
+
+    operation_name = "operator.operation_forge"
+    raw_operation_name = str(params.get("operation_name") or "").strip()
+    if not raw_operation_name:
+        return _structured_input_error(
+            ValueError("operation_name is required"),
+            operation_name=operation_name,
+        )
+    payload = {
+        "operation_name": raw_operation_name,
+        "operation_ref": str(params.get("operation_ref") or "").strip() or None,
+        "tool_name": str(params.get("tool_name") or "").strip() or None,
+        "handler_ref": str(params.get("handler_ref") or "").strip() or None,
+        "input_model_ref": str(params.get("input_model_ref") or "").strip() or None,
+        "authority_domain_ref": (
+            str(params.get("authority_domain_ref") or "authority.workflow_runs").strip()
+        ),
+        "operation_kind": str(params.get("operation_kind") or "query").strip().lower(),
+        "posture": str(params.get("posture") or "observe").strip(),
+        "idempotency_policy": (
+            str(params.get("idempotency_policy") or "read_only").strip()
+        ),
+        "summary": str(params.get("summary") or "").strip() or None,
+    }
+    return _execute_catalog_tool(operation_name=operation_name, payload=payload)
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_orient": (
         tool_praxis_orient,
@@ -1176,6 +1471,157 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "examples": [
                     {"title": "Show 24h status", "input": {"since_hours": 24}},
                 ],
+            },
+        },
+    ),
+    "praxis_legal_tools": (
+        tool_praxis_legal_tools,
+        {
+            "description": (
+                "Deprecated compatibility alias for praxis_next(action='unlock_frontier'). "
+                "The legal-tool analysis now lives under the progressive praxis_next "
+                "front door so callers do not choose between duplicate next-action surfaces."
+            ),
+            "kind": "alias",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Optional operator intent to match against the compiler and tool catalog.",
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Optional workflow run id already available to the caller.",
+                    },
+                    "state": {
+                        "type": "object",
+                        "description": "Typed state already known by the caller; keys satisfy tool required inputs.",
+                        "default": {},
+                    },
+                    "allowed_tools": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional allowlist of tool names to consider.",
+                    },
+                    "include_blocked": {
+                        "type": "boolean",
+                        "description": "When true, include blocked tools with typed gaps and repair actions.",
+                        "default": True,
+                    },
+                    "include_mutating": {
+                        "type": "boolean",
+                        "description": "When false, write, launch, and session tools are blocked unless explicitly allowed.",
+                        "default": False,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum legal and blocked rows to return.",
+                        "minimum": 1,
+                        "default": 20,
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "replacement": "praxis_next",
+                "when_to_use": "Legacy alias only; prefer praxis_next(action='unlock_frontier').",
+                "when_not_to_use": "Do not build new workflows against this name.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {
+                        "title": "Legacy legal-tools call",
+                        "input": {
+                            "intent": "prove whether this run actually fired",
+                            "run_id": "run_123",
+                            "limit": 8,
+                        },
+                    },
+                ],
+            },
+            "type_contract": {
+                "default": {
+                    "consumes": ["praxis.operator.typed_state"],
+                    "produces": ["praxis.operator.legal_tool_actions"],
+                },
+            },
+        },
+    ),
+    "praxis_execution_proof": (
+        tool_praxis_execution_proof,
+        {
+            "description": (
+                "Prove whether a workflow run or trace anchor actually produced runtime "
+                "execution evidence. Queued/running labels are treated as weak context, "
+                "not proof; the result names the concrete evidence and missing proof."
+            ),
+            "kind": "walk",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Workflow run id anchor.",
+                    },
+                    "receipt_id": {
+                        "type": "string",
+                        "description": "Operation receipt UUID anchor.",
+                    },
+                    "event_id": {
+                        "type": "string",
+                        "description": "Authority event UUID anchor.",
+                    },
+                    "correlation_id": {
+                        "type": "string",
+                        "description": "Correlation UUID anchor.",
+                    },
+                    "bug_id": {
+                        "type": "string",
+                        "description": "Bug id anchor.",
+                    },
+                    "stale_after_seconds": {
+                        "type": "integer",
+                        "description": "Heartbeat age threshold for current-execution proof.",
+                        "minimum": 5,
+                        "default": 180,
+                    },
+                    "include_trace": {
+                        "type": "boolean",
+                        "description": "When true, compose with trace.walk for receipt/event/correlation evidence.",
+                        "default": True,
+                    },
+                },
+                "anyOf": [
+                    {"required": ["run_id"]},
+                    {"required": ["receipt_id"]},
+                    {"required": ["event_id"]},
+                    {"required": ["correlation_id"]},
+                    {"required": ["bug_id"]},
+                ],
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Check whether a run actually fired, is still executing, or only has weak queued/running labels.",
+                "when_not_to_use": "Do not use it to launch, retry, cancel, or resolve work; it is proof-only.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {
+                        "title": "Prove a run fired",
+                        "input": {"run_id": "run_123", "stale_after_seconds": 180},
+                    },
+                    {
+                        "title": "Prove from a receipt",
+                        "input": {"receipt_id": "<receipt-uuid>"},
+                    },
+                ],
+            },
+            "type_contract": {
+                "default": {
+                    "consumes": ["praxis.trace.anchor"],
+                    "produces": ["praxis.operator.execution_proof"],
+                },
             },
         },
     ),
@@ -1339,6 +1785,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "cli": {
                 "surface": "operator",
                 "tier": "advanced",
+                "replacement": "workflow tools call praxis_run --input-json '{\"run_id\":\"<run_id>\",\"action\":\"status\"}'",
                 "when_to_use": "Inspect operator status for one workflow run.",
                 "when_not_to_use": "Do not use it for whole-system pass-rate summaries.",
                 "risks": {"default": "read"},
@@ -1363,6 +1810,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "cli": {
                 "surface": "operator",
                 "tier": "advanced",
+                "replacement": "workflow tools call praxis_run --input-json '{\"run_id\":\"<run_id>\",\"action\":\"scoreboard\"}'",
                 "when_to_use": "Inspect cutover readiness for one workflow run.",
                 "when_not_to_use": "Do not use it for workflow launch or global status.",
                 "risks": {"default": "read"},
@@ -1387,6 +1835,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "cli": {
                 "surface": "operator",
                 "tier": "advanced",
+                "replacement": "workflow tools call praxis_run --input-json '{\"run_id\":\"<run_id>\",\"action\":\"graph\"}'",
                 "when_to_use": "Inspect workflow topology for one run.",
                 "when_not_to_use": "Do not use it for cross-domain operator graph inspection.",
                 "risks": {"default": "read"},
@@ -1461,8 +1910,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Consolidated run-scoped view. One tool replaces praxis_run_status, "
                 "praxis_run_scoreboard, praxis_run_graph, praxis_run_lineage — pick "
-                "the view via 'action'. The old four remain as aliases for one "
-                "window per the no-shims standing order."
+                "the view via 'action' or 'view'. The old four remain as aliases "
+                "for one window per the no-shims standing order."
             ),
             "kind": "walk",
             "inputSchema": {
@@ -1471,7 +1920,13 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "run_id": {"type": "string", "description": "Workflow run id."},
                     "action": {
                         "type": "string",
-                        "description": "Which view to return.",
+                        "description": "Canonical selector for which run view to return.",
+                        "enum": ["status", "scoreboard", "graph", "lineage"],
+                        "default": "status",
+                    },
+                    "view": {
+                        "type": "string",
+                        "description": "Selector alias for HTTP parity. Prefer action; view is accepted so callers can use the same vocabulary across surfaces.",
                         "enum": ["status", "scoreboard", "graph", "lineage"],
                         "default": "status",
                     },
@@ -1481,7 +1936,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "cli": {
                 "surface": "operator",
                 "tier": "advanced",
-                "when_to_use": "One stop for run-scoped status / scoreboard / graph / lineage views.",
+                "when_to_use": "One stop for run-scoped status / scoreboard / graph / lineage views. Use action, or view when you are copying the HTTP selector shape.",
                 "when_not_to_use": "Do not use it for cross-domain operator graph (use praxis_graph_projection).",
                 "risks": {"default": "read"},
                 "examples": [
@@ -1506,6 +1961,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "cli": {
                 "surface": "operator",
                 "tier": "advanced",
+                "replacement": "workflow tools call praxis_run --input-json '{\"run_id\":\"<run_id>\",\"action\":\"lineage\"}'",
                 "when_to_use": "Inspect graph lineage and operator frames for one run.",
                 "when_not_to_use": "Do not use it for whole-system summaries.",
                 "risks": {"default": "read"},
@@ -1814,6 +2270,76 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "praxis_refactor_heatmap": (
+        tool_praxis_refactor_heatmap,
+        {
+            "description": (
+                "Read the ranked refactor heatmap. Combines architecture-bug authority, "
+                "source spread, surface coupling, and large-symbol pressure into one "
+                "deterministic read model for choosing cleanup work."
+            ),
+            "kind": "analytics",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum domains to return.",
+                        "minimum": 1,
+                        "default": 15,
+                    },
+                    "include_tests": {
+                        "type": "boolean",
+                        "description": "When true, include test files in topology metrics.",
+                        "default": False,
+                    },
+                    "include_domains": {
+                        "description": "Optional list or comma-separated set of heatmap domain slugs.",
+                    },
+                    "bug_limit": {
+                        "type": "integer",
+                        "description": "Maximum architecture bugs to consider.",
+                        "minimum": 1,
+                        "default": 250,
+                    },
+                    "long_symbol_threshold": {
+                        "type": "integer",
+                        "description": "Minimum lines for large function/class pressure.",
+                        "minimum": 40,
+                        "default": 120,
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "description": "When true, exclude resolved architecture bugs.",
+                        "default": True,
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "stable",
+                "when_to_use": (
+                    "Rank architecture refactor candidates by authority spread, bugs, "
+                    "surface coupling, and large-module pressure."
+                ),
+                "when_not_to_use": "Do not use it to mutate bugs, roadmap, catalog rows, or source files.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read the refactor heatmap", "input": {"limit": 15}},
+                    {
+                        "title": "Inspect one domain",
+                        "input": {
+                            "include_domains": ["provider_routing_admission"],
+                            "limit": 1,
+                        },
+                    },
+                ],
+            },
+            "type_contract": {
+                "default": {"consumes": [], "produces": ["praxis.refactor.heatmap"]},
+            },
+        },
+    ),
     "praxis_operator_write": (
         tool_praxis_operator_write,
         {
@@ -1977,6 +2503,24 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "default": 100,
                     },
                 },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "replacement": "praxis_next",
+                "when_to_use": "Legacy alias only; prefer praxis_next(action='unlock_frontier').",
+                "when_not_to_use": "Do not build new workflows against this name.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {
+                        "title": "Legacy legal-tools call",
+                        "input": {
+                            "intent": "prove whether this run actually fired",
+                            "run_id": "run_123",
+                            "limit": 8,
+                        },
+                    },
+                ],
             },
         },
     ),
@@ -2476,6 +3020,56 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "praxis_provider_availability_refresh": (
+        tool_praxis_provider_availability_refresh,
+        {
+            "description": (
+                "Refresh provider availability through CQRS authority.\n\n"
+                "Runs the provider_usage heartbeat probe with bounded concurrency, persists "
+                "heartbeat_runs + heartbeat_probe_snapshots, refreshes the provider control-plane "
+                "projection, and returns the receipt/event-backed evidence handle.\n\n"
+                "USE WHEN: provider routing may be stale and you need one explicit availability "
+                "refresh before pipeline eval or a proof workflow launch."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider_slugs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional provider slugs to probe. Omit to probe admitted providers.",
+                    },
+                    "adapter_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional adapter types to probe, e.g. cli_llm.",
+                    },
+                    "timeout_s": {
+                        "type": "integer",
+                        "default": 60,
+                        "description": "Per-provider probe timeout in seconds.",
+                    },
+                    "max_concurrency": {
+                        "type": "integer",
+                        "default": 4,
+                        "description": "Maximum provider probes to run at once.",
+                    },
+                    "refresh_control_plane": {
+                        "type": "boolean",
+                        "default": True,
+                    },
+                    "runtime_profile_ref": {
+                        "type": "string",
+                        "description": "Optional runtime profile projection scope.",
+                    },
+                    "include_snapshots": {
+                        "type": "boolean",
+                        "default": True,
+                    },
+                },
+            },
+        },
+    ),
     "praxis_model_access_control_matrix": (
         tool_praxis_model_access_control_matrix,
         {
@@ -2621,6 +3215,163 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "minimum": 1,
                         "default": 100,
                     },
+                },
+            },
+        },
+    ),
+    "praxis_execution_truth": (
+        tool_praxis_execution_truth,
+        {
+            "kind": "analytics",
+            "description": (
+                "Read a composed execution-truth packet. Combines status snapshot, optional "
+                "run views, and optional causal trace through gateway-dispatched child "
+                "queries so green-looking state is checked against independent proof.\n\n"
+                "USE WHEN: you need to know whether work is actually firing, whether a "
+                "specific run has observable proof, or whether queue/status state is stale."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "since_hours": {
+                        "type": "integer",
+                        "description": "Receipt/status lookback window in hours.",
+                        "minimum": 1,
+                        "default": 24,
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Optional workflow run id to inspect with run views and trace.",
+                    },
+                    "include_trace": {
+                        "type": "boolean",
+                        "description": "When true and run_id is supplied, include trace.walk(run_id).",
+                        "default": True,
+                    },
+                },
+            },
+        },
+    ),
+    "praxis_next_work": (
+        tool_praxis_next_work,
+        {
+            "kind": "analytics",
+            "description": (
+                "Read a composed next-work packet. Combines refactor heatmap, bug triage, "
+                "work assignment matrix, and runtime status into one ranked operator "
+                "view with proof gates and validation paths.\n\n"
+                "USE WHEN: you need to choose the next bounded Praxis work item without "
+                "manually stitching together bugs, heatmaps, and assignment rows."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 10,
+                    },
+                    "since_hours": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 24,
+                    },
+                    "domain_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 8,
+                    },
+                    "bug_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 25,
+                    },
+                    "work_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 25,
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "default": True,
+                    },
+                },
+            },
+        },
+    ),
+    "praxis_provider_route_truth": (
+        tool_praxis_provider_route_truth,
+        {
+            "kind": "analytics",
+            "description": (
+                "Read composed provider-route truth. Combines provider control plane and "
+                "model access control matrix to answer whether a provider/model/job "
+                "route is runnable, blocked, mixed, or unknown, with removal reasons.\n\n"
+                "USE WHEN: provider availability is ambiguous and you need the exact "
+                "authority-backed route state before launching or retrying work."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "runtime_profile_ref": {
+                        "type": "string",
+                        "default": "praxis",
+                    },
+                    "provider_slug": {"type": "string"},
+                    "job_type": {"type": "string"},
+                    "transport_type": {
+                        "type": "string",
+                        "enum": ["CLI", "API"],
+                    },
+                    "model_slug": {"type": "string"},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 100,
+                    },
+                },
+            },
+        },
+    ),
+    "praxis_operation_forge": (
+        tool_praxis_operation_forge,
+        {
+            "kind": "analytics",
+            "description": (
+                "Preview the canonical CQRS path for adding or evolving an operation. "
+                "Produces the registration payload, tool wrapper name, required row "
+                "chain, and reject paths before anyone hand-builds catalog drift.\n\n"
+                "USE WHEN: you are about to add a tool or operation and need the "
+                "operation_catalog/data_dictionary/authority_object path made explicit."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["operation_name"],
+                "properties": {
+                    "operation_name": {"type": "string"},
+                    "operation_ref": {"type": "string"},
+                    "tool_name": {"type": "string"},
+                    "handler_ref": {"type": "string"},
+                    "input_model_ref": {"type": "string"},
+                    "authority_domain_ref": {
+                        "type": "string",
+                        "default": "authority.workflow_runs",
+                    },
+                    "operation_kind": {
+                        "type": "string",
+                        "enum": ["query", "command"],
+                        "default": "query",
+                    },
+                    "posture": {
+                        "type": "string",
+                        "default": "observe",
+                    },
+                    "idempotency_policy": {
+                        "type": "string",
+                        "enum": ["read_only", "idempotent", "non_idempotent"],
+                        "default": "read_only",
+                    },
+                    "summary": {"type": "string"},
                 },
             },
         },

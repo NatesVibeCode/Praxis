@@ -42,6 +42,7 @@ class _FakeTransaction:
 
 class _FakeConn:
     def __init__(self) -> None:
+        self.receipts: dict[str, dict[str, Any]] = {}
         self.fetchrow_calls: list[tuple[str, tuple[Any, ...]]] = []
         self.fetch_calls: list[tuple[str, tuple[Any, ...]]] = []
         self.execute_calls: list[tuple[str, tuple[Any, ...]]] = []
@@ -95,6 +96,11 @@ class _FakeConn:
                 "channel_ref": args[1],
                 "authority_domain_ref": "authority.workflow_runs",
             }
+        if (
+            "FROM authority_operation_receipts" in normalized
+            and "WHERE receipt_id = $1::uuid" in normalized
+        ):
+            return self.receipts.get(str(args[0]))
         if "INSERT INTO service_bus_message_ledger" in normalized:
             return {
                 "message_id": self.service_bus_message_id,
@@ -136,6 +142,33 @@ class _FakeConn:
 
     def execute(self, query: str, *args: Any) -> list[dict[str, Any]]:
         self.execute_calls.append((query, args))
+        if "INSERT INTO authority_operation_receipts" in query:
+            self.receipts[str(args[0])] = {
+                "receipt_id": args[0],
+                "operation_ref": args[1],
+                "operation_name": args[2],
+                "operation_kind": args[3],
+                "authority_domain_ref": args[4],
+                "authority_ref": args[5],
+                "projection_ref": args[6],
+                "storage_target_ref": args[7],
+                "input_hash": args[8],
+                "output_hash": args[9],
+                "idempotency_key": args[10],
+                "caller_ref": args[11],
+                "execution_status": args[12],
+                "result_status": args[13],
+                "error_code": args[14],
+                "error_detail": args[15],
+                "event_ids": args[16],
+                "projection_freshness": args[17],
+                "result_payload": args[18],
+                "duration_ms": args[19],
+                "binding_revision": args[20],
+                "decision_ref": args[21],
+                "cause_receipt_id": args[22],
+                "correlation_id": args[23],
+            }
         return []
 
     def executed_sql(self) -> str:

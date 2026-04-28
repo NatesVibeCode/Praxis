@@ -28,6 +28,13 @@ def test_daily_heartbeat_owns_the_heartbeat_alias() -> None:
     assert catalog["praxis_heartbeat"].cli_recommended_alias is None
 
 
+def test_provider_control_plane_owns_the_provider_control_plane_alias() -> None:
+    catalog = get_tool_catalog()
+
+    assert catalog["praxis_provider_control_plane"].cli_recommended_alias == "provider-control-plane"
+    assert catalog["praxis_provider_control_plane"].cli_entrypoint == "workflow provider-control-plane"
+
+
 def test_checked_in_mcp_docs_match_generated_catalog() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     docs_path = repo_root / "docs" / "MCP.md"

@@ -72,9 +72,9 @@ def test_missing_route_identity_requires_explicit_legacy_compatibility() -> None
     assert issue.reason_code == "workflow.inspect.missing_route_identity"
     assert issue.row_id == "row-123"
     assert issue.evidence_seq == 42
-    assert route_identity.workflow_id == "wf-A"
-    assert route_identity.run_id == "run-A"
-    assert route_identity.request_id == "req-A"
+    assert route_identity.workflow_id == "missing"
+    assert route_identity.run_id == "missing"
+    assert route_identity.request_id == "missing"
     assert route_identity.authority_context_ref == "missing"
     assert route_identity.transition_seq == 3
 
@@ -120,6 +120,33 @@ def test_route_identity_present_but_missing_subfield_has_legacy_compatibility() 
     assert route_identity.claim_id == "missing"
     assert route_identity.attempt_no == 1
     assert route_identity.transition_seq == 0
+
+
+def test_route_identity_present_but_missing_core_identity_uses_sentinel_not_fallback() -> None:
+    payload = {
+        "route_identity": {
+            "workflow_id": "wf-X",
+            "authority_context_ref": "ctx-1",
+            "authority_context_digest": "digest-1",
+            "claim_id": "claim-1",
+            "attempt_no": 2,
+            "transition_seq": 7,
+        },
+        "transition_seq": 7,
+    }
+
+    route_identity, issues = _call(
+        payload,
+        allow_legacy_missing_route_identity=True,
+    )
+
+    assert any(
+        issue.reason_code == "workflow.inspect.missing_lineage_field"
+        for issue in issues
+    )
+    assert route_identity.workflow_id == "wf-X"
+    assert route_identity.run_id == "missing"
+    assert route_identity.request_id == "missing"
 
 
 def test_string_encoded_lineage_is_accepted() -> None:

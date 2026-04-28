@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from runtime.compose_plan_via_llm import ComposeViaLLMResult, compose_plan_via_llm
+from runtime.compose_plan_via_llm import ComposeViaLLMResult
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +49,11 @@ class ComposeExperimentRun:
     ``compose_provenance`` block carries usage / validation / synthesis
     state from the underlying compose call.
 
-    ``child_receipt_id`` is the receipt UUID for this child's
-    ``compose-plan-via-llm`` gateway dispatch; populated when the
-    gateway path was used. ``fallback_reason`` is set when the runner
-    fell back to a direct function call (skipping receipt + event); it
-    flags CQRS coverage gaps for an operator to investigate.
+    ``child_receipt_id`` is the receipt UUID for this child's gateway
+    dispatch. Child success requires that receipt. ``fallback_reason`` is
+    retained as a legacy/degraded metadata field for older report consumers,
+    but the runner now fails closed instead of falling back to a direct
+    function call that skips receipt + event authority.
     """
 
     config_index: int
@@ -779,11 +779,9 @@ def _run_one(
     CQRS replay parity with single-compose calls. Gateway handles
     receipt insertion + event emission.
 
-    When the gateway path fails (binding-resolution issue, missing
-    operation, etc.), falls back to a direct ``compose_plan_via_llm``
-    call so the matrix run still produces useful output. The fall-back
-    path is logged on the run's ``notes`` so an operator can spot
-    receipt-less children quickly.
+    Gateway authority is mandatory. Binding/dispatch failures fail the
+    child leg closed instead of calling ``compose_plan_via_llm`` directly
+    and creating success-shaped, receipt-less output.
     """
     started = time.monotonic()
     child_receipt_id: str | None = None
@@ -820,65 +818,81 @@ def _run_one(
                 },
             )
         except Exception as gateway_exc:
-            # Binding resolution / dispatch failure — fall back to a
-            # direct call so the experiment still produces output.
+            # Binding resolution / dispatch failure. Do not fall back to a
+            # direct call; that would bypass the child operation receipt and
+            # make the experiment output non-replayable.
             logger.warning(
-                "child[%s] gateway dispatch failed (%s); falling back to direct call",
+                "child[%s] gateway dispatch failed (%s); failing closed",
                 config_index, gateway_exc,
             )
-            fallback_reason = f"gateway: {type(gateway_exc).__name__}: {gateway_exc}"
-            gateway_result = None
-
-        if gateway_result is not None:
-            # The gateway returns the handler payload + an
-            # operation_receipt block when the binding is well-formed.
-            # When the handler raised, the gateway returns an error
-            # envelope ``{ok: False, error, error_code}`` with NO
-            # operation_receipt key. Treat that as a leg failure and
-            # surface the error string visibly so the operator doesn't
-            # see a silent compose_ok=False with no explanation.
-            if (
-                isinstance(gateway_result, dict)
-                and gateway_result.get("ok") is False
-                and "operation_receipt" not in gateway_result
-            ):
-                gw_err = gateway_result.get("error") or "gateway returned ok=False"
-                gw_code = gateway_result.get("error_code") or "gateway.error"
-                wall = time.monotonic() - started
-                return ComposeExperimentRun(
-                    config_index=config_index,
-                    config=config,
-                    ok=False,
-                    wall_seconds=wall,
-                    result=None,
-                    error=f"{gw_code}: {gw_err}",
-                    child_receipt_id=None,
-                    fallback_reason=fallback_reason,
-                    resolved_overrides=resolved_overrides,
-                )
-
-            receipt_block = (
-                gateway_result.get("operation_receipt")
-                if isinstance(gateway_result, dict)
-                else None
+            fallback_reason = (
+                f"gateway.dispatch_failed: {type(gateway_exc).__name__}: {gateway_exc}"
             )
-            if isinstance(receipt_block, dict):
-                child_receipt_id = receipt_block.get("receipt_id")
-            # Reconstruct the underlying ComposeViaLLMResult from the
-            # serialized payload so the experiment runner's downstream
-            # ranking / summary logic keeps working.
-            result = _reconstitute_compose_result(gateway_result)
-        else:
-            # Fall-back path: direct function call (no child receipt).
-            conn = subsystems.get_pg_conn()
-            result = compose_plan_via_llm(
-                intent,
-                conn=conn,
-                plan_name=plan_name,
-                concurrency=concurrency,
-                hydrate_env=hydrate_env,
-                llm_overrides=resolved_overrides,
+            wall = time.monotonic() - started
+            return ComposeExperimentRun(
+                config_index=config_index,
+                config=config,
+                ok=False,
+                wall_seconds=wall,
+                result=None,
+                error=fallback_reason,
+                child_receipt_id=None,
+                fallback_reason=fallback_reason,
+                resolved_overrides=resolved_overrides,
             )
+
+        # The gateway returns the handler payload + an operation_receipt block
+        # when dispatch is authority-backed. Treat missing receipts as failed
+        # children even if the handler payload itself looks useful.
+        if not isinstance(gateway_result, dict):
+            wall = time.monotonic() - started
+            return ComposeExperimentRun(
+                config_index=config_index,
+                config=config,
+                ok=False,
+                wall_seconds=wall,
+                result=None,
+                error="gateway.invalid_result: child dispatch returned a non-object payload",
+                child_receipt_id=None,
+                fallback_reason=fallback_reason,
+                resolved_overrides=resolved_overrides,
+            )
+        if gateway_result.get("ok") is False and "operation_receipt" not in gateway_result:
+            gw_err = gateway_result.get("error") or "gateway returned ok=False"
+            gw_code = gateway_result.get("error_code") or "gateway.error"
+            wall = time.monotonic() - started
+            return ComposeExperimentRun(
+                config_index=config_index,
+                config=config,
+                ok=False,
+                wall_seconds=wall,
+                result=None,
+                error=f"{gw_code}: {gw_err}",
+                child_receipt_id=None,
+                fallback_reason=fallback_reason,
+                resolved_overrides=resolved_overrides,
+            )
+
+        receipt_block = gateway_result.get("operation_receipt")
+        if isinstance(receipt_block, dict):
+            child_receipt_id = str(receipt_block.get("receipt_id") or "").strip() or None
+        if not child_receipt_id:
+            wall = time.monotonic() - started
+            return ComposeExperimentRun(
+                config_index=config_index,
+                config=config,
+                ok=False,
+                wall_seconds=wall,
+                result=None,
+                error="gateway.receipt_missing: child compose dispatch returned no operation receipt",
+                child_receipt_id=None,
+                fallback_reason=fallback_reason,
+                resolved_overrides=resolved_overrides,
+            )
+        # Reconstruct the underlying ComposeViaLLMResult from the serialized
+        # payload so the experiment runner's downstream ranking / summary logic
+        # keeps working.
+        result = _reconstitute_compose_result(gateway_result)
 
         wall = time.monotonic() - started
         return ComposeExperimentRun(
@@ -1200,15 +1214,14 @@ def run_compose_experiment(
                     error=f"unhandled: {type(exc).__name__}: {exc}",
                 )
 
-    # Surface CQRS coverage gap if any child fell back to a direct call
-    # (no receipt). Loud signal so the operator notices a binding
-    # regression rather than silently losing replay parity.
+    # Surface child gateway failures loudly so the operator notices a binding
+    # regression rather than reading success-shaped matrix output.
     fallback_count = sum(1 for r in runs if r.fallback_reason)
     if fallback_count:
         notes.append(
             f"cqrs.warning: {fallback_count} of {len(runs)} child compose calls "
-            f"fell back to direct dispatch (no plan.composed receipt + event). "
-            f"Inspect run.fallback_reason for details."
+            f"failed gateway authority and did not run via direct fallback. "
+            f"Inspect run.fallback_reason / run.error for details."
         )
 
     total_wall = time.monotonic() - started

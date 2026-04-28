@@ -78,40 +78,56 @@ def build_llm_context(
 ) -> str:
     integration_lines: list[str] = []
     for integration in integrations[:20]:
+        integration_id = _as_text(integration.get("id"))
+        if not integration_id:
+            continue
         for capability in integration.get("capabilities", [])[:8]:
+            action = _as_text(capability.get("action"))
+            if not action:
+                continue
             description = capability.get("description") or integration.get("description") or "No description"
-            integration_lines.append(
-                f"- @{integration['id']}/{capability['action']}: {description}"
-            )
+            integration_lines.append(f"- @{integration_id}/{action}: {description}")
 
     object_lines: list[str] = []
     for object_type in object_types[:20]:
+        type_id = _as_text(object_type.get("type_id"))
+        if not type_id:
+            continue
         if not object_type.get("fields"):
             object_lines.append(
-                f"- #{object_type['type_id']}: {object_type.get('description') or object_type.get('name') or 'No description'}"
+                f"- #{type_id}: {object_type.get('description') or object_type.get('name') or 'No description'}"
             )
             continue
         for field in object_type["fields"][:10]:
+            field_name = _as_text(field.get("name"))
+            if not field_name:
+                continue
             description = field.get("description") or field.get("type") or "No description"
-            object_lines.append(
-                f"- #{object_type['type_id']}/{field['name']}: {description}"
-            )
+            object_lines.append(f"- #{type_id}/{field_name}: {description}")
 
     semantic_lines = [
         f"- {match['name']} [{match['category']}] rank={match['rank']:.3f}: {match['description'] or 'No description'}"
         for match in matched_refs[:15]
+        if _as_text(match.get("name"))
     ]
     binding_lines = [
         f"- {binding['source_id']} -> {binding['target_id']}: {binding['rationale']}"
         for binding in composition.get("bindings", [])[:10]
+        if _as_text(binding.get("source_id")) and _as_text(binding.get("target_id"))
     ]
-    catalog_lines = [
-        f"- {entry['slug']}: {entry.get('description') or entry.get('display_name') or ''}".rstrip()
-        for entry in catalog[:20]
-    ]
+    catalog_lines: list[str] = []
+    for entry in catalog[:20]:
+        slug = _as_text(entry.get("slug"))
+        descriptor = _as_text(entry.get("description") or entry.get("display_name"))
+        # Drop entries with no slug AND no human-readable text — these
+        # rendered as "- :" noise that bloated every prompt by 20 lines.
+        if not slug and not descriptor:
+            continue
+        catalog_lines.append(f"- {slug}: {descriptor}".rstrip(": ").rstrip())
     capability_lines = [
         f"- {capability['slug']}: {capability.get('summary') or capability.get('description') or capability.get('title') or 'No description'}"
         for capability in capabilities[:12]
+        if _as_text(capability.get("slug"))
     ]
 
     effective_route_hints = route_hints or route_hints_cache
@@ -378,6 +394,10 @@ def _call_specific_route(
         temperature=temperature if temperature is not None else 0.0,
         protocol_family=str(protocol_family),
         timeout_seconds=int(compiler_llm_timeout_seconds()),
+        # Voting helper IS our retry/redundancy mechanism — never let the
+        # underlying LLMClient retry a slow call.
+        retry_attempts=0,
+        retry_backoff_seconds=(),
     )
     response = call_llm(request)
     return response.content
@@ -437,6 +457,11 @@ def _call_compile_sub_task(*, task_type: str, prompt: str) -> str:
                 temperature=cfg["temperature"] if cfg.get("temperature") is not None else 0.0,
                 protocol_family=str(protocol_family),
                 timeout_seconds=int(compiler_llm_timeout_seconds()),
+                # Be a good API citizen: no internal retries. The cascade-flip
+                # to the next route IS the retry; double-dipping the same
+                # upstream burns its rate limit and our wall budget.
+                retry_attempts=0,
+                retry_backoff_seconds=(),
             )
             response = call_llm(request)
             logger.debug(

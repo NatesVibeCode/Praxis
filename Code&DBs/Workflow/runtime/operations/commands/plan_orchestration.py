@@ -81,6 +81,22 @@ def handle_launch_plan(command: LaunchPlanCommand, subsystems: Any) -> dict[str,
     payload = receipt.to_dict()
     payload["ok"] = True
     payload["mode"] = "submitted"
+    payload["event_payload"] = {
+        "workflow_id": receipt.workflow_id,
+        "run_id": receipt.run_id,
+        "spec_name": receipt.spec_name,
+        "total_jobs": receipt.total_jobs,
+        "packet_count": len(receipt.packet_map or []),
+        "packet_labels": [
+            str(entry.get("label") or "")
+            for entry in (receipt.packet_map or [])
+            if isinstance(entry, dict)
+        ],
+        "warning_count": len(receipt.warnings or []),
+        "requested_by_kind": command.requested_by_kind,
+        "requested_by_ref": command.requested_by_ref,
+        "ok": True,
+    }
     return payload
 
 
@@ -125,6 +141,16 @@ def handle_compose_plan(command: ComposePlanCommand, subsystems: Any) -> dict[st
         }
     payload = proposed.to_dict()
     payload["ok"] = True
+    payload["event_payload"] = {
+        "workflow_id": proposed.workflow_id,
+        "spec_name": proposed.spec_name,
+        "total_jobs": proposed.total_jobs,
+        "unresolved_route_count": len(proposed.unresolved_routes or []),
+        "warning_count": len(proposed.warnings or []),
+        "packet_count": len(proposed.packet_declarations or []),
+        "binding_summary": dict(proposed.binding_summary or {}),
+        "ok": True,
+    }
     return payload
 
 

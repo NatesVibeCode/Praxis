@@ -255,10 +255,20 @@ def _call_fork_llm(
             response = call_llm(request)
             # Pull non-token observability from the raw OpenAI/Anthropic
             # response shape so callers don't have to re-parse it.
-            choices = (response.raw_response or {}).get("choices") or []
-            first_message = (choices[0] or {}).get("message") if choices else {}
-            finish_reason = (choices[0] or {}).get("finish_reason") if choices else None
-            reasoning_text = (first_message or {}).get("reasoning") or ""
+            # `(x or {}).get(...)` short-circuits only when x is FALSY. A
+            # non-empty string is truthy, so the original `(choices[0] or
+            # {}).get("message")` crashed with `'str' object has no attribute
+            # 'get'` whenever some upstream provider returned `choices[0]` as
+            # a bare string (or `message` as a string instead of a dict).
+            # Guard with isinstance so any non-dict shape coerces to the
+            # empty default cleanly.
+            raw_response = response.raw_response if isinstance(response.raw_response, dict) else {}
+            choices_raw = raw_response.get("choices")
+            choices = choices_raw if isinstance(choices_raw, list) else []
+            first_choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+            first_message = first_choice.get("message") if isinstance(first_choice.get("message"), dict) else {}
+            finish_reason = first_choice.get("finish_reason")
+            reasoning_text = first_message.get("reasoning") if isinstance(first_message.get("reasoning"), str) else ""
             call_metrics = {
                 "latency_ms": int(response.latency_ms or 0),
                 "finish_reason": str(finish_reason) if finish_reason else None,

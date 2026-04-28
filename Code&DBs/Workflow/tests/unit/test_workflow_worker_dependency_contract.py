@@ -42,6 +42,27 @@ def test_worker_concurrency_auto_balances_cpu_and_memory(monkeypatch) -> None:
     assert decision["memory_slot_bytes"] == 2 * 1024**3
 
 
+def test_local_worker_slots_are_capped_by_host_sandbox_admission() -> None:
+    env = {"PRAXIS_HOST_DOCKER_SANDBOX_SLOTS": "2"}
+
+    assert worker_loop._cap_local_slots_to_host_admission(6, env) == 2
+
+
+def test_local_worker_slots_can_follow_explicit_host_sandbox_capacity() -> None:
+    env = {"PRAXIS_HOST_DOCKER_SANDBOX_SLOTS": "4"}
+
+    assert worker_loop._cap_local_slots_to_host_admission(6, env) == 4
+
+
+def test_local_worker_slots_ignore_host_cap_when_admission_disabled() -> None:
+    env = {
+        "PRAXIS_HOST_RESOURCE_ADMISSION_DISABLED": "1",
+        "PRAXIS_HOST_DOCKER_SANDBOX_SLOTS": "2",
+    }
+
+    assert worker_loop._cap_local_slots_to_host_admission(6, env) == 6
+
+
 def test_compose_worker_does_not_pin_parallelism_by_default() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")

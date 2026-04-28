@@ -418,6 +418,28 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         backlog["routed_to"] = "issue_backlog"
         return backlog
 
+    if _matches(
+        question,
+        [
+            "refactor heatmap",
+            "refactoring heatmap",
+            "architecture debt",
+            "refactor candidate",
+            "refactor candidates",
+            "spiderweb",
+            "spider web",
+        ],
+    ):
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+
+        heatmap = execute_operation_from_subsystems(
+            subs,
+            operation_name="operator.refactor_heatmap",
+            payload={"limit": 15, "open_only": True},
+        )
+        heatmap["routed_to"] = "refactor_heatmap"
+        return heatmap
+
     if _has_data_dictionary_intent(question):
         return _data_dictionary(subs, question)
 
@@ -1179,6 +1201,14 @@ def handle_bugs(
     action = body.get("action", "list")
     bt = subs.get_bug_tracker()
     bt_mod = subs.get_bug_tracker_mod()
+    database_authority = _bug_contract.bug_surface_database_authority(subs=subs, bt=bt)
+
+    def _with_database_authority(payload: dict[str, Any]) -> dict[str, Any]:
+        return _bug_contract.attach_database_authority(
+            payload,
+            database_authority=database_authority,
+        )
+
     resolved_statuses = {
         bt_mod.BugStatus.FIXED,
         bt_mod.BugStatus.WONT_FIX,
@@ -1186,94 +1216,118 @@ def handle_bugs(
     }
     try:
         if action == "list":
-            return _bug_contract.list_bugs_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=body,
-                serialize_bug=_bug_to_dict,
-                default_limit=50,
-                include_replay_details=True,
-                parse_status=parse_bug_status,
-                parse_severity=parse_bug_severity,
-                parse_category=parse_bug_category,
+            return _with_database_authority(
+                _bug_contract.list_bugs_payload(
+                    bt=bt,
+                    bt_mod=bt_mod,
+                    body=body,
+                    serialize_bug=_bug_to_dict,
+                    default_limit=50,
+                    include_replay_details=True,
+                    parse_status=parse_bug_status,
+                    parse_severity=parse_bug_severity,
+                    parse_category=parse_bug_category,
+                )
             )
 
         if action == "file":
-            return _bug_contract.file_bug_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=body,
-                serialize_bug=_bug_to_dict,
-                filed_by_default="workflow_api",
-                source_kind_default="workflow_api",
-                parse_severity=parse_bug_severity,
-                parse_category=parse_bug_category,
+            return _with_database_authority(
+                _bug_contract.file_bug_payload(
+                    bt=bt,
+                    bt_mod=bt_mod,
+                    body=body,
+                    serialize_bug=_bug_to_dict,
+                    filed_by_default="workflow_api",
+                    source_kind_default="workflow_api",
+                    parse_severity=parse_bug_severity,
+                    parse_category=parse_bug_category,
+                )
             )
 
         if action == "search":
-            return _bug_contract.search_bugs_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=body,
-                serialize_bug=_bug_to_dict,
-                default_limit=20,
-                parse_status=parse_bug_status,
-                parse_severity=parse_bug_severity,
-                parse_category=parse_bug_category,
+            return _with_database_authority(
+                _bug_contract.search_bugs_payload(
+                    bt=bt,
+                    bt_mod=bt_mod,
+                    body=body,
+                    serialize_bug=_bug_to_dict,
+                    default_limit=20,
+                    parse_status=parse_bug_status,
+                    parse_severity=parse_bug_severity,
+                    parse_category=parse_bug_category,
+                )
             )
 
         if action == "duplicate_check":
-            return _bug_contract.duplicate_check_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=body,
-                serialize_bug=_bug_to_dict,
-                default_limit=10,
-                parse_status=parse_bug_status,
-                parse_severity=parse_bug_severity,
-                parse_category=parse_bug_category,
+            return _with_database_authority(
+                _bug_contract.duplicate_check_payload(
+                    bt=bt,
+                    bt_mod=bt_mod,
+                    body=body,
+                    serialize_bug=_bug_to_dict,
+                    default_limit=10,
+                    parse_status=parse_bug_status,
+                    parse_severity=parse_bug_severity,
+                    parse_category=parse_bug_category,
+                )
             )
 
         if action == "stats":
-            return _bug_contract.stats_payload(bt=bt, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.stats_payload(bt=bt, serialize=_serialize)
+            )
 
         if action == "packet":
-            return _bug_contract.packet_payload(bt=bt, body=body, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.packet_payload(bt=bt, body=body, serialize=_serialize)
+            )
 
         if action == "history":
-            return _bug_contract.history_payload(bt=bt, body=body, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.history_payload(bt=bt, body=body, serialize=_serialize)
+            )
 
         if action == "replay":
-            return _bug_contract.replay_payload(bt=bt, body=body, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.replay_payload(bt=bt, body=body, serialize=_serialize)
+            )
 
         if action == "backfill_replay":
-            return _bug_contract.backfill_replay_payload(bt=bt, body=body, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.backfill_replay_payload(bt=bt, body=body, serialize=_serialize)
+            )
 
         if action == "attach_evidence":
-            return _bug_contract.attach_evidence_payload(
-                bt=bt,
-                body=body,
-                serialize=_serialize,
-                created_by_default="workflow_api",
+            return _with_database_authority(
+                _bug_contract.attach_evidence_payload(
+                    bt=bt,
+                    body=body,
+                    serialize=_serialize,
+                    created_by_default="workflow_api",
+                )
             )
 
         if action == "resolve":
-            return _bug_contract.resolve_bug_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=body,
-                serialize_bug=_bug_to_dict,
-                serialize=_serialize,
-                resolved_statuses=resolved_statuses,
-                parse_status=parse_bug_status,
-                created_by_default="workflow_api",
+            return _with_database_authority(
+                _bug_contract.resolve_bug_payload(
+                    bt=bt,
+                    bt_mod=bt_mod,
+                    body=body,
+                    serialize_bug=_bug_to_dict,
+                    serialize=_serialize,
+                    resolved_statuses=resolved_statuses,
+                    parse_status=parse_bug_status,
+                    created_by_default="workflow_api",
+                )
             )
 
         if action == "patch_resume":
-            return _bug_contract.patch_resume_payload(
-                bt=bt,
-                body=body,
-                serialize_bug=_bug_to_dict,
+            return _with_database_authority(
+                _bug_contract.patch_resume_payload(
+                    bt=bt,
+                    body=body,
+                    serialize_bug=_bug_to_dict,
+                )
             )
     except ValueError as exc:
         raise _ClientError(str(exc)) from exc
@@ -1715,7 +1769,12 @@ def handle_research(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
-    view = str(body.get("view") or "status").strip().lower()
+    raw_view = str(body.get("view") or "").strip().lower()
+    raw_action = str(body.get("action") or "").strip().lower()
+    if raw_view and raw_action and raw_view != raw_action:
+        raise _ClientError("action and view must match when both are provided")
+
+    view = raw_view or raw_action or "status"
     raw_as_of = body.get("as_of")
     as_of = _parse_datetime(raw_as_of)
     if raw_as_of is not None and as_of is None:

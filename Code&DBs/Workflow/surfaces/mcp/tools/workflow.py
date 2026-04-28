@@ -808,9 +808,21 @@ def _request_workflow_command(
     requested_by_ref: str,
 ) -> Any:
     from runtime.control_commands import (
+        ControlCommandType,
         ControlIntent,
         request_control_command,
+        workflow_retry_idempotency_key,
+        workflow_retry_payload_with_guard,
     )
+    command_type_value = command_type.value if hasattr(command_type, "value") else str(command_type)
+    idempotency_key = _workflow_command_idempotency_key(action)
+    command_payload = dict(payload)
+    if command_type_value == ControlCommandType.WORKFLOW_RETRY.value:
+        command_payload = workflow_retry_payload_with_guard(pg, command_payload)
+        idempotency_key = workflow_retry_idempotency_key(
+            requested_by_kind="mcp",
+            payload=command_payload,
+        )
 
     return request_control_command(
         pg,
@@ -818,8 +830,8 @@ def _request_workflow_command(
             command_type=command_type,
             requested_by_kind="mcp",
             requested_by_ref=requested_by_ref,
-            idempotency_key=_workflow_command_idempotency_key(action),
-            payload=payload,
+            idempotency_key=idempotency_key,
+            payload=command_payload,
         ),
     )
 
@@ -834,9 +846,21 @@ def _execute_workflow_command(
     label: str | None = None,
 ) -> dict[str, Any]:
     from runtime.control_commands import (
+        ControlCommandType,
         ControlIntent,
         execute_control_intent,
+        workflow_retry_idempotency_key,
+        workflow_retry_payload_with_guard,
     )
+    command_type_value = command_type.value if hasattr(command_type, "value") else str(command_type)
+    idempotency_key = _workflow_command_idempotency_key(action)
+    command_payload = dict(payload)
+    if command_type_value == ControlCommandType.WORKFLOW_RETRY.value:
+        command_payload = workflow_retry_payload_with_guard(pg, command_payload)
+        idempotency_key = workflow_retry_idempotency_key(
+            requested_by_kind="mcp",
+            payload=command_payload,
+        )
 
     command = execute_control_intent(
         pg,
@@ -844,8 +868,8 @@ def _execute_workflow_command(
             command_type=command_type,
             requested_by_kind="mcp",
             requested_by_ref=f"praxis_workflow.{action}",
-            idempotency_key=_workflow_command_idempotency_key(action),
-            payload=payload,
+            idempotency_key=idempotency_key,
+            payload=command_payload,
         ),
         approved_by=f"mcp.praxis_workflow.{action}",
     )
@@ -1382,14 +1406,18 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
             else:
                 return {"error": "adopt_active must be a boolean"}
 
-        pg, error = _load_pg_conn(action="chain")
-        if error is not None:
-            return error
+        # Dispatch through CQRS gateway (operation `workflow_chain_submit`,
+        # registered 2026-04-28). Gateway records authority_operation_receipts
+        # row + emits `workflow_chain.submitted` to authority_events.
         try:
-            return _submit_workflow_chain_via_service_bus(
-                pg,
-                coordination_path=str(coordination_path),
-                adopt_active=bool(adopt_active),
+            from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+            return execute_operation_from_subsystems(
+                _subs,
+                operation_name="workflow_chain_submit",
+                payload={
+                    "coordination_path": str(coordination_path),
+                    "adopt_active": bool(adopt_active),
+                },
             )
         except Exception as exc:
             return _structured_runtime_error(exc, action="chain")
@@ -1531,8 +1559,17 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
     if action == "retry":
         run_id = params.get("run_id", "")
         label = params.get("label", "")
+        previous_failure = params.get("previous_failure", "")
+        retry_delta = params.get("retry_delta", "")
         if not run_id or not label:
             return {"error": "run_id and label are required for action='retry'"}
+        if not str(previous_failure or "").strip() or not str(retry_delta or "").strip():
+            return {
+                "error": (
+                    "previous_failure and retry_delta are required for action='retry'"
+                ),
+                "reason_code": "workflow.retry.explanation_required",
+            }
 
         pg, error = _load_pg_conn(action="retry")
         if error is not None:
@@ -1544,7 +1581,12 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
                 pg,
                 action="retry",
                 command_type=ControlCommandType.WORKFLOW_RETRY,
-                payload={"run_id": run_id, "label": label},
+                payload={
+                    "run_id": run_id,
+                    "label": label,
+                    "previous_failure": previous_failure,
+                    "retry_delta": retry_delta,
+                },
                 run_id=run_id,
                 label=label,
             )
@@ -1984,12 +2026,12 @@ def tool_praxis_launch_plan(params: dict) -> dict:
 
 
 def tool_praxis_plan_lifecycle(params: dict) -> dict:
-    """Read every plan.* system_event for one workflow_id in order.
+    """Read every plan.* authority event for one workflow_id in order.
 
-    Q-side of the planning stack's CQRS pattern: the C path (propose,
-    approve, launch, compose_and_launch) emits plan.composed /
-    plan.approved / plan.launched / plan.blocked via emit_system_event;
-    this tool pulls them back for Moon, CLI, or ad-hoc inspection.
+    Q-side of the planning stack's CQRS pattern: gateway-dispatched plan
+    commands emit plan.composed / plan.launched through receipt-backed
+    authority_events; this tool pulls the canonical stream back for Moon,
+    CLI, or ad-hoc inspection.
     """
     workflow_id = params.get("workflow_id")
     if not isinstance(workflow_id, str) or not workflow_id.strip():
@@ -2373,7 +2415,7 @@ def tool_praxis_compile(params: dict) -> dict:
         }
 
     try:
-        from runtime.compile_cqrs import materialize_workflow, preview_compile
+        from runtime.compile_cqrs import preview_compile
 
         if action == "preview":
             return preview_compile(intent, conn=pg_conn, match_limit=match_limit).to_dict()
@@ -2385,13 +2427,41 @@ def tool_praxis_compile(params: dict) -> dict:
                 "error": "enable_llm must be a boolean when provided",
                 "reason_code": "enable_llm.invalid",
             }
-        return materialize_workflow(
-            intent,
-            conn=pg_conn,
-            workflow_id=params.get("workflow_id") if isinstance(params.get("workflow_id"), str) else None,
-            title=params.get("title") if isinstance(params.get("title"), str) else None,
-            enable_llm=enable_llm if isinstance(enable_llm, bool) else None,
-            match_limit=match_limit,
+        enable_full_compose = params.get("enable_full_compose")
+        if enable_full_compose is not None and not isinstance(enable_full_compose, bool):
+            return {
+                "ok": False,
+                "error": "enable_full_compose must be a boolean when provided",
+                "reason_code": "enable_full_compose.invalid",
+            }
+
+        # Dispatch through the CQRS gateway (operation `compile.materialize`,
+        # registered 2026-04-28). The gateway records an
+        # authority_operation_receipts row + emits compile.materialized to
+        # authority_events. Replaces the prior direct-call path that
+        # bypassed the gateway and violated the dogfooding principle
+        # (project_dogfooding_principle.md).
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+
+        payload = {
+            "intent": intent,
+            "match_limit": match_limit,
+        }
+        workflow_id_raw = params.get("workflow_id")
+        if isinstance(workflow_id_raw, str) and workflow_id_raw.strip():
+            payload["workflow_id"] = workflow_id_raw.strip()
+        title_raw = params.get("title")
+        if isinstance(title_raw, str) and title_raw.strip():
+            payload["title"] = title_raw.strip()
+        if isinstance(enable_llm, bool):
+            payload["enable_llm"] = enable_llm
+        if isinstance(enable_full_compose, bool):
+            payload["enable_full_compose"] = enable_full_compose
+
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="compile_materialize",
+            payload=payload,
         )
     except Exception as exc:
         return _structured_runtime_error(exc, action="compile_cqrs")
@@ -2640,6 +2710,63 @@ def tool_praxis_compose_experiment(params: dict) -> dict:
     return result if isinstance(result, dict) else {"ok": True, "result": result}
 
 
+def tool_praxis_promote_experiment_winner(params: dict) -> dict:
+    """Promote one compose-experiment leg back into task_type_routing.
+
+    Inputs:
+      - source_experiment_receipt_id (str, required): receipt id from
+        praxis_compose_experiment.
+      - source_config_index (int, required): the winning config index in
+        that experiment receipt.
+      - target_task_type (str, optional): explicit override when the
+        source config omitted base_task_type.
+    """
+    source_experiment_receipt_id = params.get("source_experiment_receipt_id")
+    if not isinstance(source_experiment_receipt_id, str) or not source_experiment_receipt_id.strip():
+        return {
+            "ok": False,
+            "error": "source_experiment_receipt_id must be a non-empty string",
+            "reason_code": "source_experiment_receipt_id.invalid",
+        }
+    try:
+        raw_source_config_index = params.get("source_config_index")
+        if isinstance(raw_source_config_index, bool):
+            raise ValueError
+        source_config_index = int(raw_source_config_index)
+        if source_config_index < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error": "source_config_index must be a non-negative integer",
+            "reason_code": "source_config_index.invalid",
+        }
+    target_task_type = params.get("target_task_type")
+    if target_task_type is not None and (not isinstance(target_task_type, str) or not target_task_type.strip()):
+        return {
+            "ok": False,
+            "error": "target_task_type must be a non-empty string when provided",
+            "reason_code": "target_task_type.invalid",
+        }
+
+    try:
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+
+        result = execute_operation_from_subsystems(
+            _subs,
+            operation_name="experiment_promote_winner",
+            payload={
+                "source_experiment_receipt_id": source_experiment_receipt_id,
+                "source_config_index": source_config_index,
+                "target_task_type": target_task_type if isinstance(target_task_type, str) else None,
+                "caller_ref": "mcp.praxis_promote_experiment_winner",
+            },
+        )
+    except Exception as exc:
+        return _structured_runtime_error(exc, action="experiment_promote_winner")
+    return result if isinstance(result, dict) else {"ok": True, "result": result}
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_suggest_plan_atoms": (
         tool_praxis_suggest_plan_atoms,
@@ -2768,6 +2895,25 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "praxis_promote_experiment_winner": (
+        tool_praxis_promote_experiment_winner,
+        {
+            "description": (
+                "Promote one compose-experiment leg into the canonical task_type_routing row "
+                "for that task type. The winning leg's temperature and max_tokens are applied; "
+                "provider/model changes remain visible only in the returned diff."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source_experiment_receipt_id": {"type": "string"},
+                    "source_config_index": {"type": "integer", "minimum": 0},
+                    "target_task_type": {"type": "string"},
+                },
+                "required": ["source_experiment_receipt_id", "source_config_index"],
+            },
+        },
+    ),
     "praxis_compile": (
         tool_praxis_compile,
         {
@@ -2797,6 +2943,17 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "enable_llm": {
                         "type": "boolean",
                         "description": "Optional compiler LLM switch. Omitted means use compiler policy.",
+                    },
+                    "enable_full_compose": {
+                        "type": "boolean",
+                        "description": (
+                            "Pipeline selector for materialize. True (default) routes through "
+                            "compose_plan_via_llm (synthesis + N-way fork-out, plan_synthesis + "
+                            "plan_fork_author task types). False routes through compile_prose "
+                            "(compile_synthesize → compile_pill_match → compile_author → "
+                            "compile_finalize sub-tasks; runs voting-based binding-gate "
+                            "auto-resolution)."
+                        ),
                     },
                     "match_limit": {
                         "type": "integer",
@@ -2840,7 +2997,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  Spawn child:     praxis_workflow(action='spawn', spec_path='...', parent_run_id='workflow_parent', dispatch_reason='phase.spawn')\n"
                 "  Force kickoff:   praxis_workflow(action='run', spec_path='...', wait=false)\n"
                 "  Check status:    praxis_workflow(action='status', run_id='workflow_abc123')\n"
-                "  Retry a failure: praxis_workflow(action='retry', run_id='workflow_abc123', label='build_step')\n"
+                "  Retry a failure: praxis_workflow(action='retry', run_id='workflow_abc123', label='build_step', previous_failure='receipt-backed failure', retry_delta='what changed this time')\n"
                 "  Cancel a run:    praxis_workflow(action='cancel', run_id='workflow_abc123')\n"
                 "  Repair sync:     praxis_workflow(action='repair', run_id='workflow_abc123')\n"
                 "  List recent:     praxis_workflow(action='list')\n\n"
@@ -3127,12 +3284,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_plan_lifecycle,
         {
             "description": (
-                "Q-side of the planning stack: read every plan.* system_event for one "
-                "workflow_id in order. Pair with praxis_compose_and_launch / "
-                "praxis_approve_proposed_plan / praxis_launch_plan on the C side.\n\n"
+                "Q-side of the planning stack: read every plan.* authority_event for one "
+                "workflow_id in order. Pair with gateway-backed praxis_compose_plan / "
+                "praxis_launch_plan on the C side.\n\n"
                 "USE WHEN: an operator or Moon wants to inspect what happened to a plan "
-                "— composed when, approved by whom, launched (with run_id) or blocked "
-                "(with which gate).\n\n"
+                "— composed when, launched with which run_id, and the event payload "
+                "that was receipt-backed by the command gateway.\n\n"
                 "DO NOT USE TO: read workflow_run status. That's a separate Q on the "
                 "workflow_runs + workflow_jobs tables, surfaced by praxis_workflow's "
                 "status / stream actions.\n\n"

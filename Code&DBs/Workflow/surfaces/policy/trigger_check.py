@@ -165,8 +165,32 @@ _TOOL_NAME_ALIASES: dict[str, str] = {
 }
 
 
+_TOOL_NAME_HARNESSES: dict[str, str] = {
+    # Claude Code uses canonical tool names in hook payloads.
+    "Bash": "claude_code",
+    "Edit": "claude_code",
+    "MultiEdit": "claude_code",
+    "Write": "claude_code",
+    "Read": "claude_code",
+    # Gemini CLI native names.
+    "run_shell_command": "gemini_cli",
+    "ShellTool": "gemini_cli",
+    "replace": "gemini_cli",
+    "write_file": "gemini_cli",
+    "read_file": "gemini_cli",
+    # Codex CLI native names.
+    "local_shell": "codex_cli",
+    "shell": "codex_cli",
+    "apply_patch": "codex_cli",
+}
+
+
 def _normalize_tool_name(tool_name: str) -> str:
     return _TOOL_NAME_ALIASES.get(tool_name, tool_name)
+
+
+def _infer_harness(tool_name: str) -> str:
+    return _TOOL_NAME_HARNESSES.get(tool_name, "")
 
 
 def _extract_match_target(
@@ -241,10 +265,15 @@ def _match_glob(pattern: str, file_path: str) -> bool:
 def _match_one(
     condition: dict[str, Any],
     tool_name: str,
+    harness: str,
     regex_target: str | None,
     file_path: str | None,
     content_target: str,
 ) -> bool:
+    cond_harness = str(condition.get("harness") or "").strip()
+    if cond_harness and cond_harness != harness:
+        return False
+
     cond_tool = str(condition.get("tool") or "").strip()
     if cond_tool and cond_tool != tool_name:
         return False
@@ -361,7 +390,9 @@ def check(
     """
     if not tool_name:
         return []
+    raw_tool_name = tool_name
     tool_name = _normalize_tool_name(tool_name)
+    harness = _infer_harness(raw_tool_name)
     decisions = registry if registry is not None else load_registry()
     if not decisions:
         return []
@@ -375,7 +406,7 @@ def check(
     matches: list[TriggerMatch] = []
     for decision in decisions:
         for condition in decision.get("match") or []:
-            if _match_one(condition, tool_name, regex_target, file_path, content_target):
+            if _match_one(condition, tool_name, harness, regex_target, file_path, content_target):
                 # Cooldown: skip advisory matches we've already surfaced
                 # in this session for the same (decision_key, target) pair.
                 # Explicit (non-advisory) matches always fire.

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
+
+from runtime.crypto_authority import canonical_digest_hex
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -21,8 +22,7 @@ class IdempotencyResult:
 
 
 def canonical_hash(body: dict) -> str:
-    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode()).hexdigest()
+    return canonical_digest_hex(body, purpose="idempotency.payload_hash")
 
 
 def check_idempotency(

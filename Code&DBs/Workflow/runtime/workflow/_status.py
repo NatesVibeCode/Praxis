@@ -1196,8 +1196,28 @@ def retry_job(conn: SyncPostgresConnection, run_id: str, label: str) -> dict:
 
     from runtime.compile_artifacts import CompileArtifactStore
 
-    idempotency_key = f"{run_id}:{label}:retry"
-    payload_hash = canonical_hash({"run_id": run_id, "label": label})
+    retryable_rows = conn.execute(
+        """SELECT id, label, attempt, status
+           FROM workflow_jobs
+           WHERE run_id = $1 AND label = $2
+             AND status IN ('failed', 'dead_letter', 'cancelled')""",
+        run_id,
+        label,
+    )
+    if not retryable_rows:
+        return {'error': f'No retryable job found: {run_id}/{label}'}
+    retryable_job = dict(retryable_rows[0])
+    retry_attempt = int(retryable_job.get("attempt") or 0)
+    retry_status = str(retryable_job.get("status") or "").strip()
+    idempotency_key = f"{run_id}:{label}:retry:{retry_status}:{retry_attempt}"
+    payload_hash = canonical_hash(
+        {
+            "run_id": run_id,
+            "label": label,
+            "attempt": retry_attempt,
+            "status": retry_status,
+        }
+    )
     result = check_idempotency(conn, "workflow.retry", idempotency_key, payload_hash)
     if result.is_replay:
         logger.info("Idempotent replay: returning existing run_id=%s", result.existing_run_id)
@@ -1224,7 +1244,7 @@ def retry_job(conn: SyncPostgresConnection, run_id: str, label: str) -> dict:
         return {'error': f'No retryable job found: {run_id}/{label}'}
     job = dict(rows[0])
     _reset_blocked_descendants_for_retry(conn, int(job["id"]))
-    _recompute_workflow_run_state(conn, run_id)
+    _recompute_workflow_run_state(conn, run_id, allow_terminal_reopen=True)
     record_idempotency(conn, "workflow.retry", idempotency_key, payload_hash, run_id=run_id)
     return {
         'run_id': run_id,

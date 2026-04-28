@@ -57,6 +57,38 @@ class _FakeConn:
                     "job_type": "build",
                     "transport_type": "API",
                     "adapter_type": "llm_task",
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-disabled-by-policy",
+                    "model_version": "claude-disabled-by-policy",
+                    "cost_structure": "subscription_included",
+                    "cost_metadata": {"billing_mode": "subscription_included"},
+                    "control_enabled": False,
+                    "control_state": "off",
+                    "control_scope": "task/provider/model/access_method_denylist",
+                    "control_is_explicit": True,
+                    "control_reason_code": "control_panel.model_access_method_turned_off",
+                    "control_decision_ref": "operator_decision.architecture_policy.provider_routing.anthropic_disabled_2026_04_27",
+                    "control_operator_message": "Anthropic is disabled by operator policy.",
+                    "credential_availability_state": "available",
+                    "credential_sources": ["ambient_cli_session"],
+                    "credential_observations": [],
+                    "capability_state": "runnable",
+                    "is_runnable": True,
+                    "breaker_state": "CLOSED",
+                    "manual_override_state": None,
+                    "primary_removal_reason_code": None,
+                    "removal_reasons": [],
+                    "candidate_ref": "candidate.anthropic.cli.claude-disabled-by-policy",
+                    "provider_ref": "provider.anthropic",
+                    "source_refs": ["table.task_type_routing"],
+                    "projected_at": "2026-04-26T00:00:00Z",
+                    "projection_ref": "projection.private_provider_control_plane_snapshot",
+                },
+                {
+                    "runtime_profile_ref": "nate-private",
+                    "job_type": "build",
+                    "transport_type": "API",
+                    "adapter_type": "llm_task",
                     "provider_slug": "openai",
                     "model_slug": "gpt-5.4",
                     "model_version": "gpt-5.4",
@@ -185,8 +217,11 @@ def test_provider_control_plane_returns_projected_snapshot_payload() -> None:
         "error_detail": None,
     }
     assert payload["rows"][0]["provider_slug"] == "anthropic"
+    assert payload["rows"][0]["mechanical_capability_state"] == "runnable"
+    assert payload["rows"][0]["mechanical_is_runnable"] is True
     assert payload["rows"][0]["capability_state"] == "runnable"
     assert payload["rows"][0]["is_runnable"] is True
+    assert payload["rows"][0]["effective_dispatch_state"] == "runnable"
     assert payload["rows"][0]["control_state"] == "on"
     assert payload["rows"][0]["control_enabled"] is True
     assert payload["rows"][0]["credential_availability_state"] == "available"
@@ -213,9 +248,41 @@ def test_provider_control_plane_surfaces_structured_removal_reasons() -> None:
     assert openai_row["breaker_state"] == "OPEN"
     assert openai_row["primary_removal_reason_code"] == "provider_transport.policy_denied"
     assert [reason["reason_code"] for reason in openai_row["removal_reasons"]] == [
+        "control_panel.transport_turned_off",
         "provider_transport.policy_denied",
         "circuit_breaker.open",
     ]
+
+
+def test_provider_control_plane_control_off_overrides_mechanical_runnable() -> None:
+    conn = _FakeConn()
+
+    payload = handle_query_provider_control_plane(
+        QueryProviderControlPlane(runtime_profile_ref="nate-private"),
+        _FakeSubsystems(conn),
+    )
+
+    disabled_row = [
+        row
+        for row in payload["rows"]
+        if row["model_slug"] == "claude-disabled-by-policy"
+    ][0]
+    assert disabled_row["control_enabled"] is False
+    assert disabled_row["control_state"] == "off"
+    assert disabled_row["mechanical_capability_state"] == "runnable"
+    assert disabled_row["mechanical_is_runnable"] is True
+    assert disabled_row["capability_state"] == "removed"
+    assert disabled_row["is_runnable"] is False
+    assert disabled_row["effective_dispatch_state"] == "disabled"
+    assert disabled_row["primary_removal_reason_code"] == (
+        "control_panel.model_access_method_turned_off"
+    )
+    assert disabled_row["removal_reasons"][0]["reason_code"] == (
+        "control_panel.model_access_method_turned_off"
+    )
+    assert disabled_row["removal_reasons"][0]["source_ref"] == (
+        "operator_decision.architecture_policy.provider_routing.anthropic_disabled_2026_04_27"
+    )
 
 
 def test_circuit_states_reads_durable_projection() -> None:

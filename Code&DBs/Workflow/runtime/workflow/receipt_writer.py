@@ -407,6 +407,39 @@ def write_job_receipt(
             source="workflow_unified",
         )
 
+    # route_identity: the canonical lineage tuple read by PostgresEvidenceReader.
+    # Without this, praxis_run status queries crash with
+    # `postgres.missing_route_identity` even on successful runs. The reader
+    # is fail-closed by design (see test_evidence_route_identity_recovery.py),
+    # so the writer MUST populate this on every receipt — there is no
+    # legacy/optional path for newly-written rows.
+    authority_context_ref = (
+        str(workflow_row.get("context_bundle_id") or "").strip()
+        or f"context:{run_id}"
+    )
+    authority_context_digest = (
+        str(workflow_row.get("authority_context_digest") or "").strip()
+        or "missing"
+    )
+    claim_id = (
+        str(workflow_row.get("claimed_by") or "").strip()
+        or f"claim:{run_id}:{job_id}:{attempt_no}"
+    )
+    route_identity = {
+        "workflow_id": workflow_id,
+        "run_id": run_id,
+        "request_id": request_id,
+        "authority_context_ref": authority_context_ref,
+        "authority_context_digest": authority_context_digest,
+        "claim_id": claim_id,
+        "attempt_no": attempt_no,
+        # transition_seq is allocated by the inserter; the post-insert
+        # update at the bottom of this function patches it onto receipt_inputs.
+        # Reader pulls transition_seq from the top-level inputs key directly,
+        # not from inside route_identity, so the placeholder of 0 here is fine.
+        "transition_seq": 0,
+    }
+
     receipt_inputs = {
         "job_id": job_id,
         "job_label": label,
@@ -414,6 +447,7 @@ def write_job_receipt(
         "attempt": attempt_no,
         "workspace_ref": workspace_ref,
         "runtime_profile_ref": runtime_profile_ref,
+        "route_identity": route_identity,
     }
     if touch_entries:
         receipt_inputs["touch_keys"] = touch_entries

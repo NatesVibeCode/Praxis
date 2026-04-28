@@ -34,15 +34,15 @@ def render_mcp_markdown() -> str:
         "",
         "## Catalog Summary",
         "",
-        "| Tool | Surface | Tier | Alias | Risks | Description |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Tool | Surface | Tier | Alias | Risks | Replacement | Description |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for definition in definitions:
         alias = f"`workflow {definition.cli_recommended_alias}`" if definition.cli_recommended_alias else "-"
         risks = ", ".join(f"`{risk}`" for risk in definition.risk_levels)
         description = definition.description.split("\n", 1)[0]
         lines.append(
-            f"| `{definition.name}` | `{definition.cli_surface}` | `{definition.cli_tier}` | {alias} | {risks} | {description} |"
+            f"| `{definition.name}` | `{definition.cli_surface}` | `{definition.cli_tier}` | {alias} | {risks} | {definition.cli_replacement or '-'} | {description} |"
         )
 
     lines.extend(["", "## Tool Reference", ""])
@@ -63,6 +63,8 @@ def _tool_section(definition: McpToolDefinition) -> list[str]:
     lines.append(f"- Risks: {', '.join(f'`{risk}`' for risk in definition.risk_levels)}")
     lines.append(f"- CLI entrypoint: `{definition.cli_entrypoint}`")
     lines.append(f"- CLI schema help: `{definition.cli_describe_command}`")
+    if definition.cli_replacement:
+        lines.append(f"- Replacement: `{definition.cli_replacement}`")
     if definition.cli_when_to_use:
         lines.append(f"- When to use: {definition.cli_when_to_use}")
     if definition.cli_when_not_to_use:

@@ -11,7 +11,7 @@ Usage:
     python workflow_cli.py status
     python workflow_cli.py active
     python workflow_cli.py diagnose <run_id>
-    python workflow_cli.py retry <run_id> <label>
+    python workflow_cli.py retry <run_id> <label> --previous-failure <text> --retry-delta <text>
     python workflow_cli.py cancel <run_id>
     python workflow_cli.py repair <run_id>
 """
@@ -768,6 +768,17 @@ def cmd_retry(args: argparse.Namespace) -> int:
             ControlIntent,
             execute_control_intent,
             render_control_command_response,
+            workflow_retry_idempotency_key,
+            workflow_retry_payload_with_guard,
+        )
+        payload = workflow_retry_payload_with_guard(
+            pg_conn,
+            {
+                "run_id": args.run_id,
+                "label": args.label,
+                "previous_failure": getattr(args, "previous_failure", None),
+                "retry_delta": getattr(args, "retry_delta", None),
+            },
         )
 
         command = execute_control_intent(
@@ -776,8 +787,11 @@ def cmd_retry(args: argparse.Namespace) -> int:
                 command_type=ControlCommandType.WORKFLOW_RETRY,
                 requested_by_kind="cli",
                 requested_by_ref="workflow_cli.retry",
-                idempotency_key=f"workflow.retry.cli.{args.run_id}.{args.label}",
-                payload={"run_id": args.run_id, "label": args.label},
+                idempotency_key=workflow_retry_idempotency_key(
+                    requested_by_kind="cli",
+                    payload=payload,
+                ),
+                payload=payload,
             ),
             approved_by="cli.workflow.retry",
         )

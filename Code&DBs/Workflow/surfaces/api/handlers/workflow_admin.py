@@ -99,6 +99,14 @@ def build_orient_primitive_contracts(*args: Any, **kwargs: Any) -> dict[str, Any
     return _build_orient_primitive_contracts(*args, **kwargs)
 
 
+def workflow_database_authority_payload_from_env(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from runtime._workflow_database import (
+        workflow_database_authority_payload_from_env as _workflow_database_authority_payload_from_env,
+    )
+
+    return _workflow_database_authority_payload_from_env(*args, **kwargs)
+
+
 def _tool_definition(tool_name: str):
     from surfaces.mcp.catalog import get_tool_catalog
 
@@ -228,6 +236,13 @@ def _concern_to_tool_index() -> dict[str, Any]:
                 ),
             },
             {
+                "symptom": "architecture debt / spiderweb / too many things need refactoring",
+                "concern": "rank cleanup by open architecture bugs, source spread, surface coupling, and large-module pressure before choosing the next pull-apart target",
+                "tool": "praxis_refactor_heatmap",
+                "action": "read",
+                "do_not": "guess refactor priorities from vibes or empty quality rollups",
+            },
+            {
                 "symptom": "praxis_circuits list shows CLOSED but submits keep failing",
                 "concern": (
                     "BEFORE 2026-04-26: the gateway replayed cached read_only results so "
@@ -266,36 +281,60 @@ def _build_standing_orders(subs: Any) -> list[dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001 — orient must not crash on auxiliary reads
         return [{"error": f"standing_orders unavailable: {exc}"}]
 
+    standing_orders_sql = """
+        SELECT
+            decision_scope_ref,
+            decision_key,
+            title,
+            rationale,
+            decided_by,
+            decision_source,
+            effective_from,
+            effective_to,
+            scope_clamp
+        FROM operator_decisions
+        WHERE decision_kind = 'architecture_policy'
+          AND decision_status IN ('decided', 'active')
+          AND effective_from <= now()
+          AND (effective_to IS NULL OR effective_to > now())
+        ORDER BY effective_from DESC, decided_at DESC
+        LIMIT 50
+        """
+    standing_orders_without_scope_sql = """
+        SELECT
+            decision_scope_ref,
+            decision_key,
+            title,
+            rationale,
+            decided_by,
+            decision_source,
+            effective_from,
+            effective_to
+        FROM operator_decisions
+        WHERE decision_kind = 'architecture_policy'
+          AND decision_status IN ('decided', 'active')
+          AND effective_from <= now()
+          AND (effective_to IS NULL OR effective_to > now())
+        ORDER BY effective_from DESC, decided_at DESC
+        LIMIT 50
+        """
     try:
-        rows = pg.fetch(
-            """
-            SELECT
-                decision_scope_ref,
-                decision_key,
-                title,
-                rationale,
-                decided_by,
-                decision_source,
-                effective_from,
-                effective_to,
-                scope_clamp
-            FROM operator_decisions
-            WHERE decision_kind = 'architecture_policy'
-              AND decision_status IN ('decided', 'active')
-              AND effective_from <= now()
-              AND (effective_to IS NULL OR effective_to > now())
-            ORDER BY effective_from DESC, decided_at DESC
-            LIMIT 50
-            """
-        )
+        rows = pg.fetch(standing_orders_sql)
     except Exception as exc:  # noqa: BLE001 — orient must not crash on auxiliary reads
-        return [{"error": f"standing_orders unavailable: {exc}"}]
+        if "scope_clamp" not in str(exc):
+            return [{"error": f"standing_orders unavailable: {exc}"}]
+        try:
+            rows = pg.fetch(standing_orders_without_scope_sql)
+        except Exception as fallback_exc:  # noqa: BLE001
+            return [{"error": f"standing_orders unavailable: {fallback_exc}"}]
 
     directives: list[dict[str, Any]] = []
     for row in rows:
         effective_from = row["effective_from"]
         effective_to = row["effective_to"]
-        scope_clamp = _normalize_scope_clamp_for_orient(row["scope_clamp"])
+        scope_clamp = _normalize_scope_clamp_for_orient(
+            _row_get(row, "scope_clamp")
+        )
         directive = {
             "authority_domain": row["decision_scope_ref"],
             "policy_slug": row["decision_key"],
@@ -309,6 +348,16 @@ def _build_standing_orders(subs: Any) -> list[dict[str, Any]]:
         }
         directives.append({k: v for k, v in directive.items() if v is not None})
     return directives
+
+
+def _row_get(row: Any, key: str, default: Any = None) -> Any:
+    getter = getattr(row, "get", None)
+    if callable(getter):
+        return getter(key, default)
+    try:
+        return row[key]
+    except Exception:
+        return default
 
 
 def _normalize_scope_clamp_for_orient(raw: object) -> dict[str, Any]:
@@ -494,6 +543,7 @@ def _build_orient_authority_envelope(
         "lane_recommendation": health_payload.get("lane_recommendation") or {},
         "tool_guidance": tool_guidance,
         "tool_guidance_ref": "/orient#tool_guidance",
+        "database_authority_ref": "/orient#database_authority",
         "primitive_contracts": primitive_contracts,
         "primitive_contracts_ref": "/orient#primitive_contracts",
         "dependency_truth": {
@@ -520,6 +570,10 @@ def _build_orient_authority_envelope(
             "drift_signal": (
                 "native_instance.error or mismatched downstream native_instance payloads must be treated "
                 "as authority drift"
+            ),
+            "database_authority": (
+                "mismatched database_authority.fingerprint values across orient, bug surfaces, or "
+                "other front doors must be treated as DB authority drift"
             ),
             "primitive_contracts": (
                 "operation posture, runtime binding, state semantics, proof refs, and failure identity "
@@ -730,6 +784,28 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         tool_guidance=tool_guidance,
         fast=fast_orient,
     )
+    observed_database_url = str(
+        getattr(getattr(bug_tracker, "_conn", None), "_database_url", "") or ""
+    ).strip() or None
+    try:
+        database_authority = workflow_database_authority_payload_from_env(
+            _workflow_env(subs),
+            observed_database_url=observed_database_url,
+        )
+    except Exception as exc:  # noqa: BLE001 — orient must report authority drift, not hide it
+        database_authority = {
+            "kind": "workflow_database_authority",
+            "status": "degraded",
+            "authority_source": "unavailable",
+            "fingerprint": None,
+            "redacted_url": None,
+            "comparison_field": "fingerprint",
+            "reason_code": "workflow_database.authority_resolution_failed",
+            "message": (
+                "Workflow database authority could not be resolved for orient: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        }
     try:
         from runtime.setup_wizard import setup_payload
 
@@ -748,6 +824,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "packet_read_order": [
                 "standing_orders",
                 "authority_envelope",
+                "database_authority",
                 "tool_guidance",
                 "primitive_contracts",
                 "roadmap_truth",
@@ -758,6 +835,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             ],
             "downstream_truth_surfaces": {
                 "standing_orders": "/orient#standing_orders",
+                "database_authority": "/orient#database_authority",
                 "tool_guidance": "/orient#tool_guidance",
                 "primitive_contracts": "/orient#primitive_contracts",
                 "roadmap_truth": "/api/operator/roadmap/tree/{root_roadmap_item_id}",
@@ -776,6 +854,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         },
         "standing_orders": standing_orders,
         "authority_envelope": authority_envelope,
+        "database_authority": database_authority,
         "native_instance": authority_envelope.get("native_instance"),
         "runtime_setup": runtime_setup,
         "runtime_target": runtime_setup.get("runtime_target")
@@ -1419,13 +1498,14 @@ def _handle_setup_apply_post(request: Any, path: str) -> None:
     apply_ref = body.get("apply_ref")
 
     try:
-        from runtime.setup_wizard import setup_apply_payload
+        from runtime.setup_wizard import setup_apply_gate_payload
 
-        payload = setup_apply_payload(
+        payload = setup_apply_gate_payload(
             approved=approved,
             gate_ref=gate_ref,
             apply_ref=apply_ref,
             repo_root=REPO_ROOT,
+            applied_by="api_setup_apply",
             authority_surface="api",
         )
         status_code = 200 if payload.get("ok") else 400

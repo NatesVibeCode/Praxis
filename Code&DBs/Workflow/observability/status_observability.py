@@ -1,8 +1,8 @@
 """Derived observability summaries for the native frontdoor status surface.
 
 This module combines the already-loaded run row, evidence inspection, job
-summary, and packet inspection into one compact truth block so callers do not
-have to re-stitch the same state from multiple payloads.
+summary, and manifest inspection into one compact truth block so callers do
+not have to re-stitch the same state from multiple payloads.
 """
 
 from __future__ import annotations
@@ -637,8 +637,8 @@ def _health_state(
     if not inspection_completeness.is_complete:
         return "degraded", f"inspection missing {len(inspection_completeness.missing_evidence_refs)} evidence refs"
     if packet_drift_status is not None and packet_drift_status != "aligned":
-        return "degraded", f"packet inspection drift status is {packet_drift_status}"
-    return "healthy", "evidence, jobs, packet inspection, and status stitching are aligned"
+        return "degraded", f"manifest inspection drift status is {packet_drift_status}"
+    return "healthy", "evidence, jobs, manifest inspection, and status stitching are aligned"
 
 
 def _anomaly_headline(

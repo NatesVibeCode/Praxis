@@ -111,6 +111,25 @@ def test_cli_setup_help_mentions_graph() -> None:
     assert "graph" in stdout.getvalue()
 
 
+def test_cli_setup_apply_routes_gate_and_apply_ref_to_gate_handler() -> None:
+    from surfaces.cli.commands import setup as setup_cmd
+
+    with patch.object(
+        setup_cmd,
+        "setup_apply_gate_payload",
+        return_value={"ok": True, "mode": "apply", "gate_ref": "mcp.claude_code"},
+    ) as gate_stub:
+        stdout = io.StringIO()
+        code = setup_cmd._setup_command(
+            ["apply", "--gate", "mcp.claude_code", "--yes"],
+            stdout=stdout,
+        )
+
+    assert code == 0
+    gate_stub.assert_called_once()
+    assert json.loads(stdout.getvalue())["gate_ref"] == "mcp.claude_code"
+
+
 def test_mcp_praxis_setup_graph_action_returns_graph_payload() -> None:
     from surfaces.mcp.tools import setup as mcp_setup
 
@@ -186,3 +205,31 @@ def test_http_setup_graph_handler_returns_graph_payload() -> None:
     status_code, body = request.sent
     assert status_code == 200
     assert body["mode"] == "graph"
+
+
+def test_http_setup_apply_handler_routes_to_gate_payload() -> None:
+    from surfaces.api.handlers import workflow_admin
+
+    fake_payload = {"ok": True, "mode": "apply", "gate_ref": "mcp.claude_code"}
+
+    class _FakeRequest:
+        def __init__(self) -> None:
+            self.sent: tuple[int, dict] | None = None
+            self.headers = {"Content-Length": str(len(b'{"approved":true,"gate_ref":"mcp.claude_code"}'))}
+            self.rfile = io.BytesIO(b'{"approved":true,"gate_ref":"mcp.claude_code"}')
+
+        def _send_json(self, code: int, body: dict) -> None:
+            self.sent = (code, body)
+
+    request = _FakeRequest()
+    with patch.object(workflow_admin, "REPO_ROOT", _WORKFLOW_ROOT.parent):
+        with patch(
+            "runtime.setup_wizard.setup_apply_gate_payload",
+            return_value=fake_payload,
+        ) as stub:
+            workflow_admin._handle_setup_apply_post(request, "/api/setup/apply")
+    assert request.sent is not None
+    status_code, body = request.sent
+    assert status_code == 200
+    assert body["mode"] == "apply"
+    stub.assert_called_once()

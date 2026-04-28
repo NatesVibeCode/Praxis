@@ -130,8 +130,11 @@ def _collect_node(conn: Any, object_kind: str) -> dict[str, Any]:
     try:
         runs = latest_runs(conn, object_kind=object_kind, status=None, limit=500)
         run_status = _run_statuses(runs.get("runs", []) or [])
-    except Exception:
+    except Exception as exc:
         run_status = {}
+        run_status_error = str(exc)
+    else:
+        run_status_error = None
 
     node: dict[str, Any] = {
         "object_kind": object_kind,
@@ -144,6 +147,7 @@ def _collect_node(conn: Any, object_kind: str) -> dict[str, Any]:
         "tags_error": tags_error,
         "stewards_error": stewards_error,
         "rules_error": rules_error,
+        "run_status_error": run_status_error,
     }.items() if v}
     if errors:
         node["errors"] = errors

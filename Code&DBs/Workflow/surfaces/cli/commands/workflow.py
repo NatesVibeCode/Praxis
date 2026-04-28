@@ -1409,12 +1409,16 @@ def _pipeline_command(args: list[str], *, stdout: TextIO) -> int:
 
     import json as _json
 
+    if args and args[0] == "eval":
+        return _pipeline_eval_command(args[1:], stdout=stdout)
+
     from runtime.workflow import run_workflow_pipeline
     from runtime.workflow_builder import WorkflowStep
 
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
             "usage: workflow pipeline <pipeline.json>\n"
+            "       workflow pipeline eval <spec.json> [--json]\n"
             "\n"
             "The JSON file should contain:\n"
             '  {"steps": [{"name": "...", "prompt": "..."}, ...]}\n'
@@ -1463,6 +1467,119 @@ def _pipeline_command(args: list[str], *, stdout: TextIO) -> int:
     result = run_workflow_pipeline(steps)
     stdout.write(_json.dumps(result.to_json(), indent=2) + "\n")
     return 0 if result.status == "succeeded" else 1
+
+
+def _pipeline_eval_command(args: list[str], *, stdout: TextIO) -> int:
+    """Read-only evaluator for workflow launch contracts."""
+
+    json_output = False
+    filtered: list[str] = []
+    for token in args:
+        if token == "--json":
+            json_output = True
+            continue
+        filtered.append(token)
+
+    if not filtered or filtered[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow pipeline eval <spec.json> [--json]\n"
+            "\n"
+            "Read-only launch contract evaluation. It validates the spec, builds the\n"
+            "worker-facing preview, and fails if prompts, shards, write scope,\n"
+            "submission tools, provider availability, or scoped tool instructions\n"
+            "do not agree. It never launches jobs and never probes providers.\n"
+        )
+        return 2
+
+    spec_path = filtered[0]
+    if len(filtered) > 1:
+        stdout.write(f"error: unexpected argument: {filtered[1]}\n")
+        return 2
+
+    from runtime.workflow.pipeline_eval import evaluate_pipeline_preview
+    from runtime.workflow._admission import preview_workflow_execution
+    from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
+    from runtime.workflow_validation import _authority_error_result, validate_workflow_spec
+
+    try:
+        spec = WorkflowSpec.load(spec_path)
+    except WorkflowSpecError as exc:
+        payload = {
+            "ok": False,
+            "error_count": 1,
+            "warning_count": 0,
+            "findings": [
+                {
+                    "severity": "error",
+                    "kind": "spec_load_failed",
+                    "message": str(exc),
+                }
+            ],
+        }
+        if json_output:
+            stdout.write(json.dumps(payload, indent=2) + "\n")
+        else:
+            stdout.write(f"=== Workflow Pipeline Eval: FAILED ===\n{exc}\n")
+        return 1
+
+    try:
+        conn = cli_sync_conn()
+    except Exception as exc:
+        validation_result = _authority_error_result(spec, f"{type(exc).__name__}: {exc}")
+        preview_payload: dict[str, object] = {
+            "spec_name": spec.name,
+            "workflow_id": spec.workflow_id,
+            "total_jobs": len(spec.jobs),
+            "jobs": [],
+            "warnings": [validation_result.get("error") or "database authority unavailable"],
+        }
+    else:
+        validation_result = validate_workflow_spec(spec, pg_conn=conn)
+        try:
+            preview_payload = preview_workflow_execution(
+                conn,
+                spec_path=spec_path,
+                repo_root=str(cli_repo_root()),
+            )
+        except Exception as exc:
+            preview_payload = {
+                "spec_name": spec.name,
+                "workflow_id": spec.workflow_id,
+                "total_jobs": len(spec.jobs),
+                "jobs": [],
+                "warnings": [],
+            }
+            validation_result = {
+                **dict(validation_result),
+                "valid": False,
+                "error_kind": "preview_failed",
+                "error": f"workflow execution preview failed: {type(exc).__name__}: {exc}",
+            }
+
+    result = evaluate_pipeline_preview(
+        spec,
+        validation_result=validation_result,
+        preview_payload=preview_payload,
+    )
+
+    if json_output:
+        stdout.write(json.dumps(result.to_dict(), indent=2) + "\n")
+        return 0 if result.ok else 1
+
+    stdout.write(f"=== Workflow Pipeline Eval: {'PASSED' if result.ok else 'FAILED'} ===\n")
+    stdout.write(f"Name:        {result.spec_name}\n")
+    stdout.write(f"Workflow ID: {result.workflow_id or '-'}\n")
+    stdout.write(f"Jobs:        {result.total_jobs}\n")
+    stdout.write(f"Errors:      {result.error_count}\n")
+    stdout.write(f"Warnings:    {result.warning_count}\n")
+    stdout.write("\n")
+    for finding in result.findings:
+        label = f" [{finding.label}]" if finding.label else ""
+        stdout.write(f"- {finding.severity.upper()} {finding.kind}{label}: {finding.message}\n")
+    if not result.findings:
+        stdout.write("No contract findings.\n")
+    stdout.write("\nProvider probes: not run; this evaluator is read-only.\n")
+    return 0 if result.ok else 1
 
 
 def _scheduler_command(args: list[str], *, stdout: TextIO) -> int:
@@ -2282,6 +2399,16 @@ def _retry_command(args: list[str], *, stdout: TextIO) -> int:
     parser = argparse.ArgumentParser(prog="workflow retry")
     parser.add_argument("run_id", help="Workflow run id")
     parser.add_argument("label", help="Job label to retry")
+    parser.add_argument(
+        "--previous-failure",
+        required=True,
+        help="Receipt-backed failure being retried.",
+    )
+    parser.add_argument(
+        "--retry-delta",
+        required=True,
+        help="What is materially different about this attempt.",
+    )
 
     try:
         parsed = _parse_args(parser, args, stdout=stdout)

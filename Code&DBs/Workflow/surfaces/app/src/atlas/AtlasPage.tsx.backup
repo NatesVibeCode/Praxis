@@ -1,0 +1,400 @@
+import { useCallback, useEffect, useMemo, useState, KeyboardEvent, type CSSProperties } from 'react';
+
+interface AtlasElementData {
+  id: string;
+  label?: string;
+  source?: string;
+  target?: string;
+  type?: string;
+  area?: string;
+  preview?: string;
+  color?: string;
+  degree?: number;
+  size?: number;
+  weight?: number;
+  authority_source?: string;
+  relation_source?: string;
+  object_kind?: string;
+  category?: string;
+  definition_summary?: string;
+  surface_name?: string;
+  route_ref?: string;
+  binding_revision?: string;
+  decision_ref?: string;
+  updated_at?: string | null;
+  activity_score?: number;
+  is_area?: boolean;
+  is_aggregate?: boolean;
+}
+
+interface AtlasElement {
+  data: AtlasElementData;
+}
+
+interface AtlasArea {
+  slug: string;
+  title: string;
+  summary: string;
+  color: string;
+  member_count: number;
+}
+
+interface AtlasMetadata {
+  node_count: number;
+  edge_count: number;
+  aggregate_edge_count: number;
+  source_authority: string;
+  generated_at?: string;
+}
+
+interface AtlasPayload {
+  ok: boolean;
+  nodes: AtlasElement[];
+  edges: AtlasElement[];
+  areas: AtlasArea[];
+  metadata: AtlasMetadata;
+  warnings: string[];
+  error?: string;
+  detail?: string;
+}
+
+type SemanticObjectRole = 'authority' | 'data' | 'dependency' | 'risk' | 'live' | 'stale';
+
+const ATLAS_GRAPH_TIMEOUT_MS = 15_000;
+const ATLAS_GRAPH_STREAM_PATH = '/api/atlas/graph/stream';
+const MIN_ACTIVITY_SCORE = 0.08;
+
+function stableHash(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function haystack(data: AtlasElementData) {
+  return [
+    data.id,
+    data.label,
+    data.type,
+    data.object_kind,
+    data.category,
+    data.area,
+    data.authority_source,
+    data.source,
+    data.definition_summary,
+    data.preview,
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function semanticRoleFor(data: AtlasElementData): SemanticObjectRole {
+  const text = haystack(data);
+  const authority = String(data.authority_source || data.source || '').toLowerCase();
+  const type = String(data.type || data.category || '').toLowerCase();
+  const objectKind = String(data.object_kind || data.id || '').toLowerCase();
+  const activity = data.activity_score ?? MIN_ACTIVITY_SCORE;
+
+  if (text.includes('bug') || text.includes('issue') || text.includes('risk') || text.includes('failure')) {
+    return 'risk';
+  }
+  if (objectKind.includes('operator_decision') || objectKind.includes('authority_') || objectKind.includes('registry') || type.includes('decision') || authority.includes('operator_decisions')) {
+    return 'authority';
+  }
+  if (authority === 'data_dictionary_objects' || type === 'table' || objectKind.startsWith('table:')) {
+    return 'data';
+  }
+  if (type.includes('surface_catalog') || type.includes('capability') || type.includes('tool') || text.includes('connector') || text.includes('dependency')) {
+    return 'dependency';
+  }
+  if (activity >= 0.5) return 'live';
+  if (activity < 0.18 && Boolean(data.updated_at)) return 'stale';
+  return 'data';
+}
+
+function semanticDisplayLabel(data: AtlasElementData) {
+  const raw = data.label || data.object_kind || data.type || data.id;
+  const clean = raw.replace(/^table:/i, '').replace(/^memory:/i, '').replace(/[_:/.-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = clean.split(' ').filter(Boolean);
+  if (words.length <= 3) return clean;
+  return words.slice(0, 3).join(' ');
+}
+
+function useAtlasGraph() {
+  const [payload, setPayload] = useState<AtlasPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    setError(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), ATLAS_GRAPH_TIMEOUT_MS);
+    try {
+      const response = await fetch('/api/atlas/graph', { cache: 'no-store', signal: controller.signal });
+      const body = await response.json().catch(() => null) as AtlasPayload | null;
+      if (!response.ok || !body?.ok) throw new Error(body?.detail || body?.error || `Atlas graph request failed with HTTP ${response.status}`);
+      setPayload(body);
+    } catch (err) {
+      if (!silent) setPayload(null);
+      setError(err instanceof Error && err.name === 'AbortError' ? 'Timeout' : (err instanceof Error ? err.message : 'Error'));
+    } finally {
+      window.clearTimeout(timeout);
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.EventSource !== 'function') return;
+    const source = new window.EventSource(ATLAS_GRAPH_STREAM_PATH);
+    source.onmessage = () => { refresh(true); };
+    return () => { source.close(); };
+  }, [refresh]);
+
+  return { payload, loading, error, refresh };
+}
+
+export function AtlasPage() {
+  const { payload, loading, error, refresh } = useAtlasGraph();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+
+  const model = useMemo(() => {
+    if (!payload) return null;
+    
+    const areas = payload.areas.map(a => {
+      let weight = Math.max(1, a.member_count);
+      let auth = 0, live = 0, risk = 0, stale = 0, data = 0;
+      const objs = payload.nodes.filter(n => !n.data.is_area && n.data.area === a.slug).map(n => {
+        const role = semanticRoleFor(n.data);
+        if (role === 'authority') auth++;
+        else if (role === 'live') live++;
+        else if (role === 'risk') risk++;
+        else if (role === 'stale') stale++;
+        else data++;
+        return { ...n.data, role };
+      });
+      
+      weight = (a.member_count * 0.35) + (auth * 2.2) + (data * 1.4) + (risk * 3.2) + (live * 1.2);
+      
+      return {
+        id: a.slug,
+        name: a.title,
+        weight: Math.round(weight),
+        objects: objs,
+        counts: { auth, live, risk, stale, data },
+        isCore: weight > 15
+      };
+    }).sort((a, b) => b.weight - a.weight);
+
+    return { areas, payload };
+  }, [payload]);
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.isContentEditable)) return;
+      if (e.key === '/') {
+        e.preventDefault();
+        const el = document.getElementById('atlas-search');
+        if (el) el.focus();
+      }
+      if (e.key === 'Escape') {
+        setSelected(null);
+        setSearch('');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  if (loading) return <div style={wf2.root}><div style={{padding: 40}}>opening atlas...</div></div>;
+  if (error || !model) return <div style={wf2.root}><div style={{padding: 40}}>Error: {error} <button onClick={() => refresh()}>retry</button></div></div>;
+
+  const core = model.areas.filter(a => a.isCore);
+  const edge = model.areas.filter(a => !a.isCore);
+
+  const sel = selected ? model.areas.find(a => a.id === selected) : null;
+  const objs = sel ? sel.objects : [];
+  
+  const connectedTo = (areaSlug: string) => {
+    if (!payload) return [];
+    const deps = payload.edges.filter(e => e.data.is_aggregate);
+    const result = new Set<string>();
+    deps.forEach(e => {
+      const src = e.data.source?.replace('area::', '');
+      const tgt = e.data.target?.replace('area::', '');
+      if (src === areaSlug && tgt) result.add(tgt);
+      if (tgt === areaSlug && src) result.add(src);
+    });
+    return Array.from(result);
+  };
+  
+  const connections = sel ? connectedTo(sel.id) : [];
+
+  const Tile = ({ a, large }: { a: any, large?: boolean }) => {
+    const isSel = selected === a.id;
+    const max = Math.max(a.counts.auth, a.counts.live, a.counts.risk, a.counts.stale, 1);
+    const w = large ? 200 : 168;
+    return (
+      <button onClick={() => setSelected(a.id)} style={{...wf2.tile, width: w, ...(isSel ? wf2.tileSel : {})}}>
+        <div style={wf2.tileTop}>
+          <div style={wf2.tileName}>{a.name}</div>
+          <div style={wf2.tileWeight}>{a.weight}</div>
+        </div>
+        <div style={wf2.tileBars}>
+          <div style={wf2.barRow}>
+            <span style={wf2.barLabel}>auth</span>
+            <span style={wf2.barTrack}><span style={{...wf2.barFill, width: `${(a.counts.auth/max)*100}%`, background: '#f3eee4'}} /></span>
+            <span style={wf2.barNum}>{a.counts.auth}</span>
+          </div>
+          <div style={wf2.barRow}>
+            <span style={wf2.barLabel}>live</span>
+            <span style={wf2.barTrack}><span style={{...wf2.barFill, width: `${(a.counts.live/max)*100}%`, background: '#3fb950'}} /></span>
+            <span style={wf2.barNum}>{a.counts.live}</span>
+          </div>
+          <div style={wf2.barRow}>
+            <span style={wf2.barLabel}>risk</span>
+            <span style={wf2.barTrack}><span style={{...wf2.barFill, width: `${(a.counts.risk/max)*100}%`, background: '#d29922'}} /></span>
+            <span style={wf2.barNum}>{a.counts.risk}</span>
+          </div>
+          <div style={wf2.barRow}>
+            <span style={wf2.barLabel}>stale</span>
+            <span style={wf2.barTrack}><span style={{...wf2.barFill, width: `${(a.counts.stale/max)*100}%`, background: '#706b62'}} /></span>
+            <span style={wf2.barNum}>{a.counts.stale}</span>
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div style={wf2.root}>
+      <div style={wf2.header}>
+        <div>
+          <div style={wf2.eyebrow}>ATLAS · CATALOG</div>
+          <div style={wf2.titleText}>Areas, ordered by weight</div>
+        </div>
+        <div style={wf2.headerMeta}>
+          <span>{model.areas.length} areas</span><span style={wf2.divPipe}>·</span>
+          <span>{payload?.metadata.node_count} objects</span><span style={wf2.divPipe}>·</span>
+          <span>{payload?.metadata.edge_count} deps</span>
+        </div>
+      </div>
+
+      <div style={wf2.body}>
+        <div style={wf2.catalog}>
+          {core.length > 0 && (
+            <>
+              <div style={wf2.bandLabel}>CORE · {core.length} AREAS</div>
+              <div style={wf2.grid}>
+                {core.map(a => <Tile key={a.id} a={a} large />)}
+              </div>
+            </>
+          )}
+          {edge.length > 0 && (
+            <>
+              <div style={{...wf2.bandLabel, marginTop: 22}}>EDGE · {edge.length} AREAS</div>
+              <div style={wf2.grid}>
+                {edge.map(a => <Tile key={a.id} a={a} />)}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={wf2.rail}>
+          <div style={wf2.railHeader}>
+            <div style={wf2.railEyebrow}>SELECTED AREA</div>
+            <div style={wf2.railTitle}>{sel ? sel.name : 'None'}</div>
+            {sel && <div style={wf2.railSub}>weight {sel.weight} · {sel.counts.auth} authority · {sel.counts.live} live · {sel.counts.risk} risk · {sel.counts.stale} stale</div>}
+          </div>
+
+          <div style={wf2.railSection}>
+            <div style={wf2.railSectionLabel}>OBJECTS</div>
+            {!sel ? (
+              <div style={wf2.railEmpty}>(select an area to view objects)</div>
+            ) : objs.length === 0 ? (
+              <div style={wf2.railEmpty}>(no objects)</div>
+            ) : objs.slice(0, 30).map(o => (
+              <div key={o.id} style={wf2.objRow}>
+                <span style={{...wf2.objKind, color: kindColor(o.role)}}>{o.role}</span>
+                <span style={wf2.objName}>{semanticDisplayLabel(o)}</span>
+                <span style={wf2.objMeta}>{o.type || o.object_kind || 'object'}</span>
+              </div>
+            ))}
+          </div>
+
+          {connections.length > 0 && (
+            <div style={wf2.railSection}>
+              <div style={wf2.railSectionLabel}>TOUCHES · {connections.length}</div>
+              {connections.slice(0, 12).map(cid => {
+                const c = model.areas.find(x => x.id === cid);
+                return (
+                  <button key={cid} onClick={() => setSelected(cid)} style={wf2.connRow}>
+                    <span style={wf2.connArrow}>→</span>
+                    <span style={wf2.connName}>{c?.name || cid}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const kindColor = (k: string) => ({
+  authority: '#f3eee4',
+  data: '#9b9488',
+  risk: '#d29922',
+  stale: '#706b62',
+  live: '#3fb950',
+}[k] || '#9b9488');
+
+const wf2: Record<string, CSSProperties> = {
+  root: { width: '100%', height: '100vh', background: '#0a0a0a', fontFamily: 'Space Grotesk, sans-serif', display: 'flex', flexDirection: 'column' },
+  header: { padding: '18px 24px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderBottom: '1px solid rgba(255,255,255,0.05)' },
+  eyebrow: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.18em', color: '#706b62', textTransform: 'uppercase' },
+  titleText: { fontSize: 16, color: '#f5f1e8', fontWeight: 500, marginTop: 4 },
+  headerMeta: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, color: '#9b9488', display: 'flex', gap: 8, letterSpacing: '0.04em' },
+  divPipe: { color: '#3a3a3a' },
+  body: { flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' },
+  catalog: { flex: 1, padding: '20px 24px', overflow: 'auto' },
+  bandLabel: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.18em', color: '#706b62', marginBottom: 12 },
+  grid: { display: 'flex', flexWrap: 'wrap', gap: 10 },
+  tile: {
+    textAlign: 'left', background: '#141414', border: '1px solid rgba(255,255,255,0.06)',
+    borderRadius: 8, padding: '12px 12px 10px', cursor: 'pointer', color: 'inherit',
+    transition: 'border-color 160ms ease, background 160ms ease',
+  },
+  tileSel: { borderColor: 'rgba(243,238,228,0.30)', background: 'rgba(243,238,228,0.05)' },
+  tileTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 },
+  tileName: { fontSize: 12.5, color: '#f5f1e8', fontWeight: 500, lineHeight: 1.3 },
+  tileWeight: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, color: '#706b62' },
+  tileBars: { display: 'flex', flexDirection: 'column', gap: 4 },
+  barRow: { display: 'grid', gridTemplateColumns: '34px 1fr 18px', alignItems: 'center', gap: 6 },
+  barLabel: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, color: '#706b62', letterSpacing: '0.06em', textTransform: 'uppercase' },
+  barTrack: { height: 3, background: 'rgba(243,238,228,0.06)', borderRadius: 2, overflow: 'hidden', display: 'flex' },
+  barFill: { display: 'block', height: '100%' },
+  barNum: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, color: '#9b9488', textAlign: 'right' },
+  rail: { width: 320, borderLeft: '1px solid rgba(255,255,255,0.05)', padding: '20px 22px', overflow: 'auto', background: '#0d0d0d' },
+  railHeader: { paddingBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: 16 },
+  railEyebrow: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.18em', color: '#706b62' },
+  railTitle: { fontSize: 16, color: '#f5f1e8', fontWeight: 500, marginTop: 4 },
+  railSub: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, color: '#9b9488', marginTop: 6, lineHeight: 1.5 },
+  railSection: { marginBottom: 22 },
+  railSectionLabel: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 10, letterSpacing: '0.18em', color: '#706b62', marginBottom: 10 },
+  railEmpty: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, color: '#706b62', fontStyle: 'italic' },
+  objRow: { display: 'grid', gridTemplateColumns: '60px 1fr auto', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' },
+  objKind: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase' },
+  objName: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, color: '#f5f1e8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  objMeta: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 9, color: '#706b62' },
+  connRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', width: '100%', textAlign: 'left' },
+  connArrow: { fontFamily: 'IBM Plex Mono, monospace', fontSize: 11, color: '#706b62' },
+  connName: { fontSize: 12, color: '#9b9488' },
+};

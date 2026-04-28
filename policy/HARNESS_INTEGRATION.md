@@ -44,6 +44,7 @@ Match condition shape:
 
 ```json
 {
+  "harness": "claude_code",         // optional; narrows a trigger to one harness
   "tool": "Bash",                   // optional; matches harness tool name
   "regex": "...",                   // optional; matches tool input or command
   "file_glob": "**/*.Dockerfile",   // optional; matches file_path arg

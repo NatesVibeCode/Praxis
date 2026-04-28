@@ -60,8 +60,11 @@ class ProviderControlPlaneSnapshotRow:
     credential_availability_state: str
     credential_sources: tuple[str, ...]
     credential_observations: tuple[Mapping[str, Any], ...]
+    mechanical_capability_state: str
+    mechanical_is_runnable: bool
     capability_state: str
     is_runnable: bool
+    effective_dispatch_state: str
     breaker_state: str
     manual_override_state: str | None
     primary_removal_reason_code: str | None
@@ -164,6 +167,75 @@ class PostgresProviderControlPlaneRepository:
 
         rows = self._conn.execute(
             """
+            WITH joined AS (
+                SELECT
+                    snapshot.runtime_profile_ref,
+                    snapshot.job_type,
+                    snapshot.transport_type,
+                    snapshot.adapter_type,
+                    snapshot.provider_slug,
+                    snapshot.model_slug,
+                    snapshot.model_version,
+                    snapshot.cost_structure,
+                    snapshot.cost_metadata,
+                    (control.runtime_profile_ref IS NOT NULL) AS control_is_present,
+                    COALESCE(control.control_enabled, snapshot.is_runnable) AS control_enabled,
+                    COALESCE(
+                        control.control_state,
+                        CASE WHEN snapshot.is_runnable THEN 'on' ELSE 'off' END
+                    ) AS control_state,
+                    COALESCE(control.control_scope, 'projection.private_provider_control_plane_snapshot') AS control_scope,
+                    COALESCE(control.control_is_explicit, false) AS control_is_explicit,
+                    COALESCE(
+                        control.control_reason_code,
+                        snapshot.primary_removal_reason_code,
+                        'catalog.available'
+                    ) AS control_reason_code,
+                    COALESCE(
+                        control.control_decision_ref,
+                        'decision.model_access_control.legacy_projection'
+                    ) AS control_decision_ref,
+                    COALESCE(
+                        control.control_operator_message,
+                        CASE
+                            WHEN snapshot.is_runnable
+                            THEN 'this Model Access method is currently enabled by the control panel.'
+                            ELSE 'this Model Access method has been turned off on purpose at the control panel either for this specific task type, or more broadly, consult the control panel and do not turn it on without confirming with the user even if you think that will help you complete your task.'
+                        END
+                    ) AS control_operator_message,
+                    snapshot.credential_availability_state,
+                    snapshot.credential_sources,
+                    snapshot.credential_observations,
+                    snapshot.capability_state AS mechanical_capability_state,
+                    snapshot.is_runnable AS mechanical_is_runnable,
+                    snapshot.breaker_state,
+                    snapshot.manual_override_state,
+                    snapshot.primary_removal_reason_code,
+                    snapshot.removal_reasons,
+                    snapshot.candidate_ref,
+                    snapshot.provider_ref,
+                    snapshot.source_refs,
+                    snapshot.projected_at,
+                    snapshot.projection_ref
+                FROM private_provider_control_plane_snapshot AS snapshot
+                LEFT JOIN private_model_access_control_matrix AS control
+                  ON control.runtime_profile_ref = snapshot.runtime_profile_ref
+                 AND control.job_type = snapshot.job_type
+                 AND control.adapter_type = snapshot.adapter_type
+                 AND control.provider_slug = snapshot.provider_slug
+                 AND control.model_slug = snapshot.model_slug
+                WHERE snapshot.runtime_profile_ref = $1
+                  AND ($2::text IS NULL OR snapshot.job_type = $2)
+                  AND ($3::text IS NULL OR snapshot.transport_type = $3)
+                  AND ($4::text IS NULL OR snapshot.provider_slug = $4)
+                  AND ($5::text IS NULL OR snapshot.model_slug = $5)
+            ),
+            effective AS (
+                SELECT
+                    *,
+                    (control_enabled IS TRUE AND mechanical_is_runnable IS TRUE) AS effective_is_runnable
+                FROM joined
+            )
             SELECT
                 snapshot.runtime_profile_ref,
                 snapshot.job_type,
@@ -174,56 +246,75 @@ class PostgresProviderControlPlaneRepository:
                 snapshot.model_version,
                 snapshot.cost_structure,
                 snapshot.cost_metadata,
-                COALESCE(control.control_enabled, snapshot.is_runnable) AS control_enabled,
-                COALESCE(
-                    control.control_state,
-                    CASE WHEN snapshot.is_runnable THEN 'on' ELSE 'off' END
-                ) AS control_state,
-                COALESCE(control.control_scope, 'projection.private_provider_control_plane_snapshot') AS control_scope,
-                COALESCE(control.control_is_explicit, false) AS control_is_explicit,
-                COALESCE(
-                    control.control_reason_code,
-                    snapshot.primary_removal_reason_code,
-                    'catalog.available'
-                ) AS control_reason_code,
-                COALESCE(
-                    control.control_decision_ref,
-                    'decision.model_access_control.legacy_projection'
-                ) AS control_decision_ref,
-                COALESCE(
-                    control.control_operator_message,
-                    CASE
-                        WHEN snapshot.is_runnable
-                        THEN 'this Model Access method is currently enabled by the control panel.'
-                        ELSE 'this Model Access method has been turned off on purpose at the control panel either for this specific task type, or more broadly, consult the control panel and do not turn it on without confirming with the user even if you think that will help you complete your task.'
-                    END
-                ) AS control_operator_message,
+                snapshot.control_is_present,
+                snapshot.control_enabled,
+                snapshot.control_state,
+                snapshot.control_scope,
+                snapshot.control_is_explicit,
+                snapshot.control_reason_code,
+                snapshot.control_decision_ref,
+                snapshot.control_operator_message,
                 snapshot.credential_availability_state,
                 snapshot.credential_sources,
                 snapshot.credential_observations,
-                snapshot.capability_state,
-                snapshot.is_runnable,
+                snapshot.mechanical_capability_state,
+                snapshot.mechanical_is_runnable,
+                CASE
+                    WHEN snapshot.effective_is_runnable THEN snapshot.mechanical_capability_state
+                    ELSE 'removed'
+                END AS capability_state,
+                snapshot.effective_is_runnable AS is_runnable,
+                CASE
+                    WHEN snapshot.effective_is_runnable THEN 'runnable'
+                    WHEN snapshot.control_enabled IS FALSE THEN 'disabled'
+                    ELSE 'removed'
+                END AS effective_dispatch_state,
                 snapshot.breaker_state,
                 snapshot.manual_override_state,
-                snapshot.primary_removal_reason_code,
-                snapshot.removal_reasons,
+                CASE
+                    WHEN snapshot.control_is_present IS TRUE
+                     AND snapshot.control_enabled IS FALSE
+                     AND snapshot.mechanical_is_runnable IS TRUE
+                    THEN COALESCE(
+                        NULLIF(snapshot.control_reason_code, ''),
+                        'control_panel.model_access_method_turned_off'
+                    )
+                    ELSE snapshot.primary_removal_reason_code
+                END AS primary_removal_reason_code,
+                (
+                    CASE
+                        WHEN snapshot.control_is_present IS TRUE
+                         AND snapshot.control_enabled IS FALSE
+                        THEN jsonb_build_array(
+                            jsonb_build_object(
+                                'reason_code',
+                                COALESCE(
+                                    NULLIF(snapshot.control_reason_code, ''),
+                                    'control_panel.model_access_method_turned_off'
+                                ),
+                                'source_ref',
+                                COALESCE(
+                                    NULLIF(snapshot.control_decision_ref, ''),
+                                    'projection.private_model_access_control_matrix'
+                                ),
+                                'details',
+                                jsonb_build_object(
+                                    'control_state', snapshot.control_state,
+                                    'control_scope', snapshot.control_scope,
+                                    'control_is_explicit', snapshot.control_is_explicit
+                                )
+                            )
+                        )
+                        ELSE '[]'::jsonb
+                    END
+                    || COALESCE(snapshot.removal_reasons, '[]'::jsonb)
+                ) AS removal_reasons,
                 snapshot.candidate_ref,
                 snapshot.provider_ref,
                 snapshot.source_refs,
                 snapshot.projected_at,
                 snapshot.projection_ref
-            FROM private_provider_control_plane_snapshot AS snapshot
-            LEFT JOIN private_model_access_control_matrix AS control
-              ON control.runtime_profile_ref = snapshot.runtime_profile_ref
-             AND control.job_type = snapshot.job_type
-             AND control.adapter_type = snapshot.adapter_type
-             AND control.provider_slug = snapshot.provider_slug
-             AND control.model_slug = snapshot.model_slug
-            WHERE snapshot.runtime_profile_ref = $1
-              AND ($2::text IS NULL OR snapshot.job_type = $2)
-              AND ($3::text IS NULL OR snapshot.transport_type = $3)
-              AND ($4::text IS NULL OR snapshot.provider_slug = $4)
-              AND ($5::text IS NULL OR snapshot.model_slug = $5)
+            FROM effective AS snapshot
             ORDER BY snapshot.job_type, snapshot.transport_type, snapshot.provider_slug, snapshot.model_slug, snapshot.adapter_type
             """,
             normalized_runtime_profile_ref,
@@ -280,6 +371,70 @@ def _provider_control_plane_snapshot_row(
     for item in credential_observations_raw:
         if isinstance(item, Mapping):
             normalized_credential_observations.append(dict(item))
+    control_enabled = bool(row.get("control_enabled", row.get("is_runnable")))
+    control_is_present = bool(
+        row.get(
+            "control_is_present",
+            any(
+                key in row
+                for key in (
+                    "control_reason_code",
+                    "control_decision_ref",
+                    "control_scope",
+                    "control_state",
+                )
+            ),
+        )
+    )
+    mechanical_capability_state = str(
+        row.get("mechanical_capability_state")
+        or row.get("capability_state")
+        or "removed"
+    )
+    mechanical_is_runnable = bool(row.get("mechanical_is_runnable", row.get("is_runnable")))
+    effective_is_runnable = bool(row.get("is_runnable")) and control_enabled
+    capability_state = (
+        str(row.get("capability_state") or mechanical_capability_state)
+        if effective_is_runnable
+        else "removed"
+    )
+    effective_dispatch_state = str(row.get("effective_dispatch_state") or "").strip()
+    if not effective_dispatch_state:
+        effective_dispatch_state = (
+            "runnable"
+            if effective_is_runnable
+            else ("disabled" if not control_enabled else "removed")
+        )
+    primary_removal_reason_code = (
+        str(row["primary_removal_reason_code"])
+        if row.get("primary_removal_reason_code") is not None
+        else None
+    )
+    if not control_enabled and control_is_present:
+        control_reason_code = str(row.get("control_reason_code") or "").strip()
+        if not control_reason_code or control_reason_code == "catalog.available":
+            control_reason_code = "control_panel.model_access_method_turned_off"
+        if mechanical_is_runnable or not primary_removal_reason_code:
+            primary_removal_reason_code = control_reason_code
+        if not any(
+            isinstance(item, Mapping) and item.get("reason_code") == control_reason_code
+            for item in normalized_removal_reasons
+        ):
+            normalized_removal_reasons.insert(
+                0,
+                {
+                    "reason_code": control_reason_code,
+                    "source_ref": str(
+                        row.get("control_decision_ref")
+                        or "projection.private_model_access_control_matrix"
+                    ),
+                    "details": {
+                        "control_state": str(row.get("control_state") or "off"),
+                        "control_scope": str(row.get("control_scope") or ""),
+                        "control_is_explicit": bool(row.get("control_is_explicit")),
+                    },
+                },
+            )
     return ProviderControlPlaneSnapshotRow(
         runtime_profile_ref=str(row["runtime_profile_ref"]),
         job_type=str(row["job_type"]),
@@ -290,7 +445,7 @@ def _provider_control_plane_snapshot_row(
         model_version=str(row.get("model_version") or ""),
         cost_structure=str(row["cost_structure"]),
         cost_metadata=dict(row.get("cost_metadata") or {}),
-        control_enabled=bool(row.get("control_enabled")),
+        control_enabled=control_enabled,
         control_state=str(row.get("control_state") or "off"),
         control_scope=str(row.get("control_scope") or ""),
         control_is_explicit=bool(row.get("control_is_explicit")),
@@ -300,19 +455,18 @@ def _provider_control_plane_snapshot_row(
         credential_availability_state=str(row.get("credential_availability_state") or "unknown"),
         credential_sources=tuple(str(item) for item in credential_sources_raw),
         credential_observations=tuple(normalized_credential_observations),
-        capability_state=str(row["capability_state"]),
-        is_runnable=bool(row.get("is_runnable")),
+        mechanical_capability_state=mechanical_capability_state,
+        mechanical_is_runnable=mechanical_is_runnable,
+        capability_state=capability_state,
+        is_runnable=effective_is_runnable,
+        effective_dispatch_state=effective_dispatch_state,
         breaker_state=str(row["breaker_state"]),
         manual_override_state=(
             str(row["manual_override_state"])
             if row.get("manual_override_state") is not None
             else None
         ),
-        primary_removal_reason_code=(
-            str(row["primary_removal_reason_code"])
-            if row.get("primary_removal_reason_code") is not None
-            else None
-        ),
+        primary_removal_reason_code=primary_removal_reason_code,
         removal_reasons=tuple(normalized_removal_reasons),
         candidate_ref=str(row["candidate_ref"]) if row.get("candidate_ref") is not None else None,
         provider_ref=str(row["provider_ref"]) if row.get("provider_ref") is not None else None,

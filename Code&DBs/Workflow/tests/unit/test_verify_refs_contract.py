@@ -16,6 +16,7 @@ from runtime.verification import (
     VerificationBinding,
     resolve_verification_bindings,
     resolve_verify_commands,
+    sync_verify_command_refs,
 )
 from runtime.operating_model_planner import (
     PlanningBlockedError,
@@ -142,6 +143,71 @@ class _VerifyRefsConn:
             return
 
 
+class _LegacyVerifyCommandConn:
+    def __init__(self, *, artifact_path: str = "artifact.md") -> None:
+        self.artifact_path = artifact_path
+        self.verify_refs: dict[str, dict[str, object]] = {}
+        self.verification_registry: dict[str, dict[str, object]] = {}
+
+    def execute(self, query: str, *args):
+        normalized = " ".join(query.split())
+        if "FROM workflow_runs" in normalized:
+            return [
+                {
+                    "request_envelope": {
+                        "spec_snapshot": {
+                            "jobs": [
+                                {
+                                    "label": "execute",
+                                    "verify_command": f"test -s {self.artifact_path}",
+                                    "verify_refs": ["verify.generated.execute_packet"],
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        if "FROM verify_refs" in normalized:
+            row = self.verify_refs.get(str(args[0]))
+            return [dict(row)] if row is not None else []
+        if "FROM verification_registry" in normalized:
+            requested = {str(item) for item in args[0]}
+            return [
+                dict(row)
+                for verification_ref, row in self.verification_registry.items()
+                if verification_ref in requested
+            ]
+        return []
+
+    def execute_many(self, query: str, rows: list[tuple[object, ...]]) -> None:
+        normalized = " ".join(query.split())
+        if "INSERT INTO verification_registry" in normalized:
+            for row in rows:
+                self.verification_registry[str(row[0])] = {
+                    "verification_ref": row[0],
+                    "display_name": row[1],
+                    "description": row[2],
+                    "executor_kind": row[3],
+                    "argv_template": row[4],
+                    "template_inputs": row[5],
+                    "default_timeout_seconds": row[6],
+                    "enabled": row[8],
+                }
+            return
+        if "INSERT INTO verify_refs" in normalized:
+            for row in rows:
+                self.verify_refs[str(row[0])] = {
+                    "verify_ref": row[0],
+                    "verification_ref": row[1],
+                    "label": row[2],
+                    "description": row[3],
+                    "inputs": row[4],
+                    "enabled": row[5],
+                    "binding_revision": row[6],
+                    "decision_ref": row[7],
+                }
+
+
 def test_workflow_spec_accepts_verify_refs_as_canonical_surface() -> None:
     payload = {
         "prompt": "Do the thing",
@@ -219,6 +285,117 @@ def test_resolve_verification_bindings_reads_verification_registry_rows() -> Non
     assert commands[0].verification_ref == "verification.python.py_compile"
     assert commands[0].argv == ("python3", "-m", "py_compile", "sample.py")
     assert commands[0].label == "Compile sample.py"
+
+
+def test_sync_verify_command_refs_registers_safe_artifact_contract() -> None:
+    conn = _LegacyVerifyCommandConn()
+
+    synced = sync_verify_command_refs(
+        conn,
+        verify_refs=["verify.generated.execute_packet"],
+        verify_command="test -s artifact.md",
+        label="execute",
+    )
+    commands = resolve_verify_commands(conn, ["verify.generated.execute_packet"])
+
+    assert synced == 2
+    assert commands[0].verification_ref == "verification.file.non_empty"
+    assert commands[0].argv == ("test", "-s", "artifact.md")
+
+
+def test_sync_verify_command_refs_rejects_arbitrary_legacy_shell() -> None:
+    conn = _LegacyVerifyCommandConn()
+
+    synced = sync_verify_command_refs(
+        conn,
+        verify_refs=["verify.generated.execute_packet"],
+        verify_command="sh -c 'touch artifact.md'",
+        label="execute",
+    )
+
+    assert synced == 0
+    assert conn.verify_refs == {}
+    assert conn.verification_registry == {}
+
+
+def test_post_execution_verification_syncs_job_verify_command(tmp_path) -> None:
+    from runtime.workflow.verification_runtime import run_post_execution_verification
+
+    artifact = tmp_path / "artifact.md"
+    artifact.write_text("done\n")
+    conn = _LegacyVerifyCommandConn(artifact_path="artifact.md")
+
+    result = run_post_execution_verification(
+        conn,
+        run_id="run-1",
+        job_id=1,
+        label="execute",
+        repo_root=str(tmp_path),
+        result={"stdout": "", "stderr": ""},
+        initial_status="succeeded",
+        initial_error_code="",
+    )
+
+    assert result["final_status"] == "succeeded"
+    assert result["verification_error"] is None
+    assert result["verification_summary"].all_passed is True
+
+
+def test_get_verify_bindings_collects_job_level_refs_from_request_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from runtime.workflow import verification_runtime
+
+    class _Conn:
+        def execute(self, query: str, *args):
+            if "FROM workflow_runs" in query:
+                return [
+                    {
+                        "request_envelope": {
+                            "spec_snapshot": {
+                                "jobs": [
+                                    {"label": "job-1", "verify_refs": ["verify_ref.alpha"]},
+                                    {"label": "job-2", "verify_refs": ["verify_ref.beta"]},
+                                ]
+                            }
+                        }
+                    }
+                ]
+            return []
+
+    refs = verification_runtime.get_verify_bindings(_Conn(), "run-1")
+
+    assert refs == ["verify_ref.alpha", "verify_ref.beta"]
+
+
+def test_get_verify_bindings_can_filter_to_one_job_label() -> None:
+    from runtime.workflow import verification_runtime
+
+    class _Conn:
+        def execute(self, query: str, *args):
+            if "FROM workflow_runs" in query:
+                return [
+                    {
+                        "request_envelope": {
+                            "spec_snapshot": {
+                                "verify_refs": ["verify_ref.global"],
+                                "jobs": [
+                                    {"label": "plan", "verify_refs": []},
+                                    {"label": "execute", "verify_refs": ["verify_ref.execute"]},
+                                ],
+                            }
+                        }
+                    }
+                ]
+            return []
+
+    assert verification_runtime.get_verify_bindings(_Conn(), "run-1", label="plan") == [
+        "verify_ref.global"
+    ]
+    assert verification_runtime.get_verify_bindings(_Conn(), "run-1", label="execute") == [
+        "verify_ref.global",
+        "verify_ref.execute",
+    ]
 
 
 def test_compile_spec_emits_verify_refs_and_persists_authority_rows() -> None:

@@ -143,7 +143,32 @@ INSERT INTO provider_model_candidates (
         'api_protocol_family', 'openai_chat_completions',
         'pricing', jsonb_build_object('input_per_m_tokens', 0.080, 'output_per_m_tokens', 0.400, 'source', 'openrouter./v1/models 2026-04-26')),
      now(), NULL, 'decision.2026-04-26.compose-picker-matrix', now(),
-     'low', 9, 'reasoning', 9, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)
+     'low', 9, 'reasoning', 9, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb),
+
+    -- EMPIRICAL WINNERS admitted by migrations 282/283.
+    ('candidate.openrouter.google-gemini-3-flash-preview',
+     'provider.openrouter', 'OpenRouter', 'openrouter',
+     'google/gemini-3-flash-preview',
+     'active', 800, 1,
+     to_jsonb(ARRAY['picker-winner','compose','structured-output','json-mode']),
+     jsonb_build_object('context_window', 1048576,
+        'api_endpoint', 'https://openrouter.ai/api/v1/chat/completions',
+        'api_protocol_family', 'openai_chat_completions',
+        'pricing', jsonb_build_object('input_per_m_tokens', 0.300, 'output_per_m_tokens', 2.500, 'source', 'migration.278.bootstrap_repair')),
+     now(), NULL, 'decision.2026-04-26.compose-picker-matrix', now(),
+     'medium', 4, 'instant', 2, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb),
+
+    ('candidate.openrouter.openai-gpt-5-4-mini',
+     'provider.openrouter', 'OpenRouter', 'openrouter',
+     'openai/gpt-5.4-mini',
+     'active', 800, 1,
+     to_jsonb(ARRAY['picker-winner','compose','pill-match','structured-output']),
+     jsonb_build_object('context_window', 400000,
+        'api_endpoint', 'https://openrouter.ai/api/v1/chat/completions',
+        'api_protocol_family', 'openai_chat_completions',
+        'pricing', jsonb_build_object('input_per_m_tokens', 0.250, 'output_per_m_tokens', 2.000, 'source', 'migration.278.bootstrap_repair')),
+     now(), NULL, 'decision.2026-04-26.compose-picker-matrix', now(),
+     'medium', 1, 'instant', 2, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)
 
 ON CONFLICT (candidate_ref) DO UPDATE SET
     capability_tags = EXCLUDED.capability_tags,

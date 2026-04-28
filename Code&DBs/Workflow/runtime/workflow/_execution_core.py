@@ -792,9 +792,13 @@ def execute_job(
     )
 
 
-def _get_verify_bindings(conn: SyncPostgresConnection, run_id: str) -> list[str] | None:
+def _get_verify_bindings(
+    conn: SyncPostgresConnection,
+    run_id: str,
+    label: str | None = None,
+) -> list[str] | None:
     """Compatibility wrapper for verification binding extraction."""
-    return _verification_runtime_get_verify_bindings(conn, run_id)
+    return _verification_runtime_get_verify_bindings(conn, run_id, label=label)
 
 
 def _extract_verification_paths(bindings: list[dict] | None) -> list[str]:

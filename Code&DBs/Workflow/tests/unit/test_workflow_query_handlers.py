@@ -4861,6 +4861,38 @@ def test_handle_operator_view_status_returns_direct_payload(monkeypatch) -> None
     assert captured["payload"] == {"run_id": "run_123"}
 
 
+def test_handle_operator_view_accepts_action_alias(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _execute(subsystems, *, operation_name: str, payload: dict[str, Any]):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"view": "graph", "run_id": payload["run_id"]}
+
+    monkeypatch.setattr(
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
+    )
+
+    result = workflow_query_core.handle_operator_view(
+        SimpleNamespace(),
+        {"action": "graph", "run_id": "run_123"},
+    )
+
+    assert result == {"view": "graph", "run_id": "run_123"}
+    assert captured["operation_name"] == "operator.run_graph"
+    assert captured["payload"] == {"run_id": "run_123"}
+
+
+def test_handle_operator_view_rejects_conflicting_selector_aliases() -> None:
+    with pytest.raises(workflow_query_core._ClientError, match="must match"):
+        workflow_query_core.handle_operator_view(
+            SimpleNamespace(),
+            {"action": "status", "view": "graph", "run_id": "run_123"},
+        )
+
+
 def test_handle_operator_view_replay_ready_bugs_returns_direct_payload(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -5011,6 +5043,49 @@ def test_handle_bugs_resolve_fixed_requires_validates_fix_evidence() -> None:
         assert "validates_fix" in str(exc)
     else:
         raise AssertionError("expected resolve to fail closed without validates_fix evidence")
+
+
+def test_handle_bugs_file_requires_discovery_authority() -> None:
+    class _BugTracker:
+        def file_bug(self, **_kwargs):
+            raise AssertionError("file_bug should not run for an underlinked bug action")
+
+    class _BugTrackerMod:
+        class BugStatus:
+            FIXED = "FIXED"
+            WONT_FIX = "WONT_FIX"
+            DEFERRED = "DEFERRED"
+
+        class BugSeverity:
+            P2 = "P2"
+
+        class BugCategory:
+            OTHER = "OTHER"
+
+    subs = SimpleNamespace(
+        get_bug_tracker=lambda: _BugTracker(),
+        get_bug_tracker_mod=lambda: _BugTrackerMod(),
+    )
+
+    try:
+        workflow_query_core.handle_bugs(
+            subs,
+            {
+                "action": "file",
+                "title": "Missing discovery authority",
+                "description": "Should fail closed.",
+            },
+            parse_bug_status=lambda _mod, raw: raw,
+            parse_bug_severity=lambda _mod, raw: raw,
+            parse_bug_category=lambda _mod, raw: raw,
+        )
+    except workflow_query_core._ClientError as exc:
+        message = str(exc)
+        assert "discovered_in_run_id" in message
+        assert "discovered_in_receipt_id" in message
+        assert "underlinked" in message
+    else:
+        raise AssertionError("expected file action to fail closed without discovery authority")
 
 
 def test_handle_bugs_list_uses_injected_parser_contract() -> None:

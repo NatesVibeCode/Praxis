@@ -15,6 +15,12 @@ description: "Praxis repo-local adversarial strategy skill. Use when the current
 
 Use this skill when the direction is non-trivial and the current state needs adversarial pressure before work is packaged.
 
+## Execution Authority
+
+This is an inline Codex skill. Run the debate yourself in the current conversation.
+
+Do not call `praxis workflow debate`, do not launch a workflow, and do not shell out to another model unless the user explicitly asks for durable workflow execution. The only allowed Praxis CLI calls for this skill are ground-truth reads such as `discover`, `recall`, `query`, and catalog inspection.
+
 ## Mission
 
 Start from reality, not from a forced A/B frame.
@@ -32,19 +38,12 @@ Before debating:
 - run `praxis workflow recall "<decision or constraint>"`
 - run `praxis workflow query "<plain-English question>"` when the right surface is unclear
 
-If a fast council baseline helps, use:
-
-```text
-praxis workflow debate "<topic>"
-```
-
-The verified CLI default personas are `Pragmatist`, `Skeptic`, `Innovator`, and `Operator`.
-
 ## Debate Rules
 
 - current-state first
 - source-backed claims only
 - no fake precision
+- perspectives are reasoning lenses inside this answer, not separate provider/model calls
 - no ranked option theater
 - every perspective must state:
   - `Must Do`

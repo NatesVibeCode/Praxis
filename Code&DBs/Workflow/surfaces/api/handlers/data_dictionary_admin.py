@@ -2,7 +2,7 @@
 
 GET  /api/data-dictionary                    — catalog of object kinds (?category=)
 GET  /api/data-dictionary/<object_kind>      — merged field list (?include_layers=1)
-POST /api/data-dictionary/reproject          — run the projector now
+POST /api/data-dictionary/reproject          — refresh the data-dictionary authority now
 PUT  /api/data-dictionary/<kind>/<path>      — upsert an operator override
 DELETE /api/data-dictionary/<kind>/<path>    — clear an operator override
 """
@@ -19,6 +19,7 @@ from runtime.data_dictionary import (
     list_object_kinds,
     set_operator_override,
 )
+from memory.data_dictionary_refresh import refresh_data_dictionary_authority
 
 from ._shared import RouteEntry, _exact, _prefix, _read_json_body
 
@@ -90,16 +91,14 @@ def _handle_describe(request: Any, path: str) -> None:
 def _handle_reproject(request: Any, path: str) -> None:
     del path
     try:
-        from memory.data_dictionary_projector import DataDictionaryProjector
-
-        projector = DataDictionaryProjector(request.subsystems.get_pg_conn())
-        result = projector.run()
+        result = refresh_data_dictionary_authority(request.subsystems.get_pg_conn())
         request._send_json(
             200,
             {
-                "ok": getattr(result, "ok", True),
-                "duration_ms": getattr(result, "duration_ms", None),
-                "error": getattr(result, "error", None),
+                "ok": bool(result.get("ok", True)),
+                "duration_ms": result.get("duration_ms"),
+                "error": result.get("error"),
+                "modules": result.get("modules", []),
             },
         )
     except Exception as exc:

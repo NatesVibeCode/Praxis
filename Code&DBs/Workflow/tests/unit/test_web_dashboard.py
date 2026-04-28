@@ -199,23 +199,36 @@ class TestLiveDataFeed:
     def test_load_receipts_from_dir(self):
         with tempfile.TemporaryDirectory() as td:
             self._write_receipts(td, SAMPLE_RECEIPTS)
-            feed = LiveDataFeed(td)
+            feed = LiveDataFeed(td, allow_directory_fallback=True)
             loaded = feed.load_receipts(since_hours=999)
             assert len(loaded) == 5
 
+    def test_load_receipts_uses_canonical_loader_by_default(self):
+        with tempfile.TemporaryDirectory() as td:
+            self._write_receipts(td, SAMPLE_RECEIPTS)
+            feed = LiveDataFeed(
+                td,
+                receipt_loader=lambda *, since_hours: [SAMPLE_RECEIPTS[0]],
+            )
+            loaded = feed.load_receipts(since_hours=999)
+            assert loaded == [SAMPLE_RECEIPTS[0]]
+
     def test_load_receipts_empty_dir(self):
         with tempfile.TemporaryDirectory() as td:
-            feed = LiveDataFeed(td)
+            feed = LiveDataFeed(td, receipt_loader=lambda *, since_hours: [])
             assert feed.load_receipts() == []
 
     def test_load_receipts_missing_dir(self):
-        feed = LiveDataFeed("/nonexistent/path/receipts")
+        feed = LiveDataFeed(
+            "/nonexistent/path/receipts",
+            receipt_loader=lambda *, since_hours: [],
+        )
         assert feed.load_receipts() == []
 
     def test_full_dashboard_returns_all_sections(self):
         with tempfile.TemporaryDirectory() as td:
             self._write_receipts(td, SAMPLE_RECEIPTS)
-            feed = LiveDataFeed(td)
+            feed = LiveDataFeed(td, receipt_loader=lambda *, since_hours: SAMPLE_RECEIPTS)
             payload = feed.full_dashboard()
             names = {s.name for s in payload.sections}
             assert names == {"workflow_summary", "agent_leaderboard", "recent_failures", "cost_summary"}
@@ -226,7 +239,10 @@ class TestLiveDataFeed:
             os.makedirs(receipts_dir)
             self._write_receipts(receipts_dir, SAMPLE_RECEIPTS)
             out = os.path.join(td, "snapshot.json")
-            feed = LiveDataFeed(receipts_dir)
+            feed = LiveDataFeed(
+                receipts_dir,
+                receipt_loader=lambda *, since_hours: SAMPLE_RECEIPTS,
+            )
             feed.write_snapshot(out)
             assert Path(out).exists()
             data = json.loads(Path(out).read_text())
@@ -234,7 +250,7 @@ class TestLiveDataFeed:
 
     def test_empty_receipts_valid_dashboard(self):
         with tempfile.TemporaryDirectory() as td:
-            feed = LiveDataFeed(td)
+            feed = LiveDataFeed(td, receipt_loader=lambda *, since_hours: [])
             payload = feed.full_dashboard()
             assert isinstance(payload, DashboardPayload)
             # All section data should have zero/empty values

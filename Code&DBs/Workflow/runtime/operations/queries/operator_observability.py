@@ -197,6 +197,56 @@ class QueryBugTriagePacket(BaseModel):
         return normalized
 
 
+class QueryRefactorHeatmap(BaseModel):
+    limit: int = 15
+    include_tests: bool = False
+    include_domains: list[str] | None = None
+    bug_limit: int = 250
+    long_symbol_threshold: int = 120
+    open_only: bool = True
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _normalize_limit(cls, value: object) -> int:
+        if value in (None, ""):
+            return 15
+        try:
+            return max(1, min(int(value), 50))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be an integer") from exc
+
+    @field_validator("bug_limit", mode="before")
+    @classmethod
+    def _normalize_bug_limit(cls, value: object) -> int:
+        if value in (None, ""):
+            return 250
+        try:
+            return max(1, min(int(value), 1000))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("bug_limit must be an integer") from exc
+
+    @field_validator("long_symbol_threshold", mode="before")
+    @classmethod
+    def _normalize_long_symbol_threshold(cls, value: object) -> int:
+        if value in (None, ""):
+            return 120
+        try:
+            return max(40, min(int(value), 500))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("long_symbol_threshold must be an integer") from exc
+
+    @field_validator("include_domains", mode="before")
+    @classmethod
+    def _normalize_include_domains(cls, value: object) -> list[str] | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list):
+            return [str(part).strip() for part in value if str(part).strip()]
+        raise ValueError("include_domains must be a list or comma-separated string")
+
+
 class QueryOperatorGraphProjection(BaseModel):
     as_of: datetime | None = None
 
@@ -446,6 +496,23 @@ def handle_query_bug_triage_packet(
     )
 
 
+def handle_query_refactor_heatmap(
+    query: QueryRefactorHeatmap,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from runtime.refactor_heatmap import build_refactor_heatmap
+
+    return build_refactor_heatmap(
+        subsystems,
+        limit=query.limit,
+        include_tests=query.include_tests,
+        include_domains=query.include_domains,
+        bug_limit=query.bug_limit,
+        long_symbol_threshold=query.long_symbol_threshold,
+        open_only=query.open_only,
+    )
+
+
 async def handle_query_operator_graph_projection(
     query: QueryOperatorGraphProjection,
     subsystems: Any,
@@ -639,6 +706,7 @@ __all__ = [
     "QueryOperatorIssueBacklog",
     "QueryOperatorStatusSnapshot",
     "QueryBugTriagePacket",
+    "QueryRefactorHeatmap",
     "QueryReplayReadyBugs",
     "QueryRunScopedOperatorView",
     "QueryUiExperienceGraph",
@@ -647,6 +715,7 @@ __all__ = [
     "handle_query_operator_issue_backlog",
     "handle_query_operator_status_snapshot",
     "handle_query_bug_triage_packet",
+    "handle_query_refactor_heatmap",
     "handle_query_replay_ready_bugs",
     "handle_query_run_graph_view",
     "handle_query_run_lineage_view",

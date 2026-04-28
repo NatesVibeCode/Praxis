@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 from runtime.primitive_contracts import bug_query_default_open_only_list
 from surfaces.api.handlers import _bug_surface_contract as _bug_contract
 
@@ -76,6 +77,14 @@ def tool_praxis_bugs(params: dict) -> dict:
         bt_mod = _subs.get_bug_tracker_mod()
     except Exception as exc:
         return _structured_runtime_error(exc, action=str(action))
+    database_authority = _bug_contract.bug_surface_database_authority(subs=_subs, bt=bt)
+
+    def _with_database_authority(payload: dict[str, Any]) -> dict[str, Any]:
+        return _bug_contract.attach_database_authority(
+            payload,
+            database_authority=database_authority,
+        )
+
     resolved_statuses = {
         bt_mod.BugStatus.FIXED,
         bt_mod.BugStatus.WONT_FIX,
@@ -86,95 +95,114 @@ def tool_praxis_bugs(params: dict) -> dict:
         if action == "list":
             request_payload = dict(params)
             request_payload.setdefault("include_replay_state", True)
-            return _bug_contract.list_bugs_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=request_payload,
-                serialize_bug=_compact_bug,
-                default_limit=25,
-                include_replay_details=True,
-                parse_status=_parse_bug_status,
-                parse_severity=_parse_bug_severity,
-                parse_category=_parse_bug_category,
+            return _with_database_authority(
+                _bug_contract.list_bugs_payload(
+                    bt=bt,
+                    bt_mod=bt_mod,
+                    body=request_payload,
+                    serialize_bug=_compact_bug,
+                    default_limit=25,
+                    include_replay_details=True,
+                    parse_status=_parse_bug_status,
+                    parse_severity=_parse_bug_severity,
+                    parse_category=_parse_bug_category,
+                )
             )
 
         if action == "file":
-            return _bug_contract.file_bug_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=params,
-                serialize_bug=_bug_to_dict,
-                filed_by_default="mcp_workflow_server",
-                source_kind_default="mcp_workflow_server",
-                include_similar_bugs=True,
-                parse_severity=_parse_bug_severity,
-                parse_category=_parse_bug_category,
+            # Dispatch through CQRS gateway (operation `bug_file`,
+            # registered 2026-04-28). Gateway records authority_operation_receipts
+            # row + emits `bug.filed` to authority_events.
+            payload = {k: v for k, v in params.items() if k != "action"}
+            payload.setdefault("filed_by", "mcp_workflow_server")
+            payload.setdefault("source_kind", "mcp_workflow_server")
+            payload.setdefault("include_similar_bugs", True)
+            return _with_database_authority(
+                execute_operation_from_subsystems(
+                    _subs, operation_name="bug_file", payload=payload,
+                )
             )
 
         if action == "search":
-            return _bug_contract.search_bugs_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=params,
-                serialize_bug=_compact_bug,
-                default_limit=20,
-                parse_status=_parse_bug_status,
-                parse_severity=_parse_bug_severity,
-                parse_category=_parse_bug_category,
+            return _with_database_authority(
+                _bug_contract.search_bugs_payload(
+                    bt=bt,
+                    bt_mod=bt_mod,
+                    body=params,
+                    serialize_bug=_compact_bug,
+                    default_limit=20,
+                    parse_status=_parse_bug_status,
+                    parse_severity=_parse_bug_severity,
+                    parse_category=_parse_bug_category,
+                )
             )
 
         if action == "duplicate_check":
-            return _bug_contract.duplicate_check_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=params,
-                serialize_bug=_compact_bug,
-                default_limit=10,
-                parse_status=_parse_bug_status,
-                parse_severity=_parse_bug_severity,
-                parse_category=_parse_bug_category,
+            return _with_database_authority(
+                _bug_contract.duplicate_check_payload(
+                    bt=bt,
+                    bt_mod=bt_mod,
+                    body=params,
+                    serialize_bug=_compact_bug,
+                    default_limit=10,
+                    parse_status=_parse_bug_status,
+                    parse_severity=_parse_bug_severity,
+                    parse_category=_parse_bug_category,
+                )
             )
 
         if action == "stats":
-            return _bug_contract.stats_payload(bt=bt, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.stats_payload(bt=bt, serialize=_serialize)
+            )
 
         if action == "packet":
-            return _bug_contract.packet_payload(bt=bt, body=params, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.packet_payload(bt=bt, body=params, serialize=_serialize)
+            )
 
         if action == "history":
-            return _bug_contract.history_payload(bt=bt, body=params, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.history_payload(bt=bt, body=params, serialize=_serialize)
+            )
 
         if action == "replay":
-            return _bug_contract.replay_payload(bt=bt, body=params, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.replay_payload(bt=bt, body=params, serialize=_serialize)
+            )
 
         if action == "backfill_replay":
-            return _bug_contract.backfill_replay_payload(bt=bt, body=params, serialize=_serialize)
+            return _with_database_authority(
+                _bug_contract.backfill_replay_payload(bt=bt, body=params, serialize=_serialize)
+            )
 
         if action == "attach_evidence":
-            return _bug_contract.attach_evidence_payload(
-                bt=bt,
-                body=params,
-                serialize=_serialize,
-                created_by_default="mcp_workflow_server",
+            # Gateway dispatch — emits `bug.evidence_attached` on receipt.
+            payload = {k: v for k, v in params.items() if k != "action"}
+            payload.setdefault("created_by", "mcp_workflow_server")
+            return _with_database_authority(
+                execute_operation_from_subsystems(
+                    _subs, operation_name="bug_attach_evidence", payload=payload,
+                )
             )
 
         if action == "resolve":
-            return _bug_contract.resolve_bug_payload(
-                bt=bt,
-                bt_mod=bt_mod,
-                body=params,
-                serialize_bug=_bug_to_dict,
-                serialize=_serialize,
-                resolved_statuses=resolved_statuses,
-                parse_status=_parse_bug_status,
-                created_by_default="mcp_workflow_server",
+            # Gateway dispatch — emits `bug.resolved` on receipt.
+            payload = {k: v for k, v in params.items() if k != "action"}
+            payload.setdefault("created_by", "mcp_workflow_server")
+            return _with_database_authority(
+                execute_operation_from_subsystems(
+                    _subs, operation_name="bug_resolve", payload=payload,
+                )
             )
 
         if action == "patch_resume":
-            return _bug_contract.patch_resume_payload(
-                bt=bt,
-                body=params,
-                serialize_bug=_bug_to_dict,
+            # Gateway dispatch — emits `bug.resume_context_patched` on receipt.
+            payload = {k: v for k, v in params.items() if k != "action"}
+            return _with_database_authority(
+                execute_operation_from_subsystems(
+                    _subs, operation_name="bug_patch_resume", payload=payload,
+                )
             )
     except ValueError as exc:
         return {"error": str(exc)}
@@ -208,6 +236,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  Replay a bug:      praxis_bugs(action='replay', bug_id='BUG-1234')\n"
                 "  Backfill replay:   praxis_bugs(action='backfill_replay')\n"
                 "  Attach evidence:   praxis_bugs(action='attach_evidence', bug_id='BUG-1234', evidence_kind='receipt', evidence_ref='receipt:abc')\n"
+                "  Attach op receipt: praxis_bugs(action='attach_evidence', bug_id='BUG-1234', evidence_kind='operation_receipt', evidence_ref='<authority_operation_receipts.receipt_id>')\n"
                 "  Patch handoff:     praxis_bugs(action='patch_resume', bug_id='BUG-1234', resume_patch={'hypothesis': '...', 'next_steps': ['...']})\n"
                 "  Bug stats:         praxis_bugs(action='stats')\n"
                 "  Resolve a bug:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='WONT_FIX')\n"
@@ -301,7 +330,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": "Optional linked issue id. Accepted on file and as an exact lineage filter for list/search.",
                     },
                     "receipt_limit": {"type": "integer", "description": "How many recent receipts to include in packet output.", "minimum": 1, "default": 5},
-                    "evidence_kind": {"type": "string", "description": "Evidence kind for attach_evidence, such as receipt, run, verification_run, or healing_run."},
+                    "evidence_kind": {"type": "string", "description": "Evidence kind for attach_evidence, such as receipt, operation_receipt, run, verification_run, or healing_run."},
                     "evidence_ref": {"type": "string", "description": "Evidence reference id for attach_evidence."},
                     "evidence_role": {"type": "string", "description": "Evidence role for attach_evidence, such as observed_in, attempted_fix, or validates_fix."},
                     "created_by": {"type": "string", "description": "Actor attaching evidence."},

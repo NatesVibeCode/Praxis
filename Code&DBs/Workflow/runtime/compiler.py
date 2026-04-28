@@ -485,6 +485,57 @@ def _empty_result(error: str, prose: str = "") -> dict[str, Any]:
     )
 
 
+def _propagate_agent_bindings_to_phases(definition: dict[str, Any]) -> None:
+    """Write accepted agent-kind bindings into execution_setup.phases.agent_route.
+
+    Bindings of kind='agent' carry their resolved target_ref (e.g.
+    'task_type_routing:auto/review'); the consuming step's phase needs
+    `agent_route` populated for the build to harden. This is normally
+    done by hand in the Moon UI; for the autonomous compile_finalize
+    path we propagate explicitly.
+    """
+    ledger = definition.get("binding_ledger")
+    if not isinstance(ledger, list):
+        return
+    execution_setup = definition.get("execution_setup")
+    if not isinstance(execution_setup, dict):
+        return
+    phases = execution_setup.get("phases")
+    if not isinstance(phases, list):
+        return
+    phase_by_step_id: dict[str, dict[str, Any]] = {}
+    for phase in phases:
+        if not isinstance(phase, dict):
+            continue
+        step_id = _as_text(phase.get("step_id"))
+        if step_id:
+            phase_by_step_id[step_id] = phase
+    for binding in ledger:
+        if not isinstance(binding, dict):
+            continue
+        if _as_text(binding.get("state")) != "accepted":
+            continue
+        accepted = binding.get("accepted_target")
+        if not isinstance(accepted, dict):
+            continue
+        if _as_text(accepted.get("kind")) != "agent":
+            continue
+        target_ref = _as_text(accepted.get("target_ref"))
+        if not target_ref:
+            continue
+        # Strip the "task_type_routing:" prefix the binding ledger uses;
+        # phases.agent_route expects bare slugs like "auto/review".
+        if target_ref.startswith("task_type_routing:"):
+            target_ref = target_ref[len("task_type_routing:"):]
+        for node_id in (binding.get("source_node_ids") or []):
+            node_id = _as_text(node_id)
+            if not node_id:
+                continue
+            phase = phase_by_step_id.get(node_id)
+            if phase is not None and not _as_text(phase.get("agent_route")):
+                phase["agent_route"] = target_ref
+
+
 def _finalize_compile_result(
     *,
     definition: dict[str, Any],
@@ -541,6 +592,13 @@ def _finalize_compile_result(
             if finalize_result.get("resolved_count", 0) > 0:
                 hydrated_definition = dict(hydrated_definition)
                 hydrated_definition["binding_ledger"] = finalize_result["updated_ledger"]
+                # Propagate agent-kind accepted bindings into the
+                # consuming step's execution_setup.phases.agent_route.
+                # apply_authority_bundle doesn't do this on its own —
+                # the UI normally writes phase.agent_route by hand,
+                # so autonomous-first compile must do it explicitly.
+                _propagate_agent_bindings_to_phases(hydrated_definition)
+                hydrated_definition = apply_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
                 authority_bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
             finalize_summary = {
                 "ran": True,

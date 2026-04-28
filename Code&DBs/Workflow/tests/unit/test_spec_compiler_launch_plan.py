@@ -83,6 +83,14 @@ def test_compile_plan_translates_packets_into_multi_job_spec(monkeypatch) -> Non
     assert spec_dict["name"] == "wave_0_authority"
     assert spec_dict["why"] == "fix bug tracker before burning down dependent bugs"
     assert spec_dict["workflow_id"].startswith("plan.")
+    assert spec_dict["execution_manifest_ref"].startswith(
+        f"execution_manifest:{spec_dict['workflow_id']}:definition."
+    )
+    assert spec_dict["execution_manifest"]["manifest_kind"] == "launch_plan_inline_execution_manifest"
+    assert spec_dict["execution_manifest"]["verify_refs"] == [
+        "verify.bug-authority",
+        "verify.fixed-transition-evidence",
+    ]
     assert spec_dict["phase"] == "build"
     assert spec_dict["workdir"] == "/repo"
     assert len(spec_dict["jobs"]) == 2
@@ -801,7 +809,9 @@ def test_coerce_plan_with_from_bugs_materializes_clustered_packets(monkeypatch) 
 
     # Cluster 1: authority wave, no deps, bug_refs carries both IDs.
     assert auth.label == "w0-authority-repair"
-    assert auth.stage == "fix"
+    # Bug-derived packets keep fix intent in the prompt/bug refs, but route
+    # through the registered coding lane instead of inventing auto/fix.
+    assert auth.stage == "build"
     assert auth.write == ["."]
     assert auth.bug_refs == ["BUG-AUTH-1", "BUG-AUTH-2"]
     assert auth.bug_ref == "BUG-AUTH-1"  # primary
@@ -814,6 +824,113 @@ def test_coerce_plan_with_from_bugs_materializes_clustered_packets(monkeypatch) 
     assert runtime.label == "w1-runtime-repair"
     assert runtime.depends_on == ["w0-authority-repair"]
     assert runtime.bug_refs == ["BUG-RUN-1"]
+
+
+def test_coerce_plan_from_bugs_uses_repo_paths_from_bug_authority(monkeypatch) -> None:
+    import runtime.bug_resolution_program as bug_program_mod
+
+    monkeypatch.setattr(bug_program_mod, "derive_bug_packets", _fake_derive)
+
+    conn = _BugFetchConn(
+        {
+            "BUG-AUTH-1": {
+                "bug_id": "BUG-AUTH-1",
+                "title": "Authority 1",
+                "description": (
+                    "Evidence: Code&DBs/Workflow/runtime/workflow/_shared.py::_circuit_breakers "
+                    "and Code&DBs/Workflow/runtime/workflow_validation.py must be updated."
+                ),
+                "replay_ready": True,
+            },
+        }
+    )
+
+    plan = _coerce_plan(
+        {"name": "bug_wave_burn", "from_bugs": ["BUG-AUTH-1"]},
+        conn=conn,
+    )
+
+    packet = plan.packets[0]
+    expected_paths = [
+        "Code&DBs/Workflow/runtime/workflow/_shared.py",
+        "Code&DBs/Workflow/runtime/workflow_validation.py",
+    ]
+    assert packet.write == expected_paths
+    assert packet.read == expected_paths
+    assert "Derived repo scope:" in packet.description
+    assert "Code&DBs/Workflow/runtime/workflow/_shared.py" in packet.description
+
+
+def test_coerce_plan_from_bugs_derives_replay_state_without_bug_columns(monkeypatch) -> None:
+    import runtime.bug_resolution_program as bug_program_mod
+    import runtime.bug_tracker as bug_tracker_mod
+
+    captured: dict[str, object] = {}
+
+    def _capture_derive(**kwargs):
+        captured.update(kwargs)
+        return _fake_derive(**kwargs)
+
+    class _ReplayTracker:
+        def __init__(self, conn) -> None:
+            self.conn = conn
+
+        def replay_hint(self, bug_id, *, receipt_limit=1, allow_backfill=True):
+            assert allow_backfill is False
+            return {"available": True, "reason_code": "bug.replay_ready"}
+
+    class _NoReplayColumnConn(_BugFetchConn):
+        def execute(self, query, *params):
+            assert "replay_ready" not in query
+            assert "replay_reason_code" not in query
+            return super().execute(query, *params)
+
+    monkeypatch.setattr(bug_program_mod, "derive_bug_packets", _capture_derive)
+    monkeypatch.setattr(bug_tracker_mod, "BugTracker", _ReplayTracker)
+
+    plan = _coerce_plan(
+        {
+            "name": "bug_wave_burn",
+            "from_bugs": ["BUG-AUTH-1"],
+        },
+        conn=_NoReplayColumnConn(
+            {
+                "BUG-AUTH-1": {
+                    "bug_id": "BUG-AUTH-1",
+                    "title": "Authority 1",
+                    "status": "OPEN",
+                },
+            }
+        ),
+    )
+
+    assert len(plan.packets) == 1
+    assert captured["bugs"][0]["replay_ready"] is True
+    assert captured["bugs"][0]["replay_reason_code"] == "bug.replay_ready"
+
+
+def test_fix_stage_routes_through_build_lane_without_losing_task_type(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "compile_spec", _stub_compile_spec)
+
+    spec_dict, _ = compile_plan(
+        {
+            "name": "fix_route_alias",
+            "packets": [
+                {
+                    "description": "fix a Python bug",
+                    "write": ["Code&DBs/Workflow/runtime/example.py"],
+                    "stage": "fix",
+                    "label": "fix-python-bug",
+                }
+            ],
+        },
+        conn=_FakeConn(),
+        workdir="/repo",
+    )
+
+    job = spec_dict["jobs"][0]
+    assert job["agent"] == "auto/build"
+    assert job["task_type"] == "fix"
 
 
 def test_coerce_plan_rejects_both_packets_and_from_bugs(monkeypatch) -> None:

@@ -9,7 +9,6 @@ import contextvars
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
 import inspect
 import json
 import threading
@@ -25,6 +24,7 @@ from .operation_catalog_bindings import (
     resolve_http_operation_binding,
 )
 from .posture import Posture
+from .crypto_authority import canonical_digest_hex
 
 
 @dataclass(slots=True)
@@ -249,8 +249,7 @@ def build_operation_command(
 
 
 def _stable_hash(value: Any) -> str:
-    payload = json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return canonical_digest_hex(value, purpose="operation_catalog_gateway.stable_hash")
 
 
 def _binding_value(binding: Any, name: str, default: Any) -> Any:
@@ -647,6 +646,106 @@ def _insert_operation_receipt(
     )
 
 
+def _row_value(row: Any, name: str, default: Any = None) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(name, default)
+    try:
+        return row[name]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
+def _decode_json_field(value: Any, *, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return default
+    return value
+
+
+def _fetch_persisted_operation_receipt(
+    conn: Any,
+    binding: ResolvedHttpOperationBinding,
+    *,
+    receipt_id: str,
+) -> dict[str, Any]:
+    row = conn.fetchrow(
+        """
+        SELECT receipt_id::text AS receipt_id,
+               operation_ref,
+               operation_name,
+               operation_kind,
+               authority_domain_ref,
+               authority_ref,
+               projection_ref,
+               storage_target_ref,
+               input_hash,
+               output_hash,
+               idempotency_key,
+               execution_status,
+               result_status,
+               error_code,
+               error_detail,
+               event_ids,
+               projection_freshness,
+               duration_ms,
+               binding_revision,
+               decision_ref,
+               cause_receipt_id::text AS cause_receipt_id,
+               correlation_id::text AS correlation_id
+          FROM authority_operation_receipts
+         WHERE receipt_id = $1::uuid
+        """,
+        receipt_id,
+    )
+    if row is None:
+        raise RuntimeError(
+            "operation receipt persistence failed: "
+            f"receipt_id={receipt_id} was not readable after proof write"
+        )
+
+    event_ids = _decode_json_field(_row_value(row, "event_ids"), default=[])
+    if not isinstance(event_ids, list):
+        event_ids = []
+    projection_freshness = _decode_json_field(
+        _row_value(row, "projection_freshness"),
+        default={},
+    )
+    if not isinstance(projection_freshness, Mapping):
+        projection_freshness = {}
+
+    return {
+        "receipt_id": str(_row_value(row, "receipt_id")),
+        "operation_ref": _row_value(row, "operation_ref"),
+        "operation_name": _row_value(row, "operation_name"),
+        "operation_kind": _row_value(row, "operation_kind"),
+        "source_kind": binding.source_kind,
+        "authority_ref": _row_value(row, "authority_ref"),
+        "authority_domain_ref": _row_value(row, "authority_domain_ref"),
+        "projection_ref": _row_value(row, "projection_ref"),
+        "storage_target_ref": _row_value(row, "storage_target_ref"),
+        "posture": binding.posture,
+        "idempotency_policy": binding.idempotency_policy,
+        "idempotency_key": _row_value(row, "idempotency_key"),
+        "binding_revision": _row_value(row, "binding_revision"),
+        "decision_ref": _row_value(row, "decision_ref"),
+        "execution_status": _row_value(row, "execution_status"),
+        "result_status": _row_value(row, "result_status"),
+        "error_code": _row_value(row, "error_code"),
+        "error_detail": _row_value(row, "error_detail"),
+        "input_hash": _row_value(row, "input_hash"),
+        "output_hash": _row_value(row, "output_hash"),
+        "event_ids": [str(value) for value in event_ids],
+        "projection_freshness": dict(projection_freshness),
+        "duration_ms": _row_value(row, "duration_ms"),
+        "cause_receipt_id": _row_value(row, "cause_receipt_id"),
+        "correlation_id": _row_value(row, "correlation_id"),
+    }
+
+
 def _insert_authority_event(
     conn: Any,
     binding: ResolvedHttpOperationBinding,
@@ -782,8 +881,12 @@ def _write_operation_proof(
         if isinstance(candidate, Mapping):
             custom_event_payload = candidate
 
-    if _binding_value(binding, "receipt_required", True):
-        _insert_operation_receipt(conn, binding, receipt=durable_receipt, result_payload=result_payload)
+    if not _binding_value(binding, "receipt_required", True):
+        raise RuntimeError(
+            "operation receipt persistence requires receipt_required=true"
+        )
+
+    _insert_operation_receipt(conn, binding, receipt=durable_receipt, result_payload=result_payload)
     if durable_receipt.get("execution_status") == "completed" and event_ids:
         if should_create_event:
             _insert_authority_event(
@@ -805,7 +908,11 @@ def _write_operation_proof(
                 event_ids=event_ids,
                 correlation_id=durable_receipt.get("correlation_id"),
             )
-    return durable_receipt
+    return _fetch_persisted_operation_receipt(
+        conn,
+        binding,
+        receipt_id=str(durable_receipt["receipt_id"]),
+    )
 
 
 def _prepare_call_context(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from surfaces.api.handlers import workflow_admin
@@ -43,6 +44,58 @@ class _FakeReceiptIngester:
 class _FakeSubsystems:
     def get_receipt_ingester(self):
         return _FakeReceiptIngester()
+
+
+def test_build_standing_orders_falls_back_when_scope_clamp_column_is_missing() -> None:
+    class _FakePg:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def fetch(self, query: str):
+            self.queries.append(query)
+            if "scope_clamp" in query:
+                raise RuntimeError('column "scope_clamp" does not exist')
+            return [
+                {
+                    "decision_scope_ref": "orient",
+                    "decision_key": "architecture-policy::orient::fallback",
+                    "title": "Orient still projects standing orders",
+                    "rationale": "Missing optional clamp column should not erase standing orders.",
+                    "decided_by": "nate",
+                    "decision_source": "test",
+                    "effective_from": datetime(2026, 4, 28, tzinfo=timezone.utc),
+                    "effective_to": None,
+                }
+            ]
+
+    class _FakeStandingOrderSubsystems:
+        def __init__(self) -> None:
+            self.pg = _FakePg()
+
+        def get_pg_conn(self):
+            return self.pg
+
+    subs = _FakeStandingOrderSubsystems()
+
+    standing_orders = workflow_admin._build_standing_orders(subs)
+
+    assert len(subs.pg.queries) == 2
+    assert standing_orders == [
+        {
+            "authority_domain": "orient",
+            "policy_slug": "architecture-policy::orient::fallback",
+            "title": "Orient still projects standing orders",
+            "rationale": "Missing optional clamp column should not erase standing orders.",
+            "decided_by": "nate",
+            "decision_source": "test",
+            "effective_from": "2026-04-28T00:00:00+00:00",
+            "scope_clamp": {
+                "applies_to": [],
+                "does_not_apply_to": [],
+                "needs_review": True,
+            },
+        }
+    ]
 
 
 def test_orient_includes_dependency_truth(monkeypatch) -> None:
@@ -116,6 +169,13 @@ def test_orient_includes_dependency_truth(monkeypatch) -> None:
         "summary": {"live_defect": 1},
         "tool_ref": "praxis_bug_triage_packet",
     }
+    heatmap_concern = next(
+        item
+        for item in result["concern_to_tool"]["concerns"]
+        if item["tool"] == "praxis_refactor_heatmap"
+    )
+    assert "architecture debt" in heatmap_concern["symptom"]
+    assert heatmap_concern["action"] == "read"
     assert result["engineering_observability"]["platform_observability"]["authority"] == "platform_observability"
 
 
@@ -248,12 +308,16 @@ def test_orient_projects_mandatory_authority_envelope(monkeypatch) -> None:
 
     envelope = result["authority_envelope"]
     assert result["native_instance"] == fake_native_instance
-    assert result["instruction_authority"]["packet_read_order"][:4] == [
+    assert result["instruction_authority"]["packet_read_order"][:5] == [
         "standing_orders",
         "authority_envelope",
+        "database_authority",
         "tool_guidance",
         "primitive_contracts",
     ]
+    assert result["instruction_authority"]["downstream_truth_surfaces"]["database_authority"] == (
+        "/orient#database_authority"
+    )
     assert result["instruction_authority"]["downstream_truth_surfaces"]["primitive_contracts"] == (
         "/orient#primitive_contracts"
     )
@@ -269,8 +333,16 @@ def test_orient_projects_mandatory_authority_envelope(monkeypatch) -> None:
     assert envelope["dependency_truth"] == {"ok": True, "missing_count": 0}
     assert envelope["scope_source"]["default"] == "/orient#authority_envelope.native_instance"
     assert envelope["tool_guidance"] == result["tool_guidance"]
+    assert envelope["database_authority_ref"] == "/orient#database_authority"
     assert envelope["primitive_contracts"] == result["primitive_contracts"]
     assert envelope["primitive_contracts_ref"] == "/orient#primitive_contracts"
+    database_authority = result["database_authority"]
+    assert database_authority["kind"] == "workflow_database_authority"
+    assert database_authority["status"] == "ready"
+    assert database_authority["authority_source"] == "repo_env:/repo/.env"
+    assert database_authority["fingerprint"].startswith("workflow_pool:")
+    assert database_authority["redacted_url"] == "postgresql://nate:***@repo.test:5432/praxis"
+    assert database_authority["comparison_field"] == "fingerprint"
 
     tool_guidance = result["tool_guidance"]
     assert tool_guidance["kind"] == "orient_tool_guidance"
@@ -313,7 +385,10 @@ def test_orient_projects_mandatory_authority_envelope(monkeypatch) -> None:
 
     runtime_binding = primitive_contracts["runtime_binding"]
     assert runtime_binding["database"]["env_ref"] == "WORKFLOW_DATABASE_URL"
+    assert runtime_binding["database"]["status"] == "ready"
     assert runtime_binding["database"]["authority_source"] == "repo_env:/repo/.env"
+    assert runtime_binding["database"]["fingerprint"] == database_authority["fingerprint"]
+    assert runtime_binding["database"]["comparison_field"] == "fingerprint"
     assert runtime_binding["database"]["redacted_url"] == (
         "postgresql://nate:***@repo.test:5432/praxis"
     )
@@ -381,8 +456,17 @@ def test_fast_orient_still_projects_database_binding(monkeypatch) -> None:
 
     assert result["native_instance"] == {"status": "skipped", "reason": "orient_fast_path"}
     assert result["cli_surface"]["tool_count"] == len(get_tool_catalog())
+    database_authority = result["database_authority"]
+    assert database_authority["kind"] == "workflow_database_authority"
+    assert database_authority["status"] == "ready"
+    assert database_authority["authority_source"] == "repo_env:/repo/.env"
+    assert database_authority["fingerprint"].startswith("workflow_pool:")
+    assert database_authority["redacted_url"] == "postgresql://nate:***@repo.test:5432/praxis"
+    assert database_authority["comparison_field"] == "fingerprint"
     runtime_binding = result["primitive_contracts"]["runtime_binding"]
+    assert runtime_binding["database"]["status"] == "ready"
     assert runtime_binding["database"]["authority_source"] == "repo_env:/repo/.env"
+    assert runtime_binding["database"]["fingerprint"] == database_authority["fingerprint"]
     assert runtime_binding["database"]["redacted_url"] == (
         "postgresql://nate:***@repo.test:5432/praxis"
     )

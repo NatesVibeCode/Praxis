@@ -895,6 +895,71 @@ def test_routes_help_alias_mentions_route_discovery() -> None:
     assert "workflow tools list" in rendered
 
 
+def test_catalog_recommended_alias_accepts_single_string_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    cli_main_module = importlib.import_module("surfaces.cli.main")
+    captured: dict[str, object] = {}
+
+    def _fake_tools(args: list[str], *, stdout: StringIO) -> int:
+        captured["args"] = args
+        stdout.write(json.dumps({"ok": True}) + "\n")
+        return 0
+
+    monkeypatch.setattr(cli_main_module, "_workflow_arg_commands", lambda: {"tools": _fake_tools})
+
+    stdout = StringIO()
+    assert workflow_cli_main(["search", "operation catalog"], stdout=stdout) == 0
+
+    assert captured["args"] == [
+        "call",
+        "search",
+        "--input-json",
+        '{"query":"operation catalog"}',
+    ]
+
+
+def test_catalog_root_alias_routes_to_catalog_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    cli_main_module = importlib.import_module("surfaces.cli.main")
+    captured: dict[str, object] = {}
+
+    def _fake_tools(args: list[str], *, stdout: StringIO) -> int:
+        captured["args"] = args
+        stdout.write(json.dumps({"ok": True}) + "\n")
+        return 0
+
+    monkeypatch.setattr(cli_main_module, "_workflow_arg_commands", lambda: {"tools": _fake_tools})
+
+    stdout = StringIO()
+    assert workflow_cli_main(["provider-control-plane"], stdout=stdout) == 0
+
+    assert captured["args"] == ["call", "provider-control-plane"]
+
+
+def test_commands_index_mentions_provider_control_plane_alias() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["commands", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert any(entry["command"] == "workflow provider-control-plane" for entry in payload["entries"])
+
+
+def test_catalog_recommended_alias_help_uses_tool_describe(monkeypatch: pytest.MonkeyPatch) -> None:
+    cli_main_module = importlib.import_module("surfaces.cli.main")
+    captured: dict[str, object] = {}
+
+    def _fake_tools(args: list[str], *, stdout: StringIO) -> int:
+        captured["args"] = args
+        stdout.write("praxis_search\n")
+        return 0
+
+    monkeypatch.setattr(cli_main_module, "_workflow_arg_commands", lambda: {"tools": _fake_tools})
+
+    stdout = StringIO()
+    assert workflow_cli_main(["help", "search"], stdout=stdout) == 0
+
+    assert captured["args"] == ["describe", "search"]
+
+
 def test_api_routes_help_is_a_successful_discovery_command() -> None:
     stdout = StringIO()
 

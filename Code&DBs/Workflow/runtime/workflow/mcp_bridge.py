@@ -118,6 +118,16 @@ def _workflow_mcp_connection(
         workflow_id=str(execution_bundle.get("workflow_id") or "").strip() or None,
         job_label=str(execution_bundle.get("job_label") or "").strip(),
         allowed_tools=tool_names,
+        source_refs=[
+            str(ref)
+            for ref in execution_bundle.get("source_refs", [])
+            if str(ref).strip()
+        ]
+        if isinstance(execution_bundle.get("source_refs"), list)
+        else [],
+        access_policy=execution_bundle.get("access_policy")
+        if isinstance(execution_bundle.get("access_policy"), dict)
+        else {},
     )
     mcp_url = build_workflow_mcp_url(
         tool_names=tool_names,

@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         gnupg \
+        ripgrep \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -58,4 +59,4 @@ RUN useradd -m -d "${PRAXIS_CONTAINER_HOME}" -u 1100 -s /bin/bash praxis-agent \
 # are all reachable. The python --version check guarantees the agent's
 # `pytest` / migration / repo-script invocations land on 3.14, matching
 # the API server interpreter.
-RUN bash -lc "python3 --version && node --version && which claude && which praxis && id praxis-agent"
+RUN bash -lc "python3 --version && python3 -c 'import json' && rg --version >/dev/null && node --version && which claude && which praxis && id praxis-agent"

@@ -180,19 +180,12 @@ def handle_setup_apply(command: SetupApplyCommand, subsystems: Any) -> dict[str,
     del subsystems
     approved = bool(command.yes or command.apply or command.approved)
     gate_ref = command.gate or command.gate_ref
-    if gate_ref or command.apply_ref:
-        return setup_apply_gate_payload(
-            gate_ref=gate_ref,
-            apply_ref=command.apply_ref,
-            repo_root=workspace_repo_root(),
-            approved=approved,
-            applied_by="api_setup_apply",
-            authority_surface="api",
-        )
-    return setup_payload(
-        "apply",
+    return setup_apply_gate_payload(
+        gate_ref=gate_ref,
+        apply_ref=command.apply_ref,
         repo_root=workspace_repo_root(),
-        apply=approved,
+        approved=approved,
+        applied_by="api_setup_apply",
         authority_surface="api",
     )
 

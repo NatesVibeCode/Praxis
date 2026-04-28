@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import time
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -17,6 +18,8 @@ if TYPE_CHECKING:
 
 _DEFAULT_VERIFY_TIMEOUT = int(os.environ.get("PRAXIS_VERIFY_TIMEOUT", "60"))
 _MAX_OUTPUT_LEN = int(os.environ.get("PRAXIS_VERIFY_OUTPUT_LIMIT", "2000"))
+_FILE_NON_EMPTY_VERIFICATION_REF = "verification.file.non_empty"
+_LEGACY_VERIFY_COMMAND_DECISION_REF = "decision.verify_refs.legacy_verify_command_bridge.20260428"
 
 
 class VerificationAuthorityError(RuntimeError):
@@ -278,7 +281,115 @@ def sync_verify_refs(
     except Exception as exc:
         raise VerificationAuthorityError(f"failed to persist verify_refs authority rows: {exc}") from exc
 
- 
+def sync_verification_registry(
+    conn: "SyncPostgresConnection",
+    *,
+    verification_registry: list[dict[str, Any]] | None = None,
+) -> int:
+    """Best-effort upsert of canonical verification executor rows."""
+    if conn is None:
+        return 0
+    if not verification_registry:
+        return 0
+
+    try:
+        return _repository(conn).upsert_verification_registry(
+            verification_registry=verification_registry,
+        )
+    except Exception as exc:
+        raise VerificationAuthorityError(
+            f"failed to persist verification_registry authority rows: {exc}",
+        ) from exc
+
+
+def _file_non_empty_verification_registry_row() -> dict[str, Any]:
+    return {
+        "verification_ref": _FILE_NON_EMPTY_VERIFICATION_REF,
+        "display_name": "Non-empty File",
+        "description": "Verify that a declared artifact path exists and is non-empty.",
+        "executor_kind": "argv",
+        "argv_template": ["test", "-s", "{path}"],
+        "template_inputs": ["path"],
+        "default_timeout_seconds": 30,
+        "workdir_policy": "job",
+        "enabled": True,
+        "decision_ref": _LEGACY_VERIFY_COMMAND_DECISION_REF,
+    }
+
+
+def _file_non_empty_path_from_legacy_verify_command(verify_command: str) -> str | None:
+    command = str(verify_command or "").strip()
+    if not command:
+        return None
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if len(argv) == 3 and argv[0] == "test" and argv[1] == "-s" and argv[2].strip():
+        return argv[2].strip()
+    if (
+        len(argv) == 4
+        and argv[0] == "["
+        and argv[1] == "-s"
+        and argv[3] == "]"
+        and argv[2].strip()
+    ):
+        return argv[2].strip()
+    return None
+
+
+def sync_verify_command_refs(
+    conn: "SyncPostgresConnection",
+    *,
+    verify_refs: list[str] | None,
+    verify_command: str | None,
+    label: str | None = None,
+) -> int:
+    """Bridge legacy safe artifact checks into DB-backed verify_ref rows.
+
+    Only the generated artifact contract ``test -s <path>`` is admitted. Other
+    legacy commands remain unregistered so verification still fails closed.
+    """
+    if conn is None:
+        return 0
+    refs = [
+        item.strip()
+        for item in list(verify_refs or [])
+        if isinstance(item, str) and item.strip() and item.strip().startswith("verify.")
+    ]
+    if not refs:
+        return 0
+    path = _file_non_empty_path_from_legacy_verify_command(str(verify_command or ""))
+    if not path:
+        return 0
+
+    repo = _repository(conn)
+    missing_refs = [verify_ref for verify_ref in refs if repo.load_verify_ref(verify_ref=verify_ref) is None]
+    if not missing_refs:
+        return 0
+
+    registry_count = sync_verification_registry(
+        conn,
+        verification_registry=[_file_non_empty_verification_registry_row()],
+    )
+    verify_rows = []
+    label_text = str(label or "").strip() or "artifact"
+    for verify_ref in missing_refs:
+        digest = sha256(f"{verify_ref}|{path}".encode("utf-8")).hexdigest()[:12]
+        verify_rows.append(
+            {
+                "verify_ref": verify_ref,
+                "verification_ref": _FILE_NON_EMPTY_VERIFICATION_REF,
+                "label": f"Non-empty artifact for {label_text}",
+                "description": f"Verify generated artifact {path}",
+                "inputs": {"path": path},
+                "enabled": True,
+                "binding_revision": f"binding.legacy_verify_command.{digest}",
+                "decision_ref": _LEGACY_VERIFY_COMMAND_DECISION_REF,
+            }
+        )
+    return registry_count + sync_verify_refs(conn, verify_refs=verify_rows)
+
 
 def _repository(conn: "SyncPostgresConnection") -> "PostgresVerificationRepository":
     from storage.postgres.verification_repository import PostgresVerificationRepository

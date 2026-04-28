@@ -477,9 +477,24 @@ class TestReceiptIngester:
                     fh,
                 )
 
-        ingester = ReceiptIngester(receipts_dir)
+        ingester = ReceiptIngester(receipts_dir, allow_directory_fallback=True)
         recent = ingester.load_recent(since_hours=1)
         assert len(recent) == 2
+
+    def test_load_recent_uses_canonical_loader_by_default(self, tmp_dir):
+        receipts_dir = os.path.join(tmp_dir, "receipts")
+        os.makedirs(receipts_dir)
+        path = os.path.join(receipts_dir, "receipt_legacy.json")
+        with open(path, "w") as fh:
+            json.dump(_make_receipt(status="failed", failure_code="STALE"), fh)
+
+        canonical = [_make_receipt(status="succeeded")]
+        ingester = ReceiptIngester(
+            receipts_dir,
+            receipt_loader=lambda *, since_hours: canonical,
+        )
+
+        assert ingester.load_recent(since_hours=1) == canonical
 
     def test_load_recent_skips_old_files(self, tmp_dir):
         receipts_dir = os.path.join(tmp_dir, "receipts")
@@ -493,7 +508,7 @@ class TestReceiptIngester:
         old_time = time.time() - 7200
         os.utime(path, (old_time, old_time))
 
-        ingester = ReceiptIngester(receipts_dir)
+        ingester = ReceiptIngester(receipts_dir, allow_directory_fallback=True)
         recent = ingester.load_recent(since_hours=1)
         assert len(recent) == 0
 
@@ -528,5 +543,8 @@ class TestReceiptIngester:
         assert len(codes) == 5
 
     def test_nonexistent_directory(self):
-        ingester = ReceiptIngester("/nonexistent/path")
+        ingester = ReceiptIngester(
+            "/nonexistent/path",
+            receipt_loader=lambda *, since_hours: [],
+        )
         assert ingester.load_recent() == []
