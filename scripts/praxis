@@ -10,7 +10,6 @@ WORKFLOW_DIR="$(workflow_repo_workflow_root)"
 PYTHON_BIN="${PYTHON_BIN:-$(workflow_python_bin)}"
 COMMAND_NAME="${PRAXIS_COMMAND_NAME:-praxis}"
 SERVICE_MANAGER_PATH="${PRAXIS_SERVICE_MANAGER_PATH:-scripts/praxis}"
-COMPATIBILITY_ALIAS_PATH="${PRAXIS_COMPATIBILITY_ALIAS_PATH:-scripts/praxis-ctl}"
 PREFERRED_COMMAND_NAME="${PRAXIS_PREFERRED_COMMAND_NAME:-praxis}"
 LAUNCHER_STATE_DIR="${PRAXIS_LAUNCHER_STATE_DIR:-$REPO_ROOT/.cache/praxis-launcher}"
 LAUNCHER_STATE_FILE="$LAUNCHER_STATE_DIR/state.json"
@@ -175,7 +174,6 @@ Notes:
   - Native launchd install/setup control has been removed.
   - workflow-worker is an explicit execution-node profile; default launch/start is cockpit-only.
   - ${PREFERRED_COMMAND_NAME} is the preferred launcher front door.
-  - ${COMPATIBILITY_ALIAS_PATH} remains a compatibility alias.
 EOF
 }
 
@@ -503,7 +501,6 @@ launcher_status_json() {
     DOCTOR_JSON="$doctor_json" \
     COMMAND_NAME="$COMMAND_NAME" \
     SERVICE_MANAGER_PATH="$SERVICE_MANAGER_PATH" \
-    COMPATIBILITY_ALIAS_PATH="$COMPATIBILITY_ALIAS_PATH" \
     "$PYTHON_BIN" - <<'PY'
 import json
 import os
@@ -544,7 +541,7 @@ payload = {
     "ok": True,
     "brand": "Praxis Engine",
     "service_manager": os.environ.get("SERVICE_MANAGER_PATH", "scripts/praxis"),
-    "compatibility_alias": os.environ.get("COMPATIBILITY_ALIAS_PATH", "scripts/praxis-ctl"),
+    "compatibility_alias": None,
     "preferred_command": os.environ.get("COMMAND_NAME", "praxis"),
     "services": normalized,
     "doctor": doctor,

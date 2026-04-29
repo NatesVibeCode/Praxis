@@ -414,17 +414,22 @@ def build_execution_bundle(
         verify_refs=normalized_verify_refs,
     )
     normalized_write_scope = _dedupe_strings(_string_list(write_scope))
+    # Filter out '.' and empty entries: sandbox normalizer treats those as
+    # zero parts and raises "must be a non-empty relative path", so they're
+    # equivalent to no write_scope being supplied. Compose-generated jobs
+    # were sending write_scope=["."], which triggered the same fail.
+    normalized_write_scope = tuple(
+        scope for scope in normalized_write_scope
+        if scope and scope.strip() not in ("", ".")
+    )
     # A non-empty write_scope is the sandbox isolation boundary required by
     # SandboxRuntime — it is NOT itself evidence of mutation intent.
     # Force submission/verification only from task_type defaults unless the
     # caller explicitly overrides completion_contract values.
     #
-    # Default a per-run scratch path when caller didn't supply one. The
-    # MCP schema marks write_scope optional, but the sandbox rejects
-    # empty access_policy.write_scope ("must be a non-empty relative path"),
-    # so an unset write_scope made step_1 fail in 7s every time on the E2E
-    # path. Per-run scratch gives each run its own isolated boundary
-    # without leaking across runs.
+    # Default a per-run scratch path when caller didn't supply one (or
+    # supplied only sandbox-invalid placeholders like '.'). Per-run scratch
+    # gives each run its own isolated boundary without leaking across runs.
     if not normalized_write_scope:
         scratch_run_token = (
             str(run_id or "").strip()

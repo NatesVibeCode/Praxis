@@ -14,7 +14,6 @@ from ._shared import REPO_ROOT
 
 
 _PREFERRED_LAUNCHER_PATH = REPO_ROOT / "scripts" / "praxis"
-_COMPATIBILITY_LAUNCHER_PATH = REPO_ROOT / "scripts" / "praxis-ctl"
 _FAST_FRONTDOOR_PROBE_ENV = {
     "PRAXIS_ALPHA_TIMEOUT_API_HEALTH_S": "0.5",
     "PRAXIS_ALPHA_TIMEOUT_WORKFLOW_ORIENT_S": "0.5",
@@ -48,9 +47,6 @@ class LauncherAuthorityError(RuntimeError):
 
 
 def _resolve_launcher_path() -> str:
-    for candidate in (_PREFERRED_LAUNCHER_PATH, _COMPATIBILITY_LAUNCHER_PATH):
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
     return str(_PREFERRED_LAUNCHER_PATH)
 
 
@@ -207,7 +203,7 @@ def launcher_status_payload() -> dict[str, Any]:
         "ok": True,
         "brand": status.get("brand") or "Praxis Engine",
         "service_manager": status.get("service_manager") or "scripts/praxis",
-        "compatibility_alias": status.get("compatibility_alias") or "scripts/praxis-ctl",
+        "compatibility_alias": None,
         "preferred_command": status.get("preferred_command") or "praxis",
         "ready": ready,
         "platform_state": "ready" if ready else "degraded",
@@ -335,7 +331,7 @@ def launcher_recover_payload(
         "service_summary": _service_summary(services if isinstance(services, list) else []),
         "brand": "Praxis Engine",
         "service_manager": "scripts/praxis",
-        "compatibility_alias": "scripts/praxis-ctl",
+        "compatibility_alias": None,
         "preferred_command": "praxis",
         "launch_url": doctor.get("launch_url"),
         "dashboard_url": doctor.get("dashboard_url"),

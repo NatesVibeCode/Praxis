@@ -5,33 +5,94 @@ Internal architecture of Praxis Engine.
 ## System Overview
 
 ```
-  User / MCP Client / HTTP Client
-              |
-     +--------v--------+
-     |    Surfaces      |
-     | (MCP, HTTP, CLI) |
-     +--------+---------+
-              |
-     +--------v--------+
-     |  Spec Compiler   |
-     +--------+---------+
-              |
-     +--------v--------+
-     | Workflow Engine  |
-     +--+-----+-----+--+
-        |     |     |
-   +----v+ +--v--+ +v----+
-   |Anthr| |Open | |Goog |   Provider Adapters
-   +----++ +--+--+ ++----+
-        |     |     |
-   Claude   GPT   Gemini     LLM APIs
-        |     |     |
-     +--v-----v-----v--+
-     |    Postgres      |
-     |  (state, graph,  |
-     |   embeddings)    |
-     +------------------+
+                  Human · MCP Client · HTTP Client · CLI
+                                |
+        +-----------------------v-----------------------+
+        |                   Surfaces                     |
+        |   Moon (Overview · Build · Atlas · Manifests   |
+        |   · Console)   ·   CLI   ·   MCP   ·   REST    |
+        +-----------------------+-----------------------+
+                                |
+        +-----------------------v-----------------------+
+        |           CQRS Gateway (engine bus)            |
+        |  every operation · receipts · idempotency      |
+        |  policy · authority events · replay path       |
+        +--+-------------------+--------------------+---+
+           |                   |                    |
+   +-------v-------+   +-------v--------+   +-------v--------+
+   |   Compose     |   |   Workflow     |   |   Authority    |
+   |   Pipeline    |   |   Runtime      |   |   Layer        |
+   | synthesis     |   | DAG · lease ·  |   | operator_      |
+   | + 20 forks    |   | execute · seal |   | decisions ·    |
+   | + pill triage |   |                |   | primitive_     |
+   |               |   |                |   | catalog ·      |
+   |               |   |                |   | receipts       |
+   +-------+-------+   +-------+--------+   +-------+--------+
+           |                   |                    |
+           +---------+---------+--------------------+
+                     |
+        +------------v------------+   +------------------+
+        |    Provider Adapters    |   | Postgres + pgv   |
+        | Anthropic · OpenAI ·    |   | (durable state,  |
+        | Google · DeepSeek       |   |  knowledge graph,|
+        | task-type routed        |   |  embeddings)     |
+        +-------------------------+   +------------------+
 ```
+
+## CQRS Gateway
+
+The gateway (`runtime.operation_catalog_gateway.execute_operation_from_subsystems`) is the bus every Praxis Engine operation runs through. It:
+
+- Validates the payload against the operation's Pydantic `input_model_ref`.
+- Writes a row to `authority_operation_receipts` (input hash, idempotency key, execution status, replay path).
+- Replays cached results when the operation's `idempotency_policy` is `read_only` or `idempotent` and the same payload reappears.
+- Emits `authority_events` rows for command operations with `event_required=TRUE`.
+
+Three CQRS tables stay consistent for every operation:
+
+- `operation_catalog_registry` — authoritative. `operation_kind`, `idempotency_policy`, `receipt_required`, `event_required`, `event_type`, `handler_ref`, `input_model_ref`.
+- `authority_object_registry` — `object_kind` matches `operation_kind` (`'query'` for query ops, `'command'` for command ops).
+- `data_dictionary_objects` — `category` matches `operation_kind`.
+
+Read receipts are not optional. Even read operations record their own ledger row so an agent's "what did the LLM ask?" trail is reproducible.
+
+Standing-order row: `architecture_policy / cqrs_gateway_robust_determinism`. New MCP tools are thin wrappers that call the gateway; no tier-tier shims dispatching to subsystems directly.
+
+## Compose Pipeline
+
+The LLM-first launch compiler turns plain-English intent into a workflow plan with explicit gates the operator sees:
+
+1. **Synthesis** — a frontier model decomposes intent into ~20 packet seeds (≈30s).
+2. **Fork-out** — 20 parallel author calls expand the seeds, prefix-cached (≈2-3 min).
+3. **Pill triage + validation** — typed gaps, source-ref resolution, write-scope contracts, verifier admission.
+
+The Build screen surfaces these gates live during compose ("Composing... synthesis + 20 parallel forks") and the Release tray refuses dispatch until pre-flight checks pass — `0 jobs · triggered by no trigger · 1/4 checks` blocks by design.
+
+`runtime.spec_compiler.launch_plan` and `runtime.intent_composition.compose_plan_from_intent` are the dispatched command operations. Both register `event_type=plan.launched` / `plan.composed`, so completed receipts emit `authority_events` rows tying the launched plan to its receipt.
+
+`pattern_materialize_candidates` (`runtime/operations/commands/platform_patterns.py`) surfaces reusable shapes from completed runs. Successful patterns can be promoted into `primitive_catalog` after consistency check.
+
+## Authority Layer
+
+Praxis treats durable authority as a first-class layer, not a side-effect of execution:
+
+- **`operator_decisions`** — standing orders, architecture policies, supersession history. Scoped by `decision_kind`. The decision table below is a projection of architecture-policy rows; the canonical authority is the table.
+- **`primitive_catalog`** — declared platform primitives (authorities, engines, gateway wrappers, repositories) consistency-checked against code. Drift between blueprint and implementation surfaces as a structured finding.
+- **`authority_operation_receipts`** — one ledger row per gateway dispatch. Input/output hashes, idempotency key, execution status, cause receipt, correlation id.
+- **`authority_events`** — durable event stream emitted by command operations. Subscribers (Moon modules, replay tooling) read from here instead of polling REST.
+- **Verifier-backed bug resolution** — bugs cannot be claimed `FIXED` without pointing at a registered verifier authority that the tracker actually executes. The verifier run lands in `verification_runs` and links via `bug_evidence_links` with `evidence_role=validates_fix` before status flips.
+
+## Surfaces
+
+Moon is the canonical operator UI. One canvas, four tabs, one chat panel:
+
+- **Overview** — `WORKFLOW_CONTRACT` panel (TASK / READ / WRITE / LOCKED / TOOLS / APPROVAL / VERIFIER / RETRY / MATERIALIZED), receipts panel, sandbox terminal.
+- **New workflow (Build)** — describe-the-outcome compose entry, hollow-node graph editor, Inspector/Authority tabs, Release tray with pre-flight checks.
+- **Graph Diagram (Atlas)** — over-time accumulation across tracked architecture areas, weights, write-rate sparklines, hot/dormant signals.
+- **Manifests** — manifest catalog search.
+- **Strategy Console (Chat)** — slide-over partner panel with starter prompts (`What changed since my last session?`, `Help me plan the next build step.`, `Find the relevant context for this screen.`).
+
+CLI and MCP are sibling surfaces over the same gateway. `praxis workflow ...` (operator terminal), `mcp__praxis__*` (Claude Code / Codex / any MCP host), and `bin/praxis-agent` (Claude Code's stdio-disclaimer-immune lane). Same catalog, same gateway, same receipts.
 
 ## Decision Table
 
@@ -199,12 +260,16 @@ Key endpoints:
 - `POST /workflow/run` -- Submit and execute a workflow
 - `GET /workflow/{run_id}` -- Get workflow run status
 
-## Dashboard UI
+## Moon Dashboard
 
-A React/Vite single-page application (`surfaces/app/`) providing:
-- Workflow run visualization
-- Job status and output viewing
-- Chat panel for interactive operation
-- Module palette for workflow composition
+A React/Vite single-page application (`surfaces/app/`) — the canonical operator UI. One canvas, four tabs, one chat panel.
+
+- **Overview** (`dashboard/Dashboard.tsx`) — `WORKFLOW_CONTRACT` panel, receipts panel, sandbox terminal pane. The trust compiler made visible.
+- **New workflow / Build** (`moon/MoonBuildPage.tsx`) — describe-the-outcome compose entry, hollow-node graph editor, Inspector/Authority tabs (`MoonNodeDetail.tsx`), Release tray with pre-flight checks (`MoonReleaseTray.tsx`).
+- **Atlas** (`atlas/AtlasPage.tsx`) — over-time accumulation across tracked architecture areas. *Confidence infrastructure, materialized.*
+- **Manifests** (`praxis/ManifestCatalogPage.tsx`) — durable manifest catalog search by family, type, status, free text.
+- **Strategy Console** (`dashboard/StrategyConsole.tsx`) — slide-over partner panel with starter prompts that orient backward / forward / sideways through the work.
+
+The build canvas is event-driven: `useLiveRunSnapshot.ts` consumes the stream from `/api/shell/state/stream`, `useBuildEvents.ts` subscribes to `/api/workflows/{id}/build/stream`. Polling is a fallback, not the default.
 
 Built with `npm run build` and served by the API server.

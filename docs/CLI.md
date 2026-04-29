@@ -58,7 +58,6 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow remediation-apply` | `praxis_remediation_apply` | `operations` | `write` | Apply only guarded local runtime repairs, such as stale provider slot cleanup or expired host-resource lease cleanup, before one explicit retry. |
 | `praxis workflow remediation-plan` | `praxis_remediation_plan` | `operations` | `read` | Explain the safe remediation tier, evidence requirements, approval gate, and retry delta for a typed workflow failure. |
 | `praxis workflow runtime-truth` | `praxis_runtime_truth_snapshot` | `operations` | `read` | Inspect observed workflow runtime truth across DB authority, queue state, worker heartbeats, provider slots, host-resource leases, Docker, manifest hydration audit, and recent typed failures. |
-| `praxis workflow next-actions` | `praxis_next_actions` | `operator` | `read` | Legacy alias only; prefer praxis_next(action='next'). |
 | `praxis workflow query` | `praxis_query` | `query` | `read` | Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use. |
 | `praxis workflow approve-plan` | `praxis_approve_proposed_plan` | `workflow` | `read` | Approve a ProposedPlan so launch_approved can submit it. Wraps the proposal with approved_by + timestamp + hash; the hash binds the approval to the exact spec_dict so tampering between approve and launch fails closed. The proposed plan must already carry machine-checkable provider freshness evidence with fresh route truth. |
 | `praxis workflow bind-pills` | `praxis_bind_data_pills` | `workflow` | `read` | Suggest likely object.field data-pill candidates from loose prose and validate explicit references against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is either confirmed or surfaced as a candidate to confirm. |
@@ -188,7 +187,6 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow tools call praxis_execution_proof` | `praxis_execution_proof` | `advanced` | - | `read` | - |
 | `praxis workflow tools call praxis_graph_projection` | `praxis_graph_projection` | `advanced` | - | `read` | - |
 | `praxis workflow tools call praxis_issue_backlog` | `praxis_issue_backlog` | `advanced` | - | `read` | - |
-| `praxis workflow tools call praxis_legal_tools` | `praxis_legal_tools` | `advanced` | - | `read` | praxis_next |
 | `praxis workflow tools call praxis_operator_architecture_policy` | `praxis_operator_architecture_policy` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_operator_closeout` | `praxis_operator_closeout` | `advanced` | action: preview, commit | `read`, `write` | - |
 | `praxis workflow tools call praxis_operator_decisions` | `praxis_operator_decisions` | `advanced` | action: list, record | `read`, `write` | praxis_next |
@@ -206,7 +204,6 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow tools call praxis_semantic_assertions` | `praxis_semantic_assertions` | `advanced` | action: list, register_predicate, record_assertion, retract_assertion | `read`, `write` | - |
 | `praxis workflow tools call praxis_trace` | `praxis_trace` | `advanced` | - | `read` | - |
 | `praxis workflow tools call praxis_ui_experience_graph` | `praxis_ui_experience_graph` | `advanced` | - | `read` | - |
-| `praxis workflow next-actions` | `praxis_next_actions` | `stable` | - | `read` | praxis_next |
 | `praxis workflow tools call praxis_next` | `praxis_next` | `stable` | action: next, launch_gate, failure_triage, manifest_audit, toolsmith, unlock_frontier | `read` | - |
 | `praxis workflow tools call praxis_next_work` | `praxis_next_work` | `stable` | - | `read` | - |
 | `praxis workflow tools call praxis_refactor_heatmap` | `praxis_refactor_heatmap` | `stable` | - | `read` | - |

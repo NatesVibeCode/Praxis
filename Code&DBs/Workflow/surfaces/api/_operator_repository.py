@@ -3128,6 +3128,196 @@ class NativeOperatorQueryFrontdoor:
             **snapshot,
         }
 
+    async def _query_roadmap_backlog(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        as_of: datetime,
+        limit: int,
+        open_only: bool,
+        lifecycle: str | None,
+        status: str | None,
+        priority: str | None,
+        roots_only: bool,
+    ) -> dict[str, Any]:
+        conn = await self.connect_database(env)
+        try:
+            where_clauses: list[str] = []
+            args: list[Any] = []
+            if open_only:
+                where_clauses.append("lifecycle NOT IN ('completed', 'retired')")
+            if lifecycle is not None:
+                args.append(lifecycle)
+                where_clauses.append(f"lower(lifecycle) = ${len(args)}")
+            if status is not None:
+                args.append(status)
+                where_clauses.append(f"lower(status) = ${len(args)}")
+            if priority is not None:
+                args.append(priority)
+                where_clauses.append(f"lower(priority) = ${len(args)}")
+            if roots_only:
+                where_clauses.append("parent_roadmap_item_id IS NULL")
+            args.append(limit)
+            limit_param = f"${len(args)}"
+            where_sql = (
+                "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+            )
+            sql = f"""
+                SELECT
+                    roadmap_item_id,
+                    roadmap_key,
+                    title,
+                    item_kind,
+                    status,
+                    lifecycle,
+                    priority,
+                    parent_roadmap_item_id,
+                    source_bug_id,
+                    source_idea_id,
+                    registry_paths,
+                    summary,
+                    acceptance_criteria,
+                    decision_ref,
+                    target_start_at,
+                    target_end_at,
+                    completed_at,
+                    created_at,
+                    updated_at
+                FROM roadmap_items
+                {where_sql}
+                ORDER BY
+                    CASE priority
+                        WHEN 'p0' THEN 0
+                        WHEN 'p1' THEN 1
+                        WHEN 'p2' THEN 2
+                        WHEN 'p3' THEN 3
+                        ELSE 4
+                    END,
+                    updated_at DESC,
+                    created_at DESC
+                LIMIT {limit_param}
+            """
+            try:
+                rows = await conn.fetch(sql, *args)
+            except asyncpg.PostgresError as exc:
+                raise NativeOperatorQueryError(
+                    "operator_query.read_failed",
+                    "failed to read roadmap backlog rows",
+                    details={"sqlstate": getattr(exc, "sqlstate", None)},
+                ) from exc
+
+            count_sql = f"""
+                SELECT lifecycle, status, COUNT(*) AS n
+                FROM roadmap_items
+                {where_sql}
+                GROUP BY lifecycle, status
+            """
+            count_args = args[:-1]
+            try:
+                count_rows = await conn.fetch(count_sql, *count_args)
+            except asyncpg.PostgresError as exc:
+                raise NativeOperatorQueryError(
+                    "operator_query.read_failed",
+                    "failed to read roadmap backlog counts",
+                    details={"sqlstate": getattr(exc, "sqlstate", None)},
+                ) from exc
+
+            records = tuple(_roadmap_record_from_row(row) for row in rows)
+            by_lifecycle: dict[str, int] = {}
+            by_status: dict[str, int] = {}
+            total_matching = 0
+            for row in count_rows:
+                n = int(row["n"])
+                total_matching += n
+                by_lifecycle[row["lifecycle"]] = (
+                    by_lifecycle.get(row["lifecycle"], 0) + n
+                )
+                by_status[row["status"]] = by_status.get(row["status"], 0) + n
+
+            return {
+                "kind": "roadmap_backlog",
+                "as_of": as_of.isoformat(),
+                "query": {
+                    "limit": limit,
+                    "open_only": open_only,
+                    "lifecycle": lifecycle,
+                    "status": status,
+                    "priority": priority,
+                    "roots_only": roots_only,
+                },
+                "count": len(records),
+                "total_matching": total_matching,
+                "items": [record.to_json() for record in records],
+                "counts": {
+                    "by_lifecycle": dict(
+                        sorted(by_lifecycle.items(), key=lambda item: (-item[1], item[0]))
+                    ),
+                    "by_status": dict(
+                        sorted(by_status.items(), key=lambda item: (-item[1], item[0]))
+                    ),
+                },
+            }
+        finally:
+            await conn.close()
+
+    def query_roadmap_backlog(
+        self,
+        *,
+        env: Mapping[str, str] | None = None,
+        as_of: datetime | None = None,
+        limit: int = 200,
+        open_only: bool = True,
+        lifecycle: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        roots_only: bool = False,
+    ) -> dict[str, Any]:
+        """Read open roadmap items as a flat backlog through Postgres."""
+
+        source, instance = self._resolve_instance(env=env)
+        try:
+            backlog_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise NativeOperatorQueryError(
+                "operator_query.invalid_request",
+                "limit must be an integer",
+                details={"field": "limit"},
+            ) from exc
+        if backlog_limit < 1 or backlog_limit > 1000:
+            raise NativeOperatorQueryError(
+                "operator_query.invalid_request",
+                "limit must be between 1 and 1000",
+                details={"field": "limit"},
+            )
+
+        snapshot = _run_async(
+            self._query_roadmap_backlog(
+                env=source,
+                as_of=(
+                    _now()
+                    if as_of is None
+                    else _normalize_as_of(
+                        as_of,
+                        error_type=NativeOperatorQueryError,
+                        reason_code="operator_query.invalid_as_of",
+                    )
+                ),
+                limit=backlog_limit,
+                open_only=bool(open_only),
+                lifecycle=lifecycle,
+                status=status,
+                priority=priority,
+                roots_only=bool(roots_only),
+            ),
+            error_type=NativeOperatorQueryError,
+            reason_code="operator_query.async_boundary_required",
+            message="native operator query sync entrypoints require a non-async call boundary",
+        )
+        return {
+            "native_instance": instance.to_contract(),
+            **snapshot,
+        }
+
     def query_roadmap_tree(
         self,
         *,
@@ -3190,6 +3380,7 @@ _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR = NativeOperatorQueryFrontdoor()
 # is the control-plane object, not the legacy wrapper function.
 query_issue_backlog = _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR.query_issue_backlog
 query_operator_surface = _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR.query_operator_surface
+query_roadmap_backlog = _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR.query_roadmap_backlog
 query_roadmap_tree = _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR.query_roadmap_tree
 
 

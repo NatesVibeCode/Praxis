@@ -410,19 +410,27 @@ def compose_and_launch(
     plan_name: str | None = None,
     why: str | None = None,
     workdir: str | None = None,
-    allow_single_step: bool = False,
-    write_scope_per_step: list[list[str]] | None = None,
+    allow_single_step: bool = False,  # vestigial; LLM-first compose ignores step markers
+    write_scope_per_step: list[list[str]] | None = None,  # vestigial; LLM picks per-packet write
     default_write_scope: list[str] | None = None,
-    default_stage: str = "build",
+    default_stage: str = "build",  # advisory only; LLM picks per-packet stage
     refuse_unresolved_routes: bool = True,
     refuse_unbound_pills: bool = True,
     serialize_scope_conflicts: bool = False,
 ) -> LaunchReceipt:
     """End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt.
 
-    Wraps :func:`compose_plan_from_intent`, :func:`approve_proposed_plan`,
-    and :func:`launch_approved` into one call for trusted automation (CI,
-    scripts, experienced operators).
+    Routes prose through the LLM-first compose chain
+    (:func:`runtime.compose_plan_via_llm.compose_plan_via_llm`):
+      1. Pull data pills + atoms from the prose (deterministic).
+      2. LLM synthesis decomposes the prose into packet seeds (work-volume,
+         not step-marker, decomposition).
+      3. LLM fork-out authors each packet with consumes/produces/gates.
+      4. Validate, then approve + launch.
+
+    The deterministic step-marker decomposer (compose_plan_from_intent) is
+    no longer the front door — see standing order
+    ``feedback_fanout_by_work_volume`` and Phase 1 launch-compiler decision.
 
     Bulletproof defaults — any of these fail closed with a structured
     :class:`ComposeAndLaunchBlocked` unless the caller explicitly disables
@@ -438,18 +446,75 @@ def compose_and_launch(
     still hash-bound to the exact spec_dict, so any tampering between the
     compose step and submit will still fail at launch_approved.
     """
-    proposed = compose_plan_from_intent(
+    del allow_single_step, write_scope_per_step  # vestigial knobs, retained for caller-compat
+    from runtime.compose_plan_via_llm import compose_plan_via_llm
+
+    llm_result = compose_plan_via_llm(
         intent,
         conn=conn,
         plan_name=plan_name,
         why=why,
-        workdir=workdir,
-        allow_single_step=allow_single_step,
-        write_scope_per_step=write_scope_per_step,
-        default_write_scope=default_write_scope,
-        default_stage=default_stage,
-        serialize_scope_conflicts=serialize_scope_conflicts,
     )
+    if not llm_result.ok:
+        raise ComposeAndLaunchBlocked([
+            {
+                "kind": "compose_via_llm_failed",
+                "count": 1,
+                "detail": [
+                    {
+                        "reason_code": llm_result.reason_code,
+                        "error": llm_result.error,
+                        "notes": list(llm_result.notes or []),
+                    }
+                ],
+            }
+        ])
+
+    plan_packets_for_propose = []
+    for packet in llm_result.plan_packets or []:
+        entry = {
+            "description": packet.get("description") or "",
+            "write": list(packet.get("write") or default_write_scope or []),
+            "stage": packet.get("stage") or default_stage,
+            "label": packet.get("label") or "",
+        }
+        depends = packet.get("depends_on") or []
+        if depends:
+            entry["depends_on"] = list(depends)
+        plan_packets_for_propose.append(entry)
+
+    resolved_name = (
+        str(plan_name or "").strip()
+        or f"compose_plan_via_llm.{len(plan_packets_for_propose)}_packets"
+    )
+    plan_dict: dict[str, Any] = {
+        "name": resolved_name,
+        "packets": plan_packets_for_propose,
+    }
+    if why:
+        plan_dict["why"] = str(why)
+
+    proposed = propose_plan(plan_dict, conn=conn, workdir=workdir)
+
+    if serialize_scope_conflicts:
+        # serialize_scope_conflicts was a deterministic-decomposer affordance
+        # — the LLM path picks per-packet `write` and depends_on at synthesis
+        # time, so explicit conflict reordering at this layer would override
+        # the model's authoring intent. Surface the request as a warning
+        # instead of silently dropping it.
+        proposed = replace(
+            proposed,
+            warnings=list(proposed.warnings)
+            + ["serialize_scope_conflicts ignored under LLM-first compose"],
+        )
+
+    type_flow_errors = _validate_composed_plan_type_flow(proposed)
+    if type_flow_errors:
+        proposed = replace(
+            proposed,
+            warnings=list(proposed.warnings)
+            + [f"type_flow_validation: {err}" for err in type_flow_errors],
+        )
 
     blocked: list[dict[str, Any]] = []
 

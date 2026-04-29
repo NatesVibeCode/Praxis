@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from runtime.crypto_authority import canonical_digest_hex
+
 
 class RegistryBoundaryError(RuntimeError):
     """Raised when path or authority context resolution is ambiguous."""
@@ -282,8 +284,10 @@ class RegistryResolver:
             },
             "workflow_id": workflow_id,
         }
-        payload_json = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"))
-        bundle_hash = sha256(payload_json.encode("utf-8")).hexdigest()
+        bundle_hash = canonical_digest_hex(
+            canonical_payload,
+            purpose="execution_boundary.authority_payload",
+        )
         return ContextBundle(
             context_bundle_id=f"context:{run_id}",
             workflow_id=workflow_id,
@@ -338,8 +342,10 @@ class RegistryResolver:
             },
             "workflow_id": workflow_id,
         }
-        payload_json = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"))
-        bundle_hash = sha256(payload_json.encode("utf-8")).hexdigest()
+        bundle_hash = canonical_digest_hex(
+            canonical_payload,
+            purpose="execution_boundary.authority_payload",
+        )
         return UnresolvedAuthorityContext(
             context_bundle_id=f"context_unresolved:{run_id}",
             workflow_id=workflow_id,

@@ -251,15 +251,6 @@ def test_praxis_workflow_alias_script_delegates_to_canonical_frontdoor() -> None
     assert "workflow inspect <run_id>" in completed.stdout
 
 
-def test_praxis_ctl_help_preserves_alias_command_name() -> None:
-    completed = _run_launcher_help("praxis-ctl")
-
-    assert "Usage: praxis-ctl <command> [service]" in completed.stdout
-    assert "launch                  Start cockpit Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
-    assert "doctor --json           Emit semantic launcher readiness as JSON" in completed.stdout
-    assert "scripts/praxis-ctl remains a compatibility alias." in completed.stdout
-
-
 def test_praxis_install_reports_removed_native_service_manager() -> None:
     completed = subprocess.run(
         [str(REPO_ROOT / "scripts" / "praxis"), "install"],
@@ -326,7 +317,7 @@ def test_praxis_status_json_is_served_from_canonical_frontdoor(tmp_path: Path) -
     assert completed.returncode == 0
     payload = json.loads(completed.stdout)
     assert payload["service_manager"] == "scripts/praxis"
-    assert payload["compatibility_alias"] == "scripts/praxis-ctl"
+    assert payload["compatibility_alias"] is None
     assert payload["preferred_command"] == "praxis"
     assert [service["name"] for service in payload["services"]] == [
         "semantic-backend",
@@ -344,7 +335,7 @@ def test_launcher_status_payload_uses_fast_frontdoor_profile(monkeypatch) -> Non
         return {
             "brand": "Praxis Engine",
             "service_manager": "scripts/praxis",
-            "compatibility_alias": "scripts/praxis-ctl",
+            "compatibility_alias": None,
             "preferred_command": "praxis",
             "services": [],
             "doctor": {

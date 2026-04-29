@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useChat } from '../workspace/useChat';
 import { MarkdownRenderer } from '../workspace/MarkdownRenderer';
 import { ToolResultRenderer } from '../workspace/ToolResultRenderer';
+import { moonChatSelectionContext } from '../moon/moonChatContext';
 import './chat-panel.css';
 
 export interface ChatPanelProps {
@@ -111,7 +112,12 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
     const content = input.trim();
     if (!content || loading || !conversationId) return;
     setInput('');
-    void sendMessage(content);
+    // Forward the active Moon workflow + selection state so the orchestrator
+    // can render it into the prompt and the moon_* tools can default-target it.
+    // Snapshot at send time — we do NOT subscribe in render to avoid
+    // re-renders on every selection change.
+    const moonCtx = moonChatSelectionContext();
+    void sendMessage(content, moonCtx.length ? moonCtx : undefined);
   }, [input, loading, conversationId, sendMessage]);
 
   const handleStartNew = useCallback(async () => {

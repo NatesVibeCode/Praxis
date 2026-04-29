@@ -22,6 +22,27 @@
 
 BEGIN;
 
+-- 0a. Idempotency cleanup: an earlier apply of this migration created
+--     model_profile_candidate_bindings rows via the AFTER INSERT trigger from
+--     migration 095 (binding_id is built as 'binding.auto.' || candidate_ref,
+--     so the PK is locked to the short-form candidate_ref this migration
+--     declares). Subsequent operator workflows (provider onboarding /
+--     candidate_ref normalization) renamed the underlying candidate rows to
+--     the canonical longer form (candidate.together.deepseek-ai/DeepSeek-V4-Pro
+--     etc.), which left the original short-form binding rows behind with their
+--     candidate_ref column re-pointed at the renamed candidate. Re-running
+--     this migration on a drifted DB then trips
+--     model_profile_candidate_bindings_pkey when the trigger tries to recreate
+--     the short-form binding for the freshly re-inserted short-form candidate.
+--     Drop those orphans first so the trigger can generate clean bindings on
+--     the candidate INSERT below. No FK references the bindings table, so
+--     this is safe.
+DELETE FROM model_profile_candidate_bindings
+ WHERE model_profile_candidate_binding_id IN (
+     'binding.auto.candidate.together.deepseek-v4-pro',
+     'binding.auto.candidate.together.deepseek-v3.2'
+ );
+
 -- 0. Own the whole Together API authority chain for this private compile
 --    exception. Ranking a task_type row is insufficient under the fail-closed
 --    provider catalog: the route also needs lane policy, transport admission,

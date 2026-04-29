@@ -4,6 +4,45 @@ services:
   # Postgres, another LAN machine, or any reachable Postgres 16+ pgvector DB.
   # The old bundled postgres service was removed because it split-brained with
   # the operator-owned database authority.
+  #
+  # pgbouncer fronts Postgres for every container. Each container's
+  # WORKFLOW_DATABASE_URL points at pgbouncer (via PRAXIS_DOCKER_WORKFLOW_DATABASE_URL
+  # in .env), and pgbouncer multiplexes those onto a small upstream pool
+  # against the real Postgres at PRAXIS_PGBOUNCER_UPSTREAM_URL.
+  # Standing-order ref: BUG-D7A939CA — Postgres saturation when every
+  # container holds its own asyncpg pool. Transaction-pool mode lets us
+  # cap real Postgres backends at DEFAULT_POOL_SIZE while serving
+  # MAX_CLIENT_CONN client connections.
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DATABASE_URL: ${PRAXIS_PGBOUNCER_UPSTREAM_URL:?PRAXIS_PGBOUNCER_UPSTREAM_URL must be set in .env (the upstream Postgres URL from container view, usually postgresql://praxis:PW@host.docker.internal:5432/praxis)}
+      LISTEN_PORT: "6432"
+      # session mode (not transaction): asyncpg caches prepared statements
+      # client-side; transaction-mode pgbouncer routes queries to different
+      # upstream backends across statements, breaking cached statement state
+      # (observed: UUID arg encoded by timestamptz codec → TypeError on
+      # compose_and_launch). Session mode gives each client a sticky
+      # upstream conn — we still bound total upstream conns via
+      # DEFAULT_POOL_SIZE, just without the multiplexing.
+      POOL_MODE: session
+      DEFAULT_POOL_SIZE: "25"
+      MIN_POOL_SIZE: "5"
+      RESERVE_POOL_SIZE: "5"
+      MAX_CLIENT_CONN: "1000"
+      AUTH_TYPE: scram-sha-256
+      SERVER_RESET_QUERY: DISCARD ALL
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,search_path
+    ports:
+      - "6432:6432"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U praxis || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
   semantic-backend:
     build:
       context: ./Code&DBs/Workflow
@@ -49,6 +88,8 @@ services:
     image: praxis-api:latest
     depends_on:
       semantic-backend:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
     env_file:
       - .env
@@ -125,6 +166,9 @@ services:
         PRAXIS_CONTAINER_WORKSPACE_ROOT: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
         PRAXIS_CONTAINER_HOME: ${PRAXIS_CONTAINER_HOME:-/home/praxis-agent}
     image: praxis-scheduler:latest
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -165,6 +209,8 @@ services:
         condition: service_healthy
       scheduler:
         condition: service_started
+      pgbouncer:
+        condition: service_healthy
     env_file:
       - .env
     environment:

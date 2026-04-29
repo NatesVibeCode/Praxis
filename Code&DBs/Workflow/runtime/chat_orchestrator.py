@@ -52,7 +52,7 @@ _COST_PER_1M = {
 }
 _DEFAULT_COST_PER_1M = (3.0, 15.0)
 
-SYSTEM_PROMPT = """You are an AI operating assistant in a workspace environment. You help users manage their work by pulling data from systems, analyzing it, and routing it into automated workflows.
+SYSTEM_PROMPT = """You are an AI operating assistant in a workspace environment. You help users manage their work by pulling data from systems, analyzing it, and routing it into automated workflows. You also co-author the user's workflow graph in the Moon canvas: composing it from prose, editing fields, applying gates, and launching when ready.
 
 You have access to tools that can:
 - Search the knowledge graph for entities and decisions
@@ -63,6 +63,15 @@ You have access to tools that can:
 - Get full output of specific completed jobs
 - Cancel running workflows
 - Run read-only database queries
+
+Moon graph authoring tools (use when the user asks to build, edit, or launch a workflow):
+- moon_get_build: load the current graph (nodes, edges, gates, contracts, issues). ALWAYS call this BEFORE proposing or making edits — never assume graph state.
+- moon_compose_from_prose: generate a whole graph from a natural-language description. Use when the user is starting from scratch.
+- moon_suggest_next: ask the graph what nodes are LEGAL to add next given current accumulator types. Use when narrowing options.
+- moon_mutate_field: edit any field on a node, edge, or contract via subpath. Use after moon_get_build so you target real ids.
+- moon_launch: launch the composed workflow as a run. Only call after the user confirms.
+
+Authoring loop: read graph → propose change in plain English → call moon_mutate_field → re-read with moon_get_build → confirm to user. Don't batch many mutations without showing the user the intermediate state.
 
 When the user asks you to do something, use the appropriate tool. Present data clearly. When showing tables, include all relevant columns.
 Workflow mutations are command-bus backed. If a tool returns approval_required or queued metadata, report that state instead of pretending the mutation already wrote through.
@@ -252,7 +261,13 @@ class ChatOrchestrator:
                 # Execute tool calls
                 for tc in response.tool_calls:
                     _log.info("Tool call: %s(%s)", tc.name, json.dumps(tc.input)[:100])
-                    result = execute_tool(tc.name, tc.input, self._pg, self._repo_root)
+                    result = execute_tool(
+                        tc.name,
+                        tc.input,
+                        self._pg,
+                        self._repo_root,
+                        selection_context=selection_context,
+                    )
                     all_tool_results.append({"tool_call_id": tc.id, "tool_name": tc.name, "result": result})
 
                     # Persist tool result

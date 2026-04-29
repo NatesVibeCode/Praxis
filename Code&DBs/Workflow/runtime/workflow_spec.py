@@ -56,6 +56,12 @@ _RETIRED_AUTHORITY_MARKERS: tuple[tuple[str, str], ...] = (
     ),
 )
 
+_WORKER_REPO_ROOT = "/workspace"
+_OPERATOR_LOCAL_REPO_PREFIXES: tuple[str, ...] = (
+    "/Users/nate/Praxis",
+    "/Volumes/Users/natha/Documents/Builds/Praxis",
+)
+
 # ---------------------------------------------------------------------------
 # New authoring format field sets
 # ---------------------------------------------------------------------------
@@ -753,13 +759,51 @@ def _historical_authority_issues(text: str) -> list[str]:
     return issues
 
 
-def _validate_spec_file_authority(path: Path, display_path: str, text: str) -> None:
+def normalize_operator_local_repo_paths(text: str) -> tuple[str, list[str]]:
+    """Rewrite host-absolute operator-local repo prefixes to the worker mount.
+
+    The known operator workstations mount the repo at deterministic prefixes
+    (e.g. ``/Users/nate/Praxis``); inside the worker container the same tree
+    lives at ``/workspace``. When a spec file is generated host-side via
+    ``Path.resolve()`` and then submitted to the worker, the embedded host
+    prefix is just an alias for the worker mount — the submitter has all it
+    needs to fix it itself instead of failing closed (see BUG-C585EFE6).
+
+    Returns a tuple of ``(normalized_text, breadcrumbs)``. Each breadcrumb is
+    a short string describing one prefix substitution that was applied so the
+    caller can record a soft-warn friction event without blocking submit.
+    """
+
+    breadcrumbs: list[str] = []
+    normalized = text
+    for prefix in _OPERATOR_LOCAL_REPO_PREFIXES:
+        if prefix in normalized:
+            normalized = normalized.replace(prefix, _WORKER_REPO_ROOT)
+            breadcrumbs.append(
+                f"normalized operator-local prefix {prefix!r} -> {_WORKER_REPO_ROOT!r}"
+            )
+    return normalized, breadcrumbs
+
+
+def _validate_spec_file_authority(path: Path, display_path: str, text: str) -> str:
+    """Validate spec text and return the (possibly normalized) text.
+
+    Operator-local absolute repo paths that map deterministically to the worker
+    mount are rewritten in place before the historical-authority check, with a
+    soft-warn breadcrumb. Genuinely retired authority markers (localhost DSNs,
+    direct SQL repair instructions) still fail closed.
+    """
+
+    text, breadcrumbs = normalize_operator_local_repo_paths(text)
+    for crumb in breadcrumbs:
+        _log.warning("workflow_spec: %s in %s", crumb, display_path)
+
     if os.environ.get(_HISTORICAL_SPEC_OVERRIDE_ENV) == "1":
-        return
+        return text
 
     issues = _historical_authority_issues(text)
     if not issues:
-        return
+        return text
 
     formatted = "\n  - ".join(issues)
     raise WorkflowSpecError(
@@ -1218,7 +1262,7 @@ def load_raw(path: str) -> dict[str, Any]:
 
     file_path = _validate_spec_path(path)
     text = file_path.read_text(encoding="utf-8")
-    _validate_spec_file_authority(file_path, path, text)
+    text = _validate_spec_file_authority(file_path, path, text)
     loaded = json.loads(text)
     if not isinstance(loaded, dict):
         raise ValueError(f"Spec file must contain a JSON object: {path}")
@@ -1232,6 +1276,7 @@ __all__ = [
     "load_raw",
     "load_workflow_batch",
     "load_workflow_spec",
+    "normalize_operator_local_repo_paths",
     "validate_authoring_spec",
     "validate_workflow_spec",
 ]

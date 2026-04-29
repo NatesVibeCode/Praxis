@@ -1157,27 +1157,32 @@ def tool_praxis_operator_closeout(params: dict) -> dict:
 
 
 def tool_praxis_operator_roadmap_view(params: dict) -> dict:
-    """Read one roadmap subtree, dependency edges, and semantic-first external neighbors."""
+    """Read the open roadmap backlog, or one subtree when a root is named."""
 
     root_roadmap_item_id = str(params.get("root_roadmap_item_id", "")).strip()
+
     if not root_roadmap_item_id:
-        rows = _subs.get_pg_conn().execute(
-            """
-            SELECT roadmap_item_id
-              FROM roadmap_items
-             WHERE parent_roadmap_item_id IS NULL
-             ORDER BY
-                 CASE WHEN status = 'active' THEN 0 ELSE 1 END,
-                 updated_at DESC,
-                 created_at DESC
-             LIMIT 1
-            """
+        backlog_payload: dict[str, Any] = {}
+        if (raw_limit := params.get("limit")) is not None:
+            try:
+                backlog_payload["limit"] = int(raw_limit)
+            except (TypeError, ValueError) as exc:
+                return _structured_input_error(
+                    exc, operation_name="operator.roadmap_backlog"
+                )
+        for key in ("lifecycle", "status", "priority"):
+            value = params.get(key)
+            if value is not None and str(value).strip():
+                backlog_payload[key] = str(value).strip().lower()
+        if (open_only := params.get("open_only")) is not None:
+            backlog_payload["open_only"] = bool(open_only)
+        if (roots_only := params.get("roots_only")) is not None:
+            backlog_payload["roots_only"] = bool(roots_only)
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="operator.roadmap_backlog",
+            payload=backlog_payload,
         )
-        if not rows:
-            return {"error": "root_roadmap_item_id is required and no roadmap roots were found"}
-        root_roadmap_item_id = str(rows[0].get("roadmap_item_id") or "").strip()
-    if not root_roadmap_item_id:
-        return {"error": "failed to resolve a default roadmap root"}
 
     operation_name = "operator.roadmap_tree"
     try:
@@ -3149,24 +3154,59 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_operator_roadmap_view,
         {
             "description": (
-                "Read one roadmap subtree and its dependency edges from DB-backed authority.\n\n"
-                "USE WHEN: you want the full package view for a roadmap item, including generated child waves, "
-                "derived roadmap item clusters, external dependency edges, canonical semantic neighbors, "
-                "and a rendered markdown outline.\n\n"
+                "Read the open roadmap backlog, or one subtree when a root is named.\n\n"
+                "USE WHEN:\n"
+                "  - No root: returns the flat open backlog (lifecycle NOT IN completed/retired) "
+                "ordered by priority then updated_at, plus by_lifecycle / by_status counts. "
+                "Filter with lifecycle / status / priority / open_only / roots_only / limit.\n"
+                "  - Root supplied: returns the full package view for that roadmap item — generated "
+                "child waves, derived clusters, dependency edges, canonical semantic neighbors, "
+                "and rendered markdown outline.\n\n"
                 "EXAMPLES:\n"
-                "  praxis_operator_roadmap_view()\n"
+                "  praxis_operator_roadmap_view()  # open backlog\n"
+                "  praxis_operator_roadmap_view(priority='p1', limit=20)\n"
+                "  praxis_operator_roadmap_view(roots_only=true)\n"
                 "  praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate')\n"
                 "  praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate', semantic_neighbor_limit=8)"
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "root_roadmap_item_id": {"type": "string"},
+                    "root_roadmap_item_id": {
+                        "type": "string",
+                        "description": "When set, returns the subtree for this root via operator.roadmap_tree. When omitted, returns the open backlog via operator.roadmap_backlog.",
+                    },
                     "semantic_neighbor_limit": {
                         "type": "integer",
-                        "description": "How many external roadmap neighbors to include from canonical semantic assertions.",
+                        "description": "Subtree mode only: how many external roadmap neighbors to include from canonical semantic assertions.",
                         "default": 5,
                         "minimum": 0,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Backlog mode only: max items to return (1-1000, default 200).",
+                        "minimum": 1,
+                        "maximum": 1000,
+                    },
+                    "lifecycle": {
+                        "type": "string",
+                        "description": "Backlog mode only: filter to a specific lifecycle (e.g. 'planned', 'claimed').",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Backlog mode only: filter to a specific status (e.g. 'active', 'proposed').",
+                    },
+                    "priority": {
+                        "type": "string",
+                        "description": "Backlog mode only: filter to a specific priority (e.g. 'p0', 'p1', 'p2').",
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "description": "Backlog mode only: when true (default), excludes completed and retired items.",
+                    },
+                    "roots_only": {
+                        "type": "boolean",
+                        "description": "Backlog mode only: when true, returns only items with parent_roadmap_item_id IS NULL.",
                     },
                 },
             },

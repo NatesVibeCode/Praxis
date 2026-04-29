@@ -38,6 +38,7 @@ import {
 } from './moonComposeAuthority';
 import { appendOutcomeContract } from './outcomeContract';
 import { buildPrimitiveContractSuggestions } from './moonContractSuggestions';
+import { setMoonChatContext, clearMoonChatContext } from './moonChatContext';
 import {
   getMoonAppendPosition,
   getMoonCanvasDimensions,
@@ -447,6 +448,42 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     () => resolvePersistedWorkflowId(workflowId, payload),
     [payload, workflowId],
   );
+  // Push the active workflow + selection state into the shared chat context
+  // store so ChatPanel can forward it as selection_context on every send.
+  // The chat orchestrator threads this down to the moon_* tools so they
+  // default-target this workflow when the LLM omits an explicit workflow_id.
+  useEffect(() => {
+    if (!persistedWorkflowId) {
+      clearMoonChatContext();
+      return;
+    }
+    const workflowName =
+      (payload?.workflow as { name?: string | null } | undefined)?.name ?? null;
+    setMoonChatContext({
+      workflow_id: persistedWorkflowId,
+      workflow_name: workflowName,
+      selected_node_id: state.selectedNodeId,
+      selected_edge_id: state.selectedEdgeId,
+      view_mode: state.viewMode,
+      hint:
+        state.viewMode === 'run'
+          ? 'User is viewing a run. moon_get_build still works; mutations are typically not appropriate while observing a live run.'
+          : 'User is authoring a workflow graph. Default-target this workflow_id when the user does not name another.',
+    });
+  }, [
+    persistedWorkflowId,
+    payload?.workflow,
+    state.selectedNodeId,
+    state.selectedEdgeId,
+    state.viewMode,
+  ]);
+  // Clear context on unmount so chat opened from elsewhere isn't haunted by
+  // a stale Moon stanza pointing at a workflow the user has navigated away from.
+  useEffect(() => {
+    return () => {
+      clearMoonChatContext();
+    };
+  }, []);
   const compileSource = useMemo(
     () => appendOutcomeContract(state.compileProse, {
       successCriteria: outcomeSuccessCriteria,

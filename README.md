@@ -1,10 +1,35 @@
 # Praxis Engine
 
-Self-hostable AI workflow engine with multi-provider agent routing and MCP integration.
+Self-hostable AI platform where every action is receipt-backed and every successful pattern compounds into durable authority. Postgres + pgvector + CQRS gateway. Multi-provider agent routing, catalog-backed MCP, autonomous workflow execution.
 
 ## What is it?
 
-Praxis Engine is an autonomous workflow runner that executes multi-job DAG workflows across LLM providers (OpenAI, Anthropic, Google, DeepSeek). Jobs are routed semantically via task-type prefixes (`auto/build`, `auto/review`, `auto/architecture`, etc.) to the best-fit model for each task. The engine compiles workflow specs into dependency graphs, manages execution leases, and exposes catalog-backed MCP tools for integration with Claude Code and other MCP clients. All state is stored in Postgres with pgvector for embedding-backed knowledge graph and code discovery.
+Praxis closes the loop most AI tools leave open.
+
+The standard model: you ask an AI to do something, it produces output, you move on. Next time you start over. The tool didn't get smarter. Your work didn't accumulate into anything reusable.
+
+Praxis treats every action as a durable event:
+
+- **Operations produce receipts.** Every dispatched operation goes through the CQRS gateway, which records input hash, output hash, idempotency key, execution status, and replay path in `authority_operation_receipts`. Replays are deterministic when the policy allows.
+- **Decisions become queryable authority.** Operator decisions, standing orders, and supersession history live in `operator_decisions` rows you can query, scope, and inherit. The system remembers what it decided and why.
+- **Successful patterns can be promoted.** `pattern_materialize_candidates` surfaces reusable shapes from completed work; the `primitive_catalog` is consistency-checked against code so promoted patterns stay grounded.
+- **Resolutions require evidence.** Bugs can't be claimed "fixed" — they must point at a verifier run with stdout/stderr/exit_code linked as evidence. Trust but verify, enforced.
+
+The runtime underneath: a DAG workflow engine with multi-provider agent routing (OpenAI, Anthropic, Google, DeepSeek), one CQRS gateway dispatching every operation, and a catalog-backed MCP surface usable from Claude Code, Codex, or any MCP client. All state in Postgres + pgvector.
+
+**The thesis:** every successful work cycle should make the next easier. Breadth becomes an output of how the platform compounds, not a feature checklist you maintain by hand.
+
+## What you'll see
+
+Moon is one canvas, four surfaces:
+
+- **Overview** — the live workspace. The `WORKFLOW_CONTRACT` panel renders TASK / READ SCOPE / WRITE SCOPE / **LOCKED** authority / TOOLS / APPROVAL / VERIFIER / RETRY / MATERIALIZED side-by-side with the receipts panel and a sandbox terminal. The trust compiler made visible — what's allowed, what's locked, what proof is required to dispatch.
+- **New workflow** — the materialization entry. Describe an outcome in plain English; Praxis runs `synthesis (a frontier model decomposes intent into ~20 packet seeds, ≈30s) → fork-out (20 parallel prefix-cached author calls, ≈2-3 min) → pill triage + validation`. Nothing renders until all gates pass. The Release tray refuses to dispatch incomplete intent — `0 jobs · triggered by no trigger · 1/4 checks` blocks by design.
+- **Graph Diagram (Atlas)** — *Confidence infrastructure, materialized.* The over-time accumulation view: 20 tracked architecture areas, weights, write-rate sparklines, hot/dormant signals. Shows what's compounding.
+- **Manifests** — the catalog. Search durable manifests by family, type, status, free text.
+- **Strategy Console (Chat)** — the partner panel that slides over any surface. Starter prompts: *What changed since my last session? · Help me plan the next build step. · Find the relevant context for this screen.*
+
+CLI and MCP are sibling surfaces over the same gateway. `praxis workflow ...` is the operator front door from a terminal; `mcp__praxis__*` is the MCP-client front door from Claude Code, Codex, or any MCP host.
 
 ## Quickstart
 
@@ -190,42 +215,49 @@ The public HTTP contract lives under `/v1`. The internal route catalog remains a
 ## Architecture
 
 ```
-                        .queue.json specs
-                              |
-                     +--------v--------+
-                     |  Spec Compiler  |
-                     |  (DAG builder)  |
-                     +--------+--------+
-                              |
-                     +--------v--------+
-                     | Workflow Engine  |
-                     | (lease, execute) |
-                     +--------+--------+
-                              |
-              +---------------+---------------+
-              |               |               |
-     +--------v--+   +-------v---+   +-------v----+
-     |  Anthropic |   |  OpenAI   |   |  Google    |
-     |  Adapter   |   |  Adapter  |   |  Adapter   |
-     +--------+--+   +-------+---+   +-------+----+
-              |               |               |
-         Claude API      GPT API       Gemini API
-
-
-    +------------------+     +------------------+
-    |  Postgres + pgv  |     |   MCP Server     |
-    |  (state, graph,  |     | (catalog-backed) |
-    |   embeddings)    |     +------------------+
-    +------------------+
+                  Human · MCP Client · HTTP Client · CLI
+                                |
+        +-----------------------v-----------------------+
+        |                   Surfaces                     |
+        |   Moon (Overview · Build · Atlas · Manifests   |
+        |   · Console)   ·   CLI   ·   MCP   ·   REST    |
+        +-----------------------+-----------------------+
+                                |
+        +-----------------------v-----------------------+
+        |           CQRS Gateway (engine bus)            |
+        |  every operation · receipts · idempotency      |
+        |  policy · authority events · replay path       |
+        +--+-------------------+--------------------+---+
+           |                   |                    |
+   +-------v-------+   +-------v--------+   +-------v--------+
+   |   Compose     |   |   Workflow     |   |   Authority    |
+   |   Pipeline    |   |   Runtime      |   |   Layer        |
+   | synthesis     |   | DAG · lease ·  |   | operator_      |
+   | + 20 forks    |   | execute · seal |   | decisions ·    |
+   | + pill triage |   |                |   | primitive_     |
+   |               |   |                |   | catalog ·      |
+   |               |   |                |   | receipts       |
+   +-------+-------+   +-------+--------+   +-------+--------+
+           |                   |                    |
+           +---------+---------+--------------------+
+                     |
+        +------------v------------+   +------------------+
+        |    Provider Adapters    |   | Postgres + pgv   |
+        | Anthropic · OpenAI ·    |   | (durable state,  |
+        | Google · DeepSeek       |   |  knowledge graph,|
+        | task-type routed        |   |  embeddings)     |
+        +-------------------------+   +------------------+
 ```
 
 **Key components:**
 
-- **Spec Compiler** -- Parses `.queue.json` files, validates DAG structure, resolves agent routes, expands fan-out primitives, and lowers to a `WorkflowRequest` graph.
-- **Workflow Engine** -- Manages execution lifecycle: claiming jobs via leases, routing work to provider adapters, tracking status, handling retries and timeouts.
-- **Provider Adapters** -- Unified interface (`ProviderAdapterContract`) for each LLM provider. Handles authentication, API protocols, usage telemetry, and response parsing.
-- **Storage** -- Postgres with pgvector. Stores workflow state, execution history, knowledge graph, embeddings, operator control plane, and bug tracking.
-- **MCP Server** -- Exposes engine capabilities as MCP tools for integration with Claude Code and other clients.
+- **Surfaces** — Moon (React/Vite), CLI (`praxis workflow ...`), MCP (`mcp__praxis__*`), REST (`/v1`). All sibling lenses on the same gateway.
+- **CQRS Gateway** (`runtime.operation_catalog_gateway`) — the engine bus. Every operation goes through it: validates the payload against a Pydantic input model, writes a row to `authority_operation_receipts`, replays cached results when the idempotency policy says so, emits `authority_events` rows for command operations.
+- **Compose Pipeline** — the LLM-first launch compiler. A frontier model decomposes intent into ~20 packet seeds; 20 parallel prefix-cached author calls expand them; pill triage and validation gate before any render. `pattern_materialize_candidates` surfaces reusable shapes from completed runs.
+- **Workflow Runtime** — DAG execution with leases, retries, sealing. `.queue.json` specs are the wire format; `compose_plan_from_intent` is the LLM-driven authoring path.
+- **Authority Layer** — durable rows that outlast any single run: `operator_decisions` (standing orders, supersession history), `primitive_catalog` (consistency-checked against code), `authority_operation_receipts` (one ledger row per operation).
+- **Provider Adapters** — unified `ProviderAdapterContract` for Anthropic, OpenAI, Google, DeepSeek. Task-type routing (`auto/build`, `auto/review`, etc.) selects the best-fit model per job.
+- **Storage** — Postgres + pgvector. State, knowledge graph, embeddings, operator control plane, bugs, receipts, decisions, primitives — all one database.
 
 ## Project Layout
 

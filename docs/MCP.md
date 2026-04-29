@@ -87,9 +87,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_execution_proof` | `operator` | `advanced` | - | `read` | - | Prove whether a workflow run or trace anchor actually produced runtime execution evidence. Queued/running labels are treated as weak context, not proof; the result names the concrete evidence and missing proof. |
 | `praxis_graph_projection` | `operator` | `advanced` | - | `read` | - | Read the cross-domain operator graph projection. |
 | `praxis_issue_backlog` | `operator` | `advanced` | - | `read` | - | Read the canonical operator issue backlog. |
-| `praxis_legal_tools` | `operator` | `advanced` | - | `read` | praxis_next | Deprecated compatibility alias for praxis_next(action='unlock_frontier'). The legal-tool analysis now lives under the progressive praxis_next front door so callers do not choose between duplicate next-action surfaces. |
 | `praxis_next` | `operator` | `stable` | - | `read` | - | Progressive-disclosure operator front door for deciding what to do next. Composes existing Praxis authority instead of exposing the raw tool pile: catalog metadata, manifests, workflow run state, queue state, provider slots, host-resource leases, verifier refs, and retry/launch doctrine. |
-| `praxis_next_actions` | `operator` | `stable` | `workflow next-actions` | `read` | praxis_next | Deprecated compatibility alias for praxis_next(action='next'). Use praxis_next for progressive disclosure across next actions, launch gating, failure triage, manifest audit, toolsmith dedupe, and unlock-frontier analysis. |
 | `praxis_next_work` | `operator` | `stable` | - | `read` | - | Read a composed next-work packet. Combines refactor heatmap, bug triage, work assignment matrix, and runtime status into one ranked operator view with proof gates and validation paths. |
 | `praxis_operator_architecture_policy` | `operator` | `advanced` | - | `write` | - | Record a durable architecture-policy decision in operator authority. |
 | `praxis_operator_closeout` | `operator` | `advanced` | - | `read`, `write` | - | Preview or commit proof-backed bug and roadmap closeout through the shared reconciliation gate. |
@@ -1803,30 +1801,6 @@ Example input:
 }
 ```
 
-#### `praxis_legal_tools`
-
-- Surface: `operator`
-- Tier: `advanced`
-- Badges: `advanced`, `operator`, `deprecated-alias`
-- Risks: `read`
-- CLI entrypoint: `workflow tools call praxis_legal_tools`
-- CLI schema help: `workflow tools describe praxis_legal_tools`
-- Replacement: `praxis_next`
-- When to use: Legacy alias only; prefer praxis_next(action='unlock_frontier').
-- When not to use: Do not build new workflows against this name.
-- Selector: none
-- Required args: (none)
-
-Example input:
-
-```json
-{
-  "intent": "prove whether this run actually fired",
-  "run_id": "run_123",
-  "limit": 8
-}
-```
-
 #### `praxis_next`
 
 - Surface: `operator`
@@ -1847,29 +1821,6 @@ Example input:
   "action": "next",
   "intent": "fire workflow fleet safely",
   "fleet_size": 12
-}
-```
-
-#### `praxis_next_actions`
-
-- Surface: `operator`
-- Tier: `stable`
-- Badges: `stable`, `operator`, `alias:next-actions`, `deprecated-alias`
-- Risks: `read`
-- CLI entrypoint: `workflow next-actions`
-- CLI schema help: `workflow tools describe praxis_next_actions`
-- Replacement: `praxis_next`
-- When to use: Legacy alias only; prefer praxis_next(action='next').
-- When not to use: Do not build new workflows against this name.
-- Recommended alias: `workflow next-actions`
-- Selector: none
-- Required args: (none)
-
-Example input:
-
-```json
-{
-  "intent": "Fix workflow retries so every retry declares the failed receipt and retry delta."
 }
 ```
 

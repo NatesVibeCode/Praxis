@@ -5,7 +5,6 @@ from pathlib import Path
 import runtime.operations.queries.operator_next as operator_next_mod
 from runtime.operations.queries.operator_next import OperatorNextQuery, handle_operator_next
 from surfaces.mcp.catalog import get_tool_catalog
-from surfaces.mcp.tools import operator as operator_tools
 
 
 class _FakeConn:

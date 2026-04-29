@@ -1,6 +1,6 @@
 # Praxis Engine Setup Guide
 
-Complete installation and configuration reference.
+Complete installation and configuration reference. What you're standing up: Postgres + pgvector as Praxis.db, the CQRS gateway and workflow runtime, the Moon dashboard, and the catalog-backed CLI / MCP / REST surfaces — all one repo package, one bootstrap. The platform-specific paths below are for debugging or intentional divergence from `./scripts/bootstrap`.
 
 ## Prerequisites
 

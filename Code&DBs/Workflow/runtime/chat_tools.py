@@ -20,8 +20,47 @@ from runtime.control_commands import (
     workflow_retry_payload_with_guard,
 )
 from runtime.idempotency import canonical_hash
+from runtime.operation_catalog_gateway import (
+    _EnvironmentBackedSubsystems,
+    execute_operation_from_subsystems,
+)
 
 _log = logging.getLogger(__name__)
+
+
+def _dispatch_op(pg_conn: Any, operation_name: str, payload: dict[str, Any]) -> Any:
+    """Dispatch a registered CQRS operation through the gateway.
+
+    Wraps the chat orchestrator's ``pg_conn`` in the subsystems shape the
+    gateway expects, so chat tools can call any registered operation
+    without bypassing receipt + event recording.
+    """
+    subsystems = _EnvironmentBackedSubsystems(env=os.environ, conn=pg_conn)
+    return execute_operation_from_subsystems(
+        subsystems,
+        operation_name=operation_name,
+        payload=payload,
+    )
+
+
+# Discriminator the App's moonChatContext.ts writes into selection_context.
+MOON_CONTEXT_KIND = "moon_context"
+
+
+def _extract_moon_context(selection_context: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Pull the moon-context entry (if any) out of the selection_context list.
+
+    The frontend's ``moonChatSelectionContext()`` packs a single
+    ``{kind: 'moon_context', workflow_id, selected_node_id, ...}`` entry.
+    Returning ``None`` here means there is no active Moon workflow context
+    and tools must require explicit ``workflow_id`` arguments.
+    """
+    if not selection_context:
+        return None
+    for entry in selection_context:
+        if isinstance(entry, dict) and entry.get("kind") == MOON_CONTEXT_KIND:
+            return entry
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +187,75 @@ CHAT_TOOLS: list[dict[str, Any]] = [
                 "run_id": {"type": "string", "description": "The workflow run ID to cancel"},
             },
             "required": ["run_id"],
+        },
+    },
+    # ------------------------------------------------------------------
+    # Moon graph authoring tools — let the LLM read/edit the workflow
+    # graph the user is composing in the Moon canvas. All four dispatch
+    # through the CQRS gateway so each call leaves a receipt + (for
+    # commands) authority_event row.
+    # ------------------------------------------------------------------
+    {
+        "name": "moon_get_build",
+        "description": "Load the current Moon BuildPayload for a workflow — every node, edge, gate, contract, outcome, and any compile/binding issues. Use this BEFORE proposing edits so you reason about real graph state, not an assumed one.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "Workflow id to load"},
+            },
+            "required": ["workflow_id"],
+        },
+    },
+    {
+        "name": "moon_compose_from_prose",
+        "description": "Generate a complete Moon workflow graph from a natural-language description. One LLM synthesis pass + N parallel author calls produces nodes, edges, contracts, and gates. Use when the user describes what they want from scratch. Returns the composed plan; pair with moon_get_build to inspect what was created.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intent": {"type": "string", "description": "Plain-language description of what the workflow should do"},
+                "plan_name": {"type": "string", "description": "Optional friendly name for the plan"},
+                "why": {"type": "string", "description": "Optional rationale recorded with the plan"},
+                "concurrency": {"type": "integer", "description": "Parallel author count (1-100, default 20)"},
+            },
+            "required": ["intent"],
+        },
+    },
+    {
+        "name": "moon_mutate_field",
+        "description": "Edit any field on a node, edge, or workflow-level contract. The subpath identifies WHAT to change (e.g. 'append', 'nodes/{node_id}', 'edges/{edge_id}/release', 'outcome', 'bootstrap'); the body carries the new value. Use after moon_get_build so you target real ids. This is the single universal mutation entrypoint.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "Workflow being edited"},
+                "subpath": {"type": "string", "description": "Mutation subpath (e.g. 'append', 'nodes/{id}', 'edges/{id}/release', 'outcome', 'bootstrap')"},
+                "body": {"type": "object", "description": "Mutation body — shape depends on subpath"},
+            },
+            "required": ["workflow_id", "subpath", "body"],
+        },
+    },
+    {
+        "name": "moon_suggest_next",
+        "description": "Ask the graph what nodes are LEGAL to add next given the current accumulator types. Returns ranked likely_next_steps + possible_next_steps + blocked_next_steps. Use when the user asks 'what now' or you need to narrow a 100-tool decision space to 3-5.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "Workflow being authored"},
+                "node_id": {"type": "string", "description": "Optional anchor node to suggest from (default: latest)"},
+            },
+            "required": ["workflow_id"],
+        },
+    },
+    {
+        "name": "moon_launch",
+        "description": "Launch the composed workflow as a real run through the gateway. Returns run_id + tracking handle. Only call after the user confirms or after compose+edits have produced a coherent graph.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "Workflow to launch"},
+                "approved_by": {"type": "string", "description": "Operator ref recording who approved this launch"},
+                "plan_name": {"type": "string", "description": "Optional friendly name"},
+            },
+            "required": ["workflow_id"],
         },
     },
 ]
@@ -339,6 +447,7 @@ def execute_tool(
     arguments: dict[str, Any],
     pg_conn: Any,
     repo_root: str,
+    selection_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Execute a tool call and return structured result.
 
@@ -347,6 +456,12 @@ def execute_tool(
     - data: type-specific payload
     - selectable: bool — can the user select items?
     - summary: str — short text summary for the LLM
+
+    ``selection_context`` is forwarded by the chat orchestrator. When the
+    frontend has an active Moon workflow open, an entry of the form
+    ``{kind: 'moon_context', workflow_id, selected_node_id, ...}`` is in the
+    list. The moon_* tools read it to default-target the active workflow
+    when the LLM omits ``workflow_id``.
     """
     if name == "search_knowledge":
         return _search_knowledge(arguments, pg_conn)
@@ -366,7 +481,335 @@ def execute_tool(
         return _get_job_output(arguments, pg_conn)
     elif name == "cancel_workflow":
         return _cancel_workflow(arguments, pg_conn)
+    elif name == "moon_get_build":
+        return _moon_get_build(arguments, pg_conn, selection_context)
+    elif name == "moon_compose_from_prose":
+        return _moon_compose_from_prose(arguments, pg_conn)
+    elif name == "moon_mutate_field":
+        return _moon_mutate_field(arguments, pg_conn, selection_context)
+    elif name == "moon_suggest_next":
+        return _moon_suggest_next(arguments, pg_conn, selection_context)
+    elif name == "moon_launch":
+        return _moon_launch(arguments, pg_conn, selection_context)
     raise ValueError(f"Unknown tool: {name}")
+
+
+# ---------------------------------------------------------------------------
+# Moon graph authoring tool implementations — gateway-dispatched
+# ---------------------------------------------------------------------------
+
+def _moon_error(message: str, *, action: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"message": message, "action": action}
+    if details:
+        payload["details"] = details
+    return {"type": "error", "data": payload, "selectable": False, "summary": message}
+
+
+def _moon_status_summary(action: str, payload: dict[str, Any]) -> str:
+    """Render a compact JSON-string summary the LLM can reason about.
+
+    The chat orchestrator passes only ``summary`` back to the model, so
+    rich graph state has to live in the summary string. Use a single-line
+    JSON form that keeps token cost down while preserving every id /
+    route / status field the LLM needs to plan the next edit.
+    """
+    return f"{action}: " + json.dumps(payload, default=str, separators=(",", ":"))
+
+
+_NODE_FIELD_KEEP = {
+    "node_id", "id", "title", "summary", "route", "kind", "status",
+    "agent_slug", "capability_slug",
+}
+_NODE_DETAIL_KEEP = {
+    "trigger", "integration_args", "prompt", "required_inputs", "outputs",
+    "handoff_target", "binding_ids", "issue_ids",
+}
+
+
+def _compact_node(node: dict[str, Any]) -> dict[str, Any]:
+    out = {k: node[k] for k in _NODE_FIELD_KEEP if k in node and node[k] not in (None, "", [], {})}
+    for key in _NODE_DETAIL_KEEP:
+        value = node.get(key)
+        if value not in (None, "", [], {}):
+            out[key] = value
+    return out
+
+
+def _compact_edge(edge: dict[str, Any]) -> dict[str, Any]:
+    keep = {
+        "edge_id", "id", "source", "target", "from_node_id", "to_node_id",
+        "release", "gate_family", "condition", "branch_label",
+    }
+    return {k: edge[k] for k in keep if k in edge and edge[k] is not None}
+
+
+def _extract_outcome(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in ("outcome", "outcome_contract"):
+        candidate = payload.get(key)
+        if isinstance(candidate, dict) and candidate:
+            return {k: candidate[k] for k in ("outcome_goal", "verify_command") if k in candidate}
+    definition = payload.get("definition")
+    if isinstance(definition, dict):
+        return {
+            k: definition[k]
+            for k in ("outcome_goal", "verify_command", "objective", "phase")
+            if k in definition and definition[k] not in (None, "")
+        }
+    return {}
+
+
+def _compact_build_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    workflow_meta = payload.get("workflow") if isinstance(payload.get("workflow"), dict) else {}
+    workflow_id = workflow_meta.get("id") or payload.get("workflow_id") or payload.get("id")
+    name = workflow_meta.get("name") or payload.get("name")
+    build_graph = payload.get("build_graph") if isinstance(payload.get("build_graph"), dict) else {}
+    nodes = build_graph.get("nodes") if isinstance(build_graph.get("nodes"), list) else []
+    edges = build_graph.get("edges") if isinstance(build_graph.get("edges"), list) else []
+    issues = (
+        payload.get("build_issues")
+        or payload.get("build_blockers")
+        or payload.get("planning_notes")
+        or payload.get("issues")
+        or []
+    )
+    outcome = _extract_outcome(payload)
+
+    compact: dict[str, Any] = {
+        "workflow_id": workflow_id,
+        "name": name,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+    }
+    if nodes:
+        compact["nodes"] = [_compact_node(n) for n in nodes if isinstance(n, dict)][:30]
+    if edges:
+        compact["edges"] = [_compact_edge(e) for e in edges if isinstance(e, dict)][:30]
+    if outcome:
+        compact["outcome"] = outcome
+    if isinstance(issues, list) and issues:
+        compact["issues_top3"] = [issues[i] for i in range(min(3, len(issues)))]
+    return compact
+
+
+def _resolve_workflow_id(
+    args: dict[str, Any],
+    selection_context: list[dict[str, Any]] | None,
+) -> tuple[str, bool]:
+    """Pick workflow_id from args first, then the moon_context fallback.
+
+    Returns ``(workflow_id, came_from_context)``. The boolean lets handlers
+    surface context-defaulting in the summary so the LLM (and the user
+    reading the chat) can see WHY a tool targeted a specific workflow.
+    """
+    explicit = str(args.get("workflow_id") or "").strip()
+    if explicit:
+        return explicit, False
+    moon_ctx = _extract_moon_context(selection_context)
+    if moon_ctx:
+        ctx_id = str(moon_ctx.get("workflow_id") or "").strip()
+        if ctx_id:
+            return ctx_id, True
+    return "", False
+
+
+def _moon_get_build(
+    args: dict[str, Any],
+    pg_conn: Any,
+    selection_context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    workflow_id, from_context = _resolve_workflow_id(args, selection_context)
+    if not workflow_id:
+        return _moon_error(
+            "workflow_id is required (no active Moon workflow in selection context)",
+            action="moon_get_build",
+        )
+    try:
+        result = _dispatch_op(pg_conn, "workflow_build_get", {"workflow_id": workflow_id})
+    except Exception as exc:
+        return _moon_error(f"moon_get_build failed: {exc}", action="moon_get_build")
+    payload = result if isinstance(result, dict) else {"raw": result}
+    compact = _compact_build_payload(payload)
+    if from_context:
+        compact["targeted_via"] = "moon_context"
+    return {
+        "type": "status",
+        "data": {"status": "moon_build_loaded", **compact, "full_payload": payload},
+        "selectable": False,
+        "summary": _moon_status_summary("moon_get_build", compact),
+    }
+
+
+def _moon_compose_from_prose(args: dict[str, Any], pg_conn: Any) -> dict[str, Any]:
+    intent = str(args.get("intent") or "").strip()
+    if not intent:
+        return _moon_error("intent is required", action="moon_compose_from_prose")
+    payload: dict[str, Any] = {"intent": intent}
+    for key in ("plan_name", "why"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            payload[key] = value.strip()
+    raw_concurrency = args.get("concurrency")
+    if raw_concurrency is not None:
+        try:
+            payload["concurrency"] = max(1, min(100, int(raw_concurrency)))
+        except (TypeError, ValueError):
+            return _moon_error("concurrency must be an integer 1-100", action="moon_compose_from_prose")
+    try:
+        result = _dispatch_op(pg_conn, "compose_plan_via_llm", payload)
+    except Exception as exc:
+        return _moon_error(f"compose_plan_via_llm failed: {exc}", action="moon_compose_from_prose")
+    body = result if isinstance(result, dict) else {"raw": result}
+    plan = body.get("plan") if isinstance(body.get("plan"), dict) else body
+    nodes = []
+    if isinstance(plan, dict):
+        for key in ("nodes", "packets", "jobs"):
+            value = plan.get(key)
+            if isinstance(value, list):
+                nodes = value
+                break
+    compact = {
+        "plan_name": body.get("plan_name") or (plan.get("name") if isinstance(plan, dict) else None),
+        "node_count": len(nodes),
+        "node_titles": [str(n.get("title") or n.get("label") or n.get("id") or "") for n in nodes if isinstance(n, dict)][:20],
+        "workflow_id": body.get("workflow_id"),
+    }
+    return {
+        "type": "status",
+        "data": {"status": "moon_composed", **compact, "full_result": body},
+        "selectable": False,
+        "summary": _moon_status_summary("moon_compose_from_prose", compact),
+    }
+
+
+def _moon_mutate_field(
+    args: dict[str, Any],
+    pg_conn: Any,
+    selection_context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    workflow_id, from_context = _resolve_workflow_id(args, selection_context)
+    subpath = str(args.get("subpath") or "").strip()
+    body = args.get("body")
+    if not workflow_id:
+        return _moon_error(
+            "workflow_id is required (no active Moon workflow in selection context)",
+            action="moon_mutate_field",
+        )
+    if not subpath:
+        return _moon_error("subpath is required", action="moon_mutate_field")
+    if not isinstance(body, dict):
+        return _moon_error("body must be an object", action="moon_mutate_field")
+    try:
+        result = _dispatch_op(
+            pg_conn,
+            "workflow_build_mutate",
+            {"workflow_id": workflow_id, "subpath": subpath, "body": body},
+        )
+    except Exception as exc:
+        return _moon_error(f"workflow_build_mutate failed: {exc}", action="moon_mutate_field")
+    payload = result if isinstance(result, dict) else {"raw": result}
+    compact = _compact_build_payload(payload)
+    compact["mutated_subpath"] = subpath
+    if from_context:
+        compact["targeted_via"] = "moon_context"
+    return {
+        "type": "status",
+        "data": {"status": "moon_mutated", **compact, "full_payload": payload},
+        "selectable": False,
+        "summary": _moon_status_summary("moon_mutate_field", compact),
+    }
+
+
+def _moon_suggest_next(
+    args: dict[str, Any],
+    pg_conn: Any,
+    selection_context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    workflow_id, from_context = _resolve_workflow_id(args, selection_context)
+    if not workflow_id:
+        return _moon_error(
+            "workflow_id is required (no active Moon workflow in selection context)",
+            action="moon_suggest_next",
+        )
+    try:
+        build_result = _dispatch_op(pg_conn, "workflow_build_get", {"workflow_id": workflow_id})
+    except Exception as exc:
+        return _moon_error(f"loading build for suggest_next failed: {exc}", action="moon_suggest_next")
+    build_graph = build_result.get("build_graph") if isinstance(build_result, dict) else None
+    body: dict[str, Any] = {"build_graph": build_graph or {}}
+    raw_node_id = args.get("node_id")
+    node_id = str(raw_node_id).strip() if isinstance(raw_node_id, str) else ""
+    if not node_id:
+        moon_ctx = _extract_moon_context(selection_context) or {}
+        ctx_node = str(moon_ctx.get("selected_node_id") or "").strip()
+        if ctx_node:
+            node_id = ctx_node
+    if node_id:
+        body["node_id"] = node_id
+    try:
+        result = _dispatch_op(
+            pg_conn,
+            "workflow_build_suggest_next",
+            {"workflow_id": workflow_id, "body": body},
+        )
+    except Exception as exc:
+        return _moon_error(f"workflow_build_suggest_next failed: {exc}", action="moon_suggest_next")
+    payload = result if isinstance(result, dict) else {"raw": result}
+    likely = payload.get("likely_next_steps") or []
+    possible = payload.get("possible_next_steps") or []
+    blocked = payload.get("blocked_next_steps") or []
+    compact = {
+        "likely_count": len(likely),
+        "possible_count": len(possible),
+        "blocked_count": len(blocked),
+        "likely_titles": [str(c.get("title") or c.get("capability_slug") or "") for c in likely if isinstance(c, dict)][:5],
+    }
+    if from_context:
+        compact["targeted_via"] = "moon_context"
+    if node_id:
+        compact["anchor_node_id"] = node_id
+    return {
+        "type": "status",
+        "data": {"status": "moon_suggest_next", **compact, "full_payload": payload},
+        "selectable": False,
+        "summary": _moon_status_summary("moon_suggest_next", compact),
+    }
+
+
+def _moon_launch(
+    args: dict[str, Any],
+    pg_conn: Any,
+    selection_context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    workflow_id, from_context = _resolve_workflow_id(args, selection_context)
+    if not workflow_id:
+        return _moon_error(
+            "workflow_id is required (no active Moon workflow in selection context)",
+            action="moon_launch",
+        )
+    payload: dict[str, Any] = {"workflow_id": workflow_id}
+    for key in ("approved_by", "plan_name"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            payload[key] = value.strip()
+    try:
+        result = _dispatch_op(pg_conn, "launch_plan", payload)
+    except Exception as exc:
+        return _moon_error(f"launch_plan failed: {exc}", action="moon_launch")
+    body = result if isinstance(result, dict) else {"raw": result}
+    run_id = body.get("run_id") or body.get("workflow_run_id")
+    compact = {
+        "workflow_id": workflow_id,
+        "run_id": run_id,
+        "status": body.get("status") or body.get("execution_status"),
+    }
+    if from_context:
+        compact["targeted_via"] = "moon_context"
+    return {
+        "type": "status",
+        "data": {"status": "moon_launched", **compact, "full_payload": body},
+        "selectable": False,
+        "summary": _moon_status_summary("moon_launch", compact),
+    }
 
 
 # ---------------------------------------------------------------------------

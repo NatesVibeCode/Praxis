@@ -17,6 +17,7 @@ from types import MappingProxyType
 from typing import Any
 
 from registry.domain import ContextBundle, RuntimeProfile, WorkspaceIdentity
+from runtime.crypto_authority import canonical_digest_hex
 from registry.context_bundle_repository import (
     ContextBundleAnchorRecord,
     ContextBundleRepositoryError,
@@ -480,13 +481,10 @@ class ContextCompiler:
             },
             "workflow_id": workflow_id,
         }
-        payload_json = json.dumps(
+        bundle_hash = canonical_digest_hex(
             canonical_payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
+            purpose="execution_boundary.authority_payload",
         )
-        bundle_hash = sha256(payload_json.encode("utf-8")).hexdigest()
         return ContextBundle(
             context_bundle_id=ContextCompiler._bundle_id_for_run(run_id=run_id),
             workflow_id=workflow_id,

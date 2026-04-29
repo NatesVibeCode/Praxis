@@ -2102,12 +2102,25 @@ def tool_praxis_plan_lifecycle(params: dict) -> dict:
 def tool_praxis_compose_and_launch(params: dict) -> dict:
     """End-to-end: prose intent → compose → approve → launch in one call.
 
+    Kickoff-first by default (wait=False): spawns the compose+launch chain on a
+    daemon thread, returns immediately with a correlation_id for trace lookup.
+    The compose pipeline (LLM synthesis + N parallel fork-out authors +
+    validation + approve + launch) runs without blocking the FastAPI request
+    handler — required for swarm-scale concurrent compose calls.
+
+    Pass ``wait=True`` for inline result. Synchronous calls under MCP often
+    exceed the 60s tool-call timeout because the LLM fan-out alone is 8-15s.
+
     For trusted automation (CI, scripts, experienced operators). Fails
     closed by default if any job has unresolved routes or unbound pills.
     approved_by is required — no anonymous automation. Approval is
     hash-bound to the exact spec_dict so tampering between compose and
     submit still fails closed.
     """
+    import threading
+    import time
+    import uuid
+
     intent = params.get("intent")
     if not isinstance(intent, str) or not intent.strip():
         return {
@@ -2123,15 +2136,6 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
             "reason_code": "approved_by.invalid",
         }
 
-    try:
-        pg_conn = _subs.get_pg_conn()
-    except Exception as exc:
-        return {
-            "ok": False,
-            "error": f"{type(exc).__name__}: {exc}",
-            "reason_code": "postgres.authority.unavailable",
-        }
-
     refuse_unresolved_routes = params.get("refuse_unresolved_routes")
     if refuse_unresolved_routes is None:
         refuse_unresolved_routes = True
@@ -2139,70 +2143,135 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
     if refuse_unbound_pills is None:
         refuse_unbound_pills = True
 
-    try:
+    wait = bool(params.get("wait", False))
+
+    runtime_kwargs: dict[str, Any] = {
+        "approved_by": approved_by,
+        "approval_note": params.get("approval_note"),
+        "plan_name": params.get("plan_name"),
+        "why": params.get("why"),
+        "workdir": params.get("workdir"),
+        "default_write_scope": params.get("default_write_scope"),
+        "default_stage": str(params.get("default_stage") or "build"),
+        "refuse_unresolved_routes": bool(refuse_unresolved_routes),
+        "refuse_unbound_pills": bool(refuse_unbound_pills),
+    }
+
+    def _invoke_synchronous(conn: Any) -> dict[str, Any]:
         from runtime.intent_composition import (
             ComposeAndLaunchBlocked,
             compose_and_launch,
         )
-        from runtime.intent_decomposition import DecompositionRequiresLLMError
         from runtime.spec_compiler import (
             ApprovalHashMismatchError,
             LaunchSubmitFailedError,
         )
 
-        receipt = compose_and_launch(
-            intent,
-            conn=pg_conn,
-            approved_by=approved_by,
-            approval_note=params.get("approval_note"),
-            plan_name=params.get("plan_name"),
-            why=params.get("why"),
-            workdir=params.get("workdir"),
-            allow_single_step=bool(params.get("allow_single_step")),
-            write_scope_per_step=params.get("write_scope_per_step"),
-            default_write_scope=params.get("default_write_scope"),
-            default_stage=str(params.get("default_stage") or "build"),
-            refuse_unresolved_routes=bool(refuse_unresolved_routes),
-            refuse_unbound_pills=bool(refuse_unbound_pills),
-        )
-    except DecompositionRequiresLLMError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "reason_code": "decomposition.requires_llm",
-        }
-    except ComposeAndLaunchBlocked as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "reason_code": "compose_and_launch.blocked",
-            "blocked_reasons": exc.reasons,
-        }
-    except ApprovalHashMismatchError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "reason_code": "approval.hash_mismatch",
-        }
-    except LaunchSubmitFailedError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "reason_code": "launch.submit_failed",
-            "submit_status": exc.status,
-            "submit_error_code": exc.error_code,
-            "submit_error_detail": exc.error_detail,
-            "spec_name": exc.spec_name,
-            "submit_result": exc.submit_result,
-        }
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc), "reason_code": "compose.invalid"}
-    except Exception as exc:
-        return _structured_runtime_error(exc, action="compose_and_launch")
+        try:
+            receipt = compose_and_launch(intent, conn=conn, **runtime_kwargs)
+        except ComposeAndLaunchBlocked as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "reason_code": "compose_and_launch.blocked",
+                "blocked_reasons": exc.reasons,
+            }
+        except ApprovalHashMismatchError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "reason_code": "approval.hash_mismatch",
+            }
+        except LaunchSubmitFailedError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "reason_code": "launch.submit_failed",
+                "submit_status": exc.status,
+                "submit_error_code": exc.error_code,
+                "submit_error_detail": exc.error_detail,
+                "spec_name": exc.spec_name,
+                "submit_result": exc.submit_result,
+            }
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "reason_code": "compose.invalid"}
+        except Exception as exc:
+            return _structured_runtime_error(exc, action="compose_and_launch")
 
-    payload = receipt.to_dict()
-    payload["ok"] = True
-    return payload
+        payload = receipt.to_dict()
+        payload["ok"] = True
+        return payload
+
+    if wait:
+        try:
+            pg_conn = _subs.get_pg_conn()
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "reason_code": "postgres.authority.unavailable",
+            }
+        return _invoke_synchronous(pg_conn)
+
+    # Kickoff-first path: spawn a daemon thread for the compose+launch chain.
+    # Mirrors tool_praxis_compose_plan_via_llm's kickoff pattern. The thread
+    # uses its own subsystems (own DB conn) so it's safe across thread
+    # boundaries. compose_and_launch eventually calls launch_approved which
+    # writes its own gateway receipt — the run_id surfaces through receipts
+    # under operation_ref='launch-plan' and 'compose-plan-via-llm'.
+    from runtime.operation_catalog_gateway import (
+        CURRENT_CALLER_CONTEXT,
+        CallerContext,
+        spawn_threaded,
+    )
+    kickoff_id = f"compose_launch_kickoff_{uuid.uuid4().hex[:12]}"
+    kickoff_started_at = time.time()
+    kickoff_correlation_id = str(uuid.uuid4())
+    _ctx_token = CURRENT_CALLER_CONTEXT.set(
+        CallerContext(cause_receipt_id=None, correlation_id=kickoff_correlation_id)
+    )
+
+    def _run_compose_launch_in_background() -> None:
+        try:
+            local_subs = _subs.__class__()
+        except Exception:  # noqa: BLE001
+            return
+        try:
+            local_conn = local_subs.get_pg_conn()
+        except Exception:  # noqa: BLE001
+            return
+        try:
+            _invoke_synchronous(local_conn)
+        except Exception:  # noqa: BLE001
+            # Failures surface through the receipts written by compose_and_launch's
+            # nested gateway calls. Nothing to log here since the caller already
+            # got back the kickoff handle.
+            pass
+
+    spawn_threaded(
+        _run_compose_launch_in_background,
+        name=f"compose_launch_kickoff:{kickoff_id}",
+    )
+    CURRENT_CALLER_CONTEXT.reset(_ctx_token)
+
+    return {
+        "ok": True,
+        "kickoff": True,
+        "kickoff_id": kickoff_id,
+        "kickoff_started_at": kickoff_started_at,
+        "correlation_id": kickoff_correlation_id,
+        "intent": intent,
+        "next_step": (
+            "compose+launch is running in the background. Walk the trace: "
+            f"praxis_trace(correlation_id='{kickoff_correlation_id}'). "
+            "Run-id appears in authority_operation_receipts under "
+            "operation_ref='launch-plan' once compose finishes."
+        ),
+        "wait_for_synchronous": (
+            "Pass wait=true to block until compose+launch returns inline. "
+            "MCP tool-call timeouts may fire; kickoff-first is recommended for swarms."
+        ),
+    }
 
 
 def tool_praxis_compose_plan(params: dict) -> dict:

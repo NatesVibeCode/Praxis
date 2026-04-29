@@ -309,18 +309,32 @@ def test_mcp_operator_ideas_uses_operation_catalog_gateway(monkeypatch) -> None:
     assert captured["payload"]["idea_ids"] == []
 
 
-def test_mcp_operator_roadmap_view_uses_operation_catalog_gateway(monkeypatch) -> None:
+def test_mcp_operator_roadmap_view_dispatches_backlog_when_no_root(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class _Subs:
-        def get_pg_conn(self):
-            class _Conn:
-                def execute(self, *_args, **_kwargs):
-                    return [{"roadmap_item_id": "roadmap_item.root"}]
+    monkeypatch.setattr(operator, "_subs", object())
 
-            return _Conn()
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"kind": "roadmap_backlog", "items": []}
 
-    monkeypatch.setattr(operator, "_subs", _Subs())
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_roadmap_view(
+        {"priority": "p1", "limit": 25, "roots_only": True}
+    )
+
+    assert result == {"kind": "roadmap_backlog", "items": []}
+    assert captured["operation_name"] == "operator.roadmap_backlog"
+    assert captured["payload"] == {"limit": 25, "priority": "p1", "roots_only": True}
+
+
+def test_mcp_operator_roadmap_view_dispatches_tree_when_root_named(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
 
     def _execute(subsystems, *, operation_name: str, payload):
         captured["subsystems"] = subsystems
@@ -330,7 +344,9 @@ def test_mcp_operator_roadmap_view_uses_operation_catalog_gateway(monkeypatch) -
 
     monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
-    result = operator.tool_praxis_operator_roadmap_view({})
+    result = operator.tool_praxis_operator_roadmap_view(
+        {"root_roadmap_item_id": "roadmap_item.root"}
+    )
 
     assert result == {"rendered_markdown": "# root"}
     assert captured["operation_name"] == "operator.roadmap_tree"

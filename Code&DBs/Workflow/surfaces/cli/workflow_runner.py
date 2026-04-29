@@ -760,7 +760,7 @@ class WorkflowRunner:
         touches_infra = any(
             "config/" in p or "launchd" in p or "scripts/" in p or "plist" in p
             for p in all_paths
-        ) or any(kw in prompt.lower() for kw in ("service", "launchd", "praxis-ctl", "praxis", "postgres start", "restart"))
+        ) or any(kw in prompt.lower() for kw in ("service", "launchd", "praxis", "postgres start", "restart"))
 
         lines = [
             "--- PLATFORM CONTEXT ---",
@@ -819,7 +819,6 @@ class WorkflowRunner:
             lines.append("    - api-server      (port 8420)")
             lines.append("    - workflow-worker (event-bus workflow worker)")
             lines.append("    - scheduler       (60s tick loop)")
-            lines.append("  praxis-ctl remains available as a compatibility alias.")
             lines.append("")
 
         # Scope boundaries
