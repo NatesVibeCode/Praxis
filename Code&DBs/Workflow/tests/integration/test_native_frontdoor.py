@@ -183,7 +183,7 @@ class _FakeConnection:
                 "started_at": None,
                 "finished_at": None,
                 "submission_id": "sub-1",
-                "submission_result_kind": "code_change",
+                "submission_result_kind": "code_change_candidate",
                 "submission_summary": "sealed worker output",
                 "submission_comparison_status": "matched",
                 "submission_operation_set": [{"path": "runtime/workflow/submission_capture.py", "action": "update"}],
@@ -433,7 +433,7 @@ def test_native_frontdoor_stays_repo_local_and_fails_closed_without_native_insta
     assert status_payload["run"]["admitted_definition_hash"] == "sha256:1111222233334444"
     assert status_payload["run"]["jobs"][0]["submission"] == {
         "submission_id": "sub-1",
-        "result_kind": "code_change",
+        "result_kind": "code_change_candidate",
         "summary": "sealed worker output",
         "comparison_status": "matched",
         "measured_summary": {"create": 0, "update": 1, "delete": 0, "rename": 0, "total": 1},

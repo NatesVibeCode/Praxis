@@ -54,7 +54,7 @@ def test_run_status_payload_includes_submission_summary(monkeypatch) -> None:
                     "created_at": now,
                     "submission": {
                         "submission_id": "sub-1",
-                        "result_kind": "code_change",
+                        "result_kind": "code_change_candidate",
                         "summary": "sealed result",
                         "measured_summary": {"create": 0, "update": 1, "delete": 0, "rename": 0, "total": 1},
                         "comparison_status": "matched",
@@ -71,7 +71,7 @@ def test_run_status_payload_includes_submission_summary(monkeypatch) -> None:
 
     assert payload["jobs"][0]["submission"] == {
         "submission_id": "sub-1",
-        "result_kind": "code_change",
+        "result_kind": "code_change_candidate",
         "summary": "sealed result",
         "measured_summary": {"create": 0, "update": 1, "delete": 0, "rename": 0, "total": 1},
         "comparison_status": "matched",

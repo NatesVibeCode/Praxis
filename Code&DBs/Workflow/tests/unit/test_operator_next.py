@@ -76,7 +76,7 @@ def test_manifest_audit_fails_closed_on_scope_and_verifier_gaps():
             "jobs": [
                 {
                     "label": "Execute packet",
-                    "result_kind": "code_change",
+                    "result_kind": "code_change_candidate",
                     "primary_paths": ["artifacts/workflow/packet/EXECUTION.md"],
                     "verify_refs": ["verifier.packet.execution_file_exists"],
                     "allowed_tools": ["praxis_search"],
@@ -101,7 +101,7 @@ def test_manifest_audit_accepts_canonical_verify_refs_authority():
             "jobs": [
                 {
                     "label": "Execute packet",
-                    "result_kind": "code_change",
+                    "result_kind": "code_change_candidate",
                     "primary_paths": ["artifacts/workflow/packet/EXECUTION.md"],
                     "write_scope": ["artifacts/workflow/packet/EXECUTION.md"],
                     "verify_refs": ["verify.generated.execute_packet"],

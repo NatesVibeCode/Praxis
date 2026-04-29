@@ -939,6 +939,36 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Refine a manifest", {"manifest_id": "manifest_abc123", "feedback": "Add weekly trends and remove the status grid"}),
         ],
     ),
+    "praxis_moon": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias="moon",
+        when_to_use=(
+            "Read, compose, suggest, mutate, or launch Moon workflow graphs through "
+            "the same CQRS-backed build authority used by the in-app Moon surface."
+        ),
+        when_not_to_use=(
+            "Do not use it for unrelated roadmap, bug, provider-routing, or direct "
+            "database work. Read the graph before mutating fields."
+        ),
+        risks={
+            "default": "write",
+            "actions": {
+                "get_build": "read",
+                "compose": "write",
+                "suggest_next": "read",
+                "mutate_field": "write",
+                "launch": "launch",
+            },
+        },
+        examples=[
+            _example("Read a Moon graph", {"action": "get_build", "workflow_id": "wf_abc"}),
+            _example(
+                "Compose a Moon graph",
+                {"action": "compose", "intent": "Search GitHub issues and draft a summary"},
+            ),
+        ],
+    ),
     "praxis_operator_closeout": _tool(
         surface="operator",
         tier="advanced",

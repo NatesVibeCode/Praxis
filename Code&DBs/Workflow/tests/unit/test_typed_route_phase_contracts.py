@@ -30,7 +30,7 @@ from runtime.workflow_type_contracts import route_type_contract
 
 def test_route_type_contract_resolves_auto_build():
     contract = route_type_contract("auto/build", title="Implement the workflow")
-    assert "code_change" in contract["produces"]
+    assert "code_change_candidate" in contract["produces"]
     assert "diff" in contract["produces"]
     assert "execution_receipt" in contract["produces"]
     # build accepts upstream context types
@@ -41,7 +41,7 @@ def test_route_type_contract_resolves_auto_build():
 def test_route_type_contract_resolves_auto_review():
     contract = route_type_contract("auto/review", title="Review before acceptance")
     assert contract["produces"] == ["review_result"]
-    assert "code_change" in contract["consumes_any"]
+    assert "code_change_candidate" in contract["consumes_any"]
     assert "diff" in contract["consumes_any"]
 
 
@@ -51,7 +51,7 @@ def test_route_type_contract_resolves_research_via_title():
     )
     # Title-based inference: the "research" token should win over a generic build
     # search for a research-titled phase. The route+text both contribute to the
-    # searchable string, so research/research_findings beats build/code_change.
+    # searchable string, so research/research_findings beats the build candidate family.
     assert "research_findings" in contract["produces"]
     assert "evidence_pack" in contract["produces"]
 
@@ -82,7 +82,7 @@ def test_make_execution_phase_carries_typed_contract_for_auto_build():
     assert "consumes" in phase
     assert "consumes_any" in phase
     assert "produces" in phase
-    assert "code_change" in phase["produces"]
+    assert "code_change_candidate" in phase["produces"]
     assert "execution_receipt" in phase["produces"]
     # Legacy human-string outputs stays for back-compat readers
     assert phase["outputs"] == ["primary deliverable"]
@@ -104,7 +104,7 @@ def test_make_execution_phase_carries_typed_contract_for_auto_review():
         outputs=["review findings"],
     )
     assert phase["produces"] == ["review_result"]
-    assert "code_change" in phase["consumes_any"]
+    assert "code_change_candidate" in phase["consumes_any"]
 
 
 def test_make_execution_phase_unknown_route_still_emits_typed_fields():

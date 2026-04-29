@@ -32,7 +32,7 @@ def test_submit_submission_rejects_phantom_ship(monkeypatch) -> None:
             job_label="job1",
             summary="Did some work",
             primary_paths=["src/main.py"],
-            result_kind="code_change",
+            result_kind="artifact_bundle",
             conn=mock_conn,
         )
         
@@ -67,7 +67,7 @@ def test_submit_submission_defers_sandbox_phantom_until_auto_seal(monkeypatch) -
         job_label="job1",
         summary="Did some work",
         primary_paths=["src/main.py"],
-        result_kind="code_change",
+        result_kind="artifact_bundle",
         conn=mock_conn,
     )
 

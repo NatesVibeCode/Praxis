@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+import subprocess
 from typing import Any
 
 import pytest
@@ -115,6 +117,63 @@ def test_auto_apply_candidate_requires_routing_record() -> None:
         )
 
     assert exc_info.value.reason_code == "code_change_candidate.routing_record_missing"
+
+
+def _git(repo_root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return completed.stdout.strip()
+
+
+def _init_git_repo(repo_root: Path) -> None:
+    _git(repo_root, "init")
+    _git(repo_root, "config", "user.name", "Test User")
+    _git(repo_root, "config", "user.email", "test@example.com")
+    (repo_root / "app.py").write_text("value = 1\n", encoding="utf-8")
+    _git(repo_root, "add", "app.py")
+    _git(repo_root, "commit", "-m", "initial")
+
+
+def test_commit_live_apply_returns_real_commit_ref(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    base_head = _git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / "app.py").write_text("value = 2\n", encoding="utf-8")
+
+    canonical_commit_ref = candidate_materialization._commit_live_apply(
+        tmp_path,
+        candidate_id="11111111-1111-1111-1111-111111111111",
+        intended_files=["app.py"],
+        materialized_by="human:nate",
+    )
+
+    assert canonical_commit_ref != base_head
+    assert canonical_commit_ref == _git(tmp_path, "rev-parse", "HEAD")
+    assert _git(tmp_path, "log", "-1", "--format=%s").startswith(
+        "Materialize code-change candidate",
+    )
+    assert "candidate_patch:" not in canonical_commit_ref
+
+
+def test_commit_live_apply_rejects_ambient_staged_changes(tmp_path: Path) -> None:
+    _init_git_repo(tmp_path)
+    (tmp_path / "ambient.txt").write_text("do not include\n", encoding="utf-8")
+    _git(tmp_path, "add", "ambient.txt")
+    (tmp_path / "app.py").write_text("value = 2\n", encoding="utf-8")
+
+    with pytest.raises(candidate_materialization.CandidateMaterializationError) as exc_info:
+        candidate_materialization._commit_live_apply(
+            tmp_path,
+            candidate_id="11111111-1111-1111-1111-111111111111",
+            intended_files=["app.py"],
+            materialized_by="human:nate",
+        )
+
+    assert exc_info.value.reason_code == "code_change_candidate.index_dirty"
+    assert exc_info.value.details["staged_paths"] == ["ambient.txt"]
 
 
 @dataclass

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from io import StringIO
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +11,27 @@ os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:
 
 from surfaces.cli.commands import authority as authority_commands
 from surfaces.cli.main import main as workflow_cli_main
+
+
+def _write_fake_workflow_tree(tmp_path: Path, *, filenames: list[str]) -> Path:
+    workflow_root = tmp_path / "Code&DBs" / "Workflow"
+    migration_root = tmp_path / "Code&DBs" / "Databases" / "migrations" / "workflow"
+    authority_root = workflow_root / "system_authority"
+    migration_root.mkdir(parents=True)
+    authority_root.mkdir(parents=True)
+    for name in filenames:
+        (migration_root / name).write_text("-- test\n", encoding="utf-8")
+    spec = {
+        "canonical_manifest": filenames,
+        "policy_buckets": {"canonical": filenames, "bootstrap_only": [], "deprecated": [], "dead": []},
+        "expected_objects": {name: [] for name in filenames},
+        "tie_break_order": {},
+    }
+    (authority_root / "workflow_migration_authority.json").write_text(
+        json.dumps(spec, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return workflow_root
 
 
 def test_top_level_help_mentions_authority_frontdoors() -> None:
@@ -109,6 +131,33 @@ def test_schema_next_migration_renders_auto_renumber_notice(monkeypatch: pytest.
     assert "Automatically renumbered unmanaged duplicate migration prefixes" in rendered
     assert "338_conflict.sql -> 339_conflict.sql" in rendered
     assert "proposed_filename=340_next_policy.sql" in rendered
+
+
+def test_schema_next_migration_payload_auto_repairs_duplicate_prefixes(tmp_path: Path) -> None:
+    workflow_root = _write_fake_workflow_tree(
+        tmp_path,
+        filenames=["100_alpha.sql", "100_beta.sql", "101_next.sql"],
+    )
+
+    payload = authority_commands._schema_next_migration_payload(
+        slug="operator notice proof",
+        workflow_root=workflow_root,
+    )
+
+    assert payload["proposed_filename"] == "103_operator_notice_proof.sql"
+    assert payload["renumber_applied"] is True
+    assert payload["renumber_actions"] == [
+        {
+            "old_filename": "100_beta.sql",
+            "new_filename": "102_beta.sql",
+            "reason": "unmanaged duplicate prefix 100; kept 100_alpha.sql",
+        }
+    ]
+    assert payload["operator_messages"] == [
+        "Automatically renumbered unmanaged duplicate migration prefixes before "
+        "allocating the next migration: 100_beta.sql -> 102_beta.sql."
+    ]
+    assert payload["unmanaged_duplicate_prefixes"] == {}
 
 
 def test_registry_list_delegates_to_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> None:

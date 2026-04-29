@@ -11,7 +11,7 @@ Given a `GovernanceViolation`, produce two ordered ranked plans:
 Every command is a dict with:
 
     kind        tool identifier — one of {mcp_tool_call, operator_decision,
-                projector_rule, quality_rule, heartbeat_config, code_change}
+                projector_rule, quality_rule, heartbeat_config, code_change_candidate}
     summary     single-line explanation shown to the operator
     command     shell-ready `praxis workflow tools call ...` string when
                 possible, or a JSON-serializable instruction otherwise
@@ -286,7 +286,7 @@ def _owner_permanent(
         )
         explain += _discover_explain_suffix(discover_paths)
         out.append(RemediationAction(
-            kind="code_change",
+            kind="code_change_candidate",
             summary=(
                 f"Add namespace prefix '{ns}_' to the stewardship "
                 "namespace-owner projector"
@@ -446,7 +446,7 @@ def _rule_permanent(
     upstream_explain += _discover_explain_suffix(discover_paths)
     return [
         RemediationAction(
-            kind="code_change",
+            kind="code_change_candidate",
             summary=(
                 "Fix the upstream producer so the rule passes on every "
                 "run"

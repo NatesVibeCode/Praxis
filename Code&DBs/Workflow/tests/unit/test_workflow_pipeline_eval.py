@@ -67,9 +67,9 @@ def test_pipeline_eval_blocks_scratch_scope_for_durable_artifact() -> None:
                 label="Plan packet",
                 prompt=prompt,
                 write_scope=["scratch/workflow_eval"],
-                result_kind="code_change",
-                submit_tool="praxis_submit_code_change",
-                mcp_tools=["praxis_query", "praxis_submit_code_change", "praxis_get_submission"],
+                result_kind="code_change_candidate",
+                submit_tool="praxis_submit_code_change_candidate",
+                mcp_tools=["praxis_query", "praxis_submit_code_change_candidate", "praxis_get_submission"],
             )
         ],
     }

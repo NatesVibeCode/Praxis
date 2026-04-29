@@ -85,7 +85,7 @@ _ROUTE_CONTRACTS: tuple[tuple[tuple[str, ...], dict[str, tuple[str, ...]]], ...]
         {
             "consumes": (),
             "consumes_any": (
-                "code_change",
+                "code_change_candidate",
                 "diff",
                 "draft",
                 "analysis_result",
@@ -110,7 +110,7 @@ _ROUTE_CONTRACTS: tuple[tuple[tuple[str, ...], dict[str, tuple[str, ...]]], ...]
                 "diagnosis",
                 "review_result",
             ),
-            "produces": ("code_change", "diff", "execution_receipt"),
+            "produces": ("code_change_candidate", "diff", "execution_receipt"),
         },
     ),
     (

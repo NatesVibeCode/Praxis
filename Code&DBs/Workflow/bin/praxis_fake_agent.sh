@@ -21,7 +21,7 @@
 
 set -eu
 
-verb="${1:-submit_code_change}"
+verb="${1:-submit_artifact_bundle}"
 shift || true
 
 if [ -z "${PRAXIS_WORKFLOW_MCP_TOKEN:-}" ]; then
@@ -38,13 +38,8 @@ if ! command -v praxis >/dev/null 2>&1; then
 fi
 
 case "$verb" in
-  submit_code_change)
-    exec praxis submit_code_change \
-      --summary "fake-agent plumbing smoke" \
-      --primary-paths '[]' \
-      --result-kind code_change \
-      --notes "issued by praxis_fake_agent.sh — proves env+binary+bridge" \
-      "$@"
+  submit_code_change_candidate)
+    exec praxis submit_code_change_candidate "$@"
     ;;
   submit_artifact_bundle)
     exec praxis submit_artifact_bundle \

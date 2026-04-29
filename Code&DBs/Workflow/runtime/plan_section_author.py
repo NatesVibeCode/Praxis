@@ -248,7 +248,7 @@ def build_shared_prefix(atoms: "SuggestedAtoms", sandbox: SectionSandbox) -> str
             "\n"
             "  • `consumes` / `produces` — start from the stage floor; you may NARROW\n"
             "    `produces` to only the types this packet actually emits (e.g. a build\n"
-            "    packet that only emits an execution_receipt should drop code_change/diff\n"
+            "    packet that only emits an execution_receipt should drop code_change_candidate/diff\n"
             "    if it doesn't really produce them); you may NOT drop a type the runtime\n"
             "    floor requires nor invent un-registered types. The downstream type-flow\n"
             "    gate JOINs producers→consumers by these arrays — over-claiming poisons\n"

@@ -74,8 +74,8 @@ def test_draft_step_node_carries_typed_contract_for_implement_step():
     draft_steps = [n for n in graph["nodes"] if n["kind"] == "draft_step"]
     assert len(draft_steps) == 1
     node = draft_steps[0]
-    # implement/build family produces code_change / diff / execution_receipt
-    assert "code_change" in node["produces"]
+    # implement/build family produces a code-change candidate plus the derived diff/receipt.
+    assert "code_change_candidate" in node["produces"]
     assert "execution_receipt" in node["produces"]
 
 
@@ -122,8 +122,8 @@ def test_draft_step_node_default_when_no_inferable_role():
         ],
     )
     node = next(n for n in graph["nodes"] if n["kind"] == "draft_step")
-    # Default route auto/build picked → produces code_change family
-    assert "code_change" in node["produces"]
+    # Default route auto/build picked -> produces the code-change candidate family.
+    assert "code_change_candidate" in node["produces"]
 
 
 def test_reference_and_narrative_nodes_dont_get_typed_contract():

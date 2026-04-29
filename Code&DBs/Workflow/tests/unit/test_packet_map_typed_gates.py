@@ -32,7 +32,7 @@ def _job(**overrides):
         "label": "step-1",
         "agent": "auto/build",
         "task_type": "build",
-        "produces": ["code_change", "execution_receipt"],
+        "produces": ["code_change_candidate", "execution_receipt"],
         "consumes": [],
         "consumes_any": ["research_findings", "input_text"],
         "write_scope": ["src/foo.py"],
@@ -46,7 +46,7 @@ def test_packet_map_entry_carries_expected_typed_gates_from_produces():
     gates = entry["expected_typed_gates"]
     assert isinstance(gates, list)
     assert len(gates) == 2
-    assert {g["type"] for g in gates} == {"code_change", "execution_receipt"}
+    assert {g["type"] for g in gates} == {"code_change_candidate", "execution_receipt"}
     for gate in gates:
         assert gate["kind"] == "typed_produce"
         assert gate["auto_satisfies_when_produced"] is True
@@ -56,7 +56,7 @@ def test_packet_map_entry_surfaces_consumes_and_produces_directly():
     entry = _build_packet_map_entry(job=_job())
     assert entry["consumes"] == []
     assert entry["consumes_any"] == ["research_findings", "input_text"]
-    assert entry["produces"] == ["code_change", "execution_receipt"]
+    assert entry["produces"] == ["code_change_candidate", "execution_receipt"]
 
 
 def test_packet_map_entry_with_no_produces_emits_empty_typed_gates():
@@ -83,7 +83,7 @@ def test_packet_map_entry_typed_gates_independent_of_verify_refs():
     assert entry["expected_gates"] == []
     assert len(entry["expected_typed_gates"]) == 2
     assert {g["type"] for g in entry["expected_typed_gates"]} == {
-        "code_change",
+        "code_change_candidate",
         "execution_receipt",
     }
 
@@ -102,6 +102,6 @@ def test_packet_map_entry_with_packet_supplies_typed_gates_from_job():
     # Typed gates come from the job, not from the packet (packet has no
     # produces field; the job is the post-compile shape that does).
     assert {g["type"] for g in entry["expected_typed_gates"]} == {
-        "code_change",
+        "code_change_candidate",
         "execution_receipt",
     }

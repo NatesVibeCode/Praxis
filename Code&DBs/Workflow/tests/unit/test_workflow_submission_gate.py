@@ -58,6 +58,8 @@ def test_submission_gate_requires_verification_after_submission_exists(
 ) -> None:
     sealed_submission = {
         "submission_id": "submission.alpha",
+        "result_kind": "artifact_bundle",
+        "changed_paths": ["artifacts/report.json"],
         "acceptance_status": "passed",
         "acceptance_report": {},
     }
@@ -155,7 +157,7 @@ def test_submission_gate_can_precheck_submission_before_verification(
         lambda *_args, **_kwargs: sealed_submission,
     )
 
-    bundle = _bundle(result_kind="code_change")
+    bundle = _bundle(result_kind="code_change_candidate")
     bundle["completion_contract"]["verification_required"] = True
     result = resolve_submission_for_job(
         _Conn(),
@@ -170,6 +172,48 @@ def test_submission_gate_can_precheck_submission_before_verification(
         verification_artifact_refs=[],
         enforce_verification_contract=False,
         enforce_acceptance_contract=False,
+    )
+
+    assert result.submission_state == sealed_submission
+    assert result.final_status == "succeeded"
+    assert result.final_error_code == ""
+
+
+def test_submission_gate_defers_candidate_verification_to_materialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sealed_submission = {
+        "submission_id": "submission.alpha",
+        "result_kind": "code_change_candidate",
+        "changed_paths": ["runtime/example.py"],
+        "operation_set": [{"path": "runtime/example.py", "action": "update"}],
+        "acceptance_status": "pending_review",
+        "acceptance_report": {},
+    }
+    monkeypatch.setattr(
+        submission_capture,
+        "attach_verification_artifact_refs_for_job",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        submission_capture,
+        "get_submission_for_job_attempt",
+        lambda *_args, **_kwargs: sealed_submission,
+    )
+
+    bundle = _bundle(result_kind="code_change_candidate")
+    bundle["completion_contract"]["verification_required"] = True
+    result = resolve_submission_for_job(
+        _Conn(),
+        run_id="run.alpha",
+        workflow_id="workflow.alpha",
+        job_label="job.alpha",
+        attempt_no=1,
+        execution_bundle=bundle,
+        result={"stdout": "candidate submitted", "stderr": ""},
+        final_status="succeeded",
+        final_error_code="",
+        verification_artifact_refs=[],
     )
 
     assert result.submission_state == sealed_submission

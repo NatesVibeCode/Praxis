@@ -26,10 +26,22 @@ from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
 _TOOL_LIST_CONTEXT_LIMIT = 5
 _TOOL_LIST_CONTEXT_FIELD_LIMIT = 4
 _TOOL_DESCRIBE_CONTEXT_FIELD_LIMIT = 8
+_RETIRED_TOOL_REFERENCES = frozenset(
+    {
+        "praxis_submit_code_change",
+        "submit_code_change",
+        "workflow tools call praxis_submit_code_change",
+        "workflow tools describe praxis_submit_code_change",
+    }
+)
 
 
 def _normalize_search_text(value: str | None) -> str:
     return " ".join(str(value or "").lower().split())
+
+
+def _is_retired_tool_reference(value: str) -> bool:
+    return _normalize_search_text(value) in _RETIRED_TOOL_REFERENCES
 
 
 def _tool_exact_matches(definition: McpToolDefinition, needle: str) -> bool:
@@ -121,6 +133,9 @@ def _tool_lookup_rank(definition: McpToolDefinition, needle: str) -> tuple[int, 
 
 
 def _resolve_tool_definition(tool_name: str) -> tuple[McpToolDefinition | None, list[McpToolDefinition]]:
+    if _is_retired_tool_reference(tool_name):
+        return None, []
+
     exact_definition = get_definition(tool_name)
     if exact_definition is not None:
         return exact_definition, []

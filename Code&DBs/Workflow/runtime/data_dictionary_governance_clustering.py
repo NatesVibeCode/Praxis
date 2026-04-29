@@ -147,7 +147,7 @@ def _cluster_fix_for_owner(
     # Suggest extending the namespace-owner projector.
     owner_id = suggested_owner or f"{namespace}_authority"
     return RemediationAction(
-        kind="code_change",
+        kind="code_change_candidate",
         summary=(
             f"Add `^{namespace}_` → `{owner_id}` to the stewardship "
             f"namespace-owner projector — clears all {len(members)} "

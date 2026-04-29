@@ -23,11 +23,11 @@ import asyncpg
 
 from storage.postgres import PostgresWorkflowMetricsRepository
 
-from ._workflow_database import resolve_runtime_database_url
-from .failure_projection import project_failure_classification
+from runtime._workflow_database import resolve_runtime_database_url
+from runtime.failure_projection import project_failure_classification
 
 if TYPE_CHECKING:
-    from .workflow import WorkflowResult
+    from runtime.workflow import WorkflowResult
 
 _WORKFLOW_METRICS_LOCK = threading.Lock()
 _WORKFLOW_METRICS_VIEW: WorkflowMetricsView | None = None

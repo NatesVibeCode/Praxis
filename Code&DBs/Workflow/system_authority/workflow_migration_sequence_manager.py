@@ -39,6 +39,31 @@ class WorkflowMigrationRenumberAction:
         }
 
 
+@dataclass(frozen=True)
+class WorkflowMigrationAllocation:
+    requested_slug: str
+    normalized_slug: str
+    next_prefix: int
+    proposed_filename: str
+    renumber_actions: tuple[WorkflowMigrationRenumberAction, ...]
+    operator_messages: tuple[str, ...]
+
+    @property
+    def renumber_applied(self) -> bool:
+        return bool(self.renumber_actions)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "requested_slug": self.requested_slug,
+            "normalized_slug": self.normalized_slug,
+            "next_prefix": self.next_prefix,
+            "proposed_filename": self.proposed_filename,
+            "renumber_applied": self.renumber_applied,
+            "renumber_actions": [action.to_dict() for action in self.renumber_actions],
+            "operator_messages": list(self.operator_messages),
+        }
+
+
 def workflow_root_from_path(path: Path | None = None) -> Path:
     if path is not None:
         return Path(path).resolve()
@@ -128,9 +153,41 @@ def propose_workflow_migration_filename(
     slug: str,
     workflow_root: Path | None = None,
 ) -> str:
-    state = workflow_migration_sequence_state(workflow_root)
+    return allocate_workflow_migration_filename(
+        slug=slug,
+        workflow_root=workflow_root,
+    ).proposed_filename
+
+
+def allocate_workflow_migration_filename(
+    *,
+    slug: str,
+    workflow_root: Path | None = None,
+) -> WorkflowMigrationAllocation:
+    """Allocate the next migration filename after mandatory duplicate repair."""
+
     normalized_slug = normalize_workflow_migration_slug(slug)
-    return f"{state.next_prefix:03d}_{normalized_slug}.sql"
+    renumber_actions = renumber_unmanaged_duplicate_prefixes(workflow_root, apply=True)
+    state = workflow_migration_sequence_state(workflow_root)
+    proposed_filename = f"{state.next_prefix:03d}_{normalized_slug}.sql"
+    operator_messages: tuple[str, ...] = ()
+    if renumber_actions:
+        moved = ", ".join(
+            f"{action.old_filename} -> {action.new_filename}"
+            for action in renumber_actions
+        )
+        operator_messages = (
+            "Automatically renumbered unmanaged duplicate migration prefixes before "
+            f"allocating the next migration: {moved}.",
+        )
+    return WorkflowMigrationAllocation(
+        requested_slug=slug,
+        normalized_slug=normalized_slug,
+        next_prefix=state.next_prefix,
+        proposed_filename=proposed_filename,
+        renumber_actions=tuple(renumber_actions),
+        operator_messages=operator_messages,
+    )
 
 
 def raise_for_unmanaged_duplicate_prefixes(workflow_root: Path | None = None) -> None:
@@ -266,8 +323,10 @@ def renumber_unmanaged_duplicate_prefixes(
 
 
 __all__ = [
+    "WorkflowMigrationAllocation",
     "WorkflowMigrationRenumberAction",
     "WorkflowMigrationSequenceState",
+    "allocate_workflow_migration_filename",
     "load_workflow_migration_authority_spec",
     "normalize_workflow_migration_slug",
     "numbered_workflow_migration_filenames",

@@ -543,6 +543,27 @@ def test_tools_describe_accepts_unique_prefix(monkeypatch: pytest.MonkeyPatch) -
     assert "describe_command: workflow tools describe praxis_query" in rendered
 
 
+def test_tools_describe_rejects_retired_code_change_submit_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tools_commands, "get_definition", lambda tool_name: None)
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_submit_code_change_candidate": _tool_definition(
+                "praxis_submit_code_change_candidate",
+                description="Submit a structured code-change candidate.",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "describe", "praxis_submit_code_change"], stdout=stdout) == 2
+
+    rendered = stdout.getvalue()
+    assert "unknown tool: praxis_submit_code_change" in rendered
+    assert "praxis_submit_code_change_candidate" not in rendered
+
+
 def test_tools_describe_accepts_multiword_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tools_commands, "get_definition", lambda tool_name: None)
     monkeypatch.setattr(

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from system_authority.workflow_migration_sequence_manager import (
+    allocate_workflow_migration_filename,
     normalize_workflow_migration_slug,
     propose_workflow_migration_filename,
     raise_for_unmanaged_duplicate_prefixes,
@@ -117,6 +118,54 @@ def test_renumber_unmanaged_duplicate_prefixes_repairs_files_and_spec(tmp_path: 
     assert state.unmanaged_duplicate_prefixes == {}
     assert "102_beta.sql" in spec["canonical_manifest"]
     assert "100_beta.sql" not in spec["canonical_manifest"]
+
+
+def test_allocate_workflow_migration_filename_auto_renumbers_and_reports_notice(tmp_path: Path) -> None:
+    workflow_root = _write_fake_workflow_tree(
+        tmp_path,
+        filenames=["100_alpha.sql", "100_beta.sql", "101_next.sql"],
+    )
+
+    allocation = allocate_workflow_migration_filename(
+        slug="operator notice proof",
+        workflow_root=workflow_root,
+    )
+    state = workflow_migration_sequence_state(workflow_root)
+    migration_root = workflow_root.parent / "Databases" / "migrations" / "workflow"
+
+    assert allocation.proposed_filename == "103_operator_notice_proof.sql"
+    assert allocation.renumber_applied is True
+    assert [action.to_dict() for action in allocation.renumber_actions] == [
+        {
+            "old_filename": "100_beta.sql",
+            "new_filename": "102_beta.sql",
+            "reason": "unmanaged duplicate prefix 100; kept 100_alpha.sql",
+        }
+    ]
+    assert allocation.operator_messages == (
+        "Automatically renumbered unmanaged duplicate migration prefixes before "
+        "allocating the next migration: 100_beta.sql -> 102_beta.sql.",
+    )
+    assert state.unmanaged_duplicate_prefixes == {}
+    assert (migration_root / "102_beta.sql").exists()
+
+
+def test_propose_workflow_migration_filename_uses_same_auto_repair_authority(tmp_path: Path) -> None:
+    workflow_root = _write_fake_workflow_tree(
+        tmp_path,
+        filenames=["100_alpha.sql", "100_beta.sql", "101_next.sql"],
+    )
+
+    proposed = propose_workflow_migration_filename(
+        slug="quiet caller",
+        workflow_root=workflow_root,
+    )
+    state = workflow_migration_sequence_state(workflow_root)
+    migration_root = workflow_root.parent / "Databases" / "migrations" / "workflow"
+
+    assert proposed == "103_quiet_caller.sql"
+    assert state.unmanaged_duplicate_prefixes == {}
+    assert (migration_root / "102_beta.sql").exists()
 
 
 def test_propose_workflow_migration_filename_uses_real_repo_next_prefix() -> None:

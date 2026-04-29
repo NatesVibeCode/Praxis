@@ -276,6 +276,10 @@ def test_provider_control_plane_returns_projected_snapshot_payload() -> None:
         "temperature": 0.2,
         "max_tokens": 32768,
         "reasoning_control": {"default_level": "medium"},
+        "request_contract_ref": None,
+        "cache_policy": {},
+        "structured_output_policy": {},
+        "streaming_policy": {},
     }
     assert payload["rows"][0]["credential_availability_state"] == "available"
     assert payload["rows"][0]["credential_sources"] == ["ambient_cli_session"]

@@ -48,6 +48,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow register-operation` | `praxis_register_operation` | `operations` | `write` | Register a net-new CQRS operation (gateway dispatch key + handler + Pydantic input) through the catalog without hand-authoring a migration for the triple write. |
 | `praxis workflow retire-operation` | `praxis_retire_operation` | `operations` | `write` | Soft-retire an operation (disable gateway binding, mark authority object deprecated) while keeping rows for receipts and audit continuity. |
 | `praxis workflow task-route-eligibility` | `praxis_task_route_eligibility` | `operations` | `write` | Allow or reject one provider/model candidate for one task type through a bounded eligibility window. Use this for by-task routing policy such as letting anthropic/claude-sonnet-4-6 participate in build or review without enabling it everywhere. |
+| `praxis workflow task-route-request` | `praxis_task_route_request` | `operations` | `write` | Mutate request-shape knobs for one task route through CQRS authority: temperature, max_tokens, reasoning_control, request_contract_ref, cache policy, structured-output policy, or streaming policy. |
 | `praxis workflow orient` | `praxis_orient` | `operations` | `read` | Wake up against Praxis and get standing orders, authority envelope, tool guidance, and endpoints in one call. |
 | `praxis workflow circuits` | `praxis_circuits` | `operations` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
 | `praxis workflow dataset` | `praxis_dataset` | `operations` | `read`, `write` | Curate, score, and promote evidence-linked training/eval data per specialist; export reproducible JSONL with manifest hashes. |
@@ -59,6 +60,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow remediation-plan` | `praxis_remediation_plan` | `operations` | `read` | Explain the safe remediation tier, evidence requirements, approval gate, and retry delta for a typed workflow failure. |
 | `praxis workflow runtime-truth` | `praxis_runtime_truth_snapshot` | `operations` | `read` | Inspect observed workflow runtime truth across DB authority, queue state, worker heartbeats, provider slots, host-resource leases, Docker, manifest hydration audit, and recent typed failures. |
 | `praxis workflow query` | `praxis_query` | `query` | `read` | Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use. |
+| `praxis workflow moon` | `praxis_moon` | `workflow` | `launch`, `read`, `write` | Read, compose, suggest, mutate, or launch Moon workflow graphs through the same CQRS-backed build authority used by the in-app Moon surface. |
 | `praxis workflow approve-plan` | `praxis_approve_proposed_plan` | `workflow` | `read` | Approve a ProposedPlan so launch_approved can submit it. Wraps the proposal with approved_by + timestamp + hash; the hash binds the approval to the exact spec_dict so tampering between approve and launch fails closed. The proposed plan must already carry machine-checkable provider freshness evidence with fresh route truth. |
 | `praxis workflow bind-pills` | `praxis_bind_data_pills` | `workflow` | `read` | Suggest likely object.field data-pill candidates from loose prose and validate explicit references against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is either confirmed or surfaced as a candidate to confirm. |
 | `praxis workflow compose-plan` | `praxis_compose_plan` | `workflow` | `read` | Turn prose intent with explicit step markers into a ProposedPlan in one call — chains Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview). Compose with approve-plan + launch-plan(approved_plan=...) for the full approval-gated flow. |
@@ -88,7 +90,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
 | `praxis workflow tools call praxis_constraints` | `praxis_constraints` | `advanced` | action: list, for_scope | `read` | - |
-| `praxis workflow tools call praxis_friction` | `praxis_friction` | `advanced` | action: stats, list, patterns | `read` | - |
+| `praxis workflow tools call praxis_friction` | `praxis_friction` | `advanced` | action: stats, list, patterns, record | `read` | - |
 | `praxis workflow tools call praxis_receipts` | `praxis_receipts` | `advanced` | action: search, token_burn | `read` | - |
 | `praxis workflow artifacts` | `praxis_artifacts` | `stable` | action: stats, list, search, diff | `read` | - |
 | `praxis workflow bugs` | `praxis_bugs` | `stable` | action: list, file, search, duplicate_check, stats, show, packet, history, replay, backfill_replay, attach_evidence, patch_resume, resolve | `launch`, `read`, `write` | - |
@@ -153,6 +155,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow register-operation` | `praxis_register_operation` | `advanced` | - | `write` | - |
 | `praxis workflow retire-operation` | `praxis_retire_operation` | `advanced` | - | `write` | - |
 | `praxis workflow task-route-eligibility` | `praxis_task_route_eligibility` | `advanced` | - | `write` | - |
+| `praxis workflow task-route-request` | `praxis_task_route_request` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_access_control` | `praxis_access_control` | `advanced` | action: list, disable, enable | `read`, `write` | - |
 | `praxis workflow tools call praxis_authority_memory_refresh` | `praxis_authority_memory_refresh` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_bug_replay_provenance_backfill` | `praxis_bug_replay_provenance_backfill` | `advanced` | - | `write` | - |
@@ -249,16 +252,19 @@ The operation catalog gateway is the CQRS write/read front door when you already
 
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
+| `praxis workflow tools call praxis_code_change_candidate_materialize` | `praxis_code_change_candidate_materialize` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_code_change_candidate_review` | `praxis_code_change_candidate_review` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_get_submission` | `praxis_get_submission` | `session` | - | `session` | - |
 | `praxis workflow tools call praxis_review_submission` | `praxis_review_submission` | `session` | - | `session` | - |
 | `praxis workflow tools call praxis_submit_artifact_bundle` | `praxis_submit_artifact_bundle` | `session` | - | `session` | - |
-| `praxis workflow tools call praxis_submit_code_change` | `praxis_submit_code_change` | `session` | - | `session` | - |
+| `praxis workflow tools call praxis_submit_code_change_candidate` | `praxis_submit_code_change_candidate` | `session` | - | `session` | - |
 | `praxis workflow tools call praxis_submit_research_result` | `praxis_submit_research_result` | `session` | - | `session` | - |
 
 ### Workflow
 
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
+| `praxis workflow moon` | `praxis_moon` | `advanced` | action: get_build, compose, suggest_next, mutate_field, launch | `launch`, `read`, `write` | - |
 | `praxis workflow tools call praxis_compose_experiment` | `praxis_compose_experiment` | `advanced` | - | `launch` | - |
 | `praxis workflow tools call praxis_compose_plan_via_llm` | `praxis_compose_plan_via_llm` | `advanced` | - | `launch` | - |
 | `praxis workflow tools call praxis_connector` | `praxis_connector` | `advanced` | action: build, list, get, register, verify | `launch`, `read`, `write` | - |

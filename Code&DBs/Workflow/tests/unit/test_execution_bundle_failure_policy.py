@@ -49,11 +49,23 @@ def test_mutating_jobs_require_sealed_code_submission_by_default() -> None:
 
     assert contract["submission_required"] is True
     assert contract["verification_required"] is True
-    assert contract["result_kind"] == "code_change"
+    assert contract["result_kind"] == "code_change_candidate"
     assert contract["submit_tool_names"] == [
-        "praxis_submit_code_change",
+        "praxis_submit_code_change_candidate",
         "praxis_get_submission",
     ]
+
+
+def test_legacy_code_change_result_kind_is_rejected() -> None:
+    with pytest.raises(ValueError, match="code_change.*retired"):
+        _completion_contract(
+            task_type="build",
+            bucket="build",
+            submission_required=True,
+            downstream_labels=(),
+            verify_refs=(),
+            result_kind_override="code_change",
+        )
 
 
 def test_write_scope_does_not_force_submission_for_non_mutating_task_type() -> None:

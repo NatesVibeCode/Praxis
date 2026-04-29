@@ -73,12 +73,18 @@ CREATE TABLE IF NOT EXISTS llm_request_contracts (
     forbidden_parameters JSONB NOT NULL DEFAULT '[]'::jsonb,
     unsupported_parameter_policy TEXT NOT NULL DEFAULT 'omit'
         CHECK (unsupported_parameter_policy IN ('omit', 'fail')),
+    forbidden_parameter_policy TEXT NOT NULL DEFAULT 'omit'
+        CHECK (forbidden_parameter_policy IN ('omit', 'fail')),
+    combination_violation_policy TEXT NOT NULL DEFAULT 'shape'
+        CHECK (combination_violation_policy IN ('shape', 'fail')),
     sampling_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     reasoning_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     cache_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     structured_output_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     tool_call_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     truncation_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    state_carry_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    streaming_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     telemetry_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
     tokenizer_ref TEXT,
     provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -105,6 +111,10 @@ CREATE TABLE IF NOT EXISTS llm_request_contracts (
         CHECK (jsonb_typeof(tool_call_policy) = 'object'),
     CONSTRAINT llm_request_contracts_truncation_policy_object_check
         CHECK (jsonb_typeof(truncation_policy) = 'object'),
+    CONSTRAINT llm_request_contracts_state_carry_policy_object_check
+        CHECK (jsonb_typeof(state_carry_policy) = 'object'),
+    CONSTRAINT llm_request_contracts_streaming_policy_object_check
+        CHECK (jsonb_typeof(streaming_policy) = 'object'),
     CONSTRAINT llm_request_contracts_telemetry_policy_object_check
         CHECK (jsonb_typeof(telemetry_policy) = 'object'),
     CONSTRAINT llm_request_contracts_provenance_object_check
@@ -112,6 +122,46 @@ CREATE TABLE IF NOT EXISTS llm_request_contracts (
     CONSTRAINT llm_request_contracts_effective_window_check
         CHECK (effective_to IS NULL OR effective_to > effective_from)
 );
+
+-- Idempotency repair: CREATE TABLE IF NOT EXISTS does not evolve a table that
+-- was created by an earlier partial version of this migration. Add every
+-- contract column explicitly before creating the effective view so replay can
+-- heal drifted databases instead of failing on the first missing column.
+ALTER TABLE llm_request_contracts
+    ADD COLUMN IF NOT EXISTS provider_slug TEXT NOT NULL DEFAULT '*' CHECK (btrim(provider_slug) <> ''),
+    ADD COLUMN IF NOT EXISTS model_slug TEXT NOT NULL DEFAULT '*' CHECK (btrim(model_slug) <> ''),
+    ADD COLUMN IF NOT EXISTS transport_type TEXT NOT NULL DEFAULT 'API' CHECK (transport_type IN ('API', 'CLI')),
+    ADD COLUMN IF NOT EXISTS protocol_family TEXT,
+    ADD COLUMN IF NOT EXISTS task_type TEXT NOT NULL DEFAULT '*' CHECK (btrim(task_type) <> ''),
+    ADD COLUMN IF NOT EXISTS runtime_profile_ref TEXT NOT NULL DEFAULT '*' CHECK (btrim(runtime_profile_ref) <> ''),
+    ADD COLUMN IF NOT EXISTS context_window_tokens INTEGER CHECK (context_window_tokens IS NULL OR context_window_tokens > 0),
+    ADD COLUMN IF NOT EXISTS max_output_tokens INTEGER CHECK (max_output_tokens IS NULL OR max_output_tokens > 0),
+    ADD COLUMN IF NOT EXISTS supported_parameters JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS forbidden_parameters JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS unsupported_parameter_policy TEXT NOT NULL DEFAULT 'omit'
+        CHECK (unsupported_parameter_policy IN ('omit', 'fail')),
+    ADD COLUMN IF NOT EXISTS forbidden_parameter_policy TEXT NOT NULL DEFAULT 'omit'
+        CHECK (forbidden_parameter_policy IN ('omit', 'fail')),
+    ADD COLUMN IF NOT EXISTS combination_violation_policy TEXT NOT NULL DEFAULT 'shape'
+        CHECK (combination_violation_policy IN ('shape', 'fail')),
+    ADD COLUMN IF NOT EXISTS sampling_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS reasoning_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS cache_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS structured_output_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS tool_call_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS truncation_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS state_carry_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS streaming_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS telemetry_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS tokenizer_ref TEXT,
+    ADD COLUMN IF NOT EXISTS provenance JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS confidence TEXT NOT NULL DEFAULT 'operator_seed'
+        CHECK (confidence IN ('provider_api', 'provider_doc', 'operator_seed', 'observed', 'unknown')),
+    ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS effective_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS effective_to TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 CREATE UNIQUE INDEX IF NOT EXISTS llm_request_contracts_scope_effective_idx
     ON llm_request_contracts (
@@ -147,6 +197,8 @@ CREATE TRIGGER trg_llm_request_contracts_touch
     BEFORE UPDATE ON llm_request_contracts
     FOR EACH ROW EXECUTE FUNCTION touch_llm_request_contracts_updated_at();
 
+DROP VIEW IF EXISTS effective_llm_request_contracts;
+
 CREATE OR REPLACE VIEW effective_llm_request_contracts AS
 SELECT DISTINCT ON (
     provider_slug,
@@ -167,12 +219,16 @@ SELECT DISTINCT ON (
     supported_parameters,
     forbidden_parameters,
     unsupported_parameter_policy,
+    forbidden_parameter_policy,
+    combination_violation_policy,
     sampling_policy,
     reasoning_policy,
     cache_policy,
     structured_output_policy,
     tool_call_policy,
     truncation_policy,
+    state_carry_policy,
+    streaming_policy,
     telemetry_policy,
     tokenizer_ref,
     provenance,

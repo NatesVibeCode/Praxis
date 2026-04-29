@@ -1,8 +1,10 @@
 """LLM request-contract compiler.
 
 Provider adapters should not guess which knobs are safe for a model. This
-module compiles task-level request intent through a provider/model contract and
-returns the provider payload that is safe to send.
+module exposes a shaped request-intent JSON contract for LLM callers, then
+compiles that intent through provider/model authority into the payload that is
+safe to send. Runtime shaping is a backstop for old callers; the primary
+control is not exposing invalid knobs in the first place.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ _STRUCTURAL_KEYS = frozenset(
         "model",
         "messages",
         "contents",
+        "generationConfig",
         "system",
         "systemInstruction",
         "tools",
@@ -60,7 +63,12 @@ class LLMRequestContract:
     reasoning_policy: Mapping[str, Any] | None = None
     cache_policy: Mapping[str, Any] | None = None
     structured_output_policy: Mapping[str, Any] | None = None
+    tool_call_policy: Mapping[str, Any] | None = None
+    truncation_policy: Mapping[str, Any] | None = None
+    state_carry_policy: Mapping[str, Any] | None = None
+    streaming_policy: Mapping[str, Any] | None = None
     telemetry_policy: Mapping[str, Any] | None = None
+    tokenizer_ref: str | None = None
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "LLMRequestContract":
@@ -97,7 +105,12 @@ class LLMRequestContract:
             structured_output_policy=_mapping_or_none(
                 payload.get("structured_output_policy")
             ),
+            tool_call_policy=_mapping_or_none(payload.get("tool_call_policy")),
+            truncation_policy=_mapping_or_none(payload.get("truncation_policy")),
+            state_carry_policy=_mapping_or_none(payload.get("state_carry_policy")),
+            streaming_policy=_mapping_or_none(payload.get("streaming_policy")),
             telemetry_policy=_mapping_or_none(payload.get("telemetry_policy")),
+            tokenizer_ref=_optional_text(payload.get("tokenizer_ref")),
         )
 
 
@@ -159,6 +172,20 @@ def compile_llm_request_body(
     omitted: set[str] = set()
     decisions: list[Mapping[str, Any]] = []
 
+    _apply_sampling_intent(
+        payload=payload,
+        intent=intent,
+        contract=normalized_contract,
+        protocol_family=protocol_family,
+        applied=applied,
+        decisions=decisions,
+    )
+    _apply_output_ceiling_intent(
+        payload=payload,
+        intent=intent,
+        protocol_family=protocol_family,
+        applied=applied,
+    )
     _apply_reasoning_intent(
         payload=payload,
         intent=intent,
@@ -269,14 +296,27 @@ def compile_llm_request_body(
         and max_tokens is not None
         and max_tokens > normalized_contract.max_output_tokens
     ):
-        raise LLMRequestContractError(
-            "llm_request_contract.output_limit_exceeded",
-            "request output budget exceeds the contract max_output_tokens",
+        _handle_shape_violation(
+            contract=normalized_contract,
+            reason_code="llm_request_contract.output_limit_exceeded",
+            message="request output budget was shaped to the contract max_output_tokens",
             details={
-                "contract_ref": normalized_contract.contract_ref,
                 "max_tokens": max_tokens,
                 "max_output_tokens": normalized_contract.max_output_tokens,
             },
+        )
+        _set_max_tokens(
+            payload,
+            max_tokens=normalized_contract.max_output_tokens,
+            protocol_family=protocol_family,
+        )
+        decisions.append(
+            {
+                "policy": "output_ceiling",
+                "decision": "max_tokens_clamped",
+                "from_tokens": max_tokens,
+                "to_tokens": normalized_contract.max_output_tokens,
+            }
         )
 
     _enforce_parameter_sets(
@@ -299,6 +339,62 @@ def compile_llm_request_body(
         omitted_parameters=tuple(sorted(omitted)),
         policy_decisions=tuple(decisions),
     )
+
+
+def _apply_sampling_intent(
+    *,
+    payload: dict[str, Any],
+    intent: Mapping[str, Any],
+    contract: LLMRequestContract,
+    protocol_family: str,
+    applied: set[str],
+    decisions: list[Mapping[str, Any]],
+) -> None:
+    sampling_intent = _mapping_or_none(intent.get("sampling_intent")) or {}
+    temperature = sampling_intent.get("temperature")
+    if temperature is None:
+        return
+    sampling_policy = dict(contract.sampling_policy or {})
+    if sampling_policy.get("temperature_mode") in {
+        "provider_default_only",
+        "locked_provider_default",
+    }:
+        decisions.append(
+            {
+                "policy": "sampling",
+                "decision": "temperature_intent_ignored",
+                "reason": "provider_default_only",
+            }
+        )
+        return
+    try:
+        normalized_temperature = float(temperature)
+    except (TypeError, ValueError):
+        return
+    _set_temperature(
+        payload,
+        temperature=normalized_temperature,
+        protocol_family=protocol_family,
+    )
+    applied.add("temperature")
+
+
+def _apply_output_ceiling_intent(
+    *,
+    payload: dict[str, Any],
+    intent: Mapping[str, Any],
+    protocol_family: str,
+    applied: set[str],
+) -> None:
+    output_ceiling = _optional_int(intent.get("output_ceiling_tokens"))
+    if output_ceiling is None or output_ceiling <= 0:
+        return
+    _set_max_tokens(
+        payload,
+        max_tokens=output_ceiling,
+        protocol_family=protocol_family,
+    )
+    applied.add("max_tokens")
 
 
 def _apply_reasoning_intent(
@@ -423,6 +519,7 @@ def _enforce_parameter_sets(
     supported = set(contract.supported_parameters)
     if not supported:
         return
+    present = _present_canonical_parameters(payload, protocol_family=protocol_family)
     unsupported = {
         param
         for param in present
@@ -461,11 +558,16 @@ def llm_request_intent_json_schema(
     if normalized_contract.max_output_tokens is not None:
         properties["output_ceiling_tokens"]["maximum"] = normalized_contract.max_output_tokens
 
+    supported = set(normalized_contract.supported_parameters)
+    forbidden = set(normalized_contract.forbidden_parameters)
     sampling_policy = dict(normalized_contract.sampling_policy or {})
     if sampling_policy.get("temperature_mode") not in {
         "provider_default_only",
         "locked_provider_default",
-    }:
+    } and (
+        "temperature" in supported
+        or sampling_policy.get("temperature_supported") is True
+    ) and "temperature" not in forbidden:
         properties["sampling_intent"] = {
             "type": "object",
             "additionalProperties": False,
@@ -479,7 +581,16 @@ def llm_request_intent_json_schema(
         }
 
     reasoning_policy = dict(normalized_contract.reasoning_policy or {})
-    if reasoning_policy.get("mode") != "disabled":
+    reasoning_supported = bool(reasoning_policy) or bool(
+        supported
+        & {
+            "reasoning_effort",
+            "thinking",
+            "thinking_budget",
+            "reasoning",
+        }
+    )
+    if reasoning_supported and reasoning_policy.get("mode") != "disabled":
         reasoning_properties: dict[str, Any] = {
             "effort": {
                 "type": "string",
@@ -504,17 +615,69 @@ def llm_request_intent_json_schema(
             "properties": reasoning_properties,
         }
 
+    cache_policy = dict(normalized_contract.cache_policy or {})
+    if cache_policy.get("supported") or cache_policy.get("modes"):
+        cache_properties: dict[str, Any] = {
+            "mode": {
+                "type": "string",
+                "enum": list(cache_policy.get("modes") or ["auto", "disabled"]),
+            }
+        }
+        properties["cache_intent"] = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": cache_properties,
+        }
+
     structured_policy = dict(normalized_contract.structured_output_policy or {})
     if structured_policy.get("strict_schema_supported") or structured_policy.get("json_mode_supported"):
         properties["structured_output_intent"] = {
             "type": "object",
-            "additionalProperties": True,
+            "additionalProperties": False,
             "properties": {
                 "required": {"type": "boolean"},
                 "name": {"type": "string"},
                 "strict": {"type": "boolean"},
                 "allow_json_mode_fallback": {"type": "boolean"},
                 "schema": {"type": "object"},
+            },
+        }
+
+    tool_call_policy = dict(normalized_contract.tool_call_policy or {})
+    if tool_call_policy and tool_call_policy.get("supported", True) is not False:
+        max_tool_calls = _optional_int(tool_call_policy.get("max_tool_calls"))
+        tool_properties: dict[str, Any] = {
+            "max_tool_calls": {"type": "integer", "minimum": 0},
+        }
+        if max_tool_calls is not None:
+            tool_properties["max_tool_calls"]["maximum"] = max_tool_calls
+        properties["tool_call_intent"] = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": tool_properties,
+        }
+
+    state_carry_policy = dict(normalized_contract.state_carry_policy or {})
+    if state_carry_policy and state_carry_policy.get("mode") not in {"disabled", "none"}:
+        properties["state_carry_intent"] = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "carry_provider_state": {
+                    "type": "boolean",
+                    "default": bool(state_carry_policy.get("required", False)),
+                }
+            },
+        }
+
+    streaming_policy = dict(normalized_contract.streaming_policy or {})
+    if streaming_policy.get("supported"):
+        properties["streaming_intent"] = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "stream": {"type": "boolean"},
+                "background": {"type": "boolean"},
             },
         }
 
@@ -558,6 +721,34 @@ def _set_reasoning_budget(
             thinking_config = generation_config.setdefault("thinkingConfig", {})
             if isinstance(thinking_config, dict):
                 thinking_config["thinkingBudget"] = budget_tokens
+
+
+def _set_max_tokens(
+    payload: dict[str, Any],
+    *,
+    max_tokens: int,
+    protocol_family: str,
+) -> None:
+    if protocol_family == "google_generate_content":
+        generation_config = payload.setdefault("generationConfig", {})
+        if isinstance(generation_config, dict):
+            generation_config["maxOutputTokens"] = max_tokens
+            return
+    payload["max_tokens"] = max_tokens
+
+
+def _set_temperature(
+    payload: dict[str, Any],
+    *,
+    temperature: float,
+    protocol_family: str,
+) -> None:
+    if protocol_family == "google_generate_content":
+        generation_config = payload.setdefault("generationConfig", {})
+        if isinstance(generation_config, dict):
+            generation_config["temperature"] = temperature
+            return
+    payload["temperature"] = temperature
 
 
 def _present_canonical_parameters(

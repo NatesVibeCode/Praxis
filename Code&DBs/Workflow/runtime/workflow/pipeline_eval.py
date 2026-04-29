@@ -410,8 +410,21 @@ def evaluate_pipeline_preview(
         result_kind = str(completion.get("result_kind") or "").strip()
         prompt_lowers = prompt.lower()
         task_type = str(job_view.get("task_type") or source_job.get("task_type") or "").strip().lower()
+        if result_kind == "code_change":
+            findings.append(
+                PipelineEvalFinding(
+                    severity="error",
+                    kind="retired_code_change_result_kind",
+                    label=label,
+                    message=(
+                        "completion contract uses retired result_kind=code_change; "
+                        "code-writing jobs must submit code_change_candidate payloads"
+                    ),
+                    evidence={"result_kind": result_kind},
+                )
+            )
         if (
-            result_kind in {"code_change", "code_change_candidate"}
+            result_kind == "code_change_candidate"
             and inferred_artifact_paths
             and _looks_artifact_only(inferred_artifact_paths)
             and ("do not edit code" in prompt_lowers or task_type in {"review", "analysis", "research"})

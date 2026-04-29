@@ -48,8 +48,8 @@ def test_packet_to_job_carries_typed_contract_for_auto_build():
     assert "consumes" in job
     assert "consumes_any" in job
     assert "produces" in job
-    # build family produces code_change / diff / execution_receipt
-    assert "code_change" in job["produces"]
+    # build family produces a code-change candidate plus the derived diff/receipt.
+    assert "code_change_candidate" in job["produces"]
     assert "execution_receipt" in job["produces"]
 
 
@@ -63,7 +63,7 @@ def test_packet_to_job_carries_typed_contract_for_auto_review():
     )
     job = _packet_to_job(packet, compiled=_stub_compiled(), workdir="/repo", index=0)
     assert job["produces"] == ["review_result"]
-    assert "code_change" in job["consumes_any"]
+    assert "code_change_candidate" in job["consumes_any"]
 
 
 def test_packet_to_job_typed_contract_uses_description_text():

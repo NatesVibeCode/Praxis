@@ -72,6 +72,50 @@ def test_rest_startup_boots_shared_subsystems_when_enabled(monkeypatch) -> None:
     finally:
         if hasattr(rest.app.state, "shared_subsystems"):
             delattr(rest.app.state, "shared_subsystems")
+        if hasattr(rest.app.state, rest._SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR):
+            delattr(rest.app.state, rest._SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR)
+
+
+def test_api_health_degrades_when_shared_subsystem_boot_fails(monkeypatch) -> None:
+    class _BrokenSubsystems:
+        def boot(self) -> None:
+            raise RuntimeError("migration drift")
+
+    async def _healthy_db_snapshot():
+        return (
+            [
+                {"name": "postgres", "ok": True},
+                {"name": "worker", "ok": True, "active_jobs": 0, "ready_jobs": 0},
+                {"name": "workflow", "ok": True, "total": 1, "passed": 1, "failed": 0, "pass_rate": 1.0},
+            ],
+            "healthy",
+        )
+
+    monkeypatch.setattr(rest, "_Subsystems", _BrokenSubsystems)
+    monkeypatch.setattr(rest, "_should_boot_shared_subsystems", lambda: True)
+    monkeypatch.setattr(rest, "_health_db_snapshot_async", _healthy_db_snapshot)
+    if hasattr(rest.app.state, "shared_subsystems"):
+        delattr(rest.app.state, "shared_subsystems")
+    if hasattr(rest.app.state, rest._SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR):
+        delattr(rest.app.state, rest._SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR)
+
+    try:
+        rest._boot_shared_subsystems(rest.app)
+        response = asyncio.run(rest.health_check_endpoint())
+        payload = json.loads(response.body)
+    finally:
+        if hasattr(rest.app.state, "shared_subsystems"):
+            delattr(rest.app.state, "shared_subsystems")
+        if hasattr(rest.app.state, rest._SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR):
+            delattr(rest.app.state, rest._SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR)
+
+    assert response.status_code == 200
+    assert payload["status"] == "degraded"
+    shared_check = next(item for item in payload["checks"] if item["name"] == "shared_subsystems")
+    assert shared_check["ok"] is False
+    assert shared_check["status"] == "failed"
+    assert shared_check["reason_code"] == "shared_subsystems.boot_failed"
+    assert "RuntimeError: migration drift" in shared_check["error"]
 
 
 def test_rest_startup_degrades_when_capability_mount_fails(monkeypatch) -> None:
@@ -1250,19 +1294,18 @@ def test_run_routes_use_shared_pg_authority_and_match_contract(monkeypatch) -> N
     subsystems = _FakeRunSubsystems(conn)
     captured_health_inputs: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: subsystems)
-    monkeypatch.setattr(
-        rest,
-        "_health_db_snapshot",
-        lambda: (
+    async def _healthy_db_snapshot():
+        return (
             [
                 {"name": "postgres", "ok": True},
                 {"name": "worker", "ok": True, "active_jobs": 0, "ready_jobs": 0},
                 {"name": "workflow", "ok": True, "total": 1, "passed": 1, "failed": 0, "pass_rate": 1.0},
             ],
             "healthy",
-        ),
-    )
+        )
+
+    monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: subsystems)
+    monkeypatch.setattr(rest, "_health_db_snapshot_async", _healthy_db_snapshot)
     monkeypatch.setattr(
         rest,
         "summarize_run_health",

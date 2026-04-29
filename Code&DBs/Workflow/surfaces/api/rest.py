@@ -87,6 +87,7 @@ from .handlers.workflow_run import _submit_workflow_via_service_bus
 __all__ = ["app"]
 
 logger = logging.getLogger(__name__)
+_SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR = "shared_subsystems_boot_health"
 
 _PUBLIC_API_VERSION = "v1"
 _PUBLIC_ROUTE_PREFIX = "/v1/"
@@ -434,6 +435,13 @@ def _ensure_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
         subsystems = _Subsystems()
     except Exception:
         logger.exception("failed to initialize shared API subsystems")
+        _set_shared_subsystems_boot_health(
+            target_app,
+            status="failed",
+            ok=False,
+            reason_code="shared_subsystems.initialize_failed",
+            error="failed to initialize shared API subsystems",
+        )
         return None
     target_app.state.shared_subsystems = subsystems
     return subsystems
@@ -443,15 +451,57 @@ def _should_boot_shared_subsystems() -> bool:
     return "PYTEST_CURRENT_TEST" not in os.environ
 
 
+def _set_shared_subsystems_boot_health(
+    target_app: FastAPI,
+    *,
+    status: str,
+    ok: bool,
+    reason_code: str | None = None,
+    error: str | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "name": "shared_subsystems",
+        "ok": ok,
+        "status": status,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if reason_code:
+        payload["reason_code"] = reason_code
+    if error:
+        payload["error"] = error[:500]
+    setattr(target_app.state, _SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR, payload)
+
+
+def _shared_subsystems_boot_health(target_app: FastAPI) -> dict[str, Any] | None:
+    payload = getattr(target_app.state, _SHARED_SUBSYSTEM_BOOT_HEALTH_ATTR, None)
+    return dict(payload) if isinstance(payload, dict) else None
+
+
 def _boot_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
     """Run explicit shared subsystem boot during real API startup only."""
     subsystems = _ensure_shared_subsystems(target_app)
     if subsystems is None or not _should_boot_shared_subsystems():
+        if subsystems is not None:
+            _set_shared_subsystems_boot_health(
+                target_app,
+                status="skipped",
+                ok=True,
+                reason_code="shared_subsystems.boot_skipped",
+            )
         return subsystems
     try:
         subsystems.boot()
-    except Exception:
+    except Exception as exc:
         logger.exception("shared subsystem boot failed; API continues in degraded mode")
+        _set_shared_subsystems_boot_health(
+            target_app,
+            status="failed",
+            ok=False,
+            reason_code="shared_subsystems.boot_failed",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    else:
+        _set_shared_subsystems_boot_health(target_app, status="ready", ok=True)
     return subsystems
 
 
@@ -4356,6 +4406,12 @@ async def health_check_endpoint() -> Any:
         })
 
     import shutil
+
+    shared_boot = _shared_subsystems_boot_health(app)
+    if shared_boot is not None:
+        checks.append(shared_boot)
+        if shared_boot.get("ok") is not True and overall == "healthy":
+            overall = "degraded"
 
     usage = shutil.disk_usage(str(REPO_ROOT))
     free_gb = round(usage.free / (1024**3), 1)

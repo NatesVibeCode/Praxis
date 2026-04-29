@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `360`.
+Public route count: `8`. All route count: `372`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -61,6 +61,7 @@ Public route count: `8`. All route count: `360`.
 | `POST` | `/api/bug_resolve` | `internal` | `operations` | bug_resolve |
 | `GET` | `/api/bugs` | `internal` | - | bugs_get |
 | `GET` | `/api/bugs/replay-ready` | `internal` | - | bugs_replay_ready_get |
+| `POST` | `/api/candidate_identity_phase_b` | `internal` | `operations` | candidate_identity_phase_b |
 | `GET` | `/api/catalog` | `internal` | - | Return live catalog items from platform registries + static primitives. |
 | `GET` | `/api/catalog/operations` | `internal` | - | Return DB-backed CQRS operation definitions and source policies. |
 | `GET` | `/api/catalog/review-decisions` | `internal` | - | catalog_review_decisions_get |
@@ -79,6 +80,9 @@ Public route count: `8`. All route count: `360`.
 | `POST` | `/api/circuits` | `internal` | `operations` | operator.circuit_override |
 | `GET` | `/api/circuits/history` | `internal` | `operations` | operator.circuit_history |
 | `POST` | `/api/cli_auth_doctor` | `internal` | `operations` | cli_auth_doctor |
+| `POST` | `/api/code_change_candidate_materialize` | `internal` | `operations` | code_change_candidate.materialize |
+| `POST` | `/api/code_change_candidate_review` | `internal` | `operations` | code_change_candidate.review |
+| `POST` | `/api/code_change_candidate_submit` | `internal` | `operations` | code_change_candidate.submit |
 | `POST` | `/api/compile/materialize` | `internal` | `operations` | compile_materialize |
 | `POST` | `/api/compile/preview` | `internal` | - | compile_preview_post |
 | `POST` | `/api/compile_materialize` | `internal` | - | Legacy compatibility alias for stale compile materialize callers. |
@@ -149,6 +153,7 @@ Public route count: `8`. All route count: `360`.
 | `DELETE` | `/api/files/{rest_of_path:path}` | `internal` | - | files_path_delete |
 | `GET` | `/api/files/{rest_of_path:path}` | `internal` | - | files_path_get |
 | `GET` | `/api/fitness` | `internal` | - | Return capability fitness matrix. |
+| `POST` | `/api/friction_record` | `internal` | `operations` | friction_record |
 | `GET` | `/api/handoff/history` | `internal` | - | handoff_history_get |
 | `GET` | `/api/handoff/latest` | `internal` | - | handoff_latest_get |
 | `GET` | `/api/handoff/lineage` | `internal` | - | handoff_lineage_get |
@@ -244,6 +249,7 @@ Public route count: `8`. All route count: `360`.
 | `GET` | `/api/operator/remediation-plan` | `internal` | `operations` | operator.remediation_plan |
 | `GET` | `/api/operator/replay-ready-bugs` | `internal` | `operations` | operator.replay_ready_bugs |
 | `POST` | `/api/operator/roadmap-write` | `internal` | `operations` | operator.roadmap_write |
+| `GET` | `/api/operator/roadmap/backlog` | `internal` | `operations` | operator.roadmap_backlog |
 | `GET` | `/api/operator/roadmap/tree/{root_roadmap_item_id}` | `internal` | `operations` | operator.roadmap_tree |
 | `GET` | `/api/operator/runs/{run_id}/graph` | `internal` | `operations` | operator.run_graph |
 | `GET` | `/api/operator/runs/{run_id}/lineage` | `internal` | `operations` | operator.run_lineage |
@@ -251,6 +257,7 @@ Public route count: `8`. All route count: `360`.
 | `GET` | `/api/operator/runs/{run_id}/status` | `internal` | `operations` | operator.run_status |
 | `GET` | `/api/operator/runtime-truth` | `internal` | `operations` | operator.runtime_truth_snapshot |
 | `POST` | `/api/operator/task-route-eligibility` | `internal` | `operations` | operator.task_route_eligibility |
+| `POST` | `/api/operator/task-route-request` | `internal` | `operations` | operator.task_route_request |
 | `POST` | `/api/operator/transport-support` | `internal` | `operations` | operator.transport_support |
 | `GET` | `/api/operator/ui/experience-graph` | `internal` | `operations` | operator.ui_experience_graph |
 | `GET` | `/api/operator/work-assignment-matrix` | `internal` | `operations` | operator.work_assignment_matrix |
@@ -279,6 +286,7 @@ Public route count: `8`. All route count: `360`.
 | `GET` | `/api/runs/recent` | `internal` | - | Return recent workflow runs with job progress summaries. |
 | `GET` | `/api/runs/{run_id}` | `internal` | - | Return one workflow run with ordered job details. |
 | `GET` | `/api/runs/{run_id}/jobs/{job_id}` | `internal` | - | Return one workflow job with best-available output content. |
+| `GET` | `/api/runs/{run_id}/proof` | `internal` | - | Return the 4-authority reconciliation for a run. |
 | `GET` | `/api/scope` | `internal` | - | Resolve read scope, blast radius, and test scope for write-scope files. |
 | `GET` | `/api/search` | `internal` | - | search_get |
 | `POST` | `/api/search/bugs` | `internal` | `operations` | search.bugs |
@@ -323,6 +331,8 @@ Public route count: `8`. All route count: `360`.
 | `POST` | `/api/surface/action` | `internal` | `operations` | surface.action.performed |
 | `POST` | `/api/surface/templates` | `internal` | `operations` | surface.template.register |
 | `GET` | `/api/templates` | `internal` | - | templates_get |
+| `GET` | `/api/test/query_register_atomic/71dfa06e9d99` | `internal` | `operations` | test.query_register_atomic.71dfa06e9d99 |
+| `GET` | `/api/test/query_register_atomic/e9bcd15fa1da` | `internal` | `operations` | test.query_register_atomic.e9bcd15fa1da |
 | `POST` | `/api/trace.walk` | `internal` | `operations` | trace.walk |
 | `POST` | `/api/trigger/{rest_of_path:path}` | `internal` | - | trigger_post |
 | `GET` | `/api/trust` | `internal` | - | Return ELO-based trust scores for all (provider, model) pairs. |
@@ -339,7 +349,9 @@ Public route count: `8`. All route count: `360`.
 | `POST` | `/api/workflow-triggers` | `internal` | - | workflow_triggers_post |
 | `PUT` | `/api/workflow-triggers` | `internal` | - | workflow_triggers_put |
 | `PUT` | `/api/workflow-triggers/{rest_of_path:path}` | `internal` | - | workflow_triggers_path_put |
+| `POST` | `/api/workflow_build_get` | `internal` | `operations` | workflow_build_get |
 | `POST` | `/api/workflow_chain_submit` | `internal` | `operations` | workflow_chain_submit |
+| `POST` | `/api/workflow_create_draft` | `internal` | `operations` | workflow_create_draft |
 | `GET` | `/api/workflows` | `internal` | - | workflows_get |
 | `POST` | `/api/workflows` | `internal` | - | workflows_post |
 | `POST` | `/api/workflows/run` | `internal` | - | workflows_run_post |

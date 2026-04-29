@@ -47,8 +47,7 @@ from surfaces.cli.mcp_tools import load_json_file, print_json
 from surfaces.mcp.tools.data_dictionary import tool_praxis_data_dictionary
 from surfaces.mcp.tools.health import tool_praxis_reload
 from system_authority.workflow_migration_sequence_manager import (
-    normalize_workflow_migration_slug,
-    propose_workflow_migration_filename,
+    allocate_workflow_migration_filename,
     renumber_unmanaged_duplicate_prefixes,
     workflow_migration_sequence_state,
 )
@@ -227,31 +226,13 @@ async def _schema_describe_payload(*, scope: str, target: str) -> dict[str, Any]
         await conn.close()
 
 
-def _schema_next_migration_payload(*, slug: str) -> dict[str, Any]:
-    normalized_slug = normalize_workflow_migration_slug(slug)
-    renumber_actions = renumber_unmanaged_duplicate_prefixes(apply=True)
-    state = workflow_migration_sequence_state()
-    action_dicts = [action.to_dict() for action in renumber_actions]
-    operator_messages = []
-    if action_dicts:
-        moved = ", ".join(
-            f"{item['old_filename']} -> {item['new_filename']}"
-            for item in action_dicts
-        )
-        operator_messages.append(
-            "Automatically renumbered unmanaged duplicate migration prefixes before "
-            f"allocating the next migration: {moved}."
-        )
+def _schema_next_migration_payload(*, slug: str, workflow_root: Path | None = None) -> dict[str, Any]:
+    allocation = allocate_workflow_migration_filename(slug=slug, workflow_root=workflow_root)
+    state = workflow_migration_sequence_state(workflow_root)
     return {
         "scope": "workflow",
         "migration_manager": "deterministic_numeric_prefix_allocator",
-        "requested_slug": slug,
-        "normalized_slug": normalized_slug,
-        "next_prefix": state.next_prefix,
-        "proposed_filename": propose_workflow_migration_filename(slug=slug),
-        "renumber_applied": bool(action_dicts),
-        "renumber_actions": action_dicts,
-        "operator_messages": operator_messages,
+        **allocation.to_dict(),
         "managed_duplicate_prefixes": {
             prefix: list(filenames)
             for prefix, filenames in state.managed_duplicate_prefixes.items()

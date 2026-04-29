@@ -280,6 +280,43 @@ def test_mcp_task_route_eligibility_rejects_invalid_status(monkeypatch) -> None:
     }
 
 
+def test_mcp_task_route_request_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True, "mutated_fields": ["request_contract_ref"]}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_task_route_request(
+        {
+            "task_type": "compile",
+            "provider_slug": "OpenAI",
+            "model_slug": "gpt-5.4",
+            "transport_type": "api",
+            "request_contract_ref": "llm_request_contract.openai.gpt-5-4.api.compile",
+            "reason_code": "request_contract_tuning",
+            "rationale": "Shape request knobs from contract JSON.",
+        }
+    )
+
+    assert result["ok"] is True
+    assert captured["operation_name"] == "operator.task_route_request"
+    assert captured["payload"]["task_type"] == "compile"
+    assert captured["payload"]["provider_slug"] == "openai"
+    assert captured["payload"]["model_slug"] == "gpt-5.4"
+    assert captured["payload"]["transport_type"] == "API"
+    assert captured["payload"]["request_contract_ref"] == (
+        "llm_request_contract.openai.gpt-5-4.api.compile"
+    )
+    assert "temperature" not in captured["payload"]
+
+
 def test_mcp_operator_ideas_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

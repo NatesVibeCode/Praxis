@@ -161,6 +161,27 @@ _SEEDED_OPERATION_ROWS = [
         "decision_ref": "decision.operation_catalog_registry.surface_cleanup.20260416",
     },
     {
+        "operation_ref": "operator-task-route-request",
+        "operation_name": "operator.task_route_request",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/operator/task-route-request",
+        "input_model_ref": "runtime.operations.commands.operator_control.TaskRouteRequestCommand",
+        "handler_ref": "runtime.operations.commands.operator_control.handle_task_route_request",
+        "authority_ref": "authority.provider_routing",
+        "projection_ref": None,
+        "posture": "operate",
+        "idempotency_policy": "non_idempotent",
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.task_route_request.20260429",
+        "decision_ref": (
+            "architecture-policy::provider-routing::"
+            "reasoning-effort-is-first-class-route-dimension"
+        ),
+        "event_type": "operator.task_route_request.mutated",
+    },
+    {
         "operation_ref": "operator-native-primary-cutover-gate",
         "operation_name": "operator.native_primary_cutover_gate",
         "source_kind": "operation_command",
@@ -1125,6 +1146,7 @@ def test_seeded_operation_catalog_rows_resolve_to_live_bindings(monkeypatch) -> 
         "operator.roadmap_write",
         "operator.work_item_closeout",
         "operator.task_route_eligibility",
+        "operator.task_route_request",
         "operator.native_primary_cutover_gate",
         "operator.transport_support",
         "operator.provider_onboarding",

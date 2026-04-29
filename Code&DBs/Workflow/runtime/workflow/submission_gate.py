@@ -133,7 +133,19 @@ def resolve_submission_for_job(
 
     contract = (execution_bundle or {}).get("completion_contract") or {}
     contract_result_kind = str(contract.get("result_kind") or "").strip().lower()
-    code_candidate_required = contract_result_kind in {"code_change_candidate", "code_change"}
+    retired_code_result = contract_result_kind == "code_change"
+    code_candidate_required = contract_result_kind == "code_change_candidate"
+
+    if final_status == "succeeded" and submission_required and retired_code_result:
+        final_status = "failed"
+        final_error_code = "workflow_submission.retired_result_kind"
+        result = _result_with_stderr(
+            result,
+            (
+                "completion_contract.result_kind='code_change' is retired; "
+                "code-writing jobs must submit a structured code_change_candidate"
+            ),
+        )
 
     if final_status == "succeeded" and submission_required and submission_state is None and code_candidate_required:
         result = _result_with_stderr(

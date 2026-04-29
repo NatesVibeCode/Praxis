@@ -122,7 +122,7 @@ def test_owner_permanent_does_not_suggest_decision_filing(monkeypatch) -> None:
     kinds = [a["kind"] for a in plan["permanent"]]
     assert "operator_decision" not in kinds
     # The concrete, actionable suggestions remain.
-    assert {"code_change", "quality_rule"}.issubset(set(kinds))
+    assert {"code_change_candidate", "quality_rule"}.issubset(set(kinds))
 
 
 def test_owner_permanent_suggests_projector_extension_for_uncovered_namespace(
@@ -131,7 +131,7 @@ def test_owner_permanent_suggests_projector_extension_for_uncovered_namespace(
     monkeypatch.setattr(rem, "_namespace_owner_suggestion", lambda k: None)
     v = GovernanceViolation(policy="pii_without_owner", object_kind="table:xyz_thing")
     plan = suggest_remediation(object(), v)
-    assert any(a["kind"] == "code_change" for a in plan["permanent"])
+    assert any(a["kind"] == "code_change_candidate" for a in plan["permanent"])
 
 
 def test_owner_permanent_skips_projector_extension_when_already_mapped(
@@ -140,8 +140,8 @@ def test_owner_permanent_skips_projector_extension_when_already_mapped(
     monkeypatch.setattr(rem, "_namespace_owner_suggestion", lambda k: "bug_authority")
     v = GovernanceViolation(policy="pii_without_owner", object_kind="table:bugs")
     plan = suggest_remediation(object(), v)
-    # Namespace is already mapped → no redundant code-change suggestion.
-    assert not any(a["kind"] == "code_change" for a in plan["permanent"])
+    # Namespace is already mapped -> no redundant code-change candidate suggestion.
+    assert not any(a["kind"] == "code_change_candidate" for a in plan["permanent"])
 
 
 def test_owner_permanent_always_offers_quality_rule_backstop(monkeypatch) -> None:
@@ -181,13 +181,13 @@ def test_rule_immediate_re_evaluate_has_highest_confidence() -> None:
     assert plan["immediate"][0]["confidence"] > plan["immediate"][-1]["confidence"]
 
 
-def test_rule_permanent_includes_code_change_and_heartbeat_config() -> None:
+def test_rule_permanent_includes_code_change_candidate_and_heartbeat_config() -> None:
     v = GovernanceViolation(
         policy="error_rule_failing", object_kind="table:x", rule_kind="range",
     )
     plan = suggest_remediation(object(), v)
     kinds = {a["kind"] for a in plan["permanent"]}
-    assert {"code_change", "heartbeat_config"}.issubset(kinds)
+    assert {"code_change_candidate", "heartbeat_config"}.issubset(kinds)
     assert "operator_decision" not in kinds
 
 
@@ -277,7 +277,7 @@ def test_discover_enriches_rule_permanent_explain(monkeypatch) -> None:
     )
     plan = suggest_remediation(object(), v, discover=_fake_discover)
     upstream_fix = next(
-        a for a in plan["permanent"] if a["kind"] == "code_change"
+        a for a in plan["permanent"] if a["kind"] == "code_change_candidate"
     )
     assert "Candidate code paths" in upstream_fix["explain"]
     assert "runtime/bug_tracker.py" in upstream_fix["explain"]
@@ -290,7 +290,7 @@ def test_discover_enrichment_absent_when_no_callable() -> None:
     )
     plan = suggest_remediation(object(), v)
     upstream_fix = next(
-        a for a in plan["permanent"] if a["kind"] == "code_change"
+        a for a in plan["permanent"] if a["kind"] == "code_change_candidate"
     )
     assert "Candidate code paths" not in upstream_fix["explain"]
 
@@ -302,14 +302,16 @@ def test_discover_errors_are_swallowed_safely(monkeypatch) -> None:
     monkeypatch.setattr(rem, "_namespace_owner_suggestion", lambda k: None)
     v = GovernanceViolation(policy="pii_without_owner", object_kind="table:xyz_thing")
     plan = suggest_remediation(object(), v, discover=_bad_discover)
-    # Code-change backstop should still be present — discover failure shouldn't
+    # Code-change candidate backstop should still be present — discover failure shouldn't
     # omit the remediation, just the enrichment.
-    code_changes = [a for a in plan["permanent"] if a["kind"] == "code_change"]
-    assert code_changes
-    assert "Candidate code paths" not in code_changes[0]["explain"]
+    code_change_candidates = [
+        a for a in plan["permanent"] if a["kind"] == "code_change_candidate"
+    ]
+    assert code_change_candidates
+    assert "Candidate code paths" not in code_change_candidates[0]["explain"]
 
 
-def test_discover_enriches_owner_permanent_code_change(monkeypatch) -> None:
+def test_discover_enriches_owner_permanent_code_change_candidate(monkeypatch) -> None:
     monkeypatch.setattr(rem, "_namespace_owner_suggestion", lambda k: None)
 
     def _fake_discover(query: str, limit: int) -> list[dict[str, Any]]:
@@ -320,7 +322,7 @@ def test_discover_enriches_owner_permanent_code_change(monkeypatch) -> None:
 
     v = GovernanceViolation(policy="pii_without_owner", object_kind="table:xyz_thing")
     plan = suggest_remediation(object(), v, discover=_fake_discover)
-    code_change = next(
-        a for a in plan["permanent"] if a["kind"] == "code_change"
+    code_change_candidate = next(
+        a for a in plan["permanent"] if a["kind"] == "code_change_candidate"
     )
-    assert "memory/xyz_projector.py" in code_change["explain"]
+    assert "memory/xyz_projector.py" in code_change_candidate["explain"]

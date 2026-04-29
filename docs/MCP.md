@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 128 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 130 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -20,7 +20,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_artifacts` | `evidence` | `stable` | `workflow artifacts` | `read` | - | Browse and compare files produced by workflow sandbox runs. Each workflow job can write artifacts (code, logs, reports) — this tool lets you find, search, and diff them. |
 | `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `launch`, `read`, `write` | - | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | - | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
-| `praxis_friction` | `evidence` | `advanced` | - | `read` | - | View the friction ledger — a record of every time a guardrail blocked or warned about an action (scope violations, secret leaks, policy bounces). |
+| `praxis_friction` | `evidence` | `advanced` | - | `read` | - | Read or write the friction ledger — every guardrail bounce, warning, or hard failure (scope violations, secret leaks, policy bounces, JIT trigger matches). |
 | `praxis_patterns` | `evidence` | `stable` | - | `read`, `write` | - | Inspect and materialize durable platform patterns: recurring failure shapes clustered from friction events, bugs, and receipts. Patterns sit between raw evidence and bug tickets so repeated platform pain becomes one queryable authority object with evidence links and promotion rules. |
 | `praxis_receipts` | `evidence` | `advanced` | - | `read` | - | Search through past workflow results and analyze costs. Every workflow run produces receipts — this tool lets you search them by keyword and analyze token/cost spending. |
 | `praxis_audit_primitive` | `general` | `advanced` | - | `read` | - | Generic scan/plan/resolve surface for platform audits (wiring, governance, drift). Call action='playbook' first to read the structured usage guide; then 'registered' to discover audits/patterns, 'plan' to see findings + proposed actions, 'apply' to execute auto-safe patterns. Code-editing patterns are gated behind autorun_ok=False and never fire from 'apply'. |
@@ -81,6 +81,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_semantic_projection_refresh` | `operations` | `advanced` | - | `write` | - | Refresh the semantic projection through explicit operator maintenance authority. |
 | `praxis_status_snapshot` | `operations` | `advanced` | - | `read` | - | Read the canonical workflow status snapshot — pass rate, failure mix, queue depth, and in-flight run summaries from receipt authority. |
 | `praxis_task_route_eligibility` | `operations` | `advanced` | `workflow task-route-eligibility` | `write` | - | Write one bounded task-route eligibility window for a provider or provider/model scope through CQRS authority. |
+| `praxis_task_route_request` | `operations` | `advanced` | `workflow task-route-request` | `write` | - | Mutate request-shape knobs for one task route through CQRS authority. |
 | `praxis_work_assignment_matrix` | `operations` | `stable` | - | `read` | - | Read the model-tier work assignment matrix through CQRS authority. |
 | `tool_dag_health` | `operations` | `stable` | - | `read` | workflow health | Backwards-compatible alias for praxis_health. |
 | `praxis_bug_triage_packet` | `operator` | `advanced` | - | `read` | - | Read a compact LLM-oriented packet that classifies bugs as live defects, evidence debt, stale projections, platform friction, fixed-pending-verification, or inactive without mutating bug authority. |
@@ -95,7 +96,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_operator_ideas` | `operator` | `advanced` | - | `read`, `write` | - | Record, resolve, promote, or list pre-commitment operator ideas. Ideas are upstream of roadmap commitment: they may be rejected, superseded, archived, or promoted into existing roadmap items, but roadmap itself does not gain a canceled state. |
 | `praxis_operator_native_primary_cutover_gate` | `operator` | `advanced` | - | `write` | - | Admit a native primary cutover gate into operator-control decision and gate authority tables. |
 | `praxis_operator_relations` | `operator` | `advanced` | - | `write` | - | Record canonical functional areas and cross-object semantic relations. |
-| `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | - | Read one roadmap subtree and its dependency edges from DB-backed authority. |
+| `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | - | Read the open roadmap backlog, or one subtree when a root is named. |
 | `praxis_operator_write` | `operator` | `advanced` | - | `read`, `write` | - | Preview, validate, commit, update, retire, or re-parent roadmap rows through the shared operator-write validation gate. |
 | `praxis_refactor_heatmap` | `operator` | `stable` | - | `read` | - | Read the ranked refactor heatmap. Combines architecture-bug authority, source spread, surface coupling, and large-symbol pressure into one deterministic read model for choosing cleanup work. |
 | `praxis_replay_ready_bugs` | `operator` | `advanced` | - | `read` | - | Read the replay-ready bug backlog from authoritative provenance. |
@@ -119,10 +120,12 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_subscribe_events` | `session` | `session` | - | `session` | - | Pull build state events since the agent's last cursor position. Returns new events and advances the cursor. Call repeatedly to stay in sync with platform state changes. |
 | `praxis_credential_capture` | `setup` | `stable` | - | `read`, `write` | - | Request, inspect, or open the host-side secure API-key entry window for macOS Keychain-backed Praxis credentials. This is a thin MCP wrapper over the CQRS operation `credential_capture_keychain`; raw secret values never enter MCP params or tool results. |
 | `praxis_setup` | `setup` | `core` | - | `read` | - | Runtime-target setup authority for Praxis. Reports the active runtime_target_ref, substrate kind, API authority, DB authority, native_instance contract, workspace authority, provider-family thin sandbox image contract, and the empty_thin_sandbox_default pass/fail. USE WHEN: moving Praxis between machines, adopting an existing runtime, repointing the package at a DB, or checking that the CLI, MCP, and API are bound to the same repo-local instance. Operations belong to API/MCP; CLI and website are clients. SSH is build/deploy transport only. |
+| `praxis_code_change_candidate_materialize` | `submissions` | `advanced` | - | `write` | - | Materialize an approved or auto-apply code-change candidate. The CQRS handler rechecks verifier/gate evidence before applying source. |
+| `praxis_code_change_candidate_review` | `submissions` | `advanced` | - | `write` | - | Review a sealed code-change candidate. Writes the canonical decision to workflow_job_submission_reviews through the CQRS gateway; it never mutates source. |
 | `praxis_get_submission` | `submissions` | `session` | - | `session` | - | Read a sealed workflow submission within the current workflow MCP session. The session token owns run_id/workflow_id and the tool only accepts submission_id or job_label for the target submission. |
 | `praxis_review_submission` | `submissions` | `session` | - | `session` | - | Review a sealed workflow submission within the current workflow MCP session. The session token owns run_id/workflow_id/job_label for the reviewer. The tool only accepts submission_id or job_label for the target submission. |
 | `praxis_submit_artifact_bundle` | `submissions` | `session` | - | `session` | - | Submit a sealed artifact bundle result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
-| `praxis_submit_code_change` | `submissions` | `session` | - | `session` | - | Submit a sealed code-change result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
+| `praxis_submit_code_change_candidate` | `submissions` | `session` | - | `session` | - | Submit a structured code-change candidate for the current workflow MCP session. The agent does not edit live source; it provides a small proposal payload plus source snapshots. Runtime validates the proposal and derives the patch artifact. |
 | `praxis_submit_research_result` | `submissions` | `session` | - | `session` | - | Submit a sealed research result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_approve_proposed_plan` | `workflow` | `stable` | `workflow approve-plan` | `read` | - | Approve a ProposedPlan so launch_approved can submit it. Takes the ProposedPlan payload from praxis_launch_plan(preview_only=true), wraps it with approved_by + timestamp + hash, and returns an ApprovedPlan. The hash binds the approval to the exact spec_dict — tampering between approve and launch fails closed at launch time. The ProposedPlan must already carry machine-checkable provider freshness evidence. |
 | `praxis_bind_data_pills` | `workflow` | `stable` | `workflow bind-pills` | `read` | - | Layer 1 (Bind) of the planning stack: extract and validate ``object.field`` data-pill references from prose intent against the data dictionary authority. Deterministic — matches explicit ``snake_case.field_path`` spans in the prose; does not infer loose references like "the user's name." Returns bound / ambiguous / unbound splits the caller confirms before decomposing intent into packets. |
@@ -134,6 +137,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_decompose_intent` | `workflow` | `stable` | `workflow decompose` | `read` | - | Layer 2 (Decompose) of the planning stack: split prose intent into ordered steps by parsing explicit step markers (numbered lists, bulleted lists, or first/then/finally ordering). Deterministic — does NOT do free-prose semantic decomposition. |
 | `praxis_generate_plan` | `workflow` | `stable` | `workflow generate-plan` | `read`, `write` | - | Shared CQRS plan-generation front door. action='generate_plan' recognizes messy prose, matches spans to authority, returns suggestions and gaps, and does not mutate state. action='materialize_plan' creates or updates a draft workflow through the canonical workflow build mutation. |
 | `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | - | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
+| `praxis_moon` | `workflow` | `advanced` | `workflow moon` | `launch`, `read`, `write` | - | Graph-authoring co-pilot for the Moon canvas. Five actions over the same workflow build authority, all CQRS-gateway dispatched (each call leaves a receipt + the command actions emit authority events). |
 | `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | - | Q-side of the planning stack: read every plan.* authority_event for one workflow_id in order. Pair with gateway-backed praxis_compose_plan / praxis_launch_plan on the C side. |
 | `praxis_promote_experiment_winner` | `workflow` | `advanced` | - | `write` | - | Promote one compose-experiment leg into the canonical task_type_routing row for that task type. The winning leg's temperature and max_tokens are applied; provider/model changes remain visible only in the returned diff. |
 | `praxis_suggest_plan_atoms` | `workflow` | `stable` | `workflow suggest-atoms` | `read` | - | Layer 0 (Suggest): free prose → pills + step types + parameters. Deterministic; no LLM call; no order or count produced. |
@@ -274,7 +278,7 @@ Example input:
 - CLI schema help: `workflow tools describe praxis_friction`
 - When to use: Inspect friction and guardrail events that are slowing workflows down.
 - When not to use: Do not use it for health probes or general bug search.
-- Selector: `action`; default `stats`; values `stats`, `list`, `patterns`
+- Selector: `action`; default `stats`; values `stats`, `list`, `patterns`, `record`
 - Required args: (none)
 
 Example input:
@@ -1673,6 +1677,33 @@ Example input:
 }
 ```
 
+#### `praxis_task_route_request`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:task-route-request`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow task-route-request`
+- CLI schema help: `workflow tools describe praxis_task_route_request`
+- When to use: Mutate request-shape knobs for one task route through CQRS authority: temperature, max_tokens, reasoning_control, request_contract_ref, cache policy, structured-output policy, or streaming policy.
+- When not to use: Do not use it to allow, reject, onboard, or admit a route. Eligibility stays with praxis_task_route_eligibility; admission/access stays with provider control surfaces.
+- Recommended alias: `workflow task-route-request`
+- Selector: none
+- Required args: `task_type`, `provider_slug`, `model_slug`
+
+Example input:
+
+```json
+{
+  "task_type": "compile",
+  "provider_slug": "openai",
+  "model_slug": "gpt-5.4",
+  "temperature": 0.2,
+  "max_tokens": 32768,
+  "reason_code": "request_contract_tuning"
+}
+```
+
 #### `praxis_work_assignment_matrix`
 
 - Surface: `operations`
@@ -2517,6 +2548,51 @@ Example input:
 
 ### Submissions
 
+#### `praxis_code_change_candidate_materialize`
+
+- Surface: `submissions`
+- Tier: `advanced`
+- Badges: `advanced`, `submissions`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_code_change_candidate_materialize`
+- CLI schema help: `workflow tools describe praxis_code_change_candidate_materialize`
+- When to use: Apply a reviewed or auto-apply code-change candidate after verifier and gate checks.
+- When not to use: Do not use it to bypass review or verifier evidence.
+- Selector: none
+- Required args: `candidate_id`
+
+Example input:
+
+```json
+{
+  "candidate_id": "<uuid>",
+  "materialized_by": "human:nate"
+}
+```
+
+#### `praxis_code_change_candidate_review`
+
+- Surface: `submissions`
+- Tier: `advanced`
+- Badges: `advanced`, `submissions`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_code_change_candidate_review`
+- CLI schema help: `workflow tools describe praxis_code_change_candidate_review`
+- When to use: Approve, reject, or request changes on a sealed code-change candidate.
+- When not to use: Do not use it to apply source; materialization is a separate operation.
+- Selector: none
+- Required args: `candidate_id`, `reviewer_ref`, `decision`
+
+Example input:
+
+```json
+{
+  "candidate_id": "<uuid>",
+  "reviewer_ref": "human:nate",
+  "decision": "approve"
+}
+```
+
 #### `praxis_get_submission`
 
 - Surface: `submissions`
@@ -2586,28 +2662,25 @@ Example input:
 }
 ```
 
-#### `praxis_submit_code_change`
+#### `praxis_submit_code_change_candidate`
 
 - Surface: `submissions`
 - Tier: `session`
 - Badges: `session`, `submissions`, `session-only`
 - Risks: `session`
-- CLI entrypoint: `workflow tools call praxis_submit_code_change`
-- CLI schema help: `workflow tools describe praxis_submit_code_change`
-- When to use: Submit a sealed code-change result owned by the active workflow session.
-- When not to use: Do not use it outside token-scoped workflow execution.
+- CLI entrypoint: `workflow tools call praxis_submit_code_change_candidate`
+- CLI schema help: `workflow tools describe praxis_submit_code_change_candidate`
+- When to use: Submit a structured code-change candidate owned by the active workflow session.
+- When not to use: Do not use it outside token-scoped workflow execution; do not submit raw LLM-authored diffs.
 - Selector: none
-- Required args: `summary`, `primary_paths`, `result_kind`
+- Required args: `bug_id`, `proposal_payload`, `source_context_refs`
 
 Example input:
 
 ```json
 {
-  "summary": "Fixed MCP transport framing",
-  "primary_paths": [
-    "surfaces/mcp/protocol.py"
-  ],
-  "result_kind": "code_change"
+  "bug_id": "BUG-12345678",
+  "review_routing": "human_review"
 }
 ```
 
@@ -2911,6 +2984,29 @@ Example input:
       }
     ]
   }
+}
+```
+
+#### `praxis_moon`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:moon`, `mutates-state`, `launches-work`
+- Risks: `launch`, `read`, `write`
+- CLI entrypoint: `workflow moon`
+- CLI schema help: `workflow tools describe praxis_moon`
+- When to use: Read, compose, suggest, mutate, or launch Moon workflow graphs through the same CQRS-backed build authority used by the in-app Moon surface.
+- When not to use: Do not use it for unrelated roadmap, bug, provider-routing, or direct database work. Read the graph before mutating fields.
+- Recommended alias: `workflow moon`
+- Selector: `action`; default `get_build`; values `get_build`, `compose`, `suggest_next`, `mutate_field`, `launch`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "get_build",
+  "workflow_id": "wf_abc"
 }
 ```
 

@@ -1548,7 +1548,23 @@ def _handle_workflow_build_get(request: Any, path: str) -> None:
             request._send_json(404, {"error": f"Unknown build endpoint: {path}"})
             return
         pg = request.subsystems.get_pg_conn()
-        row = _load_workflow_build_row(pg, workflow_id)
+        try:
+            row = _load_workflow_build_row(pg, workflow_id)
+        except _ClientError as missing:
+            # Orchestrator-path workflows (workflow_id like ``workflow.run.X``)
+            # never get a row in ``public.workflows`` — that table is for the
+            # Moon-composed build authoring flow. Without a fallback the UI
+            # at /app/run/{run_id} renders an empty graph (no lines) even
+            # though the orchestrator's runtime authority HAS a graph
+            # (nodes + edges) reachable via the run-detail path. Synthesize
+            # a minimal build_moment from the run authority so the UI can
+            # render the graph it already has the data for.
+            if str(missing).startswith("Workflow not found:"):
+                synthesized = _synthesize_orchestrator_build_moment(pg, workflow_id)
+                if synthesized is not None:
+                    request._send_json(200, synthesized)
+                    return
+            raise
         request._send_json(200, build_workflow_build_moment(row, conn=pg))
     except _ClientError as exc:
         message = str(exc)
@@ -1556,6 +1572,102 @@ def _handle_workflow_build_get(request: Any, path: str) -> None:
         request._send_json(status, {"error": message})
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
+
+
+def _synthesize_orchestrator_build_moment(pg: Any, workflow_id: str) -> dict[str, Any] | None:
+    """Build a minimal Moon build moment for a workflow that only exists in
+    the orchestrator runtime authority (no ``public.workflows`` row).
+
+    Looks up the most recent run for this workflow_id, asks
+    ``runtime.workflow.unified.get_run_status`` for jobs, derives the chain
+    from the job order + adjacency, and returns a payload with a populated
+    ``build_graph`` so the UI's MoonBuildPage can render lines. Returns
+    None if no run exists yet (let the original 404 propagate).
+    """
+
+    run_row = pg.fetchrow(
+        """SELECT run_id, request_envelope, current_state
+           FROM workflow_runs
+           WHERE workflow_id = $1
+           ORDER BY requested_at DESC
+           LIMIT 1""",
+        workflow_id,
+    )
+    if run_row is None:
+        return None
+    run_id = str(run_row["run_id"])
+
+    try:
+        from runtime.workflow.unified import get_run_status
+        status = get_run_status(pg, run_id)
+    except Exception:
+        return None
+
+    jobs = []
+    if isinstance(status, dict):
+        raw_jobs = status.get("jobs")
+        if isinstance(raw_jobs, list):
+            jobs = list(raw_jobs)
+
+    if not jobs:
+        return None
+
+    # Build nodes keyed by label (the orchestrator path uses string labels
+    # as the canonical node identity — e.g. context / llm / parser).
+    seen: set[str] = set()
+    graph_nodes: list[dict[str, Any]] = []
+    for index, job in enumerate(jobs):
+        label = str((job.get("label") or "")).strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        graph_nodes.append({
+            "node_id": label,
+            "label": label,
+            "route": str(job.get("agent_slug") or job.get("resolved_agent") or "auto"),
+            "type": "job",
+            "position": index,
+            "status": str(job.get("status") or "pending"),
+            "duration_ms": int(job.get("duration_ms") or 0),
+            "cost_usd": float(job.get("cost_usd") or 0.0),
+        })
+
+    # Edges: linear chain by job order. The orchestrator path produces
+    # chained jobs (context → llm → parser → terminal) in declaration
+    # order; that's a safe approximation for rendering. Any phantom
+    # endpoints (e.g. trailing 'terminal' that wasn't materialized as a
+    # job row) get pruned so the UI doesn't get unresolved refs.
+    valid_ids = {n["node_id"] for n in graph_nodes}
+    graph_edges: list[dict[str, Any]] = []
+    for src, dst in zip(graph_nodes, graph_nodes[1:]):
+        graph_edges.append({
+            "edge_id": f"edge-{src['node_id']}-{dst['node_id']}",
+            "from_node_id": src["node_id"],
+            "to_node_id": dst["node_id"],
+            "type": "after_success",
+        })
+
+    return {
+        "id": workflow_id,
+        "name": workflow_id,
+        "description": (
+            f"Orchestrator-path workflow (no Moon spec). Graph synthesized "
+            f"from the most recent run ({run_id})."
+        ),
+        "version": 0,
+        "updated_at": None,
+        "build_graph": {
+            "nodes": graph_nodes,
+            "edges": graph_edges,
+        },
+        "definition": None,
+        "compiled_spec": None,
+        "synthesized": True,
+        "synthesis_source": {
+            "kind": "orchestrator_run",
+            "run_id": run_id,
+        },
+    }
 
 
 def _handle_workflow_build_post(request: Any, path: str) -> None:

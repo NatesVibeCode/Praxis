@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import uuid
 from datetime import datetime, timezone
 
@@ -75,6 +76,15 @@ def _result(
         review_target_modules=review_target_modules,
         parent_run_id=parent_run_id,
     )
+
+
+def test_runtime_observability_is_package_with_operational_submodules() -> None:
+    zero_token = importlib.import_module("runtime.observability.zero_token_detector")
+    preflight = importlib.import_module("runtime.observability.worker_auth_preflight")
+
+    assert observability_mod.WorkflowMetricsView is WorkflowMetricsView
+    assert zero_token.BuildAntipatternSweepModule.__name__ == "BuildAntipatternSweepModule"
+    assert callable(preflight.run_startup_auth_preflight)
 
 
 def test_failure_breakdown_and_lineage_use_new_metadata(monkeypatch, metrics_db_url):

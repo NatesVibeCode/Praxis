@@ -51,7 +51,7 @@ def test_clusters_produce_bulk_fix_only_when_leverage_exists(monkeypatch) -> Non
     assert len(clusters) == 1
     c = clusters[0]
     assert c.cluster_fix is not None
-    assert c.cluster_fix.kind == "code_change"
+    assert c.cluster_fix.kind == "code_change_candidate"
     assert "provider_" in c.cluster_fix.summary
     assert c.coverage_fixed == 2
 

@@ -9,7 +9,9 @@ overlay, no auto-discovered client config. The agent just calls:
 
     praxis discover "retry logic"
     praxis query "what is failing right now?"
-    praxis submit_code_change --summary "..." --primary-paths '["foo.py"]' --result-kind code_change
+    praxis submit_code_change_candidate --bug-id BUG-12345678 \
+      --proposal-payload '{"intended_files":["foo.py"],"edits":[]}' \
+      --source-context-refs '{"foo.py":"..."}'
 
 Each invocation is one HTTP POST to ``$PRAXIS_WORKFLOW_MCP_URL`` with the
 signed session token from ``$PRAXIS_WORKFLOW_MCP_TOKEN`` as a bearer. This
@@ -118,15 +120,19 @@ _COMMANDS: dict[str, tuple[str, list[tuple[str, str, str, bool]]]] = {
             ("--args", "args", "json", False),
         ],
     ),
-    "submit_code_change": (
-        "praxis_submit_code_change",
+    "submit_code_change_candidate": (
+        "praxis_submit_code_change_candidate",
         [
-            ("--summary", "summary", "str", True),
-            ("--primary-paths", "primary_paths", "json", True),
-            ("--result-kind", "result_kind", "str", True),
-            ("--tests-ran", "tests_ran", "json", False),
+            ("--bug-id", "bug_id", "str", True),
+            ("--proposal-payload", "proposal_payload", "json", True),
+            ("--source-context-refs", "source_context_refs", "json", True),
+            ("--base-head-ref", "base_head_ref", "str", False),
+            ("--review-routing", "review_routing", "str", False),
+            ("--verifier-ref", "verifier_ref", "str", False),
+            ("--verifier-inputs", "verifier_inputs", "json", False),
+            ("--summary", "summary", "str", False),
             ("--notes", "notes", "str", False),
-            ("--declared-operations", "declared_operations", "json", False),
+            ("--routing-decision-record", "routing_decision_record", "json", False),
         ],
     ),
     "submit_artifact_bundle": (
@@ -480,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
             "  praxis context_shard [--view X]\n"
             "  praxis health\n"
             "  praxis integration <list|describe|call> ...\n"
-            "  praxis submit_code_change --summary ... --primary-paths ... --result-kind ...\n"
+            "  praxis submit_code_change_candidate --bug-id ... --proposal-payload '{...}' --source-context-refs '{...}'\n"
             "  praxis submit_artifact_bundle --summary ... --primary-paths ... --result-kind ...\n"
             "  praxis get_submission --submission-id X | --job-label Y\n\n"
             "2) Canonical workflow shape (matches the host CLI):\n"

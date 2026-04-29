@@ -96,7 +96,7 @@ class LLMRequest:
     cache_static_prefix: bool = False
     # Contract/intents are optional for legacy callers. When provided, the
     # provider body is compiled through the DB-backed request contract before
-    # dispatch so unsupported or forbidden knobs fail closed.
+    # dispatch so unavailable knobs are shaped out with receipts.
     request_contract: dict[str, Any] | None = None
     request_intent: dict[str, Any] | None = None
 

@@ -77,7 +77,7 @@ def test_publish_policy_review_projects_gate_and_promotion_rows(monkeypatch) -> 
         "workflow_id": "workflow-1",
         "job_label": "build.codegen",
         "attempt_no": 1,
-        "result_kind": "code_change",
+        "result_kind": "code_change_candidate",
         "summary": "sealed worker output",
         "primary_paths": ["runtime/workflow/submission_capture.py"],
         "tests_ran": ["pytest tests/unit/test_workflow_submission_policy.py"],

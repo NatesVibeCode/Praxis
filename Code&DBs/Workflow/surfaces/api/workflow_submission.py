@@ -572,7 +572,6 @@ __all__ = [
     "get_submission",
     "review_submission",
     "submit_artifact_bundle",
-    "submit_code_change",
     "submit_code_change_candidate",
     "submit_research_result",
 ]

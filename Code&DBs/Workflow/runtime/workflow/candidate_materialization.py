@@ -276,6 +276,94 @@ def _dirty_intended_paths(repo_root: Path, paths: Sequence[str]) -> list[str]:
     return dirty
 
 
+def _staged_paths(repo_root: Path) -> list[str]:
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20.0,
+    )
+    if completed.returncode != 0:
+        raise CandidateMaterializationError(
+            "code_change_candidate.git_failed",
+            "could not inspect staged source changes",
+            details={"stderr": completed.stderr.strip()},
+        )
+    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
+def _assert_index_clean(repo_root: Path) -> None:
+    staged = _staged_paths(repo_root)
+    if staged:
+        raise CandidateMaterializationError(
+            "code_change_candidate.index_dirty",
+            "materialization requires an empty git index so the promotion commit has one authority",
+            details={"staged_paths": staged},
+        )
+
+
+def _commit_live_apply(
+    repo_root: Path,
+    *,
+    candidate_id: str,
+    intended_files: Sequence[str],
+    materialized_by: str,
+) -> str:
+    intended_refs = tuple(dict.fromkeys(to_repo_ref(path) for path in intended_files if str(path).strip()))
+    if not intended_refs:
+        raise CandidateMaterializationError(
+            "code_change_candidate.no_intended_files",
+            "candidate materialization needs intended files before creating a source commit",
+            details={"candidate_id": candidate_id},
+        )
+
+    _assert_index_clean(repo_root)
+    try:
+        _run_git(repo_root, ["add", "--", *intended_refs])
+        staged = _staged_paths(repo_root)
+        intended_set = set(intended_refs)
+        unexpected = sorted(set(staged) - intended_set)
+        if unexpected or not staged:
+            raise CandidateMaterializationError(
+                "code_change_candidate.commit_scope_invalid",
+                "candidate promotion commit scope did not match intended files",
+                details={
+                    "candidate_id": candidate_id,
+                    "staged_paths": staged,
+                    "unexpected_paths": unexpected,
+                    "intended_files": list(intended_refs),
+                },
+            )
+
+        actor = " ".join(str(materialized_by or "system").split())
+        message = (
+            f"Materialize code-change candidate {candidate_id}\n\n"
+            f"Materialized-by: {actor}"
+        )
+        _run_git(
+            repo_root,
+            [
+                "-c",
+                "user.name=Praxis Candidate Materializer",
+                "-c",
+                "user.email=praxis-candidate@local",
+                "commit",
+                "--no-gpg-sign",
+                "--no-verify",
+                "-m",
+                message,
+            ],
+        )
+    except Exception:
+        try:
+            _run_git(repo_root, ["reset", "--", *intended_refs])
+        except Exception:
+            pass
+        raise
+    return current_head_ref(repo_root)
+
+
 def _capture_patch_artifact(
     conn: Any,
     *,
@@ -479,7 +567,7 @@ def _insert_candidate_promotion(
     *,
     gate_evaluation: Any,
     current_head: str,
-    patch_sha256: str,
+    canonical_commit_ref: str,
     materialized_by: str,
 ) -> Any:
     now = datetime.now(timezone.utc)
@@ -494,7 +582,7 @@ def _insert_candidate_promotion(
         target_ref=gate_evaluation.target_ref,
         promotion_intent_at=now,
         finalized_at=now,
-        canonical_commit_ref=f"candidate_patch:{patch_sha256}",
+        canonical_commit_ref=canonical_commit_ref,
     )
     _insert_promotion_decision(conn, promotion_decision=promotion_decision)
     return promotion_decision
@@ -696,6 +784,7 @@ def materialize_candidate(
                 "gate_evaluation": asdict(gate_evaluation),
             }
 
+        _assert_index_clean(root)
         _run_git(root, ["apply", "--check"], input_text=projection.unified_diff)
         _run_git(root, ["apply"], input_text=projection.unified_diff)
 
@@ -729,11 +818,22 @@ def materialize_candidate(
                 "verification": final_verification,
             }
 
+        try:
+            canonical_commit_ref = _commit_live_apply(
+                root,
+                candidate_id=candidate_id,
+                intended_files=intended_files,
+                materialized_by=materialized_by,
+            )
+        except CandidateMaterializationError:
+            _rollback_live_apply(root, projection.unified_diff)
+            raise
+
         promotion_decision = _insert_candidate_promotion(
             conn,
             gate_evaluation=gate_evaluation,
             current_head=current_head,
-            patch_sha256=projection.patch_sha256,
+            canonical_commit_ref=canonical_commit_ref,
             materialized_by=materialized_by,
         )
         PostgresBugEvidenceRepository(conn).upsert_bug_evidence_link(
@@ -771,6 +871,7 @@ def materialize_candidate(
                 "gate_evaluation_id": gate_evaluation.gate_evaluation_id,
                 "promotion_decision_id": promotion_decision.promotion_decision_id,
                 "final_verification_run_id": final_verification_run_id,
+                "canonical_commit_ref": canonical_commit_ref,
             },
         )
         return {
@@ -779,6 +880,7 @@ def materialize_candidate(
             "candidate_id": candidate_id,
             "patch_artifact_ref": patch_artifact_ref,
             "patch_sha256": projection.patch_sha256,
+            "canonical_commit_ref": canonical_commit_ref,
             "gate_evaluation": asdict(gate_evaluation),
             "promotion_decision": asdict(promotion_decision),
             "final_verification": final_verification,
@@ -788,6 +890,7 @@ def materialize_candidate(
                 "submission_id": candidate["submission_id"],
                 "bug_id": candidate["bug_id"],
                 "patch_sha256": projection.patch_sha256,
+                "canonical_commit_ref": canonical_commit_ref,
                 "final_verification_run_id": final_verification_run_id,
                 "promotion_decision_id": promotion_decision.promotion_decision_id,
             },
