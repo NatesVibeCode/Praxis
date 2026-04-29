@@ -69,6 +69,7 @@ EVIDENCE_KIND_RUN = "run"
 EVIDENCE_KIND_VERIFICATION_RUN = "verification_run"
 EVIDENCE_KIND_HEALING_RUN = "healing_run"
 EVIDENCE_KIND_GOVERNANCE_SCAN = "governance_scan"
+EVIDENCE_KIND_PATH = "path"
 ALLOWED_EVIDENCE_KINDS: frozenset[str] = frozenset(
     {
         EVIDENCE_KIND_RECEIPT,
@@ -77,6 +78,7 @@ ALLOWED_EVIDENCE_KINDS: frozenset[str] = frozenset(
         EVIDENCE_KIND_VERIFICATION_RUN,
         EVIDENCE_KIND_HEALING_RUN,
         EVIDENCE_KIND_GOVERNANCE_SCAN,
+        EVIDENCE_KIND_PATH,
     }
 )
 

@@ -92,8 +92,14 @@ class BugAttachEvidenceCommand(BaseModel):
     """Input for `bug.attach_evidence` — link evidence (verification run, receipt, etc.) to a bug."""
 
     bug_id: str = Field(..., description="Bug to attach evidence to (required).")
-    evidence_kind: str = Field(..., description="Evidence kind (e.g. 'verification_run', 'receipt') (required).")
-    evidence_ref: str = Field(..., description="Pointer to the evidence row (required).")
+    evidence_kind: str = Field(
+        ...,
+        description="Evidence kind (e.g. 'verification_run', 'receipt', 'path') (required).",
+    )
+    evidence_ref: str = Field(
+        ...,
+        description="Pointer to the evidence row or repo-relative path (required).",
+    )
     evidence_role: str = Field(default="observed_in", description="Role: observed_in / validates_fix / etc.")
     created_by: str | None = Field(default=None)
     notes: str | None = Field(default=None)

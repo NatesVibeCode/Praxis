@@ -9,6 +9,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 if TYPE_CHECKING:
@@ -22,6 +23,7 @@ from runtime.bug_evidence import (
     ALLOWED_EVIDENCE_ROLES as _ALLOWED_EVIDENCE_ROLES,
     EVIDENCE_KIND_GOVERNANCE_SCAN,
     EVIDENCE_KIND_OPERATION_RECEIPT,
+    EVIDENCE_KIND_PATH,
     EVIDENCE_KIND_RECEIPT,
     EVIDENCE_ROLE_VALIDATES_FIX,
 )
@@ -32,6 +34,7 @@ from runtime.primitive_contracts import (
 )
 from storage.postgres.vector_store import PostgresVectorStore, VectorFilter
 from runtime.payload_coercion import json_object as _json_object, json_list as _json_list, coerce_datetime as _coerce_datetime
+from runtime.workspace_paths import repo_root as workspace_repo_root, to_repo_ref
 
 
 _BUG_BLAST_RADIUS_WINDOW_SQL = "7 days"
@@ -107,6 +110,27 @@ def _ordered_unique(values: list[Any]) -> tuple[Any, ...]:
         seen.add(key)
         deduped.append(value)
     return tuple(deduped)
+
+
+def _canonical_path_evidence_ref(evidence_ref: str) -> str:
+    raw = str(evidence_ref or "").strip()
+    if not raw or "\x00" in raw:
+        raise ValueError("evidence_ref is required for path evidence")
+    root = workspace_repo_root().resolve()
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        resolved = candidate.resolve(strict=False)
+    except OSError:
+        resolved = candidate.absolute()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"path evidence must resolve under repo root: {evidence_ref}") from exc
+    if not resolved.exists():
+        raise ValueError(f"unknown path reference: {evidence_ref}")
+    return to_repo_ref(resolved, repo_root=root)
 
 
 def _attempted_at_sort_key(item: Any) -> datetime:
@@ -483,7 +507,7 @@ class BugTracker:
         *,
         evidence_kind: str,
         evidence_ref: str,
-    ) -> None:
+    ) -> str:
         if evidence_kind not in _ALLOWED_EVIDENCE_KINDS:
             allowed = ", ".join(sorted(_ALLOWED_EVIDENCE_KINDS))
             raise ValueError(f"evidence_kind must be one of {allowed}")
@@ -511,10 +535,13 @@ class BugTracker:
                 "SELECT 1 FROM data_dictionary_governance_scans WHERE scan_id::text = $1",
                 evidence_ref,
             )
+        elif evidence_kind == EVIDENCE_KIND_PATH:
+            return _canonical_path_evidence_ref(evidence_ref)
         else:
             exists = False
         if not exists:
             raise ValueError(f"unknown {evidence_kind} reference: {evidence_ref}")
+        return evidence_ref
 
     def _public_receipt_summary(self, receipt: dict[str, Any] | None) -> dict[str, Any] | None:
         return _bug_evidence.public_receipt_summary(receipt)
@@ -952,10 +979,12 @@ class BugTracker:
             raise ValueError(f"evidence_role must be one of {allowed}")
         if self.get(bug_id) is None:
             raise ValueError(f"bug not found: {bug_id}")
-        self._validate_evidence_reference(
+        validated_ref = self._validate_evidence_reference(
             evidence_kind=evidence_kind,
             evidence_ref=evidence_ref,
         )
+        if validated_ref:
+            evidence_ref = validated_ref
         row = _bug_evidence_repository(self._conn).upsert_bug_evidence_link(
             bug_id=bug_id,
             evidence_kind=evidence_kind,
