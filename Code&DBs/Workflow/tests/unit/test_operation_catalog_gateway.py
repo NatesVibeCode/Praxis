@@ -503,6 +503,17 @@ def test_gateway_failure_response_includes_operation_receipt_so_callers_can_trac
     assert receipt["execution_status"] == "failed"
     assert receipt["error_code"] == "ValueError"
     assert receipt.get("receipt_id"), "failed receipt must carry its receipt_id"
+    assert receipt["event_ids"] == [], (
+        "command-kind exceptions must NOT emit authority_events — events are "
+        "reserved for completed command outcomes per the CQRS contract"
+    )
+    executed = conn.executed_sql()
+    assert "INSERT INTO authority_operation_receipts" in executed, (
+        "the failed receipt must be persisted even though the response also carries it"
+    )
+    assert "INSERT INTO authority_events" not in executed, (
+        "command failure must not write an authority_events row"
+    )
 
 
 def test_command_receipt_event_persistence_rolls_back_as_one_proof_write(monkeypatch) -> None:
