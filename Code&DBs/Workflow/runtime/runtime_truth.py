@@ -26,6 +26,8 @@ from storage.postgres.connection import (
 
 
 _PROVIDER_SLOT_STALE_SECONDS = 600
+_DB_CONNECTION_WARNING_UTILIZATION_PCT = 80.0
+_DB_CONNECTION_CRITICAL_UTILIZATION_PCT = 90.0
 
 
 def _utc_now_iso() -> str:
@@ -85,9 +87,12 @@ def _execute_rows(conn: Any, query: str, *args: Any) -> tuple[list[Any], str | N
 
 
 def _provider_control_plane_by_provider(conn: Any) -> dict[str, dict[str, Any]]:
-    from runtime.native_authority import default_native_runtime_profile_ref_required
+    from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
 
-    runtime_profile_ref = default_native_runtime_profile_ref_required(conn)
+    try:
+        runtime_profile_ref = default_native_runtime_profile_ref(conn)
+    except Exception:
+        return {}
     rows, _error = _execute_rows(
         conn,
         """
@@ -144,10 +149,87 @@ def _pool_config_snapshot() -> dict[str, Any]:
 
 def _db_authority_snapshot(conn: Any) -> dict[str, Any]:
     rows, error = _execute_rows(conn, "SELECT 1 AS ok")
+    pool_config = _pool_config_snapshot()
     return {
         "status": "ok" if not error and bool(rows) else "unavailable",
         "error": error,
-        "pool_config": _pool_config_snapshot(),
+        "pool_config": pool_config,
+        "connection_pressure": _db_connection_pressure_snapshot(conn, pool_config=pool_config),
+    }
+
+
+def _db_connection_pressure_snapshot(
+    conn: Any,
+    *,
+    pool_config: Mapping[str, Any],
+) -> dict[str, Any]:
+    rows, error = _execute_rows(
+        conn,
+        """
+        SELECT
+            current_setting('max_connections')::int AS max_connections,
+            COUNT(*) AS cluster_connections,
+            COUNT(*) FILTER (WHERE state = 'active') AS cluster_active_connections,
+            COUNT(*) FILTER (WHERE state = 'idle') AS cluster_idle_connections,
+            COUNT(*) FILTER (WHERE datname = current_database()) AS database_connections,
+            COUNT(*) FILTER (
+                WHERE datname = current_database() AND state = 'active'
+            ) AS database_active_connections,
+            COUNT(*) FILTER (
+                WHERE datname = current_database() AND state = 'idle'
+            ) AS database_idle_connections
+        FROM pg_stat_activity
+        """,
+    )
+    if error or not rows:
+        return {
+            "status": "unknown",
+            "error": error,
+        }
+    row = rows[0]
+    max_connections = _as_int(_row_value(row, "max_connections"))
+    cluster_connections = _as_int(_row_value(row, "cluster_connections"))
+    cluster_active_connections = _as_int(_row_value(row, "cluster_active_connections"))
+    cluster_idle_connections = _as_int(_row_value(row, "cluster_idle_connections"))
+    database_connections = _as_int(_row_value(row, "database_connections"))
+    database_active_connections = _as_int(_row_value(row, "database_active_connections"))
+    database_idle_connections = _as_int(_row_value(row, "database_idle_connections"))
+    free_connection_slots = (
+        max(0, max_connections - cluster_connections) if max_connections > 0 else 0
+    )
+    utilization_pct = (
+        round((cluster_connections / max_connections) * 100.0, 1)
+        if max_connections > 0
+        else 0.0
+    )
+    configured_pool_headroom_slots = max(1, _as_int(pool_config.get("max_size"), 1))
+    status = "ok"
+    if (
+        max_connections <= 0
+        or free_connection_slots <= 0
+        or utilization_pct >= _DB_CONNECTION_CRITICAL_UTILIZATION_PCT
+    ):
+        status = "critical"
+    elif (
+        free_connection_slots <= configured_pool_headroom_slots
+        or utilization_pct >= _DB_CONNECTION_WARNING_UTILIZATION_PCT
+    ):
+        status = "warning"
+    return {
+        "status": status,
+        "error": None,
+        "max_connections": max_connections,
+        "cluster_connections": cluster_connections,
+        "cluster_active_connections": cluster_active_connections,
+        "cluster_idle_connections": cluster_idle_connections,
+        "database_connections": database_connections,
+        "database_active_connections": database_active_connections,
+        "database_idle_connections": database_idle_connections,
+        "free_connection_slots": free_connection_slots,
+        "utilization_pct": utilization_pct,
+        "warning_utilization_pct": _DB_CONNECTION_WARNING_UTILIZATION_PCT,
+        "critical_utilization_pct": _DB_CONNECTION_CRITICAL_UTILIZATION_PCT,
+        "configured_pool_headroom_slots": configured_pool_headroom_slots,
     }
 
 
@@ -699,6 +781,7 @@ def truth_blockers(
     manifest_audit: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
+    db_pressure = _as_mapping(db.get("connection_pressure"))
     if db.get("status") != "ok":
         blockers.append(
             _blocker(
@@ -706,6 +789,26 @@ def truth_blockers(
                 "critical",
                 "Workflow DB authority is unavailable.",
                 evidence={"error": db.get("error"), "pool_config": db.get("pool_config")},
+                remediation_type="db_pool_pressure",
+            )
+        )
+    elif db_pressure.get("status") in {"warning", "critical"}:
+        free_slots = _as_int(db_pressure.get("free_connection_slots"))
+        blockers.append(
+            _blocker(
+                "db_pool_pressure",
+                "critical" if db_pressure.get("status") == "critical" else "warning",
+                "Postgres connection headroom is below the workflow pool safety margin.",
+                evidence={
+                    "free_connection_slots": free_slots,
+                    "max_connections": db_pressure.get("max_connections"),
+                    "cluster_connections": db_pressure.get("cluster_connections"),
+                    "utilization_pct": db_pressure.get("utilization_pct"),
+                    "configured_pool_headroom_slots": db_pressure.get(
+                        "configured_pool_headroom_slots"
+                    ),
+                    "pool_config": db.get("pool_config"),
+                },
                 remediation_type="db_pool_pressure",
             )
         )
@@ -831,6 +934,10 @@ def build_firecheck(
         "next_actions": next_actions,
         "summary": {
             "db": snapshot["db_authority"]["status"],
+            "db_connection_pressure": snapshot["db_authority"]["connection_pressure"]["status"],
+            "db_free_connection_slots": snapshot["db_authority"]["connection_pressure"].get(
+                "free_connection_slots"
+            ),
             "queue": snapshot["queue"]["status"],
             "fresh_worker_heartbeats": snapshot["workers"]["fresh_heartbeats"],
             "docker": snapshot["docker"]["status"],

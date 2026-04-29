@@ -4,6 +4,7 @@ import {
   runsRecentPath,
   workflowRunStreamPath,
 } from './runApi';
+import { fetchJson, isAbortError, isHttpRequestError, type JsonRequestOptions } from '../shared/request';
 
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
@@ -129,22 +130,25 @@ export interface RunDetail extends RecentRun {
 const TERMINAL_RUN_STATUSES = new Set<RunStatus>(['succeeded', 'failed', 'cancelled']);
 const FALLBACK_REFRESH_INTERVAL_MS = 10_000;
 
-export async function loadRunSnapshot(runId: string): Promise<RunDetail> {
-  const detailResponse = await fetch(runDetailPath(runId));
-  if (detailResponse.ok) {
-    return (await detailResponse.json()) as RunDetail;
+export async function loadRunSnapshot(runId: string, options?: JsonRequestOptions): Promise<RunDetail> {
+  try {
+    return await fetchJson<RunDetail>(runDetailPath(runId), {}, options);
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    if (!isHttpRequestError(error, 404)) {
+      const suffix = isHttpRequestError(error) ? ` (${error.status})` : '';
+      throw new Error(`Failed to load run ${runId}${suffix}`);
+    }
   }
 
-  if (detailResponse.status !== 404) {
-    throw new Error(`Failed to load run ${runId} (${detailResponse.status})`);
-  }
-
-  const recentResponse = await fetch(runsRecentPath(100));
-  if (!recentResponse.ok) {
+  let recentRuns: RecentRun[];
+  try {
+    recentRuns = await fetchJson<RecentRun[]>(runsRecentPath(100), {}, options);
+  } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new Error(`Run ${runId} was not found.`);
   }
 
-  const recentRuns = (await recentResponse.json()) as RecentRun[];
   const recentMatch = recentRuns.find((run) => run.run_id === runId) ?? null;
   if (!recentMatch) {
     throw new Error(`Run ${runId} was not found.`);
@@ -178,29 +182,53 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
   const terminalRef = useRef(false);
   const refreshTimerRef = useRef<number | null>(null);
   const connectedRef = useRef(false);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const loadRequestSeqRef = useRef(0);
 
   const refresh = useCallback(() => {
     setRefreshTick((tick) => tick + 1);
   }, []);
 
+  const closeStream = useCallback(() => {
+    connectedRef.current = false;
+    sourceRef.current?.close();
+    sourceRef.current = null;
+  }, []);
+
+  const clearQueuedRefresh = useCallback(() => {
+    if (refreshTimerRef.current !== null) {
+      window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+  }, []);
+
+  const queueStreamRefresh = useCallback(() => {
+    if (terminalRef.current || refreshTimerRef.current !== null) {
+      return;
+    }
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null;
+      if (!terminalRef.current) {
+        refresh();
+      }
+    }, 0);
+  }, [refresh]);
+
   useEffect(() => {
     terminalRef.current = false;
     initialLoadRef.current = true;
     connectedRef.current = false;
+    loadAbortRef.current?.abort();
+    loadAbortRef.current = null;
+    loadRequestSeqRef.current += 1;
     setRun(null);
     setError(null);
     setLoading(Boolean(runId));
     setStreamStatus(runId ? 'connecting' : 'idle');
     setRefreshTick(0);
-
-    if (refreshTimerRef.current !== null) {
-      window.clearTimeout(refreshTimerRef.current);
-      refreshTimerRef.current = null;
-    }
-
-    sourceRef.current?.close();
-    sourceRef.current = null;
-  }, [runId]);
+    clearQueuedRefresh();
+    closeStream();
+  }, [clearQueuedRefresh, closeStream, runId]);
 
   useEffect(() => {
     if (!runId) {
@@ -217,8 +245,8 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
     sourceRef.current = source;
 
     const refreshFromStream = () => {
-      if (!terminalRef.current) {
-        refresh();
+      if (sourceRef.current === source) {
+        queueStreamRefresh();
       }
     };
 
@@ -226,6 +254,7 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
       terminalRef.current = true;
       connectedRef.current = false;
       setStreamStatus('idle');
+      clearQueuedRefresh();
       source.close();
       if (sourceRef.current === source) {
         sourceRef.current = null;
@@ -234,7 +263,7 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
     };
 
     source.onopen = () => {
-      if (terminalRef.current) {
+      if (terminalRef.current || sourceRef.current !== source) {
         return;
       }
       connectedRef.current = true;
@@ -248,7 +277,7 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
     source.addEventListener('done', handleDone);
 
     source.onerror = () => {
-      if (terminalRef.current) {
+      if (terminalRef.current || sourceRef.current !== source) {
         return;
       }
       connectedRef.current = false;
@@ -261,15 +290,24 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
       if (sourceRef.current === source) {
         sourceRef.current = null;
       }
+      clearQueuedRefresh();
     };
-  }, [refresh, runId]);
+  }, [clearQueuedRefresh, queueStreamRefresh, refresh, runId]);
 
   useEffect(() => {
     if (!runId) {
       return undefined;
     }
 
-    let cancelled = false;
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const requestSeq = loadRequestSeqRef.current + 1;
+    loadRequestSeqRef.current = requestSeq;
+    const isCurrentRequest = () =>
+      loadRequestSeqRef.current === requestSeq
+      && loadAbortRef.current === controller
+      && !controller.signal.aborted;
     const isInitialLoad = initialLoadRef.current;
     if (isInitialLoad) {
       setLoading(true);
@@ -277,8 +315,8 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
 
     void (async () => {
       try {
-        const nextRun = await loadRunSnapshot(runId);
-        if (cancelled) {
+        const nextRun = await loadRunSnapshot(runId, { signal: controller.signal });
+        if (!isCurrentRequest()) {
           return;
         }
         initialLoadRef.current = false;
@@ -287,14 +325,14 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
         setLoading(false);
         if (TERMINAL_RUN_STATUSES.has(nextRun.status)) {
           terminalRef.current = true;
+          clearQueuedRefresh();
           setStreamStatus('idle');
-          sourceRef.current?.close();
-          sourceRef.current = null;
+          closeStream();
         } else if (connectedRef.current) {
           setStreamStatus('connected');
         }
       } catch (err: unknown) {
-        if (cancelled) {
+        if (!isCurrentRequest() || isAbortError(err)) {
           return;
         }
         initialLoadRef.current = false;
@@ -302,13 +340,17 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
           setLoading(false);
         }
         setError(err instanceof Error ? err.message : `Failed to load run ${runId}.`);
+      } finally {
+        if (loadAbortRef.current === controller) {
+          loadAbortRef.current = null;
+        }
       }
     })();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [refreshTick, runId]);
+  }, [clearQueuedRefresh, closeStream, refreshTick, runId]);
 
   useEffect(() => {
     if (!runId || !run || TERMINAL_RUN_STATUSES.has(run.status) || streamStatus === 'connected') {

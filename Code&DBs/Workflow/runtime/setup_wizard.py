@@ -159,7 +159,8 @@ class SetupApplyCommand(BaseModel):
     repo_rules: list[str] | None = None
     sops: list[str] | None = None
     anti_patterns: list[str] | None = None
-    forbidden_actions: list[str] | None = None
+    forbidden_actions: list[Any] | None = None
+    forbidden_action_rules: list[Any] | None = None
     sensitive_systems: list[Any] | None = None
     submitted_by: str | None = None
     change_reason: str | None = None
@@ -177,7 +178,6 @@ class SetupApplyCommand(BaseModel):
         "repo_rules",
         "sops",
         "anti_patterns",
-        "forbidden_actions",
         mode="before",
     )
     @classmethod
@@ -187,6 +187,23 @@ class SetupApplyCommand(BaseModel):
         if not isinstance(value, list):
             raise ValueError("repo policy list fields must be arrays")
         return [str(item).strip() for item in value if str(item).strip()]
+
+    @field_validator("forbidden_actions", "forbidden_action_rules", mode="before")
+    @classmethod
+    def _normalize_optional_forbidden_rules(cls, value: object) -> list[Any] | None:
+        if value in (None, ""):
+            return None
+        if not isinstance(value, list):
+            raise ValueError("forbidden action fields must be arrays")
+        normalized: list[Any] = []
+        for item in value:
+            if isinstance(item, dict):
+                normalized.append(dict(item))
+                continue
+            text = str(item).strip()
+            if text:
+                normalized.append(text)
+        return normalized
 
     @field_validator("sensitive_systems", mode="before")
     @classmethod
@@ -245,6 +262,7 @@ def handle_setup_apply(command: SetupApplyCommand, subsystems: Any) -> dict[str,
             "sops": command.sops,
             "anti_patterns": command.anti_patterns,
             "forbidden_actions": command.forbidden_actions,
+            "forbidden_action_rules": command.forbidden_action_rules,
             "sensitive_systems": command.sensitive_systems,
             "submitted_by": command.submitted_by,
             "change_reason": command.change_reason,

@@ -343,7 +343,10 @@
     "325_register_object_truth_record_comparison_run_operation.sql",
     "326_operator_repo_policy_onboarding.sql",
     "327_provider_reasoning_effort_matrix.sql",
-    "328_provider_reasoning_effort_policy_coverage.sql"
+    "328_provider_reasoning_effort_policy_coverage.sql",
+    "329_task_scoped_provider_job_catalog_admission.sql",
+    "330_anthropic_sonnet_cli_compile_fallback_routes.sql",
+    "331_friction_events_task_mode.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -8244,6 +8247,44 @@
         "object_type": "row",
         "object_name": "task_type_effort_policy.*"
       }
+    ],
+    "329_task_scoped_provider_job_catalog_admission.sql": [
+      {
+        "object_type": "function",
+        "object_name": "refresh_private_provider_job_catalog"
+      }
+    ],
+    "330_anthropic_sonnet_cli_compile_fallback_routes.sql": [
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.compile|anthropic|claude-sonnet-4-6"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.compile_synthesize|anthropic|claude-sonnet-4-6"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.compile_pill_match|anthropic|claude-sonnet-4-6"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.compile_author|anthropic|claude-sonnet-4-6"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_routing.compile_finalize|anthropic|claude-sonnet-4-6"
+      }
+    ],
+    "331_friction_events_task_mode.sql": [
+      {
+        "object_type": "column",
+        "object_name": "friction_events.task_mode"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_friction_events_task_mode"
+      }
     ]
   },
   "policy_buckets": {
@@ -8591,7 +8632,10 @@
       "325_register_object_truth_record_comparison_run_operation.sql",
       "326_operator_repo_policy_onboarding.sql",
       "327_provider_reasoning_effort_matrix.sql",
-      "328_provider_reasoning_effort_policy_coverage.sql"
+      "328_provider_reasoning_effort_policy_coverage.sql",
+      "329_task_scoped_provider_job_catalog_admission.sql",
+      "330_anthropic_sonnet_cli_compile_fallback_routes.sql",
+      "331_friction_events_task_mode.sql"
   ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -8773,6 +8817,7 @@
   "migrations_always_reapply": [
     "298_policy_authority_compliance_receipts.sql",
     "300_policy_authority_receipt_writer_bypasses_self.sql",
-    "311_bug_operation_receipt_provenance.sql"
+    "311_bug_operation_receipt_provenance.sql",
+    "329_task_scoped_provider_job_catalog_admission.sql"
   ]
 }

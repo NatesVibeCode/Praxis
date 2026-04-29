@@ -33,6 +33,7 @@ class FrictionEvent:
     message: str
     timestamp: datetime
     is_test: bool = False
+    task_mode: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -102,9 +103,13 @@ class FrictionLedger:
         job_label: str,
         message: str,
         is_test: bool = False,
+        task_mode: Optional[str] = None,
     ) -> FrictionEvent:
         event_id = uuid.uuid4().hex[:12]
         ts = datetime.now(timezone.utc)
+        normalized_mode = (
+            str(task_mode).strip().lower() if task_mode else None
+        ) or None
 
         vector_query = None
         if self._vector_store is not None:
@@ -122,13 +127,14 @@ class FrictionLedger:
             message=message,
             timestamp=ts,
             is_test=is_test,
+            task_mode=normalized_mode,
         )
         if vector_query is not None:
             vector_query.set_embedding("friction_events", "event_id", event_id)
         return FrictionEvent(
             event_id=event_id, friction_type=friction_type,
             source=source, job_label=job_label, message=message, timestamp=ts,
-            is_test=is_test,
+            is_test=is_test, task_mode=normalized_mode,
         )
 
     def cluster_patterns(
@@ -221,6 +227,7 @@ class FrictionLedger:
         since: Optional[datetime] = None,
         limit: int = 50,
         include_test: bool = False,
+        task_mode: Optional[str] = None,
     ) -> list[FrictionEvent]:
         rows = self._repository.list_friction_events(
             friction_type=friction_type.value if friction_type is not None else None,
@@ -228,11 +235,18 @@ class FrictionLedger:
             since=since,
             limit=limit,
             include_test=include_test,
+            task_mode=task_mode,
         )
         return [self._row_to_event(r) for r in rows]
 
-    def stats(self, include_test: bool = False) -> FrictionStats:
-        rows = self._repository.list_type_source_rows(include_test=include_test)
+    def stats(
+        self,
+        include_test: bool = False,
+        task_mode: Optional[str] = None,
+    ) -> FrictionStats:
+        rows = self._repository.list_type_source_rows(
+            include_test=include_test, task_mode=task_mode,
+        )
         total = len(rows)
         by_type: dict[str, int] = {}
         by_source: dict[str, int] = {}
@@ -348,6 +362,12 @@ class FrictionLedger:
 
     @staticmethod
     def _row_to_event(row) -> FrictionEvent:
+        if isinstance(row, dict):
+            is_test = row.get("is_test", False)
+            task_mode = row.get("task_mode")
+        else:
+            is_test = getattr(row, "is_test", False)
+            task_mode = getattr(row, "task_mode", None)
         return FrictionEvent(
             event_id=row["event_id"],
             friction_type=FrictionType(row["friction_type"]),
@@ -355,7 +375,8 @@ class FrictionLedger:
             job_label=row["job_label"],
             message=row["message"],
             timestamp=row["timestamp"] if isinstance(row["timestamp"], datetime) else datetime.fromisoformat(row["timestamp"]),
-            is_test=row.get("is_test", False) if isinstance(row, dict) else getattr(row, "is_test", False),
+            is_test=is_test,
+            task_mode=task_mode,
         )
 
 

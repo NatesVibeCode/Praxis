@@ -488,6 +488,7 @@ def test_mcp_tool_schema_advertises_repo_policy_contract_fields() -> None:
         "sops",
         "anti_patterns",
         "forbidden_actions",
+        "forbidden_action_rules",
         "sensitive_systems",
         "submitted_by",
         "change_reason",

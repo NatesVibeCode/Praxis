@@ -356,25 +356,41 @@ def execute_job(
 
     # Last-resort: if slug is still auto/, resolve via task_type_router now
     if agent_config is None and agent_slug.startswith("auto/"):
+        duration_ms = int((time.monotonic() - start) * 1000)
         if runtime_profile_ref:
             logger.warning(
                 "auto/ slug %s reached execution unresolved under runtime profile %s — failing closed",
                 agent_slug,
                 runtime_profile_ref,
             )
+            complete_job(
+                conn,
+                job_id,
+                status="failed",
+                error_code="route_unresolved_runtime_profile",
+                duration_ms=duration_ms,
+                stdout_preview=(
+                    f"Unresolved auto route reached execution for runtime profile "
+                    f"{runtime_profile_ref}: {agent_slug}"
+                ),
+            )
         else:
-            logger.warning("auto/ slug %s reached execution unresolved — resolving now", agent_slug)
-            from runtime.task_type_router import TaskTypeRouter
-            router = TaskTypeRouter(conn)
-            decision = router.resolve(agent_slug)
-            resolved = f"{decision.provider_slug}/{decision.model_slug}"
-            agent_config = registry.get(resolved)
-            if agent_config:
-                agent_slug = resolved
-                conn.execute(
-                    "UPDATE workflow_jobs SET resolved_agent = $1 WHERE id = $2",
-                    resolved, job_id,
-                )
+            logger.warning(
+                "auto/ slug %s reached execution unresolved without runtime profile — failing closed",
+                agent_slug,
+            )
+            complete_job(
+                conn,
+                job_id,
+                status="failed",
+                error_code="route_unresolved_missing_runtime_profile",
+                duration_ms=duration_ms,
+                stdout_preview=(
+                    "Unresolved auto route reached execution without runtime_profile_ref; "
+                    f"refusing broad provider catalog routing: {agent_slug}"
+                ),
+            )
+        return
 
     if agent_config is None:
         duration_ms = int((time.monotonic() - start) * 1000)

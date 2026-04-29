@@ -619,6 +619,236 @@ def test_cross_subprocess_cooldown_via_marker_dir(
     assert len(second) == 0  # marker file caused dedupe across "subprocess"
 
 
+# ─── applies_to_modes filter ──────────────────────────────────────────────
+
+
+def test_mode_filter_matches_when_task_mode_in_applies_to_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A condition with applies_to_modes fires when current task_mode matches."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::release-only",
+                "title": "release-only",
+                "match": [
+                    {
+                        "tool": "Bash",
+                        "regex": r"^echo",
+                        "applies_to_modes": ["release"],
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.delenv("PRAXIS_TASK_MODE", raising=False)
+
+    matches = trigger_check.check("Bash", {"command": "echo hi"}, task_mode="release")
+    assert len(matches) == 1
+    assert matches[0].decision_key == "test::release-only"
+
+
+def test_mode_filter_skips_when_task_mode_not_in_applies_to_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A condition scoped to release does NOT fire when task_mode is chat."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::release-only",
+                "title": "release-only",
+                "match": [
+                    {
+                        "tool": "Bash",
+                        "regex": r"^echo",
+                        "applies_to_modes": ["release"],
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.delenv("PRAXIS_TASK_MODE", raising=False)
+
+    matches = trigger_check.check("Bash", {"command": "echo hi"}, task_mode="chat")
+    assert matches == []
+
+
+def test_mode_filter_unscoped_condition_fires_in_any_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backward-compat: a condition without applies_to_modes fires regardless."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::any-mode",
+                "title": "any mode",
+                "match": [{"tool": "Bash", "regex": r"^echo"}],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.delenv("PRAXIS_TASK_MODE", raising=False)
+
+    for mode in (None, "chat", "build", "release", "incident"):
+        # Reset the cooldown so each iteration is independent.
+        trigger_check._ADVISORY_FIRED.clear()
+        matches = trigger_check.check("Bash", {"command": "echo hi"}, task_mode=mode)
+        assert len(matches) == 1, f"unscoped trigger must fire for mode={mode!r}"
+
+
+def test_mode_filter_unknown_mode_default_fires_scoped_conditions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When task_mode is None (unset), a scoped condition still fires.
+
+    A missing mode hint must never silence a real trigger — that's the
+    whole point of fail-open.
+    """
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::release-only",
+                "title": "release-only",
+                "match": [
+                    {
+                        "tool": "Bash",
+                        "regex": r"^echo",
+                        "applies_to_modes": ["release"],
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.delenv("PRAXIS_TASK_MODE", raising=False)
+
+    matches = trigger_check.check("Bash", {"command": "echo hi"}, task_mode=None)
+    assert len(matches) == 1
+
+
+def test_mode_filter_resolves_from_env_var(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PRAXIS_TASK_MODE env var sets the mode when no kwarg is passed."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::build-only",
+                "title": "build-only",
+                "match": [
+                    {
+                        "tool": "Bash",
+                        "regex": r"^echo",
+                        "applies_to_modes": ["build"],
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.setenv("PRAXIS_TASK_MODE", "chat")
+
+    # env says chat; build-only condition should NOT fire.
+    assert trigger_check.check("Bash", {"command": "echo hi"}) == []
+
+    monkeypatch.setenv("PRAXIS_TASK_MODE", "build")
+    trigger_check._ADVISORY_FIRED.clear()
+    matches = trigger_check.check("Bash", {"command": "echo hi"})
+    assert len(matches) == 1
+
+
+def test_mode_filter_kwarg_overrides_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit task_mode= kwarg overrides PRAXIS_TASK_MODE."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::release-only",
+                "title": "release-only",
+                "match": [
+                    {
+                        "tool": "Bash",
+                        "regex": r"^echo",
+                        "applies_to_modes": ["release"],
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.setenv("PRAXIS_TASK_MODE", "chat")  # would silence
+
+    matches = trigger_check.check(
+        "Bash", {"command": "echo hi"}, task_mode="release"
+    )
+    assert len(matches) == 1
+
+
+def test_mode_filter_case_insensitive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mode strings normalize to lower-case so RELEASE / Release / release all match."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::release-only",
+                "title": "release-only",
+                "match": [
+                    {
+                        "tool": "Bash",
+                        "regex": r"^echo",
+                        "applies_to_modes": ["Release"],
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.delenv("PRAXIS_TASK_MODE", raising=False)
+
+    for mode in ("release", "RELEASE", "Release"):
+        trigger_check._ADVISORY_FIRED.clear()
+        matches = trigger_check.check("Bash", {"command": "echo hi"}, task_mode=mode)
+        assert len(matches) == 1, f"mode={mode!r} should match Release"
+
+
+def test_mode_filter_malformed_applies_to_modes_default_fires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A registry entry with non-list applies_to_modes shouldn't crash; default-fires."""
+    registry_path = _write_registry(
+        tmp_path,
+        [
+            {
+                "decision_key": "test::malformed",
+                "title": "malformed",
+                "match": [
+                    {
+                        "tool": "Bash",
+                        "regex": r"^echo",
+                        "applies_to_modes": "release",  # str not list
+                    }
+                ],
+            }
+        ],
+    )
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+
+    # Malformed → fail open → default-fire regardless of mode.
+    matches = trigger_check.check("Bash", {"command": "echo hi"}, task_mode="chat")
+    assert len(matches) == 1
+
+
 def test_cooldown_disabled_when_marker_dir_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

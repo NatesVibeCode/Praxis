@@ -150,7 +150,8 @@ describe('Dashboard', () => {
     await screen.findByText('3 workflows in scope');
     expect(screen.getByText('1 live lanes')).toBeInTheDocument();
     expect(screen.getAllByText('Healthy').length).toBeGreaterThan(0);
-    expect(screen.getByText('openai / gpt-5.4')).toBeInTheDocument();
+    expect(screen.getByText('dashboard.health')).toBeInTheDocument();
+    expect(screen.getByText('$14.25')).toBeInTheDocument();
 
     await waitFor(() => {
       const urls = fetchMock.mock.calls.map(([url]) => String(url));

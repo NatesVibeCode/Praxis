@@ -10,6 +10,7 @@ from surfaces.api import operator_write
 class _FakeConn:
     def __init__(self) -> None:
         self.event_rows: list[dict[str, object]] = []
+        self.execute_calls: list[tuple[str, tuple[object, ...]]] = []
 
     async def fetchrow(self, query: str, *args: object):
         if "INSERT INTO event_log" in query:
@@ -25,7 +26,16 @@ class _FakeConn:
             return {"id": len(self.event_rows)}
         return None
 
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        if "FROM registry_native_runtime_profile_authority" in query:
+            return [
+                {"runtime_profile_ref": "praxis"},
+                {"runtime_profile_ref": "scratch_agent"},
+            ]
+        return []
+
     async def execute(self, _query: str, *_args: object) -> str:
+        self.execute_calls.append((_query, _args))
         return "OK"
 
     async def close(self) -> None:
@@ -97,3 +107,15 @@ def test_task_route_write_invalidates_target_authority_cache(monkeypatch) -> Non
     assert event["emitted_by"] == "operator_write.set_task_route_eligibility"
     assert event["payload"]["reason"] == "task_route_eligibility_window_write"
     assert event["payload"]["decision_ref"] == "decision.route.allow"
+    refresh_calls = [
+        (query, args)
+        for query, args in conn.execute_calls
+        if "refresh_private_provider_job_catalog" in query
+        or "refresh_private_provider_control_plane_snapshot" in query
+    ]
+    assert refresh_calls == [
+        ("SELECT refresh_private_provider_job_catalog($1)", ("praxis",)),
+        ("SELECT refresh_private_provider_control_plane_snapshot($1)", ("praxis",)),
+        ("SELECT refresh_private_provider_job_catalog($1)", ("scratch_agent",)),
+        ("SELECT refresh_private_provider_control_plane_snapshot($1)", ("scratch_agent",)),
+    ]

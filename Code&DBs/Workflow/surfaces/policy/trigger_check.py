@@ -515,6 +515,45 @@ def _dynamic_repo_policy_matches(
     return matches
 
 
+def _resolve_task_mode(explicit: str | None) -> str | None:
+    """Resolve the active task mode (chat/build/release/incident/...).
+
+    Priority:
+      1. explicit kwarg (caller passed task_mode= to check())
+      2. PRAXIS_TASK_MODE env var
+      3. None (mode unknown — default-fire all triggers regardless of
+         applies_to_modes annotations)
+
+    Mode strings are normalized to lower-case so registry annotations and
+    env values stay case-insensitive.
+    """
+    if explicit:
+        value = str(explicit).strip().lower()
+        return value or None
+    env = os.environ.get("PRAXIS_TASK_MODE", "").strip().lower()
+    return env or None
+
+
+def _match_mode(condition: dict[str, Any], task_mode: str | None) -> bool:
+    """Mode gate.
+
+    A condition with `applies_to_modes` only fires when the active task
+    mode is in that list. A condition without `applies_to_modes` fires in
+    any mode (backward-compatible default). When the mode is unknown
+    (env unset, no kwarg), every condition fires — a missing mode hint
+    must never silence a registered trigger.
+    """
+    modes = condition.get("applies_to_modes")
+    if not modes:
+        return True
+    if task_mode is None:
+        return True
+    if not isinstance(modes, list):
+        return True
+    normalized = {str(m).strip().lower() for m in modes if m}
+    return task_mode in normalized
+
+
 def _match_one(
     condition: dict[str, Any],
     tool_name: str,
@@ -522,7 +561,11 @@ def _match_one(
     regex_target: str | None,
     file_path: str | None,
     content_target: str,
+    task_mode: str | None = None,
 ) -> bool:
+    if not _match_mode(condition, task_mode):
+        return False
+
     cond_harness = str(condition.get("harness") or "").strip()
     if cond_harness and cond_harness != harness:
         return False
@@ -628,6 +671,7 @@ def check(
     tool_input: dict[str, Any] | None,
     *,
     registry: Iterable[dict[str, Any]] | None = None,
+    task_mode: str | None = None,
 ) -> list[TriggerMatch]:
     """Match a proposed action against the trigger registry.
 
@@ -640,12 +684,19 @@ def check(
     so consecutive edits to the same file don't surface the same advisory
     repeatedly. Explicit triggers (advisory_only=False) always fire —
     operator-binding signals are never silenced.
+
+    `task_mode` (or env `PRAXIS_TASK_MODE`) narrows the registry to
+    conditions whose `applies_to_modes` list contains the active mode.
+    Conditions without `applies_to_modes` fire in any mode. When the mode
+    hint is absent (kwarg None and env unset), every condition fires —
+    we never silence a real trigger because the mode is unknown.
     """
     if not tool_name:
         return []
     raw_tool_name = tool_name
     tool_name = _normalize_tool_name(tool_name)
     harness = _infer_harness(raw_tool_name)
+    resolved_mode = _resolve_task_mode(task_mode)
     decisions = registry if registry is not None else load_registry()
     if tool_input is None:
         tool_input = {}
@@ -657,7 +708,15 @@ def check(
     matches: list[TriggerMatch] = []
     for decision in decisions or []:
         for condition in decision.get("match") or []:
-            if _match_one(condition, tool_name, harness, regex_target, file_path, content_target):
+            if _match_one(
+                condition,
+                tool_name,
+                harness,
+                regex_target,
+                file_path,
+                content_target,
+                task_mode=resolved_mode,
+            ):
                 # Cooldown: skip advisory matches we've already surfaced
                 # in this session for the same (decision_key, target) pair.
                 # Explicit (non-advisory) matches always fire. Use

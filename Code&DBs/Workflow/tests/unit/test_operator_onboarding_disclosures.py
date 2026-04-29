@@ -61,6 +61,47 @@ def test_bug_resolve_command_attaches_operator_disclosure() -> None:
     assert payload["operator_disclosure"]["message"] == "resolved disclosure"
 
 
+def test_bug_resolve_can_promote_bug_to_pattern_memory() -> None:
+    from runtime.operations.commands.bug_actions import BugResolveCommand, handle_bug_resolve
+
+    command = BugResolveCommand(
+        bug_id="BUG-1",
+        status="WONT_FIX",
+        promote_to_pattern=True,
+    )
+    with patch(
+        "surfaces.api.handlers._bug_surface_contract.resolve_bug_payload",
+        return_value={
+            "ok": True,
+            "resolved": True,
+            "bug": {
+                "bug_id": "BUG-1",
+                "title": "Repeated verifier confusion",
+                "status": "WONT_FIX",
+                "severity": "P2",
+            },
+        },
+    ):
+        with patch("runtime.platform_patterns.PlatformPatternAuthority") as authority_cls:
+            authority_cls.return_value.materialize_bug_resolution.return_value = {
+                "ok": True,
+                "materialized_count": 1,
+                "pattern_ref": "PATTERN-1",
+            }
+            with patch(
+                "runtime.operations.commands.bug_actions.consume_operator_disclosure",
+                side_effect=[
+                    {"message": "pattern disclosure"},
+                    {"message": "bug disclosure"},
+                ],
+            ):
+                payload = handle_bug_resolve(command, _FakeSubsystems())
+
+    assert payload["pattern_promotion"]["pattern_ref"] == "PATTERN-1"
+    assert payload["pattern_operator_disclosure"]["message"] == "pattern disclosure"
+    assert payload["operator_disclosure"]["message"] == "bug disclosure"
+
+
 def test_pattern_materialize_command_attaches_operator_disclosure() -> None:
     from runtime.operations.commands.platform_patterns import (
         PatternMaterializeCandidatesCommand,

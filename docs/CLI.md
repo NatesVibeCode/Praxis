@@ -47,6 +47,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow register-authority-domain` | `praxis_register_authority_domain` | `operations` | `write` | Register or update an authority domain after the forge confirms the domain is the right owner of durable truth. This creates the domain before operations, tables, workflows, or MCP tools attach to it. |
 | `praxis workflow register-operation` | `praxis_register_operation` | `operations` | `write` | Register a net-new CQRS operation (gateway dispatch key + handler + Pydantic input) through the catalog without hand-authoring a migration for the triple write. |
 | `praxis workflow retire-operation` | `praxis_retire_operation` | `operations` | `write` | Soft-retire an operation (disable gateway binding, mark authority object deprecated) while keeping rows for receipts and audit continuity. |
+| `praxis workflow task-route-eligibility` | `praxis_task_route_eligibility` | `operations` | `write` | Allow or reject one provider/model candidate for one task type through a bounded eligibility window. Use this for by-task routing policy such as letting anthropic/claude-sonnet-4-6 participate in build or review without enabling it everywhere. |
 | `praxis workflow orient` | `praxis_orient` | `operations` | `read` | Wake up against Praxis and get standing orders, authority envelope, tool guidance, and endpoints in one call. |
 | `praxis workflow circuits` | `praxis_circuits` | `operations` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
 | `praxis workflow dataset` | `praxis_dataset` | `operations` | `read`, `write` | Curate, score, and promote evidence-linked training/eval data per specialist; export reproducible JSONL with manifest hashes. |
@@ -61,9 +62,9 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow query` | `praxis_query` | `query` | `read` | Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use. |
 | `praxis workflow approve-plan` | `praxis_approve_proposed_plan` | `workflow` | `read` | Approve a ProposedPlan so launch_approved can submit it. Wraps the proposal with approved_by + timestamp + hash; the hash binds the approval to the exact spec_dict so tampering between approve and launch fails closed. The proposed plan must already carry machine-checkable provider freshness evidence with fresh route truth. |
 | `praxis workflow bind-pills` | `praxis_bind_data_pills` | `workflow` | `read` | Suggest likely object.field data-pill candidates from loose prose and validate explicit references against the data dictionary authority. Layer 1 (Bind) of the planning stack — call BEFORE decomposing intent into packets so every field ref is either confirmed or surfaced as a candidate to confirm. |
-| `praxis workflow compile` | `praxis_compile` | `workflow` | `read`, `write` | Shared CQRS compile front door for MCP/CLI/API parity. Use action='preview' to recognize messy prose without mutation, or action='materialize' to create or update draft workflow build state. |
 | `praxis workflow compose-plan` | `praxis_compose_plan` | `workflow` | `read` | Turn prose intent with explicit step markers into a ProposedPlan in one call — chains Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview). Compose with approve-plan + launch-plan(approved_plan=...) for the full approval-gated flow. |
 | `praxis workflow decompose` | `praxis_decompose_intent` | `workflow` | `read` | Split prose intent into ordered steps by parsing explicit markers (numbered lists, bulleted lists, or first/then/finally ordering). Layer 2 (Decompose) of the planning stack — call before turning steps into PlanPackets. |
+| `praxis workflow generate-plan` | `praxis_generate_plan` | `workflow` | `read`, `write` | Shared CQRS plan-generation front door for MCP/CLI/API parity. Use action='generate_plan' to recognize messy prose without mutation, or action='materialize_plan' to create or update draft workflow build state. |
 | `praxis workflow launch-plan` | `praxis_launch_plan` | `workflow` | `write` | Translate an already-planned packet list into a workflow spec and submit it (or preview first with preview_only=true). This is the layer-5 translation primitive — caller still owns upstream planning (extract data pills, decompose prose, reorder by data-flow, author per-step prompts). Proof launches must carry fresh provider route truth or a recent provider availability refresh receipt before approval. |
 | `praxis workflow plan-history` | `praxis_plan_lifecycle` | `workflow` | `read` | Read every plan.* event for one workflow_id in chronological order — composed, approved, launched, or blocked. The Q-side read of the planning stack's CQRS pattern. |
 | `praxis workflow ship-intent` | `praxis_compose_and_launch` | `workflow` | `launch` | End-to-end: prose intent → ProposedPlan → ApprovedPlan → LaunchReceipt in one call. For trusted automation (CI, scripts, experienced operators). Fails closed by default on unresolved routes, unbound pills, or invalid approvals. |
@@ -152,6 +153,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow register-authority-domain` | `praxis_register_authority_domain` | `advanced` | - | `write` | - |
 | `praxis workflow register-operation` | `praxis_register_operation` | `advanced` | - | `write` | - |
 | `praxis workflow retire-operation` | `praxis_retire_operation` | `advanced` | - | `write` | - |
+| `praxis workflow task-route-eligibility` | `praxis_task_route_eligibility` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_access_control` | `praxis_access_control` | `advanced` | action: list, disable, enable | `read`, `write` | - |
 | `praxis workflow tools call praxis_authority_memory_refresh` | `praxis_authority_memory_refresh` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_bug_replay_provenance_backfill` | `praxis_bug_replay_provenance_backfill` | `advanced` | - | `write` | - |
@@ -270,9 +272,9 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | `praxis workflow tools call praxis_workflow_validate` | `praxis_workflow_validate` | `advanced` | - | `read` | - |
 | `praxis workflow approve-plan` | `praxis_approve_proposed_plan` | `stable` | - | `read` | - |
 | `praxis workflow bind-pills` | `praxis_bind_data_pills` | `stable` | - | `read` | - |
-| `praxis workflow compile` | `praxis_compile` | `stable` | action: preview, materialize | `read`, `write` | - |
 | `praxis workflow compose-plan` | `praxis_compose_plan` | `stable` | - | `read` | - |
 | `praxis workflow decompose` | `praxis_decompose_intent` | `stable` | - | `read` | - |
+| `praxis workflow generate-plan` | `praxis_generate_plan` | `stable` | action: generate_plan, materialize_plan | `read`, `write` | - |
 | `praxis workflow launch-plan` | `praxis_launch_plan` | `stable` | - | `write` | - |
 | `praxis workflow plan-history` | `praxis_plan_lifecycle` | `stable` | - | `read` | - |
 | `praxis workflow ship-intent` | `praxis_compose_and_launch` | `stable` | - | `launch` | - |

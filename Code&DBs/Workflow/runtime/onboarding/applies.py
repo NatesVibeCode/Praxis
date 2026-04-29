@@ -360,7 +360,8 @@ def apply_repo_policy_contract_write(
     repo_rules: list[str] | None = None,
     sops: list[str] | None = None,
     anti_patterns: list[str] | None = None,
-    forbidden_actions: list[str] | None = None,
+    forbidden_actions: list[Any] | None = None,
+    forbidden_action_rules: list[Any] | None = None,
     sensitive_systems: list[Any] | None = None,
     submitted_by: str | None = None,
     change_reason: str | None = None,
@@ -379,13 +380,17 @@ def apply_repo_policy_contract_write(
         )
     try:
         conn = ensure_postgres_available(env={"WORKFLOW_DATABASE_URL": database_url})
+        forbidden_action_inputs = [
+            *list(forbidden_actions or []),
+            *list(forbidden_action_rules or []),
+        ] or None
         record = upsert_repo_policy_contract(
             conn,
             repo_root=str(repo_root),
             repo_rules=repo_rules,
             sops=sops,
             anti_patterns=anti_patterns,
-            forbidden_actions=forbidden_actions,
+            forbidden_actions=forbidden_action_inputs,
             sensitive_systems=sensitive_systems,
             submitted_by=str(submitted_by or "operator_setup_apply"),
             change_reason=str(change_reason or "repo_policy_onboarding"),

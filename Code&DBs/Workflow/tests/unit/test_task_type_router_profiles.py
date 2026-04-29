@@ -4,6 +4,7 @@ import types
 
 import pytest
 
+import registry.native_runtime_profile_sync as native_runtime_profile_sync
 from runtime.task_type_router import TaskTypeRouter
 from runtime.task_type_router import TaskRouteAuthorityError
 
@@ -606,6 +607,42 @@ def test_runtime_profile_scopes_auto_chain_to_admitted_candidates() -> None:
     assert [entry.model_slug for entry in chain] == ["gpt-5.4", "gpt-5.4-mini"]
     assert [entry.prefer_prepaid for entry in chain] == [True, True]
     assert [entry.allow_payg_fallback for entry in chain] == [True, True]
+
+
+def test_default_runtime_profile_is_not_implicit_for_broad_routes(monkeypatch) -> None:
+    default_calls: list[object] = []
+    monkeypatch.setattr(
+        native_runtime_profile_sync,
+        "default_native_runtime_profile_ref",
+        lambda conn: default_calls.append(conn) or "runtime_profile.build",
+    )
+    conn = _ScopedProfileConn()
+    router = TaskTypeRouter(conn)
+
+    chain = router.resolve_failover_chain("auto/build")
+
+    assert default_calls == []
+    assert [entry.provider_slug for entry in chain] == ["openai", "openai"]
+    assert [entry.model_slug for entry in chain] == ["gpt-5.4", "gpt-5.4-mini"]
+
+
+def test_default_runtime_profile_can_be_opted_in_explicitly(monkeypatch) -> None:
+    default_calls: list[object] = []
+    monkeypatch.setattr(
+        native_runtime_profile_sync,
+        "default_native_runtime_profile_ref",
+        lambda conn: default_calls.append(conn) or "runtime_profile.build",
+    )
+    conn = _ScopedProfileConn()
+    router = TaskTypeRouter(conn, use_default_runtime_profile=True)
+
+    assert router._effective_runtime_profile_ref(None) == "runtime_profile.build"
+    chain = router.resolve_failover_chain("auto/build")
+
+    assert default_calls
+    assert all(call is conn for call in default_calls)
+    assert [entry.provider_slug for entry in chain] == ["openai", "openai"]
+    assert [entry.model_slug for entry in chain] == ["gpt-5.4", "gpt-5.4-mini"]
 
 
 def test_effective_provider_catalog_filter_drops_disabled_candidates() -> None:

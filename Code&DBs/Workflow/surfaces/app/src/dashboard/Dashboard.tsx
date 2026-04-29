@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { APP_CONFIG } from '../config';
 import praxisSymbol from '../assets/praxis-symbol-inverse.svg';
 import { MoonWorkflowSilhouette } from './MoonWorkflowSilhouette';
+import { isAbortError } from '../shared/request';
 import './dashboard.css';
 
 interface Workflow {
@@ -158,12 +159,6 @@ function formatCurrency(value: number): string {
   if (value >= 100) return `$${value.toFixed(0)}`;
   if (value >= 10) return `$${value.toFixed(2)}`;
   return `$${value.toFixed(3)}`;
-}
-
-function formatAgentName(value: string | null): string {
-  if (!value) return 'No leaderboard data yet';
-  const [provider, model] = value.split('/');
-  return model ? `${provider} / ${model}` : value;
 }
 
 function latestRunCopy(wf: Workflow): string {
@@ -362,13 +357,19 @@ export function Dashboard({
   const health = summary.health;
 
   useEffect(() => {
-    fetch('/api/files?scope=instance')
+    const controller = new AbortController();
+    fetch('/api/files?scope=instance', { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (data?.files) setInstanceFiles(data.files);
         else if (Array.isArray(data)) setInstanceFiles(data);
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (!isAbortError(error)) {
+          // Silent by design: file inventory is auxiliary dashboard context.
+        }
+      });
+    return () => controller.abort();
   }, []);
 
   const handleRunNow = async (workflowId: string) => {
@@ -450,6 +451,10 @@ export function Dashboard({
       && !run.spec_name?.startsWith('fix_bugs')
       && !run.spec_name?.startsWith('hardening_'),
   );
+  const materializedDate = new Date().toISOString().slice(0, 10);
+  const passRateLabel = formatPassRate(summary.pass_rate_24h);
+  const spendLabel = formatCurrency(summary.total_cost_24h);
+  const sealedRunCount = visibleRuns.filter((run) => run.status === 'succeeded').length;
   const queueTone = summary.queue.status === 'critical'
     ? 'danger'
     : summary.queue.status === 'warning'
@@ -459,7 +464,7 @@ export function Dashboard({
         : 'neutral';
   const stateSpine = [
     {
-      label: 'Health',
+      label: 'State',
       value: loading ? '...' : health.label,
       tone: health.tone,
     },
@@ -480,41 +485,41 @@ export function Dashboard({
   ];
   const hasWorkflows = summary.workflow_counts.total > 0;
   const heroTitle = hasWorkflows
-    ? 'Operate workflows with explicit control.'
-    : 'Build the first workflow lane with real state authority.';
+    ? 'Continue work'
+    : 'Start work';
   const heroCopy = hasWorkflows
-    ? 'Live lanes, saved builders, drafts, and recent executions stay visible in one control surface.'
-    : 'Describe the operating model if you know the intent, or start from scratch if you want hands-on control over every step.';
+    ? `${summary.workflow_counts.total} workflow${summary.workflow_counts.total === 1 ? '' : 's'} in scope. Open a lane, inspect receipts, or add context.`
+    : 'Describe the job, add context, or start blank. The contract keeps success, failure, scope, and receipts visible.';
 
   const sectionMeta: Record<'live' | 'saved' | 'draft', Omit<WorkflowSection, 'count' | 'workflows'>> = {
       live: {
         key: 'live',
-        title: 'Live Lanes',
-        eyebrow: 'Active execution',
-        description: 'Workflows with a trigger or schedule already wired into the world.',
-        emptyTitle: 'No live lanes yet',
-        emptyCopy: 'Promote a validated workflow into a live lane once you trust the execution path.',
-        emptyAction: 'Describe the first lane',
+        title: 'Live',
+        eyebrow: 'Active',
+        description: 'Workflow lanes already wired to the world.',
+        emptyTitle: 'No live lanes',
+        emptyCopy: 'Promote one when the contract and verifier are solid.',
+        emptyAction: 'Describe lane',
         tone: 'live',
       },
       saved: {
         key: 'saved',
-        title: 'Validated Workflows',
-        eyebrow: 'Reusable build assets',
-        description: 'Saved workflows with history behind them, ready to inspect, rerun, or evolve.',
-        emptyTitle: 'No validated workflows yet',
-        emptyCopy: 'Run a workflow once to turn the draft into a reusable operating asset.',
-        emptyAction: 'Open the builder',
+        title: 'Saved',
+        eyebrow: 'Reusable',
+        description: 'Workflows with enough shape to reopen, rerun, or evolve.',
+        emptyTitle: 'No saved workflows',
+        emptyCopy: 'Run one cleanly and it becomes reusable.',
+        emptyAction: 'Open builder',
         tone: 'saved',
       },
       draft: {
         key: 'draft',
-        title: 'Draft Bench',
-        eyebrow: 'Work in progress',
-        description: 'Early models and builders that have not seen execution yet.',
-        emptyTitle: 'The draft bench is empty',
-        emptyCopy: 'Start a fresh workflow or describe an operating model to seed the first draft.',
-        emptyAction: 'Start the first workflow',
+        title: 'Drafts',
+        eyebrow: 'Working',
+        description: 'Unproven shapes waiting for a contract and verifier.',
+        emptyTitle: 'No drafts',
+        emptyCopy: 'Start blank or describe the lane.',
+        emptyAction: 'Start',
         tone: 'draft',
       },
     };
@@ -620,20 +625,20 @@ export function Dashboard({
 
         <div className="dash-sidebar__actions">
           <button className="dash-sidebar__action-btn dash-sidebar__action-btn--primary" onClick={onDescribe}>
-            New operating model
+            New model
           </button>
           <button className="dash-sidebar__action-btn" onClick={onNewWorkflow}>
-            Workflow builder
+            Builder
           </button>
         </div>
 
         <div className="dash-sidebar__bottom">
           <div className="dash-sidebar__section">Operator lane</div>
           <button className="dash-sidebar__ask" onClick={onChat}>
-            Ask anything...
+            Ask...
           </button>
           <button type="button" className="dash-sidebar__upload" onClick={() => instanceFileRef.current?.click()}>
-            Add knowledge file
+            Add file
           </button>
           <input ref={instanceFileRef} type="file" hidden onChange={handleInstanceFileUpload} />
         </div>
@@ -649,13 +654,16 @@ export function Dashboard({
 
               <div className="dash-hero__actions">
                 <button type="button" className="dash-hero__primary" onClick={onDescribe}>
-                  Describe it
+                  Describe job
                 </button>
                 <button type="button" className="dash-hero__secondary" onClick={onNewWorkflow}>
-                  Start from scratch
+                  Blank builder
                 </button>
                 <button type="button" className="dash-hero__secondary" onClick={onChat}>
-                  Open chat
+                  Chat
+                </button>
+                <button type="button" className="dash-hero__secondary" onClick={() => instanceFileRef.current?.click()}>
+                  Add file
                 </button>
               </div>
 
@@ -674,63 +682,174 @@ export function Dashboard({
             </div>
 
             <div className="dash-hero__rail">
-              <div className="dash-hero-card dash-hero-card--spotlight">
-                <div className="dash-hero-card__eyebrow">System read</div>
-                <div className="dash-hero-card__title">{health.label}</div>
-                <div className="dash-hero-card__copy">{health.copy}</div>
-                <div className="dash-hero-card__grid">
-                  <div className="dash-hero-card__stat">
-                    <span>Pass rate</span>
-                    <strong>{loading ? '...' : formatPassRate(summary.pass_rate_24h)}</strong>
+              <div className="dash-contract-preview">
+                <div className="dash-contract-preview__head">
+                  <span>workflow_contract · tec_workflow_lane</span>
+                  <span>{hasWorkflows ? 'scope · active' : 'scope · draft'}</span>
+                </div>
+                <div className="dash-contract-preview__body">
+                  <div className="dash-contract-preview__row">
+                    <div className="dash-contract-preview__key">task</div>
+                    <div className="dash-contract-preview__val">
+                      {hasWorkflows ? 'resume or inspect workflow lanes' : 'define first workflow job'}
+                    </div>
                   </div>
-                  <div className="dash-hero-card__stat">
-                    <span>Runs today</span>
-                    <strong>{loading ? '...' : summary.runs_24h}</strong>
+                  <div className="dash-contract-preview__row">
+                    <div className="dash-contract-preview__key">read scope</div>
+                    <div className="dash-contract-preview__val">
+                      <span className="dash-contract-pill dash-contract-pill--read">/workflows</span>
+                      <span className="dash-contract-pill dash-contract-pill--read">/runs</span>
+                      <span className="dash-contract-pill dash-contract-pill--read">/receipts</span>
+                      <span className="dash-contract-pill dash-contract-pill--read">/knowledge</span>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    className="dash-hero-card__stat dash-hero-card__stat--link"
-                    onClick={onOpenCosts}
-                    title="View token spend (stays under Overview)"
-                  >
-                    <span>Spend</span>
-                    <strong>{loading ? '...' : formatCurrency(summary.total_cost_24h)}</strong>
-                  </button>
-                  <div className="dash-hero-card__stat">
-                    <span>Leaderboard</span>
-                    <strong>{loading ? '...' : summary.models_online}</strong>
+                  <div className="dash-contract-preview__row">
+                    <div className="dash-contract-preview__key">write scope</div>
+                    <div className="dash-contract-preview__val">
+                      <span className="dash-contract-pill dash-contract-pill--write">/draft</span>
+                      <span className="dash-contract-pill dash-contract-pill--write">/success_if</span>
+                      <span className="dash-contract-pill dash-contract-pill--write">/failure_if</span>
+                    </div>
                   </div>
-                  <div className="dash-hero-card__stat">
-                    <span>Top agent</span>
-                    <strong>{loading ? '...' : formatAgentName(summary.top_agent)}</strong>
+                  <div className="dash-contract-preview__row dash-contract-preview__row--locked">
+                    <div className="dash-contract-preview__key">locked</div>
+                    <div className="dash-contract-preview__val">
+                      <span className="dash-contract-pill dash-contract-pill--locked">/destructive.write</span>
+                      <span className="dash-contract-pill dash-contract-pill--locked">/unbounded.spend</span>
+                      <span className="dash-contract-pill dash-contract-pill--locked">/approval.required</span>
+                    </div>
                   </div>
-                  <div className="dash-hero-card__stat">
-                    <span>Queue</span>
-                    <strong>{loading ? '...' : summary.queue.depth}</strong>
+                  <div className="dash-contract-preview__row">
+                    <div className="dash-contract-preview__key">tools</div>
+                    <div className="dash-contract-preview__val">
+                      <span className="dash-contract-pill">workflow.builder</span>
+                      <span className="dash-contract-pill">verifier.run</span>
+                      <span className="dash-contract-pill">receipts.query</span>
+                    </div>
                   </div>
+                  <div className="dash-contract-preview__row">
+                    <div className="dash-contract-preview__key">approval</div>
+                    <div className="dash-contract-preview__val">human · for any locked.* match</div>
+                  </div>
+                  <div className="dash-contract-preview__row">
+                    <div className="dash-contract-preview__key">verifier</div>
+                    <div className="dash-contract-preview__val">success_if true · failure_if false · receipts sealed</div>
+                  </div>
+                  <div className="dash-contract-preview__row">
+                    <div className="dash-contract-preview__key">retry</div>
+                    <div className="dash-contract-preview__val">
+                      requires <span className="dash-contract-code">previous_failure</span> + <span className="dash-contract-code">retry_delta</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="dash-contract-preview__foot">
+                  <span>materialized · {materializedDate}</span>
+                  <span>✓ environment ready</span>
                 </div>
               </div>
 
             </div>
           </section>
 
+          <section className="dash-run-instrument">
+            <div className="dash-terminal">
+              <div className="dash-terminal__label">sandbox · overview · plan→execute→verify</div>
+              <span className="dash-terminal__line"><span>$</span> praxis workflow query overview</span>
+              <span className="dash-terminal__line dash-terminal__line--muted">
+                › materializing dashboard snapshot · {summary.workflow_counts.total} workflows in scope
+              </span>
+              <span className="dash-terminal__line">
+                agent · {hasWorkflows ? 'inspect lanes, receipts, and knowledge' : 'awaiting first contract'}
+              </span>
+              <span className="dash-terminal__line dash-terminal__line--ok">
+                ✓ {summary.workflow_counts.live} live · {summary.workflow_counts.saved} saved · {summary.workflow_counts.draft} drafts
+              </span>
+              <span className={`dash-terminal__line ${summary.queue.depth > 0 ? 'dash-terminal__line--warn' : 'dash-terminal__line--ok'}`}>
+                {summary.queue.depth > 0 ? '!' : '✓'} queue · {summary.queue.depth} waiting · {summary.active_runs} active
+              </span>
+              <span className="dash-terminal__line dash-terminal__line--muted">
+                › knowledge · {instanceFiles.length} file{instanceFiles.length === 1 ? '' : 's'} attached
+              </span>
+              <span className="dash-terminal__line"><span>$</span> _</span>
+            </div>
+
+            <div className="dash-receipts">
+              <div className="dash-receipts__head">
+                <span>receipts</span>
+                <span>{sealedRunCount} sealed</span>
+              </div>
+
+              <div className="dash-receipt dash-receipt--allow">
+                <div className="dash-receipt__row"><span>action</span><strong>workflow.inventory</strong></div>
+                <div className="dash-receipt__row"><span>live</span><strong>{summary.workflow_counts.live}</strong></div>
+                <div className="dash-receipt__row"><span>saved</span><strong>{summary.workflow_counts.saved}</strong></div>
+                <div className="dash-receipt__row"><span>drafts</span><strong>{summary.workflow_counts.draft}</strong></div>
+                <div className="dash-receipt__row dash-receipt__row--ok"><span>result</span><strong>hydrated · visible</strong></div>
+              </div>
+
+              <button
+                type="button"
+                className="dash-receipt dash-receipt--verify"
+                onClick={onOpenCosts}
+                title="View token spend (stays under Overview)"
+              >
+                <div className="dash-receipt__row"><span>verifier</span><strong>dashboard.health</strong></div>
+                <div className="dash-receipt__row"><span>pass</span><strong>{passRateLabel}</strong></div>
+                <div className="dash-receipt__row"><span>runs</span><strong>{summary.runs_24h}</strong></div>
+                <div className="dash-receipt__row"><span>spend</span><strong>{spendLabel}</strong></div>
+                <div className={`dash-receipt__row dash-receipt__row--${health.tone === 'danger' ? 'warn' : 'ok'}`}>
+                  <span>state</span><strong>{health.label}</strong>
+                </div>
+              </button>
+            </div>
+          </section>
+
 
           <div className="dash-board">
             <div className="dash-board__main">
-              {workflowSections.map((section) => (
-                <WorkflowSectionBlock
-                  key={section.key}
-                  section={section}
-                  loading={loading}
-                  onPrimaryAction={section.key === 'draft' ? onNewWorkflow : onDescribe}
-                  primaryActionLabel={section.emptyAction}
-                  onEditWorkflow={onEditWorkflow}
-                  onEditModel={onEditModel}
-                  onViewRun={onViewRun}
-                  onRunNow={handleRunNow}
-                  onDelete={handleDelete}
-                />
-              ))}
+              {hasWorkflows ? (
+                workflowSections.map((section) => (
+                  <WorkflowSectionBlock
+                    key={section.key}
+                    section={section}
+                    loading={loading}
+                    onPrimaryAction={section.key === 'draft' ? onNewWorkflow : onDescribe}
+                    primaryActionLabel={section.emptyAction}
+                    onEditWorkflow={onEditWorkflow}
+                    onEditModel={onEditModel}
+                    onViewRun={onViewRun}
+                    onRunNow={handleRunNow}
+                    onDelete={handleDelete}
+                  />
+                ))
+              ) : (
+                <section className="dash-section dash-start-panel">
+                  <div className="dash-section__header">
+                    <div>
+                      <h2 className="dash-section__title">Next step</h2>
+                      <p className="dash-section__copy">Pick the way you want to start. The contract and receipt surfaces stay attached.</p>
+                    </div>
+                  </div>
+                  <div className="dash-start-panel__grid">
+                    <button type="button" className="dash-start-panel__action" onClick={onDescribe}>
+                      <span>Describe job</span>
+                      <strong>Plain language into contract</strong>
+                    </button>
+                    <button type="button" className="dash-start-panel__action" onClick={onNewWorkflow}>
+                      <span>Blank builder</span>
+                      <strong>Wire the graph by hand</strong>
+                    </button>
+                    <button type="button" className="dash-start-panel__action" onClick={onChat}>
+                      <span>Chat</span>
+                      <strong>Shape the first lane beside the app</strong>
+                    </button>
+                    <button type="button" className="dash-start-panel__action" onClick={() => instanceFileRef.current?.click()}>
+                      <span>Add file</span>
+                      <strong>Attach context before the run</strong>
+                    </button>
+                  </div>
+                </section>
+              )}
             </div>
 
             <aside className="dash-board__rail">

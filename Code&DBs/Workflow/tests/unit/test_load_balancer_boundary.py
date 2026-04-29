@@ -131,3 +131,33 @@ def test_load_balancer_delegates_status_release_and_capacity_queries() -> None:
         "ensure_provider",
         "has_capacity",
     ]
+
+
+def test_load_balancer_fails_closed_on_db_connection_capacity_error() -> None:
+    repository = _FakeProviderConcurrencyRepository(acquire_results=[True])
+    balancer = GlobalLoadBalancer(
+        "postgresql://example.test/workflow",
+        repository=repository,
+    )
+
+    async def _connect():
+        raise RuntimeError("remaining connection slots are reserved for roles with the SUPERUSER attribute")
+
+    balancer._connect = _connect  # type: ignore[method-assign]
+
+    assert balancer.acquire_slot("openai", cost_weight=1.0, timeout_s=0.1) is False
+
+
+def test_load_balancer_still_degrades_open_on_generic_db_error() -> None:
+    repository = _FakeProviderConcurrencyRepository(acquire_results=[True])
+    balancer = GlobalLoadBalancer(
+        "postgresql://example.test/workflow",
+        repository=repository,
+    )
+
+    async def _connect():
+        raise RuntimeError("database temporarily unreachable")
+
+    balancer._connect = _connect  # type: ignore[method-assign]
+
+    assert balancer.acquire_slot("openai", cost_weight=1.0, timeout_s=0.1) is True

@@ -1438,6 +1438,52 @@ def tool_praxis_access_control(params: dict) -> dict:
     return _execute_catalog_tool(operation_name="access_control", payload=payload)
 
 
+def tool_praxis_task_route_eligibility(params: dict) -> dict:
+    """Write one bounded task-route eligibility window through CQRS authority."""
+
+    operation_name = "operator.task_route_eligibility"
+    provider_slug = str(params.get("provider_slug") or "").strip().lower()
+    eligibility_status = str(params.get("eligibility_status") or "").strip().lower()
+    if not provider_slug:
+        return _structured_input_error(
+            ValueError("provider_slug is required"),
+            operation_name=operation_name,
+        )
+    if not eligibility_status:
+        return _structured_input_error(
+            ValueError("eligibility_status is required"),
+            operation_name=operation_name,
+        )
+    if eligibility_status not in {"eligible", "rejected"}:
+        return _structured_input_error(
+            ValueError("eligibility_status must be one of ['eligible', 'rejected']"),
+            operation_name=operation_name,
+        )
+
+    effective_from = params.get("effective_from")
+    effective_to = params.get("effective_to")
+    payload = {
+        "provider_slug": provider_slug,
+        "eligibility_status": eligibility_status,
+        "task_type": str(params.get("task_type") or "").strip() or None,
+        "model_slug": str(params.get("model_slug") or "").strip() or None,
+        "reason_code": str(params.get("reason_code") or "operator_control").strip(),
+        "rationale": str(params.get("rationale") or "").strip() or None,
+        "decision_ref": str(params.get("decision_ref") or "").strip() or None,
+        "effective_from": (
+            _parse_iso_datetime(effective_from, field_name="effective_from")
+            if effective_from is not None
+            else None
+        ),
+        "effective_to": (
+            _parse_iso_datetime(effective_to, field_name="effective_to")
+            if effective_to is not None
+            else None
+        ),
+    }
+    return _execute_catalog_tool(operation_name=operation_name, payload=payload)
+
+
 def tool_praxis_work_assignment_matrix(params: dict) -> dict:
     """Read the model-tier work assignment matrix through CQRS authority."""
 
@@ -3496,6 +3542,58 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "default": 200,
                     },
                 },
+            },
+        },
+    ),
+    "praxis_task_route_eligibility": (
+        tool_praxis_task_route_eligibility,
+        {
+            "description": (
+                "Write one bounded task-route eligibility window for a provider or provider/model "
+                "scope through CQRS authority.\n\n"
+                "USE WHEN: you need to allow or reject a candidate for one task type without "
+                "broadly mutating provider onboarding or model-access control. This is the "
+                "canonical by-task routing policy surface.\n\n"
+                "STATUSES:\n"
+                "  eligible — admit an exception window for this provider/model/task slice\n"
+                "  rejected — block this provider/model/task slice until the window expires\n"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "provider_slug": {
+                        "type": "string",
+                        "description": "Provider slug for the route policy window.",
+                    },
+                    "eligibility_status": {
+                        "type": "string",
+                        "enum": ["eligible", "rejected"],
+                        "description": "Whether this candidate is allowed or blocked for the scoped slice.",
+                    },
+                    "task_type": {
+                        "type": "string",
+                        "description": "Optional task type scope such as build, review, or compile.",
+                    },
+                    "model_slug": {
+                        "type": "string",
+                        "description": "Optional model scope; omit to affect the whole provider.",
+                    },
+                    "reason_code": {
+                        "type": "string",
+                        "default": "operator_control",
+                    },
+                    "rationale": {"type": "string"},
+                    "decision_ref": {"type": "string"},
+                    "effective_from": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime with timezone.",
+                    },
+                    "effective_to": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime with timezone.",
+                    },
+                },
+                "required": ["provider_slug", "eligibility_status"],
             },
         },
     ),

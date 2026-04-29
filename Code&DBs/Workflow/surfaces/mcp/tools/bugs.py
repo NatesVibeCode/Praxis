@@ -244,6 +244,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  Resolve a bug:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='WONT_FIX')\n"
                 "  Mark fix pending:  praxis_bugs(action='resolve', bug_id='BUG-1234', status='FIX_PENDING_VERIFICATION')\n"
                 "  Resolve FIXED:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='FIXED', verifier_ref='verifier.job.python.pytest_file', inputs={'path': 'tests/unit/test_bug.py'})\n\n"
+                "  Promote resolved bug to pattern memory: praxis_bugs(action='resolve', bug_id='BUG-1234', status='WONT_FIX', promote_to_pattern=True)\n"
                 "STATUSES: OPEN, IN_PROGRESS, FIX_PENDING_VERIFICATION, FIXED, WONT_FIX, DEFERRED\n"
                 "SEVERITIES: P0 (critical), P1 (high), P2 (medium), P3 (low)"
             ),
@@ -357,6 +358,26 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "target_ref": {
                         "type": "string",
                         "description": "Optional verifier target ref for resolve+verifier_ref. Defaults to inputs.path when supplied, otherwise the bug_id.",
+                    },
+                    "promote_to_pattern": {
+                        "type": "boolean",
+                        "description": (
+                            "When true with action='resolve', explicitly materialize the resolved bug "
+                            "as reusable pattern/anti-pattern authority after resolution succeeds."
+                        ),
+                        "default": False,
+                    },
+                    "pattern_status": {
+                        "type": "string",
+                        "description": "Pattern status to use with promote_to_pattern.",
+                        "enum": [
+                            "observing",
+                            "confirmed",
+                            "intervention_planned",
+                            "mitigated",
+                            "rejected",
+                        ],
+                        "default": "confirmed",
                     },
                     "resume_context": {
                         "type": "object",

@@ -102,6 +102,16 @@ def test_compose_allows_docker_specific_database_authority_override() -> None:
     assert compose_text.count('"host.docker.internal:host-gateway"') == 3
 
 
+def test_compose_declares_explicit_workflow_pool_caps_per_service() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "WORKFLOW_POOL_MAX_SIZE: ${PRAXIS_API_WORKFLOW_POOL_MAX_SIZE:-8}" in compose_text
+    assert "WORKFLOW_POOL_MAX_SIZE: ${PRAXIS_SCHEDULER_WORKFLOW_POOL_MAX_SIZE:-2}" in compose_text
+    assert "WORKFLOW_POOL_MAX_SIZE: ${PRAXIS_WORKER_WORKFLOW_POOL_MAX_SIZE:-4}" in compose_text
+    assert compose_text.count("WORKFLOW_POOL_MIN_SIZE: ${") == 3
+
+
 def test_compose_worker_receives_openrouter_credentials() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     compose_text = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")

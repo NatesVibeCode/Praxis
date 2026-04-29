@@ -41,6 +41,7 @@ def tool_praxis_setup(params: dict, _progress_emitter=None) -> dict:
                 "sops": params.get("sops"),
                 "anti_patterns": params.get("anti_patterns"),
                 "forbidden_actions": params.get("forbidden_actions"),
+                "forbidden_action_rules": params.get("forbidden_action_rules"),
                 "sensitive_systems": params.get("sensitive_systems"),
                 "submitted_by": params.get("submitted_by"),
                 "change_reason": params.get("change_reason"),
@@ -114,7 +115,35 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "forbidden_actions": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional actions Praxis should treat as forbidden or proof-gated.",
+                        "description": (
+                            "Optional plain-text actions Praxis should treat as forbidden or proof-gated. "
+                            "Examples: 'delete migrations/*', 'rename config/runtime_profiles.json'."
+                        ),
+                    },
+                    "forbidden_action_rules": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "raw_text": {"type": "string"},
+                                "action": {
+                                    "type": "string",
+                                    "enum": ["create", "update", "delete", "rename"],
+                                },
+                                "path_glob": {"type": "string"},
+                                "path_substring": {"type": "string"},
+                                "enforcement_level": {
+                                    "type": "string",
+                                    "enum": ["hard", "advisory"],
+                                    "default": "hard",
+                                },
+                            },
+                            "additionalProperties": True,
+                        },
+                        "description": (
+                            "Optional structured repo-policy rules. Machine-enforceable hard rules "
+                            "feed submission acceptance and the existing hook warning surface."
+                        ),
                     },
                     "sensitive_systems": {
                         "type": "array",

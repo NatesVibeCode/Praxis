@@ -160,6 +160,7 @@ class GlobalLoadBalancer:
         self._database_url = database_url or _get_database_url()
         self._available = self._database_url is not None
         self._repository = repository or PostgresProviderConcurrencyRepository()
+        self._last_error: BaseException | None = None
         if not self._available:
             _log.debug("load_balancer: no database URL — concurrency control disabled")
 
@@ -167,11 +168,24 @@ class GlobalLoadBalancer:
 
     def _run(self, coro):
         """Run an async coroutine synchronously. Returns None on any error."""
+        self._last_error = None
         try:
             return asyncio.run(coro)
         except Exception as exc:
+            self._last_error = exc
             _log.debug("load_balancer: async error: %s", exc)
             return None
+
+    def _db_capacity_fail_closed(self) -> bool:
+        exc = self._last_error
+        if exc is None:
+            return False
+        lowered = str(exc).lower()
+        return (
+            "too many connections" in lowered
+            or "remaining connection slots" in lowered
+            or "postgres.pool_acquire_timeout" in lowered
+        )
 
     async def _connect(self):
         import asyncpg
@@ -295,10 +309,18 @@ class GlobalLoadBalancer:
             self._setup_and_acquire(provider_slug, cost_weight, timeout_s)
         )
         if result is None:
+            if self._db_capacity_fail_closed():
+                _log.warning(
+                    "load_balancer: DB capacity failure on acquire for %s, refusing slot admission: %s",
+                    provider_slug,
+                    self._last_error,
+                )
+                return False
             # DB error — degrade gracefully
             _log.warning(
-                "load_balancer: DB error on acquire for %s, proceeding without limit",
+                "load_balancer: DB error on acquire for %s, proceeding without limit: %s",
                 provider_slug,
+                self._last_error,
             )
             return True
         return result

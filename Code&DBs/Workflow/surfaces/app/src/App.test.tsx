@@ -337,6 +337,36 @@ describe('AppShell', () => {
     expect(screen.getByRole('button', { name: /assistant chat/i })).toHaveClass('app-shell__action-button--active');
   });
 
+  test('opens the app as chat beside the work surface on desktop', async () => {
+    window.history.replaceState(null, '', '/app');
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1280);
+
+    render(<AppShell />);
+
+    await screen.findByText('Dashboard Surface');
+    expect(screen.getByTestId('strategy-console')).toHaveTextContent('sidebar');
+  });
+
+  test('allows the app chat lane to be explicitly closed from the URL', async () => {
+    window.history.replaceState(null, '', '/app?chat=off');
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1280);
+
+    render(<AppShell />);
+
+    await screen.findByText('Dashboard Surface');
+    expect(screen.queryByTestId('strategy-console')).not.toBeInTheDocument();
+  });
+
+  test('keeps the app chat lane closed by default on narrow screens', async () => {
+    window.history.replaceState(null, '', '/app');
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(720);
+
+    render(<AppShell />);
+
+    await screen.findByText('Dashboard Surface');
+    expect(screen.queryByTestId('strategy-console')).not.toBeInTheDocument();
+  });
+
   test('does not leave the builder when escape is pressed', async () => {
     render(<AppShell />);
 

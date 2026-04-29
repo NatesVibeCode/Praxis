@@ -471,9 +471,11 @@ class TaskTypeRouter:
         conn: SyncPostgresConnection,
         *,
         now_factory: Callable[[], datetime] | None = None,
+        use_default_runtime_profile: bool = False,
     ) -> None:
         self._conn = conn
         self._now_factory = now_factory or (lambda: datetime.now(timezone.utc))
+        self._use_default_runtime_profile = use_default_runtime_profile
         self._routing_repository = PostgresTaskTypeRoutingRepository(self._conn)
         authority = get_route_authority_snapshot(
             self._conn,
@@ -960,6 +962,8 @@ class TaskTypeRouter:
         normalized = str(runtime_profile_ref or "").strip()
         if normalized:
             return normalized
+        if not self._use_default_runtime_profile:
+            return None
         try:
             from registry.native_runtime_profile_sync import (
                 default_native_runtime_profile_ref,
@@ -1745,7 +1749,7 @@ class TaskTypeRouter:
                 runtime_profile_ref=runtime_profile_ref,
             )
         # Explicit slug — resolve primary, then build cross-provider failover
-        primary = self.resolve(agent_slug)
+        primary = self.resolve(agent_slug, runtime_profile_ref=runtime_profile_ref)
         chain = [primary]
 
         # Find a task type this model is permitted for

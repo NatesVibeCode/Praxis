@@ -248,6 +248,29 @@ def _normalize_task_route_eligibility_status(value: object) -> str:
     )
 
 
+async def _refresh_provider_route_projections(conn: _Connection) -> None:
+    runtime_profiles = await conn.fetch(
+        """
+        SELECT runtime_profile_ref
+        FROM registry_native_runtime_profile_authority
+        ORDER BY runtime_profile_ref
+        """
+    )
+    for row in runtime_profiles:
+        runtime_profile_ref = _require_text(
+            row.get("runtime_profile_ref"),
+            field_name="runtime_profile_ref",
+        )
+        await conn.execute(
+            "SELECT refresh_private_provider_job_catalog($1)",
+            runtime_profile_ref,
+        )
+        await conn.execute(
+            "SELECT refresh_private_provider_control_plane_snapshot($1)",
+            runtime_profile_ref,
+        )
+
+
 def _normalize_issue_status(value: object | None) -> str:
     if value is None:
         return "open"
@@ -2548,6 +2571,7 @@ class OperatorControlFrontdoor:
                 invalidated_by="operator_write.set_task_route_eligibility",
                 decision_ref=normalized_decision_ref,
             )
+            await _refresh_provider_route_projections(conn)
             invalidate_route_authority_cache_key(route_cache_key)
             return TaskRouteEligibilityWriteResult(
                 task_route_eligibility=_task_route_eligibility_record_from_row(

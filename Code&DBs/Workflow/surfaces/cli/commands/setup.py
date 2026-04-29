@@ -32,6 +32,16 @@ def _extract_flag_values(args: list[str], flag: str) -> list[str]:
     return [value for value in values if str(value).strip()]
 
 
+def _parse_json_values(values: list[str]) -> list[object]:
+    parsed_values: list[object] = []
+    for raw in values:
+        try:
+            parsed_values.append(json.loads(raw))
+        except json.JSONDecodeError:
+            parsed_values.append(raw)
+    return parsed_values
+
+
 def _setup_command(args: list[str], *, stdout: TextIO) -> int:
     if not args or args[0] in {"help", "--help", "-h"}:
         stdout.write(
@@ -41,6 +51,7 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
                     "                              [--gate <gate_ref>] [--apply-ref <apply_ref>]",
                     "                              [--repo-rule <text>] [--sop <text>]",
                     "                              [--anti-pattern <text>] [--forbidden-action <text>]",
+                    "                              [--forbidden-action-rule <json>]",
                     "                              [--sensitive-system <text-or-json>]",
                     "",
                     "Runtime-target setup client. API/MCP own setup authority.",
@@ -68,14 +79,9 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
     sops = _extract_flag_values(args, "--sop")
     anti_patterns = _extract_flag_values(args, "--anti-pattern")
     forbidden_actions = _extract_flag_values(args, "--forbidden-action")
+    forbidden_action_rules = _parse_json_values(_extract_flag_values(args, "--forbidden-action-rule"))
     sensitive_system_inputs = _extract_flag_values(args, "--sensitive-system")
-    sensitive_systems = []
-    for raw in sensitive_system_inputs:
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = raw
-        sensitive_systems.append(parsed)
+    sensitive_systems = _parse_json_values(sensitive_system_inputs)
     submitted_by = _extract_flag_value(args, "--submitted-by")
     change_reason = _extract_flag_value(args, "--change-reason")
     disclosure_repeat_limit = _extract_flag_value(args, "--disclosure-repeat-limit")
@@ -93,6 +99,7 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
                 "sops": sops or None,
                 "anti_patterns": anti_patterns or None,
                 "forbidden_actions": forbidden_actions or None,
+                "forbidden_action_rules": forbidden_action_rules or None,
                 "sensitive_systems": sensitive_systems or None,
                 "submitted_by": submitted_by,
                 "change_reason": change_reason,

@@ -14,6 +14,7 @@ class _FakeConn:
         self,
         *,
         queue: dict[str, int] | None = None,
+        db_pressure: dict[str, Any] | None = None,
         workers: list[dict[str, Any]] | None = None,
         providers: list[dict[str, Any]] | None = None,
         control_plane: list[dict[str, Any]] | None = None,
@@ -23,6 +24,15 @@ class _FakeConn:
         raise_all: bool = False,
     ) -> None:
         self.queue = queue or {"pending": 0, "ready": 0, "claimed": 0, "running": 0}
+        self.db_pressure = db_pressure or {
+            "max_connections": 100,
+            "cluster_connections": 12,
+            "cluster_active_connections": 2,
+            "cluster_idle_connections": 10,
+            "database_connections": 12,
+            "database_active_connections": 2,
+            "database_idle_connections": 10,
+        }
         self.workers = workers or []
         self.providers = providers or []
         self.control_plane = control_plane or []
@@ -39,6 +49,32 @@ class _FakeConn:
         normalized = " ".join(query.split())
         if normalized == "SELECT 1 AS ok":
             return [{"ok": 1}]
+        if "FROM registry_native_runtime_defaults" in normalized:
+            return [{"runtime_profile_ref": "praxis"}]
+        if "FROM registry_native_runtime_profile_authority" in normalized:
+            return [
+                {
+                    "runtime_profile_ref": "praxis",
+                    "workspace_ref": "workspace.praxis",
+                    "instance_name": "Praxis",
+                    "provider_name": "openai",
+                    "provider_names": "[\"openai\"]",
+                    "allowed_models": "[\"gpt-5.4\"]",
+                    "receipts_dir": "artifacts/receipts",
+                    "topology_dir": "artifacts/topology",
+                    "repo_root": "/Users/nate/Praxis",
+                    "workdir": "/Users/nate/Praxis",
+                    "base_path_ref": "workspace.base.default",
+                    "repo_root_path": "/Users/nate/Praxis",
+                    "workdir_path": "/Users/nate/Praxis",
+                    "base_path": "/Users/nate/Praxis",
+                    "model_profile_id": "model_profile.default",
+                    "provider_policy_id": "provider_policy.default",
+                    "sandbox_profile_ref": "sandbox.default",
+                }
+            ]
+        if "FROM pg_stat_activity" in normalized:
+            return [self.db_pressure]
         if "FROM workflow_jobs" in normalized and "GROUP BY status" in normalized:
             return self.workers
         if "FROM workflow_jobs" in normalized:
@@ -232,6 +268,53 @@ def test_db_authority_unavailable_blocks_firecheck(monkeypatch) -> None:
     assert result["can_fire"] is False
     assert result["blockers"][0]["code"] == "db_authority_unavailable"
     assert result["summary"]["db"] == "unavailable"
+
+
+def test_db_connection_pressure_warns_before_connection_exhaustion(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
+    conn = _FakeConn(
+        db_pressure={
+            "max_connections": 100,
+            "cluster_connections": 88,
+            "cluster_active_connections": 8,
+            "cluster_idle_connections": 80,
+            "database_connections": 86,
+            "database_active_connections": 7,
+            "database_idle_connections": 79,
+        }
+    )
+
+    result = runtime_truth.build_firecheck(conn)
+
+    assert result["can_fire"] is True
+    assert result["fire_state"] == "degraded"
+    assert "db_pool_pressure" in {item["code"] for item in result["blockers"]}
+    assert result["summary"]["db_connection_pressure"] == "warning"
+    assert result["summary"]["db_free_connection_slots"] == 12
+
+
+def test_db_connection_pressure_blocks_when_slots_are_exhausted(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
+    conn = _FakeConn(
+        db_pressure={
+            "max_connections": 100,
+            "cluster_connections": 100,
+            "cluster_active_connections": 9,
+            "cluster_idle_connections": 91,
+            "database_connections": 98,
+            "database_active_connections": 8,
+            "database_idle_connections": 90,
+        }
+    )
+
+    result = runtime_truth.build_firecheck(conn)
+
+    assert result["can_fire"] is False
+    assert result["fire_state"] == "blocked"
+    assert any(
+        item["code"] == "db_pool_pressure" and item["severity"] == "critical"
+        for item in result["blockers"]
+    )
 
 
 def test_remediation_plan_declares_retry_delta() -> None:

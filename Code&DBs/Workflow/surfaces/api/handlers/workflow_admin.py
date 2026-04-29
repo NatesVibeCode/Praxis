@@ -1519,6 +1519,7 @@ def _handle_setup_apply_post(request: Any, path: str) -> None:
                 "sops": body.get("sops"),
                 "anti_patterns": body.get("anti_patterns"),
                 "forbidden_actions": body.get("forbidden_actions"),
+                "forbidden_action_rules": body.get("forbidden_action_rules"),
                 "sensitive_systems": body.get("sensitive_systems"),
                 "submitted_by": body.get("submitted_by"),
                 "change_reason": body.get("change_reason"),

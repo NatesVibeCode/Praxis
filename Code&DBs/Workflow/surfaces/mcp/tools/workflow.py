@@ -1,4 +1,4 @@
-"""Tools: praxis_workflow, praxis_workflow_validate, praxis_compile, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_compose_and_launch, praxis_plan_lifecycle."""
+"""Tools: praxis_workflow, praxis_workflow_validate, praxis_generate_plan, praxis_launch_plan, praxis_bind_data_pills, praxis_approve_proposed_plan, praxis_decompose_intent, praxis_compose_plan, praxis_compose_and_launch, praxis_plan_lifecycle."""
 from __future__ import annotations
 
 import json
@@ -2210,7 +2210,7 @@ def tool_praxis_compose_plan(params: dict) -> dict:
 
     Takes prose intent with explicit step markers, decomposes into steps,
     translates each step into a PlanPacket, then runs propose_plan (which
-    compiles + previews + binds data pills per packet). Returns a
+    prepares, previews, and binds data pills per packet). Returns a
     ProposedPlan ready for caller approval and launch. No submission.
 
     Fails closed if the prose has no step markers unless the caller passes
@@ -2429,14 +2429,14 @@ def tool_praxis_bind_data_pills(params: dict) -> dict:
     return payload
 
 
-def tool_praxis_compile(params: dict) -> dict:
-    """Shared CQRS compile front door for MCP callers."""
-    action = str(params.get("action") or "preview").strip() or "preview"
-    if action not in {"preview", "materialize"}:
+def tool_praxis_generate_plan(params: dict) -> dict:
+    """Shared CQRS plan-generation front door for MCP callers."""
+    action = str(params.get("action") or "generate_plan").strip() or "generate_plan"
+    if action not in {"generate_plan", "materialize_plan"}:
         return {
             "ok": False,
-            "error": "action must be one of preview|materialize",
-            "reason_code": "compile.action.invalid",
+            "error": "action must be one of generate_plan|materialize_plan",
+            "reason_code": "plan_generation.action.invalid",
         }
     intent = params.get("intent") or params.get("prose")
     if not isinstance(intent, str) or not intent.strip():
@@ -2462,7 +2462,7 @@ def tool_praxis_compile(params: dict) -> dict:
     try:
         from runtime.compile_cqrs import preview_compile
 
-        if action == "preview":
+        if action == "generate_plan":
             return preview_compile(intent, conn=pg_conn, match_limit=match_limit).to_dict()
 
         enable_llm = params.get("enable_llm")
@@ -2480,12 +2480,8 @@ def tool_praxis_compile(params: dict) -> dict:
                 "reason_code": "enable_full_compose.invalid",
             }
 
-        # Dispatch through the CQRS gateway (operation `compile.materialize`,
-        # registered 2026-04-28). The gateway records an
-        # authority_operation_receipts row + emits compile.materialized to
-        # authority_events. Replaces the prior direct-call path that
-        # bypassed the gateway and violated the dogfooding principle
-        # (project_dogfooding_principle.md).
+        # Dispatch through the registered CQRS materialization operation so
+        # the gateway records a receipt and emits the authority event.
         from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
         payload = {
@@ -2509,7 +2505,7 @@ def tool_praxis_compile(params: dict) -> dict:
             payload=payload,
         )
     except Exception as exc:
-        return _structured_runtime_error(exc, action="compile_cqrs")
+        return _structured_runtime_error(exc, action="plan_generation_cqrs")
 
 
 def tool_praxis_suggest_plan_atoms(params: dict) -> dict:
@@ -2564,8 +2560,7 @@ def tool_praxis_compose_plan_via_llm(params: dict) -> dict:
     queries ``praxis_receipts(action='search', query='compose-plan-via-llm')``
     to retrieve the result once the gateway writes the receipt.
 
-    Pass ``wait=True`` to keep the legacy synchronous behavior (the UI compile
-    path uses this since it needs the result inline). Synchronous calls under
+    Pass ``wait=True`` when a UI needs the result inline. Synchronous calls under
     MCP frequently exceed the 60s tool-call timeout — that's why kickoff-first
     is the new default for the MCP path.
     """
@@ -2593,7 +2588,7 @@ def tool_praxis_compose_plan_via_llm(params: dict) -> dict:
                 "reason_code": "postgres.authority.unavailable"}
 
     if wait:
-        # Synchronous path — original behavior, used by the UI compile flow.
+        # Synchronous path for callers that need the plan inline.
         try:
             from runtime.compose_plan_via_llm import compose_plan_via_llm
             result = compose_plan_via_llm(
@@ -2691,9 +2686,8 @@ def tool_praxis_compose_plan_via_llm(params: dict) -> dict:
             "Or fetch the receipt: praxis_receipts(action='search', query='compose-plan-via-llm')."
         ),
         "wait_for_synchronous": (
-            "Pass wait=true to block until the pipeline finishes (legacy UI "
-            "compile behavior). MCP tool-call timeouts may fire; kickoff-first "
-            "is recommended."
+            "Pass wait=true to block until the pipeline finishes when a caller "
+            "needs the plan inline. MCP tool-call timeouts may fire; kickoff-first is recommended."
         ),
     }
 
@@ -2845,7 +2839,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_compose_plan_via_llm,
         {
             "description": (
-                "End-to-end LLM compile: atoms → skeleton → ONE synthesis LLM call "
+                "End-to-end LLM plan composition: atoms → skeleton → ONE synthesis LLM call "
                 "(few-sentence plan statement) → N parallel fork-out author calls "
                 "(each shares the synthesis as cached prefix) → validate.\n\n"
                 "KICKOFF-FIRST BY DEFAULT (wait=False): the call returns immediately "
@@ -2854,8 +2848,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "`operation_ref='compose-plan-via-llm'` when complete; query it via "
                 "`praxis_receipts(action='search', query='compose-plan-via-llm')`. "
                 "This avoids the 60s MCP tool-call timeout for full pipeline runs.\n\n"
-                "Pass `wait=True` to keep the original synchronous behavior — used by "
-                "the UI compile path which needs the plan inline. Synchronous calls "
+                "Pass `wait=True` only when a caller needs the plan inline. Synchronous calls "
                 "via MCP often exceed the tool-call timeout."
             ),
             "inputSchema": {
@@ -2871,7 +2864,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": (
                             "False (default): kickoff-first; tool returns "
                             "immediately, work runs in background, receipt lands "
-                            "asynchronously. True: legacy synchronous behavior; "
+                            "asynchronously. True: synchronous inline result; "
                             "tool blocks until full pipeline completes."
                         ),
                     },
@@ -2959,15 +2952,15 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
-    "praxis_compile": (
-        tool_praxis_compile,
+    "praxis_generate_plan": (
+        tool_praxis_generate_plan,
         {
             "description": (
-                "Shared CQRS compile front door. Query side action='preview' recognizes messy prose, "
-                "matches spans to authority, returns suggestions and gaps, and does not mutate state. "
-                "Command side action='materialize' creates or updates a draft workflow through the "
-                "canonical workflow build mutation.\n\n"
-                "USE WHEN: MCP callers need the same compile behavior as CLI/API/UI.\n\n"
+                "Shared CQRS plan-generation front door. action='generate_plan' recognizes messy "
+                "prose, matches spans to authority, returns suggestions and gaps, and does not "
+                "mutate state. action='materialize_plan' creates or updates a draft workflow "
+                "through the canonical workflow build mutation.\n\n"
+                "USE WHEN: MCP callers need the same plan-generation behavior as CLI/API/UI.\n\n"
                 "DO NOT USE TO: silently launch a workflow run. Materialize creates build state only; "
                 "launch still goes through approval/run surfaces."
             ),
@@ -2976,10 +2969,10 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["preview", "materialize"],
-                        "default": "preview",
+                        "enum": ["generate_plan", "materialize_plan"],
+                        "default": "generate_plan",
                     },
-                    "intent": {"type": "string", "description": "Messy prose to compile."},
+                    "intent": {"type": "string", "description": "Messy prose to turn into a plan."},
                     "workflow_id": {
                         "type": "string",
                         "description": "Existing or desired workflow id for materialize.",
@@ -3208,7 +3201,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "plan": {
                         "type": "object",
         "description": (
-            "Plan to compile and launch. Required: name PLUS either 'packets' "
+            "Plan to materialize and launch. Required: name PLUS either 'packets' "
             "(explicit list) or 'from_bugs' (bug-ID list that materializes "
             "packets through derive_bug_packets with wave-dependency wiring). "
             "Supplying both is rejected as an ambiguity error. Optional: "

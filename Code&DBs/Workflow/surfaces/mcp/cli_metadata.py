@@ -207,7 +207,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         examples=[
             _example("Read the whole provider matrix", {"runtime_profile_ref": "praxis"}),
             _example(
-                "Read compile API rows",
+                "Read plan-generation API rows",
                 {
                     "runtime_profile_ref": "praxis",
                     "job_type": "compile",
@@ -251,7 +251,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         risks={"default": "read"},
         examples=[
             _example(
-                "Read compile API control state",
+                "Read plan-generation API control state",
                 {
                     "runtime_profile_ref": "praxis",
                     "job_type": "compile",
@@ -275,6 +275,45 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Read open assignment matrix", {"open_only": True}),
             _example("Read frontier work", {"recommended_model_tier": "frontier"}),
             _example("Read one audit group", {"audit_group": "A_provider_catalog_authority"}),
+        ],
+    ),
+    "praxis_task_route_eligibility": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="task-route-eligibility",
+        when_to_use=(
+            "Allow or reject one provider/model candidate for one task type through a bounded "
+            "eligibility window. Use this for by-task routing policy such as letting "
+            "anthropic/claude-sonnet-4-6 participate in build or review without enabling it everywhere."
+        ),
+        when_not_to_use=(
+            "Do not use it for broad provider onboarding or transport-wide ON/OFF control; "
+            "use praxis_provider_onboard or praxis_access_control for those."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Allow Sonnet for build only",
+                {
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-sonnet-4-6",
+                    "task_type": "build",
+                    "eligibility_status": "eligible",
+                    "reason_code": "task_type_exception",
+                    "rationale": "Allow sonnet for build high and build mid",
+                },
+            ),
+            _example(
+                "Reject one provider for review until tomorrow",
+                {
+                    "provider_slug": "anthropic",
+                    "task_type": "review",
+                    "eligibility_status": "rejected",
+                    "reason_code": "provider_disabled",
+                    "effective_to": "2026-04-30T09:00:00-07:00",
+                    "rationale": "Temporary hold during provider investigation",
+                },
+            ),
         ],
     ),
     "praxis_execution_truth": _tool(
@@ -388,7 +427,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         examples=[
             _example("Read all route truth", {"runtime_profile_ref": "praxis"}),
             _example(
-                "Read compile API route truth",
+                "Read plan-generation API route truth",
                 {"job_type": "compile", "transport_type": "API"},
             ),
         ],
@@ -730,28 +769,29 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Match an app intent", {"intent": "invoice approval workflow with status tracking"}),
         ],
     ),
-    "praxis_compile": _tool(
+    "praxis_generate_plan": _tool(
         surface="workflow",
         tier="stable",
-        recommended_alias="compile",
+        recommended_alias="generate-plan",
         when_to_use=(
-            "Shared CQRS compile front door for MCP/CLI/API parity. Use action='preview' "
-            "to recognize messy prose without mutation, or action='materialize' to create "
-            "or update draft workflow build state."
+            "Shared CQRS plan-generation front door for MCP/CLI/API parity. Use "
+            "action='generate_plan' to recognize messy prose without mutation, or "
+            "action='materialize_plan' to create or update "
+            "draft workflow build state."
         ),
         when_not_to_use=(
             "Do not use it to launch a workflow run. Materialized workflow state still "
             "needs the normal approval and launch path."
         ),
-        risks={"default": "read", "actions": {"preview": "read", "materialize": "write"}},
+        risks={"default": "read", "actions": {"generate_plan": "read", "materialize_plan": "write"}},
         examples=[
             _example(
-                "Preview compile scope",
-                {"action": "preview", "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration."},
+                "Generate plan scope",
+                {"action": "generate_plan", "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration."},
             ),
             _example(
                 "Materialize a draft workflow",
-                {"action": "materialize", "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration.", "title": "Integration builder"},
+                {"action": "materialize_plan", "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration.", "title": "Integration builder"},
             ),
         ],
     ),
@@ -764,7 +804,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "materializing or launching the workflow."
         ),
         when_not_to_use=(
-            "Do not use it as the launch authority; use praxis_compile for draft "
+            "Do not use it as the launch authority; use praxis_generate_plan for draft "
             "state and praxis_workflow for execution."
         ),
         risks={"default": "read"},
@@ -781,8 +821,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "when deterministic skeletons need one LLM planning pass."
         ),
         when_not_to_use=(
-            "Do not use it for execution or provider routing; it is a compile "
-            "planning helper."
+            "Do not use it for execution or provider routing; it is a plan-composition helper."
         ),
         risks={"default": "launch"},
         examples=[
@@ -1921,7 +1960,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_to_use=(
             "Extract source-ordered user-stated spans, match them to data "
             "dictionary/tool authority, and surface authority-backed prerequisite "
-            "suggestions before compile or compose turns anything into a workflow."
+            "suggestions before plan generation or composition turns anything into a workflow."
         ),
         when_not_to_use=(
             "Do not use this as a planner or launcher. It does not reorder user "

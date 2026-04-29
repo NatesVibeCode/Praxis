@@ -49,8 +49,49 @@ Match condition shape:
   "regex": "...",                   // optional; matches tool input or command
   "file_glob": "**/*.Dockerfile",   // optional; matches file_path arg
   "string_match": "verbal_seal",    // optional; matches new content
-  "advisory_only": false            // optional; flagged as advisory in surface
+  "advisory_only": false,           // optional; flagged as advisory in surface
+  "applies_to_modes": ["release"]   // optional; narrow to active task mode
 }
+```
+
+### Mode-scoped triggers (`applies_to_modes`)
+
+A condition with `applies_to_modes` only fires when the active task mode is
+in the list. Used to narrow noisy triggers to the phase where they matter
+(e.g. only surface release-gate policies during a release, not while the
+agent is exploring code).
+
+The active mode comes from, in priority order:
+
+1. The `task_mode=` kwarg on `surfaces.policy.check(...)` (callers like
+   the gateway check pass this from request context),
+2. The `PRAXIS_TASK_MODE` env var (set by per-harness wrappers / launchers),
+3. None — the mode is unknown.
+
+Backward compatibility:
+
+- Conditions without `applies_to_modes` fire in any mode (no behavior
+  change for existing triggers).
+- When the mode is unknown (no kwarg, no env), every condition fires.
+  A missing mode hint must never silence a real trigger — fail-open is
+  the floor.
+
+Mode strings are case-insensitive and free-form (`chat`, `build`, `release`,
+`incident`, etc. — there is no enum). The matcher trims and lower-cases
+both the registry annotation and the active mode before comparing.
+
+Usage:
+
+```bash
+PRAXIS_TASK_MODE=release \
+  praxis workflow tools call praxis_compose_and_launch --input-json '{...}'
+```
+
+Or in tests / programmatic callers:
+
+```python
+from surfaces.policy import check
+matches = check("Bash", {"command": "..."}, task_mode="release")
 ```
 
 ## Per-harness recipes

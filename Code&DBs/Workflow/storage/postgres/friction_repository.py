@@ -34,8 +34,12 @@ class PostgresFrictionRepository:
         message: str,
         timestamp: datetime,
         is_test: bool = False,
+        task_mode: str | None = None,
     ) -> str:
         normalized_event_id = _require_text(event_id, field_name="event_id")
+        normalized_mode = (
+            str(task_mode).strip().lower() if task_mode else None
+        ) or None
         self._conn.execute(
             """
             INSERT INTO friction_events
@@ -46,9 +50,10 @@ class PostgresFrictionRepository:
                 job_label,
                 message,
                 timestamp,
-                is_test
+                is_test,
+                task_mode
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """,
             normalized_event_id,
             _require_text(friction_type, field_name="friction_type"),
@@ -57,6 +62,7 @@ class PostgresFrictionRepository:
             _require_text(message, field_name="message"),
             _require_utc(timestamp, field_name="timestamp"),
             _require_bool(is_test, field_name="is_test"),
+            normalized_mode,
         )
         return normalized_event_id
 
@@ -84,6 +90,7 @@ class PostgresFrictionRepository:
         since: datetime | None = None,
         limit: int = 50,
         include_test: bool = False,
+        task_mode: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -104,12 +111,18 @@ class PostgresFrictionRepository:
             clauses.append(f"timestamp >= ${index}")
             params.append(_require_utc(since, field_name="since"))
             index += 1
+        if task_mode is not None:
+            normalized_mode = str(task_mode).strip().lower()
+            if normalized_mode:
+                clauses.append(f"task_mode = ${index}")
+                params.append(normalized_mode)
+                index += 1
 
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         rows = self._conn.execute(
             f"""
-            SELECT event_id, friction_type, source, job_label, message, timestamp, is_test
+            SELECT event_id, friction_type, source, job_label, message, timestamp, is_test, task_mode
               FROM friction_events
             {where}
              ORDER BY timestamp DESC
@@ -123,22 +136,30 @@ class PostgresFrictionRepository:
         self,
         *,
         include_test: bool = False,
+        task_mode: str | None = None,
     ) -> list[dict[str, Any]]:
-        if include_test:
-            rows = self._conn.execute(
-                """
-                SELECT friction_type, source
-                  FROM friction_events
-                """,
-            )
-        else:
-            rows = self._conn.execute(
-                """
-                SELECT friction_type, source
-                  FROM friction_events
-                 WHERE is_test = false
-                """,
-            )
+        clauses: list[str] = []
+        params: list[Any] = []
+        index = 1
+        if not include_test:
+            clauses.append(f"is_test = ${index}")
+            params.append(False)
+            index += 1
+        if task_mode is not None:
+            normalized = str(task_mode).strip().lower()
+            if normalized:
+                clauses.append(f"task_mode = ${index}")
+                params.append(normalized)
+                index += 1
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn.execute(
+            f"""
+            SELECT friction_type, source, task_mode
+              FROM friction_events
+            {where}
+            """,
+            *params,
+        )
         return [dict(row) for row in rows or []]
 
     def list_type_rows_since(

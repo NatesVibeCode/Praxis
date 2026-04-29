@@ -143,7 +143,8 @@ def tool_praxis_friction(params: dict) -> dict:
 
     if action == "stats":
         include_test = params.get("include_test", False)
-        stats = ledger.stats(include_test=include_test)
+        task_mode = (params.get("task_mode") or "").strip().lower() or None
+        stats = ledger.stats(include_test=include_test, task_mode=task_mode)
         if stats.total == 0:
             return {"total": 0, "message": "No friction events recorded."}
         patterns = ledger.cluster_patterns(since_hours=24)
@@ -153,6 +154,8 @@ def tool_praxis_friction(params: dict) -> dict:
             "by_source": stats.by_source,
             "bounce_rate_24h": round(ledger.bounce_rate(since_hours=24, include_test=include_test), 4),
         }
+        if task_mode:
+            result["task_mode"] = task_mode
         if patterns:
             result["patterns"] = [
                 {"pattern": p["pattern"], "count": p["count"], "sources": p["sources"]}
@@ -164,7 +167,10 @@ def tool_praxis_friction(params: dict) -> dict:
         limit = params.get("limit", 20)
         source = params.get("source") or None
         include_test = params.get("include_test", False)
-        events = ledger.list_events(source=source, limit=limit, include_test=include_test)
+        task_mode = (params.get("task_mode") or "").strip().lower() or None
+        events = ledger.list_events(
+            source=source, limit=limit, include_test=include_test, task_mode=task_mode,
+        )
         if not events:
             return {"count": 0, "message": "No friction events found."}
         return {
@@ -177,6 +183,7 @@ def tool_praxis_friction(params: dict) -> dict:
                     "job_label": e.job_label,
                     "message": e.message[:200],
                     "timestamp": e.timestamp.isoformat(),
+                    "task_mode": e.task_mode,
                 }
                 for e in events
             ],
@@ -286,6 +293,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "recurring friction patterns, or audit guardrail activity.\n\n"
                 "EXAMPLES:\n"
                 "  Overview stats:     praxis_friction(action='stats')\n"
+                "  Stats by mode:      praxis_friction(action='stats', task_mode='release')\n"
                 "  Recent events:      praxis_friction(action='list', limit=10)\n"
                 "  Repeated failures:  praxis_friction(action='patterns', source='cli.workflow')\n"
                 "  From one source:    praxis_friction(action='list', source='governance')"
@@ -304,6 +312,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "since_hours": {"type": "number", "description": "Only include events from the last N hours."},
                     "promotion_threshold": {"type": "integer", "description": "Pattern count that marks promotion_candidate=true.", "default": 3},
                     "include_test": {"type": "boolean", "description": "Include test friction events (excluded by default).", "default": False},
+                    "task_mode": {"type": "string", "description": "Filter stats/list to a single task mode (chat/build/release/incident/...)."},
                 },
                 "required": ["action"],
             },

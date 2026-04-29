@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { isAbortError } from '../shared/request';
 
 /**
  * Module data source. Legacy string form fetches /api/<endpoint>. The object
@@ -69,15 +70,25 @@ export function useModuleData<T>(
   const [loading, setLoading] = useState(enabled && Boolean(fetchUrl));
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const requestSeqRef = useRef(0);
 
   const fetchData = useCallback(async () => {
     if (!fetchUrl) {
+      requestSeqRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
       setLoading(false);
       return;
     }
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
+    const isCurrent = () =>
+      requestSeqRef.current === requestSeq
+      && abortRef.current === controller
+      && !controller.signal.aborted;
 
     setLoading(true);
     setError(null);
@@ -88,20 +99,30 @@ export function useModuleData<T>(
       const json = await res.json();
       if (isProjection) {
         const envelope = json as ProjectionEnvelope<T>;
+        if (!isCurrent()) return;
         setData((envelope.output ?? null) as T | null);
       } else {
+        if (!isCurrent()) return;
         setData(json as T);
       }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (!isCurrent() || isAbortError(err)) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+      }
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     }
   }, [fetchUrl, isProjection]);
 
   useEffect(() => {
     if (!enabled || !fetchUrl) {
+      requestSeqRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
       setLoading(false);
       return;
     }
@@ -112,12 +133,16 @@ export function useModuleData<T>(
       const id = setInterval(fetchData, refreshInterval);
       return () => {
         clearInterval(id);
+        requestSeqRef.current += 1;
         abortRef.current?.abort();
+        abortRef.current = null;
       };
     }
 
     return () => {
+      requestSeqRef.current += 1;
       abortRef.current?.abort();
+      abortRef.current = null;
     };
   }, [enabled, fetchData, fetchUrl, refreshInterval]);
 

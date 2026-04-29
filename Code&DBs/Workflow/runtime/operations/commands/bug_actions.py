@@ -75,6 +75,17 @@ class BugResolveCommand(BaseModel):
     resolution_summary: str | None = Field(default=None, description="Operator note on the resolution.")
     notes: str | None = Field(default=None, description="Alias for resolution_summary.")
     created_by: str | None = Field(default=None)
+    promote_to_pattern: bool = Field(
+        default=False,
+        description=(
+            "When true, explicitly materialize the resolved bug into platform pattern/"
+            "anti-pattern authority after the bug resolution succeeds."
+        ),
+    )
+    pattern_status: str = Field(
+        default="confirmed",
+        description="Pattern status to use when promote_to_pattern=true.",
+    )
 
 
 class BugAttachEvidenceCommand(BaseModel):
@@ -179,6 +190,31 @@ def handle_bug_resolve(command: BugResolveCommand, subsystems: Any) -> dict[str,
             resolved_statuses=resolved_statuses,
         )
         if payload.get("ok") and payload.get("resolved"):
+            if command.promote_to_pattern:
+                try:
+                    from runtime.platform_patterns import PlatformPatternAuthority
+
+                    pattern_payload = PlatformPatternAuthority(
+                        subsystems.get_pg_conn()
+                    ).materialize_bug_resolution(
+                        bug=dict(payload.get("bug") or {}),
+                        status=command.pattern_status,
+                        created_by=str(command.created_by or "gateway.bug_resolve"),
+                    )
+                    payload["pattern_promotion"] = pattern_payload
+                    pattern_disclosure = consume_operator_disclosure(
+                        subsystems.get_pg_conn(),
+                        repo_root=str(workspace_repo_root()),
+                        disclosure_kind="pattern",
+                    )
+                    if pattern_disclosure is not None:
+                        payload["pattern_operator_disclosure"] = pattern_disclosure
+                except Exception as exc:  # noqa: BLE001 - bug resolution already succeeded
+                    payload["pattern_promotion"] = {
+                        "ok": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "reason_code": "bug.resolve.pattern_promotion_failed",
+                    }
             disclosure = consume_operator_disclosure(
                 subsystems.get_pg_conn(),
                 repo_root=str(workspace_repo_root()),

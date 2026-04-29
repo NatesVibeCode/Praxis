@@ -475,6 +475,86 @@ class PlatformPatternAuthority:
             },
         }
 
+    def materialize_bug_resolution(
+        self,
+        *,
+        bug: Mapping[str, Any],
+        status: str = "confirmed",
+        created_by: str = "gateway.bug_resolve.pattern_promotion",
+    ) -> dict[str, Any]:
+        """Materialize one resolved bug as reusable pattern authority.
+
+        Candidate derivation handles recurring clusters. This bridge is the
+        explicit operator path: "this resolved bug should become memory."
+        """
+        bug_payload = dict(bug)
+        bug_id = _require_text(bug_payload.get("bug_id"), field_name="bug_id")
+        title = _require_text(
+            bug_payload.get("title") or f"Resolved bug {bug_id}",
+            field_name="title",
+        )
+        candidate = PatternCandidate(
+            pattern_key=f"resolved_bug:{_clean_token(bug_id)}",
+            pattern_kind=_kind_for_bug(bug_payload),
+            title=f"Resolved bug anti-pattern: {title}"[:240],
+            failure_mode=str(
+                bug_payload.get("description")
+                or bug_payload.get("summary")
+                or bug_payload.get("resolution_summary")
+                or title
+            )[:1200],
+            evidence_count=1,
+            first_seen_at=_coerce_datetime(
+                bug_payload.get("updated_at")
+                or bug_payload.get("created_at")
+                or bug_payload.get("opened_at")
+            ),
+            last_seen_at=_coerce_datetime(bug_payload.get("updated_at")),
+            promotion_candidate=True,
+            promotion_rule={
+                "source": "bug_resolution",
+                "threshold": 1,
+                "promotion": "operator_explicit_bug_to_pattern_bridge",
+            },
+            evidence=(
+                PatternEvidence(
+                    evidence_kind="bug",
+                    evidence_ref=bug_id,
+                    evidence_role="resolved_into_pattern",
+                    observed_at=_coerce_datetime(bug_payload.get("updated_at")),
+                    details={
+                        "source": "bug_resolution",
+                        "status": str(bug_payload.get("status") or ""),
+                        "category": str(bug_payload.get("category") or ""),
+                        "severity": str(bug_payload.get("severity") or ""),
+                    },
+                ),
+            ),
+            severity=_normalize_severity(bug_payload.get("severity") or "P2"),
+            status=_normalize_status(status),
+            metadata={
+                "bug_id": bug_id,
+                "bug_title": title,
+                "bug_tags": _split_tags(bug_payload.get("tags")),
+                "resolution_summary": str(bug_payload.get("resolution_summary") or ""),
+                "bridge": "bug_resolution_to_pattern",
+            },
+        )
+        pattern = self._upsert_candidate(
+            candidate,
+            status=_normalize_status(status),
+            created_by=created_by,
+        )
+        return {
+            "ok": True,
+            "status": "completed",
+            "materialized_count": 1,
+            "pattern": pattern,
+            "pattern_ref": pattern.get("pattern_ref"),
+            "source_bug_id": bug_id,
+            "bridge": "bug_resolution_to_pattern",
+        }
+
     def _upsert_candidate(
         self,
         candidate: PatternCandidate,

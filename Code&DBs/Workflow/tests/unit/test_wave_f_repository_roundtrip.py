@@ -24,6 +24,7 @@ class _FrictionConn:
                     "message": args[4],
                     "timestamp": args[5],
                     "is_test": args[6],
+                    "task_mode": args[7] if len(args) > 7 else None,
                     "embedding": None,
                 }
             )
@@ -47,16 +48,30 @@ class _FrictionConn:
                 since = args[arg_index]
                 filtered = [row for row in filtered if row["timestamp"] >= since]
                 arg_index += 1
+            if "task_mode = $" in q:
+                task_mode = args[arg_index]
+                filtered = [row for row in filtered if row.get("task_mode") == task_mode]
+                arg_index += 1
             limit = args[arg_index]
             filtered.sort(key=lambda row: row["timestamp"], reverse=True)
             return [dict(row) for row in filtered[:limit]]
 
-        if "SELECT friction_type, source" in q:
-            rows = self.rows
-            if "WHERE is_test = false" in q:
+        if "SELECT friction_type, source, task_mode" in q:
+            rows = list(self.rows)
+            arg_index = 0
+            if "is_test = $" in q:
                 rows = [row for row in rows if row["is_test"] is False]
+                arg_index += 1
+            if "task_mode = $" in q:
+                task_mode = args[arg_index]
+                rows = [row for row in rows if row.get("task_mode") == task_mode]
+                arg_index += 1
             return [
-                {"friction_type": row["friction_type"], "source": row["source"]}
+                {
+                    "friction_type": row["friction_type"],
+                    "source": row["source"],
+                    "task_mode": row.get("task_mode"),
+                }
                 for row in rows
             ]
 
@@ -176,7 +191,7 @@ def test_friction_repository_round_trip_records_and_reads_events() -> None:
 
     assert [row["event_id"] for row in listed] == ["evt_live"]
     assert type_source_rows == [
-        {"friction_type": "guardrail_bounce", "source": "wave_f"}
+        {"friction_type": "guardrail_bounce", "source": "wave_f", "task_mode": None}
     ]
     assert recent_type_rows == [{"friction_type": "guardrail_bounce"}]
 

@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `358`.
+Public route count: `8`. All route count: `360`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -256,6 +256,8 @@ Public route count: `8`. All route count: `358`.
 | `GET` | `/api/operator/work-assignment-matrix` | `internal` | `operations` | operator.work_assignment_matrix |
 | `POST` | `/api/operator/work-item-closeout` | `internal` | `operations` | operator.work_item_closeout |
 | `POST` | `/api/operator_patterns` | `internal` | `operations` | operator_patterns |
+| `GET` | `/api/operator_repo_policy_contract_current` | `internal` | `operations` | operator.repo_policy_contract_current |
+| `GET` | `/api/operator_repo_policy_submission_acceptance` | `internal` | `operations` | operator.repo_policy_submission_acceptance |
 | `POST` | `/api/pattern_materialize_candidates` | `internal` | `operations` | pattern_materialize_candidates |
 | `GET` | `/api/platform-overview` | `internal` | - | platform_overview_get |
 | `POST` | `/api/policy.list` | `internal` | `operations` | policy.list |

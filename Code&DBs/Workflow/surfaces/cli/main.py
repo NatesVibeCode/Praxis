@@ -136,7 +136,7 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     },
     {"command": "workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate", "description": "Repo-local operator surface"},
     {"command": "workflow roadmap view|status|scoreboard|graph|write|closeout", "description": "CQRS-native roadmap query/command frontdoor"},
-    {"command": "workflow compile|github", "description": "Build and repository automation"},
+    {"command": "workflow generate-plan|materialize-plan|github", "description": "Plan generation, materialization, and repository automation"},
 ]
 
 _COMMAND_INDEX_TIPS: list[str] = [
@@ -296,8 +296,15 @@ def _launcher_command(args: list[str], *, stdout: TextIO) -> int:
             return code
 
 
-def _compile_command(args: list[str], *, stdout: TextIO) -> int:
-    return _module_command_handler(".commands.admin", "_compile_command")(
+def _generate_plan_command(args: list[str], *, stdout: TextIO) -> int:
+    return _module_command_handler(".commands.admin", "_generate_plan_command")(
+        args,
+        stdout=stdout,
+    )
+
+
+def _materialize_plan_command(args: list[str], *, stdout: TextIO) -> int:
+    return _module_command_handler(".commands.admin", "_materialize_plan_command")(
         args,
         stdout=stdout,
     )
@@ -421,7 +428,8 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "cache": _lazy_args_command(".commands.operate", "_cache_command"),
         "health-map": _lazy_args_command(".commands.operate", "_health_map_command"),
         "reviews": _lazy_args_command(".commands.query", "_reviews_command"),
-        "compile": _compile_command,
+        "generate-plan": _generate_plan_command,
+        "materialize-plan": _materialize_plan_command,
         "metrics": _lazy_args_command(".commands.operate", "_metrics_command"),
         "github": _github_command,
         "api": _lazy_args_command(".commands.operate", "_api_command"),
@@ -721,7 +729,7 @@ def _help_text() -> str:
             "                                                  Run the daily external-health heartbeat",
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate",
             "  workflow roadmap view|status|scoreboard|graph|write|closeout",
-            "  workflow compile|github",
+            "  workflow generate-plan|materialize-plan|github",
             "",
             "Tip: run `workflow commands` or `workflow help commands` for the full command index.",
             "Tip: run `workflow commands --json` when you want machine-readable discovery.",

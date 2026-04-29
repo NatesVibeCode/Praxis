@@ -1022,3 +1022,107 @@
     max-width: none;
   }
 }
+
+.app-shell__chrome {
+  grid-template-columns: minmax(108px, 140px) minmax(0, 1fr) auto;
+  min-height: 50px;
+  gap: 10px;
+  padding: 6px 14px;
+}
+
+.app-shell__identity {
+  gap: 8px;
+}
+
+.app-shell__identity-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+
+.app-shell__identity-copy span {
+  display: none;
+}
+
+.app-shell__identity-copy strong {
+  font-size: 12px;
+}
+
+.app-shell__tabstrip {
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.app-shell__tab {
+  border-radius: 6px;
+}
+
+.app-shell__tab-button {
+  min-height: 30px;
+  gap: 7px;
+  padding: 0 9px 0 5px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+
+.app-shell__tab-kind,
+.app-shell__action-kicker {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.app-shell__tab-copy {
+  flex-direction: row;
+  align-items: center;
+}
+
+.app-shell__tab-glyph,
+.app-shell__action-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+}
+
+.app-shell__tab-label {
+  max-width: 150px;
+}
+
+.app-shell__action-button {
+  min-width: 76px;
+  min-height: 32px;
+  gap: 7px;
+  padding: 4px 9px 4px 5px;
+  border-radius: 7px;
+}
+
+.app-shell__action-copy {
+  gap: 0;
+}
+
+@media (max-width: 1120px) {
+  .app-shell__chrome {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-shell__chrome {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
+  .app-shell__identity {
+    align-items: center;
+  }
+
+  .app-shell__action-button {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+}

@@ -2,6 +2,7 @@
 // No React. Pure async functions that take IDs and return typed results.
 
 import type { BuildPayload, CompilePreviewPayload } from './types';
+import { fetchJson, type JsonRequestOptions } from './request';
 
 interface BuildDefinitionRequest {
   workflowId?: string | null;
@@ -9,46 +10,6 @@ interface BuildDefinitionRequest {
   definition?: Record<string, unknown>;
   buildGraph?: BuildPayload['build_graph'] | null;
   compiled_spec?: Record<string, unknown> | null;
-}
-
-interface RequestOptions {
-  timeoutMs?: number;
-}
-
-async function _json(resp: Response): Promise<any> {
-  let body: any = null;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
-  if (!resp.ok) throw new Error(body?.error || body?.detail || `HTTP ${resp.status}`);
-  return body;
-}
-
-async function _fetchJson(
-  input: string,
-  init?: RequestInit,
-  options?: RequestOptions,
-): Promise<any> {
-  const timeoutMs = options?.timeoutMs ?? 15000;
-  const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(input, {
-      ...init,
-      signal: controller.signal,
-    });
-    return await _json(response);
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s`);
-    }
-    throw error;
-  } finally {
-    globalThis.clearTimeout(timeout);
-  }
 }
 
 export interface CatalogReviewDecisionRequest {
@@ -64,15 +25,15 @@ export interface CatalogReviewDecisionRequest {
 }
 
 export async function loadWorkflowDefinition(workflowId: string): Promise<any> {
-  return _fetchJson(`/api/workflows/${workflowId}`);
+  return fetchJson(`/api/workflows/${workflowId}`);
 }
 
-export async function loadWorkflowBuild(workflowId: string): Promise<BuildPayload> {
-  return _fetchJson(`/api/workflows/${workflowId}/build`);
+export async function loadWorkflowBuild(workflowId: string, options?: JsonRequestOptions): Promise<BuildPayload> {
+  return fetchJson(`/api/workflows/${workflowId}/build`, {}, options);
 }
 
 export async function saveWorkflowDefinition(workflowId: string, definition: any): Promise<any> {
-  return _fetchJson(`/api/workflows/${workflowId}`, {
+  return fetchJson(`/api/workflows/${workflowId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(definition),
@@ -112,7 +73,7 @@ export async function compileDefinition(
 }
 
 export async function previewCompile(prose: string): Promise<CompilePreviewPayload> {
-  return _fetchJson('/api/compile/preview', {
+  return fetchJson('/api/compile/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ intent: prose }),
@@ -150,7 +111,7 @@ export async function commitDefinition(
   workflowId: string,
   opts?: BuildDefinitionRequest,
 ): Promise<any> {
-  return _fetchJson(`/api/workflows/${workflowId}`, {
+  return fetchJson(`/api/workflows/${workflowId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -163,7 +124,7 @@ export async function commitDefinition(
 }
 
 export async function fetchCatalogEnvelope(): Promise<any> {
-  return _fetchJson('/api/catalog', undefined, { timeoutMs: 10000 });
+  return fetchJson('/api/catalog', undefined, { timeoutMs: 10000 });
 }
 
 export async function fetchCatalog(): Promise<any[]> {
@@ -180,11 +141,11 @@ export async function fetchCatalogReviewDecisions(params?: {
   if (params?.target_kind) search.set('target_kind', params.target_kind);
   if (params?.target_ref) search.set('target_ref', params.target_ref);
   const query = search.toString();
-  return _fetchJson(`/api/catalog/review-decisions${query ? `?${query}` : ''}`);
+  return fetchJson(`/api/catalog/review-decisions${query ? `?${query}` : ''}`);
 }
 
 export async function postCatalogReviewDecision(body: CatalogReviewDecisionRequest): Promise<any> {
-  return _fetchJson('/api/catalog/review-decisions', {
+  return fetchJson('/api/catalog/review-decisions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -195,7 +156,7 @@ export async function createWorkflow(
   name: string,
   opts?: Omit<BuildDefinitionRequest, 'workflowId' | 'title'>,
 ): Promise<{ id: string; workflow_id?: string }> {
-  const data = await _fetchJson('/api/workflows', {
+  const data = await fetchJson<any>('/api/workflows', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -222,7 +183,7 @@ export async function planDefinition(opts?: Omit<BuildDefinitionRequest, 'compil
 }
 
 export async function triggerWorkflow(workflowId: string): Promise<{ run_id: string; status: string }> {
-  return _fetchJson(`/api/trigger/${workflowId}`, {
+  return fetchJson(`/api/trigger/${workflowId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
@@ -230,7 +191,7 @@ export async function triggerWorkflow(workflowId: string): Promise<{ run_id: str
 }
 
 export async function suggestNextSteps(workflowId: string, nodeId: string, buildGraph: Record<string, unknown>): Promise<{ likely_next_steps: any[], possible_next_steps: any[] }> {
-  return _fetchJson(`/api/workflows/${workflowId}/build/suggest-next`, {
+  return fetchJson(`/api/workflows/${workflowId}/build/suggest-next`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ node_id: nodeId, build_graph: buildGraph }),
@@ -249,7 +210,7 @@ export async function postBuildMutation(
   const isBootstrap = subpath === 'bootstrap';
   const fullCompose = isBootstrap && body['enable_full_compose'] !== false;
   const timeoutMs = fullCompose ? 360000 : (isBootstrap ? 45000 : 25000);
-  return _fetchJson(`/api/workflows/${workflowId}/build/${subpath}`, {
+  return fetchJson(`/api/workflows/${workflowId}/build/${subpath}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

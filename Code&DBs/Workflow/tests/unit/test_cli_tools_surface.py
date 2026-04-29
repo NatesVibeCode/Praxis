@@ -197,6 +197,15 @@ def test_launch_plan_metadata_requires_provider_freshness_gate() -> None:
     assert "fresh route truth" in approve_plan_meta["when_to_use"].lower()
 
 
+def test_task_route_eligibility_metadata_explains_by_task_policy() -> None:
+    metadata = CLI_TOOL_METADATA["praxis_task_route_eligibility"]
+
+    assert "by-task routing policy" in metadata["when_to_use"].lower()
+    assert metadata["examples"][0]["input"]["provider_slug"] == "anthropic"
+    assert metadata["examples"][0]["input"]["model_slug"] == "claude-sonnet-4-6"
+    assert metadata["recommended_alias"] == "task-route-eligibility"
+
+
 def test_tools_help_can_describe_a_tool_alias() -> None:
     stdout = StringIO()
 

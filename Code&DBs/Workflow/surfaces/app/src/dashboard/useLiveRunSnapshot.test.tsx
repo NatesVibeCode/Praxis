@@ -12,6 +12,14 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as Response;
 }
 
+function pendingResponse() {
+  let resolve!: (value: Response) => void;
+  const promise = new Promise<Response>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 class MockEventSource {
   static instances: MockEventSource[] = [];
 
@@ -120,7 +128,7 @@ describe('useLiveRunSnapshot', () => {
 
     expect(snapshot).toEqual(detail);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('/api/runs/run-1');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/runs/run-1');
   });
 
   it('falls back to recent runs only when the detail route is missing', async () => {
@@ -149,8 +157,8 @@ describe('useLiveRunSnapshot', () => {
       jobs: [],
       health: null,
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/runs/run-2');
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/runs/recent?limit=100');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/runs/run-2');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/runs/recent?limit=100');
   });
 
   it('refreshes the run snapshot when the live stream emits progress', async () => {
@@ -199,7 +207,108 @@ describe('useLiveRunSnapshot', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/runs/run-3');
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/runs/run-3');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/runs/run-3');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/runs/run-3');
+    expect(MockEventSource.instances[0].closed).toBe(true);
+  });
+
+  it('ignores stale snapshots after the run id changes', async () => {
+    const first = pendingResponse();
+    const second = pendingResponse();
+    const requests: Array<{ input: string; signal?: AbortSignal }> = [];
+    const fetchMock = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), signal: init?.signal ?? undefined });
+      return requests.length === 1 ? first.promise : second.promise;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { rerender } = render(<Probe runId="run-stale" />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(<Probe runId="run-current" />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    expect(requests[0].signal?.aborted).toBe(true);
+
+    await act(async () => {
+      second.resolve(jsonResponse({
+        run_id: 'run-current',
+        spec_name: 'Current',
+        status: 'running',
+        total_jobs: 1,
+        completed_jobs: 0,
+        total_cost: 0,
+        total_duration_ms: 0,
+        created_at: null,
+        finished_at: null,
+        jobs: [],
+      }));
+    });
+
+    const state = await screen.findByTestId('state');
+    await waitFor(() => {
+      expect(state).toHaveTextContent('"runId":"run-current"');
+    });
+
+    await act(async () => {
+      first.resolve(jsonResponse({
+        run_id: 'run-stale',
+        spec_name: 'Stale',
+        status: 'running',
+        total_jobs: 9,
+        completed_jobs: 0,
+        total_cost: 0,
+        total_duration_ms: 0,
+        created_at: null,
+        finished_at: null,
+        jobs: [],
+      }));
+    });
+
+    expect(state).toHaveTextContent('"runId":"run-current"');
+  });
+
+  it('coalesces live stream bursts into one snapshot refresh', async () => {
+    const initial = {
+      run_id: 'run-burst',
+      spec_name: 'Burst',
+      status: 'running',
+      total_jobs: 5,
+      completed_jobs: 1,
+      total_cost: 0,
+      total_duration_ms: 0,
+      created_at: null,
+      finished_at: null,
+      jobs: [],
+    };
+    const updated = { ...initial, completed_jobs: 4 };
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(initial))
+      .mockResolvedValueOnce(jsonResponse(updated));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<Probe runId="run-burst" />);
+
+    const state = await screen.findByTestId('state');
+    await waitFor(() => {
+      expect(state).toHaveTextContent('"totalJobs":5');
+    });
+
+    act(() => {
+      MockEventSource.instances[0].open();
+      MockEventSource.instances[0].emit('progress');
+      MockEventSource.instances[0].emit('job');
+      MockEventSource.instances[0].emit('progress');
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
   });
 });

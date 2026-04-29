@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 127 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 128 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -80,6 +80,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_semantic_bridges_backfill` | `operations` | `advanced` | - | `write` | - | Replay semantic bridges from canonical operator authority into semantic assertions. |
 | `praxis_semantic_projection_refresh` | `operations` | `advanced` | - | `write` | - | Refresh the semantic projection through explicit operator maintenance authority. |
 | `praxis_status_snapshot` | `operations` | `advanced` | - | `read` | - | Read the canonical workflow status snapshot — pass rate, failure mix, queue depth, and in-flight run summaries from receipt authority. |
+| `praxis_task_route_eligibility` | `operations` | `advanced` | `workflow task-route-eligibility` | `write` | - | Write one bounded task-route eligibility window for a provider or provider/model scope through CQRS authority. |
 | `praxis_work_assignment_matrix` | `operations` | `stable` | - | `read` | - | Read the model-tier work assignment matrix through CQRS authority. |
 | `tool_dag_health` | `operations` | `stable` | - | `read` | workflow health | Backwards-compatible alias for praxis_health. |
 | `praxis_bug_triage_packet` | `operator` | `advanced` | - | `read` | - | Read a compact LLM-oriented packet that classifies bugs as live defects, evidence debt, stale projections, platform friction, fixed-pending-verification, or inactive without mutating bug authority. |
@@ -127,13 +128,13 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_submit_research_result` | `submissions` | `session` | - | `session` | - | Submit a sealed research result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_approve_proposed_plan` | `workflow` | `stable` | `workflow approve-plan` | `read` | - | Approve a ProposedPlan so launch_approved can submit it. Takes the ProposedPlan payload from praxis_launch_plan(preview_only=true), wraps it with approved_by + timestamp + hash, and returns an ApprovedPlan. The hash binds the approval to the exact spec_dict — tampering between approve and launch fails closed at launch time. The ProposedPlan must already carry machine-checkable provider freshness evidence. |
 | `praxis_bind_data_pills` | `workflow` | `stable` | `workflow bind-pills` | `read` | - | Layer 1 (Bind) of the planning stack: extract and validate ``object.field`` data-pill references from prose intent against the data dictionary authority. Deterministic — matches explicit ``snake_case.field_path`` spans in the prose; does not infer loose references like "the user's name." Returns bound / ambiguous / unbound splits the caller confirms before decomposing intent into packets. |
-| `praxis_compile` | `workflow` | `stable` | `workflow compile` | `read`, `write` | - | Shared CQRS compile front door. Query side action='preview' recognizes messy prose, matches spans to authority, returns suggestions and gaps, and does not mutate state. Command side action='materialize' creates or updates a draft workflow through the canonical workflow build mutation. |
 | `praxis_compose_and_launch` | `workflow` | `stable` | `workflow ship-intent` | `launch` | - | End-to-end: prose intent → compose → approve → launch in one call. Compose the ProposedPlan through Layers 2 → 1 → 5, wrap with an explicit approval record (approved_by + hash), and submit through the CQRS control-command bus. |
 | `praxis_compose_experiment` | `workflow` | `advanced` | - | `launch` | - | Parallel matrix runner: fire N compose_plan_via_llm calls side-by-side, each with a different LLM knob configuration. Returns a ranked report (success-first, wall-time-asc). Each child run produces its own compose-plan-via-llm receipt + plan.composed event; the matrix run produces a parent receipt + a compose.experiment.completed event. |
 | `praxis_compose_plan` | `workflow` | `stable` | `workflow compose-plan` | `read` | - | Chain Layer 2 (decompose) → Layer 1 (bind) → Layer 5 (translate + preview) in one call. Takes prose intent with explicit step markers, returns a ProposedPlan ready for approval and launch. |
-| `praxis_compose_plan_via_llm` | `workflow` | `advanced` | - | `launch` | - | End-to-end LLM compile: atoms → skeleton → ONE synthesis LLM call (few-sentence plan statement) → N parallel fork-out author calls (each shares the synthesis as cached prefix) → validate. |
+| `praxis_compose_plan_via_llm` | `workflow` | `advanced` | - | `launch` | - | End-to-end LLM plan composition: atoms → skeleton → ONE synthesis LLM call (few-sentence plan statement) → N parallel fork-out author calls (each shares the synthesis as cached prefix) → validate. |
 | `praxis_connector` | `workflow` | `advanced` | - | `launch`, `read`, `write` | - | Build API connectors for third-party applications. One call stamps a workflow spec and launches a 4-job pipeline (discover API → map objects → build client → review). |
 | `praxis_decompose_intent` | `workflow` | `stable` | `workflow decompose` | `read` | - | Layer 2 (Decompose) of the planning stack: split prose intent into ordered steps by parsing explicit step markers (numbered lists, bulleted lists, or first/then/finally ordering). Deterministic — does NOT do free-prose semantic decomposition. |
+| `praxis_generate_plan` | `workflow` | `stable` | `workflow generate-plan` | `read`, `write` | - | Shared CQRS plan-generation front door. action='generate_plan' recognizes messy prose, matches spans to authority, returns suggestions and gaps, and does not mutate state. action='materialize_plan' creates or updates a draft workflow through the canonical workflow build mutation. |
 | `praxis_launch_plan` | `workflow` | `stable` | `workflow launch-plan` | `write` | - | Translate a packet list into a workflow spec and submit it — or preview first. This is the layer-5 translation primitive, not a planner. Caller (user or LLM) owns upstream planning: (1) extract data pills from intent, (2) decompose prose into steps, (3) reorder by data-flow, (4) author per-step prompts. This tool translates the already-planned packet list through the capability catalog and submits through the CQRS bus. |
 | `praxis_plan_lifecycle` | `workflow` | `stable` | `workflow plan-history` | `read` | - | Q-side of the planning stack: read every plan.* authority_event for one workflow_id in order. Pair with gateway-backed praxis_compose_plan / praxis_launch_plan on the C side. |
 | `praxis_promote_experiment_winner` | `workflow` | `advanced` | - | `write` | - | Promote one compose-experiment leg into the canonical task_type_routing row for that task type. The winning leg's temperature and max_tokens are applied; provider/model changes remain visible only in the returned diff. |
@@ -1647,6 +1648,33 @@ Example input:
 }
 ```
 
+#### `praxis_task_route_eligibility`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:task-route-eligibility`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow task-route-eligibility`
+- CLI schema help: `workflow tools describe praxis_task_route_eligibility`
+- When to use: Allow or reject one provider/model candidate for one task type through a bounded eligibility window. Use this for by-task routing policy such as letting anthropic/claude-sonnet-4-6 participate in build or review without enabling it everywhere.
+- When not to use: Do not use it for broad provider onboarding or transport-wide ON/OFF control; use praxis_provider_onboard or praxis_access_control for those.
+- Recommended alias: `workflow task-route-eligibility`
+- Selector: none
+- Required args: `provider_slug`, `eligibility_status`
+
+Example input:
+
+```json
+{
+  "provider_slug": "anthropic",
+  "model_slug": "claude-sonnet-4-6",
+  "task_type": "build",
+  "eligibility_status": "eligible",
+  "reason_code": "task_type_exception",
+  "rationale": "Allow sonnet for build high and build mid"
+}
+```
+
 #### `praxis_work_assignment_matrix`
 
 - Surface: `operations`
@@ -2729,29 +2757,6 @@ Example input:
 }
 ```
 
-#### `praxis_compile`
-
-- Surface: `workflow`
-- Tier: `stable`
-- Badges: `stable`, `workflow`, `alias:compile`, `mutates-state`
-- Risks: `read`, `write`
-- CLI entrypoint: `workflow compile`
-- CLI schema help: `workflow tools describe praxis_compile`
-- When to use: Shared CQRS compile front door for MCP/CLI/API parity. Use action='preview' to recognize messy prose without mutation, or action='materialize' to create or update draft workflow build state.
-- When not to use: Do not use it to launch a workflow run. Materialized workflow state still needs the normal approval and launch path.
-- Recommended alias: `workflow compile`
-- Selector: `action`; default `preview`; values `preview`, `materialize`
-- Required args: `intent`
-
-Example input:
-
-```json
-{
-  "action": "preview",
-  "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration."
-}
-```
-
 #### `praxis_compose_and_launch`
 
 - Surface: `workflow`
@@ -2843,7 +2848,7 @@ Example input:
 - CLI entrypoint: `workflow tools call praxis_compose_plan_via_llm`
 - CLI schema help: `workflow tools describe praxis_compose_plan_via_llm`
 - When to use: Compose a bounded plan statement from synthesized workflow atoms when deterministic skeletons need one LLM planning pass.
-- When not to use: Do not use it for execution or provider routing; it is a compile planning helper.
+- When not to use: Do not use it for execution or provider routing; it is a plan-composition helper.
 - Selector: none
 - Required args: `intent`
 
@@ -2898,6 +2903,29 @@ Example input:
 ```json
 {
   "intent": "1. Add a timezone column to users.\n2. Backfill existing rows with UTC.\n3. Update the profile UI to expose the field."
+}
+```
+
+#### `praxis_generate_plan`
+
+- Surface: `workflow`
+- Tier: `stable`
+- Badges: `stable`, `workflow`, `alias:generate-plan`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow generate-plan`
+- CLI schema help: `workflow tools describe praxis_generate_plan`
+- When to use: Shared CQRS plan-generation front door for MCP/CLI/API parity. Use action='generate_plan' to recognize messy prose without mutation, or action='materialize_plan' to create or update draft workflow build state.
+- When not to use: Do not use it to launch a workflow run. Materialized workflow state still needs the normal approval and launch path.
+- Recommended alias: `workflow generate-plan`
+- Selector: `action`; default `generate_plan`; values `generate_plan`, `materialize_plan`
+- Required args: `intent`
+
+Example input:
+
+```json
+{
+  "action": "generate_plan",
+  "intent": "Feed in an app name, search, retrieve, evaluate, then build a custom integration."
 }
 ```
 
@@ -3010,7 +3038,7 @@ Example input:
 - CLI entrypoint: `workflow tools call praxis_synthesize_skeleton`
 - CLI schema help: `workflow tools describe praxis_synthesize_skeleton`
 - When to use: Synthesize a workflow skeleton from recognized intent atoms before materializing or launching the workflow.
-- When not to use: Do not use it as the launch authority; use praxis_compile for draft state and praxis_workflow for execution.
+- When not to use: Do not use it as the launch authority; use praxis_generate_plan for draft state and praxis_workflow for execution.
 - Selector: none
 - Required args: `intent`
 

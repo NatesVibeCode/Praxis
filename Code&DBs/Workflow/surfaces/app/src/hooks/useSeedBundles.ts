@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { normalizePraxisBundle, type PraxisSurfaceBundleV4 } from '../praxis/manifest';
+import { fetchJson, isAbortError } from '../shared/request';
 
 /** Seed entry shape consumed by the Workspace New command menu. */
 export interface SeedBundleEntry {
@@ -34,16 +35,17 @@ export function useSeedBundles(): {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
     const load = async () => {
       try {
-        const res = await fetch('/api/manifests?status=seed&limit=20');
-        if (!res.ok) throw new Error(`/api/manifests?status=seed → ${res.status}`);
-        const payload = await res.json();
-        if (cancelled) return;
+        const payload = await fetchJson<{ manifests?: ManifestRow[] }>(
+          '/api/manifests?status=seed&limit=20',
+          {},
+          { signal: controller.signal },
+        );
         const rows: ManifestRow[] = Array.isArray(payload?.manifests) ? payload.manifests : [];
         const normalized: SeedBundleEntry[] = rows
           .map((row) => {
@@ -63,15 +65,15 @@ export function useSeedBundles(): {
           .filter((entry): entry is SeedBundleEntry => entry !== null);
         setSeeds(normalized);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!isAbortError(err)) setError(err instanceof Error ? err.message : String(err));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
 
     void load();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, []);
 

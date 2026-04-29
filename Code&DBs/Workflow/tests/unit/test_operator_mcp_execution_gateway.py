@@ -226,6 +226,60 @@ def test_mcp_refactor_heatmap_uses_operation_catalog_gateway(monkeypatch) -> Non
     }
 
 
+def test_mcp_task_route_eligibility_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True, "task_route_eligibility": {"provider_slug": "anthropic"}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_task_route_eligibility(
+        {
+            "provider_slug": "anthropic",
+            "eligibility_status": "eligible",
+            "task_type": "build",
+            "model_slug": "claude-sonnet-4-6",
+            "reason_code": "task_type_exception",
+            "rationale": "Allow sonnet for build only",
+            "effective_to": "2026-04-30T09:00:00-07:00",
+        }
+    )
+
+    assert result["ok"] is True
+    assert captured["operation_name"] == "operator.task_route_eligibility"
+    assert captured["payload"]["provider_slug"] == "anthropic"
+    assert captured["payload"]["eligibility_status"] == "eligible"
+    assert captured["payload"]["task_type"] == "build"
+    assert captured["payload"]["model_slug"] == "claude-sonnet-4-6"
+    assert captured["payload"]["reason_code"] == "task_type_exception"
+    assert captured["payload"]["rationale"] == "Allow sonnet for build only"
+    assert captured["payload"]["effective_to"].isoformat() == "2026-04-30T09:00:00-07:00"
+
+
+def test_mcp_task_route_eligibility_rejects_invalid_status(monkeypatch) -> None:
+    monkeypatch.setattr(operator, "_subs", object())
+
+    result = operator.tool_praxis_task_route_eligibility(
+        {
+            "provider_slug": "anthropic",
+            "eligibility_status": "maybe",
+        }
+    )
+
+    assert result == {
+        "ok": False,
+        "error": "eligibility_status must be one of ['eligible', 'rejected']",
+        "error_code": "operator.task_route_eligibility.invalid_input",
+        "operation_name": "operator.task_route_eligibility",
+    }
+
+
 def test_mcp_operator_ideas_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

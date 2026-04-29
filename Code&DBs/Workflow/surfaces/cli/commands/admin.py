@@ -2,169 +2,99 @@
 
 from __future__ import annotations
 
-from typing import Any, TextIO
+from typing import TextIO
 
 from surfaces.cli._db import cli_sync_conn
 
 
-def _compile_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle ``workflow compile [intent.json|--description DESC --write FILE --stage STAGE]``.
+def _plan_generation_help(stdout: TextIO) -> int:
+    stdout.write(
+        "usage: workflow generate-plan --description DESC [--match-limit N]\n"
+        "       workflow materialize-plan --description DESC [--workflow-id ID] [--title TITLE]\n"
+        "\n"
+        "Generate or materialize a workflow plan from prose. Materialize creates draft build state only;\n"
+        "execution still goes through approval and run surfaces.\n"
+        "\n"
+        "Options:\n"
+        "  --description TEXT   task description (required)\n"
+        "  --match-limit N      authority candidates per recognized span for generate-plan\n"
+        "  --workflow-id ID     workflow to update when materializing\n"
+        "  --title TITLE        workflow title when materializing\n"
+        "  --enable-llm         allow LLM-assisted build materialization\n"
+        "  --no-llm             disable LLM-assisted build materialization\n"
+        "  --json               output as JSON (default)\n"
+    )
+    return 2
 
-    Takes minimal intent (description, write files, stage) and produces a
-    fully-contexted workflow spec that can be run directly. When only a
-    description is provided, uses the shared compile CQRS front door to preview
-    or materialize workflow build state.
 
-    Usage:
-        workflow compile --description "Add retry logic" --write runtime/workflow/unified.py --stage build
-        workflow compile intent.json
-        workflow compile --description "..." --write file1.py,file2.py --stage build [--read extra.py] [--timeout 300]
-        workflow compile --description "Build a Gmail review workflow" [--action preview|materialize]
-    """
+def _parse_plan_generation_args(args: list[str], *, stdout: TextIO) -> tuple[dict[str, object], int | None]:
+    parsed: dict[str, object] = {}
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"-h", "--help"}:
+            return parsed, _plan_generation_help(stdout)
+        if arg in {"--description", "--workflow-id", "--title", "--match-limit"}:
+            if i + 1 >= len(args):
+                stdout.write(f"error: {arg} requires a value\n")
+                return parsed, 1
+            value = args[i + 1]
+            if arg == "--description":
+                parsed["description"] = value
+            elif arg == "--workflow-id":
+                parsed["workflow_id"] = value
+            elif arg == "--title":
+                parsed["title"] = value
+            else:
+                try:
+                    parsed["match_limit"] = int(value)
+                except ValueError:
+                    stdout.write(f"error: --match-limit must be an integer, got {value!r}\n")
+                    return parsed, 1
+            i += 2
+            continue
+        if arg == "--enable-llm":
+            parsed["enable_llm"] = True
+            i += 1
+            continue
+        if arg == "--no-llm":
+            parsed["enable_llm"] = False
+            i += 1
+            continue
+        if arg == "--json":
+            i += 1
+            continue
+        if not arg.startswith("--"):
+            stdout.write(
+                f"error: unexpected argument: {arg}. Use --description; intent-file plan generation is not a user-facing surface.\n"
+            )
+            return parsed, 1
+        stdout.write(f"error: unknown option: {arg}\n")
+        return parsed, 1
+    return parsed, None
+
+
+def _run_plan_generation(
+    args: list[str],
+    *,
+    stdout: TextIO,
+    materialize: bool,
+) -> int:
+    """Handle ``workflow generate-plan`` and ``workflow materialize-plan``."""
 
     import json as _json
 
-    from runtime.spec_compiler import compile_intent_from_file, compile_spec
-
     if not args or args[0] in {"-h", "--help"}:
-        stdout.write(
-            "usage: workflow compile [intent-file | --description DESC --write FILES --stage STAGE]\n"
-            "       workflow compile --description DESC [--action preview|materialize]\n"
-            "\n"
-            "Compile minimal intent into a workflow spec, or preview/materialize a workflow from prose.\n"
-            "\n"
-            "Positional argument:\n"
-            "  intent-file          path to a JSON intent file\n"
-            "\n"
-            "Options (alternative to intent-file):\n"
-            "  --description TEXT   task description (required)\n"
-            "  --write FILES        comma-separated list of files to write (required)\n"
-            "  --stage STAGE        build|fix|review|test|research (required)\n"
-            "  --read FILES         comma-separated list of files to read (optional)\n"
-            "  --label LABEL        custom label (optional, auto-generated if omitted)\n"
-            "  --timeout SECS       timeout in seconds (default: 300)\n"
-            "  --max-tokens TOKENS  max tokens (default: 4096)\n"
-            "  --temperature TEMP   temperature 0.0-2.0 (default: 0.0)\n"
-            "  --action ACTION      preview|materialize for prose-only compile (default: preview)\n"
-            "  --workflow-id ID     workflow to update when materializing (optional)\n"
-            "  --title TITLE        workflow title when materializing (optional)\n"
-            "  --enable-llm         allow LLM-assisted build materialization\n"
-            "  --no-llm             disable LLM-assisted build materialization\n"
-            "  --json               output as JSON (default)\n"
-            "\n"
-            "Examples:\n"
-            "  workflow compile intent.json\n"
-            "  workflow compile --description 'Add retry logic' \\\n"
-            "    --write runtime/workflow/unified.py --stage build\n"
-            "  workflow compile --description 'Fix bug' --write src/app.py --stage fix \\\n"
-            "    --read src/util.py --timeout 600\n"
-        )
-        return 2
+        return _plan_generation_help(stdout)
 
-    intent_dict: dict[str, Any] = {}
+    parsed, early_exit = _parse_plan_generation_args(args, stdout=stdout)
+    if early_exit is not None:
+        return early_exit
 
-    if args and not args[0].startswith("--"):
-        intent_path = args[0]
-        intent, errors = compile_intent_from_file(intent_path)
-        if errors:
-            for error in errors:
-                stdout.write(f"error: {error}\n")
-            return 1
-        if intent is None:
-            stdout.write(f"error: failed to load intent from {intent_path}\n")
-            return 1
-        intent_dict = {
-            "description": intent.description,
-            "write": intent.write,
-            "stage": intent.stage,
-            "read": intent.read,
-            "label": intent.label,
-            "timeout": intent.timeout,
-            "max_tokens": intent.max_tokens,
-            "temperature": intent.temperature,
-        }
-    else:
-        i = 0
-        while i < len(args):
-            arg = args[i]
-            if arg == "--description":
-                i += 1
-                if i < len(args):
-                    intent_dict["description"] = args[i]
-                i += 1
-            elif arg == "--write":
-                i += 1
-                if i < len(args):
-                    intent_dict["write"] = [file_path.strip() for file_path in args[i].split(",")]
-                i += 1
-            elif arg == "--read":
-                i += 1
-                if i < len(args):
-                    intent_dict["read"] = [file_path.strip() for file_path in args[i].split(",")]
-                i += 1
-            elif arg == "--stage":
-                i += 1
-                if i < len(args):
-                    intent_dict["stage"] = args[i]
-                i += 1
-            elif arg == "--label":
-                i += 1
-                if i < len(args):
-                    intent_dict["label"] = args[i]
-                i += 1
-            elif arg == "--timeout":
-                i += 1
-                if i < len(args):
-                    try:
-                        intent_dict["timeout"] = int(args[i])
-                    except ValueError:
-                        stdout.write(f"error: --timeout must be an integer, got {args[i]!r}\n")
-                        return 1
-                i += 1
-            elif arg == "--max-tokens":
-                i += 1
-                if i < len(args):
-                    try:
-                        intent_dict["max_tokens"] = int(args[i])
-                    except ValueError:
-                        stdout.write(f"error: --max-tokens must be an integer, got {args[i]!r}\n")
-                        return 1
-                i += 1
-            elif arg == "--temperature":
-                i += 1
-                if i < len(args):
-                    try:
-                        intent_dict["temperature"] = float(args[i])
-                    except ValueError:
-                        stdout.write(f"error: --temperature must be a float, got {args[i]!r}\n")
-                        return 1
-                i += 1
-            elif arg == "--action":
-                i += 1
-                if i < len(args):
-                    intent_dict["action"] = args[i]
-                i += 1
-            elif arg == "--workflow-id":
-                i += 1
-                if i < len(args):
-                    intent_dict["workflow_id"] = args[i]
-                i += 1
-            elif arg == "--title":
-                i += 1
-                if i < len(args):
-                    intent_dict["title"] = args[i]
-                i += 1
-            elif arg == "--enable-llm":
-                intent_dict["enable_llm"] = True
-                i += 1
-            elif arg == "--no-llm":
-                intent_dict["enable_llm"] = False
-                i += 1
-            elif arg in {"--json"}:
-                i += 1
-            else:
-                stdout.write(f"error: unknown option: {arg}\n")
-                return 1
+    description = str(parsed.get("description") or "").strip()
+    if not description:
+        stdout.write("error: --description is required\n")
+        return 1
 
     try:
         try:
@@ -172,43 +102,42 @@ def _compile_command(args: list[str], *, stdout: TextIO) -> int:
         except Exception:
             conn = None
 
-        description = str(intent_dict.get("description") or "").strip()
-        has_legacy_compile_shape = bool(intent_dict.get("write")) or bool(intent_dict.get("stage"))
-        if description and not has_legacy_compile_shape:
-            from runtime.compile_cqrs import materialize_workflow, preview_compile
+        if materialize:
+            from runtime.compile_cqrs import materialize_workflow
 
-            action = str(intent_dict.get("action") or "preview").strip() or "preview"
-            if action == "preview":
-                payload = preview_compile(description, conn=conn).to_dict()
-            elif action == "materialize":
-                payload = materialize_workflow(
-                    description,
-                    conn=conn,
-                    workflow_id=str(intent_dict.get("workflow_id") or "").strip() or None,
-                    title=str(intent_dict.get("title") or "").strip() or None,
-                    enable_llm=(
-                        bool(intent_dict["enable_llm"])
-                        if "enable_llm" in intent_dict
-                        else None
-                    ),
-                )
-            else:
-                stdout.write("error: --action must be preview or materialize\n")
-                return 1
-            stdout.write(_json.dumps(payload, indent=2) + "\n")
-            return 0
+            payload = materialize_workflow(
+                description,
+                conn=conn,
+                workflow_id=str(parsed.get("workflow_id") or "").strip() or None,
+                title=str(parsed.get("title") or "").strip() or None,
+                enable_llm=(
+                    bool(parsed["enable_llm"])
+                    if "enable_llm" in parsed
+                    else None
+                ),
+            )
+        else:
+            from runtime.compile_cqrs import preview_compile
 
-        spec, warnings = compile_spec(intent_dict, conn=conn)
+            payload = preview_compile(
+                description,
+                conn=conn,
+                match_limit=int(parsed.get("match_limit") or 5),
+            ).to_dict()
     except ValueError as exc:
         stdout.write(f"error: {exc}\n")
         return 1
 
-    for warning in warnings:
-        stdout.write(f"warning: {warning}\n")
-
-    spec_dict = spec.to_dispatch_spec_dict()
-    stdout.write(_json.dumps(spec_dict, indent=2) + "\n")
+    stdout.write(_json.dumps(payload, indent=2) + "\n")
     return 0
+
+
+def _generate_plan_command(args: list[str], *, stdout: TextIO) -> int:
+    return _run_plan_generation(args, stdout=stdout, materialize=False)
+
+
+def _materialize_plan_command(args: list[str], *, stdout: TextIO) -> int:
+    return _run_plan_generation(args, stdout=stdout, materialize=True)
 
 
 def _parse_pr_spec(spec_str: str) -> tuple[str, str, int]:

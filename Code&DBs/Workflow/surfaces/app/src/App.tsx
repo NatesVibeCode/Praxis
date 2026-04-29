@@ -86,10 +86,12 @@ function initialStrategyStageFromLocation(): StrategyStage {
   if (typeof window === 'undefined') return 'icon';
   const params = new URLSearchParams(window.location.search);
   const requested = (params.get('chat') || params.get('console') || params.get('assistant') || '').trim().toLowerCase();
+  if (requested === 'icon' || requested === 'closed' || requested === 'off' || requested === '0') return 'icon';
   if (requested === 'focus' || requested === 'full') return 'full';
   if (requested === 'sidebar' || requested === 'dock' || requested === 'docked' || requested === 'open' || requested === '1') {
     return 'sidebar';
   }
+  if ((window.location.pathname === '/app' || window.location.pathname === '/app/') && window.innerWidth >= 900) return 'sidebar';
   return 'icon';
 }
 
