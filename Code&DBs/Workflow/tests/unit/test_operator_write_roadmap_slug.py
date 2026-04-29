@@ -150,16 +150,175 @@ def test_roadmap_write_update_mode_reuses_existing_identity_and_allows_reparenti
 
     assert preview["committed"] is False
     assert preview["blocking_errors"] == []
-    assert preview["auto_fixes"] == [
+    # status auto_fix now fires earlier in normalization (alongside lifecycle
+    # coercion) rather than as a downstream alignment pass, so it precedes the
+    # slug auto_fix. Order is incidental — both messages must be present.
+    assert set(preview["auto_fixes"]) == {
         "slug ignored in update mode; roadmap_item_id drives identity",
         "status aligned to retired lifecycle: completed",
-    ]
+    }
     assert preview["normalized_payload"]["parent_roadmap_item_id"] == parent_item_id
     assert preview["normalized_payload"]["lifecycle"] == "retired"
     assert preview["normalized_payload"]["status"] == "completed"
     assert preview["normalized_payload"]["root_phase_order"] == "33.6"
     assert preview["preview"]["roadmap_items"][0]["roadmap_item_id"] == existing_item_id
     assert preview["preview"]["roadmap_items"][0]["parent_roadmap_item_id"] == parent_item_id
+
+
+def test_roadmap_retire_succeeds_when_existing_row_status_is_outside_input_enum(
+    monkeypatch,
+) -> None:
+    """Retire path must not fail enum validation on the existing row's status.
+
+    Closes BUG-2700B72E: a roadmap row with status='proposed' (not in the input
+    enum {active, completed, done}) used to fail
+    ValueError("status must be one of active, completed, done") during retire,
+    even though retire normalizes lifecycle=retired and forces status=completed
+    by design. The auto-fix existed but was unreachable because the enum
+    coercion read the existing row's status before the lifecycle-driven fix
+    could rewrite it.
+    """
+    existing_item_id = "roadmap_item.legacy.proposed.row"
+    existing_row = {
+        "roadmap_item_id": existing_item_id,
+        "roadmap_key": "roadmap.legacy.proposed.row",
+        "title": "Legacy proposed row",
+        "summary": "Pre-existing row with non-canonical status",
+        "item_kind": "capability",
+        "status": "proposed",
+        "lifecycle": "planned",
+        "priority": "p2",
+        "parent_roadmap_item_id": None,
+        "source_bug_id": None,
+        "source_idea_id": None,
+        "registry_paths": [],
+        "decision_ref": None,
+        "created_at": datetime(2026, 4, 3, 3, 0),
+        "acceptance_criteria": {},
+    }
+
+    async def _connect_database(_env=None):
+        return _PreviewOnlyConnection()
+
+    async def _fetch_roadmap_item(_self, _conn, *, roadmap_item_id: str):
+        return existing_row if roadmap_item_id == existing_item_id else None
+
+    async def _roadmap_item_exists(_self, _conn, *, roadmap_item_id: str):
+        return roadmap_item_id == existing_item_id
+
+    async def _bug_exists(_self, *_args, **_kwargs):
+        return True
+
+    async def _idea_exists(_self, *_args, **_kwargs):
+        return True
+
+    async def _roadmap_sibling_phase_orders(_self, *_args, **_kwargs):
+        return ()
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=_connect_database,
+    )
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_fetch_roadmap_item", _fetch_roadmap_item)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_roadmap_item_exists", _roadmap_item_exists)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_bug_exists", _bug_exists)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_idea_exists", _idea_exists)
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_roadmap_sibling_phase_orders",
+        _roadmap_sibling_phase_orders,
+    )
+
+    preview = asyncio.run(
+        frontdoor.roadmap_write_async(
+            action="preview",
+            roadmap_item_id=existing_item_id,
+            lifecycle="retired",
+        )
+    )
+
+    assert preview["committed"] is False
+    assert preview["blocking_errors"] == []
+    assert preview["normalized_payload"]["lifecycle"] == "retired"
+    assert preview["normalized_payload"]["status"] == "completed"
+    assert "status aligned to retired lifecycle: completed" in preview["auto_fixes"]
+
+
+def test_roadmap_update_coerces_out_of_enum_existing_status_with_auto_fix(
+    monkeypatch,
+) -> None:
+    """Update without explicit status must coerce out-of-enum existing values.
+
+    Closes the safe-path half of BUG-7DBAEE37: the input enum is narrower
+    than legitimate DB states (e.g. 'proposed'), so any update on a legacy
+    row would fail the same enum check. Coerce to 'active' with an auto_fix
+    note rather than raising — the caller didn't ask for the bad status.
+    """
+    existing_item_id = "roadmap_item.legacy.proposed.update_target"
+    existing_row = {
+        "roadmap_item_id": existing_item_id,
+        "roadmap_key": "roadmap.legacy.proposed.update_target",
+        "title": "Legacy proposed row",
+        "summary": "Pre-existing row with non-canonical status",
+        "item_kind": "capability",
+        "status": "proposed",
+        "lifecycle": "planned",
+        "priority": "p2",
+        "parent_roadmap_item_id": None,
+        "source_bug_id": None,
+        "source_idea_id": None,
+        "registry_paths": [],
+        "decision_ref": None,
+        "created_at": datetime(2026, 4, 3, 3, 0),
+        "acceptance_criteria": {},
+    }
+
+    async def _connect_database(_env=None):
+        return _PreviewOnlyConnection()
+
+    async def _fetch_roadmap_item(_self, _conn, *, roadmap_item_id: str):
+        return existing_row if roadmap_item_id == existing_item_id else None
+
+    async def _roadmap_item_exists(_self, _conn, *, roadmap_item_id: str):
+        return roadmap_item_id == existing_item_id
+
+    async def _bug_exists(_self, *_args, **_kwargs):
+        return True
+
+    async def _idea_exists(_self, *_args, **_kwargs):
+        return True
+
+    async def _roadmap_sibling_phase_orders(_self, *_args, **_kwargs):
+        return ()
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=_connect_database,
+    )
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_fetch_roadmap_item", _fetch_roadmap_item)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_roadmap_item_exists", _roadmap_item_exists)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_bug_exists", _bug_exists)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_idea_exists", _idea_exists)
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_roadmap_sibling_phase_orders",
+        _roadmap_sibling_phase_orders,
+    )
+
+    preview = asyncio.run(
+        frontdoor.roadmap_write_async(
+            action="preview",
+            roadmap_item_id=existing_item_id,
+            title="Legacy proposed row (touched up)",
+            intent_brief="Tweak metadata without specifying status",
+        )
+    )
+
+    assert preview["committed"] is False
+    assert preview["blocking_errors"] == []
+    assert preview["normalized_payload"]["status"] == "active"
+    assert any(
+        "not in canonical set" in fix and "coerced to 'active'" in fix
+        for fix in preview["auto_fixes"]
+    ), preview["auto_fixes"]
 
 
 def test_normalize_roadmap_priority_accepts_p0_through_p3() -> None:
