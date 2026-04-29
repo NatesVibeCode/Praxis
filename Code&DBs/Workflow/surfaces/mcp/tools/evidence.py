@@ -131,11 +131,33 @@ def tool_praxis_constraints(params: dict) -> dict:
 
 
 def tool_praxis_friction(params: dict) -> dict:
-    """Friction ledger: guardrail bounces, warnings, hard failures."""
+    """Friction ledger: record events; inspect stats, lists, patterns."""
     action = params.get("action", "stats")
 
+    if action == "record":
+        # Writes go through the catalog gateway so each event leaves an
+        # authority_operation_receipts row + an authority_events row
+        # (event_type='friction.recorded', linked by receipt_id). Per
+        # architecture-policy::agent-behavior::cqrs-wizard-before-cqrs-edits
+        # this is a thin delegation, not a hidden write behind the read tool.
+        from runtime.operation_catalog_gateway import (
+            execute_operation_from_subsystems,
+        )
+
+        payload = {
+            key: value
+            for key, value in dict(params or {}).items()
+            if key != "action" and value is not None
+        }
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="friction_record",
+            payload=payload,
+        )
+
     # Friction stats and unscoped lists expose system-wide guardrail activity.
-    # Block both inside a workflow session.
+    # Block them inside a workflow session. Recording is per-event evidence —
+    # writes are scope-safe and pass through above.
     if get_current_workflow_mcp_context() is not None:
         return {"error": "praxis_friction is not permitted inside a workflow session."}
 
@@ -287,34 +309,47 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_friction,
         {
             "description": (
-                "View the friction ledger — a record of every time a guardrail blocked or warned "
-                "about an action (scope violations, secret leaks, policy bounces).\n\n"
+                "Read or write the friction ledger — every guardrail bounce, warning, or hard "
+                "failure (scope violations, secret leaks, policy bounces, JIT trigger matches).\n\n"
                 "USE WHEN: you want to understand what's being blocked by governance, identify "
-                "recurring friction patterns, or audit guardrail activity.\n\n"
+                "recurring friction patterns, audit guardrail activity, or record a new friction "
+                "event from a per-harness PreToolUse hook.\n\n"
                 "EXAMPLES:\n"
                 "  Overview stats:     praxis_friction(action='stats')\n"
                 "  Stats by mode:      praxis_friction(action='stats', task_mode='release')\n"
                 "  Recent events:      praxis_friction(action='list', limit=10)\n"
                 "  Repeated failures:  praxis_friction(action='patterns', source='cli.workflow')\n"
-                "  From one source:    praxis_friction(action='list', source='governance')"
+                "  From one source:    praxis_friction(action='list', source='governance')\n"
+                "  Record JIT match:   praxis_friction(action='record', event_type='WARN_ONLY', source='preact_orient_hook', subject_ref='Bash', decision_keys=['architecture-policy::...'])"
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "Operation: 'stats', 'list', or 'patterns'.",
-                        "enum": ["stats", "list", "patterns"],
+                        "description": "Operation: 'stats', 'list', 'patterns', or 'record'.",
+                        "enum": ["stats", "list", "patterns", "record"],
                     },
-                    "source": {"type": "string", "description": "Filter by source (for list/patterns)."},
+                    "source": {"type": "string", "description": "Filter by source (for list/patterns); origin tag (for record)."},
                     "limit": {"type": "integer", "description": "Max events or patterns to return.", "default": 20},
                     "scan_limit": {"type": "integer", "description": "Max recent events to scan for pattern grouping.", "default": 500},
                     "since_hours": {"type": "number", "description": "Only include events from the last N hours."},
                     "promotion_threshold": {"type": "integer", "description": "Pattern count that marks promotion_candidate=true.", "default": 3},
                     "include_test": {"type": "boolean", "description": "Include test friction events (excluded by default).", "default": False},
-                    "task_mode": {"type": "string", "description": "Filter stats/list to a single task mode (chat/build/release/incident/...)."},
+                    "task_mode": {"type": "string", "description": "Filter stats/list to a single task mode, or tag the recorded event with one (chat/build/release/incident/...)."},
+                    "event_type": {"type": "string", "description": "Friction type for record: GUARDRAIL_BOUNCE, WARN_ONLY, or HARD_FAILURE.", "enum": ["GUARDRAIL_BOUNCE", "WARN_ONLY", "HARD_FAILURE"]},
+                    "subject_kind": {"type": "string", "description": "Optional kind label for the subject of the recorded event (e.g. 'agent_action')."},
+                    "subject_ref": {"type": "string", "description": "Subject identifier (typically the tool name) for the recorded event."},
+                    "job_label": {"type": "string", "description": "Override for friction_events.job_label; defaults to subject_ref."},
+                    "decision_keys": {"type": "array", "items": {"type": "string"}, "description": "Operator-decision keys this firing matched (for record)."},
+                    "metadata": {"type": "object", "description": "Free-form context (subject text, harness, matched_decisions) for record."},
+                    "message": {"type": "string", "description": "Optional explicit ledger message for record; defaults to a structured JSON envelope."},
+                    "is_test": {"type": "boolean", "description": "Mark a recorded event as synthetic (test fixture).", "default": False},
                 },
                 "required": ["action"],
+                "x-action-requirements": {
+                    "record": {"required": ["event_type", "source"]}
+                },
             },
         },
     ),

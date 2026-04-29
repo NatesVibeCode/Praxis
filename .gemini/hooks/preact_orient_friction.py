@@ -82,6 +82,14 @@ def _emit_friction_event(
     else:
         subject = tool_name
 
+    metadata: dict[str, Any] = {
+        "subject": subject,
+        "matched_decisions": list(decision_keys),
+        "harness": "gemini_cli",
+    }
+    task_mode = (os.environ.get("PRAXIS_TASK_MODE") or "").strip().lower()
+    if task_mode:
+        metadata["task_mode"] = task_mode
     payload = {
         "action": "record",
         "event_type": "WARN_ONLY",
@@ -89,11 +97,8 @@ def _emit_friction_event(
         "subject_kind": "agent_action",
         "subject_ref": tool_name,
         "decision_keys": list(decision_keys),
-        "metadata": {
-            "subject": subject,
-            "matched_decisions": list(decision_keys),
-            "harness": "gemini_cli",
-        },
+        "task_mode": task_mode or None,
+        "metadata": metadata,
     }
     try:
         result = subprocess.run(
