@@ -19,6 +19,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from runtime.repo_policy_onboarding import (
+    DEFAULT_DISCLOSURE_REPEAT_LIMIT,
+    repo_policy_probe_observed_state,
+    upsert_repo_policy_contract,
+)
+from storage.postgres import ensure_postgres_available
+
 from .graph import GateApply, GateResult, ONBOARDING_GRAPH, gate_result
 
 
@@ -343,6 +350,101 @@ _APPLY_PGVECTOR_ENABLE = GateApply(
 )
 
 
+# --- Operator: repo-policy onboarding contract -----------------------------
+
+
+def apply_repo_policy_contract_write(
+    env: Mapping[str, str],
+    repo_root: Path,
+    *,
+    repo_rules: list[str] | None = None,
+    sops: list[str] | None = None,
+    anti_patterns: list[str] | None = None,
+    forbidden_actions: list[str] | None = None,
+    sensitive_systems: list[Any] | None = None,
+    submitted_by: str | None = None,
+    change_reason: str | None = None,
+    disclosure_repeat_limit: int | None = None,
+) -> GateResult:
+    probe = ONBOARDING_GRAPH.probe("operator.repo_policy_contract")
+    database_url = (env.get("WORKFLOW_DATABASE_URL") or "").strip()
+    if not database_url:
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state=repo_policy_probe_observed_state(None),
+            remediation_hint=(
+                "Cannot write repo policy onboarding authority until WORKFLOW_DATABASE_URL is resolved."
+            ),
+        )
+    try:
+        conn = ensure_postgres_available(env={"WORKFLOW_DATABASE_URL": database_url})
+        record = upsert_repo_policy_contract(
+            conn,
+            repo_root=str(repo_root),
+            repo_rules=repo_rules,
+            sops=sops,
+            anti_patterns=anti_patterns,
+            forbidden_actions=forbidden_actions,
+            sensitive_systems=sensitive_systems,
+            submitted_by=str(submitted_by or "operator_setup_apply"),
+            change_reason=str(change_reason or "repo_policy_onboarding"),
+            disclosure_repeat_limit=(
+                int(disclosure_repeat_limit)
+                if disclosure_repeat_limit is not None
+                else DEFAULT_DISCLOSURE_REPEAT_LIMIT
+            ),
+        )
+    except ValueError as exc:
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state=repo_policy_probe_observed_state(None),
+            remediation_hint=str(exc),
+        )
+    except Exception as exc:  # noqa: BLE001 - onboarding apply should return structured state
+        return gate_result(
+            probe,
+            status="blocked",
+            observed_state={"error": str(exc), **repo_policy_probe_observed_state(None)},
+            remediation_hint=(
+                "Praxis could not persist the repo policy onboarding contract. "
+                "Check workflow database authority and migration state, then retry."
+            ),
+        )
+
+    return gate_result(
+        probe,
+        status="ok",
+        observed_state={
+            **repo_policy_probe_observed_state(record),
+            "operator_disclosure": {
+                "message": (
+                    "Praxis will now use this repo policy contract as durable setup memory and "
+                    "will explain early bug/pattern promotions for the next few interactions."
+                ),
+                "repeat_limit": record.disclosure_repeat_limit,
+            },
+        },
+    )
+
+
+_APPLY_REPO_POLICY_CONTRACT = GateApply(
+    apply_ref="apply.operator.repo_policy_contract.write",
+    gate_ref="operator.repo_policy_contract",
+    description=(
+        "Capture repo rules, SOPs, sensitive-system handling, forbidden actions, "
+        "and starter anti-patterns into durable onboarding authority."
+    ),
+    handler=apply_repo_policy_contract_write,
+    mutates=(
+        "postgres:operator_repo_policy_contracts",
+        "postgres:operator_repo_policy_contract_revisions",
+    ),
+    requires_approval=True,
+)
+
+
 # --- Providers: open the secure host capture path -------------------------
 # Provider API keys live in macOS Keychain. Apply on macOS opens a dedicated
 # hidden-input window and returns only redacted status; non-macOS stays a
@@ -444,6 +546,7 @@ def register(graph=ONBOARDING_GRAPH) -> None:
     graph.register_apply(_APPLY_ENV_FILE)
     graph.register_apply(_APPLY_WORKFLOW_DATABASE)
     graph.register_apply(_APPLY_PGVECTOR_ENABLE)
+    graph.register_apply(_APPLY_REPO_POLICY_CONTRACT)
     for provider_slug, (env_var, human_name) in _PROVIDER_APPLIES.items():
         apply_entry = GateApply(
             apply_ref=f"apply.provider.{provider_slug}.remediate",

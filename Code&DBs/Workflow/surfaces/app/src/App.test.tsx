@@ -313,7 +313,7 @@ describe('AppShell', () => {
     clickCommandMenuNewWorkflow();
 
     await screen.findByText('Builder Surface');
-    expect(screen.getByText('App builder')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /build new workflow/i })).toHaveAttribute('aria-selected', 'true');
   });
 
   test('opens spend detail from overview without promoting it to a primary tab', async () => {
@@ -324,7 +324,6 @@ describe('AppShell', () => {
     fireEvent.click(screen.getByRole('button', { name: /open spend detail/i }));
 
     await screen.findByText('Costs Surface');
-    expect(screen.getByText('Control plane')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /overview/i })).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -352,7 +351,7 @@ describe('AppShell', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
 
     expect(screen.getByText('Builder Surface')).toBeInTheDocument();
-    expect(screen.getByText('App builder')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /build new workflow/i })).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('.app-shell__chrome--collapsed')).toBeInTheDocument();
   });
 

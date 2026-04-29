@@ -87,6 +87,51 @@ class _FakeConn:
                 {
                     "runtime_profile_ref": "nate-private",
                     "job_type": "build",
+                    "transport_type": "CLI",
+                    "adapter_type": "cli_llm",
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-sonnet-4-6",
+                    "model_version": "claude-sonnet-4-6",
+                    "cost_structure": "subscription_included",
+                    "cost_metadata": {"billing_mode": "subscription_included"},
+                    "control_enabled": True,
+                    "control_state": "on",
+                    "control_scope": "transport_default_allow",
+                    "control_is_explicit": False,
+                    "control_reason_code": "control_panel.transport_default_allowed",
+                    "control_decision_ref": "decision.model_access_control.default_transport_policy",
+                    "control_operator_message": "this Model Access method is currently enabled by the control panel.",
+                    "credential_availability_state": "available",
+                    "credential_sources": ["ambient_cli_session"],
+                    "credential_observations": [],
+                    "capability_state": "removed",
+                    "is_runnable": False,
+                    "breaker_state": "CLOSED",
+                    "manual_override_state": None,
+                    "primary_removal_reason_code": "runtime_profile_route.not_admitted",
+                    "removal_reasons": [
+                        {
+                            "reason_code": "runtime_profile_route.not_admitted",
+                            "source_ref": "projection.private_provider_job_catalog",
+                            "details": {
+                                "availability_state": "disabled",
+                                "transport_type": "CLI",
+                                "adapter_type": "cli_llm",
+                            },
+                        }
+                    ],
+                    "candidate_ref": "candidate.anthropic.cli.claude-sonnet-4-6",
+                    "provider_ref": "provider.anthropic",
+                    "source_refs": [
+                        "table.runtime_profile_admitted_routes",
+                        "table.private_provider_transport_control_policy",
+                    ],
+                    "projected_at": "2026-04-26T00:00:00Z",
+                    "projection_ref": "projection.private_provider_control_plane_snapshot",
+                },
+                {
+                    "runtime_profile_ref": "nate-private",
+                    "job_type": "build",
                     "transport_type": "API",
                     "adapter_type": "llm_task",
                     "provider_slug": "openai",
@@ -251,6 +296,18 @@ def test_provider_control_plane_surfaces_structured_removal_reasons() -> None:
         "control_panel.transport_turned_off",
         "provider_transport.policy_denied",
         "circuit_breaker.open",
+    ]
+
+    disabled_candidate_row = [
+        row
+        for row in payload["rows"]
+        if row["model_slug"] == "claude-sonnet-4-6"
+    ][0]
+    assert disabled_candidate_row["primary_removal_reason_code"] == (
+        "provider_job_catalog.availability_disabled"
+    )
+    assert [reason["reason_code"] for reason in disabled_candidate_row["removal_reasons"]] == [
+        "provider_job_catalog.availability_disabled",
     ]
 
 

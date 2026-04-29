@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
@@ -55,6 +55,10 @@ from .routing_scorer import (
     positive_candidate_labels as _positive_candidate_labels,
     profile_task_rank_score as _profile_task_rank_score,
     rerank_rows as _rerank_rows,
+)
+from .reasoning_effort_routing import (
+    ReasoningEffortRoutingError,
+    resolve_reasoning_effort_route,
 )
 from storage.postgres.task_type_routing_repository import PostgresTaskTypeRoutingRepository
 
@@ -361,6 +365,8 @@ class TaskRouteDecision:
     # budget_authority_unreachable, reason code
     # lane.rejected.budget_window_data_quality_error.
     budget_window_data_quality_error: bool = False
+    reasoning_effort_slug: str = ""
+    reasoning_provider_payload: dict[str, Any] = field(default_factory=dict)
 
 
 def _resolve_default_adapter_for_router(router: Any, provider_slug: str) -> str:
@@ -478,9 +484,58 @@ class TaskTypeRouter:
         self._task_profiles = authority.task_profiles
         self._benchmark_metrics = authority.benchmark_metrics
         self._runtime_profile_candidate_cache: dict[str, tuple[dict[str, Any], ...]] = {}
+        self._reasoning_effort_authority_available: bool | None = None
 
     def _default_adapter_for_provider(self, provider_slug: str) -> str:
         return resolve_default_adapter_type(provider_slug)
+
+    def _has_reasoning_effort_authority(self) -> bool:
+        if self._reasoning_effort_authority_available is not None:
+            return self._reasoning_effort_authority_available
+        try:
+            rows = self._conn.execute(
+                """
+                SELECT to_regclass('public.provider_reasoning_effort_matrix') IS NOT NULL AS matrix_ready,
+                       to_regclass('public.task_type_effort_policy') IS NOT NULL AS policy_ready
+                """
+            )
+        except Exception:
+            self._reasoning_effort_authority_available = False
+            return False
+        row = rows[0] if rows else {}
+        self._reasoning_effort_authority_available = bool(
+            row.get("matrix_ready") and row.get("policy_ready")
+        )
+        return self._reasoning_effort_authority_available
+
+    def _reasoning_effort_fields(
+        self,
+        *,
+        task_type: str,
+        provider_slug: str,
+        model_slug: str,
+        adapter_type: str,
+    ) -> dict[str, Any]:
+        if not self._has_reasoning_effort_authority():
+            return {}
+        try:
+            effort_route = resolve_reasoning_effort_route(
+                self._conn,
+                task_type=task_type,
+                provider_slug=provider_slug,
+                model_slug=model_slug,
+                transport_type=adapter_type,
+            )
+        except ReasoningEffortRoutingError as exc:
+            raise TaskRouteAuthorityError(
+                f"reasoning effort authority rejected {provider_slug}/{model_slug}: {exc}",
+                reason_code=f"provider_authority.{exc.reason_code}",
+                details=exc.details,
+            ) from exc
+        return {
+            "reasoning_effort_slug": effort_route.effort_slug,
+            "reasoning_provider_payload": dict(effort_route.provider_payload),
+        }
 
     @property
     def route_policy(self) -> TaskRoutePolicy:
@@ -721,6 +776,12 @@ class TaskTypeRouter:
         resolved_adapter_type = str(
             economics.get("adapter_type") or self._default_adapter_for_provider(provider)
         )
+        reasoning_effort = self._reasoning_effort_fields(
+            task_type=task_type or "build",
+            provider_slug=provider,
+            model_slug=model,
+            adapter_type=resolved_adapter_type,
+        )
         return TaskRouteDecision(
             task_type=task_type or "build",
             model_slug=model,
@@ -741,6 +802,10 @@ class TaskTypeRouter:
             allow_payg_fallback=bool(economics.get("allow_payg_fallback", False)),
             budget_authority_unreachable=bool(
                 economics.get("budget_authority_unreachable", False)
+            ),
+            reasoning_effort_slug=str(reasoning_effort.get("reasoning_effort_slug") or ""),
+            reasoning_provider_payload=dict(
+                reasoning_effort.get("reasoning_provider_payload") or {}
             ),
         )
 
@@ -1320,6 +1385,19 @@ class TaskTypeRouter:
 
     def _decision_chain(self, task_type: str, rows: list[dict[str, Any]]) -> list[TaskRouteDecision]:
         rows = self._apply_lane_policy(task_type, rows)
+        for row in rows:
+            adapter_type = str(
+                row.get("adapter_type")
+                or self._default_adapter_for_provider(str(row.get("provider_slug") or ""))
+            )
+            row.update(
+                self._reasoning_effort_fields(
+                    task_type=task_type,
+                    provider_slug=str(row.get("provider_slug") or ""),
+                    model_slug=str(row.get("model_slug") or ""),
+                    adapter_type=adapter_type,
+                )
+            )
         chain = [
             TaskRouteDecision(
                 task_type=task_type,
@@ -1351,6 +1429,10 @@ class TaskTypeRouter:
                 ),
                 budget_window_data_quality_error=bool(
                     row.get("budget_window_data_quality_error", False)
+                ),
+                reasoning_effort_slug=str(row.get("reasoning_effort_slug") or ""),
+                reasoning_provider_payload=dict(
+                    row.get("reasoning_provider_payload") or {}
                 ),
             )
             for row in rows

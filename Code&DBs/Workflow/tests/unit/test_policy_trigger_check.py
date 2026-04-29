@@ -181,6 +181,50 @@ def test_codex_apply_patch_extracts_file_paths_for_edit_triggers(
     assert matches[0].decision_key == "test::cqrs-wizard"
 
 
+def test_repo_policy_contract_rules_materialize_into_existing_hook_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = _write_registry(tmp_path, [])
+    monkeypatch.setenv("PRAXIS_TRIGGER_REGISTRY", str(registry_path))
+    monkeypatch.setattr(
+        trigger_check,
+        "_load_repo_policy_contract_payload",
+        lambda: {
+            "repo_policy_contract_id": "repo_policy_contract.test",
+            "repo_policy_sections": {
+                "forbidden_action_rules": [
+                    {
+                        "rule_id": "forbidden_action_rule.test",
+                        "raw_text": "delete migrations/*",
+                        "action": "delete",
+                        "path_glob": "migrations/*",
+                        "path_substring": None,
+                        "enforcement_level": "hard",
+                        "machine_enforceable": True,
+                    }
+                ]
+            },
+        },
+    )
+
+    patch = """*** Begin Patch
+*** Delete File: migrations/001_old.sql
+*** End Patch
+"""
+
+    matches = trigger_check.check("apply_patch", {"patch": patch})
+
+    assert len(matches) == 1
+    assert matches[0].decision_key == (
+        "repo-policy::repo_policy_contract.test::forbidden_action_rule.test"
+    )
+    assert matches[0].advisory_only is False
+    assert matches[0].condition["matched_operation"] == {
+        "action": "delete",
+        "path": "migrations/001_old.sql",
+    }
+
+
 def test_codex_apply_patch_string_match_sees_patch_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

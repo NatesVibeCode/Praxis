@@ -694,6 +694,13 @@ class SyncPostgresConnection:
             ) from exc
 
     def execute(self, query: str, *args) -> list:
+        """Legacy row-returning execution helper.
+
+        This wrapper intentionally routes through ``fetch`` because a large
+        portion of the repo uses ``execute`` for ``SELECT`` statements and
+        ``WITH ... RETURNING`` projections. Prefer ``fetch`` for reads and
+        ``execute_status`` for write-status semantics in new code.
+        """
         _reject_invalid_memory_metadata_for_test(self._database_url, query, args)
         _enforce_authority_table_write_guard(query)
 
@@ -702,6 +709,19 @@ class SyncPostgresConnection:
                 "execute",
                 lambda conn: conn.fetch(query, *args),
             )
+        return _run_sync(_do())
+
+    def execute_status(self, query: str, *args) -> str:
+        """Return asyncpg's command-status string for write semantics."""
+        _reject_invalid_memory_metadata_for_test(self._database_url, query, args)
+        _enforce_authority_table_write_guard(query)
+
+        async def _do():
+            return await self._with_connection(
+                "execute_status",
+                lambda conn: conn.execute(query, *args),
+            )
+
         return _run_sync(_do())
 
     def fetch(self, query: str, *args) -> list:
@@ -816,6 +836,16 @@ class _PinnedSyncPostgresConnection:
 
         async def _do():
             return await self._conn.fetch(query, *args)
+
+        return _run_sync(_do())
+
+    def execute_status(self, query: str, *args) -> str:
+        self._ensure_open()
+        _reject_invalid_memory_metadata_for_test("", query, args)
+        _enforce_authority_table_write_guard(query)
+
+        async def _do():
+            return await self._conn.execute(query, *args)
 
         return _run_sync(_do())
 

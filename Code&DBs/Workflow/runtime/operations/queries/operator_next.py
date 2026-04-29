@@ -470,6 +470,7 @@ def _launch_gate(
 
     provider_blocked = [
         row for row in context.get("provider_slots", [])
+        if not bool(row.get("provider_disabled"))
         if float(row.get("active_slots") or 0.0) >= float(row.get("max_concurrent") or 0.0)
         and float(row.get("max_concurrent") or 0.0) > 0
     ]
@@ -555,7 +556,7 @@ def _manifest_audit(
         findings.append(
             _finding(
                 "manifest.unknown_verifiers",
-                "Manifest references verifier refs not present in verifier authority.",
+                "Manifest references verify refs not present in verification authority.",
                 severity="P1",
                 evidence={"missing": missing_verifiers},
             )
@@ -876,7 +877,10 @@ def _queue_snapshot(conn: Any) -> dict[str, Any]:
 
 
 def _provider_slots(conn: Any) -> list[dict[str, Any]]:
-    return _safe_execute(
+    from runtime.native_authority import default_native_runtime_profile_ref_required
+
+    runtime_profile_ref = default_native_runtime_profile_ref_required(conn)
+    provider_rows = _safe_execute(
         conn,
         """
         SELECT provider_slug, max_concurrent, active_slots, cost_weight_default, updated_at
@@ -884,6 +888,39 @@ def _provider_slots(conn: Any) -> list[dict[str, Any]]:
         ORDER BY provider_slug
         """,
     )
+    control_rows = _safe_execute(
+        conn,
+        """
+        SELECT
+            provider_slug,
+            BOOL_OR(COALESCE(control_state = 'on', FALSE)) AS any_control_on,
+            BOOL_OR(COALESCE(control_state = 'off', FALSE)) AS any_control_off
+        FROM private_model_access_control_matrix
+        WHERE runtime_profile_ref = $1
+        GROUP BY provider_slug
+        """,
+        runtime_profile_ref,
+    )
+    control_by_provider: dict[str, dict[str, Any]] = {}
+    for row in control_rows:
+        provider_slug = str(row.get("provider_slug") or "").strip()
+        if not provider_slug:
+            continue
+        control_by_provider[provider_slug] = {
+            "any_control_on": bool(row.get("any_control_on")),
+            "any_control_off": bool(row.get("any_control_off")),
+        }
+    enriched: list[dict[str, Any]] = []
+    for row in provider_rows:
+        provider = dict(row)
+        provider_slug = str(provider.get("provider_slug") or "").strip()
+        control = control_by_provider.get(provider_slug, {})
+        provider_runnable = control.get("any_control_on")
+        provider_disabled = bool(control.get("any_control_off")) and not bool(provider_runnable)
+        provider["provider_runnable"] = provider_runnable
+        provider["provider_disabled"] = provider_disabled
+        enriched.append(provider)
+    return enriched
 
 
 def _host_resource_leases(conn: Any) -> list[dict[str, Any]]:
@@ -1090,6 +1127,7 @@ def _runtime_work_observed(run: Mapping[str, Any], context: Mapping[str, Any]) -
                 fresh_heartbeats += 1
     active_provider_slots = sum(
         1 for row in context.get("provider_slots", [])
+        if not bool(row.get("provider_disabled"))
         if float(row.get("active_slots") or 0.0) > 0.0
     )
     return {
@@ -1222,17 +1260,19 @@ def _execution_manifest_tools(execution_manifest: Mapping[str, Any]) -> list[str
 def _known_verifiers(conn: Any, refs: Sequence[str]) -> dict[str, Any]:
     if not refs:
         return {"known": []}
+    requested = list(refs)
     rows = _safe_execute(
         conn,
         """
-        SELECT verifier_ref
-        FROM verifier_registry
-        WHERE verifier_ref = ANY($1)
+        SELECT verify_ref
+        FROM verify_refs
+        WHERE verify_ref = ANY($1)
           AND COALESCE(enabled, TRUE) IS TRUE
         """,
-        list(refs),
+        requested,
     )
-    return {"known": [str(row.get("verifier_ref")) for row in rows if row.get("verifier_ref")]}
+    known = {str(row.get("verify_ref")) for row in rows if row.get("verify_ref")}
+    return {"known": sorted(known)}
 
 
 def _job_requires_submission(job: Mapping[str, Any]) -> bool:

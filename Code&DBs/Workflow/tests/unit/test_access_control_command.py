@@ -30,7 +30,7 @@ class _FakeConn:
         self,
         fetchrow_response: dict | None = None,
         fetch_response: list[dict] | None = None,
-        execute_response: str = "DELETE 0",
+        execute_response: Any = "DELETE 0",
     ) -> None:
         self.calls: list[tuple[str, str, tuple]] = []
         self._fetchrow_response = fetchrow_response
@@ -45,7 +45,7 @@ class _FakeConn:
         self.calls.append(("fetchrow", sql, args))
         return self._fetchrow_response
 
-    def execute(self, sql: str, *args: Any) -> str:
+    def execute(self, sql: str, *args: Any) -> Any:
         self.calls.append(("execute", sql, args))
         return self._execute_response
 
@@ -97,7 +97,7 @@ def test_disable_emits_event_payload_and_refreshes_projection() -> None:
 
 
 def test_enable_deletes_row_and_refreshes_projection() -> None:
-    conn = _FakeConn(execute_response="DELETE 1")
+    conn = _FakeConn(execute_response=[{"deleted_count": 1}])
     command = AccessControlCommand(
         action="enable",
         provider_slug="openai",
@@ -113,10 +113,82 @@ def test_enable_deletes_row_and_refreshes_projection() -> None:
     delete_call = conn.calls[0]
     assert delete_call[0] == "execute"
     assert "DELETE FROM private_provider_model_access_denials" in delete_call[1]
+    assert "SELECT count(*) AS deleted_count FROM deleted" in delete_call[1]
 
     refresh_call = conn.calls[1]
     assert refresh_call[0] == "execute"
     assert "refresh_private_provider_job_catalog" in refresh_call[1]
+
+
+def test_enable_cli_rewrites_transport_wildcard_denial_to_api_residual() -> None:
+    wildcard_row = {
+        "runtime_profile_ref": "praxis",
+        "job_type": "*",
+        "transport_type": "*",
+        "adapter_type": "*",
+        "provider_slug": "anthropic",
+        "model_slug": "*",
+        "denied": True,
+        "reason_code": "control_panel.model_access_method_turned_off",
+        "operator_message": "Anthropic disabled by operator.",
+        "decision_ref": "decision.anthropic.off",
+        "created_at": None,
+        "updated_at": None,
+    }
+    replacement_row = {
+        **wildcard_row,
+        "transport_type": "API",
+    }
+    conn = _FakeConn(fetchrow_response=wildcard_row)
+
+    original_fetchrow = conn.fetchrow
+    original_execute = conn.execute
+
+    def _fetchrow(sql: str, *args: Any) -> dict | None:
+        if "transport_type = '*'" in sql:
+            conn.calls.append(("fetchrow", sql, args))
+            return wildcard_row
+        if "INSERT INTO private_provider_model_access_denials" in sql:
+            conn.calls.append(("fetchrow", sql, args))
+            return replacement_row
+        return original_fetchrow(sql, *args)
+
+    def _execute(sql: str, *args: Any) -> Any:
+        if "SELECT count(*) AS deleted_count FROM deleted" in sql and args[2] == "CLI":
+            conn.calls.append(("execute", sql, args))
+            return [{"deleted_count": 0}]
+        if "SELECT count(*) AS deleted_count FROM deleted" in sql and args[2] == "*":
+            conn.calls.append(("execute", sql, args))
+            return [{"deleted_count": 1}]
+        return original_execute(sql, *args)
+
+    conn.fetchrow = _fetchrow  # type: ignore[method-assign]
+    conn.execute = _execute  # type: ignore[method-assign]
+
+    command = AccessControlCommand(
+        action="enable",
+        provider_slug="anthropic",
+        transport_type="CLI",
+    )
+
+    result = handle_access_control(command, _FakeSubsystems(conn))
+
+    assert result["ok"] is True
+    assert result["deleted_count"] == 1
+    assert result["rewrite"]["enabled_transport"] == "CLI"
+    assert result["rewrite"]["replacement_row"]["transport_type"] == "API"
+
+    delete_call = conn.calls[0]
+    assert "SELECT count(*) AS deleted_count FROM deleted" in delete_call[1]
+
+    assert any(
+        call[0] == "fetchrow" and "transport_type = '*'" in call[1]
+        for call in conn.calls
+    )
+    assert any(
+        call[0] == "fetchrow" and "INSERT INTO private_provider_model_access_denials" in call[1]
+        for call in conn.calls
+    )
 
 
 def test_list_filters_by_selector() -> None:

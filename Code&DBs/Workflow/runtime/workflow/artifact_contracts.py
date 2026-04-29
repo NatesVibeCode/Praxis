@@ -8,9 +8,12 @@ These contracts separate:
 from __future__ import annotations
 
 import json
+import fnmatch
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
+
+from runtime.repo_policy_onboarding import normalize_forbidden_action_rules
 
 _VALID_REVIEW_DECISIONS = frozenset({"approve", "request_changes", "reject"})
 _MISSING = object()
@@ -115,6 +118,137 @@ def _normalize_assertion(value: object) -> dict[str, Any] | None:
     if "severity" in assertion:
         assertion["severity"] = str(assertion.get("severity") or "").strip().lower() or "hard"
     return assertion
+
+
+def _repo_policy_sections(repo_policy_contract: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(repo_policy_contract, Mapping):
+        return {}
+    sections = repo_policy_contract.get("repo_policy_sections")
+    return dict(sections) if isinstance(sections, Mapping) else {}
+
+
+def _operation_candidates(operation: Mapping[str, Any]) -> list[str]:
+    action = str(operation.get("action") or "").strip().lower()
+    path = str(operation.get("path") or "").strip().lower()
+    from_path = str(operation.get("from_path") or "").strip().lower()
+    candidates = [action, path, from_path]
+    if action and path:
+        candidates.append(f"{action} {path}")
+    if action and from_path and path:
+        candidates.append(f"{action} {from_path} {path}")
+    return [candidate for candidate in candidates if candidate]
+
+
+def _forbidden_action_match(
+    rule: Mapping[str, Any],
+    *,
+    operation: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(rule, Mapping):
+        return None
+    enforcement_level = str(rule.get("enforcement_level") or "").strip().lower()
+    if enforcement_level not in {"", "hard"}:
+        return None
+    if rule.get("machine_enforceable") is False:
+        return None
+    rule_action = str(rule.get("action") or "").strip().lower()
+    path_glob = str(rule.get("path_glob") or "").strip().lower()
+    path_substring = str(rule.get("path_substring") or "").strip().lower()
+    action = str(operation.get("action") or "").strip().lower()
+    path = str(operation.get("path") or "").strip().lower()
+    from_path = str(operation.get("from_path") or "").strip().lower()
+    candidates = _operation_candidates(operation)
+
+    if rule_action and action != rule_action:
+        return None
+
+    if path_glob:
+        if any(fnmatch.fnmatch(candidate, path_glob) for candidate in candidates):
+            return {"match_kind": "glob", "operation": dict(operation)}
+        return None
+
+    if path_substring:
+        if path_substring in path or path_substring in from_path:
+            return {"match_kind": "action_path_substring", "operation": dict(operation)}
+        return None
+
+    if rule_action and action == rule_action:
+        return {"match_kind": "action_exact", "operation": dict(operation)}
+    return None
+
+
+def _repo_policy_report(
+    submission: Mapping[str, Any],
+    *,
+    repo_policy_contract: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(repo_policy_contract, Mapping) or not repo_policy_contract:
+        return {
+            "contract_present": False,
+            "enforced": False,
+            "forbidden_actions": [],
+            "forbidden_action_rules": [],
+            "violations": [],
+        }
+    sections = _repo_policy_sections(repo_policy_contract)
+    raw_rules = sections.get("forbidden_action_rules")
+    forbidden_action_rules = normalize_forbidden_action_rules(
+        raw_rules
+        if isinstance(raw_rules, Sequence)
+        and not isinstance(raw_rules, (str, bytes, bytearray))
+        else sections.get("forbidden_actions")
+    )
+    forbidden_actions = _dedupe_strings(
+        [
+            str(rule.get("raw_text") or "").strip()
+            for rule in forbidden_action_rules
+            if str(rule.get("raw_text") or "").strip()
+        ]
+    )
+    raw_declared_operations = submission.get("declared_operations")
+    raw_operation_set = submission.get("operation_set")
+    operations = [
+        dict(item)
+        for item in [
+            *(list(raw_declared_operations) if isinstance(raw_declared_operations, Sequence) and not isinstance(raw_declared_operations, (str, bytes, bytearray)) else []),
+            *(list(raw_operation_set) if isinstance(raw_operation_set, Sequence) and not isinstance(raw_operation_set, (str, bytes, bytearray)) else []),
+        ]
+        if isinstance(item, Mapping)
+    ]
+    violations: list[dict[str, Any]] = []
+    seen_violations: set[str] = set()
+    for rule in forbidden_action_rules:
+        for operation in operations:
+            matched = _forbidden_action_match(rule, operation=operation)
+            if matched is None:
+                continue
+            violation = {
+                "rule_id": rule.get("rule_id"),
+                "rule": rule.get("raw_text"),
+                "enforcement_level": rule.get("enforcement_level"),
+                "match_kind": matched["match_kind"],
+                "operation": matched["operation"],
+            }
+            signature = json.dumps(violation, sort_keys=True, default=str)
+            if signature in seen_violations:
+                continue
+            seen_violations.add(signature)
+            violations.append(violation)
+    return {
+        "contract_present": True,
+        "enforced": bool(forbidden_actions),
+        "repo_policy_contract_id": str(repo_policy_contract.get("repo_policy_contract_id") or "").strip() or None,
+        "current_contract_hash": str(repo_policy_contract.get("current_contract_hash") or "").strip() or None,
+        "forbidden_actions": forbidden_actions,
+        "forbidden_action_rules": forbidden_action_rules,
+        "sensitive_systems": [
+            str(item.get("label") or item.get("system_ref") or "").strip()
+            for item in list(sections.get("sensitive_systems") or [])
+            if isinstance(item, Mapping)
+            and str(item.get("label") or item.get("system_ref") or "").strip()
+        ],
+        "violations": violations,
+    }
 
 
 def normalize_authoring_contract(
@@ -582,6 +716,7 @@ def evaluate_submission_acceptance(
     *,
     submission: Mapping[str, Any],
     acceptance_contract: Mapping[str, Any] | None,
+    repo_policy_contract: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     contract = dict(acceptance_contract) if isinstance(acceptance_contract, Mapping) else {}
     structural = _dict_value(contract.get("structural"))
@@ -593,8 +728,12 @@ def evaluate_submission_acceptance(
     summary = str(submission.get("summary") or "")
     latest_review = _dict_value(submission.get("latest_review"))
     verification_artifact_refs = _string_list(submission.get("verification_artifact_refs"))
+    repo_policy = _repo_policy_report(
+        submission,
+        repo_policy_contract=repo_policy_contract,
+    )
 
-    contract_requested = bool(structural or assertions or verify_refs or review)
+    contract_requested = bool(structural or assertions or verify_refs or review or repo_policy.get("enforced"))
     payload, payload_error = _extract_json_payload(summary)
 
     structural_report: dict[str, Any] = {
@@ -638,6 +777,13 @@ def evaluate_submission_acceptance(
     for result in assertion_results:
         if not result["passed"] and str(result.get("severity") or "hard").strip().lower() != "soft":
             hard_failures.append(f"assertion failed: {result['kind']}")
+    seen_policy_failures: set[str] = set()
+    for violation in repo_policy.get("violations") or []:
+        if isinstance(violation, Mapping):
+            failure = f"repo policy forbids: {violation.get('rule')}"
+            if failure not in seen_policy_failures:
+                seen_policy_failures.add(failure)
+                hard_failures.append(failure)
 
     review_criteria = _string_list(review.get("criteria"))
     required_decision = str(review.get("required_decision") or "").strip().lower()
@@ -681,6 +827,7 @@ def evaluate_submission_acceptance(
         "assertions": assertion_results,
         "verification": verification_report,
         "review": review_report,
+        "repo_policy": repo_policy,
         "payload_present": payload is not None,
         "payload_error": payload_error,
         "hard_failures": hard_failures,

@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import re
+import shlex
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Iterable
@@ -294,6 +295,226 @@ def _match_glob(pattern: str, file_path: str) -> bool:
     return False
 
 
+def _repo_policy_repo_root() -> str:
+    return os.path.normpath(
+        os.environ.get("PRAXIS_HOST_WORKSPACE_ROOT")
+        or os.environ.get("CLAUDE_PROJECT_DIR")
+        or _resolve_repo_root_from_module_path()
+    )
+
+
+def _load_repo_policy_contract_payload() -> dict[str, Any] | None:
+    """Best-effort dynamic projection for operator repo-policy hook rules.
+
+    The hook surface is advisory, so this must fail open. The durable authority
+    remains the repo-policy contract; this function only materializes it into
+    the existing trigger checker at action time.
+    """
+    inline_payload = os.environ.get("PRAXIS_REPO_POLICY_TRIGGER_PAYLOAD")
+    if inline_payload:
+        try:
+            parsed = json.loads(inline_payload)
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            logger.warning("trigger_check: PRAXIS_REPO_POLICY_TRIGGER_PAYLOAD is not valid JSON")
+            return None
+
+    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "").strip()
+    if not database_url:
+        return None
+    try:
+        from runtime.repo_policy_onboarding import (  # noqa: PLC0415 - avoid hook import cost
+            get_repo_policy_contract,
+            repo_policy_runtime_payload,
+        )
+        from storage.postgres import ensure_postgres_available  # noqa: PLC0415
+
+        conn = ensure_postgres_available(env={"WORKFLOW_DATABASE_URL": database_url})
+        record = get_repo_policy_contract(conn, repo_root=_repo_policy_repo_root())
+        payload = repo_policy_runtime_payload(record)
+        return dict(payload) if isinstance(payload, dict) else None
+    except Exception as exc:  # noqa: BLE001 - hooks should warn when available, never block
+        logger.debug("trigger_check: repo-policy hook projection unavailable: %s", exc)
+        return None
+
+
+def _repo_policy_rules(payload: dict[str, Any] | None) -> tuple[dict[str, Any], ...]:
+    if not isinstance(payload, dict):
+        return ()
+    sections = payload.get("repo_policy_sections")
+    if not isinstance(sections, dict):
+        return ()
+    rules = sections.get("forbidden_action_rules")
+    if not isinstance(rules, list):
+        return ()
+    return tuple(rule for rule in rules if isinstance(rule, dict))
+
+
+def _shell_words(value: str | None) -> list[str]:
+    text = str(value or "")
+    if not text:
+        return []
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
+def _patch_operations(patch_text: str) -> list[dict[str, str]]:
+    operations: list[dict[str, str]] = []
+    current_update_path = ""
+    for line in patch_text.splitlines():
+        match = re.match(r"^\*\*\* (Add|Update|Delete) File: (.+)$", line)
+        if match:
+            verb = match.group(1)
+            path = match.group(2).strip()
+            current_update_path = path if verb == "Update" else ""
+            action = {"Add": "create", "Update": "update", "Delete": "delete"}[verb]
+            operations.append({"action": action, "path": path})
+            continue
+        move_match = re.match(r"^\*\*\* Move to: (.+)$", line)
+        if move_match and current_update_path:
+            operations.append(
+                {
+                    "action": "rename",
+                    "from_path": current_update_path,
+                    "path": move_match.group(1).strip(),
+                }
+            )
+    return operations
+
+
+def _repo_policy_candidate_operations(
+    raw_tool_name: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+    *,
+    regex_target: str | None,
+    file_path: str | None,
+    content_target: str,
+) -> list[dict[str, str]]:
+    if raw_tool_name == "apply_patch":
+        return _patch_operations(content_target)
+    if tool_name in {"Edit", "MultiEdit"} and file_path:
+        return [{"action": "update", "path": file_path}]
+    if tool_name == "Write" and file_path:
+        return [{"action": "create", "path": file_path}, {"action": "update", "path": file_path}]
+    if tool_name != "Bash":
+        return []
+
+    command = regex_target or content_target
+    lowered = command.lower()
+    if re.search(r"\b(?:git\s+rm|rm|unlink)\b", lowered):
+        return [{"action": "delete", "path": word} for word in _shell_words(command)] or [
+            {"action": "delete", "path": command}
+        ]
+    if re.search(r"\b(?:git\s+mv|mv)\b", lowered):
+        words = _shell_words(command)
+        if len(words) >= 3:
+            return [{"action": "rename", "from_path": words[-2], "path": words[-1]}]
+        return [{"action": "rename", "path": command}]
+    return []
+
+
+def _repo_policy_rule_matches_operation(
+    rule: dict[str, Any],
+    operation: dict[str, str],
+    *,
+    regex_target: str | None,
+    content_target: str,
+) -> str | None:
+    if rule.get("machine_enforceable") is False:
+        return None
+    if str(rule.get("enforcement_level") or "hard").strip().lower() != "hard":
+        return None
+    rule_action = str(rule.get("action") or "").strip().lower()
+    operation_action = str(operation.get("action") or "").strip().lower()
+    if rule_action and rule_action != operation_action:
+        return None
+    path_glob = str(rule.get("path_glob") or "").strip().lower()
+    path_substring = str(rule.get("path_substring") or "").strip().lower()
+    candidate_values = [
+        str(operation.get("path") or "").strip().lower(),
+        str(operation.get("from_path") or "").strip().lower(),
+        str(regex_target or "").strip().lower(),
+        str(content_target or "").strip().lower(),
+    ]
+    candidate_values.extend(word.lower() for word in _shell_words(regex_target or content_target))
+    candidate_values = [value for value in candidate_values if value]
+    if path_glob:
+        return "glob" if any(_match_glob(path_glob, value) for value in candidate_values) else None
+    if path_substring:
+        return "path_substring" if any(path_substring in value for value in candidate_values) else None
+    if rule_action and operation_action == rule_action:
+        return "action_exact"
+    return None
+
+
+def _dynamic_repo_policy_matches(
+    raw_tool_name: str,
+    tool_name: str,
+    regex_target: str | None,
+    file_path: str | None,
+    content_target: str,
+    tool_input: dict[str, Any],
+) -> list[TriggerMatch]:
+    payload = _load_repo_policy_contract_payload()
+    rules = _repo_policy_rules(payload)
+    if not rules:
+        return []
+    operations = _repo_policy_candidate_operations(
+        raw_tool_name,
+        tool_name,
+        tool_input,
+        regex_target=regex_target,
+        file_path=file_path,
+        content_target=content_target,
+    )
+    if not operations:
+        return []
+    matches: list[TriggerMatch] = []
+    seen: set[str] = set()
+    contract_id = str((payload or {}).get("repo_policy_contract_id") or "repo_policy_contract").strip()
+    for rule in rules:
+        rule_id = str(rule.get("rule_id") or "").strip()
+        raw_text = str(rule.get("raw_text") or rule_id or "repo policy rule").strip()
+        for operation in operations:
+            match_kind = _repo_policy_rule_matches_operation(
+                rule,
+                operation,
+                regex_target=regex_target,
+                content_target=content_target,
+            )
+            if match_kind is None:
+                continue
+            signature = json.dumps({"rule_id": rule_id, "operation": operation}, sort_keys=True)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            decision = {
+                "decision_key": f"repo-policy::{contract_id}::{rule_id or raw_text}",
+                "title": f"Repo policy forbids: {raw_text}",
+                "decision_provenance": "explicit",
+                "why": (
+                    "This rule was captured through operator repo-policy onboarding and "
+                    "is materialized into the shared hook warning surface."
+                ),
+                "repo_policy_contract_id": contract_id,
+                "repo_policy_rule": rule,
+            }
+            condition = {
+                "tool": tool_name,
+                "repo_policy_rule_id": rule_id,
+                "repo_policy_match_kind": match_kind,
+                "matched_operation": operation,
+                "string_match": raw_text,
+                "advisory_only": False,
+            }
+            matches.append(TriggerMatch(decision=decision, condition=condition))
+            break
+    return matches
+
+
 def _match_one(
     condition: dict[str, Any],
     tool_name: str,
@@ -426,8 +647,6 @@ def check(
     tool_name = _normalize_tool_name(tool_name)
     harness = _infer_harness(raw_tool_name)
     decisions = registry if registry is not None else load_registry()
-    if not decisions:
-        return []
     if tool_input is None:
         tool_input = {}
     if not isinstance(tool_input, dict):
@@ -436,7 +655,7 @@ def check(
     regex_target, file_path, content_target = _extract_match_target(raw_tool_name, tool_input)
 
     matches: list[TriggerMatch] = []
-    for decision in decisions:
+    for decision in decisions or []:
         for condition in decision.get("match") or []:
             if _match_one(condition, tool_name, harness, regex_target, file_path, content_target):
                 # Cooldown: skip advisory matches we've already surfaced
@@ -454,6 +673,17 @@ def check(
                     _cooldown_record(cd_key)
                 matches.append(match)
                 break  # one match per decision is enough
+    if registry is None:
+        matches.extend(
+            _dynamic_repo_policy_matches(
+                raw_tool_name,
+                tool_name,
+                regex_target,
+                file_path,
+                content_target,
+                tool_input,
+            )
+        )
     return matches
 
 

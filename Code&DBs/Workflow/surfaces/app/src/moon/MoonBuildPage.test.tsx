@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { vi } from 'vitest';
 
@@ -221,7 +221,7 @@ describe('MoonBuildPage', () => {
     expect(screen.getByRole('button', { name: /compose workflow/i })).toBeDisabled();
   });
 
-  test('applies the yielding detail-dock class when the detail panel is opened on a populated graph', () => {
+  test('applies the yielding detail-dock class when the detail panel is opened on a populated graph', async () => {
     moonBuildPageMocks.loadCatalog.mockImplementation(() => new Promise(() => undefined));
     moonBuildPageMocks.payload = {
       definition: {},
@@ -254,9 +254,13 @@ describe('MoonBuildPage', () => {
 
     render(<MoonBuildPage workflowId="wf-123" />);
 
+    await act(async () => {});
+
     fireEvent.click(screen.getByRole('button', { name: 'Open Inspector dock' }));
 
-    expect(screen.getByTestId('moon-middle')).toHaveClass('moon-middle--context-open');
+    await waitFor(() => {
+      expect(screen.getByTestId('moon-middle')).toHaveClass('moon-middle--context-open');
+    });
   });
 
   test('uses the larger trigger picker width contract', async () => {

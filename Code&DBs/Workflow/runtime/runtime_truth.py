@@ -84,6 +84,35 @@ def _execute_rows(conn: Any, query: str, *args: Any) -> tuple[list[Any], str | N
     return list(rows or []), None
 
 
+def _provider_control_plane_by_provider(conn: Any) -> dict[str, dict[str, Any]]:
+    from runtime.native_authority import default_native_runtime_profile_ref_required
+
+    runtime_profile_ref = default_native_runtime_profile_ref_required(conn)
+    rows, _error = _execute_rows(
+        conn,
+        """
+        SELECT
+            provider_slug,
+            BOOL_OR(COALESCE(control_state = 'on', FALSE)) AS any_control_on,
+            BOOL_OR(COALESCE(control_state = 'off', FALSE)) AS any_control_off
+        FROM private_model_access_control_matrix
+        WHERE runtime_profile_ref = $1
+        GROUP BY provider_slug
+        """,
+        runtime_profile_ref,
+    )
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        provider_slug = str(_row_value(row, "provider_slug") or "").strip()
+        if not provider_slug:
+            continue
+        result[provider_slug] = {
+            "any_control_on": bool(_row_value(row, "any_control_on")),
+            "any_control_off": bool(_row_value(row, "any_control_off")),
+        }
+    return result
+
+
 def _blocker(
     code: str,
     severity: str,
@@ -211,6 +240,7 @@ def _worker_snapshot(conn: Any, *, heartbeat_fresh_seconds: int) -> dict[str, An
 
 
 def _provider_slot_snapshot(conn: Any) -> dict[str, Any]:
+    control_plane = _provider_control_plane_by_provider(conn)
     rows, error = _execute_rows(
         conn,
         """
@@ -229,12 +259,16 @@ def _provider_slot_snapshot(conn: Any) -> dict[str, Any]:
     stale: list[dict[str, Any]] = []
     saturated: list[dict[str, Any]] = []
     for row in rows:
+        provider_slug = str(_row_value(row, "provider_slug") or "")
         max_concurrent = _as_int(_row_value(row, "max_concurrent"))
         active_slots = _as_float(_row_value(row, "active_slots"))
         available = max(0.0, float(max_concurrent) - active_slots)
         age_seconds = _as_float(_row_value(row, "age_seconds"))
+        provider_control = control_plane.get(provider_slug, {})
+        provider_runnable = provider_control.get("any_control_on")
+        provider_disabled = bool(provider_control.get("any_control_off")) and not bool(provider_runnable)
         provider = {
-            "provider_slug": str(_row_value(row, "provider_slug") or ""),
+            "provider_slug": provider_slug,
             "max_concurrent": max_concurrent,
             "active_slots": active_slots,
             "available": available,
@@ -243,11 +277,13 @@ def _provider_slot_snapshot(conn: Any) -> dict[str, Any]:
             "age_seconds": round(age_seconds, 1),
             "stale": active_slots > 0 and age_seconds > _PROVIDER_SLOT_STALE_SECONDS,
             "at_capacity": max_concurrent > 0 and available <= 0,
+            "provider_runnable": provider_runnable,
+            "provider_disabled": provider_disabled,
         }
         providers.append(provider)
         if provider["stale"]:
             stale.append(provider)
-        if provider["at_capacity"]:
+        if provider["at_capacity"] and not provider_disabled:
             saturated.append(provider)
     return {
         "status": "unknown" if error else "ok",
@@ -359,20 +395,33 @@ def _manifest_audit_snapshot(
         audit = _as_mapping(_row_value(row, "workspace_manifest_audit"))
         missing = list(audit.get("missing_intended_paths") or [])
         observed = list(audit.get("observed_file_read_refs") or [])
-        total_missing += len(missing)
+        observed_mode = str(audit.get("observed_file_read_mode") or "")
+        status = str(_row_value(row, "status") or "")
+        actionable_missing = [
+            path
+            for path in missing
+            if status != "succeeded"
+            or (
+                observed_mode != "provider_output_path_mentions"
+                and observed_mode
+                and path in observed
+            )
+        ]
+        total_missing += len(actionable_missing)
         outside_observed += len(list(audit.get("observed_outside_manifest") or []))
         records.append(
             {
                 "receipt_id": str(_row_value(row, "receipt_id") or ""),
                 "run_id": str(_row_value(row, "run_id") or ""),
                 "job_label": str(_row_value(row, "node_id") or ""),
-                "status": str(_row_value(row, "status") or ""),
+                "status": status,
                 "failure_code": str(_row_value(row, "failure_code") or ""),
                 "finished_at": _iso(_row_value(row, "finished_at")),
                 "missing_intended_paths": missing,
+                "actionable_missing_intended_paths": actionable_missing,
                 "hydrated_manifest_paths": list(audit.get("hydrated_manifest_paths") or []),
                 "observed_file_read_refs": observed,
-                "observed_file_read_mode": audit.get("observed_file_read_mode"),
+                "observed_file_read_mode": observed_mode,
             }
         )
     return {

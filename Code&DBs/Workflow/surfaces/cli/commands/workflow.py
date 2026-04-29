@@ -19,7 +19,7 @@ from surfaces._workflow_database import workflow_database_authority_for_repo
 from runtime.spec_compiler import compile_prompt_launch_spec
 from runtime.workspace_paths import workflow_root
 
-_DETACHED_WAIT_ATTEMPTS = 5
+_DETACHED_WAIT_ATTEMPTS = 30
 _FOREGROUND_SUBMIT_FLAG = "--foreground-submit"
 _SCRATCH_AGENT_RUNTIME_PROFILE_REF = "scratch_agent"
 
@@ -201,6 +201,25 @@ def _forwarded_job_id(args: list[str]) -> str | None:
     return None
 
 
+def _stream_command_text(run_id: str) -> str:
+    return f"./scripts/praxis workflow stream {run_id}"
+
+
+def _emit_live_stream_block(
+    *,
+    stdout: TextIO,
+    run_id: str,
+    stream_url: object | None = None,
+    status_url: object | None = None,
+) -> None:
+    stdout.write("\nLIVE STREAM\n")
+    stdout.write(f"  {_stream_command_text(run_id)}\n")
+    if stream_url:
+        stdout.write(f"  GET {stream_url}\n")
+    if status_url:
+        stdout.write(f"  status snapshot: ./scripts/praxis workflow run-status {run_id} --summary\n")
+
+
 def _detached_launch_env(repo_root: Path) -> tuple[dict[str, str], str]:
     authority = workflow_database_authority_for_repo(repo_root, env=os.environ)
     env = dict(os.environ)
@@ -239,7 +258,12 @@ def _emit_detached_submission_status(
     stdout.write(f"Submission status: {status}\n")
     stdout.write(f"DB authority source: {authority_source}\n")
     stdout.write(f"Result file: {result_file}\n")
-    stdout.write("Use './scripts/praxis workflow active' to observe progress\n")
+    _emit_live_stream_block(
+        stdout=stdout,
+        run_id=run_id,
+        stream_url=payload.get("stream_url"),
+        status_url=payload.get("status_url"),
+    )
 
 
 def _launch_detached_frontdoor(
@@ -311,7 +335,9 @@ def _launch_detached_frontdoor(
     )
     stdout.write(f"DB authority source: {authority_source}\n")
     stdout.write(f"Result file: {result_file}\n")
-    stdout.write("Use './scripts/praxis workflow active' to check progress\n")
+    stdout.write("Durable run id is not available yet; do not guess from active runs.\n")
+    stdout.write("When the result file appears, stream the run_id it contains:\n")
+    stdout.write("  ./scripts/praxis workflow stream <run_id>\n")
     return 0
 
 
@@ -354,6 +380,9 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             "  --fresh              Force a fresh run while letting Praxis mint the run_id\n"
             "  --job-id <id>        Attach a caller-facing tracking id to the result file\n"
             "  --result-file <path> Write the queued submit payload to disk\n"
+            "\n"
+            "watch live:\n"
+            "  workflow stream <run_id>\n"
         )
         return 2
 
@@ -1026,7 +1055,7 @@ def _run_status_summary_payload(payload: dict[str, object]) -> dict[str, object]
         ]
 
     recovery = payload.get("recovery")
-    compact_recovery = _compact_status_mapping(recovery, ("mode", "reason"))
+    compact_recovery = _compact_status_mapping(recovery, ("mode", "reason", "live_stream"))
     if isinstance(recovery, dict) and isinstance(recovery.get("recommended_tool"), dict):
         compact_recovery["recommended_tool"] = _compact_status_mapping(
             recovery["recommended_tool"],

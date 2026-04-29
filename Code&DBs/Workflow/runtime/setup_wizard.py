@@ -156,6 +156,14 @@ class SetupApplyCommand(BaseModel):
     gate: str | None = None
     gate_ref: str | None = None
     apply_ref: str | None = None
+    repo_rules: list[str] | None = None
+    sops: list[str] | None = None
+    anti_patterns: list[str] | None = None
+    forbidden_actions: list[str] | None = None
+    sensitive_systems: list[Any] | None = None
+    submitted_by: str | None = None
+    change_reason: str | None = None
+    disclosure_repeat_limit: int | None = None
 
     @field_validator("gate", "gate_ref", "apply_ref", mode="before")
     @classmethod
@@ -164,6 +172,51 @@ class SetupApplyCommand(BaseModel):
             return None
         text = str(value).strip()
         return text or None
+
+    @field_validator(
+        "repo_rules",
+        "sops",
+        "anti_patterns",
+        "forbidden_actions",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_text_list(cls, value: object) -> list[str] | None:
+        if value in (None, ""):
+            return None
+        if not isinstance(value, list):
+            raise ValueError("repo policy list fields must be arrays")
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    @field_validator("sensitive_systems", mode="before")
+    @classmethod
+    def _normalize_optional_sensitive_systems(cls, value: object) -> list[Any] | None:
+        if value in (None, ""):
+            return None
+        if not isinstance(value, list):
+            raise ValueError("sensitive_systems must be an array")
+        return list(value)
+
+    @field_validator("submitted_by", "change_reason", mode="before")
+    @classmethod
+    def _normalize_optional_text(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @field_validator("disclosure_repeat_limit", mode="before")
+    @classmethod
+    def _normalize_optional_int(cls, value: object) -> int | None:
+        if value in (None, ""):
+            return None
+        if isinstance(value, bool):
+            raise ValueError("disclosure_repeat_limit must be an integer")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("disclosure_repeat_limit must be an integer") from exc
+        return max(0, parsed)
 
 
 def handle_setup_doctor(query: SetupQuery, subsystems: Any) -> dict[str, Any]:
@@ -187,6 +240,16 @@ def handle_setup_apply(command: SetupApplyCommand, subsystems: Any) -> dict[str,
         approved=approved,
         applied_by="api_setup_apply",
         authority_surface="api",
+        apply_kwargs={
+            "repo_rules": command.repo_rules,
+            "sops": command.sops,
+            "anti_patterns": command.anti_patterns,
+            "forbidden_actions": command.forbidden_actions,
+            "sensitive_systems": command.sensitive_systems,
+            "submitted_by": command.submitted_by,
+            "change_reason": command.change_reason,
+            "disclosure_repeat_limit": command.disclosure_repeat_limit,
+        },
     )
 
 
@@ -711,6 +774,7 @@ def setup_apply_gate_payload(
     approved: bool = False,
     applied_by: str = "setup_apply_gate",
     authority_surface: str = "api_or_mcp",
+    apply_kwargs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply one onboarding gate's registered handler and return the fresh result."""
     from runtime.onboarding import ONBOARDING_GRAPH
@@ -773,6 +837,11 @@ def setup_apply_gate_payload(
         evaluation_env,
         root,
         applied_by=applied_by,
+        **{
+            key: value
+            for key, value in dict(apply_kwargs or {}).items()
+            if value is not None
+        },
     )
     probe = ONBOARDING_GRAPH.probe(result.gate_ref)
     return {

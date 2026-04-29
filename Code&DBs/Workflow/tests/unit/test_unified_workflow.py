@@ -535,6 +535,90 @@ def test_summarize_run_recovery_surfaces_retry_for_orchestration_envelope_failur
     }
 
 
+def test_summarize_run_recovery_surfaces_live_stream_for_active_runs():
+    now = datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc)
+    run_data = {
+        "run_id": "dispatch_live_stream",
+        "status": "running",
+        "created_at": now - timedelta(minutes=1),
+        "total_jobs": 1,
+        "jobs": [
+            {
+                "label": "build",
+                "status": "running",
+                "created_at": now - timedelta(minutes=1),
+                "claimed_at": now - timedelta(seconds=30),
+                "started_at": now - timedelta(seconds=20),
+                "heartbeat_at": now - timedelta(seconds=5),
+            }
+        ],
+    }
+
+    health = unified_dispatch.summarize_run_health(run_data, now)
+    recovery = unified_dispatch.summarize_run_recovery(run_data, health, now)
+
+    assert recovery["mode"] == "monitor"
+    assert recovery["live_stream"] == {
+        "cli_command": "praxis workflow stream dispatch_live_stream",
+        "stream_url": "/api/workflow-runs/dispatch_live_stream/stream",
+        "status_command": "praxis workflow run-status dispatch_live_stream --summary",
+    }
+
+
+def test_summarize_run_health_treats_recent_running_job_without_heartbeat_as_active():
+    now = datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc)
+    run_data = {
+        "run_id": "dispatch_recent_running_without_heartbeat",
+        "status": "running",
+        "created_at": now - timedelta(minutes=4),
+        "total_jobs": 1,
+        "jobs": [
+            {
+                "label": "run",
+                "status": "running",
+                "created_at": now - timedelta(minutes=4),
+                "claimed_at": now - timedelta(seconds=110),
+                "started_at": now - timedelta(seconds=90),
+                "heartbeat_at": None,
+            }
+        ],
+    }
+
+    health = unified_dispatch.summarize_run_health(run_data, now)
+
+    assert health["state"] == "healthy"
+    assert health["likely_failed"] is False
+    assert health["running_or_claimed"] == 1
+    assert not any(signal["type"] == "stale_claimed_jobs" for signal in health["signals"])
+
+
+def test_summarize_run_health_flags_running_job_without_activity_as_stale():
+    now = datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc)
+    run_data = {
+        "run_id": "dispatch_stale_running_without_heartbeat",
+        "status": "running",
+        "created_at": now - timedelta(minutes=8),
+        "total_jobs": 1,
+        "jobs": [
+            {
+                "label": "run",
+                "status": "running",
+                "created_at": now - timedelta(minutes=8),
+                "claimed_at": now - timedelta(minutes=5),
+                "started_at": now - timedelta(minutes=4),
+                "heartbeat_at": None,
+            }
+        ],
+    }
+
+    health = unified_dispatch.summarize_run_health(run_data, now)
+
+    assert health["state"] == "degraded"
+    assert health["likely_failed"] is True
+    assert health["stalled_jobs"]["claimed"] == ["run"]
+    assert any(signal["type"] == "stale_claimed_jobs" for signal in health["signals"])
+
+
 def test_get_run_status_includes_shadow_packet_inspection_and_drift():
     run_row = {
         "run_id": "dispatch_shadow_abc",

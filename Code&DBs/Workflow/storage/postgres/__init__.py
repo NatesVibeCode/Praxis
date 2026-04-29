@@ -86,6 +86,7 @@ from .operator_control_repository import (
     bootstrap_operator_control_repository_schema,
 )
 from .operator_frame_repository import PostgresOperatorFrameRepository
+from .repo_policy_contract_repository import PostgresRepoPolicyContractRepository
 from .memory_graph_repository import PostgresMemoryGraphRepository
 from .provider_concurrency_repository import (
     DEFAULT_PROVIDER_CONCURRENCY_LIMITS,
@@ -157,6 +158,7 @@ __all__ = [
     "PostgresWorkflowSurfaceUsageRepository",
     "PostgresOperatorControlRepository",
     "PostgresOperatorFrameRepository",
+    "PostgresRepoPolicyContractRepository",
     "PostgresOperatorIdeaRepository",
     "PostgresProviderConcurrencyRepository",
     "PostgresReceiptRepository",

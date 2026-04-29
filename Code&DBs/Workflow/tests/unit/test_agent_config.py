@@ -181,6 +181,27 @@ class _FakeConn:
             ]
         raise AssertionError(f"Unexpected SQL: {sql}")
 
+class _EffortConn(_FakeConn):
+    def execute(self, sql: str, *args):
+        if "FROM effective_task_type_effort_routes" in sql:
+            return [
+                {
+                    "task_type": "build",
+                    "sub_task_type": "*",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4",
+                    "transport_type": "cli",
+                    "effort_slug": "high",
+                    "provider_payload": {"provider": "openai", "reasoning_effort": "high"},
+                    "cost_multiplier": 1.35,
+                    "latency_multiplier": 1.5,
+                    "quality_bias": 0.15,
+                    "effort_policy_decision_ref": "operator_decision.reasoning_policy",
+                    "effort_matrix_decision_ref": "operator_decision.reasoning_matrix",
+                }
+            ]
+        return super().execute(sql, *args)
+
 def _test_registry():
     return AgentRegistry(_TEST_AGENTS)
 
@@ -318,6 +339,33 @@ class TestGetBySlug:
         assert analysis is not None
         assert analysis.provider == "openai"
         assert analysis.model == "gpt-5.4"
+
+    def test_load_from_postgres_threads_effort_matrix_into_auto_alias(
+        self,
+        monkeypatch,
+    ) -> None:
+        import registry.model_context_limits as model_context_limits
+
+        context_windows = {
+            ("openai", "gpt-5.4"): 200_000,
+            ("openai", "gpt-5.4-mini"): 128_000,
+            ("anthropic", "claude-sonnet-4-6"): 200_000,
+        }
+        monkeypatch.setattr(
+            model_context_limits,
+            "context_window_for_model",
+            lambda provider, model: context_windows[(provider, model)],
+        )
+
+        reg = AgentRegistry.load_from_postgres(_EffortConn())
+        build = reg.get("auto/build")
+
+        assert build is not None
+        assert build.reasoning_control["selected_effort"]["effort_slug"] == "high"
+        assert build.reasoning_control["selected_effort"]["provider_payload"] == {
+            "provider": "openai",
+            "reasoning_effort": "high",
+        }
 
     def test_load_from_postgres_falls_back_when_context_window_missing(
         self,

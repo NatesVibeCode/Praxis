@@ -11,7 +11,7 @@ import enum
 import json
 import warnings
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +92,7 @@ class AgentConfig:
     execution_transport: ExecutionTransport = ExecutionTransport.cli
     sandbox_provider: SandboxProvider = SandboxProvider.docker_local
     sandbox_policy: SandboxPolicy = field(default_factory=SandboxPolicy)
+    reasoning_control: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.execution_backend is not None:
@@ -195,6 +196,14 @@ def _parse_agent(raw: Mapping[str, Any]) -> AgentConfig:
     )
 
 
+def _agent_with_reasoning_control(
+    agent: AgentConfig,
+    *,
+    reasoning_control: Mapping[str, Any],
+) -> AgentConfig:
+    return replace(agent, reasoning_control=dict(reasoning_control))
+
+
 def _normalize_auto_route_key(value: Any) -> str:
     key = str(value or "").strip().lower()
     if key.startswith("auto/"):
@@ -281,7 +290,7 @@ class AgentRegistry:
         rows = conn.execute(
             """SELECT DISTINCT ON (provider_slug, model_slug)
                 provider_slug, model_slug, status, priority, balance_weight,
-                capability_tags, default_parameters, cli_config
+                capability_tags, default_parameters, cli_config, reasoning_control
             FROM provider_model_candidates
             WHERE status = 'active'
             ORDER BY provider_slug, model_slug, priority ASC, created_at DESC"""
@@ -317,6 +326,11 @@ class AgentRegistry:
             cli_cfg = r.get("cli_config") or {}
             if isinstance(cli_cfg, str):
                 cli_cfg = json.loads(cli_cfg)
+            reasoning_control = r.get("reasoning_control") or {}
+            if isinstance(reasoning_control, str):
+                reasoning_control = json.loads(reasoning_control)
+            if not isinstance(reasoning_control, Mapping):
+                reasoning_control = {}
 
             cmd_template = cli_cfg.get("cmd_template")
             envelope_key = cli_cfg.get("envelope_key")
@@ -351,6 +365,7 @@ class AgentRegistry:
                 execution_transport=execution_transport,
                 sandbox_provider=sandbox_provider,
                 sandbox_policy=SandboxPolicy(),
+                reasoning_control=dict(reasoning_control),
             ))
 
         agents_by_slug = {agent.slug: agent for agent in agents}
@@ -360,13 +375,43 @@ class AgentRegistry:
                           benchmark_score, cost_per_m_tokens,
                           route_tier, route_tier_rank,
                           latency_class, latency_rank,
-                          updated_at
+                          reasoning_control, updated_at
                    FROM task_type_routing
                    WHERE permitted = true
                    ORDER BY task_type ASC, rank ASC, updated_at DESC"""
             )
         except Exception:
             route_rows = []
+        try:
+            effort_rows = conn.execute(
+                """SELECT task_type, sub_task_type, provider_slug, model_slug,
+                          transport_type, effort_slug, provider_payload,
+                          cost_multiplier, latency_multiplier, quality_bias,
+                          effort_policy_decision_ref, effort_matrix_decision_ref
+                   FROM effective_task_type_effort_routes
+                   WHERE permitted = true
+                     AND effort_supported = true"""
+            )
+        except Exception:
+            effort_rows = []
+        effort_by_route: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for row in effort_rows:
+            task_type = _normalize_auto_route_key(row.get("task_type"))
+            concrete_slug = f"{row.get('provider_slug')}/{row.get('model_slug')}"
+            effort_payload = row.get("provider_payload") or {}
+            if isinstance(effort_payload, str):
+                effort_payload = json.loads(effort_payload)
+            if not isinstance(effort_payload, Mapping):
+                effort_payload = {}
+            effort_by_route[(task_type, concrete_slug, str(row.get("transport_type") or "").lower())] = {
+                "effort_slug": str(row.get("effort_slug") or ""),
+                "provider_payload": dict(effort_payload),
+                "cost_multiplier": float(row.get("cost_multiplier") or 1.0),
+                "latency_multiplier": float(row.get("latency_multiplier") or 1.0),
+                "quality_bias": float(row.get("quality_bias") or 0.0),
+                "effort_policy_decision_ref": str(row.get("effort_policy_decision_ref") or ""),
+                "effort_matrix_decision_ref": str(row.get("effort_matrix_decision_ref") or ""),
+            }
         task_type_targets: dict[str, dict[str, tuple[tuple[Any, ...], AgentConfig]]] = {}
         tier_targets: dict[str, dict[str, tuple[tuple[Any, ...], AgentConfig]]] = {
             tier: {} for tier in _AUTO_ROUTE_TIERS
@@ -391,6 +436,23 @@ class AgentRegistry:
             concrete = agents_by_slug.get(concrete_slug)
             if concrete is None or not task_type:
                 continue
+            row_reasoning_control = row.get("reasoning_control") or {}
+            if isinstance(row_reasoning_control, str):
+                row_reasoning_control = json.loads(row_reasoning_control)
+            if not isinstance(row_reasoning_control, Mapping):
+                row_reasoning_control = {}
+            route_transport = "cli" if concrete.execution_transport is ExecutionTransport.cli else "api"
+            effort_control = effort_by_route.get((task_type, concrete_slug, route_transport), {})
+            if effort_control:
+                merged_reasoning_control = {
+                    **dict(concrete.reasoning_control),
+                    **dict(row_reasoning_control),
+                    "selected_effort": effort_control,
+                }
+                concrete = _agent_with_reasoning_control(
+                    concrete,
+                    reasoning_control=merged_reasoning_control,
+                )
             benchmark = -float(row.get("benchmark_score") or 0.0)
             cost = float(row.get("cost_per_m_tokens") or 0.0)
             updated_at = str(row.get("updated_at") or "")
@@ -463,6 +525,7 @@ class AgentRegistry:
                 execution_transport=primary.execution_transport,
                 sandbox_provider=primary.sandbox_provider,
                 sandbox_policy=primary.sandbox_policy,
+                reasoning_control=primary.reasoning_control,
             )
             agents.append(alias)
             agents_by_slug[alias_slug] = alias

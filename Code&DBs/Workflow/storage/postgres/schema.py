@@ -87,6 +87,7 @@ _ROW_EXPECTATION_KEY_COLUMNS = {
     "schema_migrations": "filename",
     "semantic_predicates": "predicate_slug",
     "surface_catalog_registry": "catalog_item_id",
+    "task_type_effort_policy": "task_type",
     "task_type_routing": "task_type|provider_slug|model_slug",
     "ui_shell_route_registry": "route_id",
     "ui_feature_flow_registry": "feature_id",

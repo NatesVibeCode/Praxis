@@ -479,6 +479,88 @@ def test_mcp_tool_schema_advertises_gate_and_apply_ref() -> None:
     assert "apply_ref" in props
 
 
+def test_mcp_tool_schema_advertises_repo_policy_contract_fields() -> None:
+    from surfaces.mcp.tools.setup import TOOLS
+
+    props = TOOLS["praxis_setup"][1]["inputSchema"]["properties"]
+    for field_name in (
+        "repo_rules",
+        "sops",
+        "anti_patterns",
+        "forbidden_actions",
+        "sensitive_systems",
+        "submitted_by",
+        "change_reason",
+        "disclosure_repeat_limit",
+    ):
+        assert field_name in props
+
+
+def test_probe_repo_policy_contract_missing_exposes_starter_bundle(tmp_path: Path) -> None:
+    from runtime.onboarding import probes_operator
+
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    with patch(
+        "runtime.onboarding.probes_operator.ensure_postgres_available",
+        return_value=object(),
+    ):
+        with patch(
+            "runtime.onboarding.probes_operator.get_repo_policy_contract",
+            return_value=None,
+        ):
+            result = probes_operator.probe_repo_policy_contract(env, tmp_path)
+    assert result.status == "missing"
+    assert result.apply_ref == "apply.operator.repo_policy_contract.write"
+    assert "starter_bundle" in result.observed_state
+
+
+def test_apply_repo_policy_contract_write_returns_contract_summary(tmp_path: Path) -> None:
+    from runtime.onboarding import applies
+    from storage.postgres.repo_policy_contract_repository import RepoPolicyContractRecord
+
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://u@h:5432/praxis"}
+    record = RepoPolicyContractRecord(
+        repo_policy_contract_id="repo_policy_contract.test",
+        repo_root=str(tmp_path),
+        status="active",
+        current_revision_id="repo_policy_contract_revision.test",
+        current_revision_no=1,
+        current_contract_hash="hash-1",
+        disclosure_repeat_limit=5,
+        bug_disclosure_count=0,
+        pattern_disclosure_count=0,
+        contract_body={
+            "repo_policy_sections": {
+                "repo_rules": ["Never write to prod without proof"],
+                "sops": ["Verify before reconcile"],
+                "anti_patterns": ["No raw secrets in chat"],
+                "forbidden_actions": ["Delete production data"],
+                "sensitive_systems": [{"label": "Salesforce", "system_ref": "system:salesforce"}],
+            }
+        },
+        change_reason="initial",
+        created_by="nate",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    with patch(
+        "runtime.onboarding.applies.ensure_postgres_available",
+        return_value=object(),
+    ):
+        with patch(
+            "runtime.onboarding.applies.upsert_repo_policy_contract",
+            return_value=record,
+        ):
+            result = applies.apply_repo_policy_contract_write(
+                env,
+                tmp_path,
+                repo_rules=["Never write to prod without proof"],
+            )
+    assert result.status == "ok"
+    assert result.observed_state["current_contract_present"] is True
+    assert result.observed_state["operator_disclosure"]["repeat_limit"] == 5
+
+
 # --- Mutation probes (Packet 6) ---------------------------------------------
 
 

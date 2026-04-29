@@ -21,6 +21,17 @@ def _extract_flag_value(args: list[str], flag: str) -> str | None:
     return None
 
 
+def _extract_flag_values(args: list[str], flag: str) -> list[str]:
+    values: list[str] = []
+    prefix = f"{flag}="
+    for index, arg in enumerate(args):
+        if arg == flag and index + 1 < len(args):
+            values.append(args[index + 1])
+        elif arg.startswith(prefix):
+            values.append(arg[len(prefix):])
+    return [value for value in values if str(value).strip()]
+
+
 def _setup_command(args: list[str], *, stdout: TextIO) -> int:
     if not args or args[0] in {"help", "--help", "-h"}:
         stdout.write(
@@ -28,6 +39,9 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
                 [
                     "usage: workflow setup <doctor|plan|apply|graph> [--json] [--yes]",
                     "                              [--gate <gate_ref>] [--apply-ref <apply_ref>]",
+                    "                              [--repo-rule <text>] [--sop <text>]",
+                    "                              [--anti-pattern <text>] [--forbidden-action <text>]",
+                    "                              [--sensitive-system <text-or-json>]",
                     "",
                     "Runtime-target setup client. API/MCP own setup authority.",
                     "",
@@ -50,6 +64,21 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
     approved = "--yes" in args
     gate_ref = _extract_flag_value(args, "--gate")
     apply_ref = _extract_flag_value(args, "--apply-ref")
+    repo_rules = _extract_flag_values(args, "--repo-rule")
+    sops = _extract_flag_values(args, "--sop")
+    anti_patterns = _extract_flag_values(args, "--anti-pattern")
+    forbidden_actions = _extract_flag_values(args, "--forbidden-action")
+    sensitive_system_inputs = _extract_flag_values(args, "--sensitive-system")
+    sensitive_systems = []
+    for raw in sensitive_system_inputs:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = raw
+        sensitive_systems.append(parsed)
+    submitted_by = _extract_flag_value(args, "--submitted-by")
+    change_reason = _extract_flag_value(args, "--change-reason")
+    disclosure_repeat_limit = _extract_flag_value(args, "--disclosure-repeat-limit")
 
     if mode == "apply":
         payload = setup_apply_gate_payload(
@@ -59,6 +88,16 @@ def _setup_command(args: list[str], *, stdout: TextIO) -> int:
             approved=approved,
             applied_by="cli_setup_apply",
             authority_surface="cli",
+            apply_kwargs={
+                "repo_rules": repo_rules or None,
+                "sops": sops or None,
+                "anti_patterns": anti_patterns or None,
+                "forbidden_actions": forbidden_actions or None,
+                "sensitive_systems": sensitive_systems or None,
+                "submitted_by": submitted_by,
+                "change_reason": change_reason,
+                "disclosure_repeat_limit": disclosure_repeat_limit,
+            },
         )
     else:
         payload = setup_payload_for_cli(mode, repo_root=workspace_repo_root(), apply=approved)

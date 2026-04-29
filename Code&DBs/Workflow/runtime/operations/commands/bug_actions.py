@@ -20,6 +20,8 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, Field
+from runtime.repo_policy_onboarding import consume_operator_disclosure
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,7 +137,7 @@ def handle_bug_file(command: BugFileCommand, subsystems: Any) -> dict[str, Any]:
     bt, bt_mod = _bug_subsystems(subsystems)
     body = command.model_dump(exclude_none=False)
     try:
-        return file_bug_payload(
+        payload = file_bug_payload(
             bt=bt,
             bt_mod=bt_mod,
             body=body,
@@ -144,6 +146,15 @@ def handle_bug_file(command: BugFileCommand, subsystems: Any) -> dict[str, Any]:
             source_kind_default="gateway.bug_file",
             include_similar_bugs=bool(command.include_similar_bugs),
         )
+        if payload.get("ok") and payload.get("filed"):
+            disclosure = consume_operator_disclosure(
+                subsystems.get_pg_conn(),
+                repo_root=str(workspace_repo_root()),
+                disclosure_kind="bug",
+            )
+            if disclosure is not None:
+                payload["operator_disclosure"] = disclosure
+        return payload
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "reason_code": "bug.file.invalid"}
 
@@ -160,13 +171,22 @@ def handle_bug_resolve(command: BugResolveCommand, subsystems: Any) -> dict[str,
         bt_mod.BugStatus.DEFERRED,
     }
     try:
-        return resolve_bug_payload(
+        payload = resolve_bug_payload(
             bt=bt,
             bt_mod=bt_mod,
             body=body,
             serialize_bug=_serialize_bug,
             resolved_statuses=resolved_statuses,
         )
+        if payload.get("ok") and payload.get("resolved"):
+            disclosure = consume_operator_disclosure(
+                subsystems.get_pg_conn(),
+                repo_root=str(workspace_repo_root()),
+                disclosure_kind="bug",
+            )
+            if disclosure is not None:
+                payload["operator_disclosure"] = disclosure
+        return payload
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "reason_code": "bug.resolve.invalid"}
 

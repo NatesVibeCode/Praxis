@@ -74,6 +74,8 @@ def _stub_router_provider_defaults(monkeypatch):
 
 class _FakeConn:
     def execute(self, sql: str, *params):
+        if "to_regclass('public.provider_reasoning_effort_matrix')" in sql:
+            return [{"matrix_ready": False, "policy_ready": False}]
         if "FROM route_policy_registry" in sql:
             return [{
                 "task_rank_weight": 0.35,
@@ -159,6 +161,37 @@ class _FakeConn:
         raise AssertionError(sql)
 
 
+class _EffortAuthorityConn(_FakeConn):
+    def execute(self, sql: str, *params):
+        if "to_regclass('public.provider_reasoning_effort_matrix')" in sql:
+            return [{"matrix_ready": True, "policy_ready": True}]
+        if "FROM task_type_effort_policy" in sql:
+            return [
+                {
+                    "task_type": "build",
+                    "sub_task_type": "*",
+                    "default_effort_slug": "medium",
+                    "min_effort_slug": "low",
+                    "max_effort_slug": "high",
+                    "escalation_rules": {},
+                    "decision_ref": "operator_decision.reasoning_policy",
+                }
+            ]
+        if "FROM provider_reasoning_effort_matrix" in sql:
+            return [
+                {
+                    "effort_matrix_ref": "reasoning_effort.openai.gpt-5-4-mini.cli.medium",
+                    "provider_payload": {"provider": "openai", "reasoning_effort": "medium"},
+                    "cost_multiplier": 1.0,
+                    "latency_multiplier": 1.0,
+                    "quality_bias": 0.0,
+                    "failure_risk": 0.0,
+                    "decision_ref": "operator_decision.reasoning_matrix",
+                }
+            ]
+        return super().execute(sql, *params)
+
+
 def test_resolve_medium_route_tier_chain() -> None:
     router = TaskTypeRouter(_FakeConn())
 
@@ -170,6 +203,35 @@ def test_resolve_medium_route_tier_chain() -> None:
         "claude-sonnet-4-6",
         "gemini-2.5-flash",
     ]
+
+
+def test_decision_chain_threads_reasoning_effort_when_authority_present() -> None:
+    router = TaskTypeRouter(_EffortAuthorityConn())
+
+    chain = router._decision_chain(
+        "build",
+        [
+            {
+                "provider_slug": "openai",
+                "model_slug": "gpt-5.4-mini",
+                "rank": 1,
+                "adapter_type": "cli_llm",
+                "billing_mode": "owned_compute",
+                "budget_bucket": "test",
+                "effective_marginal_cost": 0.0,
+                "spend_pressure": "low",
+                "budget_status": "",
+                "prefer_prepaid": True,
+                "allow_payg_fallback": True,
+            }
+        ],
+    )
+
+    assert chain[0].reasoning_effort_slug == "medium"
+    assert chain[0].reasoning_provider_payload == {
+        "provider": "openai",
+        "reasoning_effort": "medium",
+    }
 
 
 def test_resolve_instant_latency_chain() -> None:

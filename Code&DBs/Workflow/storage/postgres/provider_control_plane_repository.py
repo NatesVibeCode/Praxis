@@ -8,6 +8,10 @@ from typing import Any
 
 from .validators import _optional_text, _require_text
 
+_PROVIDER_JOB_CATALOG_AVAILABILITY_DISABLED = (
+    "provider_job_catalog.availability_disabled"
+)
+
 
 @dataclass(frozen=True)
 class ProjectionFreshnessRecord:
@@ -326,6 +330,45 @@ class PostgresProviderControlPlaneRepository:
         return tuple(_provider_control_plane_snapshot_row(row) for row in rows or ())
 
 
+def _normalize_catalog_availability_reason(
+    reason_code: str | None,
+    removal_reasons: list[Mapping[str, Any]],
+) -> str | None:
+    if reason_code != "runtime_profile_route.not_admitted":
+        return reason_code
+    for item in removal_reasons:
+        if not isinstance(item, Mapping):
+            continue
+        details = item.get("details")
+        if (
+            item.get("source_ref") == "projection.private_provider_job_catalog"
+            and isinstance(details, Mapping)
+            and str(details.get("availability_state") or "").strip().lower() == "disabled"
+        ):
+            return _PROVIDER_JOB_CATALOG_AVAILABILITY_DISABLED
+    return reason_code
+
+
+def _normalize_removal_reason_codes(
+    removal_reasons: list[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    normalized: list[Mapping[str, Any]] = []
+    for item in removal_reasons:
+        if not isinstance(item, Mapping):
+            continue
+        reason = dict(item)
+        details = reason.get("details")
+        if (
+            reason.get("reason_code") == "runtime_profile_route.not_admitted"
+            and reason.get("source_ref") == "projection.private_provider_job_catalog"
+            and isinstance(details, Mapping)
+            and str(details.get("availability_state") or "").strip().lower() == "disabled"
+        ):
+            reason["reason_code"] = _PROVIDER_JOB_CATALOG_AVAILABILITY_DISABLED
+        normalized.append(reason)
+    return normalized
+
+
 def _provider_circuit_state_row(row: Mapping[str, Any]) -> ProviderCircuitStateRow:
     return ProviderCircuitStateRow(
         provider_slug=str(row["provider_slug"]),
@@ -367,6 +410,7 @@ def _provider_control_plane_snapshot_row(
     for item in removal_reasons_raw:
         if isinstance(item, Mapping):
             normalized_removal_reasons.append(dict(item))
+    normalized_removal_reasons = _normalize_removal_reason_codes(normalized_removal_reasons)
     normalized_credential_observations: list[Mapping[str, Any]] = []
     for item in credential_observations_raw:
         if isinstance(item, Mapping):
@@ -435,6 +479,10 @@ def _provider_control_plane_snapshot_row(
                     },
                 },
             )
+    primary_removal_reason_code = _normalize_catalog_availability_reason(
+        primary_removal_reason_code,
+        normalized_removal_reasons,
+    )
     return ProviderControlPlaneSnapshotRow(
         runtime_profile_ref=str(row["runtime_profile_ref"]),
         job_type=str(row["job_type"]),

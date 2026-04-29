@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from runtime.repo_policy_onboarding import consume_operator_disclosure
 from runtime.workspace_paths import repo_root as workspace_repo_root
 from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from storage.postgres.workflow_runtime_repository import list_workflow_records
@@ -1209,6 +1210,18 @@ def handle_bugs(
             database_authority=database_authority,
         )
 
+    def _with_operator_disclosure(payload: dict[str, Any]) -> dict[str, Any]:
+        if not payload.get("ok") or not (payload.get("filed") or payload.get("resolved")):
+            return payload
+        disclosure = consume_operator_disclosure(
+            subs.get_pg_conn(),
+            repo_root=str(workspace_repo_root()),
+            disclosure_kind="bug",
+        )
+        if disclosure is not None:
+            payload["operator_disclosure"] = disclosure
+        return payload
+
     resolved_statuses = {
         bt_mod.BugStatus.FIXED,
         bt_mod.BugStatus.WONT_FIX,
@@ -1231,8 +1244,7 @@ def handle_bugs(
             )
 
         if action == "file":
-            return _with_database_authority(
-                _bug_contract.file_bug_payload(
+            payload = _bug_contract.file_bug_payload(
                     bt=bt,
                     bt_mod=bt_mod,
                     body=body,
@@ -1242,7 +1254,7 @@ def handle_bugs(
                     parse_severity=parse_bug_severity,
                     parse_category=parse_bug_category,
                 )
-            )
+            return _with_database_authority(_with_operator_disclosure(payload))
 
         if action == "search":
             return _with_database_authority(
@@ -1308,8 +1320,7 @@ def handle_bugs(
             )
 
         if action == "resolve":
-            return _with_database_authority(
-                _bug_contract.resolve_bug_payload(
+            payload = _bug_contract.resolve_bug_payload(
                     bt=bt,
                     bt_mod=bt_mod,
                     body=body,
@@ -1319,7 +1330,7 @@ def handle_bugs(
                     parse_status=parse_bug_status,
                     created_by_default="workflow_api",
                 )
-            )
+            return _with_database_authority(_with_operator_disclosure(payload))
 
         if action == "patch_resume":
             return _with_database_authority(

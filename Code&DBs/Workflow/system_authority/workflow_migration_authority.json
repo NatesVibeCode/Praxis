@@ -340,7 +340,10 @@
     "323_register_object_truth_schema_and_compare_operations.sql",
     "324_google_gemini_cli_yolo_trust.sql",
     "324_object_truth_comparison_run_store.sql",
-    "325_register_object_truth_record_comparison_run_operation.sql"
+    "325_register_object_truth_record_comparison_run_operation.sql",
+    "326_operator_repo_policy_onboarding.sql",
+    "327_provider_reasoning_effort_matrix.sql",
+    "328_provider_reasoning_effort_policy_coverage.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -8147,6 +8150,100 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.object-truth-record-comparison-run"
       }
+    ],
+    "326_operator_repo_policy_onboarding.sql": [
+      {
+        "object_type": "table",
+        "object_name": "operator_repo_policy_contracts"
+      },
+      {
+        "object_type": "table",
+        "object_name": "operator_repo_policy_contract_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.operator_onboarding"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operator_repo_policy_contracts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operator_repo_policy_contract_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.operator_repo_policy_contracts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.operator_repo_policy_contract_revisions"
+      }
+    ],
+    "327_provider_reasoning_effort_matrix.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.provider_routing"
+      },
+      {
+        "object_type": "table",
+        "object_name": "provider_reasoning_effort_matrix"
+      },
+      {
+        "object_type": "table",
+        "object_name": "task_type_effort_policy"
+      },
+      {
+        "object_type": "view",
+        "object_name": "effective_task_type_effort_routes"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.provider_reasoning_effort_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.task_type_effort_policy"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.table:effective_task_type_effort_routes"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.provider_reasoning_effort_matrix"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.task_type_effort_policy"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.view.public.effective_task_type_effort_routes"
+      }
+    ],
+    "328_provider_reasoning_effort_policy_coverage.sql": [
+      {
+        "object_type": "row",
+        "object_name": "task_type_effort_policy.research"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_effort_policy.compile"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_effort_policy.compile_synthesize"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_effort_policy.plan_section_author"
+      },
+      {
+        "object_type": "row",
+        "object_name": "task_type_effort_policy.*"
+      }
     ]
   },
   "policy_buckets": {
@@ -8491,7 +8588,10 @@
       "323_register_object_truth_schema_and_compare_operations.sql",
       "324_google_gemini_cli_yolo_trust.sql",
       "324_object_truth_comparison_run_store.sql",
-      "325_register_object_truth_record_comparison_run_operation.sql"
+      "325_register_object_truth_record_comparison_run_operation.sql",
+      "326_operator_repo_policy_onboarding.sql",
+      "327_provider_reasoning_effort_matrix.sql",
+      "328_provider_reasoning_effort_policy_coverage.sql"
   ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

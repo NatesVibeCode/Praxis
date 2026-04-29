@@ -29,6 +29,7 @@ def test_schema_help_is_available() -> None:
     rendered = stdout.getvalue()
     assert "workflow schema status" in rendered
     assert "workflow schema describe <object-name|migration.sql>" in rendered
+    assert "workflow schema next-migration <slug>" in rendered
 
 
 def test_schema_status_renders_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,6 +49,28 @@ def test_schema_status_renders_json(monkeypatch: pytest.MonkeyPatch) -> None:
     assert workflow_cli_main(["schema", "status", "--json"], stdout=stdout) == 0
     payload = json.loads(stdout.getvalue())
     assert payload["bootstrapped"] is True
+
+
+def test_schema_next_migration_renders_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        authority_commands,
+        "_schema_next_migration_payload",
+        lambda *, slug: {
+            "scope": "workflow",
+            "next_prefix": 328,
+            "requested_slug": slug,
+            "normalized_slug": "repo_policy_onboarding",
+            "proposed_filename": "328_repo_policy_onboarding.sql",
+            "managed_duplicate_prefixes": {"324": ["324_a.sql", "324_b.sql"]},
+            "unmanaged_duplicate_prefixes": {},
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["schema", "next-migration", "repo policy onboarding", "--json"], stdout=stdout) == 0
+    payload = json.loads(stdout.getvalue())
+    assert payload["next_prefix"] == 328
+    assert payload["proposed_filename"] == "328_repo_policy_onboarding.sql"
 
 
 def test_registry_list_delegates_to_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> None:

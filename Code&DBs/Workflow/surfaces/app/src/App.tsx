@@ -432,19 +432,6 @@ export function AppShell() {
     [routes, state.activeRouteId],
   );
 
-  const activeContext = useMemo(() => {
-    if (!activeRow) {
-      return { label: 'Surface tab', detail: 'Loading…' };
-    }
-    return {
-      label: activeRow.context_label || activeRow.tab_kind_label || 'Surface',
-      detail: interpolateLabel(activeRow.context_detail_template, {
-        ...state,
-        config: { tagline: APP_CONFIG.tagline },
-      }),
-    };
-  }, [activeRow, state]);
-
   const isBuildMode = state.activeTabId === 'build';
 
   const { seeds: seedBundles } = useSeedBundles();

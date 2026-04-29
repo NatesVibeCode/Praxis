@@ -112,6 +112,18 @@ def test_build_execution_bundle_renders_authoring_and_acceptance_contracts() -> 
                 }
             ],
         },
+        repo_policy_contract={
+            "repo_policy_contract_id": "repo_policy_contract.alpha",
+            "current_revision_no": 3,
+            "decision_ref": "architecture-policy::operator-onboarding::repo-policy",
+            "repo_policy_sections": {
+                "repo_rules": ["Do not edit generated files by hand."],
+                "sops": ["Use verifier-backed fixes for bug resolution."],
+                "anti_patterns": ["Do not add compatibility shims around bad authority."],
+                "forbidden_actions": ["delete migrations/*"],
+                "sensitive_systems": [{"label": "Production Stripe"}],
+            },
+        },
     )
 
     rendered = render_execution_bundle(bundle)
@@ -122,12 +134,15 @@ def test_build_execution_bundle_renders_authoring_and_acceptance_contracts() -> 
     assert bundle["approval_required"] is True
     assert bundle["approval_question"] == "Approve the brief before drafting?"
     assert bundle["decision_pack"]["authority_domains"] == ["sandbox_execution"]
+    assert bundle["repo_policy_contract"]["repo_policy_contract_id"] == "repo_policy_contract.alpha"
     assert "** AUTHORING CONTRACT **" in rendered
     assert "section_scaffold" in rendered
     assert "** ACCEPTANCE CONTRACT **" in rendered
     assert "review.required_decision: approve" in rendered
     assert "** APPROVAL REQUIRED **" in rendered
     assert "** APPLICABLE DECISIONS **" in rendered
+    assert "** REPO POLICY CONTRACT **" in rendered
+    assert "delete migrations/*" in rendered
     assert "docker-only-authority" in rendered
 
 
@@ -243,6 +258,44 @@ def test_evaluate_submission_acceptance_tracks_pending_and_passed_states() -> No
 
     assert passed_status == "passed"
     assert passed_report["review"]["latest_decision"] == "approve"
+
+
+def test_evaluate_submission_acceptance_fails_on_repo_policy_forbidden_action() -> None:
+    status, report = evaluate_submission_acceptance(
+        submission={
+            "summary": "Updated the workflow submission runtime.",
+            "declared_operations": [
+                {"action": "delete", "path": "migrations/001_old.sql"},
+            ],
+            "operation_set": [
+                {"action": "delete", "path": "migrations/001_old.sql"},
+            ],
+            "verification_artifact_refs": [],
+        },
+        acceptance_contract={},
+        repo_policy_contract={
+            "repo_policy_contract_id": "repo_policy_contract.alpha",
+            "current_contract_hash": "sha256:abc",
+            "repo_policy_sections": {
+                "forbidden_actions": ["delete migrations/*"],
+                "sensitive_systems": [{"label": "Production Stripe"}],
+            },
+        },
+    )
+
+    assert status == "failed"
+    assert report["repo_policy"]["contract_present"] is True
+    assert report["repo_policy"]["enforced"] is True
+    assert report["repo_policy"]["forbidden_action_rules"][0]["action"] == "delete"
+    assert report["repo_policy"]["forbidden_action_rules"][0]["path_glob"] == "migrations/*"
+    assert report["repo_policy"]["violations"][0]["rule"] == "delete migrations/*"
+    assert report["repo_policy"]["violations"][0]["match_kind"] == "glob"
+    assert report["repo_policy"]["violations"][0]["operation"] == {
+        "action": "delete",
+        "path": "migrations/001_old.sql",
+    }
+    assert report["repo_policy"]["violations"][0]["rule_id"].startswith("forbidden_action_rule.")
+    assert "repo policy forbids: delete migrations/*" in report["hard_failures"]
 
 
 def test_evaluate_submission_acceptance_fails_when_required_structure_is_missing() -> None:

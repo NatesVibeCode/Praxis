@@ -329,6 +329,11 @@ def _acceptance_contract(execution_bundle: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _repo_policy_contract(execution_bundle: Mapping[str, Any]) -> dict[str, Any]:
+    value = execution_bundle.get("repo_policy_contract")
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
 def _persist_submission_acceptance(
     repository: PostgresWorkflowSubmissionRepository,
     *,
@@ -338,6 +343,7 @@ def _persist_submission_acceptance(
     status, report = evaluate_submission_acceptance(
         submission=_enriched_submission(repository, submission),
         acceptance_contract=_acceptance_contract(execution_bundle or {}),
+        repo_policy_contract=_repo_policy_contract(execution_bundle or {}),
     )
     updated = repository.update_submission_acceptance(
         submission_id=str(submission["submission_id"]),

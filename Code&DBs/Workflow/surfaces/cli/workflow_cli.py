@@ -68,6 +68,21 @@ def _format_status_counts(counts: object) -> str:
     return ", ".join(parts)
 
 
+def _print_live_stream_block(result: dict[str, object]) -> None:
+    run_id = str(result.get("run_id") or "").strip()
+    if not run_id:
+        return
+    print()
+    print("LIVE STREAM")
+    print(f"  ./scripts/praxis workflow stream {run_id}")
+    stream_url = result.get("stream_url")
+    status_url = result.get("status_url")
+    if stream_url:
+        print(f"  GET {stream_url}")
+    if status_url:
+        print(f"  status snapshot: ./scripts/praxis workflow run-status {run_id} --summary")
+
+
 def _delegate_modern_workflow_cli(argv: list[str]) -> int:
     from surfaces.cli.main import main as modern_workflow_cli
 
@@ -244,10 +259,7 @@ def _submit_workflow_launch(
             result_payload,
         )
         print(f"Result written to: {result_file}")
-    print("Observe via:")
-    print(f"  ./scripts/praxis workflow stream {result['run_id']}")
-    print(f"  GET {result['stream_url']}")
-    print(f"  GET {result['status_url']}")
+    _print_live_stream_block(result)
     return 0
 
 
@@ -394,10 +406,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             result_payload,
         )
         print(f"Result written to: {args.result_file}")
-    print("Observe via:")
-    print(f"  ./scripts/praxis workflow stream {result['run_id']}")
-    print(f"  GET {result['stream_url']}")
-    print(f"  GET {result['status_url']}")
+    _print_live_stream_block(result)
     return 0
 
 

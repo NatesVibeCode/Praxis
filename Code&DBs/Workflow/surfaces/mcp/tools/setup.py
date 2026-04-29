@@ -36,6 +36,16 @@ def tool_praxis_setup(params: dict, _progress_emitter=None) -> dict:
             approved=approved,
             applied_by="mcp_setup_apply",
             authority_surface="mcp",
+            apply_kwargs={
+                "repo_rules": params.get("repo_rules"),
+                "sops": params.get("sops"),
+                "anti_patterns": params.get("anti_patterns"),
+                "forbidden_actions": params.get("forbidden_actions"),
+                "sensitive_systems": params.get("sensitive_systems"),
+                "submitted_by": params.get("submitted_by"),
+                "change_reason": params.get("change_reason"),
+                "disclosure_repeat_limit": params.get("disclosure_repeat_limit"),
+            },
         )
     return setup_payload(action, repo_root=REPO_ROOT, apply=approved, authority_surface="mcp")
 
@@ -85,6 +95,49 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "Apply handler ref (e.g. 'apply.mcp.claude_code.write'). "
                             "Alternative to 'gate' when multiple handlers target one gate."
                         ),
+                    },
+                    "repo_rules": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional repo rules to bind into the repo policy onboarding contract.",
+                    },
+                    "sops": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional operating SOPs to bind into the repo policy onboarding contract.",
+                    },
+                    "anti_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional starter anti-patterns or failure shapes to store for this repo.",
+                    },
+                    "forbidden_actions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional actions Praxis should treat as forbidden or proof-gated.",
+                    },
+                    "sensitive_systems": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {"type": "object"},
+                            ]
+                        },
+                        "description": "Optional sensitive systems and handling notes (plain text or JSON objects).",
+                    },
+                    "submitted_by": {
+                        "type": "string",
+                        "description": "Optional operator label recorded on the repo policy contract revision.",
+                    },
+                    "change_reason": {
+                        "type": "string",
+                        "description": "Optional reason for this repo policy contract revision.",
+                    },
+                    "disclosure_repeat_limit": {
+                        "type": "integer",
+                        "description": "How many early bug/pattern disclosures Praxis should show before going terse.",
+                        "default": 5,
                     },
                 },
             },

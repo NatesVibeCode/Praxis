@@ -513,9 +513,24 @@ def _scan_jobs_for_health(
         if job_status in ("claimed", "running"):
             running_or_claimed += 1
             heartbeat_age = _seconds_since(job.get("heartbeat_at"), now)
-            if heartbeat_age is not None:
+            activity_reference = (
+                job.get("heartbeat_at")
+                or job.get("started_at")
+                or job.get("claimed_at")
+                or job.get("ready_at")
+                or job.get("created_at")
+            )
+            activity_age = _seconds_since(activity_reference, now)
+            has_recent_activity = (
+                heartbeat_age is not None and heartbeat_age <= 180
+            ) or (
+                heartbeat_age is None
+                and activity_age is not None
+                and activity_age <= 180
+            )
+            if has_recent_activity:
                 active_heartbeat_count += 1
-            if heartbeat_age is None or heartbeat_age > 180:
+            if activity_age is None or activity_age > 180:
                 stalled_claim.append(job.get("label"))
                 stale_heartbeat_count += 1
 
@@ -926,6 +941,14 @@ def summarize_run_health(run_data: dict, now: datetime) -> dict:
     return result
 
 
+def _live_stream_recommendation(run_id: str) -> dict[str, str]:
+    return {
+        "cli_command": f"praxis workflow stream {run_id}",
+        "stream_url": f"/api/workflow-runs/{run_id}/stream",
+        "status_command": f"praxis workflow run-status {run_id} --summary",
+    }
+
+
 def summarize_run_recovery(
     run_data: dict,
     health: dict,
@@ -1025,7 +1048,8 @@ def summarize_run_recovery(
 
         return {
             "mode": "monitor",
-            "reason": signal_reason or "Run is unhealthy but still has active work; keep polling or inspect the live jobs.",
+            "reason": signal_reason or "Run is unhealthy but still has active work; use the live stream or inspect the live jobs.",
+            "live_stream": _live_stream_recommendation(run_id),
             "recommended_tool": {
                 "name": "praxis_workflow",
                 "arguments": {
@@ -1051,6 +1075,7 @@ def summarize_run_recovery(
         return {
             "mode": "monitor",
             "reason": "Run is queued and waiting for a claim.",
+            "live_stream": _live_stream_recommendation(run_id),
             "recommended_tool": {
                 "name": "praxis_workflow",
                 "arguments": {
@@ -1064,6 +1089,7 @@ def summarize_run_recovery(
         return {
             "mode": "monitor",
             "reason": "Run is active and healthy.",
+            "live_stream": _live_stream_recommendation(run_id),
             "recommended_tool": {
                 "name": "praxis_workflow",
                 "arguments": {
@@ -1076,6 +1102,7 @@ def summarize_run_recovery(
     return {
         "mode": "monitor",
         "reason": f"Run is in status '{status}'.",
+        "live_stream": _live_stream_recommendation(run_id),
         "recommended_tool": {
             "name": "praxis_workflow",
             "arguments": {

@@ -5,6 +5,8 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from runtime.platform_patterns import PlatformPatternAuthority
+from runtime.repo_policy_onboarding import consume_operator_disclosure
+from runtime.workspace_paths import repo_root as workspace_repo_root
 
 
 class PatternMaterializeCandidatesCommand(BaseModel):
@@ -66,7 +68,7 @@ def handle_pattern_materialize_candidates(
     subsystems: Any,
 ) -> dict[str, Any]:
     authority = PlatformPatternAuthority(subsystems.get_pg_conn())
-    return authority.materialize_candidates(
+    payload = authority.materialize_candidates(
         sources=command.sources,
         limit=command.limit,
         threshold=command.threshold,
@@ -77,3 +79,12 @@ def handle_pattern_materialize_candidates(
         status=command.status,
         created_by=command.created_by,
     )
+    if payload.get("ok") and int(payload.get("materialized_count") or 0) > 0:
+        disclosure = consume_operator_disclosure(
+            subsystems.get_pg_conn(),
+            repo_root=str(workspace_repo_root()),
+            disclosure_kind="pattern",
+        )
+        if disclosure is not None:
+            payload["operator_disclosure"] = disclosure
+    return payload

@@ -45,6 +45,14 @@ class _CodecConn:
         self.codecs.append((typename, kwargs))
 
 
+class _AsyncQueryConn:
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        return [{"query": query, "args": args}]
+
+    async def execute(self, query: str, *args: object) -> str:
+        return f"STATUS {query} {args!r}"
+
+
 def test_get_workflow_pool_rotates_when_dsn_changes(monkeypatch) -> None:
     connection_mod.shutdown_workflow_pool()
     created: list[_FakePool] = []
@@ -226,6 +234,38 @@ def test_sync_connection_pool_acquire_timeout_is_typed(monkeypatch) -> None:
     assert exc_info.value.details["operation"] == "fetchval"
     assert exc_info.value.details["timeout_s"] == 0.25
     assert "after 0.25s" in str(exc_info.value)
+
+
+def test_sync_connection_execute_preserves_legacy_row_return_shape(monkeypatch) -> None:
+    conn = connection_mod.SyncPostgresConnection(_FakePool("postgresql://example"))
+    async_conn = _AsyncQueryConn()
+
+    monkeypatch.setattr(connection_mod, "_run_sync", asyncio.run)
+    monkeypatch.setattr(
+        conn,
+        "_with_connection",
+        lambda _operation, callback: callback(async_conn),
+    )
+
+    rows = conn.execute("SELECT 1", "x")
+
+    assert rows == [{"query": "SELECT 1", "args": ("x",)}]
+
+
+def test_sync_connection_execute_status_returns_asyncpg_status(monkeypatch) -> None:
+    conn = connection_mod.SyncPostgresConnection(_FakePool("postgresql://example"))
+    async_conn = _AsyncQueryConn()
+
+    monkeypatch.setattr(connection_mod, "_run_sync", asyncio.run)
+    monkeypatch.setattr(
+        conn,
+        "_with_connection",
+        lambda _operation, callback: callback(async_conn),
+    )
+
+    status = conn.execute_status("DELETE FROM example WHERE id = $1", 7)
+
+    assert status == "STATUS DELETE FROM example WHERE id = $1 (7,)"
 
 
 def test_json_codec_encoder_preserves_preencoded_json_text() -> None:

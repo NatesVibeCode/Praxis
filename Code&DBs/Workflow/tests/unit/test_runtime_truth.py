@@ -16,6 +16,7 @@ class _FakeConn:
         queue: dict[str, int] | None = None,
         workers: list[dict[str, Any]] | None = None,
         providers: list[dict[str, Any]] | None = None,
+        control_plane: list[dict[str, Any]] | None = None,
         leases: list[dict[str, Any]] | None = None,
         manifest_records: list[dict[str, Any]] | None = None,
         failures: list[dict[str, Any]] | None = None,
@@ -24,6 +25,7 @@ class _FakeConn:
         self.queue = queue or {"pending": 0, "ready": 0, "claimed": 0, "running": 0}
         self.workers = workers or []
         self.providers = providers or []
+        self.control_plane = control_plane or []
         self.leases = leases or []
         self.manifest_records = manifest_records or []
         self.failures = failures or []
@@ -41,6 +43,8 @@ class _FakeConn:
             return self.workers
         if "FROM workflow_jobs" in normalized:
             return [self.queue]
+        if "FROM private_model_access_control_matrix" in normalized:
+            return self.control_plane
         if "FROM provider_concurrency" in normalized:
             return self.providers
         if "FROM execution_leases" in normalized:
@@ -118,6 +122,65 @@ def test_manifest_hydration_gap_blocks_firecheck(monkeypatch) -> None:
     )
 
 
+def test_succeeded_write_only_manifest_gap_does_not_block_firecheck(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
+    conn = _FakeConn(
+        manifest_records=[
+            {
+                "receipt_id": "receipt_2",
+                "run_id": "run_2",
+                "node_id": "job_b",
+                "status": "succeeded",
+                "failure_code": "",
+                "workspace_manifest_audit": {
+                    "intended_manifest_paths": ["artifacts/workflow/packet/CLOSEOUT.md"],
+                    "hydrated_manifest_paths": [
+                        "artifacts/workflow/packet/PLAN.md",
+                        "artifacts/workflow/packet/EXECUTION.md",
+                    ],
+                    "missing_intended_paths": ["artifacts/workflow/packet/CLOSEOUT.md"],
+                    "observed_file_read_refs": ["artifacts/workflow/packet/CLOSEOUT.md"],
+                    "observed_file_read_mode": "provider_output_path_mentions",
+                },
+            }
+        ]
+    )
+
+    result = runtime_truth.build_firecheck(conn)
+
+    assert result["can_fire"] is True
+    assert result["fire_state"] == "ready"
+    assert result["blockers"] == []
+
+
+def test_succeeded_manifest_gap_with_authoritative_read_proof_blocks_firecheck(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
+    conn = _FakeConn(
+        manifest_records=[
+            {
+                "receipt_id": "receipt_3",
+                "run_id": "run_3",
+                "node_id": "job_c",
+                "status": "succeeded",
+                "failure_code": "",
+                "workspace_manifest_audit": {
+                    "intended_manifest_paths": ["runtime/context.py"],
+                    "hydrated_manifest_paths": [],
+                    "missing_intended_paths": ["runtime/context.py"],
+                    "observed_file_read_refs": ["runtime/context.py"],
+                    "observed_file_read_mode": "sandbox_trace",
+                },
+            }
+        ]
+    )
+
+    result = runtime_truth.build_firecheck(conn)
+
+    assert result["can_fire"] is False
+    assert result["fire_state"] == "blocked"
+    assert {item["code"] for item in result["blockers"]} == {"context_not_hydrated"}
+
+
 def test_queued_work_without_fresh_worker_heartbeat_blocks_firecheck(monkeypatch) -> None:
     monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
     conn = _FakeConn(queue={"pending": 2, "ready": 0, "claimed": 0, "running": 0})
@@ -128,6 +191,37 @@ def test_queued_work_without_fresh_worker_heartbeat_blocks_firecheck(monkeypatch
     assert [item["code"] for item in result["blockers"]] == [
         "queued_without_fresh_worker_heartbeat"
     ]
+
+
+def test_disabled_provider_capacity_is_not_reported_as_firecheck_blocker(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
+    conn = _FakeConn(
+        providers=[
+            {
+                "provider_slug": "anthropic",
+                "max_concurrent": 4,
+                "active_slots": 4.0,
+                "cost_weight_default": 1.0,
+                "updated_at": "2026-04-28T23:47:10+00:00",
+                "age_seconds": 30.0,
+            }
+        ],
+        control_plane=[
+            {
+                "provider_slug": "anthropic",
+                "any_control_on": False,
+                "any_control_off": True,
+            }
+        ],
+    )
+
+    result = runtime_truth.build_firecheck(conn)
+    provider_slots = result["snapshot"]["provider_slots"]
+
+    assert result["can_fire"] is True
+    assert "provider_capacity" not in {item["code"] for item in result["blockers"]}
+    assert provider_slots["saturated_providers"] == []
+    assert provider_slots["providers"][0]["provider_disabled"] is True
 
 
 def test_db_authority_unavailable_blocks_firecheck(monkeypatch) -> None:

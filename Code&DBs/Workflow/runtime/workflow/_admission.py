@@ -1703,6 +1703,11 @@ _REASON_CODE_TO_TOOL: dict[str, dict[str, str]] = {
         "action": "onboard",
         "concern": "runtime_profile_admitted_routes is missing this candidate",
     },
+    "provider_job_catalog.availability_disabled": {
+        "tool": "praxis_provider_onboard",
+        "action": "onboard",
+        "concern": "candidate exists but is disabled in the runtime profile job catalog",
+    },
     "provider_transport.missing": {
         "tool": "praxis_provider_onboard",
         "action": "onboard",

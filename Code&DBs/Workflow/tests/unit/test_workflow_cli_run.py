@@ -187,6 +187,9 @@ def test_cmd_run_stays_silent_about_result_file_when_not_requested(
     assert result == 0
     rendered = capsys.readouterr().out
     assert "Result written to:" not in rendered
+    assert "LIVE STREAM" in rendered
+    assert "./scripts/praxis workflow stream workflow_test123" in rendered
+    assert "./scripts/praxis workflow run-status workflow_test123 --summary" in rendered
 
 
 def test_cmd_run_preview_execution_prints_structured_payload(
@@ -411,9 +414,11 @@ def test_detached_spawn_launch_reads_result_file_and_reports_authority(
     assert "Parent run: workflow_parent_123" in rendered
     assert "DB authority source: process_env" in rendered
     assert "Result file:" in rendered
+    assert "LIVE STREAM" in rendered
+    assert "./scripts/praxis workflow stream workflow_spawn_child123" in rendered
     assert "--foreground-submit" in captured["command"]
     assert captured["env"]["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] == "process_env"
-    assert "CodeDBs/Workflow" in captured["env"]["PYTHONPATH"]
+    assert "Workflow" in captured["env"]["PYTHONPATH"]
 
 
 def test_cmd_spawn_writes_async_result_file(

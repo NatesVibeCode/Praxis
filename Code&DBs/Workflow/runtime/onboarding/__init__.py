@@ -12,7 +12,14 @@ Public API:
 
 from __future__ import annotations
 
-from . import applies, probes_mcp, probes_platform, probes_provider, probes_runtime
+from . import (
+    applies,
+    probes_mcp,
+    probes_operator,
+    probes_platform,
+    probes_provider,
+    probes_runtime,
+)
 from .graph import (
     GateApply,
     GateGraph,
@@ -47,6 +54,7 @@ def _register_all() -> None:
     probes_runtime.register(ONBOARDING_GRAPH)
     probes_provider.register(ONBOARDING_GRAPH)
     probes_mcp.register(ONBOARDING_GRAPH)
+    probes_operator.register(ONBOARDING_GRAPH)
     applies.register(ONBOARDING_GRAPH)
 
 

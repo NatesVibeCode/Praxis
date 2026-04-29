@@ -30,6 +30,10 @@ from runtime.execution_packet_authority import (
 )
 from runtime.workspace_paths import container_workspace_root
 from runtime.failure_projection import project_failure_classification
+from runtime.repo_policy_onboarding import (
+    get_repo_policy_contract,
+    repo_policy_runtime_payload,
+)
 from runtime.workflow.execution_bundle import (
     build_execution_bundle,
     render_execution_bundle,
@@ -633,6 +637,9 @@ def _build_job_execution_bundles(
         raw_snapshot=raw_snapshot,
         workflow_id=workflow_id,
     )
+    repo_policy_contract = repo_policy_runtime_payload(
+        get_repo_policy_contract(conn, repo_root=workflow_root())
+    )
     require_manifest_authority = _requires_reviewed_execution_manifest(raw_snapshot)
     if require_manifest_authority and not isinstance(execution_manifest, dict):
         raise RuntimeError(
@@ -731,6 +738,7 @@ def _build_job_execution_bundles(
             else None,
             decision_pack=decision_pack,
             execution_manifest=execution_manifest,
+            repo_policy_contract=repo_policy_contract,
             require_manifest_authority=require_manifest_authority,
         )
     return bundles
@@ -918,6 +926,9 @@ def _runtime_execution_bundle(
         raw_snapshot=snapshot,
         workflow_id=str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or None,
     )
+    repo_policy_contract = repo_policy_runtime_payload(
+        get_repo_policy_contract(conn, repo_root=workflow_root())
+    )
     require_manifest_authority = _requires_reviewed_execution_manifest(snapshot)
     if require_manifest_authority and not isinstance(execution_manifest, dict):
         raise RuntimeError(
@@ -1033,6 +1044,7 @@ def _runtime_execution_bundle(
         else None,
         decision_pack=decision_pack,
         execution_manifest=execution_manifest,
+        repo_policy_contract=repo_policy_contract,
         require_manifest_authority=require_manifest_authority,
     )
 

@@ -901,14 +901,12 @@ def _validate_workspace_materialization_allowed(
     )
 
 
-def _execution_shard_paths(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
-    """Extract the sandbox shard path_filter from the execution bundle.
-
-    The shard is the union of resolved_read_scope, write_scope, test_scope,
-    and blast_radius from access_policy. Returns () when the bundle declares
-    nothing — that preserves legacy full-workspace copy behavior for specs
-    that haven't adopted scope declarations yet.
-    """
+def _execution_scope_paths(
+    metadata: Mapping[str, Any] | None,
+    *,
+    keys: Sequence[str],
+) -> tuple[str, ...]:
+    """Extract selected scoped path lists from the execution bundle."""
     if not isinstance(metadata, Mapping):
         return ()
     bundle = metadata.get("execution_bundle")
@@ -918,7 +916,7 @@ def _execution_shard_paths(metadata: Mapping[str, Any] | None) -> tuple[str, ...
     if not isinstance(access_policy, Mapping):
         return ()
     union: set[str] = set()
-    for key in ("resolved_read_scope", "declared_read_scope", "write_scope", "test_scope", "blast_radius"):
+    for key in keys:
         value = access_policy.get(key)
         if not isinstance(value, (list, tuple)):
             continue
@@ -927,6 +925,20 @@ def _execution_shard_paths(metadata: Mapping[str, Any] | None) -> tuple[str, ...
             if text:
                 union.add(text)
     return tuple(sorted(union))
+
+
+def _execution_shard_paths(metadata: Mapping[str, Any] | None) -> tuple[str, ...]:
+    """Extract the sandbox shard path_filter from the execution bundle.
+
+    The shard is the union of resolved_read_scope, write_scope, test_scope,
+    and blast_radius from access_policy. Returns () when the bundle declares
+    nothing — that preserves legacy full-workspace copy behavior for specs
+    that haven't adopted scope declarations yet.
+    """
+    return _execution_scope_paths(
+        metadata,
+        keys=("resolved_read_scope", "declared_read_scope", "write_scope", "test_scope", "blast_radius"),
+    )
 
 
 def _missing_intended_manifest_paths(
@@ -965,8 +977,18 @@ def _workspace_manifest_audit(
     result: SandboxExecutionResult | None = None,
 ) -> dict[str, Any]:
     intended_paths = _execution_shard_paths(metadata)
+    intended_read_paths = _execution_scope_paths(
+        metadata,
+        keys=("resolved_read_scope", "declared_read_scope", "test_scope", "blast_radius"),
+    )
+    intended_write_paths = _execution_scope_paths(
+        metadata,
+        keys=("write_scope",),
+    )
     hydrated_paths = tuple(str(path) for path in hydration_receipt.hydrated_paths)
-    observed_candidates = tuple(sorted(set((*intended_paths, *hydrated_paths))))
+    # Provider output path mentions are only a weak read hint, so do not
+    # treat write-only scope entries as observed reads.
+    observed_candidates = tuple(sorted(set((*intended_read_paths, *hydrated_paths))))
     output_text = ""
     if result is not None:
         output_text = "\n".join(
@@ -974,10 +996,12 @@ def _workspace_manifest_audit(
         )
     return {
         "intended_manifest_paths": list(intended_paths),
+        "intended_read_manifest_paths": list(intended_read_paths),
+        "intended_write_manifest_paths": list(intended_write_paths),
         "hydrated_manifest_paths": list(hydrated_paths),
         "hydrated_file_count": int(hydration_receipt.hydrated_files),
         "missing_intended_paths": list(
-            _missing_intended_manifest_paths(intended_paths, hydrated_paths)
+            _missing_intended_manifest_paths(intended_read_paths, hydrated_paths)
         ),
         "observed_file_read_refs": list(
             _observed_file_read_refs_from_output(output_text, observed_candidates)

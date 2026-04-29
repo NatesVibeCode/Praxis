@@ -1,9 +1,18 @@
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from pathlib import Path
 from pprint import pformat
+import sys
+
+_WORKFLOW_ROOT = Path(__file__).resolve().parents[1]
+if str(_WORKFLOW_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKFLOW_ROOT))
+
+from system_authority.workflow_migration_sequence_manager import (
+    load_workflow_migration_authority_spec,
+    raise_for_unmanaged_duplicate_prefixes,
+)
 
 _POLICY_ORDER = ("canonical", "bootstrap_only", "deprecated", "dead")
 
@@ -108,11 +117,11 @@ def _tie_break_aware_full_bootstrap(
 
 
 def main() -> None:
-    workflow_root = Path(__file__).resolve().parents[1]
-    spec_path = workflow_root / "system_authority" / "workflow_migration_authority.json"
+    workflow_root = _WORKFLOW_ROOT
     output_path = workflow_root / "storage" / "_generated_workflow_migration_authority.py"
 
-    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    raise_for_unmanaged_duplicate_prefixes(workflow_root)
+    spec = load_workflow_migration_authority_spec(workflow_root)
     policy_buckets = {
         policy: tuple(spec["policy_buckets"].get(policy, ())) for policy in _POLICY_ORDER
     }

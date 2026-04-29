@@ -1697,6 +1697,13 @@ def test_workspace_manifest_audit_compares_intended_hydrated_and_observed_reads(
         "runtime/missing.py",
         "runtime/spec_compiler.py",
     ]
+    assert audit["intended_read_manifest_paths"] == [
+        "runtime/context.py",
+        "runtime/missing.py",
+    ]
+    assert audit["intended_write_manifest_paths"] == [
+        "runtime/spec_compiler.py",
+    ]
     assert audit["hydrated_manifest_paths"] == [
         "runtime/spec_compiler.py",
         "runtime/context.py",
@@ -1706,6 +1713,82 @@ def test_workspace_manifest_audit_compares_intended_hydrated_and_observed_reads(
         "runtime/context.py",
         "runtime/missing.py",
     ]
+
+
+def test_workspace_manifest_audit_does_not_flag_write_only_output_as_missing() -> None:
+    receipt = sandbox_runtime.HydrationReceipt(
+        sandbox_session_id="sandbox.beta",
+        workspace_root="/workspace",
+        hydrated_files=2,
+        workspace_materialization="copy",
+        workspace_snapshot_ref="workspace_snapshot:def",
+        hydrated_paths=(
+            "artifacts/workflow/packet/PLAN.md",
+            "artifacts/workflow/packet/EXECUTION.md",
+        ),
+    )
+
+    audit = sandbox_runtime._workspace_manifest_audit(
+        metadata={
+            "execution_bundle": {
+                "access_policy": {
+                    "declared_read_scope": ["artifacts/workflow/packet/PLAN.md"],
+                    "write_scope": ["artifacts/workflow/packet/CLOSEOUT.md"],
+                }
+            }
+        },
+        hydration_receipt=receipt,
+        result=None,
+    )
+
+    assert audit["intended_write_manifest_paths"] == ["artifacts/workflow/packet/CLOSEOUT.md"]
+    assert audit["missing_intended_paths"] == []
+
+
+def test_workspace_manifest_audit_does_not_count_write_only_output_mentions_as_reads() -> None:
+    receipt = sandbox_runtime.HydrationReceipt(
+        sandbox_session_id="sandbox.gamma",
+        workspace_root="/workspace",
+        hydrated_files=2,
+        workspace_materialization="copy",
+        workspace_snapshot_ref="workspace_snapshot:ghi",
+        hydrated_paths=(
+            "artifacts/workflow/packet/PLAN.md",
+            "artifacts/workflow/packet/EXECUTION.md",
+        ),
+    )
+    result = sandbox_runtime.SandboxExecutionResult(
+        sandbox_session_id="sandbox.gamma",
+        sandbox_group_id="group.gamma",
+        sandbox_provider="fake",
+        execution_transport="cli",
+        exit_code=0,
+        stdout="wrote artifacts/workflow/packet/CLOSEOUT.md",
+        stderr="",
+        timed_out=False,
+        artifact_refs=(),
+        started_at="2026-04-09T00:00:00+00:00",
+        finished_at="2026-04-09T00:00:01+00:00",
+        network_policy="provider_only",
+        provider_latency_ms=5,
+        execution_mode="fake",
+        workspace_root="/workspace",
+    )
+
+    audit = sandbox_runtime._workspace_manifest_audit(
+        metadata={
+            "execution_bundle": {
+                "access_policy": {
+                    "declared_read_scope": ["artifacts/workflow/packet/PLAN.md"],
+                    "write_scope": ["artifacts/workflow/packet/CLOSEOUT.md"],
+                }
+            }
+        },
+        hydration_receipt=receipt,
+        result=result,
+    )
+
+    assert audit["observed_file_read_refs"] == []
 
 
 def test_write_workspace_snapshot_archive_writes_only_shard(tmp_path) -> None:

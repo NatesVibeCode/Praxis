@@ -174,15 +174,19 @@ def _upsert_denial(conn: Any, command: AccessControlCommand) -> dict[str, Any]:
 
 def _delete_denial(conn: Any, command: AccessControlCommand) -> int:
     sql = """
-        DELETE FROM private_provider_model_access_denials
-         WHERE runtime_profile_ref = $1
-           AND job_type = $2
-           AND transport_type = $3
-           AND adapter_type = $4
-           AND provider_slug = $5
-           AND model_slug = $6
+        WITH deleted AS (
+            DELETE FROM private_provider_model_access_denials
+             WHERE runtime_profile_ref = $1
+               AND job_type = $2
+               AND transport_type = $3
+               AND adapter_type = $4
+               AND provider_slug = $5
+               AND model_slug = $6
+             RETURNING 1
+        )
+        SELECT count(*) AS deleted_count FROM deleted
     """
-    status = conn.execute(
+    rows = conn.execute(
         sql,
         command.runtime_profile_ref,
         command.job_type,
@@ -191,14 +195,99 @@ def _delete_denial(conn: Any, command: AccessControlCommand) -> int:
         command.provider_slug,
         command.model_slug,
     )
-    if isinstance(status, str) and status.startswith("DELETE "):
-        try:
-            return int(status.split()[1])
-        except (IndexError, ValueError):
-            return 0
-    if isinstance(status, list):
-        return len(status)
+    if isinstance(rows, list) and rows:
+        first = rows[0]
+        if isinstance(first, dict):
+            return int(first.get("deleted_count") or 0)
+        getter = getattr(first, "get", None)
+        if callable(getter):
+            return int(getter("deleted_count") or 0)
     return 0
+
+
+def _find_transport_wildcard_denial(
+    conn: Any,
+    command: AccessControlCommand,
+) -> dict[str, Any] | None:
+    if command.transport_type not in {"CLI", "API"}:
+        return None
+    row = conn.fetchrow(
+        """
+        SELECT runtime_profile_ref, job_type, transport_type, adapter_type,
+               provider_slug, model_slug, denied, reason_code, operator_message,
+               decision_ref, created_at, updated_at
+          FROM private_provider_model_access_denials
+         WHERE denied = TRUE
+           AND runtime_profile_ref = $1
+           AND job_type = $2
+           AND transport_type = '*'
+           AND adapter_type = $3
+           AND provider_slug = $4
+           AND model_slug = $5
+         LIMIT 1
+        """,
+        command.runtime_profile_ref,
+        command.job_type,
+        command.adapter_type,
+        command.provider_slug,
+        command.model_slug,
+    )
+    return dict(row) if row is not None else None
+
+
+def _transport_residual(transport_type: str) -> str | None:
+    if transport_type == "CLI":
+        return "API"
+    if transport_type == "API":
+        return "CLI"
+    return None
+
+
+def _rewrite_transport_wildcard_denial(
+    conn: Any,
+    command: AccessControlCommand,
+    source_row: dict[str, Any],
+) -> dict[str, Any] | None:
+    deleted = _delete_denial(
+        conn,
+        AccessControlCommand(
+            action="enable",
+            runtime_profile_ref=str(source_row["runtime_profile_ref"]),
+            job_type=str(source_row["job_type"]),
+            transport_type=str(source_row["transport_type"]),
+            adapter_type=str(source_row["adapter_type"]),
+            provider_slug=str(source_row["provider_slug"]),
+            model_slug=str(source_row["model_slug"]),
+        ),
+    )
+    if deleted <= 0:
+        return None
+
+    residual_transport = _transport_residual(command.transport_type)
+    if residual_transport is None:
+        return None
+
+    replacement = _upsert_denial(
+        conn,
+        AccessControlCommand(
+            action="disable",
+            runtime_profile_ref=str(source_row["runtime_profile_ref"]),
+            job_type=str(source_row["job_type"]),
+            transport_type=residual_transport,
+            adapter_type=str(source_row["adapter_type"]),
+            provider_slug=str(source_row["provider_slug"]),
+            model_slug=str(source_row["model_slug"]),
+            decision_ref=str(source_row["decision_ref"]),
+            operator_message=str(source_row["operator_message"] or _DEFAULT_OPERATOR_MESSAGE),
+            reason_code=str(source_row["reason_code"] or "control_panel.model_access_method_turned_off"),
+        ),
+    )
+    return {
+        "deleted_count": deleted,
+        "replacement_row": replacement,
+        "rewritten_from_transport": str(source_row["transport_type"]),
+        "enabled_transport": command.transport_type,
+    }
 
 
 def handle_access_control(
@@ -238,11 +327,23 @@ def handle_access_control(
         }
 
     deleted = _delete_denial(conn, command)
+    rewrite = None
+    if deleted <= 0:
+        transport_wildcard_row = _find_transport_wildcard_denial(conn, command)
+        if transport_wildcard_row is not None:
+            rewrite = _rewrite_transport_wildcard_denial(
+                conn,
+                command,
+                transport_wildcard_row,
+            )
+            if rewrite is not None:
+                deleted = int(rewrite.get("deleted_count") or 0)
     _refresh_projection(conn, command.runtime_profile_ref)
     return {
         "ok": True,
         "action": "enable",
         "deleted_count": deleted,
+        "rewrite": rewrite,
         "event_payload": {
             "runtime_profile_ref": command.runtime_profile_ref,
             "selector": {

@@ -44,7 +44,7 @@ def test_setup_graph_payload_gate_shape(tmp_path: Path) -> None:
     payload = setup_graph_payload(repo_root=tmp_path)
     for gate in payload["gates"]:
         assert gate["gate_ref"]
-        assert gate["domain"] in {"platform", "runtime", "provider", "mcp"}
+        assert gate["domain"] in {"platform", "runtime", "provider", "mcp", "operator"}
         assert gate["title"]
         assert gate["purpose"]
         assert gate["status"] in {"ok", "missing", "blocked", "unknown"}

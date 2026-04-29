@@ -73,6 +73,9 @@
         "Code&DBs/Workflow/surfaces",
         "Code&DBs/Workflow/tests"
       ],
+      "verify_refs": [
+        "verify.wave_7_manifest_contract_readiness.execute_packet"
+      ],
       "allowed_tools": [
         "praxis_orient",
         "praxis_search",
@@ -104,6 +107,9 @@
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-7-manifest-contract-readiness-1/PLAN.md",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-7-manifest-contract-readiness-1/EXECUTION.md",
         "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/current_20260424/wave-7-manifest-contract-readiness-1/CLOSEOUT.md"
+      ],
+      "verify_refs": [
+        "verify.wave_7_manifest_contract_readiness.verify_and_resolve_packet"
       ],
       "allowed_tools": [
         "praxis_orient",

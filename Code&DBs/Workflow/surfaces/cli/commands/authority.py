@@ -46,6 +46,11 @@ from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import load_json_file, print_json
 from surfaces.mcp.tools.data_dictionary import tool_praxis_data_dictionary
 from surfaces.mcp.tools.health import tool_praxis_reload
+from system_authority.workflow_migration_sequence_manager import (
+    normalize_workflow_migration_slug,
+    propose_workflow_migration_filename,
+    workflow_migration_sequence_state,
+)
 
 from .data import _data_command
 
@@ -94,13 +99,14 @@ def _render_confirmation(*, stdout: TextIO) -> int:
 def _schema_help_text() -> str:
     return "\n".join(
         [
-            "usage: workflow schema <status|plan|apply|describe> [args]",
+            "usage: workflow schema <status|plan|apply|describe|next-migration> [args]",
             "",
             "Schema authority:",
             "  workflow schema status [--scope workflow|control] [--json]",
             "  workflow schema plan [--scope workflow|control] [--json]",
             "  workflow schema apply [--scope workflow|control] [--yes] [--json]",
             "  workflow schema describe <object-name|migration.sql> [--scope workflow|control] [--json]",
+            "  workflow schema next-migration <slug> [--json]",
         ]
     )
 
@@ -219,6 +225,27 @@ async def _schema_describe_payload(*, scope: str, target: str) -> dict[str, Any]
         await conn.close()
 
 
+def _schema_next_migration_payload(*, slug: str) -> dict[str, Any]:
+    normalized_slug = normalize_workflow_migration_slug(slug)
+    state = workflow_migration_sequence_state()
+    return {
+        "scope": "workflow",
+        "migration_manager": "deterministic_numeric_prefix_allocator",
+        "requested_slug": slug,
+        "normalized_slug": normalized_slug,
+        "next_prefix": state.next_prefix,
+        "proposed_filename": propose_workflow_migration_filename(slug=slug),
+        "managed_duplicate_prefixes": {
+            prefix: list(filenames)
+            for prefix, filenames in state.managed_duplicate_prefixes.items()
+        },
+        "unmanaged_duplicate_prefixes": {
+            prefix: list(filenames)
+            for prefix, filenames in state.unmanaged_duplicate_prefixes.items()
+        },
+    }
+
+
 def _schema_command(args: list[str], *, stdout: TextIO) -> int:
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(_schema_help_text() + "\n")
@@ -274,6 +301,14 @@ def _schema_command(args: list[str], *, stdout: TextIO) -> int:
                 stdout.write("usage: workflow schema describe <object-name|migration.sql> [--scope workflow|control] [--json]\n")
                 return 2
             payload = asyncio.run(_schema_describe_payload(scope=scope, target=target))
+        elif action == "next-migration":
+            if scope != "workflow":
+                stdout.write("workflow schema next-migration only supports --scope workflow\n")
+                return 2
+            if not target:
+                stdout.write("usage: workflow schema next-migration <slug> [--json]\n")
+                return 2
+            payload = _schema_next_migration_payload(slug=target)
         else:
             stdout.write(_schema_help_text() + "\n")
             return 2
@@ -282,6 +317,16 @@ def _schema_command(args: list[str], *, stdout: TextIO) -> int:
         return 1
     if as_json:
         print_json(stdout, payload)
+        return 0
+    if action == "next-migration":
+        stdout.write(
+            f"next_prefix={payload.get('next_prefix')} "
+            f"proposed_filename={payload.get('proposed_filename')}\n"
+        )
+        if payload.get("managed_duplicate_prefixes"):
+            stdout.write("managed_duplicate_prefixes:\n")
+            for prefix, filenames in sorted(payload["managed_duplicate_prefixes"].items()):
+                stdout.write(f"  {prefix}: {', '.join(filenames)}\n")
         return 0
     stdout.write(
         f"scope={payload.get('scope')} bootstrapped={payload.get('bootstrapped', False)} "

@@ -190,6 +190,13 @@ def _concern_to_tool_index() -> dict[str, Any]:
                 "do_not": "INSERT into runtime_profile_admitted_routes via SQL or migration",
             },
             {
+                "symptom": "provider_job_catalog.availability_disabled",
+                "concern": "candidate exists but is disabled in the runtime profile job catalog",
+                "tool": "praxis_provider_onboard",
+                "action": "onboard",
+                "do_not": "mutate private_provider_job_catalog or runtime_profile_admitted_routes via SQL",
+            },
+            {
                 "symptom": "control_panel.transport_turned_off / transport_default_deny",
                 "concern": "API/CLI transport is denied at the control panel for this scope",
                 "tool": "praxis_access_control",
@@ -1507,6 +1514,16 @@ def _handle_setup_apply_post(request: Any, path: str) -> None:
             repo_root=REPO_ROOT,
             applied_by="api_setup_apply",
             authority_surface="api",
+            apply_kwargs={
+                "repo_rules": body.get("repo_rules"),
+                "sops": body.get("sops"),
+                "anti_patterns": body.get("anti_patterns"),
+                "forbidden_actions": body.get("forbidden_actions"),
+                "sensitive_systems": body.get("sensitive_systems"),
+                "submitted_by": body.get("submitted_by"),
+                "change_reason": body.get("change_reason"),
+                "disclosure_repeat_limit": body.get("disclosure_repeat_limit"),
+            },
         )
         status_code = 200 if payload.get("ok") else 400
         request._send_json(status_code, payload)

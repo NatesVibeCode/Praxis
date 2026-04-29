@@ -381,6 +381,7 @@ def build_execution_bundle(
     acceptance_contract: Mapping[str, Any] | None = None,
     decision_pack: Mapping[str, Any] | None = None,
     execution_manifest: Mapping[str, Any] | None = None,
+    repo_policy_contract: Mapping[str, Any] | None = None,
     require_manifest_authority: bool = False,
 ) -> dict[str, Any]:
     manifest_mcp_tools, manifest_allowed_tools, manifest_verify_refs = _execution_manifest_tool_authority(
@@ -489,6 +490,11 @@ def build_execution_bundle(
         if isinstance(decision_pack, Mapping) and decision_pack
         else None
     )
+    normalized_repo_policy_contract = (
+        json.loads(json.dumps(dict(repo_policy_contract), sort_keys=True, default=str))
+        if isinstance(repo_policy_contract, Mapping) and repo_policy_contract
+        else None
+    )
     normalized_mcp_tools = (
         manifest_mcp_tools
         if manifest_mcp_tools
@@ -552,6 +558,7 @@ def build_execution_bundle(
         "approval_required": bool(approval_required),
         "approval_question": normalized_approval_question or None,
         "decision_pack": normalized_decision_pack,
+        "repo_policy_contract": normalized_repo_policy_contract,
         "completion_contract": completion_contract,
         "authoring_contract": normalized_authoring_contract,
         "acceptance_contract": normalized_acceptance_contract,
@@ -630,6 +637,36 @@ def render_execution_bundle(bundle: Mapping[str, Any] | None) -> str:
     rendered_decision_pack = render_decision_pack(bundle.get("decision_pack"))
     if rendered_decision_pack:
         parts.append("\n" + rendered_decision_pack)
+
+    repo_policy_contract = bundle.get("repo_policy_contract")
+    if isinstance(repo_policy_contract, Mapping) and repo_policy_contract:
+        sections = (
+            dict(repo_policy_contract.get("repo_policy_sections"))
+            if isinstance(repo_policy_contract.get("repo_policy_sections"), Mapping)
+            else {}
+        )
+        summary = {
+            "repo_policy_contract_id": str(repo_policy_contract.get("repo_policy_contract_id") or "").strip(),
+            "current_revision_no": repo_policy_contract.get("current_revision_no"),
+            "decision_ref": str(repo_policy_contract.get("decision_ref") or "").strip() or None,
+            "repo_rules": _string_list(sections.get("repo_rules")),
+            "sops": _string_list(sections.get("sops")),
+            "anti_patterns": _string_list(sections.get("anti_patterns")),
+            "forbidden_actions": _string_list(sections.get("forbidden_actions")),
+        }
+        sensitive_systems = sections.get("sensitive_systems")
+        if isinstance(sensitive_systems, Sequence) and not isinstance(sensitive_systems, (str, bytes, bytearray)):
+            summary["sensitive_systems"] = [
+                str(item.get("label") or item.get("system_ref") or "").strip()
+                for item in sensitive_systems
+                if isinstance(item, Mapping)
+                and str(item.get("label") or item.get("system_ref") or "").strip()
+            ]
+        parts.append("\n** REPO POLICY CONTRACT **\n" + json.dumps(summary, sort_keys=True, default=str))
+        if summary["forbidden_actions"]:
+            parts.append(
+                "Submission acceptance enforces low-ambiguity forbidden action matches against declared or measured operations."
+            )
 
     completion_contract = bundle.get("completion_contract")
     if isinstance(completion_contract, Mapping) and completion_contract:
