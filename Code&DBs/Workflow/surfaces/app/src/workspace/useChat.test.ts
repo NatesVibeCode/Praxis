@@ -329,6 +329,33 @@ describe('FIX #5 – SSE error handling', () => {
 // ---------------------------------------------------------------------------
 
 describe('successful SSE streaming', () => {
+  it('passes an explicit model route when one is selected', async () => {
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ id: 'conv-1' }))
+      .mockResolvedValueOnce(
+        makeSseResponse([
+          sseBlock('text_delta', { text: 'ok' }),
+          sseBlock('done', { message_id: 'msg-model', model_used: 'openai/gpt-5.4' }),
+        ]),
+      );
+
+    const { result } = renderHook(() => useChat());
+
+    await act(async () => {
+      await result.current.createConversation();
+    });
+
+    await act(async () => {
+      await result.current.sendMessage('hi', undefined, undefined, { model: 'openai/gpt-5.4' });
+    });
+
+    const request = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      content: 'hi',
+      model: 'openai/gpt-5.4',
+    });
+  });
+
   it('accumulates text_delta chunks and commits an assistant message on done', async () => {
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse({ id: 'conv-1' }))

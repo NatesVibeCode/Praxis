@@ -124,8 +124,11 @@ def handle_friction_record(
     ledger = subsystems.get_friction_ledger()
     job_label = command.job_label or command.subject_ref or command.source
     message = command.message or _structured_message(command)
+    # FrictionType members are NAMED upper-case (GUARDRAIL_BOUNCE) but VALUED
+    # lower-case ("guardrail_bounce"). The hook payload uses the public name,
+    # so look up by name.
     event = ledger.record(
-        friction_type=FrictionType(command.event_type),
+        friction_type=FrictionType[command.event_type],
         source=command.source,
         job_label=job_label,
         message=message,

@@ -41,7 +41,7 @@ def _resolve_url() -> str:
     import subprocess
 
     out = subprocess.check_output(
-        ["docker", "exec", "praxis-api-server-1", "bash", "-lc", "echo $WORKFLOW_DATABASE_URL"],
+        ["docker", "compose", "exec", "-T", "api-server", "bash", "-lc", "echo $WORKFLOW_DATABASE_URL"],
         text=True,
         timeout=4,
     ).strip()

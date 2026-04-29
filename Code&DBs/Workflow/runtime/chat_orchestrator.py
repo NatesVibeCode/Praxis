@@ -144,6 +144,16 @@ class ResolvedChatRoute:
     supports_tool_loop: bool = False
 
 
+def _parse_model_override(model_override: Any) -> tuple[str, str] | None:
+    value = str(model_override or "").strip()
+    if not value:
+        return None
+    provider, sep, model = value.partition("/")
+    if not sep or not provider.strip() or not model.strip():
+        raise RuntimeError("selected chat model must be a provider/model route slug")
+    return provider.strip(), model.strip()
+
+
 class ChatOrchestrator:
     def __init__(self, pg_conn: Any, repo_root: str, chat_store: ChatStore | None = None):
         self._pg = pg_conn
@@ -180,6 +190,8 @@ class ChatOrchestrator:
         conversation_id: str,
         user_content: str,
         selection_context: list[dict[str, Any]] | None = None,
+        *,
+        model_override: Any = None,
     ) -> dict[str, Any]:
         """Send a user message and get a complete response.
 
@@ -197,7 +209,7 @@ class ChatOrchestrator:
         # Load history
         messages = self._load_history(conversation_id, selection_context)
 
-        routes = self._resolve_route_chain()
+        routes = self._resolve_route_chain(model_override=model_override)
 
         if _should_use_cli_fast_path(routes):
             assistant_content, model_used, latency_ms = self._send_via_cli(routes, messages)
@@ -309,6 +321,8 @@ class ChatOrchestrator:
         conversation_id: str,
         user_content: str,
         selection_context: list[dict[str, Any]] | None = None,
+        *,
+        model_override: Any = None,
     ) -> Iterator[dict[str, Any]]:
         """Send a user message and yield streaming events.
 
@@ -325,7 +339,7 @@ class ChatOrchestrator:
         # Load history
         messages = self._load_history(conversation_id, selection_context)
 
-        routes = self._resolve_route_chain()
+        routes = self._resolve_route_chain(model_override=model_override)
 
         if _should_use_cli_fast_path(routes):
             assistant_content, model_used, latency_ms = self._send_via_cli(routes, messages)
@@ -343,7 +357,7 @@ class ChatOrchestrator:
             return
 
         # Resolve HTTP model lane
-        provider, model, endpoint, api_key = self._resolve_model()
+        provider, model, endpoint, api_key = self._resolve_model(routes)
 
         all_tool_results: list[dict] = []
         full_text = ""
@@ -605,7 +619,7 @@ class ChatOrchestrator:
         lines.append("Use this only when it is directly relevant; newer instructions in this conversation override older chat context.]")
         return "\n".join(lines)
 
-    def _resolve_route_chain(self) -> list[ResolvedChatRoute]:
+    def _resolve_route_chain(self, *, model_override: Any = None) -> list[ResolvedChatRoute]:
         """Resolve chat failover routes and filter to currently usable lanes."""
         from registry.provider_execution_registry import resolve_binary
         from runtime.lane_policy import admit_adapter_type, load_provider_lane_policies
@@ -720,6 +734,20 @@ class ChatOrchestrator:
                 )
             )
 
+        selected_route = _parse_model_override(model_override)
+        if selected_route is not None:
+            routes = [
+                route
+                for route in routes
+                if (route.provider_slug, route.model_slug) == selected_route
+            ]
+            if not routes:
+                provider, model = selected_route
+                raise RuntimeError(
+                    f"selected chat model {provider}/{model} is not currently usable for auto/chat"
+                )
+            return routes
+
         routes = _prioritize_last_good_cli_route(routes)
         if not routes:
             detail = "; ".join(rejections) if rejections else "no candidates"
@@ -728,9 +756,12 @@ class ChatOrchestrator:
             )
         return routes
 
-    def _resolve_model(self) -> tuple[str, str, str, str]:
+    def _resolve_model(
+        self,
+        routes: list[ResolvedChatRoute] | None = None,
+    ) -> tuple[str, str, str, str]:
         """Resolve the first HTTP-capable chat model route."""
-        route = self._resolve_http_routes()[0]
+        route = self._resolve_http_routes(routes)[0]
         return (
             route.provider_slug,
             route.model_slug,

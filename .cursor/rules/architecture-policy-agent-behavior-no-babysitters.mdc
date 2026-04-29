@@ -1,6 +1,6 @@
 ---
 description: Fix the flow, don't wrap broken flows in monitors
-globs: **/*babysitter*, /Users/nate/.praxis_waves/**, /tmp/praxis_waves/**
+globs: **/*babysitter*, **/.praxis_waves/**, /tmp/praxis_waves/**
 alwaysApply: false
 ---
 

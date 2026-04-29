@@ -39,11 +39,11 @@ def _resolve_url() -> str:
     url = os.environ.get("WORKFLOW_DATABASE_URL")
     if url:
         return url
-    # Fallback: read it out of the praxis-api-server-1 container.
+    # Fallback: read it out of the api-server container.
     import subprocess
     try:
         out = subprocess.check_output(
-            ["docker", "exec", "praxis-api-server-1", "bash", "-lc", "echo $WORKFLOW_DATABASE_URL"],
+            ["docker", "compose", "exec", "-T", "api-server", "bash", "-lc", "echo $WORKFLOW_DATABASE_URL"],
             text=True,
             timeout=4,
         ).strip()

@@ -18,6 +18,63 @@ const QUICK_PROMPTS = [
   'Help me plan the next build step.',
   'Find the relevant context for this screen.',
 ];
+const CHAT_MODEL_STORAGE_KEY = 'praxis-chat-model';
+const MAX_CHAT_FILES = 6;
+const MAX_FILE_CONTEXT_BYTES = 80_000;
+const MAX_TOTAL_FILE_CONTEXT_BYTES = 240_000;
+
+interface ChatModelOption {
+  slug: string;
+  provider: string;
+  model: string;
+  route_rank?: number;
+  route_tier?: string | null;
+  latency_class?: string | null;
+}
+
+interface PendingChatFile {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  content: string;
+  clipped: boolean;
+}
+
+function readStoredChatModel(): string {
+  try {
+    return window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function storeChatModel(value: string): void {
+  try {
+    if (value) {
+      window.localStorage.setItem(CHAT_MODEL_STORAGE_KEY, value);
+      return;
+    }
+    window.localStorage.removeItem(CHAT_MODEL_STORAGE_KEY);
+  } catch {
+    // Local storage can be unavailable in private or test contexts.
+  }
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function chatFileId(file: File): string {
+  return `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`;
+}
+
+function modelLabel(option: ChatModelOption): string {
+  const rank = option.route_rank ? `#${option.route_rank} ` : '';
+  return `${rank}${option.provider}/${option.model}`;
+}
 
 function formatConversationTime(value?: string): string {
   if (!value) return 'No activity yet';
@@ -52,8 +109,14 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(false);
   const [conversationQuery, setConversationQuery] = useState('');
+  const [availableModels, setAvailableModels] = useState<ChatModelOption[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(readStoredChatModel);
+  const [attachedFiles, setAttachedFiles] = useState<PendingChatFile[]>([]);
+  const [dropActive, setDropActive] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refreshConversations = useCallback(async () => {
     setConversationsLoading(true);
@@ -68,6 +131,39 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     if (stage === 'icon') return;
     void refreshConversations();
   }, [refreshConversations, stage]);
+
+  useEffect(() => {
+    if (stage === 'icon') return;
+    let cancelled = false;
+    setModelsLoading(true);
+    fetch('/api/models?task_type=chat')
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`models ${response.status}`)))
+      .then((data) => {
+        if (cancelled) return;
+        const models = Array.isArray(data?.models) ? data.models : [];
+        setAvailableModels(models.map((model: any) => ({
+          slug: String(model.slug || ''),
+          provider: String(model.provider || ''),
+          model: String(model.model || ''),
+          route_rank: typeof model.route_rank === 'number' ? model.route_rank : undefined,
+          route_tier: typeof model.route_tier === 'string' ? model.route_tier : null,
+          latency_class: typeof model.latency_class === 'string' ? model.latency_class : null,
+        })).filter((model: ChatModelOption) => model.slug && model.provider && model.model));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailableModels([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setModelsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stage]);
 
   useEffect(() => {
     if (stage === 'icon') return;
@@ -93,9 +189,56 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const charsRemaining = INPUT_MAX_LENGTH - input.length;
   const showCounter = charsRemaining <= INPUT_COUNTER_THRESHOLD;
   const statusLabel = loading || streamingText ? 'Thinking' : conversationId ? 'Ready' : 'No thread';
+  const selectedModelKnown = selectedModel
+    ? availableModels.some((model) => model.slug === selectedModel)
+    : true;
+
+  const handleModelChange = useCallback((value: string) => {
+    setSelectedModel(value);
+    storeChatModel(value);
+  }, []);
+
+  const attachFiles = useCallback(async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList).slice(0, MAX_CHAT_FILES);
+    if (files.length === 0) return;
+
+    let remainingBytes = Math.max(
+      0,
+      MAX_TOTAL_FILE_CONTEXT_BYTES - attachedFiles.reduce((total, file) => total + file.content.length, 0),
+    );
+    const nextFiles: PendingChatFile[] = [];
+
+    for (const file of files) {
+      if (remainingBytes <= 0) break;
+      const readBytes = Math.min(file.size, MAX_FILE_CONTEXT_BYTES, remainingBytes);
+      if (readBytes <= 0) continue;
+      const content = await file.slice(0, readBytes).text();
+      remainingBytes -= content.length;
+      nextFiles.push({
+        id: chatFileId(file),
+        name: file.name,
+        type: file.type || 'text/plain',
+        size: file.size,
+        content,
+        clipped: file.size > readBytes,
+      });
+    }
+
+    if (nextFiles.length) {
+      setAttachedFiles((current) => [...current, ...nextFiles].slice(-MAX_CHAT_FILES));
+    }
+  }, [attachedFiles]);
 
   const handleSend = useCallback(async () => {
-    const content = input.trim();
+    const attachmentContext = attachedFiles.map((file) => ({
+      type: 'chat_file_context',
+      filename: file.name,
+      mime_type: file.type,
+      size_bytes: file.size,
+      clipped: file.clipped,
+      content: file.content,
+    }));
+    const content = input.trim() || (attachmentContext.length ? 'Use the attached files as context.' : '');
     if (!content || loading) return;
 
     let targetConversationId = conversationId;
@@ -105,10 +248,16 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     }
 
     setInput('');
+    setAttachedFiles([]);
     setThreadsOpen(false);
-    void sendMessage(content, undefined, targetConversationId);
+    void sendMessage(
+      content,
+      attachmentContext.length ? attachmentContext : undefined,
+      targetConversationId,
+      { model: selectedModel || null },
+    );
     void refreshConversations();
-  }, [conversationId, createConversation, input, loading, refreshConversations, sendMessage]);
+  }, [attachedFiles, conversationId, createConversation, input, loading, refreshConversations, selectedModel, sendMessage]);
 
   const handleStartNew = useCallback(async () => {
     const id = await createConversation();
@@ -142,12 +291,9 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     <aside className={`strategy-console strategy-console--${stage}`} aria-label="Chat">
       <header className="strategy-console__header">
         <div className="strategy-console__identity">
-          <span
-            className={`strategy-console__status-dot strategy-console__status-dot--${statusLabel.toLowerCase().replace(' ', '-')}`}
-            aria-hidden="true"
-          />
+          <span className="strategy-console__face" aria-hidden="true">[._.]</span>
           <div className="strategy-console__title-block">
-            <strong>Chat</strong>
+            <strong>STRATEGY_CONSOLE</strong>
             <span>{statusLabel}</span>
           </div>
         </div>
@@ -164,7 +310,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
             className={`strategy-console__action ${stage === 'sidebar' ? 'strategy-console__action--active' : ''}`}
             onClick={() => onStageChange('sidebar')}
           >
-            Dock
+            Sidebar
           </button>
           <button
             type="button"
@@ -179,7 +325,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
             onClick={() => onStageChange('icon')}
             aria-label="Minimize chat"
           >
-            x
+            Minimize
           </button>
         </div>
       </header>
@@ -295,12 +441,85 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
       )}
 
       <form
-        className="strategy-console__composer"
+        className={`strategy-console__composer${dropActive ? ' strategy-console__composer--drop-active' : ''}`}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setDropActive(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDropActive(true);
+        }}
+        onDragLeave={() => setDropActive(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDropActive(false);
+          void attachFiles(event.dataTransfer.files);
+        }}
         onSubmit={(event) => {
           event.preventDefault();
           void handleSend();
         }}
       >
+        <div className="strategy-console__composer-tools">
+          <label className="strategy-console__model-picker">
+            <span>Model</span>
+            <select
+              value={selectedModel}
+              onChange={(event) => handleModelChange(event.target.value)}
+              aria-label="Chat model"
+              disabled={modelsLoading}
+            >
+              <option value="">{modelsLoading ? 'Loading routes...' : 'Auto route'}</option>
+              {selectedModel && !selectedModelKnown && (
+                <option value={selectedModel}>{selectedModel}</option>
+              )}
+              {availableModels.map((model) => (
+                <option key={model.slug} value={model.slug}>
+                  {modelLabel(model)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="strategy-console__file-button"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Files
+          </button>
+          <input
+            ref={fileInputRef}
+            className="strategy-console__file-input"
+            type="file"
+            multiple
+            onChange={(event) => {
+              if (event.target.files) {
+                void attachFiles(event.target.files);
+              }
+              event.currentTarget.value = '';
+            }}
+          />
+        </div>
+
+        {attachedFiles.length > 0 && (
+          <div className="strategy-console__attachments" aria-label="Files attached as chat context">
+            {attachedFiles.map((file) => (
+              <span key={file.id} className="strategy-console__attachment">
+                <span>{file.name}</span>
+                <em>{formatFileSize(file.size)}{file.clipped ? ' clipped' : ''}</em>
+                <button
+                  type="button"
+                  aria-label={`Remove ${file.name}`}
+                  onClick={() => setAttachedFiles((current) => current.filter((item) => item.id !== file.id))}
+                >
+                  x
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="strategy-console__input-wrap">
           <textarea
             ref={inputRef}
@@ -309,7 +528,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 void handleSend();
               }
@@ -327,8 +546,8 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
           )}
         </div>
         <div className="strategy-console__composer-footer">
-          <span>{conversationId ? 'Saved thread' : 'New thread on send'}</span>
-          <button type="submit" disabled={loading || !input.trim()}>
+          <span>{conversationId ? 'Return sends - saved thread' : 'Return sends - new thread'}</span>
+          <button type="submit" disabled={loading || (!input.trim() && attachedFiles.length === 0)}>
             {loading ? 'Sending' : 'Send'}
           </button>
         </div>

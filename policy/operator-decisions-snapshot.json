@@ -1,7 +1,7 @@
 {
   "$description": "Bootstrap snapshot of operator_decisions architecture_policy rows. Committed in the repo so a fresh clone can populate operator_decisions before the agent's first /orient call. Refreshed by scripts/refresh-decisions-snapshot.sh.",
   "$schema_version": 1,
-  "count": 165,
+  "count": 171,
   "decisions": [
     {
       "decided_by": "nate",
@@ -1286,6 +1286,23 @@
       "title": "Decisions are drillable; provenance and why are first-class"
     },
     {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::operator-onboarding::first-run-repo-policy-contract-and-pattern-disclosure",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "operator_onboarding",
+      "decision_source": "conversation.codex.2026-04-28",
+      "decision_status": "decided",
+      "rationale": "When Praxis is invited into repo-local or sensitive operational systems, first-run setup must capture operator SOPs, forbidden actions, sensitive-system handling rules, and initial anti-pattern examples as durable contract authority rather than leaving them in chat residue. When future behavior is logged as a pattern or a bug is promoted/resolved into anti-pattern authority, the product must say so plainly during the early interactions so operators understand what memory and guardrail value they are building.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "First-run onboarding must capture repo policy contracts and disclose pattern promotion behavior"
+    },
+    {
       "decided_by": "praxis",
       "decision_key": "architecture-policy::orient::mandatory-authority-envelope",
       "decision_kind": "architecture_policy",
@@ -1898,6 +1915,40 @@
       "title": "OpenRouter API paid lane is open when explicitly routed"
     },
     {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::provider-routing::reasoning-effort-is-first-class-route-dimension",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "provider_routing",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Provider/model routing must not hide reasoning effort inside model slugs, one-off prompt text, or provider-specific extra_body blobs. Praxis should maintain a separate effort matrix keyed by provider, model, transport lane, task type, and internal effort slug, then compile that into provider-specific payload controls such as OpenAI reasoning effort, Anthropic thinking controls, OpenRouter reasoning, or CLI flags. Route choice, cost, latency, capacity, fallback, and receipts must all see the selected effort level explicitly.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Reasoning effort is a first-class provider routing dimension"
+    },
+    {
+      "decided_by": "nate",
+      "decision_key": "architecture-policy::provider-routing::runtime-profile-admission-is-explicit",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "provider_routing",
+      "decision_source": "conversation.codex.2026-04-29",
+      "decision_status": "decided",
+      "rationale": "A missing runtime_profile_ref means broad catalog routing only. Runtime-profile admission may be used only when a caller passes an explicit runtime_profile_ref or intentionally opts into default runtime-profile lookup through a named API. Execution paths must fail closed when unresolved auto routes reach execution without scoped route authority; they must not silently recover by broad-routing against the global provider catalog.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Runtime-profile admission is explicit, not a router default"
+    },
+    {
       "decided_by": "Nate",
       "decision_key": "architecture-policy::providers-anthropic::no-synthetic-sonnet-4-7",
       "decision_kind": "architecture_policy",
@@ -2460,6 +2511,23 @@
     },
     {
       "decided_by": "nate",
+      "decision_key": "architecture-policy::workflow-execution::manifest-carries-job-contract-pattern-antipattern-gate",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_execution",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "A manifest is the moment-in-time execution packet, but the job contract inside it is the pre-execution contract: the desired pattern, forbidden anti-patterns, allowed mutations, forbidden mutations, proof requirements, and stop/recontract conditions. LLMs may propose actions, but gateway/runtime/DB/sandbox enforcement must validate proposed mutations against the job contract before execution; receipts prove allowed or blocked attempts, they do not compensate for after-the-fact punishment.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Manifest carries an enforceable job contract"
+    },
+    {
+      "decided_by": "nate",
       "decision_key": "architecture-policy::workflow-execution::no-token-budget-authority",
       "decision_kind": "architecture_policy",
       "decision_scope_kind": "authority_domain",
@@ -2615,6 +2683,40 @@
         "does_not_apply_to": []
       },
       "title": "Live migration promotion must use typed CLI authority"
+    },
+    {
+      "decided_by": "operator",
+      "decision_key": "architecture-policy::workflow-planning::external-plan-generation-language-replaces-compile",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_planning",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "The term compile is overloaded across intent interpretation, workflow plan generation, artifact caching, execution packet persistence, and ordinary code compilation. Operator-facing surfaces should describe the workflow-building step as draft plan, generate plan, materialize plan, or create execution plan. Reserve compile for low-level deterministic transforms where the analogy is exact, and keep compatibility aliases until callers migrate.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Operator-facing workflow creation should use plan-generation language instead of compile"
+    },
+    {
+      "decided_by": "operator",
+      "decision_key": "architecture-policy::workflow-planning::materialize-reserved-authority-verb",
+      "decision_kind": "architecture_policy",
+      "decision_scope_kind": "authority_domain",
+      "decision_scope_ref": "workflow_planning",
+      "decision_source": "conversation",
+      "decision_status": "decided",
+      "rationale": "Use materialize when Praxis turns a draft, candidate, projection, generated plan, UI surface description, SOP intake, or derived read model into concrete durable authority with receipts or persisted state. Do not use materialize for ordinary preview, rendering, parsing, model calls, workflow launch, or file generation that does not create authority. This preserves a useful operator/UI verb for Materialize Plan, Materialize Surface, Materialize Contract, and similar future surfaces.",
+      "scope_clamp": {
+        "applies_to": [
+          "pending_review"
+        ],
+        "does_not_apply_to": []
+      },
+      "title": "Materialize is the reserved verb for turning proposed shapes into durable authority"
     },
     {
       "decided_by": "Nate",

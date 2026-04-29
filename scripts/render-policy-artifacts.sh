@@ -84,8 +84,8 @@ render_decisions_snapshot() {
     warn "decisions snapshot — bin/praxis-agent not executable; skipping"
     return 0
   fi
-  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^praxis-api-server-1$'; then
-    warn "decisions snapshot — praxis-api-server-1 not running; skipping"
+  if ! docker compose ps --services --filter status=running 2>/dev/null | grep -q '^api-server$'; then
+    warn "decisions snapshot — api-server service not running; skipping"
     return 0
   fi
   run_renderer "$REPO_ROOT/scripts/refresh-decisions-snapshot.sh" "refresh decisions snapshot"

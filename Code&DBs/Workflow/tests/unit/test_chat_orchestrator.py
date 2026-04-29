@@ -110,6 +110,41 @@ def test_resolve_model_accepts_single_route_chain_entry(monkeypatch) -> None:
     assert api_key == "openai-key"
 
 
+def test_resolve_route_chain_honors_explicit_model_override(monkeypatch) -> None:
+    monkeypatch.setattr(
+        chat_orchestrator_mod.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(TaskTypeRouter=_FakeRouter),
+    )
+    monkeypatch.setattr(
+        "runtime.chat_orchestrator._resolve_api_key",
+        lambda provider, *, required=True: f"{provider}-key",
+    )
+    monkeypatch.setattr(
+        "runtime.chat_orchestrator._resolve_http_endpoint",
+        lambda provider, model=None: f"https://{provider}.example/v1/chat",
+    )
+    monkeypatch.setattr(
+        "runtime.lane_policy.load_provider_lane_policies",
+        lambda _pg: _lane_policies(
+            ("openai", ("llm_task",)),
+            ("anthropic", ("llm_task",)),
+        ),
+    )
+    _FakeRouter.result = [
+        SimpleNamespace(provider_slug="openai", model_slug="gpt-5.4", adapter_type="llm_task"),
+        SimpleNamespace(provider_slug="anthropic", model_slug="claude-sonnet-4-6", adapter_type="llm_task"),
+    ]
+
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT)
+
+    routes = orchestrator._resolve_route_chain(model_override="anthropic/claude-sonnet-4-6")
+
+    assert [(route.provider_slug, route.model_slug) for route in routes] == [
+        ("anthropic", "claude-sonnet-4-6"),
+    ]
+
+
 def test_extract_cli_chat_text_reads_codex_ndjson_agent_message() -> None:
     stdout = "\n".join(
         [
@@ -170,11 +205,11 @@ def test_send_message_prefers_http_lane_when_cli_route_is_sticky(monkeypatch) ->
         supports_tool_loop=True,
     )
 
-    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda: [cli_route, http_route])
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda **_kwargs: [cli_route, http_route])
     monkeypatch.setattr(
         orchestrator,
         "_resolve_model",
-        lambda: ("openai", "gpt-5.4", "https://api.openai.com/v1/chat/completions", "openai-key"),
+        lambda routes=None: ("openai", "gpt-5.4", "https://api.openai.com/v1/chat/completions", "openai-key"),
     )
     monkeypatch.setattr(
         orchestrator,
@@ -222,7 +257,7 @@ def test_send_message_fails_over_http_route_on_rate_limit(monkeypatch) -> None:
     )
     calls: list[str] = []
 
-    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda: [openai_route, anthropic_route])
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda **_kwargs: [openai_route, anthropic_route])
     monkeypatch.setattr(chat_orchestrator_mod, "_load_chat_tools", lambda: ([], lambda *_args: {}))
     chat_orchestrator_mod._RECENTLY_FAILED_ROUTES.clear()
 
@@ -378,11 +413,11 @@ def test_send_message_streaming_prefers_http_lane_when_cli_route_is_sticky(monke
         supports_tool_loop=True,
     )
 
-    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda: [cli_route, http_route])
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda **_kwargs: [cli_route, http_route])
     monkeypatch.setattr(
         orchestrator,
         "_resolve_model",
-        lambda: ("openai", "gpt-5.4", "https://api.openai.com/v1/chat/completions", "openai-key"),
+        lambda routes=None: ("openai", "gpt-5.4", "https://api.openai.com/v1/chat/completions", "openai-key"),
     )
     monkeypatch.setattr(
         orchestrator,

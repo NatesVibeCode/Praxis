@@ -1569,20 +1569,6 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
-    "praxis_next_actions": _tool(
-        surface="operator",
-        tier="stable",
-        recommended_alias="next-actions",
-        when_to_use="Legacy alias only; prefer praxis_next(action='next').",
-        when_not_to_use="Do not build new workflows against this name.",
-        risks={"default": "read"},
-        examples=[
-            _example(
-                "Legacy next-actions call",
-                {"intent": "Fix workflow retries so every retry declares the failed receipt and retry delta."},
-            ),
-        ],
-    ),
     "praxis_submit_artifact_bundle": _tool(
         surface="submissions",
         tier="session",

@@ -33,7 +33,7 @@
         },
         {
           "tool": "Write",
-          "file_glob": "/Users/nate/.praxis_waves/**"
+          "file_glob": "**/.praxis_waves/**"
         },
         {
           "tool": "Write",

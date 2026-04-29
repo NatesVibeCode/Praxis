@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
@@ -26,13 +28,46 @@ import runtime.operation_catalog_gateway as gateway
 from runtime.friction_ledger import FrictionLedger
 
 
+class _GatewayConn:
+    """Conn wrapper exposing the production ``SyncPostgresConnection`` surface
+    on top of the rollback-on-close ``_IsolatedSyncPostgresConnection`` used
+    by the test harness.
+
+    The catalog-repository read paths call ``conn.fetch(...)`` while the
+    isolated test conn only exposes ``execute`` / ``fetchrow`` / ``fetchval``.
+    The gateway also uses ``conn.transaction()`` for receipt + event writes;
+    nested-savepoint commits are pointless here because the outer isolated
+    transaction rolls back on close, so we yield self (every write rides the
+    outer transaction).
+    """
+
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+
+    def fetch(self, query: str, *args: Any) -> Any:
+        return self._conn.execute(query, *args)
+
+    def fetchrow(self, query: str, *args: Any) -> Any:
+        return self._conn.fetchrow(query, *args)
+
+    def fetchval(self, query: str, *args: Any) -> Any:
+        return self._conn.fetchval(query, *args)
+
+    def execute(self, query: str, *args: Any) -> Any:
+        return self._conn.execute(query, *args)
+
+    @contextmanager
+    def transaction(self):
+        yield self
+
+
 class _Subsystems:
     """Minimal subsystems facade satisfying the gateway contract."""
 
-    def __init__(self, conn: object) -> None:
+    def __init__(self, conn: _GatewayConn) -> None:
         self._conn = conn
 
-    def get_pg_conn(self) -> object:
+    def get_pg_conn(self) -> _GatewayConn:
         return self._conn
 
     def get_friction_ledger(self) -> FrictionLedger:
@@ -41,7 +76,7 @@ class _Subsystems:
         return FrictionLedger(self._conn, embedder=None)
 
 
-def _read_friction_event(conn, event_id: str) -> dict | None:
+def _read_friction_event(conn: Any, event_id: str) -> dict | None:
     return conn.fetchrow(
         """
         SELECT event_id, friction_type, source, job_label, message, task_mode, is_test
@@ -86,7 +121,8 @@ def _read_operation_receipt(conn, receipt_id: str) -> dict | None:
 def test_friction_record_gateway_writes_friction_event_and_authority_event() -> None:
     isolated_conn = _pg_test_conn.get_isolated_conn()
     try:
-        subsystems = _Subsystems(isolated_conn)
+        gateway_conn = _GatewayConn(isolated_conn)
+        subsystems = _Subsystems(gateway_conn)
 
         unique_source = f"test.friction_record.{uuid4().hex[:8]}"
         decision_keys = [
@@ -113,9 +149,10 @@ def test_friction_record_gateway_writes_friction_event_and_authority_event() -> 
             payload=payload,
         )
 
-        # Handler return contract.
+        # Handler return contract. friction_type is the enum's lowercase value
+        # (FrictionType.WARN_ONLY.value == "warn_only").
         assert result["ok"] is True
-        assert result["friction_type"] == "WARN_ONLY"
+        assert result["friction_type"] == "warn_only"
         assert result["source"] == unique_source
         assert result["job_label"] == "Bash"
         assert result["task_mode"] == "build", "ledger normalizes task_mode to lower case"
@@ -133,7 +170,7 @@ def test_friction_record_gateway_writes_friction_event_and_authority_event() -> 
         # Durable friction_events row.
         friction_row = _read_friction_event(isolated_conn, ledger_event_id)
         assert friction_row is not None, "friction_events row must persist"
-        assert friction_row["friction_type"] == "WARN_ONLY"
+        assert friction_row["friction_type"] == "warn_only"
         assert friction_row["source"] == unique_source
         assert friction_row["job_label"] == "Bash"
         assert friction_row["task_mode"] == "build"
@@ -152,7 +189,7 @@ def test_friction_record_gateway_writes_friction_event_and_authority_event() -> 
         # Hoisted event_payload carries decision-relevant fields.
         event_payload = json.loads(authority_row["event_payload_json"])
         assert event_payload["event_id"] == ledger_event_id
-        assert event_payload["friction_type"] == "WARN_ONLY"
+        assert event_payload["friction_type"] == "warn_only"
         assert event_payload["source"] == unique_source
         assert event_payload["decision_keys"] == decision_keys
         assert event_payload["decision_match_count"] == len(decision_keys)
@@ -198,7 +235,7 @@ def test_friction_record_handler_defaults_job_label_to_subject_ref() -> None:
 
     isolated_conn = _pg_test_conn.get_isolated_conn()
     try:
-        subsystems = _Subsystems(isolated_conn)
+        subsystems = _Subsystems(_GatewayConn(isolated_conn))
         result = handle_friction_record(
             FrictionRecordInput(
                 event_type="GUARDRAIL_BOUNCE",
@@ -210,6 +247,6 @@ def test_friction_record_handler_defaults_job_label_to_subject_ref() -> None:
         )
         assert result["ok"] is True
         assert result["job_label"] == "Edit"
-        assert result["friction_type"] == "GUARDRAIL_BOUNCE"
+        assert result["friction_type"] == "guardrail_bounce"
     finally:
         isolated_conn.close()

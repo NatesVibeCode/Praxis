@@ -86,6 +86,7 @@ def _handle_chat_messages_post(request: Any, path: str) -> None:
         conversation_id = path.split("/")[4]
         content = body.get("content", "")
         selection = body.get("selection_context")
+        model_override = body.get("model")
         chat = ChatOrchestrator(pg, str(REPO_ROOT))
 
         accept = request.headers.get("Accept", "")
@@ -99,7 +100,12 @@ def _handle_chat_messages_post(request: Any, path: str) -> None:
 
             streamed_text_parts: list[str] = []
             streamed_tool_results: list[dict[str, Any]] = []
-            for event in chat.send_message_streaming(conversation_id, content, selection):
+            for event in chat.send_message_streaming(
+                conversation_id,
+                content,
+                selection,
+                model_override=model_override,
+            ):
                 event_type = event.get("event", "message")
                 data = json.dumps(event.get("data", {}), default=str)
                 if event_type == "text_delta":
@@ -121,7 +127,12 @@ def _handle_chat_messages_post(request: Any, path: str) -> None:
                 request.wfile.flush()
             return
 
-        result = chat.send_message(conversation_id, content, selection)
+        result = chat.send_message(
+            conversation_id,
+            content,
+            selection,
+            model_override=model_override,
+        )
         pack = _save_chat_carry_forward(
             request.subsystems,
             objective=content,

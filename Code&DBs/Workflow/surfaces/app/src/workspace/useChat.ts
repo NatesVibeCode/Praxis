@@ -20,6 +20,10 @@ export interface Conversation {
   updated_at?: string;
 }
 
+export interface ChatSendOptions {
+  model?: string | null;
+}
+
 const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream';
 const FETCH_TIMEOUT_MS = 60_000;
 
@@ -199,6 +203,7 @@ export function useChat() {
     content: string,
     selectionContext?: any[],
     conversationIdOverride?: string | null,
+    options?: ChatSendOptions,
   ) => {
     const targetConversationId = conversationIdOverride ?? conversationId;
     if (!targetConversationId || !content.trim()) return;
@@ -246,7 +251,11 @@ export function useChat() {
             'Content-Type': 'application/json',
             'Accept': EVENT_STREAM_CONTENT_TYPE,
           },
-          body: JSON.stringify({ content, selection_context: selectionContext }),
+          body: JSON.stringify({
+            content,
+            selection_context: selectionContext,
+            model: options?.model || undefined,
+          }),
           signal: controller.signal,
         }),
         abortPromise,
