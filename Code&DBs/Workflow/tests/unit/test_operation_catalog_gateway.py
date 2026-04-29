@@ -450,6 +450,61 @@ def test_gateway_preserves_typed_reason_code_and_details(monkeypatch) -> None:
     assert result["details"] == {"provider_slug": "openai", "adapter_type": "llm_task"}
 
 
+def test_gateway_failure_response_includes_operation_receipt_so_callers_can_trace(monkeypatch) -> None:
+    """Failed gateway dispatches must surface the persisted receipt envelope.
+
+    Without this, a caller hitting a handler-raised ValueError (e.g. operator_write
+    retire on a row whose existing status is outside the input enum) sees only
+    {"ok": False, "error": "...", "error_code": "..."} and cannot trace the
+    failure back to authority_operation_receipts.
+    """
+    binding = SimpleNamespace(
+        operation_ref="operator.example",
+        operation_name="operator.example",
+        source_kind="operation_command",
+        operation_kind="command",
+        command_class=_ExampleCommand,
+        handler=lambda _command, _subsystems: (_ for _ in ()).throw(
+            ValueError("status must be one of active, completed, done")
+        ),
+        authority_ref="authority.example",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="non_idempotent",
+        binding_revision="binding.operation.example.20260416",
+        decision_ref="decision.operation.example.20260416",
+    )
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.example",
+        payload={"value": "anything"},
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "ValueError"
+    assert "operation_receipt" in result, (
+        "failed dispatches must attach operation_receipt envelope so callers "
+        "can trace the failure via praxis_trace without scanning the DB"
+    )
+    receipt = result["operation_receipt"]
+    assert receipt["operation_name"] == "operator.example"
+    assert receipt["execution_status"] == "failed"
+    assert receipt["error_code"] == "ValueError"
+    assert receipt.get("receipt_id"), "failed receipt must carry its receipt_id"
+
+
 def test_command_receipt_event_persistence_rolls_back_as_one_proof_write(monkeypatch) -> None:
     binding = SimpleNamespace(
         operation_ref="operator.example",
