@@ -246,21 +246,24 @@ def test_roadmap_retire_succeeds_when_existing_row_status_is_outside_input_enum(
 def test_roadmap_update_coerces_out_of_enum_existing_status_with_auto_fix(
     monkeypatch,
 ) -> None:
-    """Update without explicit status must coerce out-of-enum existing values.
+    """Update without explicit status must coerce truly unknown values safely.
 
-    Closes the safe-path half of BUG-7DBAEE37: the input enum is narrower
-    than legitimate DB states (e.g. 'proposed'), so any update on a legacy
-    row would fail the same enum check. Coerce to 'active' with an auto_fix
-    note rather than raising — the caller didn't ask for the bad status.
+    Closes the safety-net half of BUG-7DBAEE37: even after widening the
+    canonical set to include 'proposed', a row may carry a status no
+    enum knows about (legacy import, retired vocabulary, drift). Update
+    paths must not fail enum validation on such ghost values — coerce to
+    'active' with an auto_fix note rather than raising. The caller didn't
+    ask for the bad status, and a stray legacy value shouldn't make the
+    caller learn the auto-fix shape.
     """
-    existing_item_id = "roadmap_item.legacy.proposed.update_target"
+    existing_item_id = "roadmap_item.legacy.ghost_status.update_target"
     existing_row = {
         "roadmap_item_id": existing_item_id,
-        "roadmap_key": "roadmap.legacy.proposed.update_target",
-        "title": "Legacy proposed row",
-        "summary": "Pre-existing row with non-canonical status",
+        "roadmap_key": "roadmap.legacy.ghost_status.update_target",
+        "title": "Legacy row with unknown status vocabulary",
+        "summary": "Pre-existing row carrying a status no current enum knows",
         "item_kind": "capability",
-        "status": "proposed",
+        "status": "totally_legacy_ghost_status",
         "lifecycle": "planned",
         "priority": "p2",
         "parent_roadmap_item_id": None,
@@ -319,6 +322,19 @@ def test_roadmap_update_coerces_out_of_enum_existing_status_with_auto_fix(
         "not in canonical set" in fix and "coerced to 'active'" in fix
         for fix in preview["auto_fixes"]
     ), preview["auto_fixes"]
+
+
+def test_normalize_roadmap_status_accepts_proposed() -> None:
+    """Closes the canonical-set half of BUG-7DBAEE37.
+
+    'proposed' is the legitimate review-pending status used by the activity-truth
+    review pattern (see test_native_truth_surface_cutover.py and the
+    praxis_operator_roadmap_view 'status' filter description). The write enum
+    used to reject it; now the input contract matches the read model.
+    """
+    assert operator_write._normalize_roadmap_status("proposed") == "proposed"
+    assert operator_write._normalize_roadmap_status("PROPOSED") == "proposed"
+    assert "proposed" in operator_write._ROADMAP_STATUSES
 
 
 def test_normalize_roadmap_priority_accepts_p0_through_p3() -> None:

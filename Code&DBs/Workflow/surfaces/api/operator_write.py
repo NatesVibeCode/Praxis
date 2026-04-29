@@ -116,7 +116,7 @@ _OPERATOR_IDEA_STATUSES = frozenset(
 )
 _OPERATOR_IDEA_RESOLUTION_STATUSES = frozenset({"rejected", "superseded", "archived"})
 _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
-_ROADMAP_STATUSES = frozenset({"active", "completed", "done"})
+_ROADMAP_STATUSES = frozenset({"proposed", "active", "completed", "done"})
 _ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed", "retired"})
 _ROADMAP_RETIRED_LIFECYCLE = "retired"
 _ROADMAP_PRIORITIES = frozenset({"p0", "p1", "p2", "p3"})

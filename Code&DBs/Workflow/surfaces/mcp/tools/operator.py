@@ -2720,7 +2720,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "status": {
                         "type": "string",
-                        "enum": ["active", "completed", "done"],
+                        "enum": ["proposed", "active", "completed", "done"],
                     },
                     "lifecycle": {
                         "type": "string",
