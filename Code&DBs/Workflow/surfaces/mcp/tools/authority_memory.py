@@ -13,6 +13,7 @@ Migration: 158_authority_memory_projection_vocabulary.sql
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from typing import Any
 
 from runtime.authority_memory_projection import refresh_authority_memory_projection
@@ -20,7 +21,7 @@ from runtime.authority_memory_projection import refresh_authority_memory_project
 
 def tool_praxis_authority_memory_refresh(params: dict, _progress_emitter=None) -> dict:
     """Run one idempotent refresh of the authority-to-memory projection."""
-    result = asyncio.run(refresh_authority_memory_projection())
+    result = run_sync_safe(refresh_authority_memory_projection())
     return result.to_json()
 
 

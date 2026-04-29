@@ -1571,12 +1571,18 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
         if subpath == "bootstrap":
             from runtime.compile_cqrs import materialize_workflow
 
+            enable_full_compose = (
+                body.get("enable_full_compose")
+                if isinstance(body.get("enable_full_compose"), bool)
+                else None
+            )
             result = materialize_workflow(
                 str(body.get("prose") or ""),
                 conn=pg,
                 workflow_id=workflow_id,
                 title=body.get("title") if isinstance(body.get("title"), str) else None,
                 enable_llm=body.get("enable_llm") if isinstance(body.get("enable_llm"), bool) else None,
+                enable_full_compose=enable_full_compose,
             )["mutation"]
         else:
             result = mutate_workflow_build(

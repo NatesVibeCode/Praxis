@@ -22,6 +22,8 @@ export interface Conversation {
 
 export interface ChatSendOptions {
   model?: string | null;
+  maxTokens?: number | null;
+  timeoutMs?: number | null;
 }
 
 const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream';
@@ -228,10 +230,11 @@ export function useChat() {
     // FIX #6: 60-second AbortController-based timeout.
     // Track whether the abort came from the timeout so we can surface a useful message.
     let timedOut = false;
+    const timeoutMs = options?.timeoutMs ?? FETCH_TIMEOUT_MS;
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, FETCH_TIMEOUT_MS);
+    }, timeoutMs);
 
     try {
       let abortListener: (() => void) | null = null;
@@ -255,6 +258,7 @@ export function useChat() {
             content,
             selection_context: selectionContext,
             model: options?.model || undefined,
+            max_tokens: options?.maxTokens || undefined,
           }),
           signal: controller.signal,
         }),

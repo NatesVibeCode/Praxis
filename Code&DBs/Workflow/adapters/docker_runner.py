@@ -16,6 +16,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Mapping
@@ -325,8 +326,38 @@ def run_in_docker(
         **forwarded_auth_env,
         **(dict(env) if env else {}),
     }
-    for key, value in sorted(merged_env.items()):
-        docker_cmd.extend(["-e", f"{key}={value}"])
+    # Use --env-file instead of N × `-e KEY=VAL` so the env block does not
+    # blow argv beyond ARG_MAX (kernel limit ~256KB on macOS, ~128KB on
+    # Linux). Even a moderate execution bundle (full prompt, repo manifest,
+    # auth tokens) blew the limit and produced
+    # "[Errno 7] Argument list too long: 'docker'" for ~10 jobs in this
+    # session before the cause was found. Operator decision 2026-04-29:
+    # ship --env-file and stop relying on argv for the env block.
+    env_file_path: str | None = None
+    if merged_env:
+        env_fd, env_file_path = tempfile.mkstemp(prefix="praxis-docker-env-", suffix=".env")
+        try:
+            with os.fdopen(env_fd, "w") as env_fh:
+                for key, value in sorted(merged_env.items()):
+                    # docker --env-file expects KEY=VALUE per line. Embedded
+                    # newlines in values would terminate the entry early —
+                    # strip them. (Newlines in env values are exotic and the
+                    # `-e` flag wouldn't have handled them either.)
+                    safe_value = str(value).replace("\n", " ").replace("\r", " ")
+                    env_fh.write(f"{key}={safe_value}\n")
+            docker_cmd.extend(["--env-file", env_file_path])
+        except Exception:
+            # If writing fails, fall back to the legacy -e form so we still
+            # try to run rather than hard-fail. The fallback may still hit
+            # ARG_MAX on huge envs but at least preserves prior behavior.
+            try:
+                if env_file_path:
+                    os.unlink(env_file_path)
+            except OSError:
+                pass
+            env_file_path = None
+            for key, value in sorted(merged_env.items()):
+                docker_cmd.extend(["-e", f"{key}={value}"])
 
     if docker_network:
         docker_cmd.append(f"--network={docker_network}")
@@ -355,48 +386,58 @@ def run_in_docker(
             execution_mode="docker",
         )
 
-    proc = subprocess.Popen(
-        docker_cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-
-    cancel_requested = threading.Event()
-
-    if execution_control is not None:
-        def _interrupt() -> None:
-            if proc.poll() is not None:
-                return
-            cancel_requested.set()
-            _kill_process_group(proc)
-
-        execution_control.register_interrupt(_interrupt)
-
     try:
-        stdout, stderr = proc.communicate(
-            input=stdin_text,
-            timeout=timeout,
+        proc = subprocess.Popen(
+            docker_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired:
-        cancelled = cancel_requested.is_set()
-        timed_out = not cancelled
-        _kill_process_group(proc)
-        stdout, stderr = proc.communicate()
 
-    latency_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+        cancel_requested = threading.Event()
 
-    return ExecutionResult(
-        stdout=stdout or "",
-        stderr=stderr or "",
-        exit_code=proc.returncode if proc.returncode is not None else 1,
-        timed_out=timed_out,
-        cancelled=cancel_requested.is_set() or cancelled,
-        latency_ms=latency_ms,
-        execution_mode="docker",
-    )
+        if execution_control is not None:
+            def _interrupt() -> None:
+                if proc.poll() is not None:
+                    return
+                cancel_requested.set()
+                _kill_process_group(proc)
+
+            execution_control.register_interrupt(_interrupt)
+
+        try:
+            stdout, stderr = proc.communicate(
+                input=stdin_text,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            cancelled = cancel_requested.is_set()
+            timed_out = not cancelled
+            _kill_process_group(proc)
+            stdout, stderr = proc.communicate()
+
+        latency_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+
+        return ExecutionResult(
+            stdout=stdout or "",
+            stderr=stderr or "",
+            exit_code=proc.returncode if proc.returncode is not None else 1,
+            timed_out=timed_out,
+            cancelled=cancel_requested.is_set() or cancelled,
+            latency_ms=latency_ms,
+            execution_mode="docker",
+        )
+    finally:
+        # Always unlink the env file, regardless of subprocess outcome.
+        # Docker reads --env-file at invocation time so by the time Popen
+        # returns, the file's job is done.
+        if env_file_path:
+            try:
+                os.unlink(env_file_path)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------

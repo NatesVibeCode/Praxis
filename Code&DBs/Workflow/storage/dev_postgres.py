@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import json
 import os
 import shlex
@@ -333,7 +334,7 @@ def _run_coroutine(coro):
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return run_sync_safe(coro)
     try:
         coro.close()
     except Exception:

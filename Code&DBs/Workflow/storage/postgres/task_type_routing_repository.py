@@ -145,7 +145,7 @@ class PostgresTaskTypeRoutingRepository:
                 $1, '*', $2, $3, 'CLI', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                 'derived', $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, now()
             )
-            ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO UPDATE SET
+            ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug) DO UPDATE SET
                 permitted = EXCLUDED.permitted, rank = EXCLUDED.rank,
                 benchmark_score = EXCLUDED.benchmark_score, benchmark_name = EXCLUDED.benchmark_name,
                 cost_per_m_tokens = EXCLUDED.cost_per_m_tokens, rationale = EXCLUDED.rationale,

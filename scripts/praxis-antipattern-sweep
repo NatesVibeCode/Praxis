@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# praxis-antipattern-sweep — run the build-anti-pattern detection sweep
+# inside the workflow-worker. Currently fires the zero_token_silent_failure
+# detector (migration 334); future detectors register in the same registry
+# and will be picked up by run_sweep automatically.
+#
+# Usage:
+#   scripts/praxis-antipattern-sweep              # run sweep, take action
+#   scripts/praxis-antipattern-sweep --dry-run    # detect only, no demote/file
+#   scripts/praxis-antipattern-sweep --clear      # clear all open hits
+#                                                 # (operator override)
+#
+# Exit codes:
+#   0 — sweep completed, output is structured JSON on stdout
+#   1 — sweep raised an exception
+#   2 — usage error
+
+set -euo pipefail
+
+DRY_RUN=0
+CLEAR_ONLY=0
+RESOLVED_AGENT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1; shift ;;
+    --clear)
+      CLEAR_ONLY=1; shift ;;
+    --resolved-agent)
+      RESOLVED_AGENT="${2:-}"; shift 2 ;;
+    -h|--help)
+      sed -n '/^# praxis-antipattern-sweep/,/^# Exit codes:/p' "$0" | sed 's/^# *//; /^$/d'
+      exit 0 ;;
+    *)
+      echo "praxis-antipattern-sweep: unknown arg $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ $CLEAR_ONLY -eq 1 ]]; then
+  docker compose exec -T workflow-worker python3 - <<PY
+import json
+from storage.postgres.connection import SyncPostgresConnection
+from runtime.observability.zero_token_detector import clear_resolved_after_auth
+agent = ${RESOLVED_AGENT:+'"'$RESOLVED_AGENT'"' or }None
+with SyncPostgresConnection() as conn:
+    n = clear_resolved_after_auth(conn, agent)
+print(json.dumps({"cleared": n, "agent": agent}, indent=2))
+PY
+  exit 0
+fi
+
+DEMOTE_ROUTES="True"
+FILE_BUGS="True"
+if [[ $DRY_RUN -eq 1 ]]; then
+  DEMOTE_ROUTES="False"
+  FILE_BUGS="False"
+fi
+
+docker compose exec -T workflow-worker python3 - <<PY
+import json
+from storage.postgres.connection import SyncPostgresConnection
+from runtime.observability.zero_token_detector import run_sweep
+with SyncPostgresConnection() as conn:
+    summary = run_sweep(conn, demote_routes=$DEMOTE_ROUTES, file_bugs=$FILE_BUGS)
+print(json.dumps(summary, default=str, indent=2))
+PY

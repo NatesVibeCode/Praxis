@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 import contextvars
@@ -1081,7 +1082,7 @@ def _run_awaitable_sync(result: Any) -> Any:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(result)
+        return run_sync_safe(result)
     raise RuntimeError(
         "operation.sync_execution_in_async_boundary: "
         "use aexecute_operation_binding() when invoking async operation handlers "

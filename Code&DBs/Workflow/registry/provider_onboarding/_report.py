@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import json
 from dataclasses import replace
 from typing import Any
@@ -445,7 +446,7 @@ def run_provider_onboarding(
 ) -> ProviderOnboardingResult:
     if not database_url.strip():
         raise ValueError("database_url is required")
-    return asyncio.run(
+    return run_sync_safe(
         _run_provider_onboarding(
             database_url=database_url.strip(),
             spec=spec,

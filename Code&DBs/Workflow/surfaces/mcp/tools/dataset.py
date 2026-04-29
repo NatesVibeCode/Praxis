@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from typing import Any
 
 from runtime.dataset_candidate_subscriber import (
@@ -42,7 +43,7 @@ def _run(coro: Any) -> Any:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return run_sync_safe(coro)
     raise RuntimeError("praxis_dataset must be called from a non-async boundary")
 
 

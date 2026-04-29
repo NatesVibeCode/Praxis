@@ -60,11 +60,14 @@ def _import_trigger_check():
     if workflow_root not in sys.path:
         sys.path.insert(0, workflow_root)
     try:
-        from surfaces.policy import check, render_additional_context  # type: ignore  # noqa: E402
-
-        return check, render_additional_context
+        from surfaces.policy import check  # type: ignore  # noqa: E402
+        from surfaces.policy.trigger_check import (  # type: ignore  # noqa: E402
+            render_additional_context,
+            render_user_visible,
+        )
+        return check, render_additional_context, render_user_visible
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def _emit_friction_event(
@@ -134,7 +137,7 @@ def main() -> None:
     if not isinstance(tool_input, dict):
         _continue()
 
-    check, render = _import_trigger_check()
+    check, render, render_user_visible = _import_trigger_check()
     if check is None or render is None:
         # Trigger module unavailable — fail open. The agent loses surfacing
         # for this turn, but the tool call proceeds. The gateway-side check
@@ -152,14 +155,28 @@ def main() -> None:
         tool_input,
     )
 
-    additional_context = render(matches, tool_name)
-    _emit({
+    # Two-channel surfacing:
+    #   * additionalContext (LLM-only) — every match emits one of these so
+    #     the agent has the standing-order context to decide what to do.
+    #   * systemMessage (user-visible UI) — only emitted when at least one
+    #     match has surface='user_visible'. Bypasses the agent's
+    #     "don't talk about hooks" main-instruction so the human sees
+    #     structural-failure-class signals even when the agent silently
+    #     ingests context. Routine reminders stay LLM-only and don't
+    #     produce UI banners.
+    response: dict[str, Any] = {
         "continue": True,
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "additionalContext": additional_context,
+            "additionalContext": render(matches, tool_name),
         },
-    })
+    }
+    if render_user_visible is not None:
+        user_msg = render_user_visible(matches)
+        if user_msg:
+            response["systemMessage"] = user_msg
+
+    _emit(response)
 
 
 if __name__ == "__main__":

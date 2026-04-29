@@ -16,6 +16,7 @@ Each TaskProfile specifies:
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import concurrent.futures
 import json
 import os
@@ -66,7 +67,7 @@ def _run_async(coro: object) -> object:
     if loop is not None and loop.is_running():
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result(timeout=10)
-    return asyncio.run(coro)
+    return run_sync_safe(coro)
 
 
 def _read_repo_env_file(path: Path) -> dict[str, str]:

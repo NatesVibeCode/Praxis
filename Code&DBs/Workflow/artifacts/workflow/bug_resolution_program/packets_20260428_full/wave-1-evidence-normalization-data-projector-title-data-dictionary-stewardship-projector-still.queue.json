@@ -1,0 +1,54 @@
+{
+  "name": "Data / projector / title: data_dictionary_stewardship.projector.still",
+  "workflow_id": "wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still",
+  "queue_id": "wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still",
+  "phase": "bug_resolution_packet",
+  "outcome_goal": "Drive bugs BUG-FF7424CC to a terminal outcome with explicit evidence and bounded verification.",
+  "anti_requirements": [
+    "Do NOT widen scope outside the listed bugs and authority owner.",
+    "Do NOT resolve FIXED without validates_fix evidence.",
+    "Do NOT use ad hoc SQL for bug status or evidence writes.",
+    "Do NOT clean up unrelated issues just because they are nearby."
+  ],
+  "jobs": [
+    {
+      "label": "plan_packet",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Lock the execution boundary for Data / projector / title: data_dictionary_stewardship.projector.still.",
+      "outcome_goal": "One plan artifact names the exact touched files, verification path, and closure boundary before implementation starts.",
+      "prompt": "Read the coordination file `/workspace/Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260428_full.json` and extract packet `bug_resolution_program_20260428_full.wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still`.\n\nPacket contract:\n- bug_ids: [\"BUG-FF7424CC\"]\n- authority_owner: lane:data_projector\n- lane: Data / projector (data_projector)\n- wave: wave_1_evidence_normalization\n- packet_kind: evidence_recovery\n- cluster: title: data_dictionary_stewardship.projector.still (bug.title_anchor:data_dictionary_stewardship.projector.still)\n- verification_surface: Projection or data-plane integrity checks plus focused query or repository proof\n- depends_on_wave: wave_0_authority_repair\n\nWrite `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/PLAN.md` with these sections:\n1. Bugs in scope\n2. Titles in scope\n- Regression: data_dictionary_stewardship projector still writes missing object_type contact owner\n3. Files to read first\n4. Files allowed to change\n5. Verification or closure proof required\n6. Stop boundary\n\nUse current repo truth, not guesses. Do not edit code in this job.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/PLAN.md"
+    },
+    {
+      "label": "execute_packet",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.bug_resolution_packet.wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still.execute_packet"
+      ],
+      "depends_on": [
+        "plan_packet"
+      ],
+      "description": "Implement or close the packet without widening scope.",
+      "outcome_goal": "The packet produces either a bounded code fix or a proof-backed closure rationale for every bug in scope.",
+      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/PLAN.md` first.\n\nThen implement the narrowest correct path for packet `bug_resolution_program_20260428_full.wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still`.\n\nRules:\n- If the right outcome is FIXED, make the smallest durable change and record exactly what verification will prove it.\n- If the right outcome is WONT_FIX or DEFERRED, do not force code. Collect the proof and rationale instead.\n- Prepare for the closeout job by recording the intended terminal outcome for each bug in `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/EXECUTION.md`.\n- Do not resolve bugs in this job.\n\nDone criteria:\n- The affected projection or data contract becomes explicit and queryable again.\n- Verification proves the projection or query shape from the owning surface.\n- Any closure without code makes the data-model trade-off explicit.\n\nStop boundary: Do not widen into unrelated knowledge-graph, catalog, or memory refactors.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/EXECUTION.md"
+    },
+    {
+      "label": "verify_and_resolve_packet",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "verify_refs": [
+        "verify.bug_resolution_packet.wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still.verify_and_resolve_packet"
+      ],
+      "depends_on": [
+        "execute_packet"
+      ],
+      "description": "Run verification, attach bug evidence, and resolve every bug through the bug tracker surface.",
+      "outcome_goal": "Each in-scope bug is either left open with a clear blocker or moved to a terminal status with explicit evidence.",
+      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/PLAN.md` and `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/EXECUTION.md`.\n\nThen do the narrowest meaningful verification for the packet.\n\nCloseout rules:\n- Use `praxis workflow bugs attach_evidence` and `praxis workflow bugs resolve` only.\n- If terminal outcome is FIXED, attach attempted_fix evidence and validates_fix evidence before resolution.\n- If terminal outcome is WONT_FIX or DEFERRED, write the proof-backed rationale to `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/CLOSEOUT.md` and resolve through the bug tracker surface.\n- If verification fails, leave the bug open and write the blocker in CLOSEOUT.md.\n\nVerification surface: Projection or data-plane integrity checks plus focused query or repository proof\nStop boundary: Do not widen into unrelated knowledge-graph, catalog, or memory refactors.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-data-projector-title-data-dictionary-stewardship-projector-still/CLOSEOUT.md"
+    }
+  ]
+}

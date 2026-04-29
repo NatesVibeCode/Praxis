@@ -411,7 +411,7 @@ def evaluate_pipeline_preview(
         prompt_lowers = prompt.lower()
         task_type = str(job_view.get("task_type") or source_job.get("task_type") or "").strip().lower()
         if (
-            result_kind == "code_change"
+            result_kind in {"code_change", "code_change_candidate"}
             and inferred_artifact_paths
             and _looks_artifact_only(inferred_artifact_paths)
             and ("do not edit code" in prompt_lowers or task_type in {"review", "analysis", "research"})
@@ -421,7 +421,7 @@ def evaluate_pipeline_preview(
                     severity="error",
                     kind="artifact_job_uses_code_change_submission",
                     label=label,
-                    message="artifact-only job is compiled as code_change instead of artifact_bundle",
+                    message="artifact-only job is compiled as a code-change submission instead of artifact_bundle",
                     evidence={"result_kind": result_kind, "artifact_paths": inferred_artifact_paths},
                 )
             )

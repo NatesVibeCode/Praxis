@@ -9,6 +9,8 @@ import {
 } from './useLiveRunSnapshot';
 import { runJobsPath } from './runApi';
 import { RunGraphView } from '../shared/RunGraphView';
+import { RunEvidencePanel } from './RunEvidencePanel';
+import { useExecutionProof } from '../shared/hooks/useExecutionProof';
 
 export interface RunDetailViewProps {
   runId: string;
@@ -211,6 +213,13 @@ export function RunDetailView({ runId, onBack }: RunDetailViewProps) {
   const health = run.health;
   const telemetry = health?.resource_telemetry;
 
+  // Lazy-fetch the 4-authority execution proof. Stops polling once the run
+  // is terminal — proof is frozen at that point and operator can manually
+  // refresh via the panel button.
+  const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set(['succeeded', 'failed', 'cancelled']);
+  const isLiveRun = !TERMINAL_RUN_STATUSES.has(run.status);
+  const proofResult = useExecutionProof(runId, { shouldRefresh: isLiveRun });
+
   return (
     <div className="run-detail">
       <div className="run-detail__header">
@@ -324,6 +333,20 @@ export function RunDetailView({ runId, onBack }: RunDetailViewProps) {
           </div>
         </div>
       )}
+
+      {/* Execution-proof panel — 4-authority reconciliation surface for
+          "did the LLM actually run", anti-pattern hits, and missing-evidence
+          flags. Sits between health and run-graph so it's visible above the
+          jobs list without scrolling past the graph. */}
+      <div className="run-detail__evidence" style={{ marginTop: 12, padding: '12px 16px', background: 'var(--surface-card)', borderRadius: 6 }}>
+        <RunEvidencePanel
+          runId={runId}
+          proof={proofResult.proof}
+          status={proofResult.status}
+          error={proofResult.error}
+          onRefresh={proofResult.refresh}
+        />
+      </div>
 
       {/* Run graph visualization — shows dependency graph when available */}
       {run.graph && run.graph.nodes?.length > 0 && (

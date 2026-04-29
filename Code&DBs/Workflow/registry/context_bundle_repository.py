@@ -8,6 +8,7 @@ injected.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from contextlib import asynccontextmanager
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -285,7 +286,7 @@ class PostgresContextBundleRepository:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(
+            return run_sync_safe(
                 self.load_context_bundle_async(context_bundle_id=context_bundle_id)
             )
         raise ContextBundleRepositoryError(
@@ -377,7 +378,7 @@ class PostgresContextBundleRepository:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(
+            return run_sync_safe(
                 self.persist_context_bundle_async(bundle=bundle, anchors=anchors)
             )
         raise ContextBundleRepositoryError(

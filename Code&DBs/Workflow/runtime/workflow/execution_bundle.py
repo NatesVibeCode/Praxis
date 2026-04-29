@@ -73,10 +73,12 @@ _SUBMISSION_REVIEW_TASK_TYPES = frozenset(
 _SUBMISSION_READ_TOOL = "praxis_get_submission"
 _SUBMISSION_REVIEW_TOOL = "praxis_review_submission"
 _SUBMISSION_RESULT_KIND_TO_TOOL = {
-    "code_change": "praxis_submit_code_change",
+    "code_change_candidate": "praxis_submit_code_change_candidate",
     "research_result": "praxis_submit_research_result",
     "artifact_bundle": "praxis_submit_artifact_bundle",
 }
+_RETIRED_SUBMISSION_TOOLS = frozenset({"praxis_submit_code_change"})
+_RETIRED_RESULT_KINDS = frozenset({"code_change"})
 
 
 def _string_list(value: object) -> list[str]:
@@ -212,7 +214,7 @@ def _submission_result_kind(*, task_type: str, bucket: str) -> str:
     if lowered in {"research", "analysis", "architecture", "debate"}:
         return "research_result"
     if bucket == "build":
-        return "code_change"
+        return "code_change_candidate"
     return "artifact_bundle"
 
 
@@ -267,6 +269,11 @@ def _completion_contract(
         verification_required = normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
     # Spec-level result_kind wins; fall back to task_type/bucket derivation.
     normalized_override = str(result_kind_override or "").strip().lower()
+    if normalized_override in _RETIRED_RESULT_KINDS:
+        raise ValueError(
+            "completion_contract.result_kind='code_change' is retired; "
+            "code-writing jobs must submit code_change_candidate payloads"
+        )
     if normalized_override and normalized_override in _SUBMISSION_RESULT_KIND_TO_TOOL:
         result_kind = normalized_override
     else:
@@ -277,6 +284,17 @@ def _completion_contract(
     explicit_submit_tools = _dedupe_strings(
         [str(name).strip() for name in (submit_tool_names_override or []) if str(name).strip()]
     )
+    retired_submit_tools = sorted(
+        canonical_tool_name(name)
+        for name in explicit_submit_tools
+        if canonical_tool_name(name) in _RETIRED_SUBMISSION_TOOLS
+    )
+    if retired_submit_tools:
+        raise ValueError(
+            "completion_contract.submit_tool_names includes retired code-change submit tool(s): "
+            + ", ".join(retired_submit_tools)
+            + "; use praxis_submit_code_change_candidate"
+        )
     if normalized_submission_required:
         if explicit_submit_tools:
             derived_submit_tools = list(explicit_submit_tools)
@@ -337,7 +355,7 @@ def _orient_hint(
         "notes": [
             start_note,
             "Every tool in mcp_tool_names is callable as `praxis <subcommand> ...`. Run `praxis --help` for the full list.",
-            "At the end of mutating jobs, submit results via `praxis submit_code_change` or `praxis submit_artifact_bundle` — the sealed submission is the authoritative deliverable.",
+            "At the end of code-writing jobs, submit a structured code-change candidate; artifact-only jobs submit an artifact bundle.",
             "Stay inside the declared read/write boundary and verification refs.",
         ],
     }
@@ -451,7 +469,7 @@ def build_execution_bundle(
         else bool(verification_required)
     )
     effective_result_kind = (
-        "code_change"
+        "code_change_candidate"
         if mutation_requires_submission and not str(result_kind or "").strip()
         else result_kind
     )

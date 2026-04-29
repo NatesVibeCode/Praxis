@@ -19,6 +19,7 @@ event id (relevant or not) so the subscriber doesn't re-scan forever.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -392,16 +393,10 @@ class DatasetCurationProjectionSubscriber:
         subscriber_id: str = _DEFAULT_SUBSCRIBER_ID,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(
-                self.consume_available_async(
-                    limit=limit, subscriber_id=subscriber_id, env=env
-                )
+        return run_sync_safe(
+            self.consume_available_async(
+                limit=limit, subscriber_id=subscriber_id, env=env
             )
-        raise RuntimeError(
-            "dataset curation projection subscriber requires a non-async call boundary"
         )
 
 

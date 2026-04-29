@@ -30,6 +30,7 @@ def test_schema_help_is_available() -> None:
     assert "workflow schema status" in rendered
     assert "workflow schema describe <object-name|migration.sql>" in rendered
     assert "workflow schema next-migration <slug>" in rendered
+    assert "workflow schema renumber-migrations" in rendered
 
 
 def test_schema_status_renders_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,6 +62,9 @@ def test_schema_next_migration_renders_json(monkeypatch: pytest.MonkeyPatch) -> 
             "requested_slug": slug,
             "normalized_slug": "repo_policy_onboarding",
             "proposed_filename": "328_repo_policy_onboarding.sql",
+            "renumber_applied": False,
+            "renumber_actions": [],
+            "operator_messages": [],
             "managed_duplicate_prefixes": {"324": ["324_a.sql", "324_b.sql"]},
             "unmanaged_duplicate_prefixes": {},
         },
@@ -71,6 +75,40 @@ def test_schema_next_migration_renders_json(monkeypatch: pytest.MonkeyPatch) -> 
     payload = json.loads(stdout.getvalue())
     assert payload["next_prefix"] == 328
     assert payload["proposed_filename"] == "328_repo_policy_onboarding.sql"
+
+
+def test_schema_next_migration_renders_auto_renumber_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        authority_commands,
+        "_schema_next_migration_payload",
+        lambda *, slug: {
+            "scope": "workflow",
+            "next_prefix": 340,
+            "requested_slug": slug,
+            "normalized_slug": "next_policy",
+            "proposed_filename": "340_next_policy.sql",
+            "renumber_applied": True,
+            "renumber_actions": [
+                {
+                    "old_filename": "338_conflict.sql",
+                    "new_filename": "339_conflict.sql",
+                    "reason": "unmanaged duplicate prefix 338; kept 338_existing.sql",
+                }
+            ],
+            "operator_messages": [
+                "Automatically renumbered unmanaged duplicate migration prefixes before allocating the next migration: 338_conflict.sql -> 339_conflict.sql."
+            ],
+            "managed_duplicate_prefixes": {},
+            "unmanaged_duplicate_prefixes": {},
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["schema", "next-migration", "next policy"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "Automatically renumbered unmanaged duplicate migration prefixes" in rendered
+    assert "338_conflict.sql -> 339_conflict.sql" in rendered
+    assert "proposed_filename=340_next_policy.sql" in rendered
 
 
 def test_registry_list_delegates_to_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import concurrent.futures
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ def _run_reader_coro(coro):
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return run_sync_safe(coro)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(asyncio.run, coro).result()
 

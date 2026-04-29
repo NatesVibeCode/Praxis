@@ -10,6 +10,7 @@ import json
 import os
 import time
 import urllib.error
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterator
 
@@ -22,6 +23,10 @@ from .http_transport import (
     perform_http_request,
 )
 from registry.provider_execution_registry import resolve_adapter_config, resolve_api_protocol_family
+from runtime.llm_request_contracts import (
+    LLMRequestContractError,
+    compile_llm_request_body,
+)
 from runtime.integrations.rate_limiter import (
     RateLimitAcquireTimeout,
     acquire_for_provider,
@@ -89,6 +94,11 @@ class LLMRequest:
     retryable_status_codes: tuple[int, ...] | None = None
     execution_control: DeterministicExecutionControl | None = None
     cache_static_prefix: bool = False
+    # Contract/intents are optional for legacy callers. When provided, the
+    # provider body is compiled through the DB-backed request contract before
+    # dispatch so unsupported or forbidden knobs fail closed.
+    request_contract: dict[str, Any] | None = None
+    request_intent: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +173,7 @@ def _build_openai_body(request: LLMRequest) -> dict[str, Any]:
             for t in request.tools
         ]
 
-    return body
+    return _apply_request_contract(request, body)
 
 
 def _build_anthropic_body(request: LLMRequest) -> dict[str, Any]:
@@ -213,7 +223,11 @@ def _build_anthropic_body(request: LLMRequest) -> dict[str, Any]:
             tools_list[-1]["cache_control"] = {"type": "ephemeral"}
         body["tools"] = tools_list
 
-    return body
+    if request.extra_body:
+        for key, value in request.extra_body.items():
+            body[key] = value
+
+    return _apply_request_contract(request, body)
 
 
 def _build_google_body(request: LLMRequest) -> dict[str, Any]:
@@ -254,7 +268,28 @@ def _build_google_body(request: LLMRequest) -> dict[str, Any]:
             }
         ]
 
-    return body
+    if request.extra_body:
+        for key, value in request.extra_body.items():
+            body[key] = value
+
+    return _apply_request_contract(request, body)
+
+
+def _apply_request_contract(request: LLMRequest, body: dict[str, Any]) -> dict[str, Any]:
+    if not request.request_contract:
+        return body
+    try:
+        compiled = compile_llm_request_body(
+            contract=request.request_contract,
+            request_intent=request.request_intent,
+            base_payload=body,
+            provider_slug=request.provider_slug,
+            model_slug=request.model_slug,
+            protocol_family=_require_protocol_family(request),
+        )
+    except LLMRequestContractError as exc:
+        raise LLMClientError(exc.reason_code, str(exc)) from exc
+    return compiled.payload
 
 
 def _request_protocol_family(request: LLMRequest) -> str | None:
@@ -296,6 +331,15 @@ def _build_headers(request: LLMRequest) -> dict[str, str]:
 # Response parsers
 # ---------------------------------------------------------------------------
 
+def _usage_int(mapping: Mapping[str, Any] | dict[str, Any], key: str) -> int:
+    if not isinstance(mapping, Mapping):
+        return 0
+    try:
+        return int(mapping.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _parse_openai_response(data: dict[str, Any]) -> tuple[str, dict[str, int], tuple[ToolCall, ...], str | None]:
     choices = data.get("choices", [])
     if not choices:
@@ -323,14 +367,30 @@ def _parse_openai_response(data: dict[str, Any]) -> tuple[str, dict[str, int], t
         ))
 
     usage = data.get("usage", {})
-    details = usage.get("prompt_tokens_details") or {}
+    prompt_details = usage.get("prompt_tokens_details") or {}
+    completion_details = usage.get("completion_tokens_details") or {}
     parsed_usage = {
-        "prompt_tokens": usage.get("prompt_tokens", 0),
-        "completion_tokens": usage.get("completion_tokens", 0),
-        "total_tokens": usage.get("total_tokens", 0),
+        "prompt_tokens": _usage_int(usage, "prompt_tokens"),
+        "completion_tokens": _usage_int(usage, "completion_tokens"),
+        "total_tokens": _usage_int(usage, "total_tokens"),
+        "input_tokens": _usage_int(usage, "prompt_tokens"),
+        "output_tokens": _usage_int(usage, "completion_tokens"),
+        "billed_tokens": _usage_int(usage, "total_tokens"),
         # Cached prefix tokens (OpenAI / Together / DeepSeek prompt cache).
         # 0 when the provider doesn't report cache hits or the prefix didn't match.
-        "cached_tokens": int(details.get("cached_tokens") or 0),
+        "cached_tokens": _usage_int(prompt_details, "cached_tokens"),
+        "cache_read_tokens": _usage_int(prompt_details, "cached_tokens"),
+        "reasoning_tokens": _usage_int(completion_details, "reasoning_tokens"),
+        "accepted_prediction_tokens": _usage_int(
+            completion_details,
+            "accepted_prediction_tokens",
+        ),
+        "rejected_prediction_tokens": _usage_int(
+            completion_details,
+            "rejected_prediction_tokens",
+        ),
+        "input_audio_tokens": _usage_int(prompt_details, "audio_tokens"),
+        "output_audio_tokens": _usage_int(completion_details, "audio_tokens"),
     }
 
     stop_reason = "tool_use" if finish_reason == "tool_calls" else "end_turn" if finish_reason == "stop" else finish_reason
@@ -361,9 +421,24 @@ def _parse_anthropic_response(data: dict[str, Any]) -> tuple[str, dict[str, int]
 
     content = "\n".join(text_parts)
     usage = data.get("usage", {})
+    input_tokens = _usage_int(usage, "input_tokens")
+    output_tokens = _usage_int(usage, "output_tokens")
     parsed_usage = {
-        "input_tokens": usage.get("input_tokens", 0),
-        "output_tokens": usage.get("output_tokens", 0),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "billed_tokens": input_tokens + output_tokens,
+        "cache_creation_input_tokens": _usage_int(
+            usage,
+            "cache_creation_input_tokens",
+        ),
+        "cache_read_input_tokens": _usage_int(usage, "cache_read_input_tokens"),
+        "cache_write_tokens": _usage_int(usage, "cache_creation_input_tokens"),
+        "cache_read_tokens": _usage_int(usage, "cache_read_input_tokens"),
+        "thinking_tokens": _usage_int(usage, "thinking_tokens"),
+        "reasoning_tokens": _usage_int(usage, "thinking_tokens"),
     }
 
     stop_reason = data.get("stop_reason")  # "end_turn" or "tool_use"
@@ -399,10 +474,21 @@ def _parse_google_response(data: dict[str, Any]) -> tuple[str, dict[str, int], t
             )
 
     usage = data.get("usageMetadata", {})
+    prompt_tokens = _usage_int(usage, "promptTokenCount")
+    completion_tokens = _usage_int(usage, "candidatesTokenCount")
+    total_tokens = _usage_int(usage, "totalTokenCount")
     parsed_usage = {
-        "prompt_tokens": usage.get("promptTokenCount", 0),
-        "completion_tokens": usage.get("candidatesTokenCount", 0),
-        "total_tokens": usage.get("totalTokenCount", 0),
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "input_tokens": prompt_tokens,
+        "output_tokens": completion_tokens,
+        "billed_tokens": total_tokens,
+        "cache_read_tokens": _usage_int(usage, "cachedContentTokenCount"),
+        "cached_tokens": _usage_int(usage, "cachedContentTokenCount"),
+        "tool_prompt_tokens": _usage_int(usage, "toolUsePromptTokenCount"),
+        "thoughts_tokens": _usage_int(usage, "thoughtsTokenCount"),
+        "reasoning_tokens": _usage_int(usage, "thoughtsTokenCount"),
     }
     stop_reason = first_candidate.get("finishReason")
     return "\n".join(text_parts), parsed_usage, tuple(tool_calls), stop_reason

@@ -39,6 +39,7 @@ _CHARS_PER_TOKEN = 4.0
 _MAX_CONVERSATION_COST_USD = 10.0
 _MAX_VALUABLE_CONTEXT_TOKENS = 1_200
 _MAX_VALUABLE_CONTEXT_MESSAGES = 80
+_MAX_REQUESTED_CHAT_TOKENS = int(os.environ.get("PRAXIS_CHAT_MAX_REQUESTED_TOKENS", "32768"))
 _LAST_GOOD_CLI_ROUTE: tuple[str, str] | None = None
 _RECENTLY_FAILED_ROUTES: dict[tuple[str, str], float] = {}
 _ROUTE_FAILURE_TTL_SECONDS = 300  # skip routes that failed in the last 5 minutes
@@ -75,6 +76,8 @@ Authoring loop: read graph → propose change in plain English → call moon_mut
 
 When the user asks you to do something, use the appropriate tool. Present data clearly. When showing tables, include all relevant columns.
 Workflow mutations are command-bus backed. If a tool returns approval_required or queued metadata, report that state instead of pretending the mutation already wrote through.
+
+When the user has the Moon canvas open, the selection_context will contain a single entry with kind="moon_context" carrying workflow_id (and possibly selected_node_id, selected_edge_id). The moon_* tools auto-default workflow_id to that entry when you omit it — so when the user says "what's in this workflow" or "add a Slack node here", you can call moon_get_build / moon_mutate_field WITHOUT passing workflow_id and it will target the workflow they're looking at. Only pass workflow_id explicitly when the user names a different workflow.
 
 If the user has selected items (shown in the context), reference them when relevant. If they ask to "route these" or "send these to a workflow", use the run_workflow tool with the selected items.
 
@@ -143,6 +146,46 @@ def _load_chat_tools() -> tuple[list[dict[str, Any]], Any]:
     return CHAT_TOOLS, execute_tool
 
 
+def _bounded_positive_int(value: Any, *, minimum: int = 1, maximum: int) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < minimum:
+        return None
+    return min(parsed, maximum)
+
+
+def _chat_max_tokens(
+    *,
+    selection_context: list[dict[str, Any]] | None,
+    requested_max_tokens: Any = None,
+) -> int | None:
+    requested = _bounded_positive_int(
+        requested_max_tokens,
+        minimum=256,
+        maximum=_MAX_REQUESTED_CHAT_TOKENS,
+    )
+    if requested is not None:
+        return requested
+    # No arbitrary output cap. OpenAI/Google omit max_tokens entirely; Anthropic
+    # still receives the adapter's high fallback because that API requires a
+    # value. The real clamp is context selection + tool reads, not response-size
+    # guessing.
+    return None
+
+
+def _selection_context_char_limit(item: dict[str, Any]) -> int:
+    kind = str(item.get("kind") or item.get("type") or "").strip()
+    if kind in {"moon_context", "moon_materialize_handoff"}:
+        return 12_000
+    if kind == "chat_file_context":
+        return 16_000
+    return 2_000
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedChatRoute:
     provider_slug: str
@@ -151,6 +194,8 @@ class ResolvedChatRoute:
     endpoint_uri: str | None = None
     api_key: str | None = None
     supports_tool_loop: bool = False
+    max_tokens: int | None = None
+    temperature: float | None = None
 
 
 def _parse_model_override(model_override: Any) -> tuple[str, str] | None:
@@ -201,6 +246,7 @@ class ChatOrchestrator:
         selection_context: list[dict[str, Any]] | None = None,
         *,
         model_override: Any = None,
+        max_tokens: Any = None,
     ) -> dict[str, Any]:
         """Send a user message and get a complete response.
 
@@ -217,6 +263,10 @@ class ChatOrchestrator:
 
         # Load history
         messages = self._load_history(conversation_id, selection_context)
+        resolved_max_tokens = _chat_max_tokens(
+            selection_context=selection_context,
+            requested_max_tokens=max_tokens,
+        )
 
         routes = self._resolve_route_chain(model_override=model_override)
 
@@ -254,6 +304,7 @@ class ChatOrchestrator:
                 candidate_routes,
                 messages=tuple(messages),
                 tools=tuple(chat_tools),
+                max_tokens=resolved_max_tokens,
             )
             model_used = f"{response.provider_slug}/{response.model}"
 
@@ -338,6 +389,7 @@ class ChatOrchestrator:
         selection_context: list[dict[str, Any]] | None = None,
         *,
         model_override: Any = None,
+        max_tokens: Any = None,
     ) -> Iterator[dict[str, Any]]:
         """Send a user message and yield streaming events.
 
@@ -353,6 +405,10 @@ class ChatOrchestrator:
 
         # Load history
         messages = self._load_history(conversation_id, selection_context)
+        resolved_max_tokens = _chat_max_tokens(
+            selection_context=selection_context,
+            requested_max_tokens=max_tokens,
+        )
 
         routes = self._resolve_route_chain(model_override=model_override)
 
@@ -372,7 +428,11 @@ class ChatOrchestrator:
             return
 
         # Resolve HTTP model lane
-        provider, model, endpoint, api_key = self._resolve_model(routes)
+        route = self._resolve_http_routes(routes)[0]
+        provider = route.provider_slug
+        model = route.model_slug
+        endpoint = route.endpoint_uri or ""
+        api_key = route.api_key or ""
 
         all_tool_results: list[dict] = []
         full_text = ""
@@ -390,8 +450,12 @@ class ChatOrchestrator:
                 messages=tuple(messages),
                 tools=tuple(chat_tools),
                 system_prompt=SYSTEM_PROMPT,
-                max_tokens=4096,
-                temperature=0.2,
+                max_tokens=(
+                    resolved_max_tokens
+                    if resolved_max_tokens is not None
+                    else route.max_tokens
+                ),
+                temperature=route.temperature if route.temperature is not None else 0.2,
             )
 
             collected_text = ""
@@ -410,7 +474,13 @@ class ChatOrchestrator:
                     collected_tool_calls.append({"id": event["id"], "name": event["name"], "input": event["input"]})
 
                     # Execute tool immediately
-                    result = execute_tool(event["name"], event["input"], self._pg, self._repo_root)
+                    result = execute_tool(
+                        event["name"],
+                        event["input"],
+                        self._pg,
+                        self._repo_root,
+                        selection_context=selection_context,
+                    )
                     all_tool_results.append({"tool_call_id": event["id"], "tool_name": event["name"], "result": result})
 
                     # Persist and yield
@@ -553,7 +623,13 @@ class ChatOrchestrator:
         if selection_context and messages:
             ctx_text = f"\n\n[User has {len(selection_context)} items selected:\n"
             for item in selection_context[:10]:
-                ctx_text += f"  - {json.dumps(item)[:200]}\n"
+                if not isinstance(item, dict):
+                    continue
+                limit = _selection_context_char_limit(item)
+                rendered = json.dumps(item, default=str)
+                clipped = rendered[:limit]
+                suffix = " ..." if len(rendered) > limit else ""
+                ctx_text += f"  - {clipped}{suffix}\n"
             if len(selection_context) > 10:
                 ctx_text += f"  ... and {len(selection_context) - 10} more]\n"
             messages[-1]["content"] += ctx_text
@@ -726,6 +802,16 @@ class ChatOrchestrator:
                         model_slug=model,
                         adapter_type=adapter_type,
                         supports_tool_loop=False,
+                        max_tokens=_bounded_positive_int(
+                            getattr(decision, "max_tokens", None),
+                            minimum=1,
+                            maximum=_MAX_REQUESTED_CHAT_TOKENS,
+                        ),
+                        temperature=(
+                            float(getattr(decision, "temperature"))
+                            if getattr(decision, "temperature", None) is not None
+                            else None
+                        ),
                     )
                 )
                 continue
@@ -746,6 +832,16 @@ class ChatOrchestrator:
                     endpoint_uri=endpoint,
                     api_key=api_key,
                     supports_tool_loop=True,
+                    max_tokens=_bounded_positive_int(
+                        getattr(decision, "max_tokens", None),
+                        minimum=1,
+                        maximum=_MAX_REQUESTED_CHAT_TOKENS,
+                    ),
+                    temperature=(
+                        float(getattr(decision, "temperature"))
+                        if getattr(decision, "temperature", None) is not None
+                        else None
+                    ),
                 )
             )
 
@@ -805,6 +901,7 @@ class ChatOrchestrator:
         *,
         messages: tuple[dict[str, Any], ...],
         tools: tuple[dict[str, Any], ...],
+        max_tokens: int | None,
     ) -> tuple[LLMResponse, ResolvedChatRoute]:
         """Call chat over HTTP, trying each routed candidate before failing."""
         http_routes = self._resolve_http_routes(routes)
@@ -819,8 +916,8 @@ class ChatOrchestrator:
                 messages=messages,
                 tools=tools,
                 system_prompt=SYSTEM_PROMPT,
-                max_tokens=4096,
-                temperature=0.2,
+                max_tokens=max_tokens if max_tokens is not None else route.max_tokens,
+                temperature=route.temperature if route.temperature is not None else 0.2,
             )
             try:
                 response = call_llm(request)

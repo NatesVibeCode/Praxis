@@ -14,6 +14,8 @@ and fails explicitly when the row is absent.
 
 from __future__ import annotations
 
+from runtime.async_bridge import run_sync_safe
+
 import logging
 
 from runtime._workflow_database import resolve_runtime_database_url
@@ -98,7 +100,7 @@ def _load_model_profiles_context_windows() -> dict[tuple[str, str], int]:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 _model_profiles_cache = pool.submit(asyncio.run, _fetch()).result(timeout=10)
         else:
-            _model_profiles_cache = asyncio.run(_fetch())
+            _model_profiles_cache = run_sync_safe(_fetch())
         _model_profiles_loaded = True
         return _model_profiles_cache or {}
 

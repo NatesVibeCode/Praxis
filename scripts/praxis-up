@@ -90,6 +90,33 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
     exit 3
   fi
 
+  # Pre-create the Claude credentials file path so docker-compose's bind-mount
+  # has a real file to mount. Otherwise (host file missing) Docker silently
+  # creates the path as a *directory* on host, the container then mounts a
+  # directory at /root/.claude/.credentials.json, and the claude CLI's file-
+  # auth fallback fails open with "loggedIn: false". Operator fix path is
+  # CLAUDE_CODE_OAUTH_TOKEN env (set above), but the directory-mount also
+  # corrupts the host so subsequent `claude login` writes fail. Touching an
+  # empty file here is idempotent: if a real credentials file already exists,
+  # touch only updates mtime; if it's a directory, the touch fails and we
+  # warn-and-clear so the next login can proceed cleanly.
+  CLI_AUTH_HOME="${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}"
+  CRED_PATH="${CLI_AUTH_HOME}/.claude/.credentials.json"
+  mkdir -p "${CLI_AUTH_HOME}/.claude"
+  if [[ -d "$CRED_PATH" ]]; then
+    echo "praxis-up: WARN — $CRED_PATH is a directory (docker-compose bind-mount accident)" >&2
+    echo "             Removing the empty directory so the bind-mount can attach a real file next recreate." >&2
+    if rmdir "$CRED_PATH" 2>/dev/null; then
+      touch "$CRED_PATH"
+    else
+      echo "praxis-up: ERROR — directory at $CRED_PATH is not empty; refusing to delete blindly." >&2
+      echo "             Inspect contents and either preserve them under a backup name or delete manually." >&2
+      exit 3
+    fi
+  elif [[ ! -e "$CRED_PATH" ]]; then
+    touch "$CRED_PATH"
+  fi
+
   echo "→ exporting Keychain (account=praxis) into shell env via bin/praxis-compose-env"
   # shellcheck disable=SC2046
   set -a
@@ -149,5 +176,20 @@ if [[ "$UNHEALTHY" != "0" ]]; then
   echo "'unauthenticated' means the host login or token source itself is bad."
   exit 1
 fi
+
+# Auth probe passed — clear any open zero-token-silent-failure hits so the
+# anti-pattern detector reverses route demotions cleanly. Migration 334
+# installed the detector + hits log; the recurring scenario this closes is:
+# operator runs praxis-up to fix auth → routes that were auto-demoted while
+# auth was broken stay demoted forever unless something explicitly clears.
+# This is the explicit clear, gated on actually-passing the auth probe.
+echo "→ clearing any open zero-token silent-failure hits (auth probe passed)"
+docker compose exec -T workflow-worker python3 - <<'PY' || true
+from storage.postgres.connection import SyncPostgresConnection
+from runtime.observability.zero_token_detector import clear_resolved_after_auth
+with SyncPostgresConnection() as conn:
+    cleared = clear_resolved_after_auth(conn)
+print(f"  cleared {cleared} open zero-token hit(s)")
+PY
 
 echo "✓ all CLI providers healthy."

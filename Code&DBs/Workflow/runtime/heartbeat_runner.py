@@ -4,6 +4,7 @@ cycles, persisting only a minimal status row in Postgres.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from dataclasses import dataclass
 import json
 import logging
@@ -506,7 +507,7 @@ class _AuthorityMemoryProjectionRefreshModule(HeartbeatModule):
                 refresh_authority_memory_projection,
             )
 
-            asyncio.run(
+            run_sync_safe(
                 refresh_authority_memory_projection(
                     env=self._workflow_env,
                 )
@@ -863,11 +864,20 @@ class HeartbeatRunner:
                 RelationshipIntegrityScanner,
                 SchemaConsistencyScanner,
             )
+            # Build-anti-pattern detector — operational-health companion to
+            # the memory-graph hygiene modules above. Quiet on healthy cycles;
+            # emits one structured log line per active rule when findings
+            # exist. Pluggable: future rules added to build_antipattern_registry
+            # (migration 334) are picked up automatically by run_sweep.
+            from runtime.observability.zero_token_detector import (
+                BuildAntipatternSweepModule,
+            )
 
             modules.extend([
                 RelationshipIntegrityScanner(self._engine),
                 SchemaConsistencyScanner(self._engine),
                 ContentQualityScanner(self._engine),
+                BuildAntipatternSweepModule(self._conn),
                 MemorySync(self._conn, self._engine),
                 SchemaProjector(self._conn, self._engine),
                 DataDictionaryProjector(self._conn),

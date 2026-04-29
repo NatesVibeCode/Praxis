@@ -131,22 +131,31 @@ def resolve_submission_for_job(
                 exc,
             )
 
-    # ── Stage 2.5: auto-seal on write_scope match ──────────────────────────
-    # If the agent exited cleanly AND submission is required AND no submission
-    # was sealed, attempt to auto-seal by detecting files changed within the
-    # declared write_scope. We call `_measured_operations` directly (rather
-    # than `_submit_submission`) so we can be SCOPE-TOLERANT: build packets
-    # often produce shell side-effects (tmp files, cache, history) that
-    # would trip the strict `out_of_scope` guard inside `_submit_submission`.
-    # The agent's intent — writing the in-scope deliverable — is achieved
-    # whether or not the sandbox shell also wrote ephemeral side files;
-    # auto-seal records ONLY the in-scope subset and notes the side files
-    # were ignored.
-    #
-    # Auto-seal still fails closed when no in-scope file changed (the
-    # genuine contract violation). In that case Stage 3 fires the original
-    # `workflow_submission.required_missing`.
-    if final_status == "succeeded" and submission_required and submission_state is None:
+    contract = (execution_bundle or {}).get("completion_contract") or {}
+    contract_result_kind = str(contract.get("result_kind") or "").strip().lower()
+    code_candidate_required = contract_result_kind in {"code_change_candidate", "code_change"}
+
+    if final_status == "succeeded" and submission_required and submission_state is None and code_candidate_required:
+        result = _result_with_stderr(
+            result,
+            (
+                "code-change jobs must submit a structured candidate via "
+                "praxis_submit_code_change_candidate; sandbox file diffs are not a "
+                "code-change submission authority"
+            ),
+        )
+
+    # ── Stage 2.5: auto-seal non-code artifact outputs only ────────────────
+    # Code-change work no longer auto-seals from sandbox file writes. It must
+    # arrive as a structured code_change_candidate submission. Artifact-only
+    # tasks may still be auto-sealed from scoped files because those files are
+    # the deliverable, not a proposal to mutate canonical source.
+    if (
+        final_status == "succeeded"
+        and submission_required
+        and submission_state is None
+        and not code_candidate_required
+    ):
         try:
             from pathlib import Path
             from runtime.workflow.submission_capture import (
@@ -192,14 +201,14 @@ def resolve_submission_for_job(
             )
             if not changed_paths:
                 logger.info(
-                    "auto-seal skipped for %s/%s: no in-scope changes (out_of_scope=%d)",
+                    "auto-seal sealing no-change artifact completion for %s/%s (out_of_scope=%d)",
                     run_id, job_label, len(out_of_scope),
                 )
-                raise _AutoSealSkip()
 
-            contract = (execution_bundle or bundle or {}).get("completion_contract") or {}
             auto_result_kind = (
-                str(contract.get("result_kind") or "").strip() or "code_change"
+                contract_result_kind
+                or str(((bundle or {}).get("completion_contract") or {}).get("result_kind") or "").strip().lower()
+                or "artifact_bundle"
             )
             artifact_refs: list[str] = []
             for op in operation_set:
@@ -342,11 +351,23 @@ def resolve_submission_for_job(
     effective_verification_refs = (
         list(verification_artifact_refs) or submission_verification_refs
     )
+    # Code-change candidates are verified at materialization, not authoring.
+    # Non-code artifact submissions keep the old verifier contract.
+    submission_result_kind = (
+        str(submission_state.get("result_kind") or "").strip().lower()
+        if isinstance(submission_state, dict)
+        else ""
+    )
+    submission_has_code_changes = isinstance(submission_state, dict) and bool(
+        submission_state.get("changed_paths") or submission_state.get("operation_set")
+    )
     if (
         enforce_verification_contract
         and verification_required
         and final_status == "succeeded"
         and not effective_verification_refs
+        and submission_has_code_changes
+        and submission_result_kind != "code_change_candidate"
     ):
         final_status = "failed"
         final_error_code = "verification.required_not_run"

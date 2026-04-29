@@ -8,6 +8,7 @@ authority path instead of importing the runtime writer directly.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from typing import Literal
 
 from pydantic import BaseModel
@@ -35,7 +36,7 @@ class DailyHeartbeatRefreshCommand(BaseModel):
 
 
 def _run_heartbeat(command: DailyHeartbeatRefreshCommand):
-    return asyncio.run(
+    return run_sync_safe(
         run_daily_heartbeat(
             scope=command.scope,
             triggered_by=command.triggered_by,

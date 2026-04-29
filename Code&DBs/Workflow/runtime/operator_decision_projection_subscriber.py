@@ -16,6 +16,7 @@ downstream tooling can replay subscriber activity from the log.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -209,19 +210,13 @@ class OperatorDecisionProjectionSubscriber:
         as_of: datetime | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(
-                self.consume_available_async(
-                    limit=limit,
-                    subscriber_id=subscriber_id,
-                    as_of=as_of,
-                    env=env,
-                )
+        return run_sync_safe(
+            self.consume_available_async(
+                limit=limit,
+                subscriber_id=subscriber_id,
+                as_of=as_of,
+                env=env,
             )
-        raise RuntimeError(
-            "operator decision projection sync subscriber requires a non-async call boundary"
         )
 
 

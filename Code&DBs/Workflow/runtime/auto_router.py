@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import logging
 import random
 import time
@@ -137,7 +138,7 @@ async def _load_candidates_async() -> tuple[RouteCandidate, ...]:
 
 def load_candidates_from_db() -> tuple[RouteCandidate, ...]:
     """Load active candidates from Postgres (synchronous wrapper)."""
-    return asyncio.run(_load_candidates_async())
+    return run_sync_safe(_load_candidates_async())
 
 
 def refresh_candidates(candidates: tuple[RouteCandidate, ...]) -> None:

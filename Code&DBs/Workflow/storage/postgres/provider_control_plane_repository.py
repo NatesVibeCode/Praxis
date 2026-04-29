@@ -54,6 +54,13 @@ class ProviderControlPlaneSnapshotRow:
     model_version: str
     cost_structure: str
     cost_metadata: Mapping[str, Any]
+    route_temperature: float | None
+    route_max_tokens: int | None
+    route_reasoning_control: Mapping[str, Any]
+    route_request_contract_ref: str | None
+    route_cache_policy: Mapping[str, Any]
+    route_structured_output_policy: Mapping[str, Any]
+    route_streaming_policy: Mapping[str, Any]
     control_enabled: bool
     control_state: str
     control_scope: str
@@ -182,6 +189,13 @@ class PostgresProviderControlPlaneRepository:
                     snapshot.model_version,
                     snapshot.cost_structure,
                     snapshot.cost_metadata,
+                    route.temperature AS route_temperature,
+                    route.max_tokens AS route_max_tokens,
+                    route.reasoning_control AS route_reasoning_control,
+                    route.request_contract_ref AS route_request_contract_ref,
+                    route.cache_policy AS route_cache_policy,
+                    route.structured_output_policy AS route_structured_output_policy,
+                    route.streaming_policy AS route_streaming_policy,
                     (control.runtime_profile_ref IS NOT NULL) AS control_is_present,
                     COALESCE(control.control_enabled, snapshot.is_runnable) AS control_enabled,
                     COALESCE(
@@ -228,6 +242,12 @@ class PostgresProviderControlPlaneRepository:
                  AND control.adapter_type = snapshot.adapter_type
                  AND control.provider_slug = snapshot.provider_slug
                  AND control.model_slug = snapshot.model_slug
+                LEFT JOIN task_type_routing AS route
+                  ON route.task_type = snapshot.job_type
+                 AND route.transport_type = snapshot.transport_type
+                 AND route.provider_slug = snapshot.provider_slug
+                 AND route.model_slug = snapshot.model_slug
+                 AND route.sub_task_type = '*'
                 WHERE snapshot.runtime_profile_ref = $1
                   AND ($2::text IS NULL OR snapshot.job_type = $2)
                   AND ($3::text IS NULL OR snapshot.transport_type = $3)
@@ -250,6 +270,13 @@ class PostgresProviderControlPlaneRepository:
                 snapshot.model_version,
                 snapshot.cost_structure,
                 snapshot.cost_metadata,
+                snapshot.route_temperature,
+                snapshot.route_max_tokens,
+                snapshot.route_reasoning_control,
+                snapshot.route_request_contract_ref,
+                snapshot.route_cache_policy,
+                snapshot.route_structured_output_policy,
+                snapshot.route_streaming_policy,
                 snapshot.control_is_present,
                 snapshot.control_enabled,
                 snapshot.control_state,
@@ -493,6 +520,27 @@ def _provider_control_plane_snapshot_row(
         model_version=str(row.get("model_version") or ""),
         cost_structure=str(row["cost_structure"]),
         cost_metadata=dict(row.get("cost_metadata") or {}),
+        route_temperature=(
+            float(row["route_temperature"])
+            if row.get("route_temperature") is not None
+            else None
+        ),
+        route_max_tokens=(
+            int(row["route_max_tokens"])
+            if row.get("route_max_tokens") is not None
+            else None
+        ),
+        route_reasoning_control=dict(row.get("route_reasoning_control") or {}),
+        route_request_contract_ref=(
+            str(row["route_request_contract_ref"])
+            if row.get("route_request_contract_ref") is not None
+            else None
+        ),
+        route_cache_policy=dict(row.get("route_cache_policy") or {}),
+        route_structured_output_policy=dict(
+            row.get("route_structured_output_policy") or {}
+        ),
+        route_streaming_policy=dict(row.get("route_streaming_policy") or {}),
         control_enabled=control_enabled,
         control_state=str(row.get("control_state") or "off"),
         control_scope=str(row.get("control_scope") or ""),

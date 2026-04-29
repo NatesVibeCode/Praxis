@@ -1,0 +1,82 @@
+{
+  "name": "Roadmap / Add canonical route authority write surface for task_type_routing",
+  "workflow_id": "roadmap-add-canonical-route-authority-write-surface-for-task-type-routing-20260428",
+  "queue_id": "roadmap-add-canonical-route-authority-write-surface-for-task-type-routing-20260428",
+  "phase": "roadmap_item_packet",
+  "outcome_goal": "Ship a canonical CQRS write surface for task_type_routing rows so provider routing changes (e.g. Anthropic Sonnet CLI compile-family routes) no longer require ad hoc SQL or full-schema migrations. The new surface must be operator-facing (CLI + MCP), receipt-and-event backed through operation_catalog_gateway, and replace the patch path that motivated decision.2026-04-29.add-canonical-route-authority-write-surface-for-task-type-routing.",
+  "anti_requirements": [
+    "Do NOT add another sidecar SQL apply path; the new surface MUST go through operation_catalog_gateway.execute_operation_from_subsystems.",
+    "Do NOT register the operation in operation_catalog_registry without also writing the matching authority_object_registry and data_dictionary_objects rows in the same migration.",
+    "Do NOT skip the receipt + event contract (event_required=TRUE on the command, event_type=task_type_routing.upserted or equivalent registered via migration).",
+    "Do NOT widen scope beyond the task_type_routing write surface and the smallest provider-onboarding extension required to call it.",
+    "Do NOT mark complete unless the live demo upserts a real route through the new surface end-to-end and a unit test asserts gateway dispatch + receipt persistence."
+  ],
+  "target_repo": ".",
+  "workdir": ".",
+  "jobs": [
+    {
+      "label": "plan_route_authority_write_surface",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Lock the execution boundary for the task_type_routing write surface and produce an operator-facing PLAN.md.",
+      "outcome_goal": "One plan artifact names the exact files, schemas, operation kind, idempotency policy, event contract, registry rows, CLI/MCP touchpoints, and verification path before any code is written.",
+      "prompt": "Read these authority sources first, in order:\n\n1. Roadmap row + decision: roadmap_item.add.canonical.route.authority.write.surface.for.task.type.routing -> decision.2026-04-29.add-canonical-route-authority-write-surface-for-task-type-routing. Pull both via `praxis workflow tools call praxis_operator_roadmap_view --input-json '{\"root_roadmap_item_id\":\"roadmap_item.add.canonical.route.authority.write.surface.for.task.type.routing\"}'` and `praxis workflow tools call praxis_operator_decisions --input-json '{\"action\":\"list\",\"decision_kind\":\"architecture_policy\",\"limit\":50}'`.\n2. Existing CQRS contract examples: `Code&DBs/Databases/migrations/workflow/0234_register_launch_plan_command_op.sql`, `0235_register_compose_plan_command_op.sql` (the pattern for registering a command op with event contract).\n3. Existing route authority: grep for `task_type_routing` under `Code&DBs/Workflow/runtime/`, `surfaces/`, and `Code&DBs/Databases/migrations/workflow/` to inventory current readers, writers, and ad hoc patches.\n4. Provider-onboarding authority: `Code&DBs/Workflow/runtime/provider_onboarding/` and `surfaces/mcp/tools/provider_onboarding.py` for the existing operator front door we may extend instead of duplicating.\n\nWrite `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/PLAN.md` with these sections:\n1. Current state (every place a task_type_routing row is written today, including the SQL patch path that motivated the roadmap item)\n2. Target operation contract (operation_name, operation_kind=command, idempotency_policy, receipt_required=TRUE, event_required=TRUE, event_type, handler_ref, input_model_ref)\n3. Migration list to add (registry triple: operation_catalog_registry + authority_object_registry + data_dictionary_objects + event contract)\n4. Handler module + Pydantic input model paths (under runtime/operations/commands/)\n5. CLI alias + MCP tool wiring (do NOT invent a new tool if extending an existing provider_onboarding tool covers the case; capture the decision)\n6. Verification plan: unit test that proves gateway dispatch persists authority_operation_receipts + authority_events rows on a real upsert\n7. Stop boundary: nothing about provider routing semantics or task-type dictionary changes\n\nUse current repo truth, not guesses. Do not edit code in this job.",
+      "read": [
+        "Code&DBs/Workflow/runtime/operations/commands/plan_orchestration.py",
+        "Code&DBs/Workflow/runtime/operation_catalog_gateway.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/provider_onboarding.py",
+        "Code&DBs/Databases/migrations/workflow/0234_register_launch_plan_command_op.sql",
+        "Code&DBs/Databases/migrations/workflow/0235_register_compose_plan_command_op.sql"
+      ],
+      "write": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/PLAN.md"
+      ],
+      "verify_command": "test -s 'Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/PLAN.md'"
+    },
+    {
+      "label": "execute_route_authority_write_surface",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.roadmap-add-canonical-route-authority-write-surface-for-task-type-routing.execute"
+      ],
+      "depends_on": ["plan_route_authority_write_surface"],
+      "description": "Implement the route authority write surface end-to-end: handler, model, registry migrations, CLI/MCP wiring, single unit test.",
+      "outcome_goal": "A new command operation (task_type_routing.upsert or equivalent named in PLAN.md) dispatches through operation_catalog_gateway.execute_operation_from_subsystems, writes a receipt to authority_operation_receipts, and emits a registered event into authority_events. Operator can call it via `praxis workflow tools call <tool> --input-json '{...}'`.",
+      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/PLAN.md` first, then implement exactly what it locked.\n\nDo, in order:\n1. Add the Pydantic input model + handler in `Code&DBs/Workflow/runtime/operations/commands/` matching the path PLAN.md named.\n2. Add the migration that registers the operation in operation_catalog_registry, authority_object_registry, data_dictionary_objects, and the event contract row. Reuse the structure of 0234/0235.\n3. Wire the CLI alias and/or MCP tool wrapper to dispatch through `execute_operation_from_subsystems`. Do not call the handler directly.\n4. Add ONE unit test under `Code&DBs/Workflow/tests/unit/` that exercises gateway dispatch on a real (test) DB and asserts (a) authority_operation_receipts row with execution_status='completed', (b) authority_events row with the registered event_type linked by receipt_id, (c) the task_type_routing row matches the input.\n5. Apply the migration to the dev DB and run the new test only:\n\n```bash\nPYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_task_type_routing_upsert_command.py\n```\n\nIf any step blocks (e.g. handler_ref import path, registry constraint), record the blocker in `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/EXECUTION.md` with the exact authority surface that needs to change first; do not bypass the gateway.\n\nDone criteria:\n- Operation appears in `praxis workflow tools list | grep task_type_routing` (or via the chosen extension to provider_onboarding).\n- A live `--input-json` upsert returns operation_receipt with receipt_id and event_ids non-empty.\n- The unit test passes locally.\n- EXECUTION.md records the receipt_id from the live upsert and the test command + result.\n\nStop boundary: Do not change provider routing semantics, task-type dictionary, or any consumer of task_type_routing reads.",
+      "read": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/PLAN.md",
+        "Code&DBs/Workflow/runtime/operations/commands/plan_orchestration.py",
+        "Code&DBs/Databases/migrations/workflow/0235_register_compose_plan_command_op.sql"
+      ],
+      "write": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/EXECUTION.md",
+        "Code&DBs/Workflow/runtime/operations/commands/",
+        "Code&DBs/Databases/migrations/workflow/",
+        "Code&DBs/Workflow/surfaces/mcp/tools/",
+        "Code&DBs/Workflow/tests/unit/"
+      ],
+      "verify_command": "test -s 'Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/EXECUTION.md'"
+    },
+    {
+      "label": "verify_and_close_route_authority_write_surface",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "verify_refs": [
+        "verify.roadmap-add-canonical-route-authority-write-surface-for-task-type-routing.verify"
+      ],
+      "depends_on": ["execute_route_authority_write_surface"],
+      "description": "Run the registered verifier, close out the roadmap item with proof, and (optionally) retire the SQL patch path the surface replaces.",
+      "outcome_goal": "Roadmap item lifecycle moves to completed via praxis_operator_closeout with proof-backed evidence (receipt_id + test verifier_run linkage). The SQL patch path that motivated the item is either deleted or marked retired with a pointer to the new operation.",
+      "prompt": "Read PLAN.md and EXECUTION.md for the packet first.\n\nThen do the narrowest meaningful verification and closeout:\n\n1. Run the unit test through the canonical pytest verifier and capture the verifier_run row id:\n\n```bash\npraxis workflow tools call praxis_bugs --input-json '{\"action\":\"resolve\",\"bug_id\":\"<placeholder if a tracking bug exists>\",\"status\":\"FIX_PENDING_VERIFICATION\"}'\n```\n\nIf there is no tracking bug, file one via `praxis_bugs(action='file', title='Track: route authority write surface for task_type_routing', severity='P2', category='ARCHITECTURE')` so verifier evidence has somewhere to anchor.\n\n2. Use `praxis_operator_closeout` (preview, then commit) to mark roadmap_item.add.canonical.route.authority.write.surface.for.task.type.routing as completed, attaching:\n   - the operation_receipt id from the live upsert demo\n   - the verifier_run row from the pytest run\n   - the migration filename(s)\n\n3. If PLAN.md identified a now-dead SQL patch path, retire it: delete the dead helper or mark the migration superseded with a comment pointing at the new operation. Capture this in CLOSEOUT.md.\n\n4. Write `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/CLOSEOUT.md` with:\n   - operation_name + handler_ref\n   - migration ids\n   - receipt_id from live demo\n   - verifier_run id from pytest\n   - roadmap closeout receipt id\n   - explicit list of files deleted or retired\n\nVerification surface: live operator dispatch through CLI + receipt + event contract proof + unit test pass.\nStop boundary: Do not touch unrelated provider-onboarding behavior, task_type_routing reads, or any other roadmap rows.",
+      "read": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/PLAN.md",
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/EXECUTION.md"
+      ],
+      "write": [
+        "Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/CLOSEOUT.md"
+      ],
+      "verify_command": "test -s 'Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets_20260428_full/roadmap-item-add-canonical-route-authority-write-surface-for-task-type-routing/CLOSEOUT.md'"
+    }
+  ]
+}

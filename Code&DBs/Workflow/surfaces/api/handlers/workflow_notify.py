@@ -87,6 +87,7 @@ def _handle_chat_messages_post(request: Any, path: str) -> None:
         content = body.get("content", "")
         selection = body.get("selection_context")
         model_override = body.get("model")
+        max_tokens = body.get("max_tokens", body.get("maxTokens"))
         chat = ChatOrchestrator(pg, str(REPO_ROOT))
 
         accept = request.headers.get("Accept", "")
@@ -105,6 +106,7 @@ def _handle_chat_messages_post(request: Any, path: str) -> None:
                 content,
                 selection,
                 model_override=model_override,
+                max_tokens=max_tokens,
             ):
                 event_type = event.get("event", "message")
                 data = json.dumps(event.get("data", {}), default=str)
@@ -132,6 +134,7 @@ def _handle_chat_messages_post(request: Any, path: str) -> None:
             content,
             selection,
             model_override=model_override,
+            max_tokens=max_tokens,
         )
         pack = _save_chat_carry_forward(
             request.subsystems,

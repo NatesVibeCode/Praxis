@@ -42,6 +42,11 @@ from runtime.workflow.submission_contract import (
     optional_datetime as _optional_datetime_impl,
     strip_str as _strip_str_impl,
 )
+from runtime.workflow.candidate_authoring import (
+    CandidateAuthoringError,
+    derive_candidate_patch_from_sources,
+)
+from runtime.workspace_paths import repo_root as _default_repo_root
 from runtime.workflow.evidence_sequence_allocator import (
     insert_workflow_event_if_absent_with_deterministic_seq,
 )
@@ -646,15 +651,6 @@ def _make_submit(
     )
 
 
-def submit_code_change(*, run_id: str, workflow_id: str, job_label: str, summary: str,
-    primary_paths: Sequence[str], result_kind: str, tests_ran: Sequence[str] | None = None,
-    notes: str | None = None, declared_operations: Sequence[Mapping[str, Any]] | None = None,
-    conn=None) -> dict[str, Any]:
-    return _make_submit(run_id=run_id, workflow_id=workflow_id, job_label=job_label,
-        summary=summary, primary_paths=primary_paths, result_kind=result_kind,
-        tests_ran=tests_ran, notes=notes, declared_operations=declared_operations, conn=conn)
-
-
 def submit_research_result(*, run_id: str, workflow_id: str, job_label: str, summary: str,
     primary_paths: Sequence[str], result_kind: str, tests_ran: Sequence[str] | None = None,
     notes: str | None = None, declared_operations: Sequence[Mapping[str, Any]] | None = None,
@@ -671,6 +667,300 @@ def submit_artifact_bundle(*, run_id: str, workflow_id: str, job_label: str, sum
     return _make_submit(run_id=run_id, workflow_id=workflow_id, job_label=job_label,
         summary=summary, primary_paths=primary_paths, result_kind=result_kind,
         tests_ran=tests_ran, notes=notes, declared_operations=declared_operations, conn=conn)
+
+
+def submit_code_change_candidate(
+    *,
+    run_id: str,
+    workflow_id: str,
+    job_label: str,
+    bug_id: str,
+    proposal_payload: Mapping[str, Any],
+    source_context_refs: Mapping[str, Any] | Sequence[Mapping[str, Any]],
+    base_head_ref: str | None = None,
+    review_routing: str = "human_review",
+    verifier_ref: str | None = None,
+    verifier_inputs: Mapping[str, Any] | None = None,
+    summary: str | None = None,
+    notes: str | None = None,
+    routing_decision_record: Mapping[str, Any] | None = None,
+    conn=None,
+) -> dict[str, Any]:
+    """Seal a structured code-change candidate under workflow submissions."""
+
+    active_conn, repository = _repo(conn)
+    normalized_run_id = _normalize_text(run_id, field_name="run_id")
+    normalized_workflow_id = _normalize_text(workflow_id, field_name="workflow_id")
+    normalized_job_label = _normalize_text(job_label, field_name="job_label")
+    normalized_bug_id = _normalize_text(bug_id, field_name="bug_id")
+    routing = _normalize_text(review_routing, field_name="review_routing").lower()
+    if routing not in {"auto_apply", "human_review"}:
+        raise WorkflowSubmissionServiceError(
+            "code_change_candidate.routing_unsupported",
+            "V0 code-change candidates support review_routing auto_apply or human_review",
+            details={"review_routing": routing},
+        )
+    try:
+        projection = derive_candidate_patch_from_sources(
+            proposal_payload=proposal_payload,
+            source_context_refs=source_context_refs,
+        )
+    except CandidateAuthoringError as exc:
+        raise WorkflowSubmissionServiceError(
+            exc.reason_code,
+            str(exc),
+            details=exc.details,
+        ) from exc
+
+    normalized_verifier_ref = (
+        _strip_str(verifier_ref)
+        or _strip_str(projection.normalized_proposal.get("verifier_ref"))
+    )
+    if not normalized_verifier_ref:
+        raise WorkflowSubmissionServiceError(
+            "code_change_candidate.verifier_missing",
+            "code-change candidates require verifier_ref",
+            details={"bug_id": normalized_bug_id},
+        )
+    normalized_verifier_inputs = dict(
+        verifier_inputs
+        if isinstance(verifier_inputs, Mapping)
+        else projection.normalized_proposal.get("verifier_inputs") or {}
+    )
+    resolved_base_head_ref = _strip_str(base_head_ref) or _git_head_ref(str(_default_repo_root()))
+    if not resolved_base_head_ref:
+        raise WorkflowSubmissionServiceError(
+            "code_change_candidate.base_head_missing",
+            "could not resolve git HEAD for candidate base_head_ref",
+            details={"run_id": normalized_run_id, "job_label": normalized_job_label},
+        )
+
+    job_row = _current_job_row(
+        active_conn,
+        run_id=normalized_run_id,
+        job_label=normalized_job_label,
+    )
+    attempt_no = max(1, int(job_row.get("attempt") or 1))
+    execution_context_shard, execution_bundle, _ = _load_runtime_context_state(
+        active_conn,
+        run_id=normalized_run_id,
+        job_label=normalized_job_label,
+    )
+    existing_submission = repository.fetch_submission_by_run_job_attempt(
+        run_id=normalized_run_id,
+        job_label=normalized_job_label,
+        attempt_no=attempt_no,
+    )
+    if existing_submission is not None:
+        existing_candidate = active_conn.fetchrow(
+            """
+            SELECT candidate_id::text AS candidate_id,
+                   submission_id,
+                   bug_id,
+                   base_head_ref,
+                   intended_files,
+                   patch_artifact_ref,
+                   patch_sha256,
+                   verifier_ref,
+                   verifier_inputs,
+                   review_routing,
+                   next_actor_kind,
+                   materialization_status,
+                   routing_decision_record,
+                   anti_pattern_hits,
+                   created_at,
+                   updated_at
+              FROM code_change_candidate_payloads
+             WHERE submission_id = $1
+            """,
+            existing_submission["submission_id"],
+        )
+        if existing_candidate is None:
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.submission_conflict",
+                "sealed submission already exists for this job attempt without a candidate payload",
+                details={
+                    "submission_id": existing_submission["submission_id"],
+                    "run_id": normalized_run_id,
+                    "job_label": normalized_job_label,
+                    "attempt_no": attempt_no,
+                },
+            )
+        enriched_existing = _enriched_submission(repository, existing_submission)
+        enriched_existing["code_change_candidate"] = dict(existing_candidate)
+        return enriched_existing
+
+    candidate_id = str(uuid.uuid4())
+    patch_record = ArtifactStore(active_conn).capture(
+        f"code_change_candidates/{candidate_id}.diff",
+        projection.unified_diff,
+        f"code_change_candidate:{candidate_id}",
+    )
+    patch_artifact_ref = f"sandbox_artifact:{patch_record.artifact_id}"
+    candidate_summary = (
+        _strip_str(summary)
+        or projection.normalized_proposal.get("rationale")
+        or f"Code-change candidate for {normalized_bug_id}"
+    )
+    acceptance_status = "auto_apply_authorized" if routing == "auto_apply" else "pending_review"
+    acceptance_report = {
+        "kind": "code_change_candidate",
+        "bug_id": normalized_bug_id,
+        "review_routing": routing,
+        "patch_sha256": projection.patch_sha256,
+        "anti_pattern_hits": list(projection.anti_pattern_hits),
+    }
+    recorded = repository.record_submission(
+        run_id=normalized_run_id,
+        workflow_id=normalized_workflow_id,
+        job_label=normalized_job_label,
+        attempt_no=attempt_no,
+        result_kind="code_change_candidate",
+        summary=str(candidate_summary),
+        primary_paths=list(projection.intended_files),
+        tests_ran=[],
+        notes=notes,
+        declared_operations=list(projection.operation_set),
+        changed_paths=list(projection.changed_paths),
+        operation_set=list(projection.operation_set),
+        comparison_status="candidate_payload",
+        comparison_report={
+            "patch_sha256": projection.patch_sha256,
+            "per_file_summary": list(projection.per_file_summary),
+            "anti_pattern_hits": list(projection.anti_pattern_hits),
+        },
+        acceptance_status=acceptance_status,
+        acceptance_report=acceptance_report,
+        diff_artifact_ref=patch_artifact_ref,
+        artifact_refs=[patch_artifact_ref],
+        verification_artifact_refs=[],
+    )
+
+    effective_routing_record = dict(routing_decision_record or {})
+    if routing == "auto_apply" and not effective_routing_record:
+        effective_routing_record = {
+            "decision": "auto_apply",
+            "reason_code": "code_change_candidate.routing.auto_apply",
+            "review_routing": routing,
+            "run_id": normalized_run_id,
+            "workflow_id": normalized_workflow_id,
+            "job_label": normalized_job_label,
+            "base_head_ref": resolved_base_head_ref,
+        }
+
+    row = active_conn.fetchrow(
+        """
+        INSERT INTO code_change_candidate_payloads (
+            candidate_id,
+            submission_id,
+            bug_id,
+            base_head_ref,
+            source_context_refs,
+            intended_files,
+            proposal_payload,
+            patch_artifact_ref,
+            patch_sha256,
+            verifier_ref,
+            verifier_inputs,
+            review_routing,
+            next_actor_kind,
+            materialization_status,
+            routing_decision_record,
+            anti_pattern_hits
+        ) VALUES (
+            $1::uuid, $2, $3, $4, $5::jsonb, $6::text[], $7::jsonb, $8, $9,
+            $10, $11::jsonb, $12, $13, 'pending', $14::jsonb, $15::jsonb
+        )
+        ON CONFLICT (submission_id) DO UPDATE SET
+            bug_id = EXCLUDED.bug_id,
+            base_head_ref = EXCLUDED.base_head_ref,
+            source_context_refs = EXCLUDED.source_context_refs,
+            intended_files = EXCLUDED.intended_files,
+            proposal_payload = EXCLUDED.proposal_payload,
+            patch_artifact_ref = EXCLUDED.patch_artifact_ref,
+            patch_sha256 = EXCLUDED.patch_sha256,
+            verifier_ref = EXCLUDED.verifier_ref,
+            verifier_inputs = EXCLUDED.verifier_inputs,
+            review_routing = EXCLUDED.review_routing,
+            next_actor_kind = EXCLUDED.next_actor_kind,
+            routing_decision_record = EXCLUDED.routing_decision_record,
+            anti_pattern_hits = EXCLUDED.anti_pattern_hits,
+            updated_at = now()
+        RETURNING candidate_id::text AS candidate_id,
+                  submission_id,
+                  bug_id,
+                  base_head_ref,
+                  intended_files,
+                  patch_artifact_ref,
+                  patch_sha256,
+                  verifier_ref,
+                  verifier_inputs,
+                  review_routing,
+                  next_actor_kind,
+                  materialization_status,
+                  routing_decision_record,
+                  anti_pattern_hits,
+                  created_at,
+                  updated_at
+        """,
+        candidate_id,
+        recorded["submission_id"],
+        normalized_bug_id,
+        resolved_base_head_ref,
+        json.dumps(source_context_refs, sort_keys=True, default=str),
+        list(projection.intended_files),
+        json.dumps(projection.normalized_proposal, sort_keys=True, default=str),
+        patch_artifact_ref,
+        projection.patch_sha256,
+        normalized_verifier_ref,
+        json.dumps(normalized_verifier_inputs, sort_keys=True, default=str),
+        routing,
+        "system" if routing == "auto_apply" else "human",
+        json.dumps(effective_routing_record, sort_keys=True, default=str),
+        json.dumps(list(projection.anti_pattern_hits), sort_keys=True, default=str),
+    )
+    if row is None:
+        raise WorkflowSubmissionServiceError(
+            "code_change_candidate.write_failed",
+            "candidate payload insert returned no row",
+            details={"submission_id": recorded["submission_id"]},
+        )
+
+    if existing_submission is None:
+        _emit_workflow_event(
+            active_conn,
+            run_id=normalized_run_id,
+            workflow_id=normalized_workflow_id,
+            job_label=normalized_job_label,
+            event_type="workflow.job.submission.sealed",
+            reason_code="workflow_submission.candidate_sealed",
+            payload={
+                "submission_id": recorded["submission_id"],
+                "candidate_id": row["candidate_id"],
+                "job_label": normalized_job_label,
+                "attempt_no": attempt_no,
+                "result_kind": "code_change_candidate",
+                "comparison_status": "candidate_payload",
+                "changed_paths": list(projection.changed_paths),
+                "patch_artifact_ref": patch_artifact_ref,
+                "patch_sha256": projection.patch_sha256,
+            },
+        )
+        submission_protocol = _submission_protocol_state(execution_context_shard)
+        submission_protocol["latest_submission_id"] = recorded["submission_id"]
+        updated_shard = _set_submission_protocol_state(execution_context_shard, submission_protocol)
+        _persist_runtime_context_state(
+            active_conn,
+            run_id=normalized_run_id,
+            job_label=normalized_job_label,
+            workflow_id=normalized_workflow_id,
+            execution_context_shard=updated_shard,
+            execution_bundle=execution_bundle,
+        )
+
+    enriched = _enriched_submission(repository, recorded)
+    enriched["code_change_candidate"] = dict(row)
+    return enriched
 
 
 def _submit_submission(
@@ -715,7 +1005,7 @@ def _submit_submission(
     # Text-output tasks (research, debate, analysis) have no baseline or
     # write_scope — they produce text, not file changes.  Seal directly
     # instead of requiring the baseline-comparison pipeline.
-    _TEXT_ONLY_RESULT_KINDS = {"research_result", "artifact_bundle"}
+    _TEXT_ONLY_RESULT_KINDS = {"research_result", "artifact_bundle", "code_change_candidate"}
     needs_baseline = normalized_result_kind not in _TEXT_ONLY_RESULT_KINDS
 
     if not baseline and needs_baseline:
@@ -1112,6 +1402,6 @@ __all__ = [
     "list_latest_submission_summaries_for_run",
     "review_submission",
     "submit_artifact_bundle",
-    "submit_code_change",
+    "submit_code_change_candidate",
     "submit_research_result",
 ]

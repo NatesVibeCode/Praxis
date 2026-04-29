@@ -75,11 +75,40 @@
     },
     {
       "decision_key": "architecture-policy::auth::via-docker-creds-not-shell",
-      "title": "Auth via docker mounts, never agent shell env",
+      "title": "Praxis from shell uses bin/praxis-agent (API path), not direct CLI; workers must restart via scripts/praxis-up",
+      "surface": "user_visible",
       "match": [
         {
           "tool": "Bash",
-          "regex": "docker\\s+(?:exec|run).*-e\\s+(?:CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_AUTH_TOKEN)="
+          "regex": "docker\\s+(?:exec|run).*-e\\s+(?:CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_AUTH_TOKEN)=",
+          "advisory_only": true
+        },
+        {
+          "tool": "Bash",
+          "regex": "^\\s*(?:sudo\\s+)?(?:claude|codex|gemini)\\b",
+          "advisory_only": true
+        },
+        {
+          "tool": "Bash",
+          "regex": "\\bdocker\\s+exec\\b[^|;&]*\\b(?:claude|codex|gemini)\\b",
+          "advisory_only": true
+        },
+        {
+          "tool": "Bash",
+          "regex": "(?<!bin/)\\bpraxis\\s+workflow\\b",
+          "advisory_only": true
+        },
+        {
+          "tool": "Bash",
+          "regex": "\\bdocker\\s+compose\\b[^|;&]*\\b(?:up|run|start)\\b[^|;&]*\\bworkflow-worker\\b"
+        },
+        {
+          "tool": "Bash",
+          "regex": "\\bdocker\\s+compose\\b[^|;&]*--force-recreate\\b[^|;&]*workflow-worker\\b"
+        },
+        {
+          "tool": "Bash",
+          "regex": "\\bdocker\\s+(?:restart|stop)\\s+praxis-workflow-worker\\b"
         }
       ]
     },
@@ -105,25 +134,23 @@
         {
           "tool": "Edit",
           "file_glob": "**/Code&DBs/Workflow/runtime/**/*.py",
+          "string_match": "operation_catalog_registry|authority_object_registry|data_dictionary_objects|register_operation_atomic",
           "advisory_only": true
         },
         {
           "tool": "Write",
           "file_glob": "**/Code&DBs/Workflow/surfaces/**/*.py",
+          "string_match": "operation_catalog_registry|authority_object_registry|data_dictionary_objects|register_operation_atomic",
           "advisory_only": true
         },
         {
           "tool": "Edit",
           "file_glob": "**/Code&DBs/Databases/migrations/workflow/*.sql",
+          "string_match": "operation_catalog_registry|authority_object_registry|data_dictionary_objects",
           "advisory_only": true
         },
         {
           "tool": "Write",
-          "file_glob": "**/Code&DBs/Databases/migrations/workflow/*.sql",
-          "advisory_only": true
-        },
-        {
-          "tool": "Edit",
           "file_glob": "**/Code&DBs/Databases/migrations/workflow/*.sql",
           "string_match": "operation_catalog_registry|authority_object_registry|data_dictionary_objects",
           "advisory_only": true
@@ -147,6 +174,7 @@
         {
           "tool": "Edit",
           "file_glob": "**/Code&DBs/Workflow/runtime/operations/**/*.py",
+          "string_match": "class\\s+\\w+Command|operation_ref|operation_name=|input_model_ref|handler_ref|execute_operation_from_subsystems",
           "advisory_only": true
         },
         {

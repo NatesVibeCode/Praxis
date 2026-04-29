@@ -1,6 +1,7 @@
 """Workflow submission pipeline: spec parsing, job creation, and idempotency."""
 from __future__ import annotations
 
+from runtime.async_bridge import run_sync_safe
 from collections.abc import Mapping
 import concurrent.futures
 from dataclasses import replace
@@ -147,7 +148,7 @@ def _run_async(coro):
     except RuntimeError:
         import asyncio
 
-        return asyncio.run(coro)
+        return run_sync_safe(coro)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         import asyncio
 

@@ -1,0 +1,54 @@
+{
+  "name": "Workflow / runtime / title: refresh_private_provider_job_catalog.conflict.clause",
+  "workflow_id": "wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli",
+  "queue_id": "wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli",
+  "phase": "bug_resolution_packet",
+  "outcome_goal": "Drive bugs BUG-72695EF3 to a terminal outcome with explicit evidence and bounded verification.",
+  "anti_requirements": [
+    "Do NOT widen scope outside the listed bugs and authority owner.",
+    "Do NOT resolve FIXED without validates_fix evidence.",
+    "Do NOT use ad hoc SQL for bug status or evidence writes.",
+    "Do NOT clean up unrelated issues just because they are nearby."
+  ],
+  "jobs": [
+    {
+      "label": "plan_packet",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Lock the execution boundary for Workflow / runtime / title: refresh_private_provider_job_catalog.conflict.clause.",
+      "outcome_goal": "One plan artifact names the exact touched files, verification path, and closure boundary before implementation starts.",
+      "prompt": "Read the coordination file `/workspace/Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/bug_resolution_program_kickoff_20260428_full.json` and extract packet `bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli`.\n\nPacket contract:\n- bug_ids: [\"BUG-72695EF3\"]\n- authority_owner: lane:workflow_runtime\n- lane: Workflow / runtime (workflow_runtime)\n- wave: wave_1_evidence_normalization\n- packet_kind: evidence_recovery\n- cluster: title: refresh_private_provider_job_catalog.conflict.clause (bug.title_anchor:refresh_private_provider_job_catalog.conflict.clause)\n- verification_surface: Focused runtime or workflow tests plus explicit bug evidence attachment and terminal resolution\n- depends_on_wave: wave_0_authority_repair\n\nWrite `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/PLAN.md` with these sections:\n1. Bugs in scope\n2. Titles in scope\n- refresh_private_provider_job_catalog ON CONFLICT clause not aware of routing's transport_type split \u2014 cardinality violation re-running 262/267\n3. Files to read first\n4. Files allowed to change\n5. Verification or closure proof required\n6. Stop boundary\n\nUse current repo truth, not guesses. Do not edit code in this job.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/PLAN.md"
+    },
+    {
+      "label": "execute_packet",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "verify_refs": [
+        "verify.bug_resolution_packet.wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli.execute_packet"
+      ],
+      "depends_on": [
+        "plan_packet"
+      ],
+      "description": "Implement or close the packet without widening scope.",
+      "outcome_goal": "The packet produces either a bounded code fix or a proof-backed closure rationale for every bug in scope.",
+      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/PLAN.md` first.\n\nThen implement the narrowest correct path for packet `bug_resolution_program_20260428_full.wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli`.\n\nRules:\n- If the right outcome is FIXED, make the smallest durable change and record exactly what verification will prove it.\n- If the right outcome is WONT_FIX or DEFERRED, do not force code. Collect the proof and rationale instead.\n- Prepare for the closeout job by recording the intended terminal outcome for each bug in `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/EXECUTION.md`.\n- Do not resolve bugs in this job.\n\nDone criteria:\n- The runtime failure mode is fixed or closed with explicit proof.\n- Verification covers the touched runtime path without broad regression drift.\n- FIXED bugs attach validates_fix evidence before resolution.\n\nStop boundary: Do not refactor adjacent runtime domains unless they are required to close the packet.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/EXECUTION.md"
+    },
+    {
+      "label": "verify_and_resolve_packet",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "verify_refs": [
+        "verify.bug_resolution_packet.wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli.verify_and_resolve_packet"
+      ],
+      "depends_on": [
+        "execute_packet"
+      ],
+      "description": "Run verification, attach bug evidence, and resolve every bug through the bug tracker surface.",
+      "outcome_goal": "Each in-scope bug is either left open with a clear blocker or moved to a terminal status with explicit evidence.",
+      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/PLAN.md` and `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/EXECUTION.md`.\n\nThen do the narrowest meaningful verification for the packet.\n\nCloseout rules:\n- Use `praxis workflow bugs attach_evidence` and `praxis workflow bugs resolve` only.\n- If terminal outcome is FIXED, attach attempted_fix evidence and validates_fix evidence before resolution.\n- If terminal outcome is WONT_FIX or DEFERRED, write the proof-backed rationale to `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/CLOSEOUT.md` and resolve through the bug tracker surface.\n- If verification fails, leave the bug open and write the blocker in CLOSEOUT.md.\n\nVerification surface: Focused runtime or workflow tests plus explicit bug evidence attachment and terminal resolution\nStop boundary: Do not refactor adjacent runtime domains unless they are required to close the packet.",
+      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/wave-1-evidence-normalization-workflow-runtime-title-refresh-private-provider-job-catalog-confli/CLOSEOUT.md"
+    }
+  ]
+}

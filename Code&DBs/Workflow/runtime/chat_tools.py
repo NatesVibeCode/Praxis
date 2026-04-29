@@ -484,7 +484,7 @@ def execute_tool(
     elif name == "moon_get_build":
         return _moon_get_build(arguments, pg_conn, selection_context)
     elif name == "moon_compose_from_prose":
-        return _moon_compose_from_prose(arguments, pg_conn)
+        return _moon_compose_from_prose(arguments, pg_conn, selection_context)
     elif name == "moon_mutate_field":
         return _moon_mutate_field(arguments, pg_conn, selection_context)
     elif name == "moon_suggest_next":
@@ -639,43 +639,96 @@ def _moon_get_build(
     }
 
 
-def _moon_compose_from_prose(args: dict[str, Any], pg_conn: Any) -> dict[str, Any]:
+def _moon_compose_from_prose(
+    args: dict[str, Any],
+    pg_conn: Any,
+    selection_context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Compose prose into a real, editable Moon workflow.
+
+    Two paths:
+      1. ``workflow_id`` provided (explicit OR from moon_context): bootstrap
+         prose into the existing workflow's graph via workflow_build_mutate.
+      2. No workflow_id: create a fresh draft via workflow_create_draft, then
+         bootstrap prose into it. Returns the new workflow_id so the user can
+         immediately edit / launch it.
+
+    Either way the user lands on a real persisted graph the chat can keep
+    editing via moon_get_build / moon_mutate_field / moon_launch.
+    """
     intent = str(args.get("intent") or "").strip()
     if not intent:
         return _moon_error("intent is required", action="moon_compose_from_prose")
-    payload: dict[str, Any] = {"intent": intent}
-    for key in ("plan_name", "why"):
-        value = args.get(key)
-        if isinstance(value, str) and value.strip():
-            payload[key] = value.strip()
+
+    plan_name = ""
+    raw_plan_name = args.get("plan_name")
+    if isinstance(raw_plan_name, str) and raw_plan_name.strip():
+        plan_name = raw_plan_name.strip()
+
+    # Reuse the active Moon workflow if the user is on the canvas.
+    workflow_id, from_context = _resolve_workflow_id(args, selection_context)
+    created_new = False
+    if not workflow_id:
+        draft_payload: dict[str, Any] = {}
+        if plan_name:
+            draft_payload["name"] = plan_name
+        try:
+            draft_result = _dispatch_op(pg_conn, "workflow_create_draft", draft_payload)
+        except Exception as exc:
+            return _moon_error(
+                f"workflow_create_draft failed: {exc}",
+                action="moon_compose_from_prose",
+            )
+        if not isinstance(draft_result, dict) or not draft_result.get("workflow_id"):
+            return _moon_error(
+                f"workflow_create_draft returned no workflow_id: {draft_result!r}",
+                action="moon_compose_from_prose",
+            )
+        workflow_id = str(draft_result["workflow_id"])
+        created_new = True
+
+    enable_llm = args.get("enable_llm", True)
+    enable_full_compose = args.get("enable_full_compose", True)
+    bootstrap_body: dict[str, Any] = {
+        "prose": intent,
+        "enable_llm": bool(enable_llm),
+        "enable_full_compose": bool(enable_full_compose),
+    }
+    if plan_name:
+        bootstrap_body["title"] = plan_name
     raw_concurrency = args.get("concurrency")
     if raw_concurrency is not None:
         try:
-            payload["concurrency"] = max(1, min(100, int(raw_concurrency)))
+            bootstrap_body["concurrency"] = max(1, min(100, int(raw_concurrency)))
         except (TypeError, ValueError):
-            return _moon_error("concurrency must be an integer 1-100", action="moon_compose_from_prose")
+            return _moon_error(
+                "concurrency must be an integer 1-100",
+                action="moon_compose_from_prose",
+            )
+    raw_why = args.get("why")
+    if isinstance(raw_why, str) and raw_why.strip():
+        bootstrap_body["why"] = raw_why.strip()
+
     try:
-        result = _dispatch_op(pg_conn, "compose_plan_via_llm", payload)
+        result = _dispatch_op(
+            pg_conn,
+            "workflow_build.mutate",
+            {"workflow_id": workflow_id, "subpath": "bootstrap", "body": bootstrap_body},
+        )
     except Exception as exc:
-        return _moon_error(f"compose_plan_via_llm failed: {exc}", action="moon_compose_from_prose")
-    body = result if isinstance(result, dict) else {"raw": result}
-    plan = body.get("plan") if isinstance(body.get("plan"), dict) else body
-    nodes = []
-    if isinstance(plan, dict):
-        for key in ("nodes", "packets", "jobs"):
-            value = plan.get(key)
-            if isinstance(value, list):
-                nodes = value
-                break
-    compact = {
-        "plan_name": body.get("plan_name") or (plan.get("name") if isinstance(plan, dict) else None),
-        "node_count": len(nodes),
-        "node_titles": [str(n.get("title") or n.get("label") or n.get("id") or "") for n in nodes if isinstance(n, dict)][:20],
-        "workflow_id": body.get("workflow_id"),
-    }
+        # Surface the workflow_id even on failure so the user can recover the draft.
+        msg = f"bootstrap failed (workflow_id={workflow_id}): {exc}"
+        return _moon_error(msg, action="moon_compose_from_prose")
+
+    payload = result if isinstance(result, dict) else {"raw": result}
+    compact = _compact_build_payload(payload)
+    compact["workflow_id"] = compact.get("workflow_id") or workflow_id
+    compact["created_new_draft"] = created_new
+    if from_context and not created_new:
+        compact["targeted_via"] = "moon_context"
     return {
         "type": "status",
-        "data": {"status": "moon_composed", **compact, "full_result": body},
+        "data": {"status": "moon_composed", **compact, "full_payload": payload},
         "selectable": False,
         "summary": _moon_status_summary("moon_compose_from_prose", compact),
     }
@@ -701,7 +754,7 @@ def _moon_mutate_field(
     try:
         result = _dispatch_op(
             pg_conn,
-            "workflow_build_mutate",
+            "workflow_build.mutate",
             {"workflow_id": workflow_id, "subpath": subpath, "body": body},
         )
     except Exception as exc:
@@ -748,7 +801,7 @@ def _moon_suggest_next(
     try:
         result = _dispatch_op(
             pg_conn,
-            "workflow_build_suggest_next",
+            "workflow_build.suggest_next",
             {"workflow_id": workflow_id, "body": body},
         )
     except Exception as exc:

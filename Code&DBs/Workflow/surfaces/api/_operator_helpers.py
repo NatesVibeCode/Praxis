@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from runtime._helpers import _json_compatible
+from runtime.async_bridge import run_sync_safe
 
 
 def _build_error(
@@ -32,15 +32,16 @@ def _run_async(
     reason_code: str | None = None,
     message: str = "sync entrypoints require a non-async call boundary",
 ) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(awaitable)
-    raise _build_error(
-        error_type,
-        message=message,
-        reason_code=reason_code,
-    )
+    # Cache-bypass-style fix (operator decision 2026-04-29): the previous
+    # implementation refused to run when a parent event loop was active.
+    # That broke every operator-query wizard reachable from MCP HTTP
+    # (api-server runs an asyncio loop). run_sync_safe handles both lanes
+    # — direct asyncio.run when there's no parent loop, worker-thread when
+    # there is — so the proactive guard is dead. Kept the kwargs for API
+    # compatibility with callers that still pass error_type / reason_code /
+    # message; if run_sync_safe itself raises (e.g. coroutine error), the
+    # exception bubbles unchanged.
+    return run_sync_safe(awaitable)
 
 
 def _now() -> datetime:

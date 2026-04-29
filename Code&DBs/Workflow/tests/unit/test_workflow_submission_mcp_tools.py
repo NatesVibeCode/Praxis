@@ -14,7 +14,7 @@ from surfaces.mcp.tools import submission as submission_tools
 def test_submission_tools_are_discoverable() -> None:
     catalog = get_tool_catalog()
     for tool_name in (
-        "praxis_submit_code_change",
+        "praxis_submit_code_change_candidate",
         "praxis_submit_research_result",
         "praxis_submit_artifact_bundle",
         "praxis_get_submission",
@@ -26,21 +26,28 @@ def test_submission_tools_are_discoverable() -> None:
 def test_tool_wrappers_forward_parameters(monkeypatch) -> None:
     captured = {}
 
-    def _submit_code_change(**kwargs):
-        captured["code_change"] = kwargs
-        return {"ok": True, "tool": "praxis_submit_code_change", "submission": {"submission_id": "sub-1"}}
+    def _submit_code_change_candidate(**kwargs):
+        captured["code_change_candidate"] = kwargs
+        return {"ok": True, "tool": "praxis_submit_code_change_candidate", "candidate": {"candidate_id": "candidate-1"}}
 
-    monkeypatch.setattr(submission_tools.workflow_submission, "submit_code_change", _submit_code_change)
+    monkeypatch.setattr(
+        submission_tools.workflow_submission,
+        "submit_code_change_candidate",
+        _submit_code_change_candidate,
+    )
 
-    payload = submission_tools.tool_praxis_submit_code_change(
+    payload = submission_tools.tool_praxis_submit_code_change_candidate(
         {
-            "summary": "Done",
-            "primary_paths": ["runtime/workflow/submission_capture.py"],
-            "result_kind": "code_change",
-            "tests_ran": ["pytest"],
+            "bug_id": "BUG-12345678",
+            "proposal_payload": {
+                "intended_files": ["runtime/workflow/submission_capture.py"],
+                "edits": [],
+            },
+            "source_context_refs": {"runtime/workflow/submission_capture.py": ""},
+            "review_routing": "human_review",
         }
     )
 
     assert payload["ok"] is True
-    assert captured["code_change"]["result_kind"] == "code_change"
-    assert captured["code_change"]["primary_paths"] == ["runtime/workflow/submission_capture.py"]
+    assert captured["code_change_candidate"]["bug_id"] == "BUG-12345678"
+    assert captured["code_change_candidate"]["review_routing"] == "human_review"

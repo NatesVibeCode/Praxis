@@ -279,4 +279,23 @@ services:
       - surfaces.cli.main
       - queue
       - worker
+    # Healthcheck: prove the LLM CLIs we route to are actually authenticated.
+    # The worker container can be "Up" while every Anthropic call returns 401
+    # — we just spent a session learning how silently that fails (worker
+    # claimed jobs, jobs ran 100+ seconds, returned exit_code=0 with 0 tokens
+    # because the LLM call rejected, then auto-seal sealed empty submissions
+    # as "no-change completions"). The healthcheck here is the structural
+    # gate: if claude can't auth, the container is unhealthy, dependent
+    # services see it, firecheck halts admission.
+    #
+    # We only probe claude (CLAUDE_CODE_OAUTH_TOKEN, the rail most likely to
+    # go stale across recreates). Codex/Gemini auth lives in mounted dirs
+    # that survive recreate, so they don't have the same hydration cliff.
+    # Standing-order ref: architecture-policy::auth::via-docker-creds-not-shell
+    healthcheck:
+      test: ["CMD-SHELL", "claude auth status --json 2>/dev/null | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d.get(\"loggedIn\") is True else 1)'"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped

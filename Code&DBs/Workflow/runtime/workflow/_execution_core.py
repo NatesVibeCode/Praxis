@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from ._shared import _circuit_breakers, _WORKFLOW_TERMINAL_STATES
@@ -55,6 +57,88 @@ from registry.native_runtime_profile_sync import resolve_native_runtime_profile_
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
+
+
+def _positive_int_or_none(value: object) -> int | None:
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _route_execution_knobs(
+    conn: "SyncPostgresConnection",
+    *,
+    route_task_type: str,
+    provider_slug: str,
+    model_slug: str,
+) -> dict[str, object]:
+    """Read provider request knobs from task route authority.
+
+    ``provider_model_candidates`` says a model exists. ``task_type_routing``
+    says how this task should call it. Execution must honor the latter so
+    model-specific API requirements such as Kimi's larger output budget do not
+    disappear when an auto route resolves to a concrete provider/model slug.
+    """
+    normalized_task_type = str(route_task_type or "").strip()
+    normalized_provider = str(provider_slug or "").strip()
+    normalized_model = str(model_slug or "").strip()
+    route_max_tokens: int | None = None
+    reasoning_effort: str | None = None
+
+    if normalized_task_type and normalized_provider and normalized_model:
+        rows = conn.execute(
+            """SELECT max_tokens, reasoning_control
+               FROM task_type_routing
+               WHERE task_type = $1
+                 AND provider_slug = $2
+                 AND model_slug = $3
+               LIMIT 1""",
+            normalized_task_type,
+            normalized_provider,
+            normalized_model,
+        )
+        if rows:
+            row = rows[0]
+            route_max_tokens = _positive_int_or_none(row.get("max_tokens"))
+            route_reasoning = row.get("reasoning_control") or {}
+            if isinstance(route_reasoning, dict):
+                level = str(route_reasoning.get("default_level") or "").strip()
+                if level and level != "none":
+                    reasoning_effort = level
+
+    if reasoning_effort is None and normalized_provider and normalized_model:
+        rows = conn.execute(
+            """SELECT reasoning_control
+               FROM provider_model_candidates
+               WHERE provider_slug = $1 AND model_slug = $2
+               LIMIT 1""",
+            normalized_provider,
+            normalized_model,
+        )
+        if rows:
+            candidate_reasoning = rows[0].get("reasoning_control") or {}
+            if isinstance(candidate_reasoning, dict):
+                level = str(candidate_reasoning.get("default") or "").strip()
+                if level and level != "none":
+                    reasoning_effort = level
+
+    return {
+        "max_output_tokens": route_max_tokens,
+        "reasoning_effort": reasoning_effort,
+    }
+
+
+def _agent_config_with_max_output_tokens(agent_config: object, max_output_tokens: int | None) -> object:
+    if max_output_tokens is None:
+        return agent_config
+    try:
+        return replace(agent_config, max_output_tokens=max_output_tokens)
+    except TypeError:
+        attrs = dict(getattr(agent_config, "__dict__", {}) or {})
+        attrs["max_output_tokens"] = max_output_tokens
+        return SimpleNamespace(**attrs)
 
 
 def _approval_checkpoint_for_job(
@@ -666,41 +750,28 @@ def execute_job(
                         stdout_preview=f"Circuit breaker open for {provider_slug}",
                     )
                     return
-            # Resolve reasoning effort from task_type_routing for this agent + task type.
-            # Falls back to provider_model_candidates default if no task-type-specific row.
-            _reasoning_effort: str | None = None
             _route_task_type = route_task_type
             _provider, _, _model = agent_slug.partition("/")
-            if _route_task_type and _provider and _model:
-                _rc_rows = conn.execute(
-                    """SELECT reasoning_control FROM task_type_routing
-                       WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3
-                       LIMIT 1""",
-                    _route_task_type, _provider, _model,
-                )
-                if _rc_rows:
-                    _rc = _rc_rows[0].get("reasoning_control") or {}
-                    _level = str(_rc.get("default_level") or "").strip()
-                    if _level and _level != "none":
-                        _reasoning_effort = _level
-            if _reasoning_effort is None and _provider and _model:
-                _pmc_rows = conn.execute(
-                    """SELECT reasoning_control FROM provider_model_candidates
-                       WHERE provider_slug = $1 AND model_slug = $2
-                       LIMIT 1""",
-                    _provider, _model,
-                )
-                if _pmc_rows:
-                    _pmc_rc = _pmc_rows[0].get("reasoning_control") or {}
-                    _pmc_level = str(_pmc_rc.get("default") or "").strip()
-                    if _pmc_level and _pmc_level != "none":
-                        _reasoning_effort = _pmc_level
-            result = _execute_api(
+            _knobs = _route_execution_knobs(
+                conn,
+                route_task_type=_route_task_type,
+                provider_slug=_provider,
+                model_slug=_model,
+            )
+            _agent_config = _agent_config_with_max_output_tokens(
                 agent_config,
+                _knobs.get("max_output_tokens") if isinstance(_knobs.get("max_output_tokens"), int) else None,
+            )
+            result = _execute_api(
+                _agent_config,
                 full_prompt,
                 execution_workdir,
                 execution_bundle=execution_bundle,
-                reasoning_effort=_reasoning_effort,
+                reasoning_effort=(
+                    str(_knobs["reasoning_effort"])
+                    if _knobs.get("reasoning_effort") is not None
+                    else None
+                ),
             )
         else:
             raise NotImplementedError("Unsupported execution transport")

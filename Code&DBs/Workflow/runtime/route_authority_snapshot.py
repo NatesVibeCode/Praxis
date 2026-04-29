@@ -246,7 +246,14 @@ def get_route_authority_snapshot(
     *,
     load_snapshot: Callable[[object], RouteAuthoritySnapshot],
 ) -> RouteAuthoritySnapshot:
-    return _store.get_snapshot(conn, load_snapshot=load_snapshot)
+    # Cache bypassed (operator decision 2026-04-29): the in-process snapshot
+    # cache invalidation never fired on task_type_routing writes, so router
+    # changes (rank flips, transport switches, permitted toggles) didn't
+    # take effect until process restart. Reading fresh per chain build is
+    # 3-5ms on 500-row tables — acceptable for the correctness gain.
+    # Re-introduce caching once a NOTIFY/LISTEN invalidation path is wired
+    # to the trg_refresh_model_access_task_type_routing trigger.
+    return load_snapshot(conn)
 
 
 def get_task_route_policy(
@@ -255,7 +262,8 @@ def get_task_route_policy(
     task_type: str,
     load_policy: Callable[[object, str], Any],
 ) -> Any:
-    return _store.get_task_policy(conn, task_type=task_type, load_policy=load_policy)
+    # Cache bypassed — see get_route_authority_snapshot.
+    return load_policy(conn, task_type)
 
 
 def invalidate_route_authority_snapshot(conn: object) -> None:

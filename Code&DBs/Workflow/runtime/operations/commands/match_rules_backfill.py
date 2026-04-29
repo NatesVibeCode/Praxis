@@ -22,6 +22,7 @@ done for other candidates.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from collections import defaultdict
 import os
 from typing import Any
@@ -576,7 +577,7 @@ def handle_match_rules_backfill(
     command: MatchRulesBackfillCommand,
     subsystems: Any,
 ) -> dict[str, Any]:
-    return asyncio.run(
+    return run_sync_safe(
         _run_backfill(
             database_url=_resolved_database_url(subsystems),
             source_slug=command.source_slug,

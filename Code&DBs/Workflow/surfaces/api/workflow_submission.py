@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import inspect
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from typing import Any, Callable, Protocol
 
 from surfaces.mcp.catalog import canonical_tool_name
@@ -28,7 +29,7 @@ from runtime.workflow.submission_contract import (
 
 
 _SUBMIT_TOOL_NAMES = {
-    "praxis_submit_code_change": "code_change",
+    "praxis_submit_code_change_candidate": "code_change_candidate",
     "praxis_submit_research_result": "research_result",
     "praxis_submit_artifact_bundle": "artifact_bundle",
 }
@@ -50,7 +51,7 @@ class SubmissionFrontdoorError(RuntimeError):
 
 
 class _SubmissionService(Protocol):
-    def submit_code_change(self, **kwargs: Any) -> Any: ...
+    def submit_code_change_candidate(self, **kwargs: Any) -> Any: ...
 
     def submit_research_result(self, **kwargs: Any) -> Any: ...
 
@@ -145,6 +146,16 @@ def _require_declared_operations(value: object) -> tuple[dict[str, Any], ...]:
         ) from exc
 
 
+def _require_mapping(value: object, *, field_name: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise SubmissionFrontdoorError(
+            "workflow_submission.invalid_input",
+            f"{field_name} must be an object",
+            details={"field": field_name, "value_type": type(value).__name__},
+        )
+    return dict(value)
+
+
 def _normalize_context(
     context: WorkflowMcpRequestContext | None = None,
 ) -> WorkflowMcpRequestContext:
@@ -219,7 +230,7 @@ def _call_service(
             result = method(**dict(payload))
             if inspect.isawaitable(result):
                 try:
-                    result = asyncio.run(result)
+                    result = run_sync_safe(result)
                 except RuntimeError as exc:
                     return _error(
                         tool_name,
@@ -296,29 +307,60 @@ def _submit(
     )
 
 
-def submit_code_change(
+def submit_code_change_candidate(
     *,
-    summary: object,
-    primary_paths: object,
-    result_kind: object,
-    tests_ran: object | None = None,
+    bug_id: object,
+    proposal_payload: object,
+    source_context_refs: object,
+    base_head_ref: object | None = None,
+    review_routing: object = "human_review",
+    verifier_ref: object | None = None,
+    verifier_inputs: object | None = None,
+    summary: object | None = None,
     notes: object | None = None,
-    declared_operations: object | None = None,
+    routing_decision_record: object | None = None,
     context: WorkflowMcpRequestContext | None = None,
 ) -> dict[str, Any]:
-    return _frontdoor_response(
-        "praxis_submit_code_change",
-        lambda: _submit(
-            tool_name="praxis_submit_code_change",
-            result_kind=_require_text(result_kind, field_name="result_kind"),
-            summary=summary,
-            primary_paths=primary_paths,
-            tests_ran=tests_ran,
-            notes=notes,
-            declared_operations=declared_operations,
-            context=context,
-        ),
-    )
+    def _operation() -> dict[str, Any]:
+        active_context = _normalize_context(context)
+        tool_name = "praxis_submit_code_change_candidate"
+        _require_tool_admission(active_context, tool_name)
+        payload = {
+            "run_id": active_context.run_id,
+            "workflow_id": active_context.workflow_id,
+            "job_label": active_context.job_label,
+            "bug_id": _require_text(bug_id, field_name="bug_id"),
+            "proposal_payload": _require_mapping(proposal_payload, field_name="proposal_payload"),
+            "source_context_refs": source_context_refs,
+            "base_head_ref": _optional_text(base_head_ref, field_name="base_head_ref"),
+            "review_routing": _require_text(review_routing, field_name="review_routing"),
+            "verifier_ref": _optional_text(verifier_ref, field_name="verifier_ref"),
+            "verifier_inputs": (
+                _require_mapping(verifier_inputs, field_name="verifier_inputs")
+                if verifier_inputs is not None
+                else None
+            ),
+            "summary": _optional_text(summary, field_name="summary"),
+            "notes": _optional_text(notes, field_name="notes"),
+            "routing_decision_record": (
+                _require_mapping(routing_decision_record, field_name="routing_decision_record")
+                if routing_decision_record is not None
+                else None
+            ),
+        }
+        from runtime.operation_catalog_gateway import execute_operation_from_env
+        from surfaces.mcp.subsystems import workflow_database_env
+
+        result = execute_operation_from_env(
+            env=workflow_database_env(),
+            operation_name="code_change_candidate.submit",
+            payload=payload,
+        )
+        if isinstance(result, dict):
+            result.setdefault("tool", tool_name)
+        return result
+
+    return _frontdoor_response("praxis_submit_code_change_candidate", _operation)
 
 
 def submit_research_result(
@@ -531,5 +573,6 @@ __all__ = [
     "review_submission",
     "submit_artifact_bundle",
     "submit_code_change",
+    "submit_code_change_candidate",
     "submit_research_result",
 ]

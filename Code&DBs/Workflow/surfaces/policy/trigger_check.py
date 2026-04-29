@@ -87,6 +87,32 @@ class TriggerMatch:
         return self.provenance != "explicit"
 
     @property
+    def surface(self) -> str:
+        """Where to surface this match: 'context_only' (LLM additionalContext
+        only — silent to the human operator) or 'user_visible' (also emit
+        a systemMessage so the harness UI shows it to the human).
+
+        Default: 'context_only'. The condition row wins over the decision
+        row when both set it; condition allows per-match-pattern overrides.
+
+        This exists because LLM operators often have main-instruction text
+        like "do not announce hooks", which means context-only injection
+        gets silently swallowed. Structural failure modes (broken auth,
+        runtime crashes, dependency drift) need the human to see them
+        even when the LLM operator doesn't surface them in chat. Routine
+        reminders stay context-only — the LLM can act on them silently.
+        """
+        if "surface" in self.condition:
+            value = str(self.condition.get("surface") or "").strip().lower()
+        else:
+            value = str(self.decision.get("surface") or "").strip().lower()
+        return value if value in {"context_only", "user_visible"} else "context_only"
+
+    @property
+    def user_visible(self) -> bool:
+        return self.surface == "user_visible"
+
+    @property
     def provenance(self) -> str:
         """Decision provenance: 'explicit' (operator unequivocally said so)
         or 'inferred' (model guessed during conversation parsing). Default
@@ -790,9 +816,35 @@ def render_additional_context(matches: list[TriggerMatch], tool_name: str) -> st
     return "\n".join(lines)
 
 
+def render_user_visible(matches: list[TriggerMatch]) -> str:
+    """Render matches that should surface to the human operator (not just
+    the LLM). Returns empty string when no matches are tagged
+    ``surface: 'user_visible'`` — caller can then skip the systemMessage
+    field entirely so quiet matches don't generate UI banners.
+
+    Contract: short, scannable, one bullet per match. The harness shows
+    this in the UI alongside the agent's chat output, bypassing the
+    agent's "don't talk about hooks" instruction. Detail (decision_key,
+    rationale, why) lives in operator_decisions; the user-visible string
+    is the headline only.
+    """
+    visible = [m for m in matches if m.user_visible]
+    if not visible:
+        return ""
+    lines = ["⚠ Praxis standing-order match (operator action required):"]
+    for match in visible:
+        lines.append(f"  • {match.title}")
+        why = match.why or str(match.decision.get("$note") or "").strip()
+        if why:
+            lines.append(f"    why: {why.split(chr(10))[0][:200]}")
+    lines.append("Drill: `praxis_operator_decisions get <decision_key>` for full context.")
+    return "\n".join(lines)
+
+
 __all__ = [
     "TriggerMatch",
     "check",
     "load_registry",
     "render_additional_context",
+    "render_user_visible",
 ]

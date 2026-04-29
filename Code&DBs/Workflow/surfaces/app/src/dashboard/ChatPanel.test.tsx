@@ -231,7 +231,7 @@ describe('FIX #4 – Cmd/Ctrl+Enter shortcut', () => {
     await user.type(textarea, 'hello');
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
 
-    expect(sendMessage).toHaveBeenCalledWith('hello');
+    expect(sendMessage).toHaveBeenCalledWith('hello', undefined);
   });
 
   it('submits on Ctrl+Enter (ctrlKey)', async () => {
@@ -245,7 +245,7 @@ describe('FIX #4 – Cmd/Ctrl+Enter shortcut', () => {
     await user.type(textarea, 'world');
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
-    expect(sendMessage).toHaveBeenCalledWith('world');
+    expect(sendMessage).toHaveBeenCalledWith('world', undefined);
   });
 
   it('does NOT submit on plain Enter', async () => {
@@ -417,7 +417,7 @@ describe('general rendering', () => {
     await user.type(screen.getByRole('textbox'), 'click send');
     await user.click(screen.getByRole('button', { name: /^send$/i }));
 
-    expect(sendMessage).toHaveBeenCalledWith('click send');
+    expect(sendMessage).toHaveBeenCalledWith('click send', undefined);
   });
 
   it('shows an error banner when error is set', () => {

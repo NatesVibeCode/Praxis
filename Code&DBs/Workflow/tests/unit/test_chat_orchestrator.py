@@ -287,6 +287,127 @@ def test_send_message_fails_over_http_route_on_rate_limit(monkeypatch) -> None:
     assert [message["role"] for message in store.messages] == ["user", "assistant"]
 
 
+def test_send_message_leaves_output_budget_unclamped_for_moon_context(monkeypatch) -> None:
+    store = _FakeChatStore()
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
+    http_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="llm_task",
+        endpoint_uri="https://api.openai.com/v1/chat/completions",
+        api_key="openai-key",
+        supports_tool_loop=True,
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda **_kwargs: [http_route])
+    monkeypatch.setattr(chat_orchestrator_mod, "_load_chat_tools", lambda: ([], lambda *_args: {}))
+
+    def _fake_call_llm(request):
+        captured["max_tokens"] = request.max_tokens
+        return SimpleNamespace(
+            content="Moon reviewed it",
+            provider_slug="openai",
+            model="gpt-5.4",
+            usage={"input_tokens": 1, "output_tokens": 1},
+            latency_ms=12,
+            tool_calls=(),
+        )
+
+    monkeypatch.setattr(chat_orchestrator_mod, "call_llm", _fake_call_llm)
+
+    orchestrator.send_message(
+        "conv-1",
+        "Review this build",
+        selection_context=[{"kind": "moon_context", "workflow_id": "wf_123"}],
+    )
+
+    assert captured["max_tokens"] is None
+
+
+def test_send_message_uses_route_max_tokens_when_route_declares_contract(monkeypatch) -> None:
+    store = _FakeChatStore()
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
+    kimi_route = ResolvedChatRoute(
+        provider_slug="openrouter",
+        model_slug="moonshotai/kimi-k2.6",
+        adapter_type="llm_task",
+        endpoint_uri="https://openrouter.ai/api/v1/chat/completions",
+        api_key="openrouter-key",
+        supports_tool_loop=True,
+        max_tokens=32768,
+        temperature=0.2,
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda **_kwargs: [kimi_route])
+    monkeypatch.setattr(chat_orchestrator_mod, "_load_chat_tools", lambda: ([], lambda *_args: {}))
+
+    def _fake_call_llm(request):
+        captured["provider_slug"] = request.provider_slug
+        captured["model_slug"] = request.model_slug
+        captured["max_tokens"] = request.max_tokens
+        captured["temperature"] = request.temperature
+        return SimpleNamespace(
+            content="Kimi reviewed it",
+            provider_slug="openrouter",
+            model="moonshotai/kimi-k2.6",
+            usage={"input_tokens": 1, "output_tokens": 1},
+            latency_ms=12,
+            tool_calls=(),
+        )
+
+    monkeypatch.setattr(chat_orchestrator_mod, "call_llm", _fake_call_llm)
+
+    orchestrator.send_message("conv-1", "Review this build")
+
+    assert captured == {
+        "provider_slug": "openrouter",
+        "model_slug": "moonshotai/kimi-k2.6",
+        "max_tokens": 32768,
+        "temperature": 0.2,
+    }
+
+
+def test_send_message_honors_explicit_max_tokens_over_moon_default(monkeypatch) -> None:
+    store = _FakeChatStore()
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
+    http_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="llm_task",
+        endpoint_uri="https://api.openai.com/v1/chat/completions",
+        api_key="openai-key",
+        supports_tool_loop=True,
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda **_kwargs: [http_route])
+    monkeypatch.setattr(chat_orchestrator_mod, "_load_chat_tools", lambda: ([], lambda *_args: {}))
+
+    def _fake_call_llm(request):
+        captured["max_tokens"] = request.max_tokens
+        return SimpleNamespace(
+            content="Custom budget",
+            provider_slug="openai",
+            model="gpt-5.4",
+            usage={"input_tokens": 1, "output_tokens": 1},
+            latency_ms=12,
+            tool_calls=(),
+        )
+
+    monkeypatch.setattr(chat_orchestrator_mod, "call_llm", _fake_call_llm)
+
+    orchestrator.send_message(
+        "conv-1",
+        "Review this build",
+        selection_context=[{"kind": "moon_context", "workflow_id": "wf_123"}],
+        max_tokens=12000,
+    )
+
+    assert captured["max_tokens"] == 12000
+
+
 def test_resolve_route_chain_reads_endpoint_from_registry_without_hardcoded_fallback(monkeypatch) -> None:
     """Non-openai providers must resolve endpoints via provider_cli_profiles, not a hardcoded dict."""
 

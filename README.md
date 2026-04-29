@@ -100,21 +100,18 @@ Vite serves the UI and proxies API calls to the port in `PRAXIS_API_PORT` (defau
 
 ### Docker path (alternative)
 
-If you prefer containers, `docker compose up -d` brings up the cockpit services: semantic backend, API server, and scheduler. The stack does **not** start its own database container; it uses `WORKFLOW_DATABASE_URL` from `.env` or the shell. That URL may point at host-local Postgres, another LAN machine, or any reachable Postgres 16+ instance with `pgvector`. When native host tools use a local-only DSN like `127.0.0.1`, set `PRAXIS_DOCKER_WORKFLOW_DATABASE_URL` to the container-reachable equivalent such as `postgresql://...@host.docker.internal:5432/praxis`.
-
-The worker also mounts CLI auth files from `PRAXIS_CLI_AUTH_HOME` when set, otherwise from `$HOME`. Local worker slots are derived from the CPU and RAM visible to the worker; set `PRAXIS_WORKER_MAX_PARALLEL` only when you need an explicit cap.
-
-Execution workers are opt-in. Start a worker node explicitly on the machine that should do the work:
+If you prefer containers, the canonical entry points are `make refresh` (full stack) and `make worker` (workflow worker only). Both wrap `scripts/praxis-up`, which exports macOS Keychain provider auth into the shell, then `docker compose up -d --force-recreate` so the containers receive the fresh tokens at recreate time.
 
 ```bash
-docker compose --profile worker up -d --build workflow-worker
+make refresh         # api-server + workflow-worker + scheduler
+make worker          # workflow-worker only (cheaper if auth went stale)
 ```
 
-The launcher alias is equivalent for day-to-day control:
+The stack does **not** start its own database container; it uses `WORKFLOW_DATABASE_URL` from `.env` or the shell. That URL may point at host-local Postgres, another LAN machine, or any reachable Postgres 16+ instance with `pgvector`. When native host tools use a local-only DSN like `127.0.0.1`, set `PRAXIS_DOCKER_WORKFLOW_DATABASE_URL` to the container-reachable equivalent such as `postgresql://...@host.docker.internal:5432/praxis`.
 
-```bash
-./scripts/praxis start worker
-```
+The worker mounts CLI auth files from `PRAXIS_CLI_AUTH_HOME` when set, otherwise from `$HOME`. Local worker slots are derived from the CPU and RAM visible to the worker; set `PRAXIS_WORKER_MAX_PARALLEL` only when you need an explicit cap.
+
+**Do not** invoke `docker compose up -d --force-recreate workflow-worker` directly. That path skips the keychain re-export and leaves the worker with an empty `CLAUDE_CODE_OAUTH_TOKEN`, which causes every Anthropic call to 401 silently. Use `make worker` instead — same recreate, with the auth hydration step included.
 
 ## Example Workflow Spec
 

@@ -754,6 +754,72 @@ def _authority_event_summary(conn: Any, run_id: str) -> dict[str, Any] | None:
     )
 
 
+def _llm_invocation_summary(conn: Any, run_id: str) -> dict[str, Any] | None:
+    """Aggregate per-run token / cost evidence from workflow_jobs.
+
+    The token columns (token_input, token_output, cost_usd) are written
+    in complete_job from result.get('token_*', 0) — when the provider
+    CLI exits cleanly with no usage envelope they all stay at zero.
+    Aggregating here gives execution_proof a direct authority signal for
+    "did the LLM actually run during this run." Without it, proof can
+    show fired/executing/heartbeat=fresh while the underlying CLI is
+    silently producing zero-token successes (the pathology that
+    build_antipattern_hits.zero_token_silent_failure exists to catch).
+    """
+
+    return _first_row(
+        conn,
+        """
+        SELECT COUNT(*) AS llm_job_count,
+               COUNT(*) FILTER (WHERE COALESCE(token_input, 0) > 0
+                                   OR COALESCE(token_output, 0) > 0) AS jobs_with_tokens,
+               COUNT(*) FILTER (WHERE status = 'succeeded'
+                                  AND COALESCE(token_input, 0) = 0
+                                  AND COALESCE(token_output, 0) = 0
+                                  AND COALESCE(cost_usd, 0::numeric) = 0::numeric) AS zero_token_succeeded_jobs,
+               COALESCE(SUM(token_input), 0) AS total_token_input,
+               COALESCE(SUM(token_output), 0) AS total_token_output,
+               COALESCE(SUM(cost_usd), 0::numeric)::float AS total_cost_usd,
+               ARRAY_AGG(DISTINCT resolved_agent) FILTER (WHERE resolved_agent IS NOT NULL AND resolved_agent <> '') AS agents
+          FROM workflow_jobs
+         WHERE run_id = $1
+           AND (job_type IS NULL OR job_type <> 'integration')
+        """,
+        run_id,
+    )
+
+
+def _antipattern_hits_for_run(conn: Any, run_id: str, agents: list[str] | None) -> list[dict[str, Any]]:
+    """Cross-reference build_antipattern_hits for this run's agents.
+
+    Two lookup paths:
+      (a) hit.sample_run_ids contains this run_id → direct evidence the
+          run's jobs contributed to a hit's streak.
+      (b) hit.resolved_agent matches an agent that ran in this run → the
+          agent is currently flagged at the time of this proof query.
+
+    Only open hits (cleared_at IS NULL) are surfaced — closed hits are
+    historical noise.
+    """
+
+    if not agents:
+        agents = []
+    return _execute_rows(
+        conn,
+        """
+        SELECT rule_slug, resolved_agent, provider_slug, model_slug,
+               streak_count, latest_finished_at, detected_at, remediation_action
+          FROM build_antipattern_hits
+         WHERE cleared_at IS NULL
+           AND ($1 = ANY(sample_run_ids) OR resolved_agent = ANY($2::text[]))
+         ORDER BY detected_at DESC
+         LIMIT 5
+        """,
+        run_id,
+        agents,
+    )
+
+
 def _sandbox_row(conn: Any, sandbox_session_id: str | None) -> dict[str, Any] | None:
     if not sandbox_session_id:
         return None
@@ -900,6 +966,9 @@ def handle_query_execution_proof(query: QueryExecutionProof, subsystems: Any) ->
     outbox = _outbox_summary(conn, run_id) or {}
     events = _authority_event_summary(conn, run_id) or {}
     sandbox = _sandbox_row(conn, _clean_text((claim or {}).get("sandbox_session_id")))
+    llm = _llm_invocation_summary(conn, run_id) or {}
+    run_agents = list(llm.get("agents") or [])
+    antipattern_hits = _antipattern_hits_for_run(conn, run_id, run_agents)
 
     now = datetime.now(timezone.utc)
     latest_heartbeat = jobs.get("latest_heartbeat_at")
@@ -982,6 +1051,55 @@ def handle_query_execution_proof(query: QueryExecutionProof, subsystems: Any) ->
         details=events,
     )
 
+    # LLM-invocation evidence — the missing 4th-authority signal that
+    # answers "did the model actually run." Yesterday's runs averaged
+    # 17K tokens in / 6.5K tokens out per job; today's all-zero is the
+    # silent failure mode build_antipattern_hits exists to catch.
+    llm_jobs_with_tokens = _count(llm, "jobs_with_tokens")
+    llm_zero_token_successes = _count(llm, "zero_token_succeeded_jobs")
+    llm_total_in = _count(llm, "total_token_input")
+    llm_total_out = _count(llm, "total_token_output")
+    llm_total_tokens = llm_total_in + llm_total_out
+    if llm_jobs_with_tokens > 0:
+        llm_proof_strength = "strong"
+    elif llm_zero_token_successes > 0:
+        # LLM jobs ran AND succeeded but produced zero tokens — silent
+        # failure shape. Surface as weak (proof exists but is suspect).
+        llm_proof_strength = "weak"
+    else:
+        llm_proof_strength = "missing"
+    _record_evidence(
+        evidence,
+        source="llm_invocation",
+        present=llm_jobs_with_tokens > 0 or llm_zero_token_successes > 0,
+        proof_strength=llm_proof_strength,
+        details={
+            "llm_job_count": _count(llm, "llm_job_count"),
+            "jobs_with_tokens": llm_jobs_with_tokens,
+            "zero_token_succeeded_jobs": llm_zero_token_successes,
+            "total_token_input": llm_total_in,
+            "total_token_output": llm_total_out,
+            "total_tokens": llm_total_tokens,
+            "total_cost_usd": llm.get("total_cost_usd") or 0.0,
+            "agents": run_agents,
+        },
+    )
+
+    # Cross-reference current build_antipattern hits — if this run's
+    # agents are flagged (or this run_id appears in a hit's sample set),
+    # the proof should NOT report "fired and healthy" without surfacing
+    # that the agent itself is in a quarantine state.
+    _record_evidence(
+        evidence,
+        source="build_antipattern_hits",
+        present=len(antipattern_hits) > 0,
+        proof_strength="strong" if antipattern_hits else "missing",
+        details={
+            "open_hit_count": len(antipattern_hits),
+            "hits": antipattern_hits,
+        },
+    )
+
     if not has_claim:
         missing_evidence.append("claim")
     if not fresh_heartbeat:
@@ -994,6 +1112,12 @@ def handle_query_execution_proof(query: QueryExecutionProof, subsystems: Any) ->
         missing_evidence.append("workflow_outbox")
     if event_count <= 0:
         missing_evidence.append("authority_event")
+    # llm_jobs_with_tokens > 0 is the only "the LLM actually ran" signal
+    # this proof has. Without it, fired/executing verdicts are unreliable
+    # — the run may be silently empty-completing (build_antipattern_hits
+    # zero_token_silent_failure pathology).
+    if llm_jobs_with_tokens <= 0 and started_jobs > 0:
+        missing_evidence.append("llm_token_burn")
 
     runtime_effects = any(
         (
@@ -1049,6 +1173,8 @@ def handle_query_execution_proof(query: QueryExecutionProof, subsystems: Any) ->
             "workflow_outbox",
             "authority_events",
             "trace.walk",
+            "llm_invocation",
+            "build_antipattern_hits",
         ],
     }
 

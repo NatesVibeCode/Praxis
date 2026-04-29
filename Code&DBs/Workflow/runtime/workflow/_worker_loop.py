@@ -493,6 +493,25 @@ def run_worker_loop(
     )
     _start_embedding_prewarm_for_worker()
 
+    # Auth preflight: probe each permitted provider's CLI before opening
+    # the claim loop. Any provider that returns unauthenticated/timeout
+    # gets its routes demoted so the worker won't claim jobs into a dead
+    # auth lane. Pairs with scripts/praxis-up (recreate-time probe), the
+    # docker-compose healthcheck (ongoing claude-only gate), and the
+    # zero_token_silent_failure detector (post-hoc metric). Each layer
+    # catches a different version of the same failure.
+    # Standing-order ref: architecture-policy::auth::via-docker-creds-not-shell
+    try:
+        from runtime.observability.worker_auth_preflight import run_startup_auth_preflight
+        _preflight = run_startup_auth_preflight(conn)
+        logger.info("worker_auth_preflight result: %s", _preflight)
+    except Exception as _preflight_exc:  # noqa: BLE001 - never let preflight crash the worker
+        logger.warning(
+            "worker_auth_preflight: skipped due to error: %s",
+            _preflight_exc,
+            exc_info=True,
+        )
+
     notification_wakeup = threading.Event()
     try:
         database_url = resolve_runtime_database_url(required=True)

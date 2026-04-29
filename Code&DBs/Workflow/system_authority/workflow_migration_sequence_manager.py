@@ -25,6 +25,20 @@ class WorkflowMigrationSequenceState:
     next_prefix: int
 
 
+@dataclass(frozen=True)
+class WorkflowMigrationRenumberAction:
+    old_filename: str
+    new_filename: str
+    reason: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "old_filename": self.old_filename,
+            "new_filename": self.new_filename,
+            "reason": self.reason,
+        }
+
+
 def workflow_root_from_path(path: Path | None = None) -> Path:
     if path is not None:
         return Path(path).resolve()
@@ -120,29 +134,146 @@ def propose_workflow_migration_filename(
 
 
 def raise_for_unmanaged_duplicate_prefixes(workflow_root: Path | None = None) -> None:
+    """Legacy guard kept for callers that still use the old name.
+
+    The policy is repair-first, not fail-closed: unmanaged duplicate migration
+    prefixes are automatically moved to fresh prefixes. A hard failure only
+    means the repair itself could not be applied safely.
+    """
+
     state = workflow_migration_sequence_state(workflow_root)
     if not state.unmanaged_duplicate_prefixes:
         return
-    lines = [
-        "workflow migrations have unmanaged duplicate numeric prefixes:",
-    ]
+    renumber_unmanaged_duplicate_prefixes(workflow_root, apply=True)
+
+
+def _filename_policy_rank(spec: dict[str, Any], filename: str) -> tuple[int, int, str]:
+    manifest = [str(item) for item in (spec.get("canonical_manifest") or ())]
+    if filename in manifest:
+        return (0, manifest.index(filename), filename)
+    policy_buckets = spec.get("policy_buckets") if isinstance(spec.get("policy_buckets"), dict) else {}
+    order = ("canonical", "bootstrap_only", "deprecated", "dead")
+    for bucket_index, bucket in enumerate(order, start=1):
+        filenames = [str(item) for item in (policy_buckets.get(bucket) or ())]
+        if filename in filenames:
+            return (bucket_index, filenames.index(filename), filename)
+    return (len(order) + 1, 10**9, filename)
+
+
+def _replace_filename(value: Any, old_filename: str, new_filename: str) -> tuple[Any, bool]:
+    if isinstance(value, str):
+        return (new_filename, True) if value == old_filename else (value, False)
+    if isinstance(value, list):
+        changed = False
+        replaced: list[Any] = []
+        for item in value:
+            next_item, item_changed = _replace_filename(item, old_filename, new_filename)
+            changed = changed or item_changed
+            replaced.append(next_item)
+        return replaced, changed
+    if isinstance(value, dict):
+        changed = False
+        replaced: dict[str, Any] = {}
+        for key, item in value.items():
+            next_key = new_filename if key == old_filename else key
+            next_item, item_changed = _replace_filename(item, old_filename, new_filename)
+            changed = changed or item_changed or next_key != key
+            replaced[next_key] = next_item
+        return replaced, changed
+    return value, False
+
+
+def renumber_unmanaged_duplicate_prefixes(
+    workflow_root: Path | None = None,
+    *,
+    apply: bool = False,
+) -> tuple[WorkflowMigrationRenumberAction, ...]:
+    """Move accidental duplicate-prefix migrations onto fresh numeric prefixes.
+
+    Managed duplicate prefixes are legacy apply-order exceptions declared in
+    ``tie_break_order``. Unmanaged duplicates are almost always an authoring
+    mistake, so the repair keeps the already-authoritative filename at its
+    current prefix and moves the rest to the next free prefix.
+    """
+
+    root = workflow_root_from_path(workflow_root)
+    state = workflow_migration_sequence_state(root)
+    if not state.unmanaged_duplicate_prefixes:
+        return ()
+
+    spec = load_workflow_migration_authority_spec(root)
+    used_prefixes = {
+        match.group("prefix")
+        for filename in state.filenames
+        if (match := _NUMBERED_SQL_PATTERN.match(filename)) is not None
+    }
+    next_prefix = state.highest_prefix + 1
+    actions: list[WorkflowMigrationRenumberAction] = []
+
     for prefix, filenames in sorted(state.unmanaged_duplicate_prefixes.items()):
-        rendered = ", ".join(filenames)
-        lines.append(f"  - {prefix}: {rendered}")
-    lines.append(
-        "Allocate a new file with `workflow schema next-migration <slug>` instead of "
-        "reusing an existing prefix."
-    )
-    raise ValueError("\n".join(lines))
+        keep = min(filenames, key=lambda filename: _filename_policy_rank(spec, filename))
+        for filename in sorted(item for item in filenames if item != keep):
+            match = _NUMBERED_SQL_PATTERN.match(filename)
+            if match is None:
+                continue
+            while f"{next_prefix:03d}" in used_prefixes:
+                next_prefix += 1
+            new_filename = f"{next_prefix:03d}_{match.group('slug')}.sql"
+            used_prefixes.add(f"{next_prefix:03d}")
+            next_prefix += 1
+            actions.append(
+                WorkflowMigrationRenumberAction(
+                    old_filename=filename,
+                    new_filename=new_filename,
+                    reason=f"unmanaged duplicate prefix {prefix}; kept {keep}",
+                )
+            )
+
+    if not apply:
+        return tuple(actions)
+
+    migration_root = workflow_migration_root(root)
+    updated_spec: Any = spec
+    spec_changed = False
+    for action in actions:
+        old_path = migration_root / action.old_filename
+        new_path = migration_root / action.new_filename
+        if not old_path.exists():
+            raise FileNotFoundError(f"migration file not found: {old_path}")
+        if new_path.exists():
+            raise FileExistsError(f"target migration file already exists: {new_path}")
+        old_path.rename(new_path)
+        updated_spec, changed = _replace_filename(
+            updated_spec,
+            action.old_filename,
+            action.new_filename,
+        )
+        spec_changed = spec_changed or changed
+
+    if spec_changed:
+        workflow_migration_authority_spec_path(root).write_text(
+            json.dumps(updated_spec, indent=2, sort_keys=False) + "\n",
+            encoding="utf-8",
+        )
+
+    post_state = workflow_migration_sequence_state(root)
+    if post_state.unmanaged_duplicate_prefixes:
+        raise RuntimeError(
+            "migration renumbering left unmanaged duplicate prefixes: "
+            f"{post_state.unmanaged_duplicate_prefixes}"
+        )
+    return tuple(actions)
 
 
 __all__ = [
+    "WorkflowMigrationRenumberAction",
     "WorkflowMigrationSequenceState",
     "load_workflow_migration_authority_spec",
     "normalize_workflow_migration_slug",
     "numbered_workflow_migration_filenames",
     "propose_workflow_migration_filename",
     "raise_for_unmanaged_duplicate_prefixes",
+    "renumber_unmanaged_duplicate_prefixes",
     "workflow_migration_authority_spec_path",
     "workflow_migration_root",
     "workflow_migration_sequence_state",

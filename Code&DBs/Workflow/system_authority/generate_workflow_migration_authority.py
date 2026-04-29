@@ -11,7 +11,7 @@ if str(_WORKFLOW_ROOT) not in sys.path:
 
 from system_authority.workflow_migration_sequence_manager import (
     load_workflow_migration_authority_spec,
-    raise_for_unmanaged_duplicate_prefixes,
+    renumber_unmanaged_duplicate_prefixes,
 )
 
 _POLICY_ORDER = ("canonical", "bootstrap_only", "deprecated", "dead")
@@ -120,7 +120,14 @@ def main() -> None:
     workflow_root = _WORKFLOW_ROOT
     output_path = workflow_root / "storage" / "_generated_workflow_migration_authority.py"
 
-    raise_for_unmanaged_duplicate_prefixes(workflow_root)
+    renumber_actions = renumber_unmanaged_duplicate_prefixes(workflow_root, apply=True)
+    if renumber_actions:
+        print("workflow migration authority auto-renumbered duplicate prefixes:", file=sys.stderr)
+        for action in renumber_actions:
+            print(
+                f"  {action.old_filename} -> {action.new_filename} ({action.reason})",
+                file=sys.stderr,
+            )
     spec = load_workflow_migration_authority_spec(workflow_root)
     policy_buckets = {
         policy: tuple(spec["policy_buckets"].get(policy, ())) for policy in _POLICY_ORDER

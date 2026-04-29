@@ -131,6 +131,17 @@ class ProviderControlPlaneFrontdoor:
                     "model_version": row.model_version,
                     "cost_structure": row.cost_structure,
                     "cost_metadata": dict(row.cost_metadata),
+                    "route_request": {
+                        "temperature": row.route_temperature,
+                        "max_tokens": row.route_max_tokens,
+                        "reasoning_control": dict(row.route_reasoning_control),
+                        "request_contract_ref": row.route_request_contract_ref,
+                        "cache_policy": dict(row.route_cache_policy),
+                        "structured_output_policy": dict(
+                            row.route_structured_output_policy
+                        ),
+                        "streaming_policy": dict(row.route_streaming_policy),
+                    },
                     "control_enabled": row.control_enabled,
                     "control_state": row.control_state,
                     "control_scope": row.control_scope,
@@ -179,6 +190,7 @@ class ProviderControlPlaneFrontdoor:
                 "commands": [
                     "operator.circuit_override",
                     "operator.task_route_eligibility",
+                    "operator.task_route_request",
                 ],
                 "queries": [
                     "operator.circuit_states",

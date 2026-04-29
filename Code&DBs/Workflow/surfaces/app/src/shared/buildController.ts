@@ -56,10 +56,14 @@ async function _ensureWorkflowId(
 
 export async function compileDefinition(
   prose: string,
-  opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'> & { fullCompose?: boolean },
+  opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'> & {
+    fullCompose?: boolean;
+    onWorkflowReady?: (workflowId: string) => void;
+  },
 ): Promise<BuildPayload> {
   const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, { definition: {} });
-  // Default to the full compose path: synthesis + 20 parallel fork-out
+  if (workflowId) opts?.onWorkflowReady?.(workflowId);
+  // Default to the full compose path: synthesis + bounded parallel fork-out
   // author calls. The build canvas renders nothing until this returns —
   // operator standing order feedback_autonomous_first_no_review_gates +
   // feedback_fanout_by_work_volume.
@@ -203,7 +207,7 @@ export async function postBuildMutation(
   subpath: string,
   body: Record<string, unknown>,
 ): Promise<BuildPayload> {
-  // Full compose path runs synthesis (~30s) + 20 parallel fork-out author
+  // Full compose path runs synthesis (~30s) + bounded parallel fork-out author
   // calls (~3 min wall-clock). Single-call compile fits the 45s budget;
   // give bootstrap-with-full-compose a 6 min ceiling so the LLM compile
   // gates can finish before the canvas renders anything.

@@ -1,4 +1,4 @@
-"""Tools: praxis_submit_code_change, praxis_submit_research_result, praxis_submit_artifact_bundle, praxis_get_submission, praxis_review_submission."""
+"""Workflow submission MCP tools."""
 
 from __future__ import annotations
 
@@ -7,14 +7,18 @@ from typing import Any
 import surfaces.api.workflow_submission as workflow_submission
 
 
-def tool_praxis_submit_code_change(params: dict) -> dict:
-    return workflow_submission.submit_code_change(
+def tool_praxis_submit_code_change_candidate(params: dict) -> dict:
+    return workflow_submission.submit_code_change_candidate(
+        bug_id=params.get("bug_id"),
+        proposal_payload=params.get("proposal_payload"),
+        source_context_refs=params.get("source_context_refs"),
+        base_head_ref=params.get("base_head_ref"),
+        review_routing=params.get("review_routing") or "human_review",
+        verifier_ref=params.get("verifier_ref"),
+        verifier_inputs=params.get("verifier_inputs"),
         summary=params.get("summary"),
-        primary_paths=params.get("primary_paths"),
-        result_kind=params.get("result_kind"),
-        tests_ran=params.get("tests_ran"),
         notes=params.get("notes"),
-        declared_operations=params.get("declared_operations"),
+        routing_decision_record=params.get("routing_decision_record"),
     )
 
 
@@ -58,51 +62,65 @@ def tool_praxis_review_submission(params: dict) -> dict:
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
-    "praxis_submit_code_change": (
-        tool_praxis_submit_code_change,
+    "praxis_submit_code_change_candidate": (
+        tool_praxis_submit_code_change_candidate,
         {
             "description": (
-                "Submit a sealed code-change result for the current workflow MCP session. "
-                "The session token owns run_id, workflow_id, and job_label. This tool never accepts "
-                "those ids as input and returns structured errors instead of stack traces."
+                "Submit a structured code-change candidate for the current workflow MCP session. "
+                "The agent does not edit live source; it provides a small proposal payload plus "
+                "source snapshots. Runtime validates the proposal and derives the patch artifact."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "summary": {"type": "string", "description": "One-line result summary."},
-                    "primary_paths": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Primary files or paths touched by the submission.",
-                    },
-                    "result_kind": {
-                        "type": "string",
-                        "enum": ["code_change"],
-                        "default": "code_change",
-                    },
-                    "tests_ran": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional tests or checks that were run.",
-                    },
-                    "notes": {"type": "string", "description": "Optional reviewer-facing notes."},
-                    "declared_operations": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "path": {"type": "string"},
-                                "action": {
-                                    "type": "string",
-                                    "enum": ["create", "update", "delete", "rename"],
+                    "bug_id": {"type": "string", "description": "Bug this candidate is intended to fix."},
+                    "summary": {"type": "string", "description": "Optional reviewer-facing summary."},
+                    "proposal_payload": {
+                        "type": "object",
+                        "properties": {
+                            "intended_files": {"type": "array", "items": {"type": "string"}},
+                            "rationale": {"type": "string"},
+                            "edits": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "file": {"type": "string"},
+                                        "action": {
+                                            "type": "string",
+                                            "enum": ["full_file_replace", "exact_block_replace"],
+                                        },
+                                        "new_content": {"type": "string"},
+                                        "old_block": {"type": "string"},
+                                        "new_block": {"type": "string"},
+                                    },
+                                    "required": ["file", "action"],
                                 },
-                                "from_path": {"type": "string"},
                             },
-                            "required": ["path", "action"],
+                            "verifier_ref": {"type": "string"},
+                            "verifier_inputs": {"type": "object"},
                         },
+                        "required": ["intended_files", "edits"],
                     },
+                    "source_context_refs": {
+                        "description": (
+                            "Full source snapshots the candidate was authored against. "
+                            "Accepted shapes: {path: content}, {files: [{path, content}]}, "
+                            "or [{path, content}]."
+                        )
+                    },
+                    "base_head_ref": {"type": "string"},
+                    "review_routing": {
+                        "type": "string",
+                        "enum": ["auto_apply", "human_review"],
+                        "default": "human_review",
+                    },
+                    "verifier_ref": {"type": "string"},
+                    "verifier_inputs": {"type": "object"},
+                    "notes": {"type": "string"},
+                    "routing_decision_record": {"type": "object"},
                 },
-                "required": ["summary", "primary_paths", "result_kind"],
+                "required": ["bug_id", "proposal_payload", "source_context_refs"],
             },
         },
     ),

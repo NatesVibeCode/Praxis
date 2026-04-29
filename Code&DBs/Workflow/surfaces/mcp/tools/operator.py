@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -463,7 +464,7 @@ def tool_praxis_graph_projection(params: dict) -> dict:
             if as_of_raw is not None
             else None
         )
-        return asyncio.run(
+        return run_sync_safe(
             handle_query_operator_graph_projection(
                 QueryOperatorGraphProjection(as_of=as_of),
                 _subs,
@@ -1432,6 +1433,68 @@ def tool_praxis_task_route_eligibility(params: dict) -> dict:
             else None
         ),
     }
+    return _execute_catalog_tool(operation_name=operation_name, payload=payload)
+
+
+def tool_praxis_task_route_request(params: dict) -> dict:
+    """Mutate request-shape knobs for one task route through CQRS authority."""
+
+    operation_name = "operator.task_route_request"
+    task_type = str(params.get("task_type") or "").strip()
+    provider_slug = str(params.get("provider_slug") or "").strip().lower()
+    model_slug = str(params.get("model_slug") or "").strip()
+    if not task_type:
+        return _structured_input_error(
+            ValueError("task_type is required"),
+            operation_name=operation_name,
+        )
+    if not provider_slug:
+        return _structured_input_error(
+            ValueError("provider_slug is required"),
+            operation_name=operation_name,
+        )
+    if not model_slug:
+        return _structured_input_error(
+            ValueError("model_slug is required"),
+            operation_name=operation_name,
+        )
+
+    try:
+        payload: dict[str, Any] = {
+            "task_type": task_type,
+            "provider_slug": provider_slug,
+            "model_slug": model_slug,
+            "sub_task_type": str(params.get("sub_task_type") or "*").strip() or "*",
+            "transport_type": str(params.get("transport_type") or "").strip().upper() or None,
+            "reason_code": str(params.get("reason_code") or "operator_control").strip(),
+            "rationale": str(params.get("rationale") or "").strip() or None,
+            "decision_ref": str(params.get("decision_ref") or "").strip() or None,
+        }
+        for key in (
+            "temperature",
+            "max_tokens",
+            "reasoning_control",
+            "request_contract_ref",
+            "cache_policy",
+            "structured_output_policy",
+            "streaming_policy",
+        ):
+            if key in params:
+                payload[key] = params[key]
+        for key in (
+            "clear_temperature",
+            "clear_max_tokens",
+            "clear_reasoning_control",
+            "clear_request_contract_ref",
+            "clear_cache_policy",
+            "clear_structured_output_policy",
+            "clear_streaming_policy",
+        ):
+            if key in params:
+                payload[key] = _parse_bool(params.get(key), field_name=key)
+    except ValueError as exc:
+        return _structured_input_error(exc, operation_name=operation_name)
+
     return _execute_catalog_tool(operation_name=operation_name, payload=payload)
 
 
@@ -3506,6 +3569,45 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                 },
                 "required": ["provider_slug", "eligibility_status"],
+            },
+        },
+    ),
+    "praxis_task_route_request": (
+        tool_praxis_task_route_request,
+        {
+            "description": (
+                "Mutate request-shape knobs for one task route through CQRS authority.\n\n"
+                "USE WHEN: you need to change temperature, max_tokens, reasoning_control, "
+                "request_contract_ref, cache policy, structured-output policy, or streaming "
+                "policy without changing route eligibility or provider admission."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_type": {"type": "string"},
+                    "sub_task_type": {"type": "string", "default": "*"},
+                    "provider_slug": {"type": "string"},
+                    "model_slug": {"type": "string"},
+                    "transport_type": {"type": "string", "enum": ["CLI", "API"]},
+                    "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+                    "clear_temperature": {"type": "boolean", "default": False},
+                    "max_tokens": {"type": "integer", "minimum": 1},
+                    "clear_max_tokens": {"type": "boolean", "default": False},
+                    "reasoning_control": {"type": "object"},
+                    "clear_reasoning_control": {"type": "boolean", "default": False},
+                    "request_contract_ref": {"type": "string"},
+                    "clear_request_contract_ref": {"type": "boolean", "default": False},
+                    "cache_policy": {"type": "object"},
+                    "clear_cache_policy": {"type": "boolean", "default": False},
+                    "structured_output_policy": {"type": "object"},
+                    "clear_structured_output_policy": {"type": "boolean", "default": False},
+                    "streaming_policy": {"type": "object"},
+                    "clear_streaming_policy": {"type": "boolean", "default": False},
+                    "reason_code": {"type": "string", "default": "operator_control"},
+                    "rationale": {"type": "string"},
+                    "decision_ref": {"type": "string"},
+                },
+                "required": ["task_type", "provider_slug", "model_slug"],
             },
         },
     ),

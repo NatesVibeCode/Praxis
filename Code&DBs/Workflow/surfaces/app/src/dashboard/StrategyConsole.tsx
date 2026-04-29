@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Conversation } from '../workspace/useChat';
+import {
+  clearMoonChatHandoff,
+  getMoonChatHandoff,
+  moonChatSelectionContext,
+  subscribeMoonChatHandoff,
+  type MoonChatHandoff,
+} from '../moon/moonChatContext';
 import { MarkdownRenderer } from '../workspace/MarkdownRenderer';
 import { ToolResultRenderer } from '../workspace/ToolResultRenderer';
 import './strategy-console.css';
@@ -114,9 +121,11 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const [selectedModel, setSelectedModel] = useState(readStoredChatModel);
   const [attachedFiles, setAttachedFiles] = useState<PendingChatFile[]>([]);
   const [dropActive, setDropActive] = useState(false);
+  const [moonHandoff, setMoonHandoff] = useState<MoonChatHandoff | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const processedHandoffIdsRef = useRef<Set<string>>(new Set());
 
   const refreshConversations = useCallback(async () => {
     setConversationsLoading(true);
@@ -131,6 +140,17 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     if (stage === 'icon') return;
     void refreshConversations();
   }, [refreshConversations, stage]);
+
+  useEffect(() => {
+    if (stage === 'icon') return;
+    const applyHandoff = (event: MoonChatHandoff | null) => {
+      if (!event) return;
+      setThreadsOpen(false);
+      setMoonHandoff(event);
+    };
+    applyHandoff(getMoonChatHandoff());
+    return subscribeMoonChatHandoff(applyHandoff);
+  }, [stage]);
 
   useEffect(() => {
     if (stage === 'icon') return;
@@ -250,14 +270,63 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     setInput('');
     setAttachedFiles([]);
     setThreadsOpen(false);
+    // Splice the active Moon workflow + selection state into selection_context
+    // when the user has the canvas open. Tools default-target it, so the user
+    // can ask "what's in this workflow" or "add a Slack node here" without
+    // naming the workflow id explicitly.
+    const moonCtx = moonChatSelectionContext();
+    const mergedSelection = moonCtx.length || attachmentContext.length
+      ? [...moonCtx, ...attachmentContext]
+      : undefined;
     void sendMessage(
       content,
-      attachmentContext.length ? attachmentContext : undefined,
+      mergedSelection,
       targetConversationId,
       { model: selectedModel || null },
     );
     void refreshConversations();
   }, [attachedFiles, conversationId, createConversation, input, loading, refreshConversations, selectedModel, sendMessage]);
+
+  useEffect(() => {
+    if (stage === 'icon' || loading) return;
+    if (!moonHandoff || moonHandoff.phase !== 'ready' || !moonHandoff.prompt) return;
+    if (processedHandoffIdsRef.current.has(moonHandoff.handoff_id)) return;
+    processedHandoffIdsRef.current.add(moonHandoff.handoff_id);
+
+    let cancelled = false;
+    const runHandoff = async () => {
+      let targetConversationId = conversationId;
+      if (!targetConversationId) {
+        targetConversationId = await createConversation(`Moon review ${moonHandoff.workflow_id}`);
+        if (!targetConversationId || cancelled) return;
+      }
+      const moonCtx = moonChatSelectionContext();
+      const selectionContext = [
+        ...moonCtx,
+        {
+          kind: 'moon_materialize_handoff',
+          workflow_id: moonHandoff.workflow_id,
+          workflow_name: moonHandoff.workflow_name ?? null,
+          phase: moonHandoff.phase,
+          status_message: moonHandoff.status_message,
+        },
+      ];
+      void sendMessage(
+        moonHandoff.prompt || '',
+        selectionContext,
+        targetConversationId,
+        { model: selectedModel || null, timeoutMs: 240000 },
+      );
+      clearMoonChatHandoff();
+      setMoonHandoff(moonHandoff);
+      void refreshConversations();
+    };
+
+    void runHandoff();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, createConversation, loading, moonHandoff, refreshConversations, selectedModel, sendMessage, stage]);
 
   const handleStartNew = useCallback(async () => {
     const id = await createConversation();
@@ -372,6 +441,14 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
       )}
 
       <div className="strategy-console__stream" role="log" aria-live="polite" aria-relevant="additions">
+        {moonHandoff && (
+          <div className={`strategy-console__handoff strategy-console__handoff--${moonHandoff.phase}`}>
+            <span className="strategy-console__handoff-kicker">Moon handoff</span>
+            <strong>{moonHandoff.phase === 'ready' ? 'Reviewing materialize output' : moonHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
+            <p>{moonHandoff.status_message}</p>
+          </div>
+        )}
+
         {messages.length === 0 && !streamingText && (
           <div className="strategy-console__empty-state">
             <strong>Start from the work in front of you.</strong>

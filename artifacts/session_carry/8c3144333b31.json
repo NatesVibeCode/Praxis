@@ -1,0 +1,19 @@
+{
+  "pack_id": "8c3144333b31",
+  "objective": "Can you help me build on the screen im on? No right? Do you just need better MCP tools for it?",
+  "decisions": [],
+  "open_questions": [
+    "What specific capability are you trying to build?"
+  ],
+  "constraints": [],
+  "risks": [],
+  "artifacts": [],
+  "next_actions": [
+    "**Register:** Add the capability to `operation_catalog_registry`.",
+    "**Define:** Create a Pydantic model for the input.",
+    "**Implement:** Create a handler in the backend that the gateway dispatches to.",
+    "**Expose:** Create a thin MCP tool wrapper that invokes that gateway operation."
+  ],
+  "created_at": "2026-04-29T02:08:57.143754+00:00",
+  "token_estimate": 171
+}

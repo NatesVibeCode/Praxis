@@ -26,6 +26,7 @@ Hard rules enforced here:
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import hashlib
 import json
 import os
@@ -458,20 +459,16 @@ def export_dataset(
     exported_by: str,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(
-            aexport_dataset(
-                dataset_family=dataset_family,
-                specialist_target=specialist_target,
-                split_tag=split_tag,
-                output_path=output_path,
-                exported_by=exported_by,
-                env=env,
-            )
+    return run_sync_safe(
+        aexport_dataset(
+            dataset_family=dataset_family,
+            specialist_target=specialist_target,
+            split_tag=split_tag,
+            output_path=output_path,
+            exported_by=exported_by,
+            env=env,
         )
-    raise RuntimeError("dataset exporter requires a non-async call boundary")
+    )
 
 
 async def abuild_eval_set(

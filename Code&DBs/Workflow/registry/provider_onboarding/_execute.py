@@ -193,7 +193,7 @@ def _post_onboarding_sync(
                            '{}'::jsonb, 0.65, 'explicit',
                            0, 0, 0, 0, 0, 0, 0, 0, 0, '', ''
                        )
-                       ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO NOTHING""",
+                       ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug) DO NOTHING""",
                     task_type,
                     provider_slug,
                     model_slug,
@@ -224,7 +224,7 @@ def _post_onboarding_sync(
                                    '{}'::jsonb, 0.65, 'explicit',
                                    0, 0, 0, 0, 0, 0, 0, 0, 0, '', ''
                                )
-                               ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type) DO NOTHING""",
+                               ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug) DO NOTHING""",
                             task_type,
                             provider_slug,
                             model_slug,

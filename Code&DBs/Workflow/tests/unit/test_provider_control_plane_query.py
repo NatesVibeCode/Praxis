@@ -30,6 +30,9 @@ class _FakeConn:
                     "model_version": "claude-opus-4-7",
                     "cost_structure": "subscription_included",
                     "cost_metadata": {"billing_mode": "subscription_included"},
+                    "route_temperature": 0.2,
+                    "route_max_tokens": 32768,
+                    "route_reasoning_control": {"default_level": "medium"},
                     "control_enabled": True,
                     "control_state": "on",
                     "control_scope": "transport_default_allow",
@@ -269,6 +272,11 @@ def test_provider_control_plane_returns_projected_snapshot_payload() -> None:
     assert payload["rows"][0]["effective_dispatch_state"] == "runnable"
     assert payload["rows"][0]["control_state"] == "on"
     assert payload["rows"][0]["control_enabled"] is True
+    assert payload["rows"][0]["route_request"] == {
+        "temperature": 0.2,
+        "max_tokens": 32768,
+        "reasoning_control": {"default_level": "medium"},
+    }
     assert payload["rows"][0]["credential_availability_state"] == "available"
     assert payload["rows"][0]["credential_sources"] == ["ambient_cli_session"]
     assert payload["rows"][0]["projection_ref"] == "projection.private_provider_control_plane_snapshot"

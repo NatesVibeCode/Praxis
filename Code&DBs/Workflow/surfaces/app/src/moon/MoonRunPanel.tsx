@@ -8,6 +8,8 @@ import {
 } from '../dashboard/runApi';
 import { triggerWorkflow } from '../shared/buildController';
 import { MoonStatusRing } from './MoonStatusRing';
+import { RunEvidencePanel } from '../dashboard/RunEvidencePanel';
+import { useExecutionProof } from '../shared/hooks/useExecutionProof';
 
 interface Props {
   runId: string;
@@ -33,6 +35,31 @@ function formatRawStatus(status: string): string {
 interface RunStreamEvent {
   jobs?: RunJob[];
   status?: RunStatus;
+}
+
+/**
+ * Inline 4-authority execution proof for the Moon run dock.
+ *
+ * Lazy-fetches via /api/runs/{id}/proof. Polls every 30s while the run is
+ * live, freezes once terminal. Renders the same RunEvidencePanel the
+ * dashboard RunDetailView uses — single component, single contract, no
+ * Moon-specific clone.
+ */
+function MoonRunEvidence({ runId, isTerminal }: { runId: string; isTerminal: boolean }) {
+  const { proof, status, error, refresh } = useExecutionProof(runId, {
+    shouldRefresh: !isTerminal,
+  });
+  return (
+    <div className="moon-run__evidence" style={{ marginTop: 12, marginBottom: 12 }}>
+      <RunEvidencePanel
+        runId={runId}
+        proof={proof}
+        status={status}
+        error={error}
+        onRefresh={refresh}
+      />
+    </div>
+  );
 }
 
 function JobRow({ job, onClick }: { job: RunJob; onClick?: () => void }) {
@@ -191,6 +218,8 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
             {liveRun.total_cost > 0 && <span> &middot; ${liveRun.total_cost.toFixed(4)}</span>}
             {liveRun.finished_at && <span> &middot; done</span>}
           </div>
+
+          <MoonRunEvidence runId={runId} isTerminal={isTerminal} />
 
           <div className="moon-run__jobs">
             {liveRun.jobs.map((job: RunJob) => (

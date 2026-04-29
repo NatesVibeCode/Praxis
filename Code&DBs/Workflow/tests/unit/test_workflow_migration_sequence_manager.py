@@ -9,6 +9,8 @@ from system_authority.workflow_migration_sequence_manager import (
     normalize_workflow_migration_slug,
     propose_workflow_migration_filename,
     raise_for_unmanaged_duplicate_prefixes,
+    renumber_unmanaged_duplicate_prefixes,
+    load_workflow_migration_authority_spec,
     workflow_migration_sequence_state,
 )
 
@@ -73,16 +75,48 @@ def test_sequence_state_reports_managed_and_unmanaged_duplicate_prefixes(tmp_pat
     assert state.unmanaged_duplicate_prefixes == {"102": ("102_delta.sql", "102_gamma.sql")}
 
 
-def test_raise_for_unmanaged_duplicate_prefixes_points_to_allocator(tmp_path: Path) -> None:
+def test_legacy_duplicate_guard_auto_repairs_instead_of_failing_closed(tmp_path: Path) -> None:
     workflow_root = _write_fake_workflow_tree(
         tmp_path,
-        filenames=["100_first.sql", "100_second.sql"],
+        filenames=["100_first.sql", "100_second.sql", "101_next.sql"],
     )
 
-    with pytest.raises(ValueError) as excinfo:
-        raise_for_unmanaged_duplicate_prefixes(workflow_root)
+    raise_for_unmanaged_duplicate_prefixes(workflow_root)
+    state = workflow_migration_sequence_state(workflow_root)
+    migration_root = workflow_root.parent / "Databases" / "migrations" / "workflow"
 
-    assert "workflow schema next-migration <slug>" in str(excinfo.value)
+    assert state.unmanaged_duplicate_prefixes == {}
+    assert not (migration_root / "100_second.sql").exists()
+    assert (migration_root / "102_second.sql").exists()
+
+
+def test_renumber_unmanaged_duplicate_prefixes_repairs_files_and_spec(tmp_path: Path) -> None:
+    workflow_root = _write_fake_workflow_tree(
+        tmp_path,
+        filenames=["100_alpha.sql", "100_beta.sql", "101_next.sql"],
+    )
+
+    dry_run = renumber_unmanaged_duplicate_prefixes(workflow_root)
+
+    assert [action.to_dict() for action in dry_run] == [
+        {
+            "old_filename": "100_beta.sql",
+            "new_filename": "102_beta.sql",
+            "reason": "unmanaged duplicate prefix 100; kept 100_alpha.sql",
+        }
+    ]
+
+    applied = renumber_unmanaged_duplicate_prefixes(workflow_root, apply=True)
+    state = workflow_migration_sequence_state(workflow_root)
+    spec = load_workflow_migration_authority_spec(workflow_root)
+    migration_root = workflow_root.parent / "Databases" / "migrations" / "workflow"
+
+    assert tuple(action.to_dict() for action in applied) == tuple(action.to_dict() for action in dry_run)
+    assert not (migration_root / "100_beta.sql").exists()
+    assert (migration_root / "102_beta.sql").exists()
+    assert state.unmanaged_duplicate_prefixes == {}
+    assert "102_beta.sql" in spec["canonical_manifest"]
+    assert "100_beta.sql" not in spec["canonical_manifest"]
 
 
 def test_propose_workflow_migration_filename_uses_real_repo_next_prefix() -> None:

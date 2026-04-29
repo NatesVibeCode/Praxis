@@ -42,6 +42,22 @@ def _cursor_value(value: object) -> str | None:
     return text or None
 
 
+def _cursor_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def _event_payload_dict(value: object) -> dict[str, Any]:
     if isinstance(value, str):
         try:
@@ -85,7 +101,7 @@ def _fetch_events(conn: Any, *, session: str, after: str | None, limit: int = 50
         """,
         list(SHELL_NAVIGATION_EVENT_TYPES),
         session,
-        after,
+        _cursor_datetime(after),
         limit,
     )
 

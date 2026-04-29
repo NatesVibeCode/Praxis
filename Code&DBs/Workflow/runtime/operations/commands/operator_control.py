@@ -105,6 +105,31 @@ class TaskRouteEligibilityCommand(BaseModel):
     decision_ref: str | None = None
 
 
+class TaskRouteRequestCommand(BaseModel):
+    task_type: str
+    provider_slug: str
+    model_slug: str
+    sub_task_type: str = "*"
+    transport_type: str | None = None
+    temperature: float | None = None
+    clear_temperature: bool = False
+    max_tokens: int | None = None
+    clear_max_tokens: bool = False
+    reasoning_control: dict[str, Any] | None = None
+    clear_reasoning_control: bool = False
+    request_contract_ref: str | None = None
+    clear_request_contract_ref: bool = False
+    cache_policy: dict[str, Any] | None = None
+    clear_cache_policy: bool = False
+    structured_output_policy: dict[str, Any] | None = None
+    clear_structured_output_policy: bool = False
+    streaming_policy: dict[str, Any] | None = None
+    clear_streaming_policy: bool = False
+    reason_code: str = "operator_control"
+    rationale: str | None = None
+    decision_ref: str | None = None
+
+
 class NativePrimaryCutoverGateCommand(BaseModel):
     decided_by: str
     decision_source: str
@@ -297,6 +322,65 @@ def handle_task_route_eligibility(
     )
 
 
+def handle_task_route_request(
+    command: TaskRouteRequestCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from surfaces.api.operator_write import OperatorControlFrontdoor
+
+    supplied = set(command.model_fields_set)
+    fields_to_update = supplied & {
+        "temperature",
+        "max_tokens",
+        "reasoning_control",
+        "request_contract_ref",
+        "cache_policy",
+        "structured_output_policy",
+        "streaming_policy",
+    }
+    if command.clear_temperature:
+        fields_to_update.add("temperature")
+    if command.clear_max_tokens:
+        fields_to_update.add("max_tokens")
+    if command.clear_reasoning_control:
+        fields_to_update.add("reasoning_control")
+    if command.clear_request_contract_ref:
+        fields_to_update.add("request_contract_ref")
+    if command.clear_cache_policy:
+        fields_to_update.add("cache_policy")
+    if command.clear_structured_output_policy:
+        fields_to_update.add("structured_output_policy")
+    if command.clear_streaming_policy:
+        fields_to_update.add("streaming_policy")
+
+    return OperatorControlFrontdoor().set_task_route_request(
+        task_type=command.task_type,
+        provider_slug=command.provider_slug,
+        model_slug=command.model_slug,
+        sub_task_type=command.sub_task_type,
+        transport_type=command.transport_type,
+        fields_to_update=frozenset(fields_to_update),
+        temperature=command.temperature,
+        clear_temperature=command.clear_temperature,
+        max_tokens=command.max_tokens,
+        clear_max_tokens=command.clear_max_tokens,
+        reasoning_control=command.reasoning_control,
+        clear_reasoning_control=command.clear_reasoning_control,
+        request_contract_ref=command.request_contract_ref,
+        clear_request_contract_ref=command.clear_request_contract_ref,
+        cache_policy=command.cache_policy,
+        clear_cache_policy=command.clear_cache_policy,
+        structured_output_policy=command.structured_output_policy,
+        clear_structured_output_policy=command.clear_structured_output_policy,
+        streaming_policy=command.streaming_policy,
+        clear_streaming_policy=command.clear_streaming_policy,
+        reason_code=command.reason_code,
+        rationale=command.rationale,
+        decision_ref=command.decision_ref,
+        env=_resolved_env(subsystems),
+    )
+
+
 def handle_native_primary_cutover_gate(
     command: NativePrimaryCutoverGateCommand,
     subsystems: Any,
@@ -436,6 +520,7 @@ __all__ = [
     "OperatorObjectRelationRecordCommand",
     "RoadmapWriteCommand",
     "TaskRouteEligibilityCommand",
+    "TaskRouteRequestCommand",
     "WorkItemCloseoutCommand",
     "handle_architecture_policy_record",
     "handle_circuit_override",
@@ -446,5 +531,6 @@ __all__ = [
     "handle_operator_object_relation_record",
     "handle_operator_roadmap_write",
     "handle_task_route_eligibility",
+    "handle_task_route_request",
     "handle_work_item_closeout",
 ]

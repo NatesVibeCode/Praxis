@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import os
 import re
 from dataclasses import asdict, is_dataclass
@@ -377,7 +378,7 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     if _matches(question, ["lane catalog", "lane runtime", "workflow bridge", "worker lane"]):
         try:
             bridge = _build_workflow_bridge(subs)
-            catalog = asyncio.run(
+            catalog = run_sync_safe(
                 bridge.inspect_lane_catalog(as_of=datetime.now(timezone.utc))
             )
             return {

@@ -1402,7 +1402,7 @@ def test_execute_job_non_packet_runtime_injects_execution_bundle(monkeypatch) ->
     assert "praxis_context_shard" in execution_bundle["mcp_tool_names"]
     assert execution_bundle["tool_bucket"] == "build"
     assert execution_bundle["completion_contract"]["submission_required"] is True
-    assert "praxis_submit_code_change" in execution_bundle["mcp_tool_names"]
+    assert "praxis_submit_code_change_candidate" in execution_bundle["mcp_tool_names"]
     assert "praxis_get_submission" in execution_bundle["mcp_tool_names"]
     assert execution_bundle["access_policy"]["blast_radius"] == ["runtime/downstream.py"]
     assert execution_bundle["access_policy"]["verify_refs"] == ["verify.spec.global"]
@@ -1662,7 +1662,7 @@ def test_execute_job_allows_mcp_transport_through_cli_sandbox(monkeypatch) -> No
     assert completed["status"] == "succeeded"
     assert "implement the feature" in captured["prompt"]
     assert execution_bundle["mcp_tool_names"]
-    assert "praxis_submit_code_change" in execution_bundle["mcp_tool_names"]
+    assert "praxis_submit_code_change_candidate" in execution_bundle["mcp_tool_names"]
     assert "praxis_get_submission" in execution_bundle["mcp_tool_names"]
 
 
@@ -3113,13 +3113,13 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
     assert "praxis_context_shard" in bundle["mcp_tool_names"]
     assert "praxis_query" in bundle["mcp_tool_names"]
     assert "praxis_workflow_validate" in bundle["mcp_tool_names"]
-    assert "praxis_submit_code_change" in bundle["mcp_tool_names"]
+    assert "praxis_submit_code_change_candidate" in bundle["mcp_tool_names"]
     assert "praxis_get_submission" in bundle["mcp_tool_names"]
     assert "workflow" in bundle["skill_refs"]
     assert bundle["completion_contract"]["submission_required"] is True
-    assert bundle["completion_contract"]["result_kind"] == "code_change"
+    assert bundle["completion_contract"]["result_kind"] == "code_change_candidate"
     assert bundle["completion_contract"]["submit_tool_names"] == [
-        "praxis_submit_code_change",
+        "praxis_submit_code_change_candidate",
         "praxis_get_submission",
     ]
 

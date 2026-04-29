@@ -7,6 +7,7 @@ calls the requested method, and returns an IntegrationResult.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import concurrent.futures
 import importlib
 import inspect
@@ -138,7 +139,7 @@ def _call_async(method: Any, args: dict, timeout_s: int) -> Any:
     """Bridge async method to sync with a timeout."""
     async def _run():
         return await asyncio.wait_for(method(**args), timeout=timeout_s)
-    return asyncio.run(_run())
+    return run_sync_safe(_run())
 
 
 def _call_sync(method: Any, args: dict, timeout_s: int) -> Any:

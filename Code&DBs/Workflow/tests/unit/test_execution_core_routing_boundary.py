@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from registry.agent_config import AgentRegistry
 from runtime.workflow import _execution_core
 
@@ -20,6 +22,51 @@ class _FakeConn:
                 }
             ]
         return []
+
+
+class _RouteKnobConn:
+    def execute(self, sql: str, *params):
+        normalized = " ".join(sql.split())
+        if "FROM task_type_routing" in normalized:
+            return [
+                {
+                    "max_tokens": 32768,
+                    "reasoning_control": {"default_level": "medium"},
+                }
+            ]
+        if "FROM provider_model_candidates" in normalized:
+            raise AssertionError("provider fallback should not run when route reasoning is explicit")
+        raise AssertionError(f"Unexpected query: {normalized}")
+
+
+@dataclass(frozen=True)
+class _Agent:
+    max_output_tokens: int
+    model: str = "moonshotai/kimi-k2.6"
+
+
+def test_route_execution_knobs_read_task_route_max_tokens_and_reasoning() -> None:
+    knobs = _execution_core._route_execution_knobs(
+        _RouteKnobConn(),
+        route_task_type="build",
+        provider_slug="openrouter",
+        model_slug="moonshotai/kimi-k2.6",
+    )
+
+    assert knobs == {
+        "max_output_tokens": 32768,
+        "reasoning_effort": "medium",
+    }
+
+
+def test_agent_config_with_max_output_tokens_replaces_api_budget() -> None:
+    adjusted = _execution_core._agent_config_with_max_output_tokens(
+        _Agent(max_output_tokens=4096),
+        32768,
+    )
+
+    assert adjusted.max_output_tokens == 32768
+    assert adjusted.model == "moonshotai/kimi-k2.6"
 
 
 def test_unresolved_auto_job_without_runtime_profile_fails_closed(monkeypatch) -> None:

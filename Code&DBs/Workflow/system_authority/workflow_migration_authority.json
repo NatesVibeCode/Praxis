@@ -347,7 +347,14 @@
     "329_task_scoped_provider_job_catalog_admission.sql",
     "330_anthropic_sonnet_cli_compile_fallback_routes.sql",
     "331_friction_events_task_mode.sql",
-    "332_register_friction_record_operation.sql"
+    "332_register_friction_record_operation.sql",
+    "333_collapse_routing_pk_drop_transport_dim.sql",
+    "334_partial_success_run_state.sql",
+    "334_zero_token_silent_failure_projection.sql",
+    "335_workflow_build_moon_tool_allowlist.sql",
+    "336_code_change_candidate_payloads.sql",
+    "337_llm_request_contract_authority.sql",
+    "338_zero_token_detector_wiring.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -8312,6 +8319,160 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.friction_record"
       }
+    ],
+    "333_collapse_routing_pk_drop_transport_dim.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "task_type_routing.task_type_routing_pkey"
+      }
+    ],
+    "334_partial_success_run_state.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "workflow_runs.workflow_runs_current_state_check"
+      }
+    ],
+    "334_zero_token_silent_failure_projection.sql": [
+      {
+        "object_type": "table",
+        "object_name": "build_antipattern_registry"
+      },
+      {
+        "object_type": "table",
+        "object_name": "build_antipattern_hits"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_build_antipattern_hits_agent_open"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_build_antipattern_hits_detected"
+      },
+      {
+        "object_type": "view",
+        "object_name": "v_zero_token_silent_failures"
+      },
+      {
+        "object_type": "row",
+        "object_name": "build_antipattern_registry.zero_token_silent_failure"
+      }
+    ],
+    "335_workflow_build_moon_tool_allowlist.sql": [
+      {
+        "object_type": "row",
+        "object_name": "platform_config.workflow_build.moon_tool_allowlist.v1"
+      }
+    ],
+    "336_code_change_candidate_payloads.sql": [
+      {
+        "object_type": "table",
+        "object_name": "code_change_candidate_payloads"
+      },
+      {
+        "object_type": "index",
+        "object_name": "code_change_candidate_payloads_bug_status_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "code_change_candidate_payloads_next_actor_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "code_change_candidate_payloads_submission_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "code_change_candidate_payloads_patch_sha_idx"
+      },
+      {
+        "object_type": "view",
+        "object_name": "code_change_candidate_review_queue"
+      }
+    ],
+    "337_llm_request_contract_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.llm_request_contracts"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.request_contract_ref"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.cache_policy"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.structured_output_policy"
+      },
+      {
+        "object_type": "column",
+        "object_name": "task_type_routing.streaming_policy"
+      },
+      {
+        "object_type": "table",
+        "object_name": "llm_request_contracts"
+      },
+      {
+        "object_type": "index",
+        "object_name": "llm_request_contracts_scope_effective_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "llm_request_contracts_active_lookup_idx"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_llm_request_contracts_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_llm_request_contracts_touch"
+      },
+      {
+        "object_type": "view",
+        "object_name": "effective_llm_request_contracts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.llm_request_contracts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.table:effective_llm_request_contracts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.llm_request_contracts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.view.public.effective_llm_request_contracts"
+      }
+    ],
+    "338_zero_token_detector_wiring.sql": [
+      {
+        "object_type": "view",
+        "object_name": "v_zero_token_silent_failures"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_build_antipattern_hits_open_unique"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_build_antipattern_hits"
+      },
+      {
+        "object_type": "function",
+        "object_name": "refresh_build_antipattern_hits_trigger"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_refresh_build_antipattern_hits"
+      }
     ]
   },
   "policy_buckets": {
@@ -8663,7 +8824,14 @@
       "329_task_scoped_provider_job_catalog_admission.sql",
       "330_anthropic_sonnet_cli_compile_fallback_routes.sql",
       "331_friction_events_task_mode.sql",
-      "332_register_friction_record_operation.sql"
+      "332_register_friction_record_operation.sql",
+      "333_collapse_routing_pk_drop_transport_dim.sql",
+      "334_partial_success_run_state.sql",
+      "334_zero_token_silent_failure_projection.sql",
+      "335_workflow_build_moon_tool_allowlist.sql",
+      "336_code_change_candidate_payloads.sql",
+      "337_llm_request_contract_authority.sql",
+      "338_zero_token_detector_wiring.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -8840,12 +9008,18 @@
     "324": [
       "324_google_gemini_cli_yolo_trust.sql",
       "324_object_truth_comparison_run_store.sql"
+    ],
+    "334": [
+      "334_partial_success_run_state.sql",
+      "334_zero_token_silent_failure_projection.sql"
     ]
   },
   "migrations_always_reapply": [
     "298_policy_authority_compliance_receipts.sql",
     "300_policy_authority_receipt_writer_bypasses_self.sql",
     "311_bug_operation_receipt_provenance.sql",
-    "329_task_scoped_provider_job_catalog_admission.sql"
+    "329_task_scoped_provider_job_catalog_admission.sql",
+    "337_llm_request_contract_authority.sql",
+    "338_zero_token_detector_wiring.sql"
   ]
 }

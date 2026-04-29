@@ -16,6 +16,7 @@ The module-level ``app`` object is the canonical ASGI app.
 """
 
 from __future__ import annotations
+import asyncio
 from collections import Counter
 from contextlib import asynccontextmanager
 import dataclasses
@@ -1331,6 +1332,19 @@ def _shared_pg_conn():
 agent_sessions_app.app.state.pg_conn_factory = _shared_pg_conn
 
 
+def _dispatch_legacy_handler(method: str, adapter: _FastAPIHandlerAdapter, path: str) -> bool:
+    """Run legacy BaseHTTPRequestHandler-style routes off the event loop."""
+    if method == "GET":
+        return handle_get_request(adapter, path)
+    if method == "POST":
+        return handle_post_request(adapter, path)
+    if method == "PUT":
+        return handle_put_request(adapter, path)
+    if method == "DELETE":
+        return handle_delete_request(adapter, path)
+    return False
+
+
 async def _route_to_handler(request: Request) -> Response:
     """Dispatch a request through the unified handler system.
 
@@ -1373,16 +1387,16 @@ async def _route_to_handler(request: Request) -> Response:
     body = await request.body()
     adapter = _FastAPIHandlerAdapter(request, subsystems, body)
 
-    if request.method == "GET":
-        handled = handle_get_request(adapter, path)
-    elif request.method == "POST":
-        handled = handle_post_request(adapter, path)
-    elif request.method == "PUT":
-        handled = handle_put_request(adapter, path)
-    elif request.method == "DELETE":
-        handled = handle_delete_request(adapter, path)
-    else:
-        handled = False
+    # Legacy handlers are synchronous and can perform long DB/LLM work. Running
+    # them inline blocks the ASGI loop and makes unrelated routes such as
+    # /api/health time out during full materialize/compose. Keep the adapter
+    # contract intact, but isolate the blocking work in a worker thread.
+    handled = await asyncio.to_thread(
+        _dispatch_legacy_handler,
+        request.method,
+        adapter,
+        path,
+    )
 
     if not handled:
         adapter._send_json(404, {"error": f"Not found: {path}"})
@@ -2079,6 +2093,60 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
         "graph": graph,
         "health": health,
     }
+
+
+@app.get("/api/runs/{run_id}/proof")
+def get_run_execution_proof(run_id: str, stale_after_seconds: int = 180) -> dict[str, Any]:
+    """Return the 4-authority reconciliation for a run.
+
+    Delegates to ``operator.execution_proof`` via the catalog gateway.
+    The response shape is the same as the MCP path —
+    ``{verdict, confidence, evidence[], missing_evidence[], authority_sources[]}``.
+
+    Used by the Moon Run dock + RunDetailView "Evidence" tab. Lazy-fetched
+    on click rather than inlined into ``/api/runs/{id}`` because proof is
+    heavier (5+ aggregation queries across workflow_jobs, receipts,
+    workflow_outbox, authority_events, build_antipattern_hits, etc.) and
+    only needed when an operator is inspecting a specific run.
+    """
+
+    subsystems = _ensure_shared_subsystems(app)
+    if subsystems is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "ok": False,
+                "error": "shared subsystems unavailable",
+                "reason_code": "execution_proof.subsystems_unavailable",
+            },
+        )
+    try:
+        result = execute_operation_from_subsystems(
+            subsystems,
+            operation_name="operator.execution_proof",
+            payload={"run_id": run_id, "stale_after_seconds": int(stale_after_seconds)},
+        )
+    except OperationCatalogBoundaryError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "ok": False,
+                "error": str(exc),
+                "reason_code": "execution_proof.catalog_error",
+            },
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 — surface any backend failure to the UI
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "ok": False,
+                "error": str(exc),
+                "reason_code": "execution_proof.unexpected_failure",
+            },
+        ) from exc
+    if isinstance(result, dict) and result.get("ok") is False:
+        raise HTTPException(status_code=400, detail=result)
+    return result if isinstance(result, dict) else {"result": result}
 
 
 def _load_run_jobs_from_status_authority(conn: Any, run_id: str) -> list[dict[str, Any]]:

@@ -316,6 +316,43 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_task_route_request": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="task-route-request",
+        when_to_use=(
+            "Mutate request-shape knobs for one task route through CQRS authority: "
+            "temperature, max_tokens, reasoning_control, request_contract_ref, cache policy, "
+            "structured-output policy, or streaming policy."
+        ),
+        when_not_to_use=(
+            "Do not use it to allow, reject, onboard, or admit a route. Eligibility stays "
+            "with praxis_task_route_eligibility; admission/access stays with provider control surfaces."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Set compile request shape",
+                {
+                    "task_type": "compile",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4",
+                    "temperature": 0.2,
+                    "max_tokens": 32768,
+                    "reason_code": "request_contract_tuning",
+                },
+            ),
+            _example(
+                "Attach request contract",
+                {
+                    "task_type": "compile",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4",
+                    "request_contract_ref": "llm_request_contract.openai.gpt-5-4.api.compile",
+                },
+            ),
+        ],
+    ),
     "praxis_execution_truth": _tool(
         surface="operations",
         tier="stable",
@@ -1580,15 +1617,37 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Submit an artifact bundle", {"summary": "Generated migration bundle", "primary_paths": ["artifacts/migrations"], "result_kind": "artifact_bundle"}),
         ],
     ),
-    "praxis_submit_code_change": _tool(
+    "praxis_submit_code_change_candidate": _tool(
         surface="submissions",
         tier="session",
         recommended_alias=None,
-        when_to_use="Submit a sealed code-change result owned by the active workflow session.",
-        when_not_to_use="Do not use it outside token-scoped workflow execution.",
+        when_to_use="Submit a structured code-change candidate owned by the active workflow session.",
+        when_not_to_use="Do not use it outside token-scoped workflow execution; do not submit raw LLM-authored diffs.",
         risks={"default": "session"},
         examples=[
-            _example("Submit a code change", {"summary": "Fixed MCP transport framing", "primary_paths": ["surfaces/mcp/protocol.py"], "result_kind": "code_change"}),
+            _example("Submit a candidate", {"bug_id": "BUG-12345678", "review_routing": "human_review"}),
+        ],
+    ),
+    "praxis_code_change_candidate_review": _tool(
+        surface="submissions",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Approve, reject, or request changes on a sealed code-change candidate.",
+        when_not_to_use="Do not use it to apply source; materialization is a separate operation.",
+        risks={"default": "write"},
+        examples=[
+            _example("Approve a candidate", {"candidate_id": "<uuid>", "reviewer_ref": "human:nate", "decision": "approve"}),
+        ],
+    ),
+    "praxis_code_change_candidate_materialize": _tool(
+        surface="submissions",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Apply a reviewed or auto-apply code-change candidate after verifier and gate checks.",
+        when_not_to_use="Do not use it to bypass review or verifier evidence.",
+        risks={"default": "write"},
+        examples=[
+            _example("Materialize a candidate", {"candidate_id": "<uuid>", "materialized_by": "human:nate"}),
         ],
     ),
     "praxis_submit_research_result": _tool(

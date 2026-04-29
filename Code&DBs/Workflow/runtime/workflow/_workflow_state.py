@@ -266,32 +266,53 @@ def _recompute_workflow_run_state(
     dead_letter_jobs = counts.get("dead_letter", 0)
     cancelled_jobs = counts.get("cancelled", 0)
 
+    # Cascade-cancel fix (operator decision 2026-04-29, option B): the run
+    # only flips to a terminal state once no peers can still run. Previously
+    # the `failed` branch fired on the FIRST failed peer, which set
+    # workflow_runs.current_state='failed' while siblings were still queued.
+    # Workers then auto-cancelled those siblings at claim-time via
+    # _execution_core.py:299's _WORKFLOW_TERMINAL_STATES check. For
+    # parallel-fanout waves (e.g. independent bug-fix packets) this turned
+    # one failure into N run_cancelled cascades.
+    #
+    # New rule: while active or pending peers exist, stay in `running`/`queued`
+    # so the rest of the wave can attempt. Once everyone has settled, classify:
+    #   * dead_letter present     → 'dead_letter' (system-level retry exhaustion)
+    #   * succeeded AND (failed OR dead_letter) → 'partial_success' (mixed outcome)
+    #   * failed/blocked-only, no successes      → 'failed'
+    #   * succeeded-only                         → 'succeeded'
+    #   * cancelled-only                         → 'cancelled'
     if total_jobs == 0:
         new_state = "failed"
         terminal_reason = "no_jobs"
-    elif dead_letter_jobs > 0:
-        new_state = "dead_letter"
-        terminal_reason = "job_dead_lettered"
-    elif failed_jobs > 0:
-        # Only hard failures count — blocked jobs from unselected branches are not failures
-        new_state = "failed"
-        terminal_reason = "job_failed"
-    elif cancelled_jobs > 0 and active_jobs == 0 and pending_jobs == 0:
-        new_state = "cancelled"
-        terminal_reason = "workflow_cancelled"
-    elif succeeded_jobs > 0 and active_jobs == 0 and pending_jobs == 0:
-        # All active-path jobs succeeded; blocked jobs are branch-skipped, not failures
-        new_state = "succeeded"
-        terminal_reason = "all_jobs_succeeded"
     elif active_jobs > 0:
         new_state = "running"
         terminal_reason = None
     elif pending_jobs > 0:
         new_state = "queued"
         terminal_reason = None
+    elif dead_letter_jobs > 0 and succeeded_jobs == 0:
+        new_state = "dead_letter"
+        terminal_reason = "job_dead_lettered"
+    elif succeeded_jobs > 0 and (failed_jobs > 0 or dead_letter_jobs > 0):
+        new_state = "partial_success"
+        terminal_reason = "partial_completion"
+    elif failed_jobs > 0:
+        new_state = "failed"
+        terminal_reason = "job_failed"
+    elif cancelled_jobs > 0 and succeeded_jobs == 0:
+        new_state = "cancelled"
+        terminal_reason = "workflow_cancelled"
+    elif succeeded_jobs > 0:
+        # All active-path jobs succeeded; blocked jobs are branch-skipped, not failures
+        new_state = "succeeded"
+        terminal_reason = "all_jobs_succeeded"
     else:
-        new_state = "queued"
-        terminal_reason = None
+        # Edge case: only blocked/cancelled remain (no active, no pending,
+        # no successes). Treat as failed for visibility — a workflow that
+        # blocked-out without any forward progress is not "succeeded".
+        new_state = "failed"
+        terminal_reason = "no_progress"
 
     if (
         prior_state in _WORKFLOW_TERMINAL_STATES
@@ -341,8 +362,14 @@ def _recompute_workflow_run_state(
             "parent_run_id": request_envelope.get("parent_run_id"),
             "trigger_depth": request_envelope.get("trigger_depth", 0),
         }
-        lifecycle_event_type = "workflow.completed" if new_state == "succeeded" else "workflow.failed"
-        compatibility_event_type = "run.succeeded" if new_state == "succeeded" else "run.failed"
+        # partial_success emits as a completion event (the run finished its
+        # attempt cycle and produced at least one successful packet) with
+        # reason_code='partial_completion' so consumers can branch on the
+        # mixed-outcome shape without losing the "this finished cleanly"
+        # signal. Operator decision 2026-04-29.
+        completion_states = {"succeeded", "partial_success"}
+        lifecycle_event_type = "workflow.completed" if new_state in completion_states else "workflow.failed"
+        compatibility_event_type = "run.succeeded" if new_state in completion_states else "run.failed"
         emit_system_event(
             conn,
             event_type=lifecycle_event_type,

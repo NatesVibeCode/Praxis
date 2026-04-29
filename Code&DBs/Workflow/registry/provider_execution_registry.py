@@ -12,6 +12,8 @@ Transport mechanics remain in ``adapters.provider_transport``.
 
 from __future__ import annotations
 
+from runtime.async_bridge import run_sync_safe
+
 import enum
 import json
 import logging
@@ -305,7 +307,7 @@ def _run_async(coro: Any) -> Any:
                     f"DB load timed out after {timeout}s "
                     f"(set {_LOAD_TIMEOUT_ENV} to increase)"
                 ) from exc
-    return asyncio.run(coro)
+    return run_sync_safe(coro)
 
 
 async def _fetch_from_db(

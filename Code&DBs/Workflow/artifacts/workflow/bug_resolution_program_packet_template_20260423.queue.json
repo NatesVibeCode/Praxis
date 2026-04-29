@@ -2,53 +2,41 @@
   "name": "{{PACKET_NAME}}",
   "workflow_id": "{{PACKET_SLUG}}",
   "queue_id": "{{PACKET_SLUG}}",
-  "phase": "bug_resolution_packet",
-  "outcome_goal": "Drive bugs {{BUG_IDS_COMMA}} to a terminal outcome with explicit evidence and bounded verification.",
+  "phase": "bug_resolution_candidate_authoring",
+  "outcome_goal": "Author a structured code-change candidate for bugs {{BUG_IDS_COMMA}}. No live source write is allowed from this workflow.",
   "anti_requirements": [
-    "Do NOT widen scope outside the listed bugs and authority owner.",
-    "Do NOT resolve FIXED without validates_fix evidence.",
-    "Do NOT use ad hoc SQL for bug status or evidence writes.",
-    "Do NOT clean up unrelated issues just because they are nearby."
+    "Do NOT edit live source or packet markdown.",
+    "Do NOT use any direct code-change submit interface.",
+    "Do NOT resolve FIXED without a materialized candidate and validates_fix evidence.",
+    "Do NOT widen scope outside the listed bugs and authority owner."
   ],
   "jobs": [
     {
-      "label": "plan_packet",
-      "agent": "openai/gpt-5.4",
-      "task_type": "architecture",
-      "description": "Lock the execution boundary for {{PACKET_NAME}}.",
-      "outcome_goal": "One plan artifact names the exact touched files, verification path, and closure boundary before implementation starts.",
-      "prompt": "Read the coordination file `{{COORDINATION_PATH}}` and extract packet `{{PACKET_ID}}`.\n\nPacket contract:\n- bug_ids: {{BUG_IDS_JSON}}\n- authority_owner: {{AUTHORITY_OWNER}}\n- lane: {{LANE_LABEL}} ({{LANE_ID}})\n- wave: {{WAVE_ID}}\n- packet_kind: {{PACKET_KIND}}\n- cluster: {{CLUSTER_LABEL}} ({{CLUSTER_KEY}})\n- verification_surface: {{VERIFICATION_SURFACE}}\n- depends_on_wave: {{DEPENDS_ON_WAVE}}\n\nWrite `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/PLAN.md` with these sections:\n1. Bugs in scope\n2. Titles in scope\n{{BUG_TITLES_MD}}\n3. Files to read first\n4. Files allowed to change\n5. Verification or closure proof required\n6. Stop boundary\n\nUse current repo truth, not guesses. Do not edit code in this job.",
-      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/PLAN.md"
-    },
-    {
-      "label": "execute_packet",
+      "label": "author_code_change_candidate",
       "agent": "openai/gpt-5.4",
       "task_type": "build",
-      "verify_refs": [
-        "verify.bug_resolution_packet.{{PACKET_SLUG}}.execute_packet"
+      "write_scope": [],
+      "mcp_tools": [
+        "praxis_query",
+        "praxis_discover",
+        "praxis_recall",
+        "praxis_bugs",
+        "praxis_submit_code_change_candidate",
+        "praxis_get_submission"
       ],
-      "depends_on": [
-        "plan_packet"
-      ],
-      "description": "Implement or close the packet without widening scope.",
-      "outcome_goal": "The packet produces either a bounded code fix or a proof-backed closure rationale for every bug in scope.",
-      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/PLAN.md` first.\n\nThen implement the narrowest correct path for packet `{{PACKET_ID}}`.\n\nRules:\n- If the right outcome is FIXED, make the smallest durable change and record exactly what verification will prove it.\n- If the right outcome is WONT_FIX or DEFERRED, do not force code. Collect the proof and rationale instead.\n- Prepare for the closeout job by recording the intended terminal outcome for each bug in `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/EXECUTION.md`.\n- Do not resolve bugs in this job.\n\nDone criteria:\n{{DONE_CRITERIA_MD}}\n\nStop boundary: {{STOP_BOUNDARY}}",
-      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/EXECUTION.md"
-    },
-    {
-      "label": "verify_and_resolve_packet",
-      "agent": "openai/gpt-5.4",
-      "task_type": "test",
-      "verify_refs": [
-        "verify.bug_resolution_packet.{{PACKET_SLUG}}.verify_and_resolve_packet"
-      ],
-      "depends_on": [
-        "execute_packet"
-      ],
-      "description": "Run verification, attach bug evidence, and resolve every bug through the bug tracker surface.",
-      "outcome_goal": "Each in-scope bug is either left open with a clear blocker or moved to a terminal status with explicit evidence.",
-      "prompt": "Read `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/PLAN.md` and `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/EXECUTION.md`.\n\nThen do the narrowest meaningful verification for the packet.\n\nCloseout rules:\n- Use `praxis workflow bugs attach_evidence` and `praxis workflow bugs resolve` only.\n- If terminal outcome is FIXED, attach attempted_fix evidence and validates_fix evidence before resolution.\n- If terminal outcome is WONT_FIX or DEFERRED, write the proof-backed rationale to `Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/CLOSEOUT.md` and resolve through the bug tracker surface.\n- If verification fails, leave the bug open and write the blocker in CLOSEOUT.md.\n\nVerification surface: {{VERIFICATION_SURFACE}}\nStop boundary: {{STOP_BOUNDARY}}",
-      "verify_command": "test -s Code&DBs/Workflow/artifacts/workflow/bug_resolution_program/packets/{{PACKET_SLUG}}/CLOSEOUT.md"
+      "submission_required": true,
+      "completion_contract": {
+        "submission_required": true,
+        "verification_required": false,
+        "result_kind": "code_change_candidate",
+        "submit_tool_names": [
+          "praxis_submit_code_change_candidate",
+          "praxis_get_submission"
+        ]
+      },
+      "description": "Author a DB-resident code-change candidate; do not mutate source.",
+      "outcome_goal": "A sealed workflow submission plus code_change_candidate_payload row exists for the primary bug in scope.",
+      "prompt": "Read the coordination file `{{COORDINATION_PATH}}` and extract packet `{{PACKET_ID}}`.\n\nPacket contract:\n- bug_ids: {{BUG_IDS_JSON}}\n- authority_owner: {{AUTHORITY_OWNER}}\n- lane: {{LANE_LABEL}} ({{LANE_ID}})\n- wave: {{WAVE_ID}}\n- packet_kind: {{PACKET_KIND}}\n- cluster: {{CLUSTER_LABEL}} ({{CLUSTER_KEY}})\n- verification_surface: {{VERIFICATION_SURFACE}}\n- depends_on_wave: {{DEPENDS_ON_WAVE}}\n\nHard boundary:\n- Do not edit files.\n- Do not write PLAN.md, EXECUTION.md, or CLOSEOUT.md.\n- Do not call the retired direct-submit interface.\n- Your deliverable is one `praxis_submit_code_change_candidate` tool call.\n\nCandidate contract:\n- Pick the first bug in bug_ids as `bug_id` for V0. If other bugs in the packet need separate fixes, leave that in the candidate rationale; future packets handle them one bug at a time.\n- Read the source files you need and include their full base contents in `source_context_refs`.\n- Use `proposal_payload.edits` with only `exact_block_replace` or `full_file_replace`.\n- Prefer `exact_block_replace` with an `old_block` that appears exactly once in the source context.\n- Include `verifier_ref` and `verifier_inputs` that can prove the candidate at materialization time.\n- Use `review_routing: \"human_review\"` unless the coordination file explicitly says this lane is auto_apply.\n\nDone criteria:\n{{DONE_CRITERIA_MD}}\n\nStop boundary: {{STOP_BOUNDARY}}"
     }
   ]
 }

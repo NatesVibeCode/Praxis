@@ -48,6 +48,7 @@ balancer as optional.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import logging
 import os
 import time
@@ -144,7 +145,7 @@ class GlobalLoadBalancer:
     """Cross-session provider concurrency control backed by Postgres.
 
     All public methods are synchronous wrappers that spin up a fresh
-    ``asyncio.run()`` call internally, which keeps them safe to call from
+    ``run_sync_safe()`` call internally, which keeps them safe to call from
     any thread without managing a shared event loop.
 
     If the Postgres URL is not configured, or the DB is unreachable, every
@@ -170,7 +171,7 @@ class GlobalLoadBalancer:
         """Run an async coroutine synchronously. Returns None on any error."""
         self._last_error = None
         try:
-            return asyncio.run(coro)
+            return run_sync_safe(coro)
         except Exception as exc:
             self._last_error = exc
             _log.debug("load_balancer: async error: %s", exc)

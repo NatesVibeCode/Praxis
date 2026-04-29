@@ -29,6 +29,7 @@ The reconciler is idempotent: re-running on a clean DB is a no-op.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import json
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -364,13 +365,9 @@ def reconcile_dataset_staleness(
     reconciled_by: str = DEFAULT_RECONCILER_ID,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(
-            areconcile_dataset_staleness(reconciled_by=reconciled_by, env=env)
-        )
-    raise RuntimeError("staleness reconciler requires a non-async call boundary")
+    return run_sync_safe(
+        areconcile_dataset_staleness(reconciled_by=reconciled_by, env=env)
+    )
 
 
 __all__ = [

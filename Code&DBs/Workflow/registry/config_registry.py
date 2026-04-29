@@ -13,6 +13,7 @@ Singleton access:  ``get_config()``
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import logging
 import threading
 import time
@@ -108,7 +109,7 @@ def _run_async(coro: Any) -> Any:
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result(timeout=10)
-    return asyncio.run(coro)
+    return run_sync_safe(coro)
 
 
 class ConfigRegistry:

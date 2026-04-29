@@ -24,29 +24,32 @@ This script is idempotent. It resolves setup/registry DB authority, creates `.en
 Requires Docker and Docker Compose. The compose stack does **not** include its own database. It uses `WORKFLOW_DATABASE_URL` from `.env` or the shell, so the database can be host-local, remote on the LAN, or any reachable Postgres 16+ instance with `pgvector`. If container networking needs a different DSN than native host tools do, set `PRAXIS_DOCKER_WORKFLOW_DATABASE_URL` to the container-reachable authority while leaving `WORKFLOW_DATABASE_URL` pointed at the native host authority.
 
 ```bash
-# Start the cockpit services (semantic-backend + api-server + scheduler)
-docker compose up -d
+# One-time setup (creates .env, DB, deps, runs migrations, smoke-tests):
+make bootstrap
 
-# Wait for healthy
-docker compose ps
-
-# From the host, prepare the database and dependencies
-./scripts/bootstrap
+# Day-to-day: start / refresh the cockpit + worker with fresh Keychain-
+# hydrated provider auth. Use this every time after `claude /login`,
+# Docker Desktop / OrbStack restart, host reboot, or whenever a worker is
+# "Up" but failing auth probes.
+make refresh         # api-server + workflow-worker + scheduler (recommended)
+make worker          # workflow-worker only (cheaper if just auth went stale)
 ```
 
-Default compose startup is cockpit-only. The workflow worker is an explicit
-execution-node profile so cockpit machines do not accidentally claim jobs from
-the shared database.
+`make refresh` wraps `scripts/praxis-up`, which exports the macOS Keychain
+"praxis" account into the shell, ensures `~/.claude/.credentials.json`
+exists as a file (not a directory — that mount accident silently breaks
+the file-auth fallback), then runs `docker compose up -d --force-recreate`
+so the containers receive the fresh tokens at recreate time.
 
-Run the worker only on the machine that should execute workflow work:
+**Do not** invoke `docker compose up -d --force-recreate workflow-worker`
+directly. It bypasses the keychain re-export step and leaves the worker
+with an empty `CLAUDE_CODE_OAUTH_TOKEN`, which causes every Anthropic
+call to 401 silently. The `via-docker-creds-not-shell` standing-order
+hook surfaces a reminder if it sees that command pattern.
 
-```bash
-docker compose --profile worker up -d --build workflow-worker
-docker compose logs -f workflow-worker
-```
-
-For day-to-day control, `./scripts/praxis start worker` targets the same
-execution-node service explicitly.
+The workflow worker runs under a `worker` profile so cockpit-only machines
+don't accidentally claim jobs from the shared database. `make worker` /
+`make refresh` invoke the right profile automatically.
 
 If nested Docker workers need to call the host-published API from Linux, set `PRAXIS_WORKFLOW_MCP_URL` to a reachable URL for `/mcp`. On Docker Desktop and OrbStack the default `http://host.docker.internal:8420/mcp` usually works. Set `PRAXIS_WORKFLOW_MCP_SIGNING_SECRET` in `.env` to the same random value for the API and worker containers; `openssl rand -hex 32` is enough for local setups.
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1506,6 +1508,53 @@ def test_rest_legacy_api_bridge_routes_unknown_api_paths_to_handler(monkeypatch)
     assert post_response.status_code == 200
     assert post_response.json() == {"ok": True, "path": "/api/workflows", "method": "POST"}
     assert seen == [("GET", "/api/models"), ("POST", "/api/workflows")]
+
+
+def test_rest_legacy_api_bridge_offloads_sync_handlers(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+    offloaded: list[bool] = []
+
+    async def _fake_to_thread(func, *args, **kwargs):
+        offloaded.append(True)
+        return func(*args, **kwargs)
+
+    def _fake_dispatch(method, adapter, path):
+        calls.append((method, path))
+        adapter._send_json(200, {"ok": True, "path": path, "method": method})
+        return True
+
+    monkeypatch.setattr(rest.asyncio, "to_thread", _fake_to_thread)
+    monkeypatch.setattr(rest, "_dispatch_legacy_handler", _fake_dispatch)
+    monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: object())
+
+    async def _receive():
+        return {
+            "type": "http.request",
+            "body": b'{"prose":"x"}',
+            "more_body": False,
+        }
+
+    request = rest.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/workflows/wf_123/build/bootstrap",
+            "raw_path": b"/api/workflows/wf_123/build/bootstrap",
+            "query_string": b"wait=false",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        _receive,
+    )
+    response = asyncio.run(rest._route_to_handler(request))
+
+    assert response.status_code == 200
+    assert json.loads(response.body.decode("utf-8")) == {
+        "ok": True,
+        "path": "/api/workflows/wf_123/build/bootstrap?wait=false",
+        "method": "POST",
+    }
+    assert calls == [("POST", "/api/workflows/wf_123/build/bootstrap?wait=false")]
+    assert offloaded == [True]
 
 
 def test_dashboard_route_delegates_to_handler_bridge(monkeypatch) -> None:

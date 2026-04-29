@@ -536,6 +536,7 @@ export function AppShell() {
       openCompose,
       openDashboardCosts,
       setChatOpen: () => setStrategyStage('sidebar'),
+      openMaterializeChat: () => setStrategyStage('sidebar'),
       handleBuildDraftStateChange,
     });
     return <Component {...props} />;
@@ -695,6 +696,7 @@ interface RenderPropHelpers {
   openCompose: (intent: string, pillRefs?: readonly string[]) => Promise<void>;
   openDashboardCosts: () => Promise<void>;
   setChatOpen: () => void;
+  openMaterializeChat: () => void;
   handleBuildDraftStateChange: (draft: { dirty: boolean; message?: string | null }) => void;
 }
 
@@ -729,6 +731,7 @@ function renderPropsForRoute(routeId: string, state: ShellState, helpers: Render
         onEditWorkflow: (wfId: string) => helpers.openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon' }),
         onViewRun: (runId: string) => helpers.openRunDetail(runId),
         onDraftStateChange: helpers.handleBuildDraftStateChange,
+        onMaterializeHandoff: helpers.openMaterializeChat,
         initialMode:
           state.buildIntent === '__compose__' || (!state.buildWorkflowId && !state.moonRunId)
             ? 'compose'

@@ -365,6 +365,8 @@ class TaskRouteDecision:
     # budget_authority_unreachable, reason code
     # lane.rejected.budget_window_data_quality_error.
     budget_window_data_quality_error: bool = False
+    temperature: float | None = None
+    max_tokens: int | None = None
     reasoning_effort_slug: str = ""
     reasoning_provider_payload: dict[str, Any] = field(default_factory=dict)
 
@@ -1142,6 +1144,8 @@ class TaskTypeRouter:
             task_rank_score = _profile_task_rank_score(candidate, profile, affinity_bucket=affinity_bucket)
             benchmark_score = float(explicit_override.get("benchmark_score") or 0.0) if explicit_override else 0.0
             benchmark_name = str(explicit_override.get("benchmark_name") or "") if explicit_override else ""
+            row_temperature = state_row.get("temperature") if state_row is not None else None
+            row_max_tokens = state_row.get("max_tokens") if state_row is not None else None
             raw_cost_per_m_tokens = _base_cost_per_m_tokens(candidate, state_row=state_row)
             provider_slug = str(candidate["provider_slug"])
             try:
@@ -1170,6 +1174,8 @@ class TaskTypeRouter:
                 "benchmark_score": benchmark_score,
                 "benchmark_name": benchmark_name,
                 "cost_per_m_tokens": raw_cost_per_m_tokens,
+                "temperature": float(row_temperature) if row_temperature is not None else None,
+                "max_tokens": int(row_max_tokens) if row_max_tokens is not None else None,
                 "rationale": rationale,
                 "route_tier": candidate.get("route_tier"),
                 "route_tier_rank": candidate.get("route_tier_rank"),
@@ -1433,6 +1439,16 @@ class TaskTypeRouter:
                 ),
                 budget_window_data_quality_error=bool(
                     row.get("budget_window_data_quality_error", False)
+                ),
+                temperature=(
+                    float(row["temperature"])
+                    if row.get("temperature") is not None
+                    else None
+                ),
+                max_tokens=(
+                    int(row["max_tokens"])
+                    if row.get("max_tokens") is not None
+                    else None
                 ),
                 reasoning_effort_slug=str(row.get("reasoning_effort_slug") or ""),
                 reasoning_provider_payload=dict(

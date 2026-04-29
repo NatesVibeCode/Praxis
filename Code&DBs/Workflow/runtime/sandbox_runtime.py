@@ -185,7 +185,7 @@ def _submission_required(metadata: Mapping[str, Any] | None) -> bool:
     # (workflow_execution::mutating-jobs-use-sealed-submission-and-verify-refs-
     # only). Under that contract, the sandbox filesystem is ephemeral scratch:
     # the authoritative deliverable is the workflow_job_submissions row the
-    # agent writes via praxis_submit_code_change / praxis_submit_artifact_bundle,
+    # agent writes via the candidate or artifact submission tool,
     # not on-disk artifacts. Filesystem write_scope enforcement and host
     # dehydration are legacy-mode only.
     if not isinstance(metadata, Mapping):

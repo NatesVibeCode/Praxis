@@ -49,6 +49,7 @@ from surfaces.mcp.tools.health import tool_praxis_reload
 from system_authority.workflow_migration_sequence_manager import (
     normalize_workflow_migration_slug,
     propose_workflow_migration_filename,
+    renumber_unmanaged_duplicate_prefixes,
     workflow_migration_sequence_state,
 )
 
@@ -99,7 +100,7 @@ def _render_confirmation(*, stdout: TextIO) -> int:
 def _schema_help_text() -> str:
     return "\n".join(
         [
-            "usage: workflow schema <status|plan|apply|describe|next-migration> [args]",
+            "usage: workflow schema <status|plan|apply|describe|next-migration|renumber-migrations> [args]",
             "",
             "Schema authority:",
             "  workflow schema status [--scope workflow|control] [--json]",
@@ -107,6 +108,7 @@ def _schema_help_text() -> str:
             "  workflow schema apply [--scope workflow|control] [--yes] [--json]",
             "  workflow schema describe <object-name|migration.sql> [--scope workflow|control] [--json]",
             "  workflow schema next-migration <slug> [--json]",
+            "  workflow schema renumber-migrations [--yes] [--json]",
         ]
     )
 
@@ -227,7 +229,19 @@ async def _schema_describe_payload(*, scope: str, target: str) -> dict[str, Any]
 
 def _schema_next_migration_payload(*, slug: str) -> dict[str, Any]:
     normalized_slug = normalize_workflow_migration_slug(slug)
+    renumber_actions = renumber_unmanaged_duplicate_prefixes(apply=True)
     state = workflow_migration_sequence_state()
+    action_dicts = [action.to_dict() for action in renumber_actions]
+    operator_messages = []
+    if action_dicts:
+        moved = ", ".join(
+            f"{item['old_filename']} -> {item['new_filename']}"
+            for item in action_dicts
+        )
+        operator_messages.append(
+            "Automatically renumbered unmanaged duplicate migration prefixes before "
+            f"allocating the next migration: {moved}."
+        )
     return {
         "scope": "workflow",
         "migration_manager": "deterministic_numeric_prefix_allocator",
@@ -235,6 +249,9 @@ def _schema_next_migration_payload(*, slug: str) -> dict[str, Any]:
         "normalized_slug": normalized_slug,
         "next_prefix": state.next_prefix,
         "proposed_filename": propose_workflow_migration_filename(slug=slug),
+        "renumber_applied": bool(action_dicts),
+        "renumber_actions": action_dicts,
+        "operator_messages": operator_messages,
         "managed_duplicate_prefixes": {
             prefix: list(filenames)
             for prefix, filenames in state.managed_duplicate_prefixes.items()
@@ -243,6 +260,21 @@ def _schema_next_migration_payload(*, slug: str) -> dict[str, Any]:
             prefix: list(filenames)
             for prefix, filenames in state.unmanaged_duplicate_prefixes.items()
         },
+    }
+
+
+def _schema_renumber_migrations_payload(*, apply: bool) -> dict[str, Any]:
+    from system_authority.workflow_migration_sequence_manager import (
+        renumber_unmanaged_duplicate_prefixes,
+    )
+
+    actions = renumber_unmanaged_duplicate_prefixes(apply=apply)
+    return {
+        "scope": "workflow",
+        "migration_manager": "deterministic_numeric_prefix_allocator",
+        "applied": bool(apply),
+        "actions": [action.to_dict() for action in actions],
+        "action_count": len(actions),
     }
 
 
@@ -309,16 +341,30 @@ def _schema_command(args: list[str], *, stdout: TextIO) -> int:
                 stdout.write("usage: workflow schema next-migration <slug> [--json]\n")
                 return 2
             payload = _schema_next_migration_payload(slug=target)
+        elif action == "renumber-migrations":
+            if scope != "workflow":
+                stdout.write("workflow schema renumber-migrations only supports --scope workflow\n")
+                return 2
+            payload = _schema_renumber_migrations_payload(apply=confirmed)
         else:
             stdout.write(_schema_help_text() + "\n")
             return 2
-    except (PostgresConfigurationError, PostgresStorageError, ValueError) as exc:
+    except (PostgresConfigurationError, PostgresStorageError, ValueError, OSError, RuntimeError) as exc:
         print_json(stdout, {"error": str(exc)})
         return 1
     if as_json:
         print_json(stdout, payload)
         return 0
     if action == "next-migration":
+        for message in payload.get("operator_messages") or []:
+            stdout.write(f"{message}\n")
+        if payload.get("renumber_actions"):
+            stdout.write("renumber_actions:\n")
+            for item in payload.get("renumber_actions") or []:
+                stdout.write(
+                    f"  {item.get('old_filename')} -> {item.get('new_filename')} "
+                    f"({item.get('reason')})\n"
+                )
         stdout.write(
             f"next_prefix={payload.get('next_prefix')} "
             f"proposed_filename={payload.get('proposed_filename')}\n"
@@ -327,6 +373,16 @@ def _schema_command(args: list[str], *, stdout: TextIO) -> int:
             stdout.write("managed_duplicate_prefixes:\n")
             for prefix, filenames in sorted(payload["managed_duplicate_prefixes"].items()):
                 stdout.write(f"  {prefix}: {', '.join(filenames)}\n")
+        return 0
+    if action == "renumber-migrations":
+        if not confirmed:
+            stdout.write("dry_run=true; add --yes to rename unmanaged duplicate-prefix migrations\n")
+        stdout.write(f"renumbered={payload.get('action_count', 0)}\n")
+        for item in payload.get("actions") or []:
+            stdout.write(
+                f"  {item.get('old_filename')} -> {item.get('new_filename')} "
+                f"({item.get('reason')})\n"
+            )
         return 0
     stdout.write(
         f"scope={payload.get('scope')} bootstrapped={payload.get('bootstrapped', False)} "

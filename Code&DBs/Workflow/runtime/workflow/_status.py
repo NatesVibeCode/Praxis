@@ -1416,7 +1416,7 @@ def _retry_graph_job(
                terminal_reason_code = NULL,
                finished_at = NULL
            WHERE run_id = $1
-             AND current_state IN ('failed', 'dead_letter', 'cancelled')
+             AND current_state IN ('failed', 'partial_success', 'dead_letter', 'cancelled')
            RETURNING run_id""",
         run_id,
     )

@@ -9,6 +9,7 @@ watermarks copied from the authority rows.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -207,7 +208,7 @@ class PostgresWorkflowOutboxSubscriber:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(
+            return run_sync_safe(
                 self.load_batch(
                     run_id=run_id,
                     after_evidence_seq=after_evidence_seq,

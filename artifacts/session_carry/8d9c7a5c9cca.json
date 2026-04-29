@@ -1,0 +1,20 @@
+{
+  "pack_id": "8d9c7a5c9cca",
+  "objective": "Audit the current Praxis README at /Users/nate/Praxis/README.md against what is actually shipped in the Moon UI. Surfaces I want compared: Overview WORKFLOW_CONTRACT panel, the Atlas (Graph Diagram tab), the Manifests catalog, the Strategy Console. Output a 5-bullet list of concrete copy changes the README needs to match what the user actually encounters on screen. Cite specific README lines and specific UI surfaces.",
+  "decisions": [],
+  "open_questions": [
+    "**Clarify Workflow Contract Persistence:** The README states Praxis treats every action as a durable event (Section \"What is it?"
+  ],
+  "constraints": [],
+  "risks": [],
+  "artifacts": [],
+  "next_actions": [
+    "**Clarify Workflow Contract Persistence:** The README states Praxis treats every action as a durable event (Section \"What is it?\"), but it fails to mention the `WORKFLOW_CONTRACT` panel in Moon. The UI treats contract-definition as a visual, interactive graph, not just a spec file. **Recommendation:** Add a sentence to the \"Example Workflow Spec\" section noting that `.queue.json` files are bidirectional: they serve as both the source-of-truth file spec and the live state model displayed in the `WORKFLOW_CONTRACT` panel of the Moon dashboard.",
+    "**Atlas vs. Graph Diagram Tab:** The README makes no mention of \"The Atlas,\" yet the UI prominently displays this as the \"Graph Diagram\" tab in the Moon workspace. **Recommendation:** In the \"Architecture\" section (line 173), update the \"Storage\" bullet point to explicitly state that the Postgres/pgvector engine provides the source data for the \"Atlas\" (the Graph Diagram tab), which provides visual geometry and interaction reachability as queryable product state.",
+    "**Manifest Catalog vs. README List:** The README lists static documentation links (e.g., lines 193-195) for MCP and CLI, but fails to define the \"Manifests\" catalog surface. **Recommendation:** Under the \"MCP Integration\" section, note that the tool manifest is now dynamically catalog-backed and surfaced through the Moon \"Manifests\" tab, ensuring that README tool-documentation links are treated as entry points to the live, runtime-queried manifest catalog.",
+    "**Strategy Console Representation:** The README refers to CLI-based setup (`praxis setup doctor`, line 69) and manually-run workflows, but the \"Strategy Console\" (where operators steer high-level planning) is the primary UI authority. **Recommendation:** Update the \"First run\" section (lines 66-70) to state that the Strategy Console is the authoritative UI for steering operator-level planning (e.g., decision-kind policy, standing orders), deprecating reliance on `praxis workflow query \"status\"` as the sole source of truth for high-level operations.",
+    "**Surface-Level Navigation:** The README suggests manual file editing (Section \"Example Workflow Spec\") for all changes, yet Moon's UI supports direct manipulation and mutation. **Recommendation:** Add a disclaimer to the \"Example Workflow Spec\" section (line 120) advising users that while `.queue.json` remains the authoritative backend representation, destructive edits and graph-structuring should be performed via the Moon UI's \"Build Mode\" canvas to ensure visibility into layout geometry and node hierarchy."
+  ],
+  "created_at": "2026-04-29T02:20:12.054871+00:00",
+  "token_estimate": 841
+}

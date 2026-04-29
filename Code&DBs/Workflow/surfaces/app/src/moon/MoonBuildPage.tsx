@@ -38,7 +38,7 @@ import {
 } from './moonComposeAuthority';
 import { appendOutcomeContract } from './outcomeContract';
 import { buildPrimitiveContractSuggestions } from './moonContractSuggestions';
-import { setMoonChatContext, clearMoonChatContext } from './moonChatContext';
+import { setMoonChatContext, clearMoonChatContext, publishMoonChatHandoff } from './moonChatContext';
 import {
   getMoonAppendPosition,
   getMoonCanvasDimensions,
@@ -70,6 +70,7 @@ interface Props {
   onEditWorkflow?: (id: string) => void;
   onViewRun?: (runId: string) => void;
   onDraftStateChange?: (draft: { dirty: boolean; message?: string | null }) => void;
+  onMaterializeHandoff?: () => void;
   /** Initial empty mode: 'choice' (default), 'compose' (prose entry), 'trigger-picker' */
   initialMode?: 'choice' | 'compose' | 'trigger-picker';
 }
@@ -85,6 +86,19 @@ function readMoonGlowProfile(): MoonGlowProfile {
   } catch {
     return 'soft';
   }
+}
+
+function materializeReviewPrompt(workflowId: string): string {
+  return [
+    'Materialize has handed you the final workflow build pass.',
+    `Workflow id: ${workflowId}`,
+    'Open with: "I have the final pass from materialize. Let me make a quick review pass and I will share the cleaned version in a second."',
+    'Then call moon_get_build before making any claim about the graph.',
+    'Review nodes, edges, gates, contracts, unresolved issues, and approval/readiness state.',
+    'If you find small safe cleanup edits, apply them with moon_mutate_field and then call moon_get_build again.',
+    'Do not launch the workflow unless the user explicitly asks.',
+    'Finish with a concise summary of what changed, what is ready, and what still needs human approval.',
+  ].join('\n');
 }
 
 // Half-moon dock invitation
@@ -406,7 +420,7 @@ function buildDeletionTargetSummary(
   return null;
 }
 
-export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, onEditWorkflow, onViewRun, onDraftStateChange, initialMode }: Props) {
+export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, onEditWorkflow, onViewRun, onDraftStateChange, onMaterializeHandoff, initialMode }: Props) {
   const { payload, loading, error, mutate, reload, setPayload } = useBuildPayload(workflowId);
   const [state, dispatch] = useReducer(moonBuildReducer, {
     ...initialMoonBuildState,
@@ -1201,6 +1215,8 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const handleCompile = useCallback(async () => {
     if (!compileSource.trim()) return;
     dispatch({ type: 'COMPILE_START' });
+    const handoffBaseId = `moon-materialize-${Date.now()}`;
+    let materializeWorkflowId = workflowId || '';
     try {
       const compileProse = buildAuthorityCompileProse({
         prose: compileSource,
@@ -1209,6 +1225,24 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       });
       const result = await compileDefinition(compileProse, {
         workflowId,
+        onWorkflowReady: (readyWorkflowId) => {
+          materializeWorkflowId = readyWorkflowId;
+          setMoonChatContext({
+            workflow_id: readyWorkflowId,
+            workflow_name: null,
+            selected_node_id: null,
+            selected_edge_id: null,
+            view_mode: 'build',
+            hint: 'Materialize is running for this workflow. Use moon_get_build after the final pass lands before editing.',
+          });
+          publishMoonChatHandoff({
+            handoff_id: `${handoffBaseId}:started`,
+            workflow_id: readyWorkflowId,
+            phase: 'started',
+            status_message: 'Materialize is compiling the workflow. Moon chat is open and will review the graph when the final pass lands.',
+          });
+          onMaterializeHandoff?.();
+        },
       });
       // Surface compose_provenance failures as compile errors so the user
       // sees the LLM-gate finding (validation, fork-out, etc.) instead of
@@ -1230,6 +1264,15 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
         const summary = errorFindings
           ? `Compose blocked by ${reason} (${findings.length} finding${findings.length === 1 ? '' : 's'}):\n${errorFindings}`
           : `Compose blocked by ${reason}: ${provenance.error || 'no detail'}`;
+        if (materializeWorkflowId) {
+          publishMoonChatHandoff({
+            handoff_id: `${handoffBaseId}:blocked`,
+            workflow_id: materializeWorkflowId,
+            phase: 'blocked',
+            status_message: summary,
+          });
+          onMaterializeHandoff?.();
+        }
         dispatch({ type: 'COMPILE_ERROR', error: summary });
         return;
       }
@@ -1245,19 +1288,48 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           };
         }
       }
-      const wfId = (result as any)?.definition?.workflow_id || (result as any)?.workflow?.id;
+      const wfId = (result as any)?.definition?.workflow_id || (result as any)?.workflow?.id || materializeWorkflowId;
+      const workflowName = (result as any)?.definition?.compiled_prose?.slice(0, 60) || '';
       const asPayload = {
         ...result,
-        workflow: wfId ? { id: wfId, name: (result as any)?.definition?.compiled_prose?.slice(0, 60) || '' } : null,
+        workflow: wfId ? { id: wfId, name: workflowName } : null,
       };
       setPayload(asPayload);
       setCompilePreview(result.compile_preview ?? compilePreview);
       if (wfId && onWorkflowCreated) onWorkflowCreated(wfId);
+      if (wfId) {
+        setMoonChatContext({
+          workflow_id: wfId,
+          workflow_name: workflowName || null,
+          selected_node_id: null,
+          selected_edge_id: null,
+          view_mode: 'build',
+          hint: 'Materialize completed for this workflow. Review with moon_get_build before making edits.',
+        });
+        publishMoonChatHandoff({
+          handoff_id: `${handoffBaseId}:ready`,
+          workflow_id: wfId,
+          workflow_name: workflowName || null,
+          phase: 'ready',
+          status_message: 'Materialize handed Moon the final pass. I am reviewing the graph and making small safe tweaks if needed.',
+          prompt: materializeReviewPrompt(wfId),
+        });
+        onMaterializeHandoff?.();
+      }
       dispatch({ type: 'COMPILE_SUCCESS' });
     } catch (e: any) {
+      if (materializeWorkflowId) {
+        publishMoonChatHandoff({
+          handoff_id: `${handoffBaseId}:blocked`,
+          workflow_id: materializeWorkflowId,
+          phase: 'blocked',
+          status_message: e.message || 'Materialize failed before Moon could review the graph.',
+        });
+        onMaterializeHandoff?.();
+      }
       dispatch({ type: 'COMPILE_ERROR', error: e.message || 'Compilation failed' });
     }
-  }, [compilePreview, compileSource, composeAuthority, onWorkflowCreated, setPayload, state.selectedTrigger, workflowId]);
+  }, [compilePreview, compileSource, composeAuthority, onMaterializeHandoff, onWorkflowCreated, setPayload, state.selectedTrigger, workflowId]);
 
   const handleTriggerSelect = useCallback((item: CatalogItem) => {
     const trigger = {
@@ -1948,6 +2020,16 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                   <div className={`moon-nucleus__ring${state.selectedTrigger ? ' moon-nucleus__ring--decided' : ''}`}>
                   </div>
                 </div>
+
+                {compiling && (
+                  <div className="moon-materialize-wait" role="status" aria-live="polite">
+                    <span className="moon-spinner" aria-hidden="true" />
+                    <div>
+                      <strong>Materialize is building the graph.</strong>
+                      <p>Moon chat is open. When the final pass lands, it gets a larger review budget and will inspect the graph before proposing tweaks.</p>
+                    </div>
+                  </div>
+                )}
 
                 {showComposePanel && (
                   <div className="moon-compose moon-compose--intro" style={{ marginTop: 32 }}>

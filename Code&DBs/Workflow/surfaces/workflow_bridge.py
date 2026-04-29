@@ -8,6 +8,7 @@ or invent protocol-specific orchestration behavior.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Lock
@@ -198,7 +199,7 @@ def build_live_workflow_bridge(database_url: str) -> WorkflowBridge:
                 finally:
                     await conn.close()
 
-            return asyncio.run(_inspect())
+            return run_sync_safe(_inspect())
 
     class _LaneCatalogReader:
         def __init__(self, url: str) -> None:

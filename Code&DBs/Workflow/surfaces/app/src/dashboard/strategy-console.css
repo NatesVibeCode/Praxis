@@ -254,6 +254,44 @@
   scrollbar-gutter: stable;
 }
 
+.strategy-console__handoff {
+  padding: 14px 16px;
+  border: 1px solid rgba(210, 153, 34, 0.28);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(210, 153, 34, 0.16), transparent 34%),
+    rgba(0, 0, 0, 0.36);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+}
+
+.strategy-console__handoff-kicker {
+  display: block;
+  color: var(--warning);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.strategy-console__handoff strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.strategy-console__handoff p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.strategy-console__handoff--blocked {
+  border-color: rgba(245, 98, 98, 0.34);
+}
+
 .strategy-console__empty,
 .strategy-console__empty-state {
   border: 1px dashed rgba(255, 255, 255, 0.12);

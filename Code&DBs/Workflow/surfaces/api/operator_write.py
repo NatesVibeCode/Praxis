@@ -248,6 +248,85 @@ def _normalize_task_route_eligibility_status(value: object) -> str:
     )
 
 
+_TASK_ROUTE_REQUEST_MUTABLE_FIELDS = frozenset(
+    {
+        "temperature",
+        "max_tokens",
+        "reasoning_control",
+        "request_contract_ref",
+        "cache_policy",
+        "structured_output_policy",
+        "streaming_policy",
+    }
+)
+
+
+def _normalize_route_temperature(value: object | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("temperature must be numeric") from exc
+    if normalized < 0.0 or normalized > 2.0:
+        raise ValueError("temperature must be between 0.0 and 2.0")
+    return normalized
+
+
+def _normalize_route_max_tokens(value: object | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("max_tokens must be a positive integer")
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_tokens must be a positive integer") from exc
+    if normalized <= 0:
+        raise ValueError("max_tokens must be a positive integer")
+    return normalized
+
+
+def _normalize_policy_object(value: object | None, *, field_name: str) -> Mapping[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field_name} must be an object")
+    return dict(value)
+
+
+def _route_request_row_to_json(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "task_type": row.get("task_type"),
+        "sub_task_type": row.get("sub_task_type"),
+        "provider_slug": row.get("provider_slug"),
+        "model_slug": row.get("model_slug"),
+        "transport_type": row.get("transport_type"),
+        "temperature": (
+            float(row["temperature"])
+            if row.get("temperature") is not None
+            else None
+        ),
+        "max_tokens": (
+            int(row["max_tokens"])
+            if row.get("max_tokens") is not None
+            else None
+        ),
+        "reasoning_control": _json_compatible(row.get("reasoning_control") or {}),
+        "request_contract_ref": row.get("request_contract_ref"),
+        "cache_policy": _json_compatible(row.get("cache_policy") or {}),
+        "structured_output_policy": _json_compatible(
+            row.get("structured_output_policy") or {}
+        ),
+        "streaming_policy": _json_compatible(row.get("streaming_policy") or {}),
+        "updated_at": (
+            row["updated_at"].isoformat()
+            if hasattr(row.get("updated_at"), "isoformat")
+            else row.get("updated_at")
+        ),
+    }
+
+
 async def _refresh_provider_route_projections(conn: _Connection) -> None:
     runtime_profiles = await conn.fetch(
         """
@@ -1254,6 +1333,24 @@ class TaskRouteEligibilityWriteResult:
             "superseded_task_route_eligibility_ids": list(
                 self.superseded_task_route_eligibility_ids
             ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class TaskRouteRequestMutationResult:
+    route_request_before: Mapping[str, Any]
+    route_request_after: Mapping[str, Any]
+    mutated_fields: tuple[str, ...]
+    decision_ref: str
+    projection_refs: tuple[str, ...]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "route_request_before": dict(self.route_request_before),
+            "route_request_after": dict(self.route_request_after),
+            "mutated_fields": list(self.mutated_fields),
+            "decision_ref": self.decision_ref,
+            "projection_refs": list(self.projection_refs),
         }
 
 
@@ -2584,6 +2681,253 @@ class OperatorControlFrontdoor:
             )
         finally:
             await conn.close()
+
+    async def _set_task_route_request(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        task_type: str,
+        provider_slug: str,
+        model_slug: str,
+        sub_task_type: str,
+        transport_type: str | None,
+        fields_to_update: frozenset[str],
+        temperature: float | None,
+        clear_temperature: bool,
+        max_tokens: int | None,
+        clear_max_tokens: bool,
+        reasoning_control: Mapping[str, Any] | None,
+        clear_reasoning_control: bool,
+        request_contract_ref: str | None,
+        clear_request_contract_ref: bool,
+        cache_policy: Mapping[str, Any] | None,
+        clear_cache_policy: bool,
+        structured_output_policy: Mapping[str, Any] | None,
+        clear_structured_output_policy: bool,
+        streaming_policy: Mapping[str, Any] | None,
+        clear_streaming_policy: bool,
+        reason_code: str,
+        rationale: str | None,
+        decision_ref: str | None,
+    ) -> TaskRouteRequestMutationResult:
+        normalized_task_type = _require_text(task_type, field_name="task_type")
+        normalized_sub_task_type = _require_text(sub_task_type, field_name="sub_task_type")
+        normalized_provider_slug = _require_text(
+            provider_slug,
+            field_name="provider_slug",
+        ).lower()
+        normalized_model_slug = _require_text(model_slug, field_name="model_slug")
+        normalized_transport_type = _optional_text(
+            transport_type,
+            field_name="transport_type",
+        )
+        if normalized_transport_type is not None:
+            normalized_transport_type = normalized_transport_type.upper()
+            if normalized_transport_type not in {"CLI", "API"}:
+                raise ValueError("transport_type must be CLI or API")
+
+        invalid_fields = set(fields_to_update) - _TASK_ROUTE_REQUEST_MUTABLE_FIELDS
+        if invalid_fields:
+            raise ValueError(f"unsupported route request fields: {sorted(invalid_fields)}")
+        if not fields_to_update:
+            raise ValueError("at least one route request field must be supplied")
+        if clear_temperature and temperature is not None:
+            raise ValueError("temperature and clear_temperature cannot both be supplied")
+        if clear_max_tokens and max_tokens is not None:
+            raise ValueError("max_tokens and clear_max_tokens cannot both be supplied")
+        if clear_reasoning_control and reasoning_control is not None:
+            raise ValueError(
+                "reasoning_control and clear_reasoning_control cannot both be supplied"
+            )
+        if clear_request_contract_ref and request_contract_ref is not None:
+            raise ValueError(
+                "request_contract_ref and clear_request_contract_ref cannot both be supplied"
+            )
+        if clear_cache_policy and cache_policy is not None:
+            raise ValueError("cache_policy and clear_cache_policy cannot both be supplied")
+        if clear_structured_output_policy and structured_output_policy is not None:
+            raise ValueError(
+                "structured_output_policy and clear_structured_output_policy cannot both be supplied"
+            )
+        if clear_streaming_policy and streaming_policy is not None:
+            raise ValueError(
+                "streaming_policy and clear_streaming_policy cannot both be supplied"
+            )
+
+        normalized_reason_code = _require_text(reason_code, field_name="reason_code")
+        normalized_rationale = _optional_text(rationale, field_name="rationale")
+        normalized_decision_ref = (
+            _optional_text(decision_ref, field_name="decision_ref")
+            or "decision.task_route_request."
+            f"{_scope_fragment(normalized_task_type, fallback='task')}."
+            f"{_scope_fragment(normalized_provider_slug, fallback='provider')}."
+            f"{_scope_fragment(normalized_model_slug, fallback='model')}."
+            f"{_now().strftime('%Y%m%dT%H%M%SZ')}"
+        )
+
+        updates: dict[str, Any] = {}
+        if "temperature" in fields_to_update:
+            updates["temperature"] = (
+                None if clear_temperature else _normalize_route_temperature(temperature)
+            )
+        if "max_tokens" in fields_to_update:
+            updates["max_tokens"] = (
+                None if clear_max_tokens else _normalize_route_max_tokens(max_tokens)
+            )
+        if "reasoning_control" in fields_to_update:
+            updates["reasoning_control"] = (
+                {} if clear_reasoning_control else _normalize_policy_object(
+                    reasoning_control,
+                    field_name="reasoning_control",
+                )
+            )
+        if "request_contract_ref" in fields_to_update:
+            updates["request_contract_ref"] = (
+                None
+                if clear_request_contract_ref
+                else _optional_text(request_contract_ref, field_name="request_contract_ref")
+            )
+        if "cache_policy" in fields_to_update:
+            updates["cache_policy"] = (
+                {} if clear_cache_policy else _normalize_policy_object(
+                    cache_policy,
+                    field_name="cache_policy",
+                )
+            )
+        if "structured_output_policy" in fields_to_update:
+            updates["structured_output_policy"] = (
+                {} if clear_structured_output_policy else _normalize_policy_object(
+                    structured_output_policy,
+                    field_name="structured_output_policy",
+                )
+            )
+        if "streaming_policy" in fields_to_update:
+            updates["streaming_policy"] = (
+                {} if clear_streaming_policy else _normalize_policy_object(
+                    streaming_policy,
+                    field_name="streaming_policy",
+                )
+            )
+
+        select_sql = """
+            SELECT
+                task_type,
+                sub_task_type,
+                provider_slug,
+                model_slug,
+                transport_type,
+                temperature,
+                max_tokens,
+                reasoning_control,
+                request_contract_ref,
+                cache_policy,
+                structured_output_policy,
+                streaming_policy,
+                updated_at
+            FROM task_type_routing
+            WHERE task_type = $1
+              AND sub_task_type = $2
+              AND provider_slug = $3
+              AND model_slug = $4
+              AND ($5::text IS NULL OR transport_type = $5)
+            ORDER BY transport_type
+        """
+        conn = await self.connect_database(env)
+        try:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    select_sql,
+                    normalized_task_type,
+                    normalized_sub_task_type,
+                    normalized_provider_slug,
+                    normalized_model_slug,
+                    normalized_transport_type,
+                )
+                if not rows:
+                    raise ValueError("task_type_routing row not found")
+                if len(rows) > 1:
+                    raise ValueError(
+                        "transport_type is required because multiple route rows match"
+                    )
+                before = rows[0]
+                bound_args: list[Any] = []
+                set_clauses: list[str] = []
+
+                def _bind(value: Any) -> str:
+                    bound_args.append(value)
+                    return f"${len(bound_args)}"
+
+                for field_name, value in updates.items():
+                    if field_name in {
+                        "reasoning_control",
+                        "cache_policy",
+                        "structured_output_policy",
+                        "streaming_policy",
+                    }:
+                        set_clauses.append(
+                            f"{field_name} = {_bind(json.dumps(value, sort_keys=True))}::jsonb"
+                        )
+                    else:
+                        set_clauses.append(f"{field_name} = {_bind(value)}")
+                set_clauses.append("updated_at = now()")
+                where_task = _bind(normalized_task_type)
+                where_sub_task = _bind(normalized_sub_task_type)
+                where_provider = _bind(normalized_provider_slug)
+                where_model = _bind(normalized_model_slug)
+                where_transport = _bind(str(before["transport_type"]))
+                update_sql = f"""
+                    UPDATE task_type_routing
+                       SET {', '.join(set_clauses)}
+                     WHERE task_type = {where_task}
+                       AND sub_task_type = {where_sub_task}
+                       AND provider_slug = {where_provider}
+                       AND model_slug = {where_model}
+                       AND transport_type = {where_transport}
+                    RETURNING
+                        task_type,
+                        sub_task_type,
+                        provider_slug,
+                        model_slug,
+                        transport_type,
+                        temperature,
+                        max_tokens,
+                        reasoning_control,
+                        request_contract_ref,
+                        cache_policy,
+                        structured_output_policy,
+                        streaming_policy,
+                        updated_at
+                """
+                after = await conn.fetchrow(update_sql, *bound_args)
+                if after is None:
+                    raise RuntimeError("failed to mutate task_type_routing row")
+
+                route_cache_key = resolve_workflow_authority_cache_key(env=env)
+                await aemit_cache_invalidation(
+                    conn,
+                    cache_kind=CACHE_KIND_ROUTE_AUTHORITY_SNAPSHOT,
+                    cache_key=route_cache_key,
+                    reason="task_route_request_write",
+                    invalidated_by="operator_write.set_task_route_request",
+                    decision_ref=normalized_decision_ref,
+                )
+                await _refresh_provider_route_projections(conn)
+                invalidate_route_authority_cache_key(route_cache_key)
+
+        finally:
+            await conn.close()
+
+        return TaskRouteRequestMutationResult(
+            route_request_before=_route_request_row_to_json(before),
+            route_request_after=_route_request_row_to_json(after),
+            mutated_fields=tuple(sorted(updates)),
+            decision_ref=normalized_decision_ref,
+            projection_refs=(
+                "projection.private_provider_job_catalog",
+                "projection.private_provider_control_plane_snapshot",
+                "route_authority_snapshot",
+            ),
+        )
 
     async def _fetch_roadmap_item(
         self,
@@ -5089,6 +5433,62 @@ class OperatorControlFrontdoor:
         )
         return result.to_json()
 
+    async def set_task_route_request_async(
+        self,
+        *,
+        task_type: str,
+        provider_slug: str,
+        model_slug: str,
+        sub_task_type: str = "*",
+        transport_type: str | None = None,
+        fields_to_update: frozenset[str] | set[str] | tuple[str, ...] = frozenset(),
+        temperature: float | None = None,
+        clear_temperature: bool = False,
+        max_tokens: int | None = None,
+        clear_max_tokens: bool = False,
+        reasoning_control: Mapping[str, Any] | None = None,
+        clear_reasoning_control: bool = False,
+        request_contract_ref: str | None = None,
+        clear_request_contract_ref: bool = False,
+        cache_policy: Mapping[str, Any] | None = None,
+        clear_cache_policy: bool = False,
+        structured_output_policy: Mapping[str, Any] | None = None,
+        clear_structured_output_policy: bool = False,
+        streaming_policy: Mapping[str, Any] | None = None,
+        clear_streaming_policy: bool = False,
+        reason_code: str = "operator_control",
+        rationale: str | None = None,
+        decision_ref: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        result = await self._set_task_route_request(
+            env=env,
+            task_type=task_type,
+            provider_slug=provider_slug,
+            model_slug=model_slug,
+            sub_task_type=sub_task_type,
+            transport_type=transport_type,
+            fields_to_update=frozenset(fields_to_update),
+            temperature=temperature,
+            clear_temperature=clear_temperature,
+            max_tokens=max_tokens,
+            clear_max_tokens=clear_max_tokens,
+            reasoning_control=reasoning_control,
+            clear_reasoning_control=clear_reasoning_control,
+            request_contract_ref=request_contract_ref,
+            clear_request_contract_ref=clear_request_contract_ref,
+            cache_policy=cache_policy,
+            clear_cache_policy=clear_cache_policy,
+            structured_output_policy=structured_output_policy,
+            clear_structured_output_policy=clear_structured_output_policy,
+            streaming_policy=streaming_policy,
+            clear_streaming_policy=clear_streaming_policy,
+            reason_code=reason_code,
+            rationale=rationale,
+            decision_ref=decision_ref,
+        )
+        return result.to_json()
+
     async def record_issue_async(
         self,
         *,
@@ -5787,6 +6187,67 @@ class OperatorControlFrontdoor:
             ),
         )
         return result.to_json()
+
+    def set_task_route_request(
+        self,
+        *,
+        task_type: str,
+        provider_slug: str,
+        model_slug: str,
+        sub_task_type: str = "*",
+        transport_type: str | None = None,
+        fields_to_update: frozenset[str] | set[str] | tuple[str, ...] = frozenset(),
+        temperature: float | None = None,
+        clear_temperature: bool = False,
+        max_tokens: int | None = None,
+        clear_max_tokens: bool = False,
+        reasoning_control: Mapping[str, Any] | None = None,
+        clear_reasoning_control: bool = False,
+        request_contract_ref: str | None = None,
+        clear_request_contract_ref: bool = False,
+        cache_policy: Mapping[str, Any] | None = None,
+        clear_cache_policy: bool = False,
+        structured_output_policy: Mapping[str, Any] | None = None,
+        clear_structured_output_policy: bool = False,
+        streaming_policy: Mapping[str, Any] | None = None,
+        clear_streaming_policy: bool = False,
+        reason_code: str = "operator_control",
+        rationale: str | None = None,
+        decision_ref: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return _run_async(
+            self.set_task_route_request_async(
+                task_type=task_type,
+                provider_slug=provider_slug,
+                model_slug=model_slug,
+                sub_task_type=sub_task_type,
+                transport_type=transport_type,
+                fields_to_update=fields_to_update,
+                temperature=temperature,
+                clear_temperature=clear_temperature,
+                max_tokens=max_tokens,
+                clear_max_tokens=clear_max_tokens,
+                reasoning_control=reasoning_control,
+                clear_reasoning_control=clear_reasoning_control,
+                request_contract_ref=request_contract_ref,
+                clear_request_contract_ref=clear_request_contract_ref,
+                cache_policy=cache_policy,
+                clear_cache_policy=clear_cache_policy,
+                structured_output_policy=structured_output_policy,
+                clear_structured_output_policy=clear_structured_output_policy,
+                streaming_policy=streaming_policy,
+                clear_streaming_policy=clear_streaming_policy,
+                reason_code=reason_code,
+                rationale=rationale,
+                decision_ref=decision_ref,
+                env=env,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
 
     def reconcile_work_item_closeout(
         self,
@@ -7158,6 +7619,63 @@ def set_task_route_eligibility_window(
     )
 
 
+def set_task_route_request(
+    *,
+    task_type: str,
+    provider_slug: str,
+    model_slug: str,
+    sub_task_type: str = "*",
+    transport_type: str | None = None,
+    fields_to_update: frozenset[str] | set[str] | tuple[str, ...] = frozenset(),
+    temperature: float | None = None,
+    clear_temperature: bool = False,
+    max_tokens: int | None = None,
+    clear_max_tokens: bool = False,
+    reasoning_control: Mapping[str, Any] | None = None,
+    clear_reasoning_control: bool = False,
+    request_contract_ref: str | None = None,
+    clear_request_contract_ref: bool = False,
+    cache_policy: Mapping[str, Any] | None = None,
+    clear_cache_policy: bool = False,
+    structured_output_policy: Mapping[str, Any] | None = None,
+    clear_structured_output_policy: bool = False,
+    streaming_policy: Mapping[str, Any] | None = None,
+    clear_streaming_policy: bool = False,
+    reason_code: str = "operator_control",
+    rationale: str | None = None,
+    decision_ref: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Mutate request-shape knobs for one task route through the default frontdoor."""
+
+    return OperatorControlFrontdoor().set_task_route_request(
+        task_type=task_type,
+        provider_slug=provider_slug,
+        model_slug=model_slug,
+        sub_task_type=sub_task_type,
+        transport_type=transport_type,
+        fields_to_update=fields_to_update,
+        temperature=temperature,
+        clear_temperature=clear_temperature,
+        max_tokens=max_tokens,
+        clear_max_tokens=clear_max_tokens,
+        reasoning_control=reasoning_control,
+        clear_reasoning_control=clear_reasoning_control,
+        request_contract_ref=request_contract_ref,
+        clear_request_contract_ref=clear_request_contract_ref,
+        cache_policy=cache_policy,
+        clear_cache_policy=clear_cache_policy,
+        structured_output_policy=structured_output_policy,
+        clear_structured_output_policy=clear_structured_output_policy,
+        streaming_policy=streaming_policy,
+        clear_streaming_policy=clear_streaming_policy,
+        reason_code=reason_code,
+        rationale=rationale,
+        decision_ref=decision_ref,
+        env=env,
+    )
+
+
 async def aset_task_route_eligibility_window(
     *,
     provider_slug: str,
@@ -7182,6 +7700,63 @@ async def aset_task_route_eligibility_window(
         reason_code=reason_code,
         rationale=rationale,
         effective_from=effective_from,
+        decision_ref=decision_ref,
+        env=env,
+    )
+
+
+async def aset_task_route_request(
+    *,
+    task_type: str,
+    provider_slug: str,
+    model_slug: str,
+    sub_task_type: str = "*",
+    transport_type: str | None = None,
+    fields_to_update: frozenset[str] | set[str] | tuple[str, ...] = frozenset(),
+    temperature: float | None = None,
+    clear_temperature: bool = False,
+    max_tokens: int | None = None,
+    clear_max_tokens: bool = False,
+    reasoning_control: Mapping[str, Any] | None = None,
+    clear_reasoning_control: bool = False,
+    request_contract_ref: str | None = None,
+    clear_request_contract_ref: bool = False,
+    cache_policy: Mapping[str, Any] | None = None,
+    clear_cache_policy: bool = False,
+    structured_output_policy: Mapping[str, Any] | None = None,
+    clear_structured_output_policy: bool = False,
+    streaming_policy: Mapping[str, Any] | None = None,
+    clear_streaming_policy: bool = False,
+    reason_code: str = "operator_control",
+    rationale: str | None = None,
+    decision_ref: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Mutate request-shape knobs for one task route through the async frontdoor."""
+
+    return await OperatorControlFrontdoor().set_task_route_request_async(
+        task_type=task_type,
+        provider_slug=provider_slug,
+        model_slug=model_slug,
+        sub_task_type=sub_task_type,
+        transport_type=transport_type,
+        fields_to_update=fields_to_update,
+        temperature=temperature,
+        clear_temperature=clear_temperature,
+        max_tokens=max_tokens,
+        clear_max_tokens=clear_max_tokens,
+        reasoning_control=reasoning_control,
+        clear_reasoning_control=clear_reasoning_control,
+        request_contract_ref=request_contract_ref,
+        clear_request_contract_ref=clear_request_contract_ref,
+        cache_policy=cache_policy,
+        clear_cache_policy=clear_cache_policy,
+        structured_output_policy=structured_output_policy,
+        clear_structured_output_policy=clear_structured_output_policy,
+        streaming_policy=streaming_policy,
+        clear_streaming_policy=clear_streaming_policy,
+        reason_code=reason_code,
+        rationale=rationale,
         decision_ref=decision_ref,
         env=env,
     )
@@ -7944,6 +8519,7 @@ __all__ = [
     "OperatorControlFrontdoor",
     "TaskRouteEligibilityRecord",
     "TaskRouteEligibilityWriteResult",
+    "TaskRouteRequestMutationResult",
     "CACHE_KIND_DATASET_CURATED_PROJECTION",
     "CACHE_KIND_DATASET_SCORING_POLICY",
     "EVENT_DATASET_CANDIDATE_REJECTED",
@@ -7966,6 +8542,7 @@ __all__ = [
     "aroadmap_write",
     "areconcile_work_item_closeout",
     "aset_task_route_eligibility_window",
+    "aset_task_route_request",
     "arecord_work_item_workflow_binding",
     "admit_native_primary_cutover_gate",
     "inspect_workflow_flows",
@@ -7984,4 +8561,5 @@ __all__ = [
     "record_work_item_workflow_binding",
     "set_circuit_breaker_override",
     "set_task_route_eligibility_window",
+    "set_task_route_request",
 ]

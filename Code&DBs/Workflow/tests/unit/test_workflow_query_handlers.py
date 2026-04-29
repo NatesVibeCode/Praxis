@@ -1067,7 +1067,11 @@ def test_handle_workflow_build_post_bootstrap_compiles_into_workflow_build_paylo
     }
     pg = _MutableWorkflowPg(workflow_rows={"wf_build_bootstrap": workflow_row})
     request = _RequestStub(
-        {"prose": "Review support inbox", "title": "Bootstrap Draft"},
+        {
+            "prose": "Review support inbox",
+            "title": "Bootstrap Draft",
+            "enable_full_compose": False,
+        },
         subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
         path="/api/workflows/wf_build_bootstrap/build/bootstrap",
     )
@@ -1099,6 +1103,72 @@ def test_handle_workflow_build_post_bootstrap_compiles_into_workflow_build_paylo
     assert payload["workflow"]["id"] == "wf_build_bootstrap"
     assert payload["definition"]["workflow_id"] == "wf_build_bootstrap"
     assert payload["compile_preview"]["cqrs_role"] == "query"
+
+
+def test_handle_workflow_build_post_bootstrap_forwards_full_compose_flag(monkeypatch) -> None:
+    calls: dict[str, Any] = {}
+
+    def fake_materialize_workflow(
+        intent: str,
+        *,
+        conn: Any,
+        workflow_id: str | None = None,
+        title: str | None = None,
+        enable_llm: bool | None = None,
+        enable_full_compose: bool | None = None,
+    ) -> dict[str, Any]:
+        calls.update(
+            {
+                "intent": intent,
+                "conn": conn,
+                "workflow_id": workflow_id,
+                "title": title,
+                "enable_llm": enable_llm,
+                "enable_full_compose": enable_full_compose,
+            }
+        )
+        return {
+            "mutation": {
+                "row": {"id": workflow_id},
+                "definition": {"workflow_id": workflow_id},
+                "compiled_spec": {},
+                "build_bundle": {},
+                "planning_notes": [],
+            }
+        }
+
+    monkeypatch.setattr("runtime.compile_cqrs.materialize_workflow", fake_materialize_workflow)
+    monkeypatch.setattr(
+        workflow_query,
+        "build_workflow_build_moment",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+
+    request = _RequestStub(
+        {
+            "prose": "Review support inbox",
+            "title": "Bootstrap Draft",
+            "enable_llm": True,
+            "enable_full_compose": False,
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: "db"),
+        path="/api/workflows/wf_build_bootstrap/build/bootstrap",
+    )
+
+    workflow_query._handle_workflow_build_post(
+        request,
+        "/api/workflows/wf_build_bootstrap/build/bootstrap",
+    )
+
+    assert request.sent == (200, {"ok": True})
+    assert calls == {
+        "intent": "Review support inbox",
+        "conn": "db",
+        "workflow_id": "wf_build_bootstrap",
+        "title": "Bootstrap Draft",
+        "enable_llm": True,
+        "enable_full_compose": False,
+    }
 
 
 def test_handle_compile_preview_post_returns_query_payload(monkeypatch) -> None:

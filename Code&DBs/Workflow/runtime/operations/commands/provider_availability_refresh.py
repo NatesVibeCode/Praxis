@@ -9,6 +9,7 @@ conceptual event, and an optional control-plane projection refresh.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from collections import Counter
 from typing import Any
 
@@ -49,7 +50,7 @@ class ProviderAvailabilityRefreshCommand(BaseModel):
 
 
 def _run_provider_heartbeat(command: ProviderAvailabilityRefreshCommand) -> HeartbeatRunResult:
-    return asyncio.run(
+    return run_sync_safe(
         run_daily_heartbeat(
             scope="providers",
             triggered_by="mcp",

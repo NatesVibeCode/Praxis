@@ -8,6 +8,7 @@ runtime lifecycle truth, compile queue state, or introduce transport concerns.
 from __future__ import annotations
 
 import asyncio
+from runtime.async_bridge import run_sync_safe
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -300,7 +301,7 @@ class WorkflowWorkerSubscription:
                     field_name="cursor.last_acked_evidence_seq",
                 ),
             )
-            return asyncio.run(
+            return run_sync_safe(
                 self.load_batch(
                     cursor=normalized_cursor,
                     limit=limit,
@@ -349,7 +350,7 @@ class WorkflowWorkerSubscription:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(
+            return run_sync_safe(
                 self.acknowledge_batch(
                     batch=batch,
                     through_evidence_seq=through_evidence_seq,

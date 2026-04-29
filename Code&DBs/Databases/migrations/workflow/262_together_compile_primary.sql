@@ -408,8 +408,25 @@ UPDATE task_type_routing
    AND route_source = 'explicit';
 
 -- 4. Insert Together as the new rank 1 + 2 compile routes.
+--
+-- Idempotency note: migration 333 later collapsed task_type_routing's primary
+-- key from the transport-scoped shape to (task_type, sub_task_type,
+-- provider_slug, model_slug). Re-running this older migration against a modern
+-- DB cannot rely on an ON CONFLICT target that only existed in the old shape.
+-- These two rows are wholly owned by this migration, so replace them directly.
+DELETE FROM task_type_routing
+ WHERE task_type = 'compile'
+   AND sub_task_type = '*'
+   AND provider_slug = 'together'
+   AND model_slug IN (
+       'deepseek-ai/DeepSeek-V4-Pro',
+       'deepseek-ai/DeepSeek-V3.2'
+   );
+
 INSERT INTO task_type_routing (
     task_type,
+    sub_task_type,
+    transport_type,
     provider_slug,
     model_slug,
     permitted,
@@ -424,6 +441,8 @@ INSERT INTO task_type_routing (
 ) VALUES
     (
         'compile',
+        '*',
+        'API',
         'together',
         'deepseek-ai/DeepSeek-V4-Pro',
         TRUE,
@@ -438,6 +457,8 @@ INSERT INTO task_type_routing (
     ),
     (
         'compile',
+        '*',
+        'API',
         'together',
         'deepseek-ai/DeepSeek-V3.2',
         TRUE,
@@ -450,17 +471,7 @@ INSERT INTO task_type_routing (
         2,
         'explicit'
     )
-ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug, transport_type)
-DO UPDATE SET
-    permitted = EXCLUDED.permitted,
-    rank = EXCLUDED.rank,
-    rationale = EXCLUDED.rationale,
-    updated_at = EXCLUDED.updated_at,
-    route_tier = EXCLUDED.route_tier,
-    route_tier_rank = EXCLUDED.route_tier_rank,
-    latency_class = EXCLUDED.latency_class,
-    latency_rank = EXCLUDED.latency_rank,
-    route_source = EXCLUDED.route_source;
+;
 
 -- 5. Refresh the private CQRS catalog/snapshot after the authority rows land.
 DO $$
