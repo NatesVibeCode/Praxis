@@ -217,6 +217,31 @@ def _filename_policy_rank(spec: dict[str, Any], filename: str) -> tuple[int, int
     return (len(order) + 1, 10**9, filename)
 
 
+def _rewrite_migration_self_references(
+    path: Path,
+    old_prefix: str,
+    new_prefix: str,
+) -> int:
+    """Rewrite ``Migration <old_prefix>`` self-references inside a renumbered SQL file.
+
+    Catches the header comment (``-- Migration 376: ...``) and any other
+    standalone references where the migration mentions its own number. Excludes
+    filename-style cross-references like ``Migration 375_cleanup_…`` (followed
+    by ``_``), which point at sibling migrations, not self.
+    """
+
+    if old_prefix == new_prefix:
+        return 0
+    text = path.read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf"\bMigration\s+{re.escape(old_prefix)}(?=[:\s,.)\]]|$)(?!_)",
+    )
+    new_text, count = pattern.subn(f"Migration {new_prefix}", text)
+    if count:
+        path.write_text(new_text, encoding="utf-8")
+    return count
+
+
 def _replace_filename(value: Any, old_filename: str, new_filename: str) -> tuple[Any, bool]:
     if isinstance(value, str):
         return (new_filename, True) if value == old_filename else (value, False)
@@ -300,6 +325,14 @@ def renumber_unmanaged_duplicate_prefixes(
         if new_path.exists():
             raise FileExistsError(f"target migration file already exists: {new_path}")
         old_path.rename(new_path)
+        old_prefix_match = _NUMBERED_SQL_PATTERN.match(action.old_filename)
+        new_prefix_match = _NUMBERED_SQL_PATTERN.match(action.new_filename)
+        if old_prefix_match and new_prefix_match:
+            _rewrite_migration_self_references(
+                new_path,
+                old_prefix_match.group("prefix"),
+                new_prefix_match.group("prefix"),
+            )
         updated_spec, changed = _replace_filename(
             updated_spec,
             action.old_filename,

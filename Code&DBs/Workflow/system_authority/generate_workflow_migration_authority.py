@@ -122,10 +122,16 @@ def main() -> None:
 
     renumber_actions = renumber_unmanaged_duplicate_prefixes(workflow_root, apply=True)
     if renumber_actions:
-        print("workflow migration authority auto-renumbered duplicate prefixes:", file=sys.stderr)
+        print(
+            "[migration-authority] heads up — submitted migration(s) collided with an "
+            "existing prefix and were bumped to the next free number. The file was "
+            "renamed AND its 'Migration <num>' header references were rewritten in "
+            "place. Nothing for you to do; this is the routine handler. Summary:",
+            file=sys.stderr,
+        )
         for action in renumber_actions:
             print(
-                f"  {action.old_filename} -> {action.new_filename} ({action.reason})",
+                f"  • {action.old_filename} -> {action.new_filename}",
                 file=sys.stderr,
             )
     spec = load_workflow_migration_authority_spec(workflow_root)

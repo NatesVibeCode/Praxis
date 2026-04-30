@@ -205,10 +205,10 @@
       formEl.innerHTML = `<h3>${esc(cur.title || cur.label)}</h3><p class="step-desc">${esc(cur.description || '')}</p>${fields}`;
 
       formEl.querySelectorAll('input.prx-field-input').forEach(input => {
-        on(input, 'input', e => { state.data[input.dataset.field] = e.target.value; renderPreview(); });
+        on(input, 'input', e => { state.data[input.dataset.field] = e.target.value; renderPreview(); renderFoot(); });
       });
       formEl.querySelectorAll('.prx-radio-pill').forEach(pill => {
-        on(pill, 'click', () => { state.data[pill.dataset.field] = pill.dataset.value; renderForm(); renderPreview(); });
+        on(pill, 'click', () => { state.data[pill.dataset.field] = pill.dataset.value; renderForm(); renderPreview(); renderFoot(); });
       });
     }
 
