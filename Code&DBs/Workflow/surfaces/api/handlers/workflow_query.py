@@ -84,6 +84,7 @@ from ._shared import (
     _bug_to_dict,
     _query_params,
     _read_json_body,
+    _route_path,
     _serialize,
 )
 from .workflow_admin import _handle_health
@@ -3527,8 +3528,9 @@ def _content_disposition(filename: str) -> str:
 def _handle_files_get(request: Any, path: str) -> None:
     try:
         pg = request.subsystems.get_pg_conn()
+        route_path = _route_path(path)
 
-        if path == "/api/files":
+        if route_path == "/api/files":
             params = _query_params(request.path)
             scope = (params.get("scope") or [None])[0]
             workflow_id = (params.get("workflow_id") or [None])[0]
@@ -3542,7 +3544,7 @@ def _handle_files_get(request: Any, path: str) -> None:
             request._send_json(200, {"files": files, "count": len(files)})
             return
 
-        file_id = _file_id_from_path(path, suffix="/content")
+        file_id = _file_id_from_path(route_path, suffix="/content")
         if not file_id:
             request._send_json(400, {"error": "file id is required"})
             return

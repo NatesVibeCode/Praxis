@@ -9,6 +9,7 @@ rollback before live automation is promoted.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from enum import Enum
 import hashlib
@@ -766,6 +767,310 @@ class ContractInventory:
             "automation_snapshots": [item.as_dict() for item in self.automation_snapshots],
             "typed_gaps": [item.as_dict() for item in gaps],
         }
+
+
+def _enum_or_default(enum_cls: Callable[[Any], ContractEnum], value: object, default: ContractEnum) -> ContractEnum:
+    if value is None or value == "":
+        return default
+    return enum_cls(value)
+
+
+def _contract_field_from_mapping(payload: object) -> ContractField:
+    data = _mapping(payload)
+    return ContractField(
+        name=str(data.get("name") or ""),
+        field_type=str(data.get("field_type") or data.get("type") or "unknown"),
+        required=bool(data.get("required", True)),
+        description=str(data.get("description") or ""),
+        default=data.get("default"),
+        constraints=_mapping(data.get("constraints")),
+        sensitive=bool(data.get("sensitive", False)),
+        source_ref=data.get("source_ref"),
+    )
+
+
+def _payload_envelope_from_mapping(payload: object) -> PayloadEnvelope:
+    data = _mapping(payload)
+    return PayloadEnvelope(
+        schema_ref=str(data.get("schema_ref") or ""),
+        fields=tuple(_contract_field_from_mapping(item) for item in _sequence_of_mappings(data.get("fields"))),
+        schema_version=str(data.get("schema_version") or "1"),
+        allow_additional_fields=bool(data.get("allow_additional_fields", False)),
+        validation_rules=tuple(str(item) for item in _tuple_of(data.get("validation_rules")) if str(item)),
+        examples=tuple(dict(item) for item in _sequence_of_mappings(data.get("examples"))),
+        description=str(data.get("description") or ""),
+    )
+
+
+def _output_envelope_from_mapping(payload: object) -> OutputEnvelope:
+    data = _mapping(payload)
+    partial_success = data.get("partial_success")
+    return OutputEnvelope(
+        success=_payload_envelope_from_mapping(data.get("success")),
+        partial_success=_payload_envelope_from_mapping(partial_success) if partial_success else None,
+        result_states=tuple(str(item) for item in _tuple_of(data.get("result_states") or ("succeeded", "failed", "skipped"))),
+        description=str(data.get("description") or ""),
+    )
+
+
+def _error_envelope_from_mapping(payload: object) -> ErrorEnvelope:
+    data = _mapping(payload)
+    return ErrorEnvelope(
+        schema_ref=str(data.get("schema_ref") or ""),
+        error_code_field=str(data.get("error_code_field") or "error"),
+        summary_field=str(data.get("summary_field") or "summary"),
+        data_field=str(data.get("data_field") or "data"),
+        retryable_error_codes=tuple(str(item) for item in _tuple_of(data.get("retryable_error_codes"))),
+        terminal_error_codes=tuple(str(item) for item in _tuple_of(data.get("terminal_error_codes"))),
+        unknown_error_behavior=str(
+            data.get("unknown_error_behavior") or "treat_as_failed_and_require_operator_review"
+        ),
+    )
+
+
+def _external_system_from_mapping(payload: object, *, default_ref: str) -> ExternalSystemRef:
+    data = _mapping(payload)
+    return ExternalSystemRef(
+        system_ref=str(data.get("system_ref") or default_ref),
+        display_name=str(data.get("display_name") or ""),
+        provider=str(data.get("provider") or ""),
+        environment_ref=data.get("environment_ref"),
+        tenant_ref=data.get("tenant_ref"),
+    )
+
+
+def _action_systems_from_mapping(payload: object) -> ActionSystems:
+    data = _mapping(payload)
+    return ActionSystems(
+        source=_external_system_from_mapping(data.get("source"), default_ref="unknown.source"),
+        target=_external_system_from_mapping(data.get("target"), default_ref="unknown.target"),
+    )
+
+
+def _idempotency_from_mapping(payload: object) -> IdempotencyContract:
+    data = _mapping(payload)
+    return IdempotencyContract(
+        state=_enum_or_default(IdempotencyState, data.get("state"), IdempotencyState.UNKNOWN),
+        key_origin=_enum_or_default(IdempotencyKeyOrigin, data.get("key_origin"), IdempotencyKeyOrigin.UNKNOWN),
+        key_fields=tuple(str(item) for item in _tuple_of(data.get("key_fields"))),
+        dedupe_scope=_enum_or_default(DedupeScope, data.get("dedupe_scope"), DedupeScope.UNKNOWN),
+        retention_window=data.get("retention_window"),
+        replay_after_success=str(data.get("replay_after_success") or "unknown"),
+        replay_after_timeout=str(data.get("replay_after_timeout") or "unknown"),
+        replay_after_partial_failure=str(data.get("replay_after_partial_failure") or "unknown"),
+        downstream_deduplication=str(data.get("downstream_deduplication") or "unknown"),
+        evidence_ref=data.get("evidence_ref"),
+    )
+
+
+def _side_effect_from_mapping(payload: object) -> SideEffectSpec:
+    data = _mapping(payload)
+    return SideEffectSpec(
+        kind=_enum_or_default(SideEffectKind, data.get("kind"), SideEffectKind.UNKNOWN),
+        target_ref=str(data.get("target_ref") or "unknown.target"),
+        description=str(data.get("description") or ""),
+        persistence=str(data.get("persistence") or "unknown"),
+        downstream_automation=str(data.get("downstream_automation") or "unknown"),
+        human_visible=bool(data.get("human_visible", False)),
+        quota_or_billing_impact=str(data.get("quota_or_billing_impact") or "unknown"),
+        evidence_ref=data.get("evidence_ref"),
+    )
+
+
+def _retry_replay_from_mapping(payload: object) -> RetryReplayContract:
+    data = _mapping(payload)
+    return RetryReplayContract(
+        retry_policy=_enum_or_default(RetryPolicyKind, data.get("retry_policy"), RetryPolicyKind.UNKNOWN),
+        max_attempts=data.get("max_attempts"),
+        backoff=data.get("backoff"),
+        timeout_behavior=str(data.get("timeout_behavior") or "unknown"),
+        retryable_error_codes=tuple(str(item) for item in _tuple_of(data.get("retryable_error_codes"))),
+        duplicate_handling=str(data.get("duplicate_handling") or "unknown"),
+        replay_requires_receipt=bool(data.get("replay_requires_receipt", True)),
+        dead_letter_path=data.get("dead_letter_path"),
+        evidence_ref=data.get("evidence_ref"),
+    )
+
+
+def _permission_from_mapping(payload: object) -> PermissionBinding:
+    data = _mapping(payload)
+    return PermissionBinding(
+        identity_type=_enum_or_default(IdentityType, data.get("identity_type"), IdentityType.UNKNOWN),
+        identity_ref=str(data.get("identity_ref") or ""),
+        owner_ref=str(data.get("owner_ref") or ""),
+        auth_kind=str(data.get("auth_kind") or ""),
+        credential_ref=data.get("credential_ref"),
+        env_var_ref=data.get("env_var_ref"),
+        roles=tuple(str(item) for item in _tuple_of(data.get("roles"))),
+        scopes=tuple(str(item) for item in _tuple_of(data.get("scopes"))),
+        resource_permissions=tuple(str(item) for item in _tuple_of(data.get("resource_permissions"))),
+        execution_identity_mode=_enum_or_default(
+            ExecutionIdentityMode,
+            data.get("execution_identity_mode"),
+            ExecutionIdentityMode.UNKNOWN,
+        ),
+        tenant_isolation=str(data.get("tenant_isolation") or "unknown"),
+        least_privilege_rationale=str(data.get("least_privilege_rationale") or ""),
+        rotation_approval_ref=data.get("rotation_approval_ref"),
+    )
+
+
+def _event_delivery_from_mapping(payload: object) -> EventDeliveryContract:
+    data = _mapping(payload)
+    return EventDeliveryContract(
+        event_name=str(data.get("event_name") or ""),
+        direction=_enum_or_default(EventDirection, data.get("direction"), EventDirection.INTERNAL),
+        producer=str(data.get("producer") or ""),
+        consumer=str(data.get("consumer") or ""),
+        contract_version=str(data.get("contract_version") or ""),
+        endpoint_or_topic=str(data.get("endpoint_or_topic") or ""),
+        payload_schema_ref=str(data.get("payload_schema_ref") or ""),
+        authentication=str(data.get("authentication") or "unknown"),
+        signature_verification=str(data.get("signature_verification") or "unknown"),
+        delivery_semantics=_enum_or_default(
+            EventDeliverySemantics,
+            data.get("delivery_semantics"),
+            EventDeliverySemantics.UNKNOWN,
+        ),
+        ordering_guarantee=str(data.get("ordering_guarantee") or "unknown"),
+        retry_policy=_enum_or_default(RetryPolicyKind, data.get("retry_policy"), RetryPolicyKind.UNKNOWN),
+        replay_handling=str(data.get("replay_handling") or "unknown"),
+        duplicate_suppression=str(data.get("duplicate_suppression") or "unknown"),
+        dead_letter_path=data.get("dead_letter_path"),
+        failure_blocks_parent=data.get("failure_blocks_parent"),
+        monitoring_owner=str(data.get("monitoring_owner") or ""),
+    )
+
+
+def _rollback_from_mapping(payload: object) -> RollbackContract:
+    data = _mapping(payload)
+    return RollbackContract(
+        rollback_class=_enum_or_default(RollbackClass, data.get("rollback_class"), RollbackClass.MANUAL_ONLY),
+        trigger_criteria=tuple(str(item) for item in _tuple_of(data.get("trigger_criteria"))),
+        max_safe_window=data.get("max_safe_window"),
+        irreversible_data=tuple(str(item) for item in _tuple_of(data.get("irreversible_data"))),
+        rollback_idempotency=_enum_or_default(
+            IdempotencyState,
+            data.get("rollback_idempotency"),
+            IdempotencyState.UNKNOWN,
+        ),
+        approval_required=bool(data.get("approval_required", True)),
+        operator_playbook_ref=data.get("operator_playbook_ref"),
+        compensating_action_ref=data.get("compensating_action_ref"),
+    )
+
+
+def _observability_from_mapping(payload: object) -> ObservabilityAuditContract:
+    data = _mapping(payload)
+    return ObservabilityAuditContract(
+        structured_logs=tuple(str(item) for item in _tuple_of(data.get("structured_logs"))),
+        metrics=tuple(str(item) for item in _tuple_of(data.get("metrics"))),
+        traces=tuple(str(item) for item in _tuple_of(data.get("traces"))),
+        audit_entries=tuple(str(item) for item in _tuple_of(data.get("audit_entries"))),
+        required_dimensions=tuple(str(item) for item in _tuple_of(data.get("required_dimensions") or _REQUIRED_OBSERVABILITY_DIMENSIONS)),
+        retained_dimensions=tuple(str(item) for item in _tuple_of(data.get("retained_dimensions"))),
+        receipt_required=bool(data.get("receipt_required", True)),
+        event_receipt_counters=tuple(str(item) for item in _tuple_of(data.get("event_receipt_counters"))),
+        alert_thresholds=tuple(str(item) for item in _tuple_of(data.get("alert_thresholds"))),
+        retention_ref=data.get("retention_ref"),
+        evidence_ref=data.get("evidence_ref"),
+    )
+
+
+def _gap_from_mapping(payload: object) -> TypedContractGap | None:
+    data = _mapping(payload)
+    if not data.get("gap_kind"):
+        return None
+    return TypedContractGap(
+        gap_kind=GapKind(data.get("gap_kind")),
+        related_ref=str(data.get("related_ref") or ""),
+        description=str(data.get("description") or ""),
+        evidence_source=str(data.get("evidence_source") or "contract_payload"),
+        severity=_enum_or_default(GapSeverity, data.get("severity"), GapSeverity.MEDIUM),
+        proposed_owner=str(data.get("proposed_owner") or ""),
+        required_follow_up=str(data.get("required_follow_up") or ""),
+        disposition=str(data.get("disposition") or "open"),
+        gap_id=data.get("gap_id"),
+        context=_mapping(data.get("context")),
+    )
+
+
+def _typed_gaps_from_payload(payload: object) -> tuple[TypedContractGap, ...]:
+    gaps: list[TypedContractGap] = []
+    for item in _sequence_of_mappings(payload):
+        gap = _gap_from_mapping(item)
+        if gap is not None:
+            gaps.append(gap)
+    return tuple(gaps)
+
+
+def integration_action_contract_from_dict(payload: object) -> IntegrationActionContract:
+    """Rehydrate a JSON contract packet for validation and hashing."""
+
+    data = _mapping(payload)
+    action_id = str(data.get("action_id") or data.get("action_contract_id") or "")
+    if not action_id:
+        raise ValueError("integration action contract requires action_id")
+    return IntegrationActionContract(
+        action_id=action_id,
+        name=str(data.get("name") or action_id),
+        owner=str(data.get("owner") or data.get("owner_ref") or ""),
+        systems=_action_systems_from_mapping(data.get("systems")),
+        trigger_types=tuple(
+            _enum_or_default(TriggerType, item, TriggerType.WORKFLOW_STEP)
+            for item in _tuple_of(data.get("trigger_types") or (TriggerType.WORKFLOW_STEP.value,))
+        ),
+        inputs=_payload_envelope_from_mapping(data.get("inputs")),
+        outputs=_output_envelope_from_mapping(data.get("outputs")),
+        errors=_error_envelope_from_mapping(data.get("errors")),
+        side_effects=tuple(_side_effect_from_mapping(item) for item in _sequence_of_mappings(data.get("side_effects"))),
+        idempotency=_idempotency_from_mapping(data.get("idempotency")),
+        retry_replay=_retry_replay_from_mapping(data.get("retry_replay")),
+        permissions=tuple(_permission_from_mapping(item) for item in _sequence_of_mappings(data.get("permissions"))),
+        rollback=_rollback_from_mapping(data.get("rollback")),
+        observability=_observability_from_mapping(data.get("observability")),
+        webhook_events=tuple(_event_delivery_from_mapping(item) for item in _sequence_of_mappings(data.get("webhook_events"))),
+        preconditions=tuple(str(item) for item in _tuple_of(data.get("preconditions"))),
+        invariants=tuple(str(item) for item in _tuple_of(data.get("invariants"))),
+        timeout_s=data.get("timeout_s"),
+        execution_mode=_enum_or_default(ExecutionMode, data.get("execution_mode"), ExecutionMode.UNKNOWN),
+        automation_rule_refs=tuple(str(item) for item in _tuple_of(data.get("automation_rule_refs"))),
+        evidence_refs=tuple(str(item) for item in _tuple_of(data.get("evidence_refs"))),
+        open_gaps=_typed_gaps_from_payload(data.get("open_gaps") or data.get("typed_gaps")),
+        status=_enum_or_default(ContractStatus, data.get("status"), ContractStatus.DRAFT),
+        captured_at=data.get("captured_at"),
+        metadata=_mapping(data.get("metadata")),
+    )
+
+
+def automation_rule_snapshot_from_dict(payload: object) -> AutomationRuleSnapshot:
+    """Rehydrate a JSON automation snapshot for validation and hashing."""
+
+    data = _mapping(payload)
+    rule_id = str(data.get("rule_id") or data.get("automation_rule_id") or "")
+    if not rule_id:
+        raise ValueError("automation rule snapshot requires rule_id")
+    return AutomationRuleSnapshot(
+        rule_id=rule_id,
+        name=str(data.get("name") or rule_id),
+        source_of_truth_ref=str(data.get("source_of_truth_ref") or ""),
+        snapshot_timestamp=str(data.get("snapshot_timestamp") or ""),
+        trigger_condition=str(data.get("trigger_condition") or ""),
+        owner=str(data.get("owner") or data.get("owner_ref") or ""),
+        status=_enum_or_default(AutomationRuleStatus, data.get("status"), AutomationRuleStatus.UNKNOWN),
+        filter_conditions=tuple(str(item) for item in _tuple_of(data.get("filter_conditions"))),
+        execution_steps=tuple(str(item) for item in _tuple_of(data.get("execution_steps"))),
+        suppression_rules=tuple(str(item) for item in _tuple_of(data.get("suppression_rules"))),
+        rate_limits=tuple(str(item) for item in _tuple_of(data.get("rate_limits"))),
+        environment_dependencies=tuple(str(item) for item in _tuple_of(data.get("environment_dependencies"))),
+        linked_action_ids=tuple(str(item) for item in _tuple_of(data.get("linked_action_ids"))),
+        pause_disable_method=str(data.get("pause_disable_method") or ""),
+        capture_method=_enum_or_default(SnapshotConfidence, data.get("capture_method"), SnapshotConfidence.UNKNOWN),
+        confidence_notes=str(data.get("confidence_notes") or ""),
+        evidence_refs=tuple(str(item) for item in _tuple_of(data.get("evidence_refs"))),
+        open_gaps=_typed_gaps_from_payload(data.get("open_gaps") or data.get("typed_gaps")),
+        metadata=_mapping(data.get("metadata")),
+    )
 
 
 def _gap(
@@ -1542,10 +1847,12 @@ __all__ = [
     "SnapshotConfidence",
     "TriggerType",
     "TypedContractGap",
+    "automation_rule_snapshot_from_dict",
     "draft_contract_from_registry_definition",
     "draft_contracts_from_registry_definition",
     "generic_integration_error_envelope",
     "generic_integration_result_output",
+    "integration_action_contract_from_dict",
     "stable_digest",
     "stable_json_dumps",
     "to_plain",

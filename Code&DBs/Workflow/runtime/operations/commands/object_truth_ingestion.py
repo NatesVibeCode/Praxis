@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from core.object_truth_ops import build_object_version
+from core.object_truth_ops import canonical_digest, canonical_value, build_object_version
 from runtime.object_truth.ingestion import (
     PRIVACY_CLASSIFICATIONS,
     SAMPLE_STRATEGIES,
@@ -25,6 +25,7 @@ from storage.postgres.object_truth_repository import (
 
 
 PrivacyClassification = Literal["public", "internal", "confidential", "restricted"]
+SENSITIVE_PRIVACY_CLASSIFICATIONS = {"confidential", "restricted"}
 SampleStrategy = Literal[
     "recent",
     "claimed_source_truth",
@@ -254,6 +255,7 @@ def handle_object_truth_ingestion_sample_record(
             raw_payload_reference=raw_payload_reference,
             redacted_preview=redacted_preview,
         )
+        source_metadata = _redact_ingestion_source_metadata(source_metadata, redacted_preview=redacted_preview)
         object_version = build_object_version(
             system_ref=command.system_ref,
             object_ref=command.object_ref,
@@ -262,6 +264,7 @@ def handle_object_truth_ingestion_sample_record(
             source_metadata=source_metadata,
             schema_snapshot_digest=command.schema_snapshot_digest,
         )
+        object_version = _redact_ingested_object_version(object_version, redacted_preview)
         persisted_version = persist_object_version(
             conn,
             object_version=object_version,
@@ -347,6 +350,112 @@ def handle_object_truth_ingestion_sample_record(
         "persisted": persisted,
         "event_payload": event_payload,
     }
+
+
+def _redact_ingestion_source_metadata(
+    source_metadata: dict[str, Any],
+    *,
+    redacted_preview: dict[str, Any],
+) -> dict[str, Any]:
+    """Remove raw source identifiers from ingestion metadata while preserving stable joins."""
+
+    sanitized = canonical_value(source_metadata)
+    for key in ("external_record_id", "source_actor_ref"):
+        value = sanitized.get(key)
+        if isinstance(value, str) and value:
+            sanitized[key] = f"redacted:{canonical_digest(value, purpose=f'object_truth.source_metadata.{key}.v1')[:24]}"
+    metadata_json = sanitized.get("metadata_json")
+    if metadata_json not in (None, {}):
+        sanitized["metadata_json"] = {
+            "kind": "object_truth.source_metadata_redacted.v1",
+            "raw_metadata_digest": canonical_digest(
+                metadata_json,
+                purpose="object_truth.source_metadata.raw_metadata.v1",
+            ),
+            "redacted_preview_digest": redacted_preview.get("preview_digest"),
+        }
+    sanitized["source_metadata_digest"] = canonical_digest(
+        sanitized,
+        purpose="object_truth.source_metadata.v1",
+    )
+    return sanitized
+
+
+def _redact_ingested_object_version(
+    object_version: dict[str, Any],
+    redacted_preview: dict[str, Any],
+) -> dict[str, Any]:
+    privacy_by_path = _preview_privacy_by_path(redacted_preview)
+    sanitized = canonical_value(object_version)
+    observations = sanitized.get("field_observations")
+    if isinstance(observations, list):
+        for observation in observations:
+            if not isinstance(observation, dict):
+                continue
+            path = str(observation.get("field_path") or "")
+            privacy = _sensitive_privacy_for_path(path, privacy_by_path)
+            if privacy is None:
+                continue
+            observation["sensitive"] = True
+            observation["redacted_value_preview"] = {
+                "redacted": True,
+                "classification": privacy["classification"],
+                "value_kind": privacy.get("value_kind") or observation.get("field_kind") or "unknown",
+                "value_digest": observation.get("normalized_value_digest"),
+            }
+
+    identity = sanitized.get("identity")
+    if isinstance(identity, dict) and isinstance(identity.get("identity_values"), dict):
+        for path, value in list(identity["identity_values"].items()):
+            privacy = _sensitive_privacy_for_path(str(path), privacy_by_path)
+            if privacy is None:
+                continue
+            identity["identity_values"][path] = {
+                "redacted": True,
+                "classification": privacy["classification"],
+                "value_kind": privacy.get("value_kind") or "unknown",
+                "value_digest": canonical_digest(value, purpose="object_truth.identity_value.v1"),
+            }
+
+    digest_basis = dict(sanitized)
+    digest_basis.pop("object_version_digest", None)
+    sanitized["object_version_digest"] = canonical_digest(
+        digest_basis,
+        purpose="object_truth.object_version.v1",
+    )
+    return sanitized
+
+
+def _preview_privacy_by_path(redacted_preview: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    classifications = redacted_preview.get("field_classifications")
+    if not isinstance(classifications, list):
+        return {}
+    privacy_by_path: dict[str, dict[str, Any]] = {}
+    for item in classifications:
+        if not isinstance(item, dict):
+            continue
+        field_path = str(item.get("field_path") or "").strip()
+        classification = str(item.get("classification") or "").strip().lower()
+        if not field_path or classification not in SENSITIVE_PRIVACY_CLASSIFICATIONS:
+            continue
+        privacy_by_path[field_path] = {
+            "classification": classification,
+            "value_kind": item.get("value_kind"),
+        }
+    return privacy_by_path
+
+
+def _sensitive_privacy_for_path(
+    field_path: str,
+    privacy_by_path: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    direct = privacy_by_path.get(field_path)
+    if direct is not None:
+        return direct
+    for parent_path, privacy in privacy_by_path.items():
+        if field_path.startswith(f"{parent_path}.") or field_path.startswith(f"{parent_path}["):
+            return privacy
+    return None
 
 
 __all__ = [

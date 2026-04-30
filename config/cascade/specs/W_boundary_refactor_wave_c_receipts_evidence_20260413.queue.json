@@ -59,7 +59,7 @@
       "write": [
         "Code&DBs/Databases/migrations/workflow/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_c_create_repositories",
@@ -86,7 +86,7 @@
         "Code&DBs/Workflow/storage/postgres/__init__.py",
         "Code&DBs/Workflow/authority/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_c_thin_sources",
@@ -113,7 +113,7 @@
         "Code&DBs/Workflow/runtime/workflow/job_runtime_context.py",
         "Code&DBs/Workflow/runtime/workflow/receipt_writer.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/compile_artifacts.py' 'Code&DBs/Workflow/runtime/persistent_evidence.py' 'Code&DBs/Workflow/runtime/receipt_store.py' 'Code&DBs/Workflow/runtime/workflow/job_runtime_context.py' 'Code&DBs/Workflow/runtime/workflow/receipt_writer.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/runtime/compile_artifacts.py' 'Code&DBs/Workflow/runtime/persistent_evidence.py' 'Code&DBs/Workflow/runtime/receipt_store.py' 'Code&DBs/Workflow/runtime/workflow/job_runtime_context.py' 'Code&DBs/Workflow/runtime/workflow/receipt_writer.py'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile 'Code&DBs/Workflow/runtime/compile_artifacts.py' 'Code&DBs/Workflow/runtime/persistent_evidence.py' 'Code&DBs/Workflow/runtime/receipt_store.py' 'Code&DBs/Workflow/runtime/workflow/job_runtime_context.py' 'Code&DBs/Workflow/runtime/workflow/receipt_writer.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/runtime/compile_artifacts.py' 'Code&DBs/Workflow/runtime/persistent_evidence.py' 'Code&DBs/Workflow/runtime/receipt_store.py' 'Code&DBs/Workflow/runtime/workflow/job_runtime_context.py' 'Code&DBs/Workflow/runtime/workflow/receipt_writer.py'"
     },
     {
       "label": "wave_c_tests",
@@ -135,7 +135,7 @@
       "write": [
         "Code&DBs/Workflow/tests/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'receipts' || true"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'receipts' || true"
     },
     {
       "label": "wave_c_close_bugs",
@@ -146,7 +146,7 @@
       ],
       "description": "Resolve the wave's linked bugs as FIXED",
       "outcome_goal": "Every linked bug is FIXED with a resolution citing this queue_id",
-      "prompt": "Resolve the Wave C linked bugs as FIXED after regression tests pass.\n\n```bash\ncd /Users/nate/Praxis\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-CEC41B042F4F\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/receipt_store.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-A3538875D2D9\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/workflow/receipt_writer.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-1DEAE0B81178\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/persistent_evidence.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-41F70113DFC3\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/compile_artifacts.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-07C1BFD40B03\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/compile_artifacts.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-6D489F9683CF\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/workflow/job_runtime_context.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
+      "prompt": "Resolve the Wave C linked bugs as FIXED after regression tests pass.\n\n```bash\ncd .\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-CEC41B042F4F\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/receipt_store.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-A3538875D2D9\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/workflow/receipt_writer.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-1DEAE0B81178\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/persistent_evidence.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-41F70113DFC3\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/compile_artifacts.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-07C1BFD40B03\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/compile_artifacts.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-6D489F9683CF\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/workflow/job_runtime_context.py in boundary_refactor_wave_c_receipts_evidence_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
       "read": [],
       "write": [],
       "verify_command": "true"

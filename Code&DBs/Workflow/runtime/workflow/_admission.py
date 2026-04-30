@@ -1252,6 +1252,11 @@ def preview_workflow_execution(
         if route_reason:
             warnings.append(f"{label}: {route_reason}")
         context_shard = dict(execution_context_shards.get(label) or {})
+        scope_skip = context_shard.get("scope_resolution_skipped")
+        if isinstance(scope_skip, dict):
+            skip_message = str(scope_skip.get("message") or "").strip()
+            if skip_message:
+                warnings.append(f"{label}: {skip_message}")
         execution_bundle = dict(execution_bundles.get(label) or {})
         job_payload = dict(job)
         if context_shard:

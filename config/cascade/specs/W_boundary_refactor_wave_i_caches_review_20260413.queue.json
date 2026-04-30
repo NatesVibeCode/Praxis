@@ -52,7 +52,7 @@
       "write": [
         "Code&DBs/Databases/migrations/workflow/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_i_create_repositories",
@@ -77,7 +77,7 @@
         "Code&DBs/Workflow/storage/postgres/__init__.py",
         "Code&DBs/Workflow/authority/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_i_thin_sources",
@@ -100,7 +100,7 @@
         "Code&DBs/Workflow/runtime/post_workflow_sync.py",
         "Code&DBs/Workflow/runtime/result_cache.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/auto_review.py' 'Code&DBs/Workflow/runtime/post_workflow_sync.py' 'Code&DBs/Workflow/runtime/result_cache.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/runtime/auto_review.py' 'Code&DBs/Workflow/runtime/post_workflow_sync.py' 'Code&DBs/Workflow/runtime/result_cache.py'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile 'Code&DBs/Workflow/runtime/auto_review.py' 'Code&DBs/Workflow/runtime/post_workflow_sync.py' 'Code&DBs/Workflow/runtime/result_cache.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/runtime/auto_review.py' 'Code&DBs/Workflow/runtime/post_workflow_sync.py' 'Code&DBs/Workflow/runtime/result_cache.py'"
     },
     {
       "label": "wave_i_tests",
@@ -120,7 +120,7 @@
       "write": [
         "Code&DBs/Workflow/tests/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'caches' || true"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'caches' || true"
     },
     {
       "label": "wave_i_close_bugs",
@@ -131,7 +131,7 @@
       ],
       "description": "Resolve the wave's linked bugs as FIXED",
       "outcome_goal": "Every linked bug is FIXED with a resolution citing this queue_id",
-      "prompt": "Resolve the Wave I linked bugs as FIXED after regression tests pass.\n\n```bash\ncd /Users/nate/Praxis\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-010099E3219F\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/result_cache.py in boundary_refactor_wave_i_caches_review_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-2DB22C395592\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/auto_review.py in boundary_refactor_wave_i_caches_review_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-D45A73DABE47\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/post_workflow_sync.py in boundary_refactor_wave_i_caches_review_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
+      "prompt": "Resolve the Wave I linked bugs as FIXED after regression tests pass.\n\n```bash\ncd .\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-010099E3219F\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/result_cache.py in boundary_refactor_wave_i_caches_review_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-2DB22C395592\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/auto_review.py in boundary_refactor_wave_i_caches_review_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-D45A73DABE47\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/post_workflow_sync.py in boundary_refactor_wave_i_caches_review_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
       "read": [],
       "write": [],
       "verify_command": "true"

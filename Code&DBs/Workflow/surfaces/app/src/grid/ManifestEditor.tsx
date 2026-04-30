@@ -122,6 +122,7 @@ export function ManifestEditor({ manifestId }: ManifestEditorProps) {
   }
 
   const previewSurface = parsedBundle ? resolvePraxisBundleSurface(parsedBundle) : null;
+  const previewQuadrantSurface = previewSurface?.kind === 'quadrant_manifest' ? previewSurface : null;
 
   return (
     <div className="manifest-editor" ref={containerRef}>
@@ -162,8 +163,8 @@ export function ManifestEditor({ manifestId }: ManifestEditorProps) {
         <div className="manifest-editor-preview-label">Preview</div>
         <div className="manifest-editor-preview-container">
           <div className="manifest-editor-preview-scale">
-            {previewSurface ? (
-              <QuadrantGrid manifest={previewSurface.manifest} />
+            {previewQuadrantSurface ? (
+              <QuadrantGrid manifest={previewQuadrantSurface.manifest} />
             ) : (
               <div style={{ padding: 24, color: 'var(--text-muted)' }}>No preview surface available.</div>
             )}

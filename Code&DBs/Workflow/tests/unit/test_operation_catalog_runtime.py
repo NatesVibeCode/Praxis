@@ -165,6 +165,56 @@ def test_get_resolved_operation_definition_canonicalizes_stale_compile_materiali
     assert resolved.http_path == "/api/compile/materialize"
 
 
+def test_get_resolved_operation_definition_repairs_stale_compose_plan_lane(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        operation_catalog,
+        "_load_operation_catalog_record",
+        lambda conn, operation_ref: None,
+    )
+    monkeypatch.setattr(
+        operation_catalog,
+        "_load_operation_catalog_record_by_name",
+        lambda conn, operation_name: {
+            **_QUERY_ROW,
+            "operation_ref": "compose-plan",
+            "operation_name": "compose_plan",
+            "source_kind": "operation_command",
+            "operation_kind": "command",
+            "input_model_ref": "runtime.operations.commands.plan_orchestration.ComposePlanCommand",
+            "handler_ref": "runtime.operations.commands.plan_orchestration.handle_compose_plan",
+            "posture": "operate",
+            "idempotency_policy": "non_idempotent",
+            "execution_lane": "background",
+            "kickoff_required": True,
+            "timeout_ms": 15000,
+        },
+    )
+    monkeypatch.setattr(
+        operation_catalog,
+        "_list_operation_source_policy_records",
+        lambda conn, include_disabled=False, limit=100: [
+            {
+                **_QUERY_POLICY,
+                "policy_ref": "operation-command",
+                "source_kind": "operation_command",
+                "posture": "operate",
+                "idempotency_policy": "non_idempotent",
+            }
+        ],
+    )
+
+    resolved = operation_catalog.get_resolved_operation_definition(
+        object(),
+        operation_name="compose_plan",
+    )
+
+    assert resolved.execution_lane == "interactive"
+    assert resolved.kickoff_required is False
+    assert resolved.timeout_ms == 35000
+
+
 def test_get_operation_catalog_record_requires_exactly_one_lookup_key() -> None:
     with pytest.raises(operation_catalog.OperationCatalogBoundaryError) as exc_info:
         operation_catalog.get_operation_catalog_record(

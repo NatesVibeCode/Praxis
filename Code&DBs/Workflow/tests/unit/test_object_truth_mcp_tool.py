@@ -314,3 +314,75 @@ def test_object_truth_ingestion_sample_read_mcp_tool_uses_gateway(monkeypatch) -
         "action": "describe",
         "sample_id": "sample.1",
     }
+
+
+def test_object_truth_mdm_resolution_record_mcp_tool_uses_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        object_truth,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://authority.example/praxis"},
+    )
+
+    def _execute(*, env, operation_name, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True, "operation": "object_truth_mdm_resolution_record"}
+
+    monkeypatch.setattr(object_truth, "execute_operation_from_env", _execute)
+
+    result = object_truth.tool_praxis_object_truth_mdm_resolution_record(
+        {
+            "client_ref": "client.acme",
+            "entity_type": "organization",
+            "as_of": "2026-04-30T16:00:00Z",
+            "identity_clusters": [{"cluster_id": "cluster.1"}],
+            "field_comparisons": [{"field_comparison_digest": "comparison.digest"}],
+            "source_ref": None,
+        }
+    )
+
+    assert result == {"ok": True, "operation": "object_truth_mdm_resolution_record"}
+    assert captured["operation_name"] == "object_truth_mdm_resolution_record"
+    assert captured["payload"] == {
+        "client_ref": "client.acme",
+        "entity_type": "organization",
+        "as_of": "2026-04-30T16:00:00Z",
+        "identity_clusters": [{"cluster_id": "cluster.1"}],
+        "field_comparisons": [{"field_comparison_digest": "comparison.digest"}],
+    }
+
+
+def test_object_truth_mdm_resolution_read_mcp_tool_uses_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        object_truth,
+        "workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://authority.example/praxis"},
+    )
+
+    def _execute(*, env, operation_name, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True, "operation": "object_truth_mdm_resolution_read"}
+
+    monkeypatch.setattr(object_truth, "execute_operation_from_env", _execute)
+
+    result = object_truth.tool_praxis_object_truth_mdm_resolution_read(
+        {
+            "action": "describe",
+            "packet_ref": "packet.1",
+            "client_ref": None,
+        }
+    )
+
+    assert result == {"ok": True, "operation": "object_truth_mdm_resolution_read"}
+    assert captured["operation_name"] == "object_truth_mdm_resolution_read"
+    assert captured["payload"] == {
+        "action": "describe",
+        "packet_ref": "packet.1",
+    }

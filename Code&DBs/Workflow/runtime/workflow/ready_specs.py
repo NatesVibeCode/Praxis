@@ -33,7 +33,7 @@ def evaluate_ready_specs(conn: SyncPostgresConnection) -> int:
         """
         SELECT spec_id, spec_path
         FROM workflow_spec_ready
-        WHERE status = 'pending'
+        WHERE status = 'staged'
           AND (scheduled_at IS NULL OR scheduled_at <= now())
         ORDER BY scheduled_at NULLS FIRST, created_at
         LIMIT 10
@@ -83,6 +83,13 @@ def evaluate_ready_specs(conn: SyncPostgresConnection) -> int:
                 )
                 fired_count += 1
                 logger.info("Fired ready spec %s -> run %s", spec_id, run_id)
+                emit_system_event(
+                    conn,
+                    event_type="workflow.ready_spec.fired",
+                    source_id=spec_id,
+                    source_type="workflow_spec_ready",
+                    payload={"spec_id": spec_id, "spec_path": spec_path, "run_id": run_id, "spec_name": spec.name},
+                )
             else:
                 error_code = result.get("error_code") or "submit_failed"
                 logger.error("Failed to fire ready spec %s: %s", spec_id, error_code)
@@ -95,6 +102,13 @@ def evaluate_ready_specs(conn: SyncPostgresConnection) -> int:
                     """,
                     spec_id,
                 )
+                emit_system_event(
+                    conn,
+                    event_type="workflow.ready_spec.failed",
+                    source_id=spec_id,
+                    source_type="workflow_spec_ready",
+                    payload={"spec_id": spec_id, "spec_path": spec_path, "error_code": error_code},
+                )
 
         except Exception as exc:
             logger.error("Error firing ready spec %s: %s", spec_id, exc, exc_info=True)
@@ -106,6 +120,13 @@ def evaluate_ready_specs(conn: SyncPostgresConnection) -> int:
                 WHERE spec_id = $1
                 """,
                 spec_id,
+            )
+            emit_system_event(
+                conn,
+                event_type="workflow.ready_spec.failed",
+                source_id=spec_id,
+                source_type="workflow_spec_ready",
+                payload={"spec_id": spec_id, "spec_path": spec_path, "error": f"{type(exc).__name__}: {exc}"},
             )
 
     return fired_count

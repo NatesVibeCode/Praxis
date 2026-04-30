@@ -22,7 +22,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 1' planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md"
+      "verify_command": "grep -q 'Phase 1' planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md"
     },
     {
       "label": "phase_002_control_plane_core",
@@ -37,7 +37,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_002_control_plane_core.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 2' planning/phase-program/foundation-wave/phase_002_control_plane_core.md"
+      "verify_command": "grep -q 'Phase 2' planning/phase-program/foundation-wave/phase_002_control_plane_core.md"
     },
     {
       "label": "phase_003_registry_authority",
@@ -52,7 +52,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_003_registry_authority.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 3' planning/phase-program/foundation-wave/phase_003_registry_authority.md"
+      "verify_command": "grep -q 'Phase 3' planning/phase-program/foundation-wave/phase_003_registry_authority.md"
     },
     {
       "label": "phase_004_gate_and_promotion_policy",
@@ -67,7 +67,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 4' planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md"
+      "verify_command": "grep -q 'Phase 4' planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md"
     },
     {
       "label": "phase_005_workflow_outbox",
@@ -82,7 +82,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_005_workflow_outbox.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 5' planning/phase-program/foundation-wave/phase_005_workflow_outbox.md"
+      "verify_command": "grep -q 'Phase 5' planning/phase-program/foundation-wave/phase_005_workflow_outbox.md"
     },
     {
       "label": "phase_006_platform_authority_schema",
@@ -97,7 +97,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 6' planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md"
+      "verify_command": "grep -q 'Phase 6' planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md"
     },
     {
       "label": "phase_007_provider_route_health_budget",
@@ -112,7 +112,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 7' planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md"
+      "verify_command": "grep -q 'Phase 7' planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md"
     },
     {
       "label": "phase_008_workflow_class_and_schedule_schema",
@@ -127,7 +127,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 8' planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md"
+      "verify_command": "grep -q 'Phase 8' planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md"
     },
     {
       "label": "phase_009_bug_and_roadmap_authority",
@@ -142,7 +142,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 9' planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md"
+      "verify_command": "grep -q 'Phase 9' planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md"
     },
     {
       "label": "phase_010_operator_control_authority",
@@ -157,7 +157,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 10' planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
+      "verify_command": "grep -q 'Phase 10' planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
     },
     {
       "label": "phase_001_010_synthesis",
@@ -193,7 +193,7 @@
       "write": [
         "planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && grep -q 'Dependency map' planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
+      "verify_command": "grep -q 'Dependency map' planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
     },
     {
       "label": "phase_001_010_review",
@@ -256,7 +256,7 @@
         "planning/phase-program/foundation-wave/phase_010_operator_control_authority.md",
         "planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && test -f planning/phase-program/foundation-wave/phase_001_010_synthesis.md && grep -q 'Phase 10' planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
+      "verify_command": "test -f planning/phase-program/foundation-wave/phase_001_010_synthesis.md && grep -q 'Phase 10' planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
     }
   ]
 }

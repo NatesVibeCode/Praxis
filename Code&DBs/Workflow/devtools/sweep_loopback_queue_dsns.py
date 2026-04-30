@@ -31,16 +31,13 @@ OLD_EXPORT_CD = (
     + "n"
 )
 EXPORT_CD_REPLACE = (
-    "cd /Users/nate/Praxis"
-    + chr(92)
-    + "n"
-    + ". ./scripts/_workflow_env.sh && workflow_load_repo_env"
+    ". ./scripts/_workflow_env.sh && workflow_load_repo_env"
     + chr(92)
     + "n"
 )
 
 CD_THEN_INLINE = re.compile(
-    r"(cd /Users/nate/Praxis &&) WORKFLOW_DATABASE_URL=postgres(?:ql)?://localhost:5432/praxis "
+    r"(cd /[^ ]+ &&) WORKFLOW_DATABASE_URL=postgres(?:ql)?://localhost:5432/praxis "
 )
 
 # Remaining inline env prefix before a command (e.g. prompt backticks on own line)

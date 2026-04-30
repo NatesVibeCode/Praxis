@@ -14,7 +14,7 @@
       "prompt": "Rename the `RunDAG` function component and its CSS classes in the dashboard:\n\n1. In `Code&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx`:\n   - Find the function `RunDAG` (around line 81) and rename it to `RunGraph`\n   - Update any JSX references like `<RunDAG` to `<RunGraph`\n   - Update any comments mentioning 'Run DAG' to 'Run graph'\n   - Replace all `run-dag` CSS class references with `run-graph` (e.g. `run-dag__edge` -> `run-graph__edge`, `run-dag__column` -> `run-graph__column`, `run-dag__node` -> `run-graph__node`, etc.)\n\n2. In the dashboard CSS file (find it via grep — likely `Code&DBs/Workflow/surfaces/app/src/dashboard/dashboard.css` or similar):\n   - Replace all `.run-dag` selectors with `.run-graph`\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
       "read": ["Code&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx"],
       "write": ["Code&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx"],
-      "verify_command": "! grep -q 'RunDAG\\|run-dag' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx"
+      "verify_command": "! grep -q 'RunDAG\\|run-dag' Code\\&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx"
     },
     {
       "label": "rename_graph_layout",
@@ -31,7 +31,7 @@
         "Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts",
         "Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
       ],
-      "verify_command": "! grep -q 'DagLayout' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts && ! grep -q 'DagLayout' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
+      "verify_command": "! grep -q 'DagLayout' Code\\&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts && ! grep -q 'DagLayout' Code\\&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
     },
     {
       "label": "rename_moon_graph_css",
@@ -48,7 +48,7 @@
         "Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css",
         "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
       ],
-      "verify_command": "! grep -q 'moon-dag' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/moon-build.css && ! grep -q 'moon-dag' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+      "verify_command": "! grep -q 'moon-dag' Code\\&DBs/Workflow/surfaces/app/src/moon/moon-build.css && ! grep -q 'moon-dag' Code\\&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
     },
     {
       "label": "rename_configs",
@@ -69,7 +69,7 @@
         "Code&DBs/Workflow/surfaces/app/.claude/launch.json",
         "Code&DBs/Workflow/surfaces/app/package.json"
       ],
-      "verify_command": "! grep -q '\"dag-' /Users/nate/Praxis/Code\\&DBs/Workflow/.claude/launch.json && ! grep -q '\"dag-' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/.claude/launch.json"
+      "verify_command": "! grep -q '\"dag-' Code\\&DBs/Workflow/.claude/launch.json && ! grep -q '\"dag-' Code\\&DBs/Workflow/surfaces/app/.claude/launch.json"
     }
   ]
 }

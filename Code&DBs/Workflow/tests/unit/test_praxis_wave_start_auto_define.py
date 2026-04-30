@@ -22,7 +22,7 @@ from surfaces.mcp.tools.wave import _parse_start_jobs, tool_praxis_wave
 
 class _FakeOrch:
     """Minimal test stand-in exposing the orchestrator surface that
-    tool_praxis_wave depends on: _waves dict, add_wave, start_wave,
+    tool_praxis_wave depends on: is_wave_defined, add_wave, start_wave,
     resolve_default_wave_id, observe (not exercised here)."""
 
     def __init__(self) -> None:
@@ -32,6 +32,9 @@ class _FakeOrch:
 
     def resolve_default_wave_id(self, *, action: str) -> str:
         raise KeyError(action)
+
+    def is_wave_defined(self, wave_id: str) -> bool:
+        return wave_id in self._waves
 
     def add_wave(self, wave_id: str, jobs: list[dict], depends_on_wave=None) -> None:
         self.add_wave_calls.append(

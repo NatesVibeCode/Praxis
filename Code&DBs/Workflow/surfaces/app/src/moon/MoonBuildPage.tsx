@@ -1621,7 +1621,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
             selected_node_id: null,
             selected_edge_id: null,
             view_mode: 'build',
-            hint: 'Materialize could not finish this graph. Moon chat owns the recovery pass and must read before editing.',
+            hint: 'Materialize could not finish this graph. Recovery chat owns the recovery pass and must read before editing.',
             materialize_status: 'chat_fallback',
             operation_receipt_id: params.receiptId ?? null,
             correlation_id: params.correlationId ?? null,
@@ -1633,7 +1633,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           workflow_id: fallbackWorkflowId,
           workflow_name: null,
           phase: 'chat_fallback',
-          status_message: "Materialize could not build a usable graph. Moon chat is looking at it now; the manual builder stays available.",
+          status_message: "Materialize could not build a usable graph. Recovery chat is looking at it now; the manual builder stays available.",
           prompt: buildMaterializeFallbackPrompt({
             intent: compileProse,
             workflowId: fallbackWorkflowId,
@@ -1742,7 +1742,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           workflow_id: wfId,
           workflow_name: workflowName || null,
           phase: 'ready',
-          status_message: 'Materialize handed Moon a multi-step graph. Review is available when you ask for it.',
+          status_message: 'Materialize produced a multi-step graph. Review is available when you ask for it.',
           operation_receipt_id: receiptId,
           correlation_id: correlationId,
           graph_summary: graphSummary ?? null,
@@ -1768,7 +1768,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           selected_node_id: null,
           selected_edge_id: null,
           view_mode: 'build',
-          hint: 'Materialize failed. Moon chat owns the recovery pass and must read before editing.',
+          hint: 'Materialize failed. Recovery chat owns the recovery pass and must read before editing.',
           materialize_status: 'chat_fallback',
           operation_receipt_id: failure.receiptId,
           correlation_id: failure.correlationId,
@@ -1780,7 +1780,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
         workflow_id: fallbackWorkflowId,
         workflow_name: null,
         phase: 'chat_fallback',
-        status_message: "Materialize failed. Moon chat is looking at it now; the manual builder stays available.",
+        status_message: "Materialize failed. Recovery chat is looking at it now; the manual builder stays available.",
         prompt: buildMaterializeFallbackPrompt({
           intent: compileProse,
           workflowId: fallbackWorkflowId,
@@ -2588,7 +2588,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                 {state.compileError && !showComposePanel && (
                   <div className="moon-compose__error" role="alert">
                     {state.compileError}
-                    <div>Manual build is open; Moon chat is handling the recovery pass.</div>
+                    <div>Manual build is open; recovery chat is handling the recovery pass.</div>
                   </div>
                 )}
 

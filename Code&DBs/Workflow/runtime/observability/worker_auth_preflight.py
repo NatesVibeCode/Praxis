@@ -94,7 +94,7 @@ def run_startup_auth_preflight(conn: Any) -> dict[str, Any]:
     the whole worker).
     """
     try:
-        from surfaces.mcp.tools.provider_onboard import tool_praxis_cli_auth_doctor
+        from surfaces.mcp.tools.provider_onboard import run_cli_auth_doctor
     except Exception as exc:
         logger.warning(
             "worker_auth_preflight: cli_auth_doctor unavailable, skipping probe: %s",
@@ -107,7 +107,7 @@ def run_startup_auth_preflight(conn: Any) -> dict[str, Any]:
         return {"skipped": True, "reason": "no_permitted_providers"}
 
     try:
-        result = tool_praxis_cli_auth_doctor({})
+        result = run_cli_auth_doctor({})
     except Exception as exc:
         logger.warning(
             "worker_auth_preflight: auth_doctor probe failed: %s",

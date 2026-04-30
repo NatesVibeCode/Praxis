@@ -928,7 +928,7 @@ export function Dashboard({
               <section className="dash-panel dash-toolbelt-panel">
                 <div className="dash-panel__header">
                   <div>
-                    <div className="dash-panel__eyebrow">Moon</div>
+                    <div className="dash-panel__eyebrow">Materialize</div>
                     <h2 className="dash-panel__title">Toolbelt Review</h2>
                   </div>
                   <span className="dash-review-count">{loading ? '...' : toolbeltReviewItems.length}</span>

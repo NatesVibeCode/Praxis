@@ -221,7 +221,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     surface: {
       tier: 'primary',
       badge: 'Core',
-      detail: 'Primary Moon step primitive with a real planned runtime route.',
+      detail: 'Primary step primitive with a real planned runtime route.',
     },
     scaffold: (node) => ({
       prompt: node.prompt || 'Research the request using the attached context and return grounded findings.',
@@ -233,7 +233,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     surface: {
       tier: 'primary',
       badge: 'Core',
-      detail: 'Primary Moon step primitive with a real planned runtime route.',
+      detail: 'Primary step primitive with a real planned runtime route.',
     },
     scaffold: (node) => ({
       prompt: node.prompt || 'Classify the input, return the selected label, and explain the reasoning briefly.',
@@ -245,7 +245,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     surface: {
       tier: 'primary',
       badge: 'Core',
-      detail: 'Primary Moon step primitive with a real planned runtime route.',
+      detail: 'Primary step primitive with a real planned runtime route.',
     },
     scaffold: (node) => ({
       prompt: node.prompt || 'Draft the requested output using the available context and preserve the requested tone.',
@@ -278,7 +278,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     surface: {
       tier: 'primary',
       badge: 'Core',
-      detail: 'Visible now that Moon offers opinionated request presets instead of a blank transport form.',
+      detail: 'Visible now that the builder offers opinionated request presets instead of a blank transport form.',
     },
     scaffold: (node) => {
       const integrationArgs = normalizeIntegrationArgs(node.integration_args);
@@ -306,7 +306,7 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     surface: {
       tier: 'primary',
       badge: 'Core',
-      detail: 'Visible now that Moon can pick saved child workflows by name from the inspector.',
+      detail: 'Visible now that the builder can pick saved child workflows by name from the inspector.',
     },
     scaffold: (node) => {
       const integrationArgs = normalizeIntegrationArgs(node.integration_args);

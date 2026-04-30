@@ -15,30 +15,10 @@
     "main": {
       "id": "main",
       "title": "Workspace",
-      "kind": "quadrant_manifest",
-      "manifest": {
-        "version": 2,
-        "grid": "4x4",
-        "title": "Blank Workspace",
-        "quadrants": {
-          "A1": {
-            "module": "markdown",
-            "span": "2x1",
-            "config": {
-              "content": "Add the blocks this workspace needs."
-            }
-          },
-          "A3": {
-            "module": "search-panel",
-            "span": "2x1",
-            "config": {
-              "placeholder": "Search this workspace"
-            }
-          }
-        }
-      }
+      "kind": "compose",
+      "draft": {}
     }
   },
   "source_options": {},
-  "description": "Minimal workspace seed."
+  "description": "Workspace contract authoring surface."
 }

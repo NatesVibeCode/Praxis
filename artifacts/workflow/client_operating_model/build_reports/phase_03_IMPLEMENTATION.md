@@ -4,114 +4,136 @@ Date: 2026-04-30
 
 ## Summary
 
-Implemented the bounded Object Truth MDM/source-authority substrate requested
-for Worker Phase 3. The change stays out of existing Object Truth command,
-query, storage, generated-doc, and migration files.
+Promoted Object Truth MDM, normalization, lineage, freshness, and
+source-authority evidence from local deterministic primitives into DB-backed
+CQRS authority.
 
-Added deterministic primitives for:
+Phase 3 now records queryable MDM resolution packets with decomposed identity
+clusters, field comparisons, normalization rules, field-level source authority
+evidence, hierarchy signals, and typed gaps through Postgres tables, gateway
+operations, MCP tools, and HTTP routes.
 
-- identity cluster members, match signals, anti-match signals, and cluster state
-  scoring
-- normalization rule records and auditable field normalization
-- reversible canonical-field-to-source-field links
-- freshness scoring independent from source authority
-- field-aware source authority evidence
-- field comparison matrices with canonical selection rationale
-- typed gap emission for unresolved policy, freshness, conflict, and missing
-  states
-- hierarchy and flattening signals
-- stable MDM resolution packet digests
+## Authority Added
+
+- Migration: `Code&DBs/Databases/migrations/workflow/363_object_truth_mdm_resolution_authority.sql`
+- Command operation: `object_truth_mdm_resolution_record`
+- Query operation: `object_truth_mdm_resolution_read`
+- MCP tools:
+  - `praxis_object_truth_mdm_resolution_record`
+  - `praxis_object_truth_mdm_resolution_read`
+- HTTP routes:
+  - `POST /api/object-truth/mdm/resolutions`
+  - `GET /api/object-truth/mdm/resolutions`
 
 ## Changed Files
 
-- `Code&DBs/Workflow/runtime/object_truth/mdm.py`
-- `Code&DBs/Workflow/tests/unit/test_object_truth_mdm.py`
-- `docs/architecture/object-truth-trust-toolbelt/mdm-source-authority-2026-04-30.md`
+- `Code&DBs/Databases/migrations/workflow/363_object_truth_mdm_resolution_authority.sql`
+- `Code&DBs/Workflow/runtime/operations/commands/object_truth_mdm.py`
+- `Code&DBs/Workflow/runtime/operations/queries/object_truth_mdm.py`
+- `Code&DBs/Workflow/storage/postgres/object_truth_repository.py`
+- `Code&DBs/Workflow/surfaces/mcp/tools/object_truth.py`
+- `Code&DBs/Workflow/surfaces/mcp/cli_metadata.py`
+- `Code&DBs/Workflow/system_authority/workflow_migration_authority.json`
+- `Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py`
+- `Code&DBs/Workflow/tests/unit/test_object_truth_mdm_operation.py`
+- `Code&DBs/Workflow/tests/unit/test_object_truth_mdm_repository.py`
+- `Code&DBs/Workflow/tests/unit/test_object_truth_mcp_tool.py`
+- `Code&DBs/Workflow/tests/unit/test_operation_catalog_mounting.py`
+- `docs/MCP.md`
+- `docs/CLI.md`
+- `docs/API.md`
 - `artifacts/workflow/client_operating_model/build_reports/phase_03_IMPLEMENTATION.md`
-
-## Implemented Controls
-
-- Blocking anti-match evidence forces multi-source clusters to
-  `split-required`.
-- Consensus without source authority evidence remains unresolved and emits
-  `policy-missing`.
-- Highest-ranked field authority selects canonical values only when the
-  highest-ranked source is present and internally non-conflicting.
-- Stale authoritative values do not get hidden; conflicting fresher
-  lower-authority evidence emits `stale-value`.
-- Raw source values remain recoverable through normalization outputs and
-  reversible source links.
-- Normalization failures preserve raw values and expose `non-normalizable`
-  gaps.
-- All records carry purpose-scoped stable SHA-256 digests over canonical JSON.
 
 ## Validation
 
-Commands run:
+Focused local gate:
 
 ```bash
 PYTHONPATH='Code&DBs/Workflow' .venv/bin/python -m py_compile \
-  'Code&DBs/Workflow/runtime/object_truth/mdm.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_mdm.py'
-```
+  Code\&DBs/Workflow/runtime/operations/commands/object_truth_mdm.py \
+  Code\&DBs/Workflow/runtime/operations/queries/object_truth_mdm.py \
+  Code\&DBs/Workflow/storage/postgres/object_truth_repository.py \
+  Code\&DBs/Workflow/surfaces/mcp/tools/object_truth.py \
+  Code\&DBs/Workflow/surfaces/mcp/cli_metadata.py \
+  Code\&DBs/Workflow/runtime/operation_catalog_gateway.py
 
-Result: passed.
-
-```bash
-praxis workflow discover reindex --yes
-```
-
-Result: passed with exit code 0.
-
-```bash
 PYTHONPATH='Code&DBs/Workflow' .venv/bin/python -m pytest \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_mdm.py' -q
+  Code\&DBs/Workflow/tests/unit/test_object_truth_mdm.py \
+  Code\&DBs/Workflow/tests/unit/test_object_truth_mdm_operation.py \
+  Code\&DBs/Workflow/tests/unit/test_object_truth_mdm_repository.py \
+  Code\&DBs/Workflow/tests/unit/test_object_truth_mcp_tool.py \
+  Code\&DBs/Workflow/tests/unit/test_operation_catalog_mounting.py \
+  Code\&DBs/Workflow/tests/unit/test_workflow_migration_authority_contract.py -q
 ```
 
-Result: `6 passed in 0.32s`.
+Result: `60 passed in 0.60s`.
+
+Generated docs and metadata gate:
 
 ```bash
+PYTHONPATH='Code&DBs/Workflow' .venv/bin/python -m scripts.generate_mcp_docs
 PYTHONPATH='Code&DBs/Workflow' .venv/bin/python -m pytest \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_mdm.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_ingestion.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_ops.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_operation.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_store_operation.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_schema_and_compare_operations.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_readiness.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_mcp_tool.py' -q
+  Code\&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py -q
 ```
 
-Result: `33 passed in 0.52s`.
+Result: `9 passed in 0.52s`.
 
-```bash
-git diff --check -- \
-  'Code&DBs/Workflow/runtime/object_truth/mdm.py' \
-  'Code&DBs/Workflow/tests/unit/test_object_truth_mdm.py' \
-  'docs/architecture/object-truth-trust-toolbelt/mdm-source-authority-2026-04-30.md' \
-  'artifacts/workflow/client_operating_model/build_reports/phase_03_IMPLEMENTATION.md'
-```
+The live migration was applied to the network Postgres authority and the API
+server was restarted and health checked successfully.
 
-Result: passed.
+## Live Proof
 
-Focused validation covers:
+Operation forge previews:
 
-- deterministic two-source identity clustering
-- blocking anti-match split routing
-- normalization rule records and raw-value reversibility
-- stale authoritative vs fresh lower-authority field conflicts
-- unresolved fields when authority policy is missing
-- stable MDM resolution packet digests across input order
+- record command: `6d58bb9a-1f32-46c4-a365-66c35a7e9a07`
+- read query: `5a54cd4e-8014-4a20-b77c-2298bc4c922e`
 
-## Blockers And Migration Needs
+MCP proof:
 
-No blocker for the bounded primitive layer.
+- MDM packet write receipt: `abbc1af9-f505-4ba3-af74-256610ba9e27`
+- MDM packet write event: `ad554d55-6f3c-4abb-86b5-7fcdcf5e6adf`
+- packet: `object_truth_mdm_packet.8085dbb1eb458470`
+- packet digest: `fb08c2cee4b8c5c5470d23cd973af3e7d0e8c8943bc57aa09b2eefd103fb8023`
+- MCP list readback: `93c1d000-3c9d-493d-820a-629742673df5`
+- MCP describe readback: `bf02af00-53e4-4adc-9f67-940f80c51f8e`
 
-No migration was required for this worker scope. Durable MDM authority still
-needs separately owned storage/CQRS work if identity clusters, field comparison
-matrices, source authority evidence, hierarchy/flattening signals, typed gaps,
-or resolution packets must become queryable Postgres-backed authority.
+HTTP proof:
 
-Shared generated docs were not regenerated; later surface phases should update
-`docs/API.md`, `docs/CLI.md`, and `docs/MCP.md` only when CQRS/tool surfaces are
-actually added.
+- route catalog showed one GET and one POST under
+  `/api/object-truth/mdm/resolutions`
+- HTTP GET list receipt: `2a19c446-e2e2-4876-a0e6-a9a44aafd2c6`
+- HTTP POST write receipt: `a4cd27f9-b948-4b34-adb6-11ac0b53925e`
+- HTTP POST event: `347295f7-a7d1-4b99-9324-7a42f0ab042c`
+- HTTP packet: `object_truth_mdm_packet.25390d9593e47b0a`
+- HTTP packet digest: `00167c3860fa07499cc193fb52b8b9de8d4fa241ae054003d702dabafc43214e`
+- HTTP describe receipt: `82d307fa-f7d2-422c-b517-0d9790bd1688`
+
+The live proof used Phase 2 object-version digests as upstream evidence refs,
+then proved that Phase 3 can persist and read back:
+
+- one cross-system identity cluster
+- one field comparison
+- one normalization rule
+- one field-level source-authority record
+- selected canonical field value and reversible source link evidence
+
+## Known Separate Issue
+
+While closing Phase 2, the local operator surface hit an unrelated unresolved
+merge state in `runtime/operation_catalog_gateway.py`. The import-blocking
+conflict markers were resolved so roadmap authority could run again. The git
+index still reports unrelated unresolved files outside Phase 3 scope.
+
+## Closeout Judgment
+
+Phase 3 is closed in roadmap authority.
+
+- closeout preview receipt: `8776c1db-f6c3-4581-8db5-5e2774b77617`
+- closeout commit receipt: `74dcb0c6-8350-41d9-b0ae-8957e784eb39`
+- closeout event: `f22db280-7023-44b5-bbba-214f2c31e6b1`
+- roadmap readback: status `completed`, lifecycle `completed` as of
+  `2026-04-30T17:07:50.900759+00:00`
+
+MDM/source authority is no longer only deterministic in-memory math; it is a
+receipt-backed authority path with durable writes, queryable readbacks,
+decomposed records, MCP tools, HTTP routes, and focused test coverage.

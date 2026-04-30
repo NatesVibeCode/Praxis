@@ -28,6 +28,21 @@ def normalize_source_option(option_id: str, raw: Any) -> dict[str, Any]:
     }
 
 
+def normalize_compose_draft(raw: Any) -> dict[str, Any]:
+    item = dict(raw) if isinstance(raw, dict) else {}
+    return {
+        "intent": _optional_text(item.get("intent")),
+        "read_scope": _string_list(item.get("read_scope")),
+        "write_scope": _string_list(item.get("write_scope")),
+        "anti_requirements": _string_list(item.get("anti_requirements")),
+        "verifier_ref": _optional_text(item.get("verifier_ref")),
+        "generated_manifest_id": _optional_text(item.get("generated_manifest_id")),
+        "workflow_id": _optional_text(item.get("workflow_id")),
+        "run_id": _optional_text(item.get("run_id")),
+        "last_compiled_at": _optional_text(item.get("last_compiled_at")),
+    }
+
+
 def adapt_v2_manifest_to_bundle(
     manifest: dict[str, Any],
     *,
@@ -112,6 +127,14 @@ def normalize_helm_bundle(
         for surface_id, item in surfaces_raw.items():
             if not isinstance(item, dict):
                 continue
+            if item.get("kind") == "compose":
+                surfaces[str(surface_id)] = {
+                    "id": _text(item.get("id")) or str(surface_id),
+                    "title": _text(item.get("title")) or str(surface_id),
+                    "kind": "compose",
+                    "draft": normalize_compose_draft(item.get("draft")),
+                }
+                continue
             candidate_manifest = item.get("manifest") if isinstance(item.get("manifest"), dict) else item
             quadrant_manifest = {
                 "version": 2,
@@ -180,6 +203,14 @@ def validate_helm_bundle(bundle: dict[str, Any], *, valid_block_ids: set[str] | 
     for surface_id, surface in surfaces.items():
         if not isinstance(surface, dict):
             raise ValueError(f"surface {surface_id} must be a dict")
+        surface_kind = _text(surface.get("kind")) or "quadrant_manifest"
+        if surface_kind == "compose":
+            draft = surface.get("draft")
+            if draft is not None and not isinstance(draft, dict):
+                raise ValueError(f"surface {surface_id} compose draft must be a dict")
+            continue
+        if surface_kind != "quadrant_manifest":
+            raise ValueError(f"surface {surface_id} has unsupported kind: {surface_kind}")
         manifest = surface.get("manifest")
         if not isinstance(manifest, dict):
             raise ValueError(f"surface {surface_id} missing manifest")
@@ -224,6 +255,16 @@ def _optional_text(value: Any) -> str | None:
     return text or None
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [
+        entry.strip()
+        for entry in value
+        if isinstance(entry, str) and entry.strip()
+    ]
+
+
 def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
@@ -231,6 +272,7 @@ def _text(value: Any) -> str:
 __all__ = [
     "adapt_v2_manifest_to_bundle",
     "normalize_helm_bundle",
+    "normalize_compose_draft",
     "normalize_source_option",
     "resolve_tab",
     "validate_helm_bundle",

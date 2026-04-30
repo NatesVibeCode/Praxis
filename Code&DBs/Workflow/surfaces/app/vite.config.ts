@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 // light a port the server then can't actually bind (e.g. when OrbStack or
 // another process already holds *:<port>), and the dev proxy silently
 // targets a dead address.
-const API_HOST = '127.0.0.1';
+const API_HOST = process.env.PRAXIS_API_HOST || '127.0.0.1';
 const UI_HOST = process.env.PRAXIS_UI_HOST || '127.0.0.1';
 const PYTHON_COMMAND = process.env.PRAXIS_PYTHON_COMMAND || (process.platform === 'win32' ? 'python' : 'python3');
 const API_WATCH_ENABLED = process.env.PRAXIS_API_WATCH !== '0';

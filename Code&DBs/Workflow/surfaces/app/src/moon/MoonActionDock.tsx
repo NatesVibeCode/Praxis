@@ -329,7 +329,7 @@ export function MoonActionDock({
     setError(null);
     setSuccess(null);
     try {
-      const title = payload?.workflow?.name || 'Moon draft';
+      const title = payload?.workflow?.name || 'Materialize draft';
       const definition = (payload?.definition && Object.keys(payload.definition).length > 0)
         ? payload.definition as Record<string, unknown>
         : undefined;

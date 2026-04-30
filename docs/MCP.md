@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 144 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 159 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -51,7 +51,10 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_access_control` | `operations` | `advanced` | - | `read`, `write` | - | Mutate the control-panel model-access denial table — the first-class checkbox surface for turning a (provider × transport × job_type × model) tuple on or off. |
 | `praxis_authority_domain_forge` | `operations` | `advanced` | `workflow authority-domain-forge` | `read` | - | Preview the authority-domain ownership path before creating a new authority boundary or attaching operations, tables, workflows, or tools to it. Returns existing domain state, nearby domains, attached operations, authority objects, missing inputs, reject paths, and the safe register payload. |
 | `praxis_authority_memory_refresh` | `operations` | `advanced` | - | `write` | - | Project authority FK data into memory_edges so the knowledge graph reflects real structure. Upserts canonical-class edges for roadmap parent_of/dependencies, roadmap resolves_bug, operator_object_relations, workflow build intent links, bug and issue lineage, bug evidence links, workflow job/chain relationships, and operator decision scopes. Idempotent; safe to re-run. |
+| `praxis_authority_portable_cartridge_read` | `operations` | `advanced` | `workflow portable-cartridge-read` | `read` | - | Read persisted portable cartridge deployment contract records, dependencies, assets, binding contracts, verifier checks, drift hooks, and readiness state through the CQRS gateway. |
+| `praxis_authority_portable_cartridge_record` | `operations` | `advanced` | `workflow portable-cartridge-record` | `write` | - | Validate and persist portable cartridge manifests, Object Truth dependencies, assets, binding contracts, verifier checks, drift hooks, runtime assumptions, and deployment readiness through the CQRS gateway. |
 | `praxis_bug_replay_provenance_backfill` | `operations` | `advanced` | - | `write` | - | Backfill replay provenance from canonical bug and receipt authority. |
+| `praxis_chat_routing_options_list` | `operations` | `stable` | - | `read` | - | List task_type_routing candidates for a chat task slug. Surfaces provider_slug, model_slug, transport_type, rank, route_health_score, benchmark_score, route_tier, latency_class. Filters to permitted=true rows by default; pass include_disabled=true to surface disabled candidates with their disable signals. Replaces hardcoded OPERATOR_CHAT_ENGINE constants in the operator console picker drawer. |
 | `praxis_circuits` | `operations` | `stable` | `workflow circuits` | `read`, `write` | - | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
 | `praxis_client_operating_model` | `operations` | `advanced` | `workflow client-operating-model` | `read` | - | Build one read-only Client Operating Model operator view through the CQRS gateway. Views include system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed runtime accounting, next safe actions, and workflow-builder validation. The tool normalizes provided evidence into an operator read model; it does not persist, mutate, or call live client systems. |
 | `praxis_client_operating_model_snapshot_store` | `operations` | `advanced` | - | `write` | - | Persist one Client Operating Model operator-view snapshot through the CQRS gateway for historical readback. This stores the already built operator_view payload; it does not call client systems. |
@@ -68,12 +71,16 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_firecheck` | `operations` | `stable` | `workflow firecheck` | `read` | - | Preflight whether workflow work can actually fire now. Returns can_fire, typed blockers, and remediation plans so submitted state is not mistaken for runtime proof. |
 | `praxis_health` | `operations` | `stable` | `workflow health` | `read` | - | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, memory graph health, and projection freshness (event-log cursors + process-cache refresh lag) with SLA alerts and a read-side circuit-breaker verdict. |
 | `praxis_heartbeat` | `operations` | `advanced` | - | `read`, `write` | - | Run or check the knowledge graph maintenance cycle. The heartbeat syncs receipts, bugs, constraints, and friction events into the knowledge graph, mines relationships between entities, generates daily/weekly rollups, and archives stale nodes. |
+| `praxis_integration_action_contract_read` | `operations` | `advanced` | `workflow integration-action-contract-read` | `read` | - | Read receipt-backed integration action contracts, revisions, automation rule snapshots, linked actions, and typed gaps through the CQRS gateway. |
+| `praxis_integration_action_contract_record` | `operations` | `advanced` | `workflow integration-action-contract-record` | `write` | - | Record receipt-backed integration action contracts and automation rule snapshots through the CQRS gateway. The payload captures versioned behavior, validation gaps, linked automation actions, hashes, and the command receipt/event. |
 | `praxis_metrics_reset` | `operations` | `advanced` | - | `write` | - | Reset observability metrics through explicit operator maintenance authority. |
 | `praxis_model_access_control_matrix` | `operations` | `stable` | - | `read` | - | Read the live model-access ON/OFF switchboard that drives the private provider catalog. |
 | `praxis_object_truth` | `operations` | `advanced` | `workflow object-truth` | `read` | - | Build deterministic object-truth evidence for one inline record. This is a thin read-only MCP wrapper over the gateway operation `object_truth_observe_record`; it normalizes identity, field observations, value digests, source metadata, hierarchy signals, and redaction-safe previews without deciding business truth. |
 | `praxis_object_truth_compare_versions` | `operations` | `advanced` | `workflow object-truth-compare` | `read` | - | Compare two persisted object-truth object versions by digest. This is a thin read-only MCP wrapper over the gateway query `object_truth_compare_versions`; it compares field observations and freshness hints without deciding business truth. |
 | `praxis_object_truth_ingestion_sample_read` | `operations` | `advanced` | `workflow object-truth-ingestion-sample-read` | `read` | - | Read queryable Object Truth ingestion sample evidence and replay fixture packets through the gateway query `object_truth_ingestion_sample_read`. |
 | `praxis_object_truth_ingestion_sample_record` | `operations` | `advanced` | `workflow object-truth-ingestion-sample-record` | `write` | - | Record receipt-backed Object Truth ingestion sample evidence. This thin MCP wrapper dispatches to the gateway command `object_truth_ingestion_sample_record`; it persists a system snapshot, source-query evidence, sample capture, redacted payload previews, raw payload references, object versions, field observations, and replay fixture evidence. |
+| `praxis_object_truth_mdm_resolution_read` | `operations` | `advanced` | `workflow object-truth-mdm-resolution-read` | `read` | - | Read queryable Object Truth MDM/source-authority resolution packets and decomposed evidence through the gateway query `object_truth_mdm_resolution_read`. |
+| `praxis_object_truth_mdm_resolution_record` | `operations` | `advanced` | `workflow object-truth-mdm-resolution-record` | `write` | - | Record receipt-backed Object Truth MDM/source-authority evidence. This thin MCP wrapper dispatches to the gateway command `object_truth_mdm_resolution_record`; it persists a resolution packet plus decomposed identity clusters, field comparisons, normalization rules, source authority evidence, hierarchy signals, and typed gaps. |
 | `praxis_object_truth_readiness` | `operations` | `advanced` | `workflow object-truth-readiness` | `read` | - | Inspect whether Object Truth authority is ready for downstream client-system discovery, ingestion, and Virtual Lab planning. This is a thin read-only MCP wrapper over the gateway query `object_truth_readiness`; blocked readiness is returned as a query result with explicit no-go conditions. |
 | `praxis_object_truth_record_comparison_run` | `operations` | `advanced` | `workflow object-truth-record-comparison` | `write` | - | Compare two persisted object-truth object versions and store the comparison output as durable evidence. This is a thin write MCP wrapper over the gateway command `object_truth_record_comparison_run`. |
 | `praxis_object_truth_store` | `operations` | `advanced` | `workflow object-truth-store` | `write` | - | Build and persist deterministic object-truth evidence for one inline record. This is a thin write MCP wrapper over the gateway command `object_truth_store_observed_record`; it creates durable object-version and field-observation evidence, plus the command receipt/event. |
@@ -93,8 +100,16 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_semantic_bridges_backfill` | `operations` | `advanced` | - | `write` | - | Replay semantic bridges from canonical operator authority into semantic assertions. |
 | `praxis_semantic_projection_refresh` | `operations` | `advanced` | - | `write` | - | Refresh the semantic projection through explicit operator maintenance authority. |
 | `praxis_status_snapshot` | `operations` | `advanced` | - | `read` | - | Read the canonical workflow status snapshot — pass rate, failure mix, queue depth, and in-flight run summaries from receipt authority. |
+| `praxis_task_environment_contract_read` | `operations` | `advanced` | `workflow task-environment-contract-read` | `read` | - | Read receipt-backed task-environment contract heads, revisions, hierarchy nodes, and typed invalid states through the CQRS gateway. |
+| `praxis_task_environment_contract_record` | `operations` | `advanced` | `workflow task-environment-contract-record` | `write` | - | Record one receipt-backed task-environment contract head and revision through the CQRS gateway. The payload captures the contract, deterministic evaluation result, hierarchy nodes, typed invalid states, dependency hash, and command receipt/event. |
 | `praxis_task_route_eligibility` | `operations` | `advanced` | `workflow task-route-eligibility` | `write` | - | Write one bounded task-route eligibility window for a provider or provider/model scope through CQRS authority. |
 | `praxis_task_route_request` | `operations` | `advanced` | `workflow task-route-request` | `write` | - | Mutate request-shape knobs for one task route through CQRS authority. |
+| `praxis_virtual_lab_sandbox_promotion_read` | `operations` | `advanced` | `workflow virtual-lab-sandbox-promotion-read` | `read` | - | Read persisted live sandbox promotion records, readback evidence, predicted-vs-actual reports, drift classifications, handoffs, and stop/continue recommendations through the CQRS gateway. |
+| `praxis_virtual_lab_sandbox_promotion_record` | `operations` | `advanced` | `workflow virtual-lab-sandbox-promotion-record` | `write` | - | Persist live sandbox promotion manifests, required simulation verifier proof refs, execution/readback evidence, predicted-vs-actual comparison reports, drift ledgers, handoff refs, and stop/continue summaries through the CQRS gateway. |
+| `praxis_virtual_lab_simulation_read` | `operations` | `advanced` | `workflow virtual-lab-simulation-read` | `read` | - | Read persisted Virtual Lab simulation runs, traces, verifier results, typed gaps, and promotion blockers through the CQRS gateway. |
+| `praxis_virtual_lab_simulation_run` | `operations` | `advanced` | `workflow virtual-lab-simulation-run` | `write` | - | Run and persist a deterministic Virtual Lab simulation through the CQRS gateway. The run stores scenario/result digests, runtime events, predicted state events, transitions, action results, automation firings, assertions, verifier results, typed gaps, promotion blockers, and contract refs. |
+| `praxis_virtual_lab_state_read` | `operations` | `advanced` | `workflow virtual-lab-state-read` | `read` | - | Read receipt-backed Virtual Lab environment revisions, object state projections, event streams, command receipts, and typed gaps through the CQRS gateway. |
+| `praxis_virtual_lab_state_record` | `operations` | `advanced` | `workflow virtual-lab-state-record` | `write` | - | Record receipt-backed Virtual Lab environment revisions, copy-on-write object state projections, event envelopes, command receipts, replay validation, and typed gaps through the CQRS gateway. |
 | `praxis_work_assignment_matrix` | `operations` | `stable` | - | `read` | - | Read the model-tier work assignment matrix through CQRS authority. |
 | `tool_dag_health` | `operations` | `stable` | - | `read` | workflow health | Backwards-compatible alias for praxis_health. |
 | `praxis_bug_triage_packet` | `operator` | `advanced` | - | `read` | - | Read a compact LLM-oriented packet that classifies bugs as live defects, evidence debt, stale projections, platform friction, fixed-pending-verification, or inactive without mutating bug authority. |
@@ -984,6 +999,62 @@ Example input:
 {}
 ```
 
+#### `praxis_authority_portable_cartridge_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:portable-cartridge-read`
+- Risks: `read`
+- CLI entrypoint: `workflow portable-cartridge-read`
+- CLI schema help: `workflow tools describe praxis_authority_portable_cartridge_read`
+- When to use: Inspect persisted portable cartridge records, deployment readiness, Object Truth dependencies, assets, bindings, verifier checks, and drift hooks before export, mount, or later drift audit.
+- When not to use: Do not use it to write a contract; use praxis_authority_portable_cartridge_record for writes.
+- Recommended alias: `workflow portable-cartridge-read`
+- Selector: `action`; default `list_records`; values `list_records`, `describe_record`, `list_dependencies`, `list_assets`, `list_bindings`, `list_verifiers`, `list_drift_hooks`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe_record",
+  "cartridge_record_id": "portable_cartridge_record.phase9.build_2026_04_30_0001.staged_deployment",
+  "include_dependencies": true,
+  "include_bindings": true,
+  "include_verifiers": true,
+  "include_drift_hooks": true
+}
+```
+
+#### `praxis_authority_portable_cartridge_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:portable-cartridge-record`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow portable-cartridge-record`
+- CLI schema help: `workflow tools describe praxis_authority_portable_cartridge_record`
+- When to use: Record a portable cartridge deployment contract after the manifest has been assembled. The operation validates the contract, persists Object Truth dependencies, assets, bindings, verifiers, drift hooks, runtime assumptions, and readiness through CQRS.
+- When not to use: Do not use it to execute the cartridge, call customer systems, or own recurring task runs. It records the portable contract and readiness evidence only.
+- Recommended alias: `workflow portable-cartridge-record`
+- Selector: none
+- Required args: `manifest`
+
+Example input:
+
+```json
+{
+  "manifest": {
+    "manifest_version": "1.0",
+    "cartridge_id": "phase9-portable-cartridge",
+    "cartridge_version": "2026.04.30",
+    "build_id": "build_2026_04_30_0001"
+  },
+  "deployment_mode": "staged_deployment",
+  "source_ref": "phase_09_live_proof"
+}
+```
+
 #### `praxis_bug_replay_provenance_backfill`
 
 - Surface: `operations`
@@ -1003,6 +1074,25 @@ Example input:
 {
   "open_only": true
 }
+```
+
+#### `praxis_chat_routing_options_list`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_chat_routing_options_list`
+- CLI schema help: `workflow tools describe praxis_chat_routing_options_list`
+- When to use: Render the operator console picker drawer or audit chat routing candidates.
+- When not to use: Do not use it to mutate routing — this is read-only.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{}
 ```
 
 #### `praxis_circuits`
@@ -1398,6 +1488,69 @@ Example input:
 }
 ```
 
+#### `praxis_integration_action_contract_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:integration-action-contract-read`
+- Risks: `read`
+- CLI entrypoint: `workflow integration-action-contract-read`
+- CLI schema help: `workflow tools describe praxis_integration_action_contract_read`
+- When to use: Read stored integration action contracts, revisions, automation snapshots, linked actions, and typed gaps before Virtual Lab simulation or live sandbox promotion.
+- When not to use: Do not use it to mutate contract authority; use praxis_integration_action_contract_record for writes.
+- Recommended alias: `workflow integration-action-contract-read`
+- Selector: `action`; default `list_contracts`; values `list_contracts`, `describe_contract`, `list_automation_snapshots`, `describe_automation_snapshot`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe_contract",
+  "action_contract_id": "integration_action.hubspot.create_contact",
+  "include_history": true,
+  "include_automation": true
+}
+```
+
+#### `praxis_integration_action_contract_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:integration-action-contract-record`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow integration-action-contract-record`
+- CLI schema help: `workflow tools describe praxis_integration_action_contract_record`
+- When to use: Persist receipt-backed integration action contracts and automation rule snapshots with deterministic hashes, validation gaps, linked actions, and a command event before simulation or sandbox promotion.
+- When not to use: Do not use it to execute an integration or invent connector behavior. The contract should describe observed, owner-reviewed, or explicitly gapped behavior.
+- Recommended alias: `workflow integration-action-contract-record`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "contracts": [
+    {
+      "action_id": "integration_action.hubspot.create_contact",
+      "name": "HubSpot / create contact",
+      "status": "draft"
+    }
+  ],
+  "automation_snapshots": [
+    {
+      "rule_id": "automation.hubspot.contact_sync",
+      "name": "HubSpot contact sync",
+      "status": "active",
+      "linked_action_ids": [
+        "integration_action.hubspot.create_contact"
+      ]
+    }
+  ]
+}
+```
+
 #### `praxis_metrics_reset`
 
 - Surface: `operations`
@@ -1564,6 +1717,64 @@ Example input:
   ],
   "privacy_classification": "confidential",
   "retention_policy_ref": "retention.object_truth.redacted_hashes"
+}
+```
+
+#### `praxis_object_truth_mdm_resolution_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:object-truth-mdm-resolution-read`
+- Risks: `read`
+- CLI entrypoint: `workflow object-truth-mdm-resolution-read`
+- CLI schema help: `workflow tools describe praxis_object_truth_mdm_resolution_read`
+- When to use: Read stored Object Truth MDM/source-authority resolution packets and their decomposed identity, field, authority, hierarchy, and gap evidence.
+- When not to use: Do not use it to mutate MDM evidence; use praxis_object_truth_mdm_resolution_record for writes.
+- Recommended alias: `workflow object-truth-mdm-resolution-read`
+- Selector: `action`; default `list`; values `list`, `describe`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe",
+  "packet_ref": "object_truth_mdm_packet.demo",
+  "include_records": true
+}
+```
+
+#### `praxis_object_truth_mdm_resolution_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:object-truth-mdm-resolution-record`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow object-truth-mdm-resolution-record`
+- CLI schema help: `workflow tools describe praxis_object_truth_mdm_resolution_record`
+- When to use: Persist a receipt-backed Object Truth MDM/source-authority resolution packet with identity clusters, field comparisons, normalization rules, authority evidence, hierarchy signals, and typed gaps.
+- When not to use: Do not use it to decide source authority implicitly. The input must already contain explicit MDM evidence built by the domain layer or an equivalent deterministic authority path.
+- Recommended alias: `workflow object-truth-mdm-resolution-record`
+- Selector: none
+- Required args: `client_ref`, `entity_type`, `as_of`, `identity_clusters`, `field_comparisons`
+
+Example input:
+
+```json
+{
+  "client_ref": "client.acme",
+  "entity_type": "organization",
+  "as_of": "2026-04-30T16:00:00Z",
+  "identity_clusters": [
+    {
+      "cluster_id": "object_truth_cluster.organization.demo"
+    }
+  ],
+  "field_comparisons": [
+    {
+      "field_comparison_digest": "comparison.digest"
+    }
+  ]
 }
 ```
 
@@ -2024,6 +2235,64 @@ Example input:
 }
 ```
 
+#### `praxis_task_environment_contract_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:task-environment-contract-read`
+- Risks: `read`
+- CLI entrypoint: `workflow task-environment-contract-read`
+- CLI schema help: `workflow tools describe praxis_task_environment_contract_read`
+- When to use: Read stored task-environment contract heads, revisions, hierarchy nodes, and typed invalid states before launch or promotion.
+- When not to use: Do not use it to mutate contract authority; use praxis_task_environment_contract_record for writes.
+- Recommended alias: `workflow task-environment-contract-read`
+- Selector: `action`; default `list`; values `list`, `describe`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe",
+  "contract_id": "task_contract.account_sync.1",
+  "include_history": true
+}
+```
+
+#### `praxis_task_environment_contract_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:task-environment-contract-record`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow task-environment-contract-record`
+- CLI schema help: `workflow tools describe praxis_task_environment_contract_record`
+- When to use: Persist a receipt-backed task-environment contract head and revision with its deterministic evaluation result, hierarchy nodes, typed invalid states, dependency hash, and command event.
+- When not to use: Do not use it to invent policy during execution. The contract and evaluation result should come from the task-contract domain model or another deterministic authority path.
+- Recommended alias: `workflow task-environment-contract-record`
+- Selector: none
+- Required args: `contract`, `evaluation_result`
+
+Example input:
+
+```json
+{
+  "contract": {
+    "contract_id": "task_contract.account_sync.1",
+    "task_ref": "task.account_sync",
+    "hierarchy_node_id": "task.account_sync",
+    "revision_id": "rev.contract.1",
+    "status": "active"
+  },
+  "evaluation_result": {
+    "ok": true,
+    "status": "valid",
+    "invalid_states": [],
+    "warnings": []
+  }
+}
+```
+
 #### `praxis_task_route_eligibility`
 
 - Surface: `operations`
@@ -2075,6 +2344,223 @@ Example input:
   "temperature": 0.2,
   "max_tokens": 32768,
   "reason_code": "request_contract_tuning"
+}
+```
+
+#### `praxis_virtual_lab_sandbox_promotion_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:virtual-lab-sandbox-promotion-read`
+- Risks: `read`
+- CLI entrypoint: `workflow virtual-lab-sandbox-promotion-read`
+- CLI schema help: `workflow tools describe praxis_virtual_lab_sandbox_promotion_read`
+- When to use: Inspect persisted sandbox promotion records, readback evidence, drift reason codes, handoff refs, and stop/continue decisions before any client-live rollout.
+- When not to use: Do not use it to record new evidence; use praxis_virtual_lab_sandbox_promotion_record for writes.
+- Recommended alias: `workflow virtual-lab-sandbox-promotion-read`
+- Selector: `action`; default `list_records`; values `list_records`, `describe_record`, `list_drift`, `list_handoffs`, `list_readback_evidence`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe_record",
+  "promotion_record_id": "sandbox_promotion_record.demo",
+  "include_readback": true,
+  "include_drift": true,
+  "include_handoffs": true
+}
+```
+
+#### `praxis_virtual_lab_sandbox_promotion_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:virtual-lab-sandbox-promotion-record`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow virtual-lab-sandbox-promotion-record`
+- CLI schema help: `workflow tools describe praxis_virtual_lab_sandbox_promotion_record`
+- When to use: Record a live sandbox promotion window after simulation proof exists, then persist sandbox execution, readback evidence, predicted-vs-actual comparison, drift classification, handoff refs, and stop/continue summary through CQRS.
+- When not to use: Do not use it to run simulations, call live integrations, or file bugs directly. It records the evidence and handoff refs after those actions happen through their own authorities.
+- Recommended alias: `workflow virtual-lab-sandbox-promotion-record`
+- Selector: none
+- Required args: `manifest`, `candidate_records`
+
+Example input:
+
+```json
+{
+  "manifest": {
+    "manifest_id": "manifest.phase8",
+    "created_at": "2026-04-30T18:00:00Z",
+    "created_by": "agent.phase_08",
+    "candidates": [
+      {
+        "candidate_id": "candidate.phase8.account_sync",
+        "owner": "operator:nate",
+        "build_ref": "build.account_sync.20260430",
+        "sandbox_target": "sandbox.crm.dev",
+        "scope_ref": "scope.client_operating_model.phase_08",
+        "scenario_refs": [
+          "scenario.qualify_account"
+        ],
+        "prediction_refs": [
+          "prediction.qualify_account.status"
+        ]
+      }
+    ]
+  },
+  "candidate_records": [
+    {
+      "candidate_id": "candidate.phase8.account_sync",
+      "simulation_run_id": "virtual_lab_simulation_run.phase_07_proof",
+      "execution": {
+        "execution_id": "execution.qualify_account.1"
+      },
+      "evidence_package": {
+        "package_id": "evidence_package.qualify_account"
+      },
+      "checks": [
+        {
+          "check_id": "check.status"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### `praxis_virtual_lab_simulation_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:virtual-lab-simulation-read`
+- Risks: `read`
+- CLI entrypoint: `workflow virtual-lab-simulation-read`
+- CLI schema help: `workflow tools describe praxis_virtual_lab_simulation_read`
+- When to use: Inspect persisted Virtual Lab simulation runs, ordered runtime events, verifier results, typed gaps, and promotion blockers before live sandbox promotion.
+- When not to use: Do not use it to run a new scenario; use praxis_virtual_lab_simulation_run for writes.
+- Recommended alias: `workflow virtual-lab-simulation-read`
+- Selector: `action`; default `list_runs`; values `list_runs`, `describe_run`, `list_events`, `list_verifiers`, `list_blockers`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe_run",
+  "run_id": "virtual_lab_simulation_run.demo",
+  "include_events": true,
+  "include_verifiers": true,
+  "include_blockers": true
+}
+```
+
+#### `praxis_virtual_lab_simulation_run`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:virtual-lab-simulation-run`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow virtual-lab-simulation-run`
+- CLI schema help: `workflow tools describe praxis_virtual_lab_simulation_run`
+- When to use: Run a deterministic Virtual Lab scenario and persist its trace, state transitions, automation firings, assertions, verifier results, typed gaps, and promotion blockers through CQRS.
+- When not to use: Do not use it to mutate live systems or Object Truth. It records predicted consequences against a saved Virtual Lab revision.
+- Recommended alias: `workflow virtual-lab-simulation-run`
+- Selector: none
+- Required args: `scenario`
+
+Example input:
+
+```json
+{
+  "scenario": {
+    "scenario_id": "scenario.account_sync",
+    "initial_state": {
+      "revision": {
+        "environment_id": "virtual_lab.env.account_sync",
+        "revision_id": "virtual_lab_revision.demo"
+      },
+      "object_states": []
+    },
+    "actions": [],
+    "config": {
+      "seed": "seed.account_sync",
+      "clock_start": "2026-04-30T17:00:00Z"
+    },
+    "verifiers": [
+      {
+        "verifier_id": "verifier.no_blockers",
+        "verifier_kind": "no_blockers"
+      }
+    ]
+  },
+  "task_contract_ref": "task_environment_contract.account_sync",
+  "integration_action_contract_refs": [
+    "integration_action_contract.crm.patch_account"
+  ]
+}
+```
+
+#### `praxis_virtual_lab_state_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:virtual-lab-state-read`
+- Risks: `read`
+- CLI entrypoint: `workflow virtual-lab-state-read`
+- CLI schema help: `workflow tools describe praxis_virtual_lab_state_read`
+- When to use: Read stored Virtual Lab revisions, object state projections, event streams, command receipts, and replay gaps before sandbox promotion or drift readback.
+- When not to use: Do not use it to mutate lab authority; use praxis_virtual_lab_state_record for writes.
+- Recommended alias: `workflow virtual-lab-state-read`
+- Selector: `action`; default `list_environments`; values `list_environments`, `list_revisions`, `describe_revision`, `list_events`, `list_receipts`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe_revision",
+  "environment_id": "virtual_lab.env.account_sync",
+  "revision_id": "virtual_lab_revision.demo",
+  "include_events": true,
+  "include_receipts": true
+}
+```
+
+#### `praxis_virtual_lab_state_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:virtual-lab-state-record`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow virtual-lab-state-record`
+- CLI schema help: `workflow tools describe praxis_virtual_lab_state_record`
+- When to use: Persist a receipt-backed Virtual Lab state packet after deterministic replay validation: environment revision, seeded object projections, event envelopes, command receipts, and typed gaps.
+- When not to use: Do not use it to execute integrations or mutate Object Truth. Object Truth seeds base state; Virtual Lab records predicted copy-on-write consequences only.
+- Recommended alias: `workflow virtual-lab-state-record`
+- Selector: none
+- Required args: `environment_revision`
+
+Example input:
+
+```json
+{
+  "environment_revision": {
+    "environment_id": "virtual_lab.env.account_sync",
+    "revision_id": "virtual_lab_revision.demo",
+    "status": "active"
+  },
+  "object_states": [
+    {
+      "object_id": "account:001",
+      "instance_id": "primary"
+    }
+  ],
+  "events": [],
+  "command_receipts": [],
+  "typed_gaps": []
 }
 ```
 

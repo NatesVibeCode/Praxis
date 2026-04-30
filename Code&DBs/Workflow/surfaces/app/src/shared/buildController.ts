@@ -56,7 +56,7 @@ async function _ensureWorkflowId(
   opts?: Omit<BuildDefinitionRequest, 'workflowId' | 'title'>,
 ): Promise<string> {
   if (workflowId) return workflowId;
-  const created = await createWorkflow(title || 'Moon draft', {
+  const created = await createWorkflow(title || 'Materialize draft', {
     definition: opts?.definition ?? {},
     buildGraph: opts?.buildGraph,
     compiled_spec: opts?.compiled_spec,
@@ -229,12 +229,34 @@ export async function planDefinition(opts?: Omit<BuildDefinitionRequest, 'compil
   });
 }
 
-export async function triggerWorkflow(workflowId: string): Promise<{ run_id: string; status: string }> {
-  return fetchJson(`/api/trigger/${workflowId}`, {
+export async function triggerWorkflow(
+  workflowId: string,
+  opts?: {
+    manifestId?: string | null;
+    operationReceiptId?: string | null;
+    dispatchedBy?: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<{ run_id: string; status: string }> {
+  const result = await fetchJson<{ run_id: string; status: string }>(`/api/trigger/${workflowId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
   }, { timeoutMs: 15000 });
+  if (opts?.manifestId && result.run_id) {
+    await fetchJson(`/api/workspaces/${encodeURIComponent(opts.manifestId)}/run-bindings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workflow_id: workflowId,
+        run_id: result.run_id,
+        operation_receipt_id: opts.operationReceiptId || undefined,
+        dispatched_by: opts.dispatchedBy || 'workspace.compose',
+        metadata: opts.metadata || {},
+      }),
+    }, { timeoutMs: 15000 });
+  }
+  return result;
 }
 
 export async function suggestNextSteps(workflowId: string, nodeId: string, buildGraph: Record<string, unknown>): Promise<{ likely_next_steps: any[], possible_next_steps: any[] }> {

@@ -127,7 +127,9 @@ export const IntentBoxModule: React.FC<QuadrantProps> = ({ config }) => {
         description: typeof manifestData?.description === 'string' ? manifestData.description : undefined,
       });
       const previewSurface = resolvePraxisBundleSurface(bundle);
-      if (!previewSurface) throw new Error('Generated manifest has no preview surface');
+      if (!previewSurface || previewSurface.kind !== 'quadrant_manifest') {
+        throw new Error('Generated manifest has no preview surface');
+      }
 
       setGenerateResult({ manifest_id: manifestId, explanation });
       setPreviewManifestId(manifestId);

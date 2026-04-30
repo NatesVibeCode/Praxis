@@ -615,6 +615,566 @@ def test_list_api_routes_surfaces_object_truth_ingestion_routes(monkeypatch) -> 
     ) in route_keys
 
 
+def test_list_api_routes_surfaces_object_truth_mdm_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class MdmCommand(BaseModel):
+        client_ref: str | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="object_truth.command.mdm_resolution_record",
+                operation_name="object_truth_mdm_resolution_record",
+                http_method="POST",
+                http_path="/api/object-truth/mdm/resolutions",
+                input_model_ref=(
+                    "runtime.operations.commands.object_truth_mdm."
+                    "RecordObjectTruthMdmResolutionCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.object_truth_mdm."
+                    "handle_object_truth_mdm_resolution_record"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="object_truth.query.mdm_resolution_read",
+                operation_name="object_truth_mdm_resolution_read",
+                http_method="GET",
+                http_path="/api/object-truth/mdm/resolutions",
+                input_model_ref=(
+                    "runtime.operations.queries.object_truth_mdm."
+                    "QueryObjectTruthMdmResolutionRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.object_truth_mdm."
+                    "handle_object_truth_mdm_resolution_read"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=MdmCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/object-truth/mdm",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/object-truth/mdm/resolutions",
+        "object_truth_mdm_resolution_record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/object-truth/mdm/resolutions",
+        "object_truth_mdm_resolution_read",
+    ) in route_keys
+
+
+def test_list_api_routes_surfaces_task_environment_contract_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class ContractCommand(BaseModel):
+        contract: dict | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="task_environment.command.contract_record",
+                operation_name="task_environment_contract_record",
+                http_method="POST",
+                http_path="/api/task-environment/contracts",
+                input_model_ref=(
+                    "runtime.operations.commands.task_environment_contracts."
+                    "RecordTaskEnvironmentContractCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.task_environment_contracts."
+                    "handle_task_environment_contract_record"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="task_environment.query.contract_read",
+                operation_name="task_environment_contract_read",
+                http_method="GET",
+                http_path="/api/task-environment/contracts",
+                input_model_ref=(
+                    "runtime.operations.queries.task_environment_contracts."
+                    "QueryTaskEnvironmentContractRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.task_environment_contracts."
+                    "handle_task_environment_contract_read"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=ContractCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/task-environment",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/task-environment/contracts",
+        "task_environment_contract_record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/task-environment/contracts",
+        "task_environment_contract_read",
+    ) in route_keys
+
+
+def test_list_api_routes_surfaces_integration_action_contract_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class ContractCommand(BaseModel):
+        contracts: list[dict] | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="integration_action.command.contract_record",
+                operation_name="integration_action_contract_record",
+                http_method="POST",
+                http_path="/api/integration-action/contracts",
+                input_model_ref=(
+                    "runtime.operations.commands.integration_action_contracts."
+                    "RecordIntegrationActionContractCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.integration_action_contracts."
+                    "handle_integration_action_contract_record"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="integration_action.query.contract_read",
+                operation_name="integration_action_contract_read",
+                http_method="GET",
+                http_path="/api/integration-action/contracts",
+                input_model_ref=(
+                    "runtime.operations.queries.integration_action_contracts."
+                    "QueryIntegrationActionContractRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.integration_action_contracts."
+                    "handle_integration_action_contract_read"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=ContractCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/integration-action",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/integration-action/contracts",
+        "integration_action_contract_record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/integration-action/contracts",
+        "integration_action_contract_read",
+    ) in route_keys
+
+
+def test_list_api_routes_surfaces_virtual_lab_state_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class VirtualLabCommand(BaseModel):
+        environment_revision: dict | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="virtual_lab.command.state_record",
+                operation_name="virtual_lab_state_record",
+                http_method="POST",
+                http_path="/api/virtual-lab/state",
+                input_model_ref=(
+                    "runtime.operations.commands.virtual_lab_state."
+                    "RecordVirtualLabStateCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.virtual_lab_state."
+                    "handle_virtual_lab_state_record"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="virtual_lab.query.state_read",
+                operation_name="virtual_lab_state_read",
+                http_method="GET",
+                http_path="/api/virtual-lab/state",
+                input_model_ref=(
+                    "runtime.operations.queries.virtual_lab_state."
+                    "QueryVirtualLabStateRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.virtual_lab_state."
+                    "handle_virtual_lab_state_read"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=VirtualLabCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/virtual-lab",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/virtual-lab/state",
+        "virtual_lab_state_record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/virtual-lab/state",
+        "virtual_lab_state_read",
+    ) in route_keys
+
+
+def test_list_api_routes_surfaces_virtual_lab_simulation_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class VirtualLabSimulationCommand(BaseModel):
+        scenario: dict | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="virtual_lab.command.simulation_run",
+                operation_name="virtual_lab_simulation_run",
+                http_method="POST",
+                http_path="/api/virtual-lab/simulations",
+                input_model_ref=(
+                    "runtime.operations.commands.virtual_lab_simulation."
+                    "RunVirtualLabSimulationCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.virtual_lab_simulation."
+                    "handle_virtual_lab_simulation_run"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="virtual_lab.query.simulation_read",
+                operation_name="virtual_lab_simulation_read",
+                http_method="GET",
+                http_path="/api/virtual-lab/simulations",
+                input_model_ref=(
+                    "runtime.operations.queries.virtual_lab_simulation."
+                    "QueryVirtualLabSimulationRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.virtual_lab_simulation."
+                    "handle_virtual_lab_simulation_read"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=VirtualLabSimulationCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/virtual-lab",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/virtual-lab/simulations",
+        "virtual_lab_simulation_run",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/virtual-lab/simulations",
+        "virtual_lab_simulation_read",
+    ) in route_keys
+
+
+def test_list_api_routes_surfaces_virtual_lab_sandbox_promotion_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class VirtualLabSandboxPromotionCommand(BaseModel):
+        manifest: dict | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="virtual_lab.command.sandbox_promotion_record",
+                operation_name="virtual_lab_sandbox_promotion_record",
+                http_method="POST",
+                http_path="/api/virtual-lab/sandbox-promotions",
+                input_model_ref=(
+                    "runtime.operations.commands.virtual_lab_sandbox_promotion."
+                    "RecordVirtualLabSandboxPromotionCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.virtual_lab_sandbox_promotion."
+                    "handle_virtual_lab_sandbox_promotion_record"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="virtual_lab.query.sandbox_promotion_read",
+                operation_name="virtual_lab_sandbox_promotion_read",
+                http_method="GET",
+                http_path="/api/virtual-lab/sandbox-promotions",
+                input_model_ref=(
+                    "runtime.operations.queries.virtual_lab_sandbox_promotion."
+                    "QueryVirtualLabSandboxPromotionRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.virtual_lab_sandbox_promotion."
+                    "handle_virtual_lab_sandbox_promotion_read"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=VirtualLabSandboxPromotionCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/virtual-lab",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/virtual-lab/sandbox-promotions",
+        "virtual_lab_sandbox_promotion_record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/virtual-lab/sandbox-promotions",
+        "virtual_lab_sandbox_promotion_read",
+    ) in route_keys
+
+
+def test_list_api_routes_surfaces_portable_cartridge_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class PortableCartridgeCommand(BaseModel):
+        manifest: dict | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="authority-portable-cartridge-record",
+                operation_name="authority.portable_cartridge.record",
+                http_method="POST",
+                http_path="/api/authority/portable-cartridges",
+                input_model_ref=(
+                    "runtime.operations.commands.portable_cartridge."
+                    "RecordPortableCartridgeCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.portable_cartridge."
+                    "handle_record_portable_cartridge"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="authority-portable-cartridge-read",
+                operation_name="authority.portable_cartridge.read",
+                http_method="GET",
+                http_path="/api/authority/portable-cartridges",
+                input_model_ref=(
+                    "runtime.operations.queries.portable_cartridge."
+                    "ReadPortableCartridgeQuery"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.portable_cartridge."
+                    "handle_read_portable_cartridge"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=PortableCartridgeCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/authority",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/authority/portable-cartridges",
+        "authority.portable_cartridge.record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/authority/portable-cartridges",
+        "authority.portable_cartridge.read",
+    ) in route_keys
+
+
 def test_compile_family_routes_are_not_static_wrappers() -> None:
     source = Path(rest.__file__).read_text(encoding="utf-8")
 

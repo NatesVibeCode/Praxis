@@ -14,6 +14,13 @@
       "runtimeArgs": ["vite", "--port", "5173"],
       "port": 5173,
       "cwd": "Code&DBs/Workflow/surfaces/app"
+    },
+    {
+      "name": "primitives",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8770"],
+      "port": 8770,
+      "cwd": "Code&DBs/Workflow/surfaces/app/src/styles"
     }
   ]
 }

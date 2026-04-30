@@ -1,0 +1,1101 @@
+/* =============================================================
+ * Praxis primitives — internal UI building blocks.
+ * Depends on tokens.css. Aesthetic: warm-paper-on-near-black,
+ * monospace cage, ASCII glyphs, single amber authority accent,
+ * hairline structure, restrained glow.
+ * ============================================================= */
+
+/* ── Section strip ───────────────────────────────────────────
+ * Cap-marker that floats above a section. Mono numeral + dot +
+ * label, all uppercase tracked. Pairs with a top hairline rule.
+ */
+.prx-section-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-section-strip .num { color: var(--text, #f5f1e8); }
+.prx-section-strip .sep { color: var(--text-muted, #9b9488); }
+.prx-section-strip .label { color: var(--text-muted, #9b9488); }
+.prx-section-strip .label::before {
+  content: "▮▮ · ";
+  color: var(--accent, #f3eee4);
+  letter-spacing: 0;
+  margin-right: 2px;
+}
+.prx-section-strip .label::after {
+  content: " · ▮▮";
+  color: var(--accent, #f3eee4);
+  letter-spacing: 0;
+  margin-left: 2px;
+}
+
+/* ── Token chip ──────────────────────────────────────────────
+ * Field/scope chip with read · write · locked tones and ASCII
+ * glyph prefix. Used for envelopes, contracts, parameter rows.
+ */
+.prx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  margin: 2px 4px 2px 0;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text, #f5f1e8);
+}
+.prx-chip[data-tone="read"]::before    { content: "·"; color: var(--text-muted, #9b9488); }
+.prx-chip[data-tone="write"]::before   { content: "›"; color: var(--text-muted, #9b9488); }
+.prx-chip[data-tone="locked"] {
+  border-color: rgba(210,153,34,0.35);
+  background: rgba(210,153,34,0.10);
+  color: var(--warning, #d29922);
+}
+.prx-chip[data-tone="locked"]::before  { content: "▢"; color: var(--warning, #d29922); font-size: 10px; }
+.prx-chip[data-tone="ok"] {
+  border-color: rgba(63,185,80,0.30);
+  color: var(--success, #3fb950);
+}
+.prx-chip[data-tone="ok"]::before      { content: "✓"; }
+.prx-chip[data-tone="bad"] {
+  border-color: rgba(248,81,73,0.30);
+  color: var(--danger, #f85149);
+}
+.prx-chip[data-tone="bad"]::before     { content: "✕"; }
+
+/* ── Gate badge ──────────────────────────────────────────────
+ * Approval-state indicator. Sibling of chip but always carries
+ * a state and is wider for legibility. ASCII square-glyph spine.
+ */
+.prx-gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid rgba(243,238,228,0.18);
+  border-radius: 4px;
+  background: rgba(243,238,228,0.04);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text, #f5f1e8);
+}
+.prx-gate .glyph { font-size: 11px; line-height: 1; }
+.prx-gate[data-state="pending"]  { color: var(--text-muted, #9b9488); }
+.prx-gate[data-state="pending"] .glyph::before  { content: "□"; }
+.prx-gate[data-state="approved"] {
+  color: var(--success, #3fb950);
+  border-color: rgba(63,185,80,0.30);
+  background: rgba(63,185,80,0.10);
+}
+.prx-gate[data-state="approved"] .glyph::before { content: "▣"; }
+.prx-gate[data-state="refused"] {
+  color: var(--danger, #f85149);
+  border-color: rgba(248,81,73,0.30);
+  background: rgba(248,81,73,0.10);
+}
+.prx-gate[data-state="refused"] .glyph::before  { content: "▨"; }
+.prx-gate[data-state="held"] {
+  color: var(--warning, #d29922);
+  border-color: rgba(210,153,34,0.35);
+  background: rgba(210,153,34,0.10);
+  box-shadow: 0 0 12px rgba(210,153,34,0.15);
+}
+.prx-gate[data-state="held"] .glyph::before     { content: "◫"; }
+
+/* ── Manifest tree ───────────────────────────────────────────
+ * Indented mono tree with box-drawing glyphs. Use for graph
+ * navigation, contract trees, write-scope previews.
+ */
+.prx-tree {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text, #f5f1e8);
+}
+.prx-tree .row {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+.prx-tree .glyph {
+  color: var(--text-muted, #9b9488);
+  white-space: pre;
+  flex-shrink: 0;
+}
+.prx-tree .label { color: var(--text, #f5f1e8); }
+.prx-tree .meta {
+  color: var(--text-muted, #9b9488);
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.prx-tree .row.muted .label { color: var(--text-muted, #9b9488); }
+.prx-tree .row.locked .label { color: var(--warning, #d29922); }
+
+/* ── Runlog row ──────────────────────────────────────────────
+ * Hairline-divided syslog-style row: timestamp · actor · action ·
+ * status. For workflow runs, agent activity, receipt streams.
+ */
+.prx-runlog {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted, #9b9488);
+}
+.prx-runlog .row {
+  display: grid;
+  grid-template-columns: 88px 120px 1fr 90px;
+  gap: 14px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  align-items: baseline;
+}
+.prx-runlog .row:last-child { border-bottom: none; }
+.prx-runlog .ts    { color: var(--text-muted, #9b9488); letter-spacing: 0.04em; }
+.prx-runlog .actor { color: var(--accent, #f3eee4); }
+.prx-runlog .what  { color: var(--text, #f5f1e8); }
+.prx-runlog .what em { color: var(--text-muted, #9b9488); font-style: normal; }
+.prx-runlog .stat  {
+  text-align: right;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.prx-runlog .stat::before {
+  display: inline-block;
+  margin-right: 4px;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+.prx-runlog .stat[data-tone="ok"]::before   { content: "▣"; }
+.prx-runlog .stat[data-tone="warn"]::before { content: "◫"; }
+.prx-runlog .stat[data-tone="err"]::before  { content: "▨"; }
+.prx-runlog .stat[data-tone="dim"]::before  { content: "▫"; }
+.prx-runlog .stat[data-tone="ok"]   { color: var(--success, #3fb950); }
+.prx-runlog .stat[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-runlog .stat[data-tone="err"]  { color: var(--danger, #f85149); }
+.prx-runlog .stat[data-tone="dim"]  { color: var(--text-muted, #9b9488); }
+
+/* ── Diff line ───────────────────────────────────────────────
+ * +/-/= prefixed lines for graph mutations, contract edits,
+ * spec diffs. Mirrors the canary line vocabulary.
+ */
+.prx-diff {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--bg-card, #141414);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+.prx-diff .line { display: block; min-height: 1.6em; white-space: pre; }
+.prx-diff .line[data-mark="+"] { color: var(--success, #3fb950); }
+.prx-diff .line[data-mark="-"] { color: var(--danger, #f85149); }
+.prx-diff .line[data-mark="="] { color: var(--text-muted, #9b9488); }
+.prx-diff .line[data-mark="!"] { color: var(--warning, #d29922); }
+.prx-diff .line::before {
+  display: inline-block;
+  width: 1.5em;
+  color: currentColor;
+}
+.prx-diff .line[data-mark="+"]::before { content: "▶ "; }
+.prx-diff .line[data-mark="-"]::before { content: "▷ "; }
+.prx-diff .line[data-mark="="]::before { content: "▢ "; color: var(--text-muted, #9b9488); }
+.prx-diff .line[data-mark="!"]::before { content: "▲ "; }
+
+/* ── Kbd cluster ─────────────────────────────────────────────
+ * Keyboard chord chips for the operator console.
+ */
+.prx-kbd-cluster {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.prx-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  color: var(--text, #f5f1e8);
+  font-size: 11px;
+  line-height: 1;
+}
+.prx-kbd-cluster .plus { color: var(--text-muted, #9b9488); font-size: 11px; }
+
+/* ── Gauge / meter ───────────────────────────────────────────
+ * Discrete-tick confidence/score bar. CSS-div ticks: each cell
+ * is a small filled rectangle. Use for score, confidence, quota
+ * — anything where you want quanta legibility. (For continuous
+ * LCD-style bars use prx-lcd; for history use prx-bargraph.)
+ */
+.prx-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-gauge .ticks {
+  display: inline-flex;
+  gap: 2px;
+}
+.prx-gauge .ticks .t {
+  width: 6px;
+  height: 12px;
+  background: var(--border-faint, rgba(255,255,255,0.06));
+}
+.prx-gauge .ticks .t.on { background: var(--accent, #f3eee4); }
+.prx-gauge[data-tone="warn"] .ticks .t.on { background: var(--warning, #d29922); }
+.prx-gauge[data-tone="bad"]  .ticks .t.on { background: var(--danger,  #f85149); }
+.prx-gauge .val { color: var(--text, #f5f1e8); letter-spacing: 0.04em; }
+
+/* ── Block-bar sparkline ─────────────────────────────────────
+ * Stair-stepped bar graph using `▁▂▃▄▅▆▇█` glyphs. Inline,
+ * scannable, no SVG. Pairs with prx-gauge / prx-lcd as the
+ * "history" sibling of a current-state meter.
+ */
+.prx-bargraph {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 16px;
+  letter-spacing: 0;
+  color: var(--accent, #f3eee4);
+  line-height: 1;
+}
+.prx-bargraph .bars {
+  display: inline-block;
+  white-space: pre;
+  font-feature-settings: "tnum";
+}
+.prx-bargraph[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-bargraph[data-tone="bad"]  { color: var(--danger,  #f85149); }
+.prx-bargraph .label {
+  color: var(--text-muted, #9b9488);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.prx-bargraph .val { color: var(--text, #f5f1e8); font-size: 12px; }
+
+/* ── Sealed receipt ──────────────────────────────────────────
+ * Receipt card variant with mono hash footer and amber wax-seal
+ * glyph. Use for trust-compiler receipts, signed events.
+ */
+.prx-receipt {
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #9b9488);
+  position: relative;
+}
+.prx-receipt .hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-receipt .hd > span:first-child::before {
+  content: "▦▦ ";
+  letter-spacing: 0;
+  margin-right: 4px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-receipt .hd > span:first-child::after {
+  content: " ▦▦";
+  letter-spacing: 0;
+  margin-left: 4px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-receipt[data-state="sealed"]  .hd > span:first-child::before,
+.prx-receipt[data-state="sealed"]  .hd > span:first-child::after { color: var(--warning, #d29922); }
+.prx-receipt[data-state="ok"]      .hd > span:first-child::before,
+.prx-receipt[data-state="ok"]      .hd > span:first-child::after { color: var(--success, #3fb950); }
+.prx-receipt[data-state="refused"] .hd > span:first-child::before,
+.prx-receipt[data-state="refused"] .hd > span:first-child::after { color: var(--danger, #f85149); }
+.prx-receipt .row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 10px;
+  padding: 2px 0;
+}
+.prx-receipt .k {
+  color: var(--text-muted, #9b9488);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 10px;
+  padding-top: 2px;
+}
+.prx-receipt .v { color: var(--text, #f5f1e8); }
+.prx-receipt .ft {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-faint, rgba(255,255,255,0.04));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted, #9b9488);
+}
+.prx-receipt .ft .hash { color: var(--text, #f5f1e8); }
+.prx-receipt .seal {
+  color: var(--warning, #d29922);
+  text-shadow: 0 0 8px rgba(210,153,34,0.5);
+}
+.prx-receipt[data-state="sealed"] {
+  border-color: rgba(210,153,34,0.35);
+  box-shadow: 0 0 16px rgba(210,153,34,0.12);
+}
+.prx-receipt[data-state="ok"]      { border-color: rgba(63,185,80,0.30); }
+.prx-receipt[data-state="refused"] { border-color: rgba(248,81,73,0.30); }
+
+/* ── Sparkline ───────────────────────────────────────────────
+ * 1px hairline path with single filled marker dot. Wraps an
+ * inline svg; class only sets sizing + colors.
+ */
+.prx-spark {
+  display: inline-block;
+  width: 96px;
+  height: 18px;
+  vertical-align: middle;
+  color: var(--accent, #f3eee4);
+}
+.prx-spark svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.prx-spark svg path { fill: none; stroke: currentColor; stroke-width: 1; opacity: 0.75; }
+.prx-spark svg circle { fill: currentColor; }
+.prx-spark[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-spark[data-tone="bad"]  { color: var(--danger,  #f85149); }
+
+/* ── LED dot ─────────────────────────────────────────────────
+ * Pulsing status dot. Inline beside an actor name, agent pill,
+ * or runlog row. Tones: live (amber, pulsing) · ok (green) ·
+ * idle (muted) · err (red).
+ */
+.prx-led {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-muted, #9b9488);
+  vertical-align: 1px;
+  margin-right: 6px;
+}
+.prx-led[data-tone="live"] {
+  background: var(--warning, #d29922);
+  box-shadow: 0 0 8px rgba(210,153,34,0.6);
+  animation: prx-led-pulse 2.4s ease-in-out infinite;
+}
+.prx-led[data-tone="ok"] {
+  background: var(--success, #3fb950);
+  box-shadow: 0 0 6px rgba(63,185,80,0.45);
+}
+.prx-led[data-tone="err"] {
+  background: var(--danger, #f85149);
+  box-shadow: 0 0 6px rgba(248,81,73,0.45);
+}
+.prx-led[data-tone="idle"] { background: var(--text-muted, #9b9488); opacity: 0.6; }
+@keyframes prx-led-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.45 } }
+
+/* ── Cursor ──────────────────────────────────────────────────
+ * Stepped block cursor. Append to a line ending to imply live
+ * input. The animation is steps(1) — deliberately not smooth,
+ * so it reads as terminal/firmware, not browser caret.
+ */
+.prx-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  background: var(--accent, #f3eee4);
+  vertical-align: -2px;
+  margin-left: 2px;
+  animation: prx-blink 1s steps(1) infinite;
+}
+.prx-cursor[data-tone="warn"] { background: var(--warning, #d29922); }
+@keyframes prx-blink { 50% { opacity: 0 } }
+
+/* ── ASCII frame ─────────────────────────────────────────────
+ * Corner-bracket frame around any content block. The brackets
+ * are drawn in CSS as box-drawing characters via ::before /
+ * ::after, set in mono. Use sparingly — for hero callouts,
+ * standing-order panels, "live now" banners.
+ */
+.prx-frame {
+  position: relative;
+  padding: 18px 22px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text, #f5f1e8);
+}
+.prx-frame::before,
+.prx-frame::after {
+  position: absolute;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  letter-spacing: -0.04em;
+  color: var(--text-muted, #9b9488);
+  white-space: pre;
+  pointer-events: none;
+}
+.prx-frame::before {
+  content: "┌─                       ─┐";
+  top: 4px; left: 12px; right: 12px;
+  text-align: justify;
+}
+.prx-frame::after {
+  content: "└─                       ─┘";
+  bottom: 4px; left: 12px; right: 12px;
+  text-align: justify;
+}
+.prx-frame[data-tone="warn"]::before,
+.prx-frame[data-tone="warn"]::after { color: var(--warning, #d29922); }
+
+/* ── LCD progress ────────────────────────────────────────────
+ * Block-character progress bar using █▓▒░ as a fallback shape.
+ * Renders crisp at any zoom. Use for budget bars, capacity,
+ * job progress.
+ */
+.prx-lcd {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  color: var(--text-muted, #9b9488);
+  letter-spacing: -0.02em;
+}
+.prx-lcd .bar {
+  display: inline-block;
+  font-feature-settings: "tnum";
+  white-space: pre;
+}
+.prx-lcd .bar .on  { color: var(--accent, #f3eee4); }
+.prx-lcd .bar .off { color: var(--border, #2a2a2a); }
+.prx-lcd[data-tone="warn"] .bar .on { color: var(--warning, #d29922); }
+.prx-lcd[data-tone="bad"]  .bar .on { color: var(--danger,  #f85149); }
+.prx-lcd .pct { color: var(--text, #f5f1e8); letter-spacing: 0.04em; font-size: 12px; }
+
+/* ── Marquee rule ────────────────────────────────────────────
+ * Hairline rule using a glyph row instead of a solid border.
+ * Tones: dotted (·), dashed (─), beaded (▮), tracked (▾).
+ */
+.prx-rule {
+  display: block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text-muted, #9b9488);
+  letter-spacing: 0.32em;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+.prx-rule[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-rule[data-tone="dim"]  { color: var(--border, #2a2a2a); }
+
+/* ── Agent pill ──────────────────────────────────────────────
+ * Agent identity chip with leading LED. Used in runlog actor
+ * cells, sidebars, mention contexts.
+ */
+.prx-agent {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 999px;
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text, #f5f1e8);
+}
+.prx-agent .name { color: var(--text, #f5f1e8); }
+.prx-agent .role { color: var(--text-muted, #9b9488); margin-left: 6px; font-size: 10px; }
+
+/* ── Catalog table ───────────────────────────────────────────
+ * Uniform table for operation_catalog_registry rows, receipts,
+ * bugs, decisions. Mono cells, hairline rows, sticky header,
+ * sortable column heads, filter bar, click row → 'prx:row-select'.
+ *
+ * Markup:
+ *   <div class="prx-table" data-cols='[…]' data-rows='[…]'>
+ *     <div class="prx-table-bar">
+ *       <input class="prx-table-filter" placeholder="filter…" />
+ *       <div class="prx-table-chips"><span class="prx-chip">kind=search</span> …</div>
+ *     </div>
+ *     <div class="body"></div>
+ *   </div>
+ */
+.prx-table {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  overflow: hidden;
+}
+.prx-table-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  flex-wrap: wrap;
+}
+.prx-table-filter {
+  flex: 0 0 220px;
+  background: var(--bg-input, rgba(10,10,10,0.94));
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text, #f5f1e8);
+}
+.prx-table-filter:focus {
+  outline: none;
+  border-color: rgba(243,238,228,0.24);
+  box-shadow: 0 0 0 3px rgba(243,238,228,0.10);
+}
+.prx-table-filter::placeholder { color: var(--text-muted, #9b9488); }
+.prx-table-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.prx-table-meta {
+  margin-left: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-table .body { max-height: 480px; overflow: auto; }
+.prx-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.prx-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card, #141414);
+  z-index: 1;
+  text-align: left;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  font-weight: 400;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.prx-table thead th .arrow {
+  display: inline-block;
+  margin-left: 6px;
+  width: 8px;
+  color: var(--border, #2a2a2a);
+}
+.prx-table thead th.sort-asc  .arrow::before { content: "▲"; color: var(--accent, #f3eee4); }
+.prx-table thead th.sort-desc .arrow::before { content: "▼"; color: var(--accent, #f3eee4); }
+.prx-table tbody td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text, #f5f1e8);
+  vertical-align: baseline;
+}
+.prx-table tbody tr {
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+.prx-table tbody tr:hover { background: var(--surface-hover, rgba(255,255,255,0.04)); }
+.prx-table tbody tr.selected {
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+  box-shadow: inset 2px 0 0 var(--accent, #f3eee4);
+}
+.prx-table .stat-cap {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.prx-table .stat-cap::before {
+  display: inline-block;
+  margin-right: 4px;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+.prx-table .stat-cap[data-tone="ok"]   { color: var(--success, #3fb950); }
+.prx-table .stat-cap[data-tone="ok"]::before   { content: "▣"; }
+.prx-table .stat-cap[data-tone="warn"] { color: var(--warning, #d29922); }
+.prx-table .stat-cap[data-tone="warn"]::before { content: "◫"; }
+.prx-table .stat-cap[data-tone="err"]  { color: var(--danger, #f85149); }
+.prx-table .stat-cap[data-tone="err"]::before  { content: "▨"; }
+.prx-table .stat-cap[data-tone="dim"]  { color: var(--text-muted, #9b9488); }
+.prx-table .stat-cap[data-tone="dim"]::before  { content: "▫"; }
+.prx-table .empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted, #9b9488);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+/* ── Drawer ──────────────────────────────────────────────────
+ * Right-side slide-in panel for receipt detail, node inspector,
+ * etc. Backdrop click / esc to close. Uses prx-receipt internally.
+ *
+ *   <div class="prx-drawer" id="receipt-drawer">
+ *     <div class="prx-drawer-backdrop"></div>
+ *     <aside class="prx-drawer-panel">
+ *       <header>… <button data-close>✕</button></header>
+ *       <div class="body">…</div>
+ *       <footer>…</footer>
+ *     </aside>
+ *   </div>
+ */
+.prx-drawer {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+.prx-drawer-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.55);
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+.prx-drawer.open { pointer-events: auto; }
+.prx-drawer.open .prx-drawer-backdrop { opacity: 1; pointer-events: auto; }
+.prx-drawer-panel {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: min(480px, 100vw);
+  background: var(--bg-card, #141414);
+  border-left: 1px solid var(--border, #2a2a2a);
+  box-shadow: var(--shadow-drawer, -2px 0 8px rgba(0,0,0,0.5));
+  transform: translateX(100%);
+  transition: transform 240ms ease;
+  display: flex;
+  flex-direction: column;
+}
+.prx-drawer.open .prx-drawer-panel { transform: translateX(0); }
+.prx-drawer-panel > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+}
+.prx-drawer-panel > header .title::before { content: "▦▦ "; color: var(--warning, #d29922); margin-right: 4px; letter-spacing: 0; }
+.prx-drawer-panel > header .title::after  { content: " ▦▦"; color: var(--warning, #d29922); margin-left: 4px;  letter-spacing: 0; }
+.prx-drawer-panel > header button {
+  background: transparent;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text-muted, #9b9488);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.prx-drawer-panel > header button:hover { color: var(--text, #f5f1e8); border-color: rgba(243,238,228,0.24); }
+.prx-drawer-panel > .body { flex: 1; overflow: auto; padding: 18px; }
+.prx-drawer-panel > footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+}
+.prx-drawer-panel > footer button {
+  background: transparent;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text, #f5f1e8);
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.prx-drawer-panel > footer button.primary {
+  background: var(--accent, #f3eee4);
+  color: var(--text-inverse, #090909);
+  border-color: var(--accent, #f3eee4);
+}
+.prx-drawer-panel > footer button:hover { border-color: rgba(243,238,228,0.24); }
+.prx-drawer-panel > footer .right { margin-left: auto; display: flex; gap: 8px; }
+html.prx-drawer-open { overflow: hidden; }
+
+/* ── Command palette (⌘K) ────────────────────────────────────
+ * Centered modal. Mono input, fuzzy/substring search, arrow nav,
+ * enter to fire 'prx:tool-run'. Bound to ⌘K / ctrl+K globally.
+ *
+ *   <div class="prx-palette" data-items='[…]'>
+ *     <div class="prx-palette-backdrop"></div>
+ *     <div class="prx-palette-panel">
+ *       <input class="prx-palette-input" placeholder="run…" />
+ *       <div class="prx-palette-list"></div>
+ *       <div class="prx-palette-foot">
+ *         <span><span class="prx-kbd">↑</span><span class="prx-kbd">↓</span> nav</span>
+ *         <span><span class="prx-kbd">↵</span> run</span>
+ *         <span><span class="prx-kbd">esc</span> close</span>
+ *       </div>
+ *     </div>
+ *   </div>
+ */
+.prx-palette {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.prx-palette.open { pointer-events: auto; opacity: 1; }
+.prx-palette-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.55);
+}
+.prx-palette-panel {
+  position: relative;
+  margin: 12vh auto 0;
+  width: min(640px, 92vw);
+  background: var(--bg-card, #141414);
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 10px;
+  box-shadow: var(--shadow-modal, 0 20px 56px rgba(0,0,0,0.42));
+  overflow: hidden;
+  transform: translateY(-6px);
+  transition: transform 160ms ease;
+}
+.prx-palette.open .prx-palette-panel { transform: translateY(0); }
+.prx-palette-input {
+  width: 100%;
+  display: block;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  padding: 16px 20px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  color: var(--text, #f5f1e8);
+}
+.prx-palette-input:focus { outline: none; }
+.prx-palette-input::placeholder { color: var(--text-muted, #9b9488); }
+.prx-palette-list {
+  max-height: 50vh;
+  overflow: auto;
+}
+.prx-palette-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 20px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+}
+.prx-palette-row:hover { background: var(--surface-hover, rgba(255,255,255,0.04)); }
+.prx-palette-row.sel  { background: var(--surface-accent-soft, rgba(243,238,228,0.08)); box-shadow: inset 2px 0 0 var(--accent, #f3eee4); }
+.prx-palette-row .glyph { color: var(--accent, #f3eee4); }
+.prx-palette-row .cmd   { color: var(--text, #f5f1e8); }
+.prx-palette-row .desc  { color: var(--text-muted, #9b9488); font-size: 11px; text-align: right; }
+.prx-palette-row .kind  {
+  color: var(--text-muted, #9b9488);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.prx-palette-foot {
+  display: flex;
+  gap: 18px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  align-items: center;
+}
+.prx-palette-foot .prx-kbd {
+  min-width: 18px; height: 18px;
+  font-size: 10px;
+  padding: 0 4px;
+  margin-right: 4px;
+}
+.prx-palette-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted, #9b9488);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+/* ── Wizard ──────────────────────────────────────────────────
+ * Stepped form with live-preview pane. Use for CQRS operation
+ * registration, integration onboarding, plan authoring — any
+ * task where the operator (LLM or human) walks fields toward a
+ * generated artifact (migration SQL, config row, JSON).
+ *
+ *   <div class="prx-wizard"
+ *        data-config='{"steps":[…]}'
+ *        data-preview="renderCqrsMigration">
+ *     <div class="prx-wizard-steps"></div>
+ *     <div class="prx-wizard-body">
+ *       <div class="prx-wizard-form"></div>
+ *       <div class="prx-wizard-preview"></div>
+ *     </div>
+ *     <div class="prx-wizard-foot"></div>
+ *   </div>
+ *
+ * Fires 'prx:wizard-submit' on final step.
+ */
+.prx-wizard {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  background: var(--bg-card, #141414);
+  overflow: hidden;
+}
+.prx-wizard-steps {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-wrap: wrap;
+}
+.prx-wizard-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-wizard-step .num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 0;
+  color: var(--text-muted, #9b9488);
+  background: transparent;
+}
+.prx-wizard-step.active { color: var(--text, #f5f1e8); }
+.prx-wizard-step.active .num {
+  background: var(--accent, #f3eee4);
+  color: var(--text-inverse, #090909);
+  border-color: var(--accent, #f3eee4);
+}
+.prx-wizard-step.done .num {
+  color: var(--success, #3fb950);
+  border-color: rgba(63,185,80,0.30);
+}
+.prx-wizard-step.done .num::before { content: "▣"; letter-spacing: 0; }
+.prx-wizard-step.done .num span { display: none; }
+.prx-wizard-steps .sep { color: var(--border, #2a2a2a); letter-spacing: 0.32em; }
+
+.prx-wizard-body {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr);
+  min-height: 380px;
+}
+@media (max-width: 720px) {
+  .prx-wizard-body { grid-template-columns: 1fr; }
+}
+.prx-wizard-form {
+  padding: 22px;
+  border-right: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  overflow: auto;
+}
+.prx-wizard-form h3 {
+  font-family: var(--font-sans, sans-serif);
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0 0 4px;
+  letter-spacing: 0;
+  color: var(--text, #f5f1e8);
+}
+.prx-wizard-form .step-desc {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+  margin: 0 0 18px;
+  letter-spacing: 0.04em;
+}
+.prx-wizard-preview {
+  padding: 18px;
+  background: var(--bg-editor, #151515);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text, #f5f1e8);
+  overflow: auto;
+  max-height: 520px;
+}
+.prx-wizard-preview .preview-cap {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+}
+.prx-wizard-preview .preview-cap::before { content: "▦▦ "; color: var(--warning, #d29922); letter-spacing: 0; margin-right: 4px; }
+.prx-wizard-preview pre {
+  margin: 0;
+  white-space: pre;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.prx-wizard-preview .sql-kw   { color: var(--accent, #f3eee4); }
+.prx-wizard-preview .sql-tbl  { color: var(--warning, #d29922); }
+.prx-wizard-preview .sql-str  { color: var(--success-bright, #7ee787); }
+.prx-wizard-preview .sql-num  { color: var(--accent, #f3eee4); }
+.prx-wizard-preview .sql-com  { color: var(--text-muted, #9b9488); font-style: normal; }
+.prx-wizard-preview .sql-warn { color: var(--warning, #d29922); }
+.prx-wizard-preview .gap {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px dashed var(--border, #2a2a2a);
+  border-radius: 3px;
+  color: var(--text-muted, #9b9488);
+}
+
+.prx-wizard-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  background: var(--surface-muted, rgba(255,255,255,0.03));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-muted, #9b9488);
+}
+.prx-wizard-foot button {
+  background: transparent;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  color: var(--text, #f5f1e8);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.prx-wizard-foot button:hover:not([disabled]) { border-color: rgba(243,238,228,0.24); }
+.prx-wizard-foot button[disabled] { opacity: 0.4; cursor: not-allowed; }
+.prx-wizard-foot button.primary {
+  background: var(--accent, #f3eee4);
+  color: var(--text-inverse, #090909);
+  border-color: var(--accent, #f3eee4);
+}
+
+/* ── Form fields (used inside wizard, but reusable) ───────── */
+.prx-field { margin-bottom: 16px; }
+.prx-field-label {
+  display: block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted, #9b9488);
+  margin-bottom: 6px;
+}
+.prx-field-label .req { color: var(--warning, #d29922); margin-left: 3px; }
+.prx-field-input {
+  width: 100%;
+  background: var(--bg-input, rgba(10,10,10,0.94));
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  color: var(--text, #f5f1e8);
+  box-sizing: border-box;
+}
+.prx-field-input:focus {
+  outline: none;
+  border-color: rgba(243,238,228,0.24);
+  box-shadow: 0 0 0 3px rgba(243,238,228,0.10);
+}
+.prx-field-input::placeholder { color: var(--text-muted, #9b9488); }
+.prx-field-hint {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #9b9488);
+  margin-top: 5px;
+}
+.prx-field-hint.warn { color: var(--warning, #d29922); }
+.prx-radio-group { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.prx-radio-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.04));
+  border-radius: 999px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #9b9488);
+  cursor: pointer;
+  transition: all 120ms ease;
+  user-select: none;
+}
+.prx-radio-pill:hover { color: var(--text, #f5f1e8); border-color: rgba(243,238,228,0.24); }
+.prx-radio-pill.checked {
+  background: var(--surface-accent-soft, rgba(243,238,228,0.08));
+  border-color: var(--border-accent, rgba(243,238,228,0.24));
+  color: var(--accent, #f3eee4);
+}

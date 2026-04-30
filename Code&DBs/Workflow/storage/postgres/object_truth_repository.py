@@ -1234,11 +1234,451 @@ def load_ingestion_sample(
     return sample
 
 
+def persist_mdm_resolution_packet(
+    conn: Any,
+    *,
+    packet: dict[str, Any],
+    observed_by_ref: str | None = None,
+    source_ref: str | None = None,
+) -> dict[str, Any]:
+    packet_record = dict(_require_mapping(packet, field_name="mdm_packet"))
+    packet_ref = _require_text(packet_record.get("packet_ref"), field_name="mdm_packet.packet_ref")
+    clusters = [dict(_require_mapping(item, field_name="identity_cluster")) for item in packet_record.get("identity_clusters") or []]
+    comparisons = [dict(_require_mapping(item, field_name="field_comparison")) for item in packet_record.get("field_comparisons") or []]
+    rules = [dict(_require_mapping(item, field_name="normalization_rule")) for item in packet_record.get("normalization_rules") or []]
+    authority = [dict(_require_mapping(item, field_name="authority_evidence")) for item in packet_record.get("authority_evidence") or []]
+    hierarchy = [dict(_require_mapping(item, field_name="hierarchy_signal")) for item in packet_record.get("hierarchy_signals") or []]
+    gaps = [dict(_require_mapping(item, field_name="typed_gap")) for item in packet_record.get("typed_gaps") or []]
+
+    packet_row = conn.fetchrow(
+        """
+        INSERT INTO object_truth_mdm_resolution_packets (
+            packet_ref,
+            resolution_packet_digest,
+            client_ref,
+            entity_type,
+            as_of,
+            identity_cluster_count,
+            field_comparison_count,
+            normalization_rule_count,
+            authority_evidence_count,
+            hierarchy_signal_count,
+            typed_gap_count,
+            packet_json,
+            observed_by_ref,
+            source_ref
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14
+        )
+        ON CONFLICT (packet_ref) DO UPDATE SET
+            resolution_packet_digest = EXCLUDED.resolution_packet_digest,
+            client_ref = EXCLUDED.client_ref,
+            entity_type = EXCLUDED.entity_type,
+            as_of = EXCLUDED.as_of,
+            identity_cluster_count = EXCLUDED.identity_cluster_count,
+            field_comparison_count = EXCLUDED.field_comparison_count,
+            normalization_rule_count = EXCLUDED.normalization_rule_count,
+            authority_evidence_count = EXCLUDED.authority_evidence_count,
+            hierarchy_signal_count = EXCLUDED.hierarchy_signal_count,
+            typed_gap_count = EXCLUDED.typed_gap_count,
+            packet_json = EXCLUDED.packet_json,
+            observed_by_ref = EXCLUDED.observed_by_ref,
+            source_ref = EXCLUDED.source_ref,
+            updated_at = now()
+        RETURNING
+            packet_ref,
+            resolution_packet_digest,
+            client_ref,
+            entity_type,
+            as_of,
+            identity_cluster_count,
+            field_comparison_count,
+            normalization_rule_count,
+            authority_evidence_count,
+            hierarchy_signal_count,
+            typed_gap_count,
+            packet_json,
+            observed_by_ref,
+            source_ref,
+            created_at,
+            updated_at
+        """,
+        packet_ref,
+        _require_text(
+            packet_record.get("resolution_packet_digest"),
+            field_name="mdm_packet.resolution_packet_digest",
+        ),
+        _require_text(packet_record.get("client_ref"), field_name="mdm_packet.client_ref"),
+        _require_text(packet_record.get("entity_type"), field_name="mdm_packet.entity_type"),
+        _timestamp(packet_record.get("as_of"), field_name="mdm_packet.as_of"),
+        len(clusters),
+        len(comparisons),
+        len(rules),
+        len(authority),
+        len(hierarchy),
+        len(gaps),
+        _encode_jsonb(packet_record, field_name="mdm_packet"),
+        _optional_text(observed_by_ref, field_name="observed_by_ref"),
+        _optional_text(source_ref, field_name="source_ref"),
+    )
+    for table_name in (
+        "object_truth_mdm_identity_clusters",
+        "object_truth_mdm_field_comparisons",
+        "object_truth_mdm_normalization_rules",
+        "object_truth_mdm_source_authority_evidence",
+        "object_truth_mdm_hierarchy_signals",
+        "object_truth_mdm_typed_gaps",
+    ):
+        conn.execute(f"DELETE FROM {table_name} WHERE packet_ref = $1", packet_ref)
+
+    if clusters:
+        conn.execute_many(
+            """
+            INSERT INTO object_truth_mdm_identity_clusters (
+                packet_ref,
+                cluster_id,
+                identity_cluster_digest,
+                entity_type,
+                review_status,
+                cluster_confidence,
+                member_count,
+                cluster_json
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            ON CONFLICT (packet_ref, cluster_id) DO UPDATE SET
+                identity_cluster_digest = EXCLUDED.identity_cluster_digest,
+                entity_type = EXCLUDED.entity_type,
+                review_status = EXCLUDED.review_status,
+                cluster_confidence = EXCLUDED.cluster_confidence,
+                member_count = EXCLUDED.member_count,
+                cluster_json = EXCLUDED.cluster_json
+            """,
+            [
+                (
+                    packet_ref,
+                    _require_text(item.get("cluster_id"), field_name="identity_cluster.cluster_id"),
+                    _require_text(
+                        item.get("identity_cluster_digest"),
+                        field_name="identity_cluster.identity_cluster_digest",
+                    ),
+                    _require_text(item.get("entity_type"), field_name="identity_cluster.entity_type"),
+                    _require_text(item.get("review_status"), field_name="identity_cluster.review_status"),
+                    float(item.get("cluster_confidence") or 0.0),
+                    len(item.get("member_records") or []),
+                    _encode_jsonb(item, field_name="identity_cluster"),
+                )
+                for item in clusters
+            ],
+        )
+
+    if comparisons:
+        conn.execute_many(
+            """
+            INSERT INTO object_truth_mdm_field_comparisons (
+                packet_ref,
+                field_comparison_digest,
+                cluster_id,
+                canonical_record_id,
+                canonical_field,
+                entity_type,
+                selection_state,
+                conflict_flag,
+                consensus_flag,
+                typed_gap_count,
+                comparison_json
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+            ON CONFLICT (packet_ref, field_comparison_digest) DO UPDATE SET
+                cluster_id = EXCLUDED.cluster_id,
+                canonical_record_id = EXCLUDED.canonical_record_id,
+                canonical_field = EXCLUDED.canonical_field,
+                entity_type = EXCLUDED.entity_type,
+                selection_state = EXCLUDED.selection_state,
+                conflict_flag = EXCLUDED.conflict_flag,
+                consensus_flag = EXCLUDED.consensus_flag,
+                typed_gap_count = EXCLUDED.typed_gap_count,
+                comparison_json = EXCLUDED.comparison_json
+            """,
+            [
+                (
+                    packet_ref,
+                    _require_text(
+                        item.get("field_comparison_digest"),
+                        field_name="field_comparison.field_comparison_digest",
+                    ),
+                    _optional_text(item.get("cluster_id"), field_name="field_comparison.cluster_id"),
+                    _require_text(
+                        item.get("canonical_record_id"),
+                        field_name="field_comparison.canonical_record_id",
+                    ),
+                    _require_text(item.get("canonical_field"), field_name="field_comparison.canonical_field"),
+                    _require_text(item.get("entity_type"), field_name="field_comparison.entity_type"),
+                    _require_text(item.get("selection_state"), field_name="field_comparison.selection_state"),
+                    bool(item.get("conflict_flag", False)),
+                    bool(item.get("consensus_flag", False)),
+                    len(item.get("typed_gaps") or []),
+                    _encode_jsonb(item, field_name="field_comparison"),
+                )
+                for item in comparisons
+            ],
+        )
+
+    if rules:
+        conn.execute_many(
+            """
+            INSERT INTO object_truth_mdm_normalization_rules (
+                packet_ref,
+                rule_ref,
+                normalization_rule_digest,
+                entity_type,
+                field_name,
+                reversible,
+                loss_risk,
+                rule_json
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            ON CONFLICT (packet_ref, rule_ref) DO UPDATE SET
+                normalization_rule_digest = EXCLUDED.normalization_rule_digest,
+                entity_type = EXCLUDED.entity_type,
+                field_name = EXCLUDED.field_name,
+                reversible = EXCLUDED.reversible,
+                loss_risk = EXCLUDED.loss_risk,
+                rule_json = EXCLUDED.rule_json
+            """,
+            [
+                (
+                    packet_ref,
+                    _require_text(item.get("rule_ref"), field_name="normalization_rule.rule_ref"),
+                    _require_text(
+                        item.get("normalization_rule_digest"),
+                        field_name="normalization_rule.normalization_rule_digest",
+                    ),
+                    _require_text(item.get("entity_type"), field_name="normalization_rule.entity_type"),
+                    _require_text(item.get("field_name"), field_name="normalization_rule.field_name"),
+                    bool(item.get("reversible", False)),
+                    _require_text(item.get("loss_risk"), field_name="normalization_rule.loss_risk"),
+                    _encode_jsonb(item, field_name="normalization_rule"),
+                )
+                for item in rules
+            ],
+        )
+
+    if authority:
+        conn.execute_many(
+            """
+            INSERT INTO object_truth_mdm_source_authority_evidence (
+                packet_ref,
+                authority_evidence_digest,
+                entity_type,
+                field_name,
+                source_system,
+                authority_rank,
+                evidence_type,
+                evidence_reference,
+                evidence_json
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+            ON CONFLICT (packet_ref, authority_evidence_digest) DO UPDATE SET
+                entity_type = EXCLUDED.entity_type,
+                field_name = EXCLUDED.field_name,
+                source_system = EXCLUDED.source_system,
+                authority_rank = EXCLUDED.authority_rank,
+                evidence_type = EXCLUDED.evidence_type,
+                evidence_reference = EXCLUDED.evidence_reference,
+                evidence_json = EXCLUDED.evidence_json
+            """,
+            [
+                (
+                    packet_ref,
+                    _require_text(
+                        item.get("authority_evidence_digest"),
+                        field_name="authority_evidence.authority_evidence_digest",
+                    ),
+                    _require_text(item.get("entity_type"), field_name="authority_evidence.entity_type"),
+                    _require_text(item.get("field_name"), field_name="authority_evidence.field_name"),
+                    _require_text(item.get("source_system"), field_name="authority_evidence.source_system"),
+                    int(item.get("authority_rank") or 0),
+                    _require_text(item.get("evidence_type"), field_name="authority_evidence.evidence_type"),
+                    _require_text(
+                        item.get("evidence_reference"),
+                        field_name="authority_evidence.evidence_reference",
+                    ),
+                    _encode_jsonb(item, field_name="authority_evidence"),
+                )
+                for item in authority
+            ],
+        )
+
+    if hierarchy:
+        conn.execute_many(
+            """
+            INSERT INTO object_truth_mdm_hierarchy_signals (
+                packet_ref,
+                hierarchy_signal_digest,
+                entity_type,
+                signal_type,
+                source_system,
+                source_record_id,
+                authoritative,
+                hierarchy_json
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            ON CONFLICT (packet_ref, hierarchy_signal_digest) DO UPDATE SET
+                entity_type = EXCLUDED.entity_type,
+                signal_type = EXCLUDED.signal_type,
+                source_system = EXCLUDED.source_system,
+                source_record_id = EXCLUDED.source_record_id,
+                authoritative = EXCLUDED.authoritative,
+                hierarchy_json = EXCLUDED.hierarchy_json
+            """,
+            [
+                (
+                    packet_ref,
+                    _require_text(
+                        item.get("hierarchy_signal_digest"),
+                        field_name="hierarchy_signal.hierarchy_signal_digest",
+                    ),
+                    _require_text(item.get("entity_type"), field_name="hierarchy_signal.entity_type"),
+                    _require_text(item.get("signal_type"), field_name="hierarchy_signal.signal_type"),
+                    _require_text(item.get("source_system"), field_name="hierarchy_signal.source_system"),
+                    _require_text(item.get("source_record_id"), field_name="hierarchy_signal.source_record_id"),
+                    bool(item.get("authoritative", False)),
+                    _encode_jsonb(item, field_name="hierarchy_signal"),
+                )
+                for item in hierarchy
+            ],
+        )
+
+    if gaps:
+        conn.execute_many(
+            """
+            INSERT INTO object_truth_mdm_typed_gaps (
+                packet_ref,
+                gap_id,
+                gap_digest,
+                entity_type,
+                field_name,
+                gap_type,
+                severity,
+                gap_json
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            ON CONFLICT (packet_ref, gap_id) DO UPDATE SET
+                gap_digest = EXCLUDED.gap_digest,
+                entity_type = EXCLUDED.entity_type,
+                field_name = EXCLUDED.field_name,
+                gap_type = EXCLUDED.gap_type,
+                severity = EXCLUDED.severity,
+                gap_json = EXCLUDED.gap_json
+            """,
+            [
+                (
+                    packet_ref,
+                    _require_text(item.get("gap_id"), field_name="typed_gap.gap_id"),
+                    _require_text(item.get("gap_digest"), field_name="typed_gap.gap_digest"),
+                    _require_text(item.get("entity_type"), field_name="typed_gap.entity_type"),
+                    _require_text(item.get("field_name"), field_name="typed_gap.field_name"),
+                    _require_text(item.get("gap_type"), field_name="typed_gap.gap_type"),
+                    _require_text(item.get("severity"), field_name="typed_gap.severity"),
+                    _encode_jsonb(item, field_name="typed_gap"),
+                )
+                for item in gaps
+            ],
+        )
+
+    return {
+        "packet": _normalize_row(packet_row, operation="persist_mdm_resolution_packet.packet"),
+        "identity_cluster_count": len(clusters),
+        "field_comparison_count": len(comparisons),
+        "normalization_rule_count": len(rules),
+        "authority_evidence_count": len(authority),
+        "hierarchy_signal_count": len(hierarchy),
+        "typed_gap_count": len(gaps),
+    }
+
+
+def list_mdm_resolution_packets(
+    conn: Any,
+    *,
+    client_ref: str | None = None,
+    entity_type: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    rows = conn.fetch(
+        """
+        SELECT
+            packet_ref,
+            resolution_packet_digest,
+            client_ref,
+            entity_type,
+            as_of,
+            identity_cluster_count,
+            field_comparison_count,
+            normalization_rule_count,
+            authority_evidence_count,
+            hierarchy_signal_count,
+            typed_gap_count,
+            observed_by_ref,
+            source_ref,
+            created_at,
+            updated_at
+          FROM object_truth_mdm_resolution_packets
+         WHERE ($1::text IS NULL OR client_ref = $1)
+           AND ($2::text IS NULL OR entity_type = $2)
+         ORDER BY as_of DESC, updated_at DESC
+         LIMIT $3
+        """,
+        _optional_text(client_ref, field_name="client_ref"),
+        _optional_text(entity_type, field_name="entity_type"),
+        int(limit),
+    )
+    return _normalize_rows(rows, operation="list_mdm_resolution_packets")
+
+
+def load_mdm_resolution_packet(
+    conn: Any,
+    *,
+    packet_ref: str,
+    include_records: bool = True,
+) -> dict[str, Any] | None:
+    packet_row = conn.fetchrow(
+        """
+        SELECT *
+          FROM object_truth_mdm_resolution_packets
+         WHERE packet_ref = $1
+        """,
+        _require_text(packet_ref, field_name="packet_ref"),
+    )
+    if packet_row is None:
+        return None
+    packet = _normalize_row(packet_row, operation="load_mdm_resolution_packet.packet")
+    if not include_records:
+        return packet
+    child_specs = {
+        "identity_clusters": ("object_truth_mdm_identity_clusters", "cluster_json", "cluster_id"),
+        "field_comparisons": ("object_truth_mdm_field_comparisons", "comparison_json", "canonical_field"),
+        "normalization_rules": ("object_truth_mdm_normalization_rules", "rule_json", "rule_ref"),
+        "authority_evidence": ("object_truth_mdm_source_authority_evidence", "evidence_json", "authority_rank"),
+        "hierarchy_signals": ("object_truth_mdm_hierarchy_signals", "hierarchy_json", "signal_type"),
+        "typed_gaps": ("object_truth_mdm_typed_gaps", "gap_json", "gap_id"),
+    }
+    for key, (table_name, json_column, order_column) in child_specs.items():
+        rows = conn.fetch(
+            f"""
+            SELECT {json_column}
+              FROM {table_name}
+             WHERE packet_ref = $1
+             ORDER BY {order_column}
+            """,
+            _require_text(packet_ref, field_name="packet_ref"),
+        )
+        records = _normalize_rows(rows, operation=f"load_mdm_resolution_packet.{key}")
+        packet[key] = [item.get(json_column) for item in records if item.get(json_column) is not None]
+    return packet
+
+
 __all__ = [
     "inspect_readiness",
     "list_ingestion_samples",
+    "list_mdm_resolution_packets",
     "load_ingestion_sample",
+    "load_mdm_resolution_packet",
     "load_object_version",
+    "persist_mdm_resolution_packet",
     "persist_ingestion_sample",
     "persist_comparison_run",
     "persist_object_version",

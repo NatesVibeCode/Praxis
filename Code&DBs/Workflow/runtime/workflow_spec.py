@@ -37,30 +37,39 @@ _PRE_RELOAD_WORKFLOW_SPEC = globals().get("WorkflowSpec")
 
 _HISTORICAL_SPEC_OVERRIDE_ENV = "PRAXIS_ALLOW_HISTORICAL_QUEUE_SPEC"
 _POSTGRESQL_DSN_PREFIX = "postgres" + "ql://"
-_RETIRED_AUTHORITY_MARKERS: tuple[tuple[str, str], ...] = (
-    (
-        _POSTGRESQL_DSN_PREFIX + "nate@127.0.0.1:5432/dag_workflow",
-        "retired localhost dag_workflow database authority",
-    ),
-    (
-        _POSTGRESQL_DSN_PREFIX + "localhost:5432/praxis",
-        "retired localhost Praxis.db authority",
-    ),
-    (
-        "/Users/nate/Praxis",
-        "operator-local /Users/nate/Praxis workspace authority",
-    ),
-    (
-        "/Volumes/Users/natha/Documents/Builds/Praxis",
-        "operator-local absolute workspace authority",
-    ),
-)
+_OPERATOR_LOCAL_PATHS_ENV = "PRAXIS_OPERATOR_LOCAL_REPO_PATHS"
+
+
+def _operator_local_repo_paths() -> tuple[str, ...]:
+    """Operator-local workspace paths used as authority guardrails.
+
+    Configured via ``PRAXIS_OPERATOR_LOCAL_REPO_PATHS`` (colon-separated). Empty
+    by default so the public codebase does not carry one operator's filesystem.
+    """
+
+    raw = os.environ.get(_OPERATOR_LOCAL_PATHS_ENV, "")
+    return tuple(p for p in (segment.strip() for segment in raw.split(":")) if p)
+
+
+def _retired_authority_markers() -> tuple[tuple[str, str], ...]:
+    static: tuple[tuple[str, str], ...] = (
+        (
+            _POSTGRESQL_DSN_PREFIX + "nate@127.0.0.1:5432/dag_workflow",
+            "retired localhost dag_workflow database authority",
+        ),
+        (
+            _POSTGRESQL_DSN_PREFIX + "localhost:5432/praxis",
+            "retired localhost Praxis.db authority",
+        ),
+    )
+    operator_local = tuple(
+        (path, f"operator-local workspace authority ({path})")
+        for path in _operator_local_repo_paths()
+    )
+    return static + operator_local
+
 
 _WORKER_REPO_ROOT = "/workspace"
-_OPERATOR_LOCAL_REPO_PREFIXES: tuple[str, ...] = (
-    "/Users/nate/Praxis",
-    "/Volumes/Users/natha/Documents/Builds/Praxis",
-)
 
 # ---------------------------------------------------------------------------
 # New authoring format field sets
@@ -751,7 +760,7 @@ def _unsafe_psql_instruction(text: str) -> bool:
 def _historical_authority_issues(text: str) -> list[str]:
     issues = [
         reason
-        for marker, reason in _RETIRED_AUTHORITY_MARKERS
+        for marker, reason in _retired_authority_markers()
         if marker in text
     ]
     if _unsafe_psql_instruction(text):
@@ -776,7 +785,7 @@ def normalize_operator_local_repo_paths(text: str) -> tuple[str, list[str]]:
 
     breadcrumbs: list[str] = []
     normalized = text
-    for prefix in _OPERATOR_LOCAL_REPO_PREFIXES:
+    for prefix in _operator_local_repo_paths():
         if prefix in normalized:
             normalized = normalized.replace(prefix, _WORKER_REPO_ROOT)
             breadcrumbs.append(

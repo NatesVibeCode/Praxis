@@ -132,6 +132,21 @@ def _canonicalize_operation_catalog_row(row: dict[str, Any]) -> dict[str, Any]:
         and row.get("http_path") == "/api/compile_materialize"
     ):
         repaired["http_path"] = "/api/compile/materialize"
+    if (
+        row.get("operation_ref") == "compose-plan"
+        and row.get("operation_name") == "compose_plan"
+        and (
+            row.get("execution_lane") != "interactive"
+            or row.get("kickoff_required") is not False
+            or int(row.get("timeout_ms") or 0) < 35000
+        )
+    ):
+        # Migration 373 makes this durable. Keep the projection repaired for
+        # already-booted catalogs that still carry migration 353's broad
+        # background-only classification.
+        repaired["execution_lane"] = "interactive"
+        repaired["kickoff_required"] = False
+        repaired["timeout_ms"] = 35000
     return repaired
 
 

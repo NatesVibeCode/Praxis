@@ -42,7 +42,7 @@
         "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
         "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_workflow_query_handlers.py -k market"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_workflow_query_handlers.py -k market"
     },
     {
       "label": "market_models_handler_review",

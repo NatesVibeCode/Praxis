@@ -34,6 +34,7 @@ import {
   createDefaultShellState,
   manifestEditorShellId,
   manifestTabShellId,
+  manifestWorkspaceLabel,
   upsertDynamicTab,
   type DynamicTab,
   type ShellState,
@@ -106,7 +107,7 @@ export function routeSlotState(
       const nextTab: DynamicTab = {
         id: dynamicId,
         kind: 'manifest',
-        label: manifestTabId === 'main' ? manifestId : `${manifestId} · ${manifestTabId}`,
+        label: manifestWorkspaceLabel(manifestId, manifestTabId),
         closable: true,
         manifestId,
         manifestTabId,

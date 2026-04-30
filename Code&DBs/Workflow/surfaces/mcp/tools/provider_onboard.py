@@ -5,6 +5,8 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+from dataclasses import dataclass
 from typing import Any
 
 from runtime.operation_catalog_gateway import execute_operation_from_env
@@ -67,12 +69,20 @@ def tool_praxis_provider_onboard(params: dict, _progress_emitter=None) -> dict:
 # worker containers so the renewed token/file is re-read by the sandbox runner.
 # ──────────────────────────────────────────────────────────────────────────
 
-# (binary_name, provider_slug, prompt_args). We use `claude -p`, `codex exec`,
-# and `gemini -p` style invocations; each emits JSON with status fields.
-_CLI_AUTH_PROBES: tuple[tuple[str, str, list[str]], ...] = (
-    ("claude", "anthropic", ["-p", "--output-format", "json"]),
-    ("codex", "openai", ["exec", "--output-last-message", "/tmp/_codex_authprobe.txt"]),
-    ("gemini", "google", ["-p"]),
+@dataclass(frozen=True, slots=True)
+class _CliAuthProbe:
+    binary: str
+    provider_slug: str
+    args: tuple[str, ...]
+    timeout_seconds: int
+
+
+# We use `claude -p`, `codex exec`, and `gemini -p` style invocations. Codex
+# has a materially slower cold start in Docker, so it gets its own timeout.
+_CLI_AUTH_PROBES: tuple[_CliAuthProbe, ...] = (
+    _CliAuthProbe("claude", "anthropic", ("-p", "--output-format", "json"), 15),
+    _CliAuthProbe("codex", "openai", ("exec", "--output-last-message", "{output_path}"), 45),
+    _CliAuthProbe("gemini", "google", ("-p",), 15),
 )
 
 # Patterns that indicate auth failure, regardless of CLI brand
@@ -95,7 +105,19 @@ def _which_binary(name: str) -> str | None:
     return shutil.which(name)
 
 
-def _probe_cli_auth(binary: str, provider_slug: str, args: list[str]) -> dict[str, Any]:
+def _materialize_probe_args(probe: _CliAuthProbe) -> tuple[list[str], str | None]:
+    """Return CLI args plus any temporary path the caller should clean up."""
+    if "{output_path}" not in probe.args:
+        return list(probe.args), None
+
+    fd, output_path = tempfile.mkstemp(prefix=f"praxis-{probe.provider_slug}-authprobe-", suffix=".txt")
+    os.close(fd)
+    return [output_path if arg == "{output_path}" else arg for arg in probe.args], output_path
+
+
+def _probe_cli_auth(probe: _CliAuthProbe) -> dict[str, Any]:
+    binary = probe.binary
+    provider_slug = probe.provider_slug
     binary_path = _which_binary(binary)
     if not binary_path:
         return {
@@ -111,13 +133,14 @@ def _probe_cli_auth(binary: str, provider_slug: str, args: list[str]) -> dict[st
                 f"runtime/docker_image_authority.AGENT_FAMILY_IMAGE_MAP)."
             ),
         }
+    args, cleanup_path = _materialize_probe_args(probe)
     try:
         result = subprocess.run(
             [binary_path, *args],
             input="say hi" if provider_slug == "anthropic" else "say hi\n",
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=probe.timeout_seconds,
         )
     except subprocess.TimeoutExpired:
         return {
@@ -126,7 +149,7 @@ def _probe_cli_auth(binary: str, provider_slug: str, args: list[str]) -> dict[st
             "binary_path": binary_path,
             "auth_state": "timeout",
             "healthy": False,
-            "summary": f"`{binary}` did not respond within 15s.",
+            "summary": f"`{binary}` did not respond within {probe.timeout_seconds}s.",
             "remediation": (
                 f"The CLI is installed but hung. Try a manual `{binary} -p` from "
                 "the host shell to confirm it works, then bounce the relevant "
@@ -143,6 +166,12 @@ def _probe_cli_auth(binary: str, provider_slug: str, args: list[str]) -> dict[st
             "summary": f"`{binary}` execution raised {type(exc).__name__}: {exc}",
             "remediation": "Check binary permissions / runtime.",
         }
+    finally:
+        if cleanup_path:
+            try:
+                os.unlink(cleanup_path)
+            except FileNotFoundError:
+                pass
 
     blob = (result.stdout or "") + "\n" + (result.stderr or "")
     matched_pattern: str | None = None
@@ -253,16 +282,17 @@ def run_cli_auth_doctor(params: dict, _progress_emitter=None) -> dict:
         requested_set = {requested.strip().lower()}
 
     reports: list[dict[str, Any]] = []
-    for binary, provider_slug, args in _CLI_AUTH_PROBES:
+    for probe in _CLI_AUTH_PROBES:
+        provider_slug = probe.provider_slug
         if requested_set is not None and provider_slug not in requested_set:
             continue
         if _progress_emitter:
             _progress_emitter.emit(
                 progress=len(reports),
                 total=3,
-                message=f"Probing {binary} ({provider_slug}) auth …",
+                message=f"Probing {probe.binary} ({provider_slug}) auth …",
             )
-        reports.append(_probe_cli_auth(binary, provider_slug, args))
+        reports.append(_probe_cli_auth(probe))
 
     healthy = sum(1 for r in reports if r.get("healthy"))
     unhealthy = [r for r in reports if not r.get("healthy")]

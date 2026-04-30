@@ -41,7 +41,27 @@ export interface QuadrantSurfaceSpec {
   manifest: QuadrantManifest;
 }
 
-export type PraxisSurfaceSpec = QuadrantSurfaceSpec;
+export interface ComposeDraftSpec {
+  intent?: string;
+  read_scope?: string[];
+  write_scope?: string[];
+  requirements?: string[];
+  anti_requirements?: string[];
+  verifier_ref?: string;
+  generated_manifest_id?: string;
+  workflow_id?: string;
+  run_id?: string;
+  last_compiled_at?: string;
+}
+
+export interface ComposeSurfaceSpec {
+  id: string;
+  title: string;
+  kind: 'compose';
+  draft?: ComposeDraftSpec;
+}
+
+export type PraxisSurfaceSpec = QuadrantSurfaceSpec | ComposeSurfaceSpec;
 
 export interface PraxisSurfaceBundleV4 {
   version: 4;
@@ -100,6 +120,30 @@ function normalizeSourceOption(id: string, value: unknown): SourceOption | null 
     integration_id: typeof value.integration_id === 'string' ? value.integration_id : undefined,
     setup_intent: typeof value.setup_intent === 'string' ? value.setup_intent : undefined,
     description: typeof value.description === 'string' ? value.description : undefined,
+  };
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function normalizeComposeDraft(value: unknown): ComposeDraftSpec {
+  if (!isRecord(value)) return {};
+  return {
+    intent: typeof value.intent === 'string' ? value.intent : undefined,
+    read_scope: normalizeStringList(value.read_scope),
+    write_scope: normalizeStringList(value.write_scope),
+    requirements: normalizeStringList(value.requirements),
+    anti_requirements: normalizeStringList(value.anti_requirements),
+    verifier_ref: typeof value.verifier_ref === 'string' ? value.verifier_ref : undefined,
+    generated_manifest_id: typeof value.generated_manifest_id === 'string' ? value.generated_manifest_id : undefined,
+    workflow_id: typeof value.workflow_id === 'string' ? value.workflow_id : undefined,
+    run_id: typeof value.run_id === 'string' ? value.run_id : undefined,
+    last_compiled_at: typeof value.last_compiled_at === 'string' ? value.last_compiled_at : undefined,
   };
 }
 
@@ -175,7 +219,15 @@ export function normalizePraxisBundle(
 
   const surfaces = Object.entries(rawSurfaces).reduce<Record<string, PraxisSurfaceSpec>>((acc, [surfaceId, rawSurface]) => {
     if (!isRecord(rawSurface)) return acc;
-    const kind = rawSurface.kind === 'quadrant_manifest' ? 'quadrant_manifest' : 'quadrant_manifest';
+    if (rawSurface.kind === 'compose') {
+      acc[surfaceId] = {
+        id: normalizeString(rawSurface.id, surfaceId),
+        title: normalizeString(rawSurface.title, surfaceId),
+        kind: 'compose',
+        draft: normalizeComposeDraft(rawSurface.draft),
+      };
+      return acc;
+    }
     const rawManifest = isRecord(rawSurface.manifest)
       ? rawSurface.manifest
       : isRecord(rawSurface.quadrants)
@@ -184,7 +236,7 @@ export function normalizePraxisBundle(
     acc[surfaceId] = {
       id: normalizeString(rawSurface.id, surfaceId),
       title: normalizeString(rawSurface.title, surfaceId),
-      kind,
+      kind: 'quadrant_manifest',
       manifest: {
         version: 2,
         grid: normalizeString((rawManifest as Record<string, unknown>).grid, '4x4'),

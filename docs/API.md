@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `388`.
+Public route count: `8`. All route count: `410`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -75,6 +75,7 @@ Public route count: `8`. All route count: `388`.
 | `POST` | `/api/chat/conversations` | `internal` | - | chat_conversations_post |
 | `GET` | `/api/chat/conversations/{conversation_id}` | `internal` | - | chat_conversation_get |
 | `POST` | `/api/chat/conversations/{conversation_id}/messages` | `internal` | - | chat_messages_post |
+| `GET` | `/api/chat/routing_options` | `internal` | `operations` | chat.routing_options.list |
 | `GET` | `/api/checkpoints` | `internal` | - | checkpoints_get |
 | `POST` | `/api/checkpoints` | `internal` | - | checkpoints_post |
 | `GET` | `/api/checkpoints/{checkpoint_id}` | `internal` | - | checkpoints_detail_get |
@@ -163,6 +164,8 @@ Public route count: `8`. All route count: `388`.
 | `GET` | `/api/handoff/lineage` | `internal` | - | handoff_lineage_get |
 | `GET` | `/api/handoff/status` | `internal` | - | handoff_status_get |
 | `GET` | `/api/health` | `internal` | - | Platform health from bounded Postgres probes. |
+| `GET` | `/api/integration-action/contracts` | `internal` | `operations` | integration_action_contract_read |
+| `POST` | `/api/integration-action/contracts` | `internal` | `operations` | integration_action_contract_record |
 | `GET` | `/api/integrations` | `internal` | - | integrations_get |
 | `POST` | `/api/integrations` | `internal` | - | integrations_post |
 | `POST` | `/api/integrations/reload` | `internal` | - | integrations_reload_post |
@@ -197,6 +200,8 @@ Public route count: `8`. All route count: `388`.
 | `GET` | `/api/object-truth/compare-versions` | `internal` | `operations` | object_truth_compare_versions |
 | `GET` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_read |
 | `POST` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_record |
+| `GET` | `/api/object-truth/mdm/resolutions` | `internal` | `operations` | object_truth_mdm_resolution_read |
+| `POST` | `/api/object-truth/mdm/resolutions` | `internal` | `operations` | object_truth_mdm_resolution_record |
 | `POST` | `/api/object-truth/observe-record` | `internal` | `operations` | object_truth_observe_record |
 | `GET` | `/api/object-truth/readiness` | `internal` | `operations` | object_truth_readiness |
 | `POST` | `/api/object-truth/record-comparison-run` | `internal` | `operations` | object_truth_record_comparison_run |
@@ -343,8 +348,11 @@ Public route count: `8`. All route count: `388`.
 | `GET` | `/api/status` | `internal` | `operations` | operator.status_snapshot |
 | `GET` | `/api/structured-documents/context-selections` | `internal` | `operations` | structured_documents.list_context_selection_receipts |
 | `POST` | `/api/structured-documents/context-selections` | `internal` | `operations` | structured_documents.record_context_selection |
+| `GET` | `/api/structured_documents_context_assemble` | `internal` | `operations` | structured_documents.context_assemble |
 | `POST` | `/api/surface/action` | `internal` | `operations` | surface.action.performed |
 | `POST` | `/api/surface/templates` | `internal` | `operations` | surface.template.register |
+| `GET` | `/api/task-environment/contracts` | `internal` | `operations` | task_environment_contract_read |
+| `POST` | `/api/task-environment/contracts` | `internal` | `operations` | task_environment_contract_record |
 | `GET` | `/api/templates` | `internal` | - | templates_get |
 | `GET` | `/api/test/query_register_atomic/71dfa06e9d99` | `internal` | `operations` | test.query_register_atomic.71dfa06e9d99 |
 | `GET` | `/api/test/query_register_atomic/e9bcd15fa1da` | `internal` | `operations` | test.query_register_atomic.e9bcd15fa1da |
@@ -352,6 +360,13 @@ Public route count: `8`. All route count: `388`.
 | `POST` | `/api/trigger/{rest_of_path:path}` | `internal` | - | trigger_post |
 | `GET` | `/api/trust` | `internal` | - | Return ELO-based trust scores for all (provider, model) pairs. |
 | `POST` | `/api/typed_gap/emit` | `internal` | `operations` | typed_gap.emit |
+| `GET` | `/api/verifiers` | `internal` | `operations` | verifier.catalog.list |
+| `GET` | `/api/virtual-lab/sandbox-promotions` | `internal` | `operations` | virtual_lab_sandbox_promotion_read |
+| `POST` | `/api/virtual-lab/sandbox-promotions` | `internal` | `operations` | virtual_lab_sandbox_promotion_record |
+| `GET` | `/api/virtual-lab/simulations` | `internal` | `operations` | virtual_lab_simulation_read |
+| `POST` | `/api/virtual-lab/simulations` | `internal` | `operations` | virtual_lab_simulation_run |
+| `GET` | `/api/virtual-lab/state` | `internal` | `operations` | virtual_lab_state_read |
+| `POST` | `/api/virtual-lab/state` | `internal` | `operations` | virtual_lab_state_record |
 | `POST` | `/api/webhooks/endpoints` | `internal` | `webhooks` | Register a new webhook endpoint. Auto-creates workflow_trigger if target_workflow_id is set. |
 | `POST` | `/api/webhooks/{slug}` | `internal` | `webhooks` | Receive an incoming webhook, validate signature, store event. |
 | `POST` | `/api/workflow-job` | `internal` | - | workflow_job_post |
@@ -377,6 +392,13 @@ Public route count: `8`. All route count: `388`.
 | `PUT` | `/api/workflows/{rest_of_path:path}` | `internal` | - | workflows_path_put |
 | `POST` | `/api/workflows/{workflow_id}/build/suggest-next` | `internal` | `operations` | workflow_build.suggest_next |
 | `POST` | `/api/workflows/{workflow_id}/build/{subpath:path}` | `internal` | `operations` | workflow_build.mutate |
+| `GET` | `/api/workspace-contract-fields` | `internal` | - | Return object/field suggestions for structured contract clauses. |
+| `GET` | `/api/workspace-paths` | `internal` | - | Return repo-relative path suggestions for scope pickers. |
+| `GET` | `/api/workspaces/{manifest_id}/receipts` | `internal` | `operations` | workspace.receipts.list |
+| `POST` | `/api/workspaces/{manifest_id}/run-bindings` | `internal` | `operations` | workspace.run_binding.record |
+| `GET` | `/api/workspaces/{manifest_id}/runs` | `internal` | `operations` | workspace.runs.list |
+| `POST` | `/api/workspaces/{manifest_id}/surface-migration/apply` | `internal` | `operations` | workspace.surface_migration.apply |
+| `GET` | `/api/workspaces/{manifest_id}/surface-migration/preview` | `internal` | `operations` | workspace.surface_migration.preview |
 | `GET` | `/app` | `internal` | - | launcher_app_root |
 | `GET` | `/app/` | `internal` | - | launcher_app_root_slash |
 | `GET` | `/app/manifest.webmanifest` | `internal` | - | launcher_manifest |

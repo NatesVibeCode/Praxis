@@ -37,7 +37,7 @@
         "Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py",
         "Code&DBs/Workflow/tests/integration/test_operator_path_recurring_flow_adoption.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow && python3 -c 'from runtime.instance import NativeWorkflowInstance; print(\"OK\")' && ! grep -rn 'NativeDagInstance' . --include='*.py' | grep -v __pycache__"
+      "verify_command": "cd Code\\&DBs/Workflow && python3 -c 'from runtime.instance import NativeWorkflowInstance; print(\"OK\")' && ! grep -rn 'NativeDagInstance' . --include='*.py' | grep -v __pycache__"
     },
     {
       "label": "rename_native_frontdoor",
@@ -58,7 +58,7 @@
         "Code&DBs/Workflow/tests/integration/test_native_frontdoor.py",
         "Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py"
       ],
-      "verify_command": "grep -q 'NativeWorkflowFrontdoor' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/api/frontdoor.py && ! grep -rn 'NativeDagFrontdoor' /Users/nate/Praxis/Code\\&DBs/Workflow/ --include='*.py' | grep -v __pycache__"
+      "verify_command": "grep -q 'NativeWorkflowFrontdoor' Code\\&DBs/Workflow/surfaces/api/frontdoor.py && ! grep -rn 'NativeDagFrontdoor' Code\\&DBs/Workflow/ --include='*.py' | grep -v __pycache__"
     },
     {
       "label": "rename_http_headers",
@@ -69,7 +69,7 @@
       "prompt": "In `Code&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py`:\n\n1. Line 1: change module docstring from 'HTTP bridge for the DAG MCP surface' to 'HTTP bridge for the Praxis Engine MCP surface'\n2. Line 23: rename header `X-DAG-Allowed-MCP-Tools` to `X-Praxis-Allowed-MCP-Tools`\n3. Line 45: rename header `X-DAG-Workflow-Token` to `X-Praxis-Workflow-Token`\n\nThese are the only occurrences. Make sure string literals match exactly.",
       "read": ["Code&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py"],
       "write": ["Code&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py"],
-      "verify_command": "grep -q 'X-Praxis-Allowed-MCP-Tools' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py && grep -q 'X-Praxis-Workflow-Token' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py && ! grep -q 'X-DAG-' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py"
+      "verify_command": "grep -q 'X-Praxis-Allowed-MCP-Tools' Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py && grep -q 'X-Praxis-Workflow-Token' Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py && ! grep -q 'X-DAG-' Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py"
     },
     {
       "label": "rename_user_agents",
@@ -86,7 +86,7 @@
         "Code&DBs/Workflow/runtime/github_integration.py",
         "Code&DBs/Workflow/adapters/api_task.py"
       ],
-      "verify_command": "grep -q 'praxis-workflow-github-integration' /Users/nate/Praxis/Code\\&DBs/Workflow/runtime/github_integration.py && grep -q 'Praxis-APITaskAdapter' /Users/nate/Praxis/Code\\&DBs/Workflow/adapters/api_task.py"
+      "verify_command": "grep -q 'praxis-workflow-github-integration' Code\\&DBs/Workflow/runtime/github_integration.py && grep -q 'Praxis-APITaskAdapter' Code\\&DBs/Workflow/adapters/api_task.py"
     },
     {
       "label": "rename_integration_registry",
@@ -97,7 +97,7 @@
       "prompt": "In `Code&DBs/Workflow/registry/integration_registry_sync.py`, update the _STATIC_INTEGRATIONS list:\n\n1. Line 21: change `\"id\": \"dag-dispatch\"` to `\"id\": \"praxis-dispatch\"`\n2. Line 22: change `\"name\": \"DAG Dispatch\"` to `\"name\": \"Praxis Dispatch\"`\n3. Line 24: change `\"provider\": \"dag\"` to `\"provider\": \"praxis\"`\n4. Line 28: change description 'Submit a workflow job to the DAG dispatch runtime' to 'Submit a workflow job to the Praxis Engine runtime'\n5. Line 48: change `\"provider\": \"dag\"` to `\"provider\": \"praxis\"` (notifications entry)\n\nKeep the webhook entry unchanged (it has provider: 'http').",
       "read": ["Code&DBs/Workflow/registry/integration_registry_sync.py"],
       "write": ["Code&DBs/Workflow/registry/integration_registry_sync.py"],
-      "verify_command": "grep -q '\"praxis-dispatch\"' /Users/nate/Praxis/Code\\&DBs/Workflow/registry/integration_registry_sync.py && ! grep -q '\"dag-dispatch\"' /Users/nate/Praxis/Code\\&DBs/Workflow/registry/integration_registry_sync.py && ! grep -q '\"provider\": \"dag\"' /Users/nate/Praxis/Code\\&DBs/Workflow/registry/integration_registry_sync.py"
+      "verify_command": "grep -q '\"praxis-dispatch\"' Code\\&DBs/Workflow/registry/integration_registry_sync.py && ! grep -q '\"dag-dispatch\"' Code\\&DBs/Workflow/registry/integration_registry_sync.py && ! grep -q '\"provider\": \"dag\"' Code\\&DBs/Workflow/registry/integration_registry_sync.py"
     },
     {
       "label": "rename_docstrings_runtime",
@@ -120,7 +120,7 @@
         "Code&DBs/Workflow/runtime/condition_evaluator.py",
         "Code&DBs/Workflow/runtime/task_assembler.py"
       ],
-      "verify_command": "! grep -rn 'native DAG\\|DAG operations\\|DAG instance\\|DAG dispatch\\|DAG runtime\\|DAG execution\\|Dag Project\\|DAG Workflow' /Users/nate/Praxis/Code\\&DBs/Workflow/runtime/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive | grep -v _mine_failure"
+      "verify_command": "! grep -rn 'native DAG\\|DAG operations\\|DAG instance\\|DAG dispatch\\|DAG runtime\\|DAG execution\\|Dag Project\\|DAG Workflow' Code\\&DBs/Workflow/runtime/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive | grep -v _mine_failure"
     },
     {
       "label": "rename_docstrings_surfaces",
@@ -150,7 +150,7 @@
         "Code&DBs/Workflow/surfaces/cli/commands/operate.py",
         "Code&DBs/Workflow/surfaces/mcp/tools/research_workflow.py"
       ],
-      "verify_command": "! grep -rn 'DAG MCP\\|DAG node\\|Dag Project\\|DAG autonomous\\|DAG REST\\|native DAG' /Users/nate/Praxis/Code\\&DBs/Workflow/adapters/ /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive"
+      "verify_command": "! grep -rn 'DAG MCP\\|DAG node\\|Dag Project\\|DAG autonomous\\|DAG REST\\|native DAG' Code\\&DBs/Workflow/adapters/ Code\\&DBs/Workflow/surfaces/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive"
     },
     {
       "label": "rename_cli_help",
@@ -169,7 +169,7 @@
         "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
         "Code&DBs/Workflow/surfaces/cli/commands/operate.py"
       ],
-      "verify_command": "! grep -rn 'Dag Project\\|DAG REST\\|DAG workflow runner' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/cli/ --include='*.py' | grep -v __pycache__"
+      "verify_command": "! grep -rn 'Dag Project\\|DAG REST\\|DAG workflow runner' Code\\&DBs/Workflow/surfaces/cli/ --include='*.py' | grep -v __pycache__"
     },
     {
       "label": "verify_python",
@@ -181,7 +181,7 @@
       "prompt": "Run a comprehensive grep sweep across all Python files in Code&DBs/Workflow/ for any remaining 'DAG', 'Dag', or 'dag' references that should have been renamed.\n\nRun: grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|dag-dispatch\\|dag-project\\|DAG-APITask\\|dag-workflow-github\\|DAG Dispatch\\|DAG Workflow\\|Dag Project\\|DAG REST\\|DAG MCP\\|DAG node\\|native DAG\\|DAG operations\\|DAG instance\\|DAG dispatch\\|DAG runtime\\|DAG execution\\|DAG autonomous' Code&DBs/Workflow/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive | grep -v _mine_failure\n\nIf any hits are found, fix them by applying the same naming rules:\n- 'DAG' in branding context -> 'Praxis' or 'Praxis Engine'\n- 'DAG' in domain context -> 'workflow' or 'workflow graph'\n- Class/function names: follow the pattern established by other jobs\n\nAlso verify Python imports work: python3 -c 'from runtime.instance import NativeWorkflowInstance; from surfaces.api.frontdoor import NativeWorkflowFrontdoor; print(\"OK\")'",
       "read": ["Code&DBs/Workflow/runtime/instance.py", "Code&DBs/Workflow/surfaces/api/frontdoor.py"],
       "write": [],
-      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow && ! grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|dag-dispatch\\|DAG-APITask\\|dag-workflow-github' . --include='*.py' | grep -v __pycache__"
+      "verify_command": "cd Code\\&DBs/Workflow && ! grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|dag-dispatch\\|DAG-APITask\\|dag-workflow-github' . --include='*.py' | grep -v __pycache__"
     }
   ]
 }

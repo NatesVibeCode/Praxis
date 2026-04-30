@@ -622,6 +622,138 @@ class StateCommandResult:
         }
 
 
+def seed_manifest_entry_from_dict(payload: dict[str, Any]) -> SeedManifestEntry:
+    entry = SeedManifestEntry(
+        object_id=payload.get("object_id"),
+        instance_id=str(payload.get("instance_id") or "primary"),
+        object_truth_ref=payload.get("object_truth_ref"),
+        object_truth_version=payload.get("object_truth_version"),
+        projection_version=payload.get("projection_version"),
+        seed_parameters=dict(payload.get("seed_parameters") or {}),
+        base_state=dict(payload.get("base_state") or {}),
+    )
+    _assert_digest_match(payload, "base_state_digest", entry.base_state_digest)
+    _assert_digest_match(payload, "seed_digest", entry.seed_digest)
+    return entry
+
+
+def seed_manifest_from_dict(payload: dict[str, Any]) -> SeedManifest:
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise VirtualLabStateError(
+            "virtual_lab.seed_manifest_entries_required",
+            "seed_manifest.entries must be a list",
+        )
+    manifest = build_seed_manifest([seed_manifest_entry_from_dict(dict(item)) for item in entries])
+    _assert_digest_match(payload, "seed_digest", manifest.seed_digest)
+    return manifest
+
+
+def environment_revision_from_dict(payload: dict[str, Any]) -> EnvironmentRevision:
+    seed_manifest_payload = payload.get("seed_manifest")
+    if not isinstance(seed_manifest_payload, dict):
+        raise VirtualLabStateError(
+            "virtual_lab.seed_manifest_required",
+            "environment revision requires seed_manifest",
+        )
+    revision = EnvironmentRevision(
+        environment_id=payload.get("environment_id"),
+        revision_id=payload.get("revision_id"),
+        parent_revision_id=payload.get("parent_revision_id"),
+        revision_reason=payload.get("revision_reason"),
+        seed_manifest=seed_manifest_from_dict(dict(seed_manifest_payload)),
+        config_digest=payload.get("config_digest"),
+        policy_digest=payload.get("policy_digest"),
+        created_at=payload.get("created_at"),
+        created_by=payload.get("created_by"),
+        status=payload.get("status") or REVISION_STATUS_ACTIVE,
+        metadata=dict(payload.get("metadata") or {}),
+    )
+    _assert_digest_match(payload, "seed_digest", revision.seed_digest)
+    _assert_digest_match(payload, "revision_digest", revision.revision_digest)
+    return revision
+
+
+def object_state_record_from_dict(payload: dict[str, Any]) -> ObjectStateRecord:
+    record = ObjectStateRecord(
+        environment_id=payload.get("environment_id"),
+        revision_id=payload.get("revision_id"),
+        object_id=payload.get("object_id"),
+        instance_id=str(payload.get("instance_id") or "primary"),
+        source_ref=dict(payload.get("source_ref") or {}),
+        base_state=dict(payload.get("base_state") or {}),
+        overlay_state=dict(payload.get("overlay_state") or {}),
+        last_event_id=payload.get("last_event_id"),
+        tombstone=bool(payload.get("tombstone")),
+    )
+    _assert_digest_match(payload, "base_state_digest", record.base_state_digest)
+    _assert_digest_match(payload, "overlay_state_digest", record.overlay_state_digest)
+    _assert_digest_match(payload, "effective_state_digest", record.effective_state_digest)
+    _assert_digest_match(payload, "state_digest", record.state_digest)
+    return record
+
+
+def event_envelope_from_dict(payload: dict[str, Any]) -> EventEnvelope:
+    parent_event_ids = payload.get("parent_event_ids") or ()
+    if not isinstance(parent_event_ids, (list, tuple)):
+        raise VirtualLabStateError(
+            "virtual_lab.parent_event_ids_not_list",
+            "parent_event_ids must be a list",
+        )
+    return EventEnvelope(
+        event_id=payload.get("event_id"),
+        environment_id=payload.get("environment_id"),
+        revision_id=payload.get("revision_id"),
+        stream_id=payload.get("stream_id"),
+        event_type=payload.get("event_type"),
+        event_version=int(payload.get("event_version") or 1),
+        occurred_at=payload.get("occurred_at"),
+        recorded_at=payload.get("recorded_at"),
+        actor_id=payload.get("actor_id"),
+        actor_type=payload.get("actor_type"),
+        command_id=payload.get("command_id"),
+        causation_id=payload.get("causation_id"),
+        correlation_id=payload.get("correlation_id"),
+        parent_event_ids=tuple(parent_event_ids),
+        sequence_number=int(payload.get("sequence_number") or 0),
+        pre_state_digest=payload.get("pre_state_digest"),
+        post_state_digest=payload.get("post_state_digest"),
+        payload=dict(payload.get("payload") or {}),
+        payload_digest=payload.get("payload_digest"),
+        schema_digest=payload.get("schema_digest"),
+    )
+
+
+def command_receipt_from_dict(payload: dict[str, Any]) -> CommandReceipt:
+    resulting_event_ids = payload.get("resulting_event_ids") or ()
+    errors = payload.get("errors") or ()
+    warnings = payload.get("warnings") or ()
+    if not isinstance(resulting_event_ids, (list, tuple)):
+        raise VirtualLabStateError(
+            "virtual_lab.resulting_event_ids_not_list",
+            "resulting_event_ids must be a list",
+        )
+    if not isinstance(errors, (list, tuple)) or not isinstance(warnings, (list, tuple)):
+        raise VirtualLabStateError(
+            "virtual_lab.receipt_diagnostics_not_list",
+            "receipt errors and warnings must be lists",
+        )
+    return CommandReceipt(
+        receipt_id=payload.get("receipt_id"),
+        command_id=payload.get("command_id"),
+        environment_id=payload.get("environment_id"),
+        revision_id=payload.get("revision_id"),
+        status=payload.get("status"),
+        resulting_event_ids=tuple(resulting_event_ids),
+        precondition_digest=payload.get("precondition_digest"),
+        result_digest=payload.get("result_digest"),
+        errors=tuple(dict(item) for item in errors),
+        warnings=tuple(dict(item) for item in warnings),
+        issued_at=payload.get("issued_at"),
+        issued_by=payload.get("issued_by"),
+    )
+
+
 def build_seed_manifest(entries: list[SeedManifestEntry | dict[str, Any]] | tuple[SeedManifestEntry | dict[str, Any], ...]) -> SeedManifest:
     normalized = tuple(entry if isinstance(entry, SeedManifestEntry) else SeedManifestEntry(**entry) for entry in entries)
     return SeedManifest(entries=normalized)
@@ -1368,3 +1500,13 @@ def _normalize_required_datetime(value: Any, field_name: str) -> str:
     if dt.tzinfo is None or dt.utcoffset() is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _assert_digest_match(payload: dict[str, Any], field_name: str, expected: str) -> None:
+    actual = _optional_text(payload.get(field_name))
+    if actual is not None and actual != expected:
+        raise VirtualLabStateError(
+            f"virtual_lab.{field_name}_mismatch",
+            f"{field_name} must match canonical value",
+            details={"expected": expected, "actual": actual},
+        )

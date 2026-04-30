@@ -69,11 +69,18 @@ def test_clean_repo_relative_queue_spec_still_loads(tmp_path: Path) -> None:
 
 
 def test_operator_local_host_path_is_auto_normalized(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """BUG-C585EFE6: host-absolute repo prefixes are self-fixable; submitter
     must rewrite them to /workspace and emit a soft-warn breadcrumb instead
     of failing the chain submit."""
+
+    monkeypatch.setenv(
+        "PRAXIS_OPERATOR_LOCAL_REPO_PATHS",
+        "/Users/nate/Praxis:/Volumes/Users/natha/Documents/Builds/Praxis",
+    )
 
     spec_path = _write_spec(
         tmp_path / "artifacts/workflow/host_absolute.queue.json",
@@ -95,7 +102,13 @@ def test_operator_local_host_path_is_auto_normalized(
     )
 
 
-def test_operator_local_volumes_path_is_auto_normalized(tmp_path: Path) -> None:
+def test_operator_local_volumes_path_is_auto_normalized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(
+        "PRAXIS_OPERATOR_LOCAL_REPO_PATHS",
+        "/Users/nate/Praxis:/Volumes/Users/natha/Documents/Builds/Praxis",
+    )
     spec_path = _write_spec(
         tmp_path / "artifacts/workflow/host_absolute_volumes.queue.json",
         (
@@ -111,7 +124,13 @@ def test_operator_local_volumes_path_is_auto_normalized(tmp_path: Path) -> None:
     assert "/workspace/scripts/praxis_bugs.py" in prompt
 
 
-def test_normalize_helper_is_pure_and_idempotent() -> None:
+def test_normalize_helper_is_pure_and_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "PRAXIS_OPERATOR_LOCAL_REPO_PATHS",
+        "/Users/nate/Praxis:/Volumes/Users/natha/Documents/Builds/Praxis",
+    )
     raw = (
         "[a](/Users/nate/Praxis/x.py) and "
         "[b](/Volumes/Users/natha/Documents/Builds/Praxis/y.py)"

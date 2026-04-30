@@ -50,7 +50,7 @@
       "write": [
         "Code&DBs/Databases/migrations/workflow/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_l_create_repositories",
@@ -74,7 +74,7 @@
         "Code&DBs/Workflow/storage/postgres/__init__.py",
         "Code&DBs/Workflow/authority/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_l_thin_sources",
@@ -95,7 +95,7 @@
         "Code&DBs/Workflow/surfaces/api/frontdoor.py",
         "Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/surfaces/api/frontdoor.py' 'Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/surfaces/api/frontdoor.py' 'Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile 'Code&DBs/Workflow/surfaces/api/frontdoor.py' 'Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/surfaces/api/frontdoor.py' 'Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py'"
     },
     {
       "label": "wave_l_tests",
@@ -114,7 +114,7 @@
       "write": [
         "Code&DBs/Workflow/tests/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'frontdoor' || true"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'frontdoor' || true"
     },
     {
       "label": "wave_l_close_bugs",
@@ -125,7 +125,7 @@
       ],
       "description": "Resolve the wave's linked bugs as FIXED",
       "outcome_goal": "Every linked bug is FIXED with a resolution citing this queue_id",
-      "prompt": "Resolve the Wave L linked bugs as FIXED after regression tests pass.\n\n```bash\ncd /Users/nate/Praxis\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-118A3F229AC1\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/frontdoor.py:483 in boundary_refactor_wave_l_frontdoor_submission_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-0015036EEFF2\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/frontdoor.py:828 in boundary_refactor_wave_l_frontdoor_submission_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-433129C7156B\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/handlers/workflow_admin.py:132 in boundary_refactor_wave_l_frontdoor_submission_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
+      "prompt": "Resolve the Wave L linked bugs as FIXED after regression tests pass.\n\n```bash\ncd .\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-118A3F229AC1\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/frontdoor.py:483 in boundary_refactor_wave_l_frontdoor_submission_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-0015036EEFF2\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/frontdoor.py:828 in boundary_refactor_wave_l_frontdoor_submission_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-433129C7156B\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/handlers/workflow_admin.py:132 in boundary_refactor_wave_l_frontdoor_submission_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
       "read": [],
       "write": [],
       "verify_command": "true"

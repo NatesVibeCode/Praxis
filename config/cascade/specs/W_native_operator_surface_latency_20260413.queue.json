@@ -45,7 +45,7 @@
       "write": [
         "Code&DBs/Workflow/surfaces/api/native_operator_surface.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py -k native_operator"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py -k native_operator"
     },
     {
       "label": "batch_operator_query_reads",
@@ -65,7 +65,7 @@
       "write": [
         "Code&DBs/Workflow/surfaces/api/_operator_repository.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_query_surface.py -k operator_surface"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_query_surface.py -k operator_surface"
     },
     {
       "label": "native_operator_surface_tests",
@@ -88,7 +88,7 @@
         "Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py",
         "Code&DBs/Workflow/tests/integration/test_native_observability_cockpit.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py Code\\&DBs/Workflow/tests/integration/test_native_operator_query_surface.py"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py Code\\&DBs/Workflow/tests/integration/test_native_operator_query_surface.py"
     },
     {
       "label": "native_operator_surface_review",

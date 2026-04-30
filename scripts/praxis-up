@@ -167,8 +167,8 @@ echo "→ running praxis_cli_auth_doctor inside the workflow-worker service"
 DOCTOR_OUT="$(
   docker compose exec -T workflow-worker python3 - <<'PY'
 import json
-from surfaces.mcp.tools.provider_onboard import tool_praxis_cli_auth_doctor
-result = tool_praxis_cli_auth_doctor({})
+from surfaces.mcp.tools.provider_onboard import run_cli_auth_doctor
+result = run_cli_auth_doctor({})
 print(json.dumps({
     "ok": result.get("ok"),
     "summary": result.get("summary"),
@@ -194,9 +194,15 @@ d = json.loads(sys.stdin.read())
 print(d.get('unhealthy_count', 1))
 ")"
 
-if [[ "$UNHEALTHY" != "0" ]]; then
+OK="$(echo "$DOCTOR_OUT" | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.read())
+print('1' if d.get('ok') is True else '0')
+")"
+
+if [[ "$OK" != "1" || "$UNHEALTHY" != "0" ]]; then
   echo
-  echo "praxis-up: $UNHEALTHY provider(s) failed auth probe."
+  echo "praxis-up: auth probe failed (ok=$OK unhealthy_count=$UNHEALTHY)."
   echo "Inspect the reports above. A 'timeout' state usually means the worker"
   echo "has stale auth hydration or an invalid legacy mount, while"
   echo "'unauthenticated' means the host login or token source itself is bad."
@@ -211,10 +217,10 @@ fi
 # This is the explicit clear, gated on actually-passing the auth probe.
 echo "→ clearing any open zero-token silent-failure hits (auth probe passed)"
 docker compose exec -T workflow-worker python3 - <<'PY' || true
-from storage.postgres.connection import SyncPostgresConnection
+from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 from runtime.observability.zero_token_detector import clear_resolved_after_auth
-with SyncPostgresConnection() as conn:
-    cleared = clear_resolved_after_auth(conn)
+conn = SyncPostgresConnection(get_workflow_pool())
+cleared = clear_resolved_after_auth(conn)
 print(f"  cleared {cleared} open zero-token hit(s)")
 PY
 

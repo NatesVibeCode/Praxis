@@ -19,7 +19,7 @@
         "Code&DBs/Workflow/surfaces/app/src/moon/moonBuildReducer.ts"
       ],
       "write": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"],
-      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app && grep -q 'useMoonDrag' src/moon/MoonBuildPage.tsx && grep -q 'MoonDragGhost' src/moon/MoonBuildPage.tsx && grep -q 'data-drop-node' src/moon/MoonBuildPage.tsx"
+      "verify_command": "cd Code\\&DBs/Workflow/surfaces/app && grep -q 'useMoonDrag' src/moon/MoonBuildPage.tsx && grep -q 'MoonDragGhost' src/moon/MoonBuildPage.tsx && grep -q 'data-drop-node' src/moon/MoonBuildPage.tsx"
     },
     {
       "label": "ring_states_full",
@@ -36,7 +36,7 @@
         "Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts",
         "Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css"
       ],
-      "verify_command": "grep -c 'run-pending\\|run-active\\|run-succeeded\\|run-failed\\|projected\\|decided-incomplete\\|blocked' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts | grep -v '^0$'"
+      "verify_command": "grep -c 'run-pending\\|run-active\\|run-succeeded\\|run-failed\\|projected\\|decided-incomplete\\|blocked' Code\\&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts | grep -v '^0$'"
     },
     {
       "label": "release_tray_fix",
@@ -47,7 +47,7 @@
       "prompt": "Fix two issues in `Code&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx`:\n\n1. **Doubled spec calculation**: The planned spec (job list) is calculated in two places — once via projectedJobs for the preview and once via the handlePlan callback. Refactor so that:\n   - projectedJobs is used ONLY as the initial preview before the user clicks Plan\n   - handlePlan's result becomes the single source of truth stored in state\n   - The dispatch step uses the planned result, not a re-calculation\n\n2. **Add inline dispatch confirmation**: After the user clicks 'Release'/'Dispatch', show an inline confirmation panel (NOT window.confirm) with:\n   - Number of jobs that will be dispatched\n   - Agent assignments summary\n   - A 'Confirm Release' button (primary/accent color)\n   - A 'Cancel' button\n   - Use local state (e.g. `confirmingDispatch: boolean`) to toggle the panel\n   - Only call the actual dispatch function when 'Confirm Release' is clicked\n\nRead the file first to understand the current flow, then make targeted changes.\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
       "read": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx"],
       "write": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx"],
-      "verify_command": "grep -q 'confirmingDispatch\\|confirmDispatch\\|Confirm Release' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx"
+      "verify_command": "grep -q 'confirmingDispatch\\|confirmDispatch\\|Confirm Release' Code\\&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx"
     },
     {
       "label": "run_panel_endpoints",
@@ -58,7 +58,7 @@
       "prompt": "Fix the API endpoints and add live streaming in `Code&DBs/Workflow/surfaces/app/src/moon/MoonRunPanel.tsx`:\n\n1. **Fix endpoints**: The component likely uses hardcoded paths like `/api/runs/` which should be `/api/workflow/runs/`. Search for all fetch() calls and URL constructions. Update them:\n   - `/api/runs/recent` -> `/api/workflow/runs/recent`\n   - `/api/runs/{runId}/jobs/{id}` -> `/api/workflow/runs/{runId}/jobs/{id}`\n   - Any other `/api/runs/` paths\n\n2. **Add SSE streaming**: When the run is not in a terminal state (succeeded, failed, cancelled), open an EventSource connection for live updates:\n   ```typescript\n   // When run is active, stream updates\n   useEffect(() => {\n     if (!runId || TERMINAL.has(status)) return;\n     const es = new EventSource(`/api/workflow/runs/${runId}/stream`);\n     es.onmessage = (e) => {\n       const data = JSON.parse(e.data);\n       // Update job statuses from the event data\n       // The event shape is: { jobs: RunJob[], status: RunStatus }\n     };\n     es.onerror = () => es.close();\n     return () => es.close();\n   }, [runId, status]);\n   ```\n   Integrate this with the existing state management. When the EventSource fires, update the job list and overall run status without a full re-fetch.\n\n3. Clean up the EventSource on unmount or when the run becomes terminal.\n\nRead the file first, then make changes.\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
       "read": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonRunPanel.tsx"],
       "write": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonRunPanel.tsx"],
-      "verify_command": "grep -q 'EventSource\\|/api/workflow/runs' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/MoonRunPanel.tsx"
+      "verify_command": "grep -q 'EventSource\\|/api/workflow/runs' Code\\&DBs/Workflow/surfaces/app/src/moon/MoonRunPanel.tsx"
     },
     {
       "label": "build_graph_gates",
@@ -73,7 +73,7 @@
         "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
       ],
       "write": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx"],
-      "verify_command": "grep -q 'approval\\|human_review\\|validation\\|gate' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx"
+      "verify_command": "grep -q 'approval\\|human_review\\|validation\\|gate' Code\\&DBs/Workflow/surfaces/app/src/moon/MoonReleaseTray.tsx"
     },
     {
       "label": "drag_error_handling",
@@ -85,7 +85,7 @@
       "prompt": "Add error handling to all drag-drop and mutation paths in `Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx`.\n\n1. Find all places where mutate() or onMutate() is called (handleNodeAction, handleApplyGate, handleNodeDrop, applyCatalogToEdge, etc.)\n\n2. Wrap each in try/catch:\n   ```typescript\n   try {\n     await mutate(...);\n   } catch (err) {\n     setMutationError(err instanceof Error ? err.message : 'Mutation failed');\n   }\n   ```\n\n3. Add a mutation error state:\n   ```typescript\n   const [mutationError, setMutationError] = useState<string | null>(null);\n   ```\n\n4. Auto-clear the error after 5 seconds:\n   ```typescript\n   useEffect(() => {\n     if (!mutationError) return;\n     const t = setTimeout(() => setMutationError(null), 5000);\n     return () => clearTimeout(t);\n   }, [mutationError]);\n   ```\n\n5. Render an error toast/banner when mutationError is set:\n   ```tsx\n   {mutationError && (\n     <div className=\"moon-error-toast\">\n       {mutationError}\n       <button onClick={() => setMutationError(null)}>&times;</button>\n     </div>\n   )}\n   ```\n   Place it at the top of the moon-page container.\n\nRead the file first to find all mutation call sites.\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
       "read": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"],
       "write": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"],
-      "verify_command": "grep -q 'mutationError\\|moon-error-toast' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+      "verify_command": "grep -q 'mutationError\\|moon-error-toast' Code\\&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
     }
   ]
 }

@@ -4,107 +4,110 @@ Date: 2026-04-30
 
 ## Summary
 
-Implemented the bounded Phase 6 Virtual Lab state primitive layer.
+Promoted the Virtual Lab state model into DB-backed CQRS authority.
 
-The implementation is pure deterministic domain code. It does not mutate Object
-Truth, register CQRS operations, create migrations, touch generated docs, or
-add storage authority.
+Object Truth still owns observed client facts. Virtual Lab now owns predicted
+copy-on-write consequences in queryable environment revisions with object
+state projections, event envelopes, command receipts, replay validation, typed
+gaps, MCP tools, and live HTTP routes.
 
-## Existing Authority Discovery
+## Authority Model
 
-Used the live standing-order query first, then local discovery and the phase
-packet.
-
-Relevant authority:
-
-- Object Truth discovers client systems and owns observed facts.
-- Virtual Lab proves predicted consequences separately from Object Truth.
-- CQRS operation/storage authority must not be bypassed by sidecar shims.
-- Unknown or invalid state must fail closed with explicit receipts or errors.
-
-Required local reads completed:
-
-- `AGENTS.md`
-- `artifacts/workflow/client_operating_model/packets/phase_06_virtual_lab_state/PLAN.md`
-- `Code&DBs/Workflow/runtime/object_truth/ingestion.py`
-- `Code&DBs/Workflow/runtime/task_contracts/environment.py`
-- `Code&DBs/Workflow/runtime/integrations/action_contracts.py`
-
-The phase skill referenced `Code&DBs/Workflow/PUBLIC_NAMING.md`, but that file
-is not present in this checkout.
+- Authority domain: `authority.virtual_lab_state`
+- Event stream: `stream.authority.virtual_lab_state`
+- Command operation: `virtual_lab_state_record`
+- Query operation: `virtual_lab_state_read`
+- Event contract: `virtual_lab_state.recorded`
+- HTTP route: `/api/virtual-lab/state`
+- MCP tools:
+  - `praxis_virtual_lab_state_record`
+  - `praxis_virtual_lab_state_read`
 
 ## Changed Files
 
+- `Code&DBs/Databases/migrations/workflow/367_virtual_lab_state_authority.sql`
 - `Code&DBs/Workflow/runtime/virtual_lab/state.py`
-- `Code&DBs/Workflow/runtime/virtual_lab/__init__.py`
-- `Code&DBs/Workflow/tests/unit/test_virtual_lab_state.py`
-- `docs/architecture/object-truth-trust-toolbelt/virtual-lab-state-2026-04-30.md`
-- `artifacts/workflow/client_operating_model/build_reports/phase_06_IMPLEMENTATION.md`
+- `Code&DBs/Workflow/runtime/operations/commands/virtual_lab_state.py`
+- `Code&DBs/Workflow/runtime/operations/queries/virtual_lab_state.py`
+- `Code&DBs/Workflow/storage/postgres/virtual_lab_state_repository.py`
+- `Code&DBs/Workflow/surfaces/mcp/tools/virtual_lab_state.py`
+- `Code&DBs/Workflow/surfaces/mcp/cli_metadata.py`
+- `Code&DBs/Workflow/system_authority/workflow_migration_authority.json`
+- `Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py`
+- `Code&DBs/Workflow/tests/unit/test_virtual_lab_state_operations.py`
+- `Code&DBs/Workflow/tests/unit/test_virtual_lab_state_repository.py`
+- `Code&DBs/Workflow/tests/unit/test_virtual_lab_state_mcp_tool.py`
+- `Code&DBs/Workflow/tests/unit/test_operation_catalog_bindings.py`
+- `Code&DBs/Workflow/tests/unit/test_operation_catalog_mounting.py`
+- `Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py`
+- `docs/MCP.md`
+- `docs/CLI.md`
+- `docs/API.md`
 
 ## Implemented Contracts
 
-Added typed domain records for:
+- Environment revision heads and immutable revision packets.
+- Seed-entry storage binding Virtual Lab objects to Object Truth refs.
+- Copy-on-write object state projections with base, overlay, effective, and
+  state digests.
+- Event store with per-stream sequence ordering and pre/post state digests.
+- Command receipt storage with result digests and event linkage.
+- Revision-scoped typed gap storage.
+- Gateway command/query handlers that validate domain packets before storage.
+- Thin MCP wrappers that dispatch only through the CQRS gateway.
 
-- environment revisions
-- seed manifest entries from Object Truth refs
-- seed manifests with canonical ordering and digesting
-- copy-on-write object state records
-- actor identity
-- canonical event envelopes
-- command receipts
-- state command results
+## Live Proof
 
-Added helpers for:
+- MCP write receipt: `89055039-0ea3-487a-9773-d802642537cc`
+- MCP write event: `c26104fb-bc21-4937-89c6-8c86ea9f77cb`
+- MCP revision read: `83626082-0357-4f9b-aae0-96eaf68eeb84`
+- MCP event stream read: `a971beb6-dbe1-4fcb-be64-5b836d78a595`
+- MCP receipt read: `481467e5-cd7f-468c-9513-4e610023ba79`
+- HTTP POST write receipt: `1a3dcf98-a619-4916-a936-e4d9fd0e8cea`
+- HTTP POST event: `c3c4d365-a9c0-4f4e-a352-08e5e566f082`
+- HTTP GET revision read: `e724acce-4f9e-4b96-81f5-9305cbb1c42e`
 
-- algorithm/version-qualified canonical digests
-- environment revision construction
-- seed-derived object state construction
-- object stream ids
-- overlay patch, overlay replace, tombstone, and restore commands
-- event append validation
-- event stream validation
-- event chain digesting
-- object and environment replay
+Live revision:
 
-## Validation Behavior
+- Environment: `virtual_lab.env.phase06.demo`
+- Revision: `virtual_lab_revision.22ec452f0aa6534a572f`
+- Revision digest:
+  `sha256:v1:ecc5758e43d042ba0fe40663dda6244105a65791134fafc5d040b4b6f2771b7a`
+- Event-chain digest:
+  `sha256:v1:5c01da365e8ab1eac87b9a6b5bb377f627a7d0571ef4e0c712cd70bc0777de79`
 
-The state layer fails closed for:
-
-- missing required identifiers
-- duplicate seed manifest object instances
-- invalid revision, actor, receipt, or event status values
-- duplicate event ids
-- duplicate or skipped per-stream sequence numbers
-- orphan object events during environment replay
-- event pre-state digest mismatch
-- event post-state digest mismatch during replay
-- expected state digest conflict
-- closed revision mutation attempts
-
-Closed revision writes return a rejected receipt and append no event.
-
-## Validation Commands
-
-```bash
-PYTHONPATH='Code&DBs/Workflow' .venv/bin/python -m py_compile 'Code&DBs/Workflow/runtime/virtual_lab/state.py' 'Code&DBs/Workflow/runtime/virtual_lab/__init__.py'
-PYTHONPATH='Code&DBs/Workflow' .venv/bin/python -m pytest 'Code&DBs/Workflow/tests/unit/test_virtual_lab_state.py' -q
-```
-
-Result:
+## Validation
 
 ```text
-6 passed
+12 passed in 0.53s
+53 passed in 0.85s
+88 passed in 0.36s
+9 passed in 0.62s
+65 passed in 1.05s
+78 passed in 0.92s
+75 passed in 0.03s
+153 passed in 0.93s
+git diff --check passed
+API health passed
 ```
 
-## Blockers
+The 153-test focused recheck was pinned to the live operator
+`WORKFLOW_DATABASE_URL` so generated API docs used the same route authority as
+the checked-in docs. When collected with integration tests without that pin,
+`tests/integration/conftest.py` points `WORKFLOW_DATABASE_URL` at
+`praxis_test`, which correctly changes the route count and creates a docs-only
+false negative.
 
-No code blocker in the requested scope.
+## Roadmap Closeout
 
-## Migration Needs
+- Closeout command receipt: `17f77fc4-7fd4-4482-9b8a-90fb9755eb10`
+- Closeout event: `11c85aa8-d281-4239-83f1-d97f17c17217`
+- Roadmap readback receipt: `6c7b068e-309e-426f-8f37-294c62f77ebb`
+- Roadmap state: Phase 6 is `completed` / `completed`
 
-No migration was added.
+## Boundary
 
-If Virtual Lab state needs to become runtime authority, add a separate
-DB-backed repository plus CQRS command/query operations. That packet should
-register operation catalog rows, receipt behavior, event contracts, and storage
-schema explicitly. This phase intentionally stays as reusable domain code.
+This phase does not execute integrations, mutate Object Truth, promote to live
+sandboxes, or claim predicted state is proven live state. It makes predicted
+state durable, replayable, and inspectable so later phases can compare it
+against sandbox readback.

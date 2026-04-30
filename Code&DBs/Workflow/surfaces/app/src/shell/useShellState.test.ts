@@ -45,7 +45,7 @@ describe('routeSlotState', () => {
       {
         id: manifestTabShellId('entity-workspace-2a1a7c', 'main'),
         kind: 'manifest',
-        label: 'entity-workspace-2a1a7c',
+        label: 'Entity Workspace',
         closable: true,
         manifestId: 'entity-workspace-2a1a7c',
         manifestTabId: 'main',
@@ -57,7 +57,7 @@ describe('routeSlotState', () => {
     const existing: DynamicTab = {
       id: manifestTabShellId('blank-workspace-2df889', 'main'),
       kind: 'manifest',
-      label: 'blank-workspace-2df889',
+      label: 'Compose',
       closable: true,
       manifestId: 'blank-workspace-2df889',
       manifestTabId: 'main',
@@ -75,7 +75,7 @@ describe('routeSlotState', () => {
       {
         id: manifestTabShellId('entity-workspace-2a1a7c', 'main'),
         kind: 'manifest',
-        label: 'entity-workspace-2a1a7c',
+        label: 'Entity Workspace',
         closable: true,
         manifestId: 'entity-workspace-2a1a7c',
         manifestTabId: 'main',

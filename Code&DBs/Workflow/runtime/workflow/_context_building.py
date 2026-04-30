@@ -481,6 +481,16 @@ def _scope_resolution_root(
     return configured
 
 
+def _scope_contains_workspace_root(scope_paths: list[str]) -> bool:
+    for path in scope_paths:
+        normalized = str(path or "").strip()
+        if normalized in {"", ".", "./"}:
+            return True
+        if normalized.rstrip("/") == ".":
+            return True
+    return False
+
+
 def _job_execution_context_shard(
     *,
     conn: SyncPostgresConnection,
@@ -513,6 +523,19 @@ def _job_execution_context_shard(
         scope_paths=[*write_scope, *declared_read_scope],
     )
     if not normalized_repo_root or not write_scope:
+        return shard
+    if _scope_contains_workspace_root([*write_scope, *declared_read_scope]):
+        shard["scope_resolution_skipped"] = {
+            "reason_code": "scope.workspace_root_too_broad",
+            "message": (
+                "write/read scope includes workspace root; blast-radius and "
+                "test-scope expansion skipped to avoid a full-repository scan"
+            ),
+        }
+        shard["metrics"] = {
+            **dict(shard["metrics"]),
+            "scope_resolution_skipped": 1,
+        }
         return shard
 
     try:
@@ -879,6 +902,17 @@ def _render_execution_context_shard(value: object) -> str:
     resolution_error = str(value.get("scope_resolution_error") or "").strip()
     if resolution_error:
         parts.append(f"scope_resolution_error: {resolution_error}")
+    resolution_skipped = value.get("scope_resolution_skipped")
+    if isinstance(resolution_skipped, dict) and resolution_skipped:
+        parts.append(
+            "scope_resolution_skipped: "
+            + json.dumps(
+                resolution_skipped,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        )
 
     parts.append("--- END EXECUTION CONTEXT SHARD ---")
     return "\n".join(parts)

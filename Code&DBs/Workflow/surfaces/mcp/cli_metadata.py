@@ -1584,6 +1584,500 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_object_truth_mdm_resolution_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-mdm-resolution-record",
+        when_to_use=(
+            "Persist a receipt-backed Object Truth MDM/source-authority "
+            "resolution packet with identity clusters, field comparisons, "
+            "normalization rules, authority evidence, hierarchy signals, and "
+            "typed gaps."
+        ),
+        when_not_to_use=(
+            "Do not use it to decide source authority implicitly. The input "
+            "must already contain explicit MDM evidence built by the domain "
+            "layer or an equivalent deterministic authority path."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record one MDM resolution packet",
+                {
+                    "client_ref": "client.acme",
+                    "entity_type": "organization",
+                    "as_of": "2026-04-30T16:00:00Z",
+                    "identity_clusters": [{"cluster_id": "object_truth_cluster.organization.demo"}],
+                    "field_comparisons": [{"field_comparison_digest": "comparison.digest"}],
+                },
+            ),
+        ],
+    ),
+    "praxis_object_truth_mdm_resolution_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-mdm-resolution-read",
+        when_to_use=(
+            "Read stored Object Truth MDM/source-authority resolution packets "
+            "and their decomposed identity, field, authority, hierarchy, and "
+            "gap evidence."
+        ),
+        when_not_to_use=(
+            "Do not use it to mutate MDM evidence; use "
+            "praxis_object_truth_mdm_resolution_record for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one MDM resolution packet",
+                {
+                    "action": "describe",
+                    "packet_ref": "object_truth_mdm_packet.demo",
+                    "include_records": True,
+                },
+            ),
+        ],
+    ),
+    "praxis_task_environment_contract_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="task-environment-contract-record",
+        when_to_use=(
+            "Persist a receipt-backed task-environment contract head and "
+            "revision with its deterministic evaluation result, hierarchy "
+            "nodes, typed invalid states, dependency hash, and command event."
+        ),
+        when_not_to_use=(
+            "Do not use it to invent policy during execution. The contract "
+            "and evaluation result should come from the task-contract domain "
+            "model or another deterministic authority path."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record one task-environment contract",
+                {
+                    "contract": {
+                        "contract_id": "task_contract.account_sync.1",
+                        "task_ref": "task.account_sync",
+                        "hierarchy_node_id": "task.account_sync",
+                        "revision_id": "rev.contract.1",
+                        "status": "active",
+                    },
+                    "evaluation_result": {
+                        "ok": True,
+                        "status": "valid",
+                        "invalid_states": [],
+                        "warnings": [],
+                    },
+                },
+            ),
+        ],
+    ),
+    "praxis_task_environment_contract_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="task-environment-contract-read",
+        when_to_use=(
+            "Read stored task-environment contract heads, revisions, hierarchy "
+            "nodes, and typed invalid states before launch or promotion."
+        ),
+        when_not_to_use=(
+            "Do not use it to mutate contract authority; use "
+            "praxis_task_environment_contract_record for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one task-environment contract",
+                {
+                    "action": "describe",
+                    "contract_id": "task_contract.account_sync.1",
+                    "include_history": True,
+                },
+            ),
+        ],
+    ),
+    "praxis_integration_action_contract_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="integration-action-contract-record",
+        when_to_use=(
+            "Persist receipt-backed integration action contracts and "
+            "automation rule snapshots with deterministic hashes, validation "
+            "gaps, linked actions, and a command event before simulation or "
+            "sandbox promotion."
+        ),
+        when_not_to_use=(
+            "Do not use it to execute an integration or invent connector "
+            "behavior. The contract should describe observed, owner-reviewed, "
+            "or explicitly gapped behavior."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record one integration action contract",
+                {
+                    "contracts": [
+                        {
+                            "action_id": "integration_action.hubspot.create_contact",
+                            "name": "HubSpot / create contact",
+                            "status": "draft",
+                        }
+                    ],
+                    "automation_snapshots": [
+                        {
+                            "rule_id": "automation.hubspot.contact_sync",
+                            "name": "HubSpot contact sync",
+                            "status": "active",
+                            "linked_action_ids": ["integration_action.hubspot.create_contact"],
+                        }
+                    ],
+                },
+            ),
+        ],
+    ),
+    "praxis_integration_action_contract_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="integration-action-contract-read",
+        when_to_use=(
+            "Read stored integration action contracts, revisions, automation "
+            "snapshots, linked actions, and typed gaps before Virtual Lab "
+            "simulation or live sandbox promotion."
+        ),
+        when_not_to_use=(
+            "Do not use it to mutate contract authority; use "
+            "praxis_integration_action_contract_record for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one integration action contract",
+                {
+                    "action": "describe_contract",
+                    "action_contract_id": "integration_action.hubspot.create_contact",
+                    "include_history": True,
+                    "include_automation": True,
+                },
+            ),
+            _example(
+                "List automation snapshots",
+                {
+                    "action": "list_automation_snapshots",
+                    "status": "active",
+                },
+            ),
+        ],
+    ),
+    "praxis_virtual_lab_state_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="virtual-lab-state-record",
+        when_to_use=(
+            "Persist a receipt-backed Virtual Lab state packet after "
+            "deterministic replay validation: environment revision, seeded "
+            "object projections, event envelopes, command receipts, and typed "
+            "gaps."
+        ),
+        when_not_to_use=(
+            "Do not use it to execute integrations or mutate Object Truth. "
+            "Object Truth seeds base state; Virtual Lab records predicted "
+            "copy-on-write consequences only."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record one Virtual Lab revision",
+                {
+                    "environment_revision": {
+                        "environment_id": "virtual_lab.env.account_sync",
+                        "revision_id": "virtual_lab_revision.demo",
+                        "status": "active",
+                    },
+                    "object_states": [
+                        {
+                            "object_id": "account:001",
+                            "instance_id": "primary",
+                        }
+                    ],
+                    "events": [],
+                    "command_receipts": [],
+                    "typed_gaps": [],
+                },
+            ),
+        ],
+    ),
+    "praxis_virtual_lab_state_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="virtual-lab-state-read",
+        when_to_use=(
+            "Read stored Virtual Lab revisions, object state projections, event "
+            "streams, command receipts, and replay gaps before sandbox "
+            "promotion or drift readback."
+        ),
+        when_not_to_use=(
+            "Do not use it to mutate lab authority; use "
+            "praxis_virtual_lab_state_record for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one Virtual Lab revision",
+                {
+                    "action": "describe_revision",
+                    "environment_id": "virtual_lab.env.account_sync",
+                    "revision_id": "virtual_lab_revision.demo",
+                    "include_events": True,
+                    "include_receipts": True,
+                },
+            ),
+            _example(
+                "Read one event stream",
+                {
+                    "action": "list_events",
+                    "environment_id": "virtual_lab.env.account_sync",
+                    "revision_id": "virtual_lab_revision.demo",
+                    "stream_id": "virtual_lab.env.account_sync/virtual_lab_revision.demo/objects/account:001/primary",
+                },
+            ),
+        ],
+    ),
+    "praxis_virtual_lab_simulation_run": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="virtual-lab-simulation-run",
+        when_to_use=(
+            "Run a deterministic Virtual Lab scenario and persist its trace, "
+            "state transitions, automation firings, assertions, verifier "
+            "results, typed gaps, and promotion blockers through CQRS."
+        ),
+        when_not_to_use=(
+            "Do not use it to mutate live systems or Object Truth. It records "
+            "predicted consequences against a saved Virtual Lab revision."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Run one simulation scenario",
+                {
+                    "scenario": {
+                        "scenario_id": "scenario.account_sync",
+                        "initial_state": {
+                            "revision": {
+                                "environment_id": "virtual_lab.env.account_sync",
+                                "revision_id": "virtual_lab_revision.demo",
+                            },
+                            "object_states": [],
+                        },
+                        "actions": [],
+                        "config": {
+                            "seed": "seed.account_sync",
+                            "clock_start": "2026-04-30T17:00:00Z",
+                        },
+                        "verifiers": [
+                            {
+                                "verifier_id": "verifier.no_blockers",
+                                "verifier_kind": "no_blockers",
+                            }
+                        ],
+                    },
+                    "task_contract_ref": "task_environment_contract.account_sync",
+                    "integration_action_contract_refs": [
+                        "integration_action_contract.crm.patch_account"
+                    ],
+                },
+            ),
+        ],
+    ),
+    "praxis_virtual_lab_simulation_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="virtual-lab-simulation-read",
+        when_to_use=(
+            "Inspect persisted Virtual Lab simulation runs, ordered runtime "
+            "events, verifier results, typed gaps, and promotion blockers "
+            "before live sandbox promotion."
+        ),
+        when_not_to_use=(
+            "Do not use it to run a new scenario; use "
+            "praxis_virtual_lab_simulation_run for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one simulation run",
+                {
+                    "action": "describe_run",
+                    "run_id": "virtual_lab_simulation_run.demo",
+                    "include_events": True,
+                    "include_verifiers": True,
+                    "include_blockers": True,
+                },
+            ),
+            _example(
+                "List blocked runs for one environment",
+                {
+                    "action": "list_runs",
+                    "environment_id": "virtual_lab.env.account_sync",
+                    "status": "blocked",
+                },
+            ),
+        ],
+    ),
+    "praxis_virtual_lab_sandbox_promotion_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="virtual-lab-sandbox-promotion-record",
+        when_to_use=(
+            "Record a live sandbox promotion window after simulation proof "
+            "exists, then persist sandbox execution, readback evidence, "
+            "predicted-vs-actual comparison, drift classification, handoff "
+            "refs, and stop/continue summary through CQRS."
+        ),
+        when_not_to_use=(
+            "Do not use it to run simulations, call live integrations, or file "
+            "bugs directly. It records the evidence and handoff refs after "
+            "those actions happen through their own authorities."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record one sandbox promotion",
+                {
+                    "manifest": {
+                        "manifest_id": "manifest.phase8",
+                        "created_at": "2026-04-30T18:00:00Z",
+                        "created_by": "agent.phase_08",
+                        "candidates": [
+                            {
+                                "candidate_id": "candidate.phase8.account_sync",
+                                "owner": "operator:nate",
+                                "build_ref": "build.account_sync.20260430",
+                                "sandbox_target": "sandbox.crm.dev",
+                                "scope_ref": "scope.client_operating_model.phase_08",
+                                "scenario_refs": ["scenario.qualify_account"],
+                                "prediction_refs": ["prediction.qualify_account.status"],
+                            }
+                        ],
+                    },
+                    "candidate_records": [
+                        {
+                            "candidate_id": "candidate.phase8.account_sync",
+                            "simulation_run_id": "virtual_lab_simulation_run.phase_07_proof",
+                            "execution": {"execution_id": "execution.qualify_account.1"},
+                            "evidence_package": {"package_id": "evidence_package.qualify_account"},
+                            "checks": [{"check_id": "check.status"}],
+                        }
+                    ],
+                },
+            ),
+        ],
+    ),
+    "praxis_virtual_lab_sandbox_promotion_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="virtual-lab-sandbox-promotion-read",
+        when_to_use=(
+            "Inspect persisted sandbox promotion records, readback evidence, "
+            "drift reason codes, handoff refs, and stop/continue decisions "
+            "before any client-live rollout."
+        ),
+        when_not_to_use=(
+            "Do not use it to record new evidence; use "
+            "praxis_virtual_lab_sandbox_promotion_record for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one sandbox promotion record",
+                {
+                    "action": "describe_record",
+                    "promotion_record_id": "sandbox_promotion_record.demo",
+                    "include_readback": True,
+                    "include_drift": True,
+                    "include_handoffs": True,
+                },
+            ),
+            _example(
+                "List drift needing rerun",
+                {
+                    "action": "list_drift",
+                    "disposition": "rerun_required",
+                    "reason_code": "OBSERVABILITY_GAP",
+                },
+            ),
+        ],
+    ),
+    "praxis_authority_portable_cartridge_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="portable-cartridge-record",
+        when_to_use=(
+            "Record a portable cartridge deployment contract after the manifest "
+            "has been assembled. The operation validates the contract, persists "
+            "Object Truth dependencies, assets, bindings, verifiers, drift hooks, "
+            "runtime assumptions, and readiness through CQRS."
+        ),
+        when_not_to_use=(
+            "Do not use it to execute the cartridge, call customer systems, or "
+            "own recurring task runs. It records the portable contract and "
+            "readiness evidence only."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record one staged cartridge contract",
+                {
+                    "manifest": {
+                        "manifest_version": "1.0",
+                        "cartridge_id": "phase9-portable-cartridge",
+                        "cartridge_version": "2026.04.30",
+                        "build_id": "build_2026_04_30_0001",
+                    },
+                    "deployment_mode": "staged_deployment",
+                    "source_ref": "phase_09_live_proof",
+                },
+            ),
+        ],
+    ),
+    "praxis_authority_portable_cartridge_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="portable-cartridge-read",
+        when_to_use=(
+            "Inspect persisted portable cartridge records, deployment readiness, "
+            "Object Truth dependencies, assets, bindings, verifier checks, and "
+            "drift hooks before export, mount, or later drift audit."
+        ),
+        when_not_to_use=(
+            "Do not use it to write a contract; use "
+            "praxis_authority_portable_cartridge_record for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one cartridge record",
+                {
+                    "action": "describe_record",
+                    "cartridge_record_id": "portable_cartridge_record.phase9.build_2026_04_30_0001.staged_deployment",
+                    "include_dependencies": True,
+                    "include_bindings": True,
+                    "include_verifiers": True,
+                    "include_drift_hooks": True,
+                },
+            ),
+            _example(
+                "List blocked production cartridges",
+                {
+                    "action": "list_records",
+                    "deployment_mode": "production_deployment",
+                    "readiness_status": "blocked",
+                },
+            ),
+        ],
+    ),
     "praxis_client_operating_model": _tool(
         surface="operations",
         tier="advanced",

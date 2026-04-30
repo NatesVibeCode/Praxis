@@ -42,3 +42,23 @@ def test_context_shard_resolves_scopes_against_container_workspace_when_host_roo
     assert "scope_resolution_error" not in shard
     assert shard["write_scope"] == ["Code&DBs/Workflow/runtime/spec_compiler.py"]
     assert shard["metrics"]["write_scope_count"] == 1
+
+
+def test_context_shard_skips_workspace_root_scope_resolution(tmp_path) -> None:
+    shard = context_building._job_execution_context_shard(
+        conn=_Conn(),
+        job={
+            "label": "broad",
+            "write_scope": ["."],
+        },
+        spec_verify_refs=[],
+        repo_root=str(tmp_path),
+        proof_snapshot={},
+    )
+
+    assert shard["write_scope"] == ["."]
+    assert shard["scope_resolution_skipped"]["reason_code"] == "scope.workspace_root_too_broad"
+    assert shard["metrics"]["scope_resolution_skipped"] == 1
+    assert "resolved_read_scope" not in shard
+    rendered = context_building._render_execution_context_shard(shard)
+    assert "scope_resolution_skipped" in rendered

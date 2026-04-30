@@ -137,7 +137,15 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "349_register_authority_impact_contract_audit_scan.sql" in filenames
     assert "350_operation_lane_initial_classification.sql" in filenames
     assert "351_register_authority_audit_query_operations.sql" in filenames
-    assert filenames[-1] == "351_register_authority_audit_query_operations.sql"
+    assert "370_workspace_surface_migration_authority.sql" in filenames
+    assert "371_virtual_lab_simulation_authority.sql" in filenames
+    assert "372_cli_auth_doctor_timeout_budget.sql" in filenames
+    assert "373_compose_plan_interactive_lane.sql" in filenames
+    assert "374_virtual_lab_sandbox_promotion_authority.sql" in filenames
+    assert "375_cleanup_invalid_task_type_routing_transports.sql" in filenames
+    assert "376_portable_cartridge_authority.sql" in filenames
+    assert "377_register_chat_routing_options_query.sql" in filenames
+    assert filenames[-1] == "377_register_chat_routing_options_query.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -172,6 +180,202 @@ def test_together_compile_primary_declares_full_control_plane_authority() -> Non
     assert "task_type_routing.compile|together|deepseek-ai/DeepSeek-V3.2" in names
     assert "authority_projection_state.projection.private_provider_job_catalog" in names
     assert "authority_projection_state.projection.private_provider_control_plane_snapshot" in names
+
+
+def test_retired_deepseek_v32_cleanup_is_registered_and_targets_authority() -> None:
+    objects = workflow_migration_expected_objects(
+        "364_remove_retired_deepseek_v32_native_profile.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "364_remove_retired_deepseek_v32_native_profile.sql"
+    )
+
+    assert "registry_native_runtime_profile_authority.praxis" in names
+    assert "registry_native_runtime_profile_authority.scratch_agent" in names
+    assert "deepseek-ai/DeepSeek-V3.2" in sql_text
+    assert "status = 'retired'" in sql_text
+    assert "DELETE FROM runtime_profile_admitted_routes" in sql_text
+    assert "refresh_private_provider_control_plane_snapshot" in sql_text
+
+
+def test_task_environment_contract_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "365_task_environment_contract_authority.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "365_task_environment_contract_authority.sql"
+    )
+
+    assert "task_environment_contract_heads" in names
+    assert "task_environment_contract_revisions" in names
+    assert "task_environment_hierarchy_nodes" in names
+    assert "task_environment_contract_invalid_states" in names
+    assert "operation_catalog_registry.task_environment_contract_record" in names
+    assert "operation_catalog_registry.task_environment_contract_read" in names
+    assert "task_environment_contract_record" in sql_text
+    assert "task_environment_contract_read" in sql_text
+    assert "p_execution_lane        := 'interactive'" in sql_text
+
+
+def test_integration_action_contract_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "366_integration_action_contract_authority.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "366_integration_action_contract_authority.sql"
+    )
+
+    assert "authority_domains.authority.integration_action_contracts" in names
+    assert "integration_action_contract_heads" in names
+    assert "integration_action_contract_revisions" in names
+    assert "integration_action_contract_typed_gaps" in names
+    assert "integration_automation_rule_snapshot_heads" in names
+    assert "integration_automation_rule_snapshot_revisions" in names
+    assert "integration_automation_action_links" in names
+    assert "operation_catalog_registry.integration_action_contract_record" in names
+    assert "operation_catalog_registry.integration_action_contract_read" in names
+    assert "integration_action_contract_record" in sql_text
+    assert "integration_action_contract_read" in sql_text
+    assert "p_execution_lane        := 'interactive'" in sql_text
+
+
+def test_virtual_lab_state_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "367_virtual_lab_state_authority.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "367_virtual_lab_state_authority.sql"
+    )
+
+    assert "authority_domains.authority.virtual_lab_state" in names
+    assert "virtual_lab_environment_heads" in names
+    assert "virtual_lab_environment_revisions" in names
+    assert "virtual_lab_seed_entries" in names
+    assert "virtual_lab_object_states" in names
+    assert "virtual_lab_events" in names
+    assert "virtual_lab_command_receipts" in names
+    assert "virtual_lab_typed_gaps" in names
+    assert "authority_event_contracts.event_contract.virtual_lab_state.recorded" in names
+    assert "operation_catalog_registry.virtual_lab_state_record" in names
+    assert "operation_catalog_registry.virtual_lab_state_read" in names
+    assert "virtual_lab_state_record" in sql_text
+    assert "virtual_lab_state_read" in sql_text
+    assert "p_execution_lane        := 'interactive'" in sql_text
+
+
+def test_virtual_lab_simulation_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "371_virtual_lab_simulation_authority.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "371_virtual_lab_simulation_authority.sql"
+    )
+
+    assert "authority_domains.authority.virtual_lab_simulation" in names
+    assert "virtual_lab_simulation_runs" in names
+    assert "virtual_lab_simulation_runtime_events" in names
+    assert "virtual_lab_simulation_state_events" in names
+    assert "virtual_lab_simulation_transitions" in names
+    assert "virtual_lab_simulation_action_results" in names
+    assert "virtual_lab_simulation_automation_evaluations" in names
+    assert "virtual_lab_simulation_automation_firings" in names
+    assert "virtual_lab_simulation_assertion_results" in names
+    assert "virtual_lab_simulation_verifier_results" in names
+    assert "virtual_lab_simulation_typed_gaps" in names
+    assert "virtual_lab_simulation_promotion_blockers" in names
+    assert "authority_event_contracts.event_contract.virtual_lab_simulation.completed" in names
+    assert "operation_catalog_registry.virtual_lab_simulation_run" in names
+    assert "operation_catalog_registry.virtual_lab_simulation_read" in names
+    assert "virtual_lab_simulation_run" in sql_text
+    assert "virtual_lab_simulation_read" in sql_text
+    assert "p_execution_lane        := 'interactive'" in sql_text
+
+
+def test_virtual_lab_sandbox_promotion_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "374_virtual_lab_sandbox_promotion_authority.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "374_virtual_lab_sandbox_promotion_authority.sql"
+    )
+
+    assert "authority_domains.authority.virtual_lab_sandbox_promotion" in names
+    assert "virtual_lab_sandbox_promotion_records" in names
+    assert "virtual_lab_sandbox_promotion_candidates" in names
+    assert "virtual_lab_sandbox_executions" in names
+    assert "virtual_lab_sandbox_readback_evidence" in names
+    assert "virtual_lab_sandbox_comparison_reports" in names
+    assert "virtual_lab_sandbox_comparison_rows" in names
+    assert "virtual_lab_sandbox_drift_ledgers" in names
+    assert "virtual_lab_sandbox_drift_classifications" in names
+    assert "virtual_lab_sandbox_handoffs" in names
+    assert "authority_event_contracts.event_contract.virtual_lab_sandbox_promotion.recorded" in names
+    assert "operation_catalog_registry.virtual_lab_sandbox_promotion_record" in names
+    assert "operation_catalog_registry.virtual_lab_sandbox_promotion_read" in names
+    assert "virtual_lab_sandbox_promotion_record" in sql_text
+    assert "virtual_lab_sandbox_promotion_read" in sql_text
+    assert "p_execution_lane        := 'interactive'" in sql_text
+
+
+def test_portable_cartridge_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "376_portable_cartridge_authority.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "376_portable_cartridge_authority.sql"
+    )
+
+    assert "authority_domains.authority.portable_cartridges" in names
+    assert "portable_cartridge_records" in names
+    assert "portable_cartridge_object_truth_dependencies" in names
+    assert "portable_cartridge_assets" in names
+    assert "portable_cartridge_binding_contracts" in names
+    assert "portable_cartridge_verifier_checks" in names
+    assert "portable_cartridge_drift_hooks" in names
+    assert "authority_event_contracts.event_contract.portable_cartridge.recorded" in names
+    assert "operation_catalog_registry.authority.portable_cartridge.record" in names
+    assert "operation_catalog_registry.authority.portable_cartridge.read" in names
+    assert "authority.portable_cartridge.record" in sql_text
+    assert "authority.portable_cartridge.read" in sql_text
+    assert "p_execution_lane        := 'interactive'" in sql_text
+
+
+def test_task_type_routing_transport_cleanup_is_classified() -> None:
+    objects = workflow_migration_expected_objects(
+        "375_cleanup_invalid_task_type_routing_transports.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "375_cleanup_invalid_task_type_routing_transports.sql"
+    )
+
+    assert "task_type_routing" in names
+    assert "provider_transport_admissions" in names
+    assert "DELETE FROM task_type_routing" in sql_text
+    assert "provider_transport_admissions" in sql_text
+
+
+def test_chat_routing_options_query_operation_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "377_register_chat_routing_options_query.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "377_register_chat_routing_options_query.sql"
+    )
+
+    assert "data_dictionary_objects.operation.chat.routing_options.list" in names
+    assert "authority_object_registry.operation.chat.routing_options.list" in names
+    assert "operation_catalog_registry.chat.routing_options.list" in names
+    assert "chat.routing_options.list" in sql_text
+    assert "p_execution_lane        := 'interactive'" in sql_text
 
 
 def test_claim_lease_proposal_runtime_expected_objects_are_registered() -> None:

@@ -199,6 +199,10 @@ class WaveOrchestrator:
         wave = self._waves[wave_id]
         return all(j.status in ("succeeded", "failed") for j in wave.jobs)
 
+    def is_wave_defined(self, wave_id: str) -> bool:
+        """Public membership check for control-plane surfaces."""
+        return wave_id in self._waves
+
     def resolve_default_wave_id(self, *, action: str = "next") -> str:
         """Resolve the single obvious wave for the requested action.
 

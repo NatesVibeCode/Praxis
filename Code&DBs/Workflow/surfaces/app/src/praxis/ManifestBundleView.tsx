@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QuadrantGrid } from '../grid/QuadrantGrid';
 import { emitPraxisOpenTab } from './events';
-import { normalizePraxisBundle, resolvePraxisBundleSurface, resolvePraxisBundleTab, type PraxisSurfaceBundleV4, type SourceOption } from './manifest';
+import { normalizePraxisBundle, resolvePraxisBundleTab, type PraxisSurfaceBundleV4, type PraxisTabDefinition, type SourceOption } from './manifest';
 import { SourceOptionPills } from './SourceOptionPills';
+import { WorkspaceComposeSurface } from './WorkspaceComposeSurface';
+import { WorkspaceReceiptsTab, type WorkspaceRunRow } from './WorkspaceReceiptsTab';
 
 interface ManifestBundleViewProps {
   manifestId: string;
@@ -11,6 +13,26 @@ interface ManifestBundleViewProps {
 
 interface SourceOptionPayload {
   source_options?: SourceOption[];
+}
+
+function isDefaultBlankWorkspaceTitle(value: string | null | undefined, manifestId: string): boolean {
+  const normalized = (value || '').trim().toLowerCase();
+  return normalized === 'blank workspace' || normalized === manifestId.toLowerCase();
+}
+
+function displayWorkspaceTitle(bundle: PraxisSurfaceBundleV4, manifestId: string, isComposeSurface: boolean): string {
+  if (isComposeSurface && isDefaultBlankWorkspaceTitle(bundle.title, manifestId)) {
+    return 'Compose';
+  }
+  return bundle.title;
+}
+
+function displayWorkspaceDescription(bundle: PraxisSurfaceBundleV4, isComposeSurface: boolean): string {
+  const description = (bundle.description || '').trim();
+  if (isComposeSurface && (!description || description.toLowerCase().includes('minimal workspace'))) {
+    return 'Compose intent into a contract, then dispatch the work and inspect the receipts.';
+  }
+  return description;
 }
 
 function manifestLoadFailure(rawMessage: string | null): { title: string; copy: string } {
@@ -35,6 +57,7 @@ function manifestLoadFailure(rawMessage: string | null): { title: string; copy: 
 export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProps) {
   const [bundle, setBundle] = useState<PraxisSurfaceBundleV4 | null>(null);
   const [sourceOptions, setSourceOptions] = useState<SourceOption[]>([]);
+  const [workspaceRuns, setWorkspaceRuns] = useState<WorkspaceRunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -48,6 +71,7 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setWorkspaceRuns([]);
 
     const load = async () => {
       try {
@@ -63,10 +87,11 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
           description: typeof manifestPayload?.description === 'string' ? manifestPayload.description : undefined,
         });
         setBundle(nextBundle);
-        setDraftTitle(nextBundle.title);
         setRenameError(null);
 
         const selectedTab = resolvePraxisBundleTab(nextBundle, tabId);
+        const selectedSurface = nextBundle.surfaces[selectedTab.surface_id] ?? null;
+        setDraftTitle(displayWorkspaceTitle(nextBundle, manifestId, selectedSurface?.kind === 'compose'));
         const params = new URLSearchParams({ manifest_id: manifestId, tab_id: selectedTab.id });
         const sourceResponse = await fetch(`/api/source-options?${params.toString()}`);
         const sourcePayload = await sourceResponse.json().catch(() => null) as SourceOptionPayload | null;
@@ -75,6 +100,16 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
         }
         if (cancelled) return;
         setSourceOptions(Array.isArray(sourcePayload?.source_options) ? sourcePayload?.source_options ?? [] : []);
+
+        try {
+          const runsResponse = await fetch(`/api/workspaces/${encodeURIComponent(manifestId)}/runs?limit=20`);
+          const runsPayload = await runsResponse.json().catch(() => null);
+          if (!cancelled && runsResponse.ok) {
+            setWorkspaceRuns(Array.isArray(runsPayload?.items) ? runsPayload.items as WorkspaceRunRow[] : []);
+          }
+        } catch {
+          if (!cancelled) setWorkspaceRuns([]);
+        }
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -89,19 +124,72 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
     };
   }, [manifestId, tabId, loadAttempt]);
 
-  const selectedTab = useMemo(() => (bundle ? resolvePraxisBundleTab(bundle, tabId) : null), [bundle, tabId]);
-  const selectedSurface = useMemo(() => (bundle ? resolvePraxisBundleSurface(bundle, tabId) : null), [bundle, tabId]);
+  const receiptsTab = useMemo<PraxisTabDefinition | null>(() => (
+    workspaceRuns.length > 0
+      ? { id: 'receipts', label: 'Receipts', surface_id: '__receipts', source_option_ids: [] }
+      : null
+  ), [workspaceRuns.length]);
+  const visibleTabs = useMemo(() => {
+    if (!bundle) return [];
+    return receiptsTab ? [...bundle.tabs, receiptsTab] : bundle.tabs;
+  }, [bundle, receiptsTab]);
+  const selectedTab = useMemo(() => {
+    if (!bundle) return null;
+    if (tabId === 'receipts' && receiptsTab) return receiptsTab;
+    return resolvePraxisBundleTab(bundle, tabId);
+  }, [bundle, receiptsTab, tabId]);
+  const selectedSurface = useMemo(() => {
+    if (!bundle || !selectedTab || selectedTab.id === 'receipts') return null;
+    return bundle.surfaces[selectedTab.surface_id] ?? null;
+  }, [bundle, selectedTab]);
   const layoutPath = useMemo(() => (
     selectedSurface
       ? `ui.manifest_layout.${encodeURIComponent(manifestId)}.${encodeURIComponent(selectedSurface.id)}.quadrants`
       : 'ui.layout.quadrants'
   ), [manifestId, selectedSurface]);
+  const isReceiptsTab = selectedTab?.id === 'receipts';
+  const isComposeSurface = selectedSurface?.kind === 'compose';
+  const canCustomize = selectedSurface?.kind === 'quadrant_manifest';
+  const workspaceTitle = useMemo(() => (
+    bundle ? displayWorkspaceTitle(bundle, manifestId, isComposeSurface) : ''
+  ), [bundle, isComposeSurface, manifestId]);
+  const workspaceDescription = useMemo(() => (
+    bundle ? displayWorkspaceDescription(bundle, isComposeSurface) : ''
+  ), [bundle, isComposeSurface]);
+
+  const persistBundle = useCallback(async (nextBundle: PraxisSurfaceBundleV4): Promise<PraxisSurfaceBundleV4> => {
+    const response = await fetch('/api/manifests/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: manifestId,
+        name: nextBundle.name ?? nextBundle.title,
+        description: nextBundle.description ?? '',
+        manifest: nextBundle,
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || payload?.detail || 'Workspace save failed');
+    }
+    const savedBundle = normalizePraxisBundle(payload?.manifest ?? nextBundle, {
+      id: manifestId,
+      title: typeof payload?.name === 'string' ? payload.name : nextBundle.title,
+      description: typeof payload?.description === 'string' ? payload.description : nextBundle.description,
+    });
+    setBundle(savedBundle);
+    const savedSelectedSurface = selectedSurface?.id
+      ? savedBundle.surfaces[selectedSurface.id] ?? null
+      : null;
+    setDraftTitle(displayWorkspaceTitle(savedBundle, manifestId, savedSelectedSurface?.kind === 'compose'));
+    return savedBundle;
+  }, [manifestId, selectedSurface?.id]);
 
   const saveTitle = useCallback(async () => {
     if (!bundle) return;
     const nextTitle = draftTitle.trim();
-    if (!nextTitle || nextTitle === bundle.title) {
-      setDraftTitle(bundle.title);
+    if (!nextTitle || nextTitle === workspaceTitle) {
+      setDraftTitle(workspaceTitle);
       setRenameError(null);
       return;
     }
@@ -115,7 +203,7 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
       if (surface.title === previousTitle || surface.id === selectedSurface?.id) {
         surface.title = nextTitle;
       }
-      if (surface.manifest.title === previousTitle || surface.id === selectedSurface?.id) {
+      if (surface.kind === 'quadrant_manifest' && (surface.manifest.title === previousTitle || surface.id === selectedSurface?.id)) {
         surface.manifest.title = nextTitle;
       }
     }
@@ -123,34 +211,17 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
     setRenaming(true);
     setRenameError(null);
     try {
-      const response = await fetch('/api/manifests/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: manifestId,
-          name: nextTitle,
-          description: nextBundle.description ?? '',
-          manifest: nextBundle,
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(payload?.error || 'Rename failed');
-      }
-      const savedBundle = normalizePraxisBundle(payload?.manifest ?? nextBundle, {
-        id: manifestId,
-        title: typeof payload?.name === 'string' ? payload.name : nextTitle,
-        description: typeof payload?.description === 'string' ? payload.description : nextBundle.description,
-      });
+      nextBundle.name = nextTitle;
+      const savedBundle = await persistBundle(nextBundle);
       setBundle(savedBundle);
-      setDraftTitle(savedBundle.title);
+      setDraftTitle(displayWorkspaceTitle(savedBundle, manifestId, isComposeSurface));
     } catch (saveError) {
-      setDraftTitle(bundle.title);
+      setDraftTitle(workspaceTitle);
       setRenameError(saveError instanceof Error ? saveError.message : 'Rename failed');
     } finally {
       setRenaming(false);
     }
-  }, [bundle, draftTitle, manifestId, selectedSurface?.id]);
+  }, [bundle, draftTitle, isComposeSurface, manifestId, persistBundle, selectedSurface?.id, workspaceTitle]);
 
   if (loading) {
     return (
@@ -161,7 +232,7 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
     );
   }
 
-  if (error || !bundle || !selectedTab || !selectedSurface) {
+  if (error || !bundle || !selectedTab || (!isReceiptsTab && !selectedSurface)) {
     const failure = manifestLoadFailure(error);
     return (
       <div className="app-shell__fallback app-shell__fallback--error">
@@ -182,8 +253,15 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
   }
 
   return (
-    <div className="app-shell__surface">
-      <div className="app-shell__surface-header app-shell__surface-header--workbench">
+    <div className={[
+      'app-shell__surface',
+      isComposeSurface ? 'app-shell__surface--workspace-compose' : '',
+    ].filter(Boolean).join(' ')}>
+      <div className={[
+        'app-shell__surface-header',
+        'app-shell__surface-header--workbench',
+        isComposeSurface ? 'app-shell__surface-header--compose' : '',
+      ].filter(Boolean).join(' ')}>
         <div className="app-shell__surface-heading app-shell__surface-heading--workbench">
           <div className="app-shell__surface-title-row">
             <input
@@ -209,15 +287,15 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
                 }
                 if (event.key === 'Escape') {
                   skipNextTitleBlurSave.current = true;
-                  setDraftTitle(bundle.title);
+                  setDraftTitle(workspaceTitle);
                   setRenameError(null);
                   event.currentTarget.blur();
                 }
               }}
               spellCheck={false}
             />
-            {bundle.description ? (
-              <div className="app-shell__surface-copy app-shell__surface-copy--inline">{bundle.description}</div>
+            {workspaceDescription ? (
+              <div className="app-shell__surface-copy app-shell__surface-copy--inline">{workspaceDescription}</div>
             ) : null}
             {renaming ? (
               <div className="app-shell__surface-rename-status">Saving</div>
@@ -227,9 +305,9 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
               </div>
             ) : null}
           </div>
-          {bundle.tabs.length > 1 && (
+          {visibleTabs.length > 1 && (
             <div className="app-shell__surface-tabs app-shell__surface-tabs--inline">
-              {bundle.tabs.map((entry) => (
+              {visibleTabs.map((entry) => (
                 <button
                   key={entry.id}
                   type="button"
@@ -247,41 +325,55 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
         </div>
 
         <div className="app-shell__surface-workbench-actions">
-          {sourceOptions.length > 0 && (
+          {!isReceiptsTab && !isComposeSurface && sourceOptions.length > 0 && (
             <div className="app-shell__surface-source-group" aria-label="Sources">
               <span className="app-shell__surface-source-label">Sources</span>
               <SourceOptionPills options={sourceOptions} />
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => setCustomizing((value) => !value)}
-            className={[
-              'app-shell__surface-action',
-              'app-shell__surface-action--primary',
-              customizing ? 'app-shell__surface-action--active' : '',
-            ].filter(Boolean).join(' ')}
-            aria-pressed={customizing}
-          >
-            {customizing ? 'Done' : 'Customize'}
-          </button>
+          {canCustomize ? (
+            <button
+              type="button"
+              onClick={() => setCustomizing((value) => !value)}
+              className={[
+                'app-shell__surface-action',
+                'app-shell__surface-action--primary',
+                customizing ? 'app-shell__surface-action--active' : '',
+              ].filter(Boolean).join(' ')}
+              aria-pressed={customizing}
+            >
+              {customizing ? 'Done' : 'Customize'}
+            </button>
+          ) : null}
         </div>
       </div>
 
       <div className="app-shell__surface-body">
-        <QuadrantGrid
-          manifest={selectedSurface.manifest}
-          editable={customizing}
-          layoutPath={layoutPath}
-          showHeaderTitle={false}
-          saveTarget={{
-            manifestId,
-            name: bundle.name ?? bundle.title,
-            description: bundle.description,
-            bundle,
-            surfaceId: selectedSurface.id,
-          }}
-        />
+        {isReceiptsTab ? (
+          <WorkspaceReceiptsTab manifestId={manifestId} initialRuns={workspaceRuns} />
+        ) : selectedSurface?.kind === 'compose' ? (
+          <WorkspaceComposeSurface
+            manifestId={manifestId}
+            bundle={bundle}
+            surface={selectedSurface}
+            workspaceTitle={workspaceTitle}
+            onSaveBundle={persistBundle}
+          />
+        ) : selectedSurface?.kind === 'quadrant_manifest' ? (
+          <QuadrantGrid
+            manifest={selectedSurface.manifest}
+            editable={customizing}
+            layoutPath={layoutPath}
+            showHeaderTitle={false}
+            saveTarget={{
+              manifestId,
+              name: bundle.name ?? bundle.title,
+              description: bundle.description,
+              bundle,
+              surfaceId: selectedSurface.id,
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

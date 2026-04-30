@@ -4,123 +4,123 @@ Date: 2026-04-30
 
 ## Summary
 
-Implemented deterministic Virtual Lab simulation runtime primitives for Client
-Operating Model Phase 7.
+Promoted the Virtual Lab simulation runtime into DB-backed CQRS authority.
 
-The implementation is pure domain code. It does not call live systems, use
-ambient time, use ambient randomness, persist state, register CQRS operations,
-or treat unsupported actions as successful no-ops.
+Phase 6 owns durable modeled state revisions. Phase 7 now owns deterministic
+simulation runs over those revisions: predicted state transitions, automation
+firing traces, final-state assertions, verifier results, typed gaps, and
+promotion blockers. A simulation cannot report green status without at least
+one verifier result.
 
-## Existing Authority Discovery
+## Authority Model
 
-Used the live standing-order query first, then Praxis discovery/recall and the
-phase packet.
-
-Relevant authority:
-
-- Object Truth discovers client systems and owns observed facts.
-- Virtual Lab proves predicted consequences separately from Object Truth.
-- Phase 6 Virtual Lab state owns modeled object mutation, event envelopes,
-  receipts, digests, and replay.
-- Simulation runtime must surface unsupported capabilities as typed gaps and
-  blockers.
-
-Required local reads completed:
-
-- `AGENTS.md`
-- `artifacts/workflow/client_operating_model/packets/phase_05_integration_automation_contracts/PLAN.md`
-- `artifacts/workflow/client_operating_model/packets/phase_06_virtual_lab_state/PLAN.md`
-- `artifacts/workflow/client_operating_model/packets/phase_07_simulation_runtime/PLAN.md`
-- `Code&DBs/Workflow/runtime/virtual_lab/state.py`
-- `Code&DBs/Workflow/runtime/integrations/action_contracts.py`
-- `Code&DBs/Workflow/runtime/task_contracts/environment.py`
+- Authority domain: `authority.virtual_lab_simulation`
+- Event stream: `stream.authority.virtual_lab_simulation`
+- Command operation: `virtual_lab_simulation_run`
+- Query operation: `virtual_lab_simulation_read`
+- Event contract: `virtual_lab_simulation.completed`
+- HTTP route: `/api/virtual-lab/simulations`
+- MCP tools:
+  - `praxis_virtual_lab_simulation_run`
+  - `praxis_virtual_lab_simulation_read`
 
 ## Changed Files
 
+- `Code&DBs/Databases/migrations/workflow/371_virtual_lab_simulation_authority.sql`
 - `Code&DBs/Workflow/runtime/virtual_lab/simulation.py`
-- `Code&DBs/Workflow/runtime/virtual_lab/__init__.py`
+- `Code&DBs/Workflow/runtime/operations/commands/virtual_lab_simulation.py`
+- `Code&DBs/Workflow/runtime/operations/queries/virtual_lab_simulation.py`
+- `Code&DBs/Workflow/storage/postgres/virtual_lab_simulation_repository.py`
+- `Code&DBs/Workflow/surfaces/mcp/tools/virtual_lab_simulation.py`
+- `Code&DBs/Workflow/surfaces/mcp/cli_metadata.py`
+- `Code&DBs/Workflow/system_authority/workflow_migration_authority.json`
+- `Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py`
 - `Code&DBs/Workflow/tests/unit/test_virtual_lab_simulation.py`
-- `docs/architecture/object-truth-trust-toolbelt/simulation-runtime-2026-04-30.md`
-- `artifacts/workflow/client_operating_model/build_reports/phase_07_IMPLEMENTATION.md`
+- `Code&DBs/Workflow/tests/unit/test_virtual_lab_simulation_operations.py`
+- `Code&DBs/Workflow/tests/unit/test_virtual_lab_simulation_repository.py`
+- `Code&DBs/Workflow/tests/unit/test_virtual_lab_simulation_mcp_tool.py`
+- `Code&DBs/Workflow/tests/unit/test_operation_catalog_bindings.py`
+- `Code&DBs/Workflow/tests/unit/test_operation_catalog_mounting.py`
+- `Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py`
+- `docs/MCP.md`
+- `docs/CLI.md`
+- `docs/API.md`
 
 ## Implemented Contracts
 
-Added typed domain records for:
+- Simulation-run storage with scenario/config/result/trace digests.
+- Runtime trace event storage ordered by run sequence.
+- Predicted Virtual Lab state event storage with pre/post state digests.
+- Per-object transition storage by run, object, event, and action.
+- Action result, automation evaluation, automation firing, assertion result,
+  verifier result, typed gap, and promotion blocker storage.
+- Gateway command handler that parses domain JSON, runs the deterministic
+  simulator, persists the run, and emits `virtual_lab_simulation.completed`.
+- Gateway query handler for run listing, run description, runtime events,
+  verifier results, and promotion blockers.
+- Thin MCP wrappers that dispatch only through the CQRS gateway.
+- Simulation parser round-trip support for JSON packets.
+- Green-status guard: passing simulations require verifier results.
 
-- simulation config with controlled clock and seed
-- scenario input and initial state
-- simulated actions
-- automation predicates and rules
-- runtime events and traces
-- state transitions
-- action result envelopes
-- automation evaluation and firing results
-- assertion results
-- verifier results
-- typed gaps
-- promotion blockers
-- terminal run reports
+Migration numbering note: `370_workspace_surface_migration_authority.sql` was
+already present in the manifest, so this authority landed as migration `371`.
 
-## Runtime Behavior
+## Live Proof
 
-Supported simulated actions:
+- Virtual Lab state seed receipt: `c18e336b-b6e7-4fc4-8fd1-4ae4178fda02`
+- Simulation run receipt: `8759f3a4-218e-41d4-97d0-9d5dc504d903`
+- Simulation read receipt: `4efd6473-765b-4703-b86e-cd70ceac31be`
+- Roadmap closeout receipt: `9e778ffd-fb1c-488c-8696-d0a80fa4bd89`
+- Roadmap closeout event: `8d455909-4c79-4863-9b8a-4e8501221856`
+- Roadmap readback receipt: `6dd5cf44-11aa-4c85-9be5-fd12c0db4731`
 
-- `patch_object`
-- `replace_object_overlay`
-- `tombstone_object`
-- `restore_object`
+Live simulation:
 
-All supported object mutations dispatch through Phase 6 Virtual Lab state
-commands. Unsupported action kinds return `unsupported` action results plus a
-typed gap and promotion blocker.
+- Run: `virtual_lab_simulation_run.phase_07_proof`
+- Environment: `virtual_lab.env.phase_07_proof`
+- Status: `passed`
+- Stop reason: `success`
+- Runtime events: `5`
+- State events: `1`
+- Transitions: `1`
+- Action results: `1`
+- Assertions: `1`
+- Verifier results: `2`
+- Typed gaps: `0`
+- Promotion blockers: `0`
 
-Automation rules are ordered deterministically by `priority` and `rule_id`.
-Eligible rules emit evaluation/firing records and enqueue normal simulated
-actions with traceable causation.
+Operation catalog readback confirmed:
 
-Loop protection is explicit:
+- `virtual_lab_simulation_run` -> `POST /api/virtual-lab/simulations`,
+  interactive command, event required, event type
+  `virtual_lab_simulation.completed`
+- `virtual_lab_simulation_read` -> `GET /api/virtual-lab/simulations`,
+  interactive read-only query
 
-- max action count
-- max automation firing count
-- max recursion depth
-- optional per-rule max firing count
-
-Guardrail failures produce `runtime.guardrail_exceeded`, typed gaps, blockers,
-and `stop_reason=guardrail_exceeded`.
-
-## Validation Behavior
-
-The focused test suite covers:
-
-- happy path with action, automation firing, assertion, and verifier
-- unsupported action gap/blocker behavior
-- deterministic automation ordering and replay
-- automation loop guard
-- assertion failure
-- structured verifier output
-
-## Validation Commands
-
-```bash
-PYTHONPATH='Code&DBs/Workflow' .venv/bin/python -m py_compile 'Code&DBs/Workflow/runtime/virtual_lab/simulation.py' 'Code&DBs/Workflow/runtime/virtual_lab/__init__.py'
-PYTHONPATH='Code&DBs/Workflow' .venv/bin/python -m pytest 'Code&DBs/Workflow/tests/unit/test_virtual_lab_simulation.py' -q
-```
-
-Result:
+## Validation
 
 ```text
-6 passed
+13 passed in 0.52s
+158 passed in 1.02s
+py_compile passed
+git diff --check passed
+praxis workflow discover reindex --yes passed
+live CQRS write/read smoke passed
 ```
 
-## Blockers
+The 158-test focused gate was pinned to the live operator
+`WORKFLOW_DATABASE_URL` so generated API docs used the same route authority as
+the checked-in docs.
 
-No code blocker in the requested scope.
+## Roadmap Closeout
 
-## Migration Needs
+- Closeout command receipt: `9e778ffd-fb1c-488c-8696-d0a80fa4bd89`
+- Closeout event: `8d455909-4c79-4863-9b8a-4e8501221856`
+- Roadmap readback receipt: `6dd5cf44-11aa-4c85-9be5-fd12c0db4731`
+- Roadmap state: Phase 7 is `completed` / `completed`
 
-No migration was added.
+## Boundary
 
-If simulation run history needs to become durable authority, add a separate
-DB-backed repository plus CQRS command/query operations. That packet should
-register operation catalog rows, receipt behavior, event contracts, storage
-schema, and replay/read models explicitly.
+This phase does not execute live integrations or promote to a live sandbox. It
+proves predicted consequences inside Virtual Lab authority so later promotion
+can compare predicted state against sandbox readback.

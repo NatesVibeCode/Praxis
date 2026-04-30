@@ -9,10 +9,10 @@
     "Do not preserve built-in provider or task-profile fallbacks as runtime truth.",
     "Do not widen scope into unrelated route, provider onboarding, or UI work.",
     "Do not use shell loops or ad hoc scripts as substitute authority.",
-    "Do not cross workspace boundaries outside /Users/nate/Praxis."
+    "Do not cross workspace boundaries outside .."
   ],
-  "target_repo": "/Users/nate/Praxis",
-  "workdir": "/Users/nate/Praxis",
+  "target_repo": ".",
+  "workdir": ".",
   "jobs": [
     {
       "label": "authority_execution_map",
@@ -37,7 +37,7 @@
       "write": [
         "artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md && grep -q 'Runtime authority contract' artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md"
+      "verify_command": "test -f artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md && grep -q 'Runtime authority contract' artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md"
     },
     {
       "label": "surface_authority_resolver_core",
@@ -59,7 +59,7 @@
       "write": [
         "Code&DBs/Workflow/surfaces/_workflow_database.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && ! grep -qF 'DEFAULT_REPO_LOCAL_DATABASE_URL' Code\\&DBs/Workflow/surfaces/_workflow_database.py && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile Code\\&DBs/Workflow/surfaces/_workflow_database.py"
+      "verify_command": "! grep -qF 'DEFAULT_REPO_LOCAL_DATABASE_URL' Code\\&DBs/Workflow/surfaces/_workflow_database.py && PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile Code\\&DBs/Workflow/surfaces/_workflow_database.py"
     },
     {
       "label": "workflow_wrapper_alignment",
@@ -86,7 +86,7 @@
         "Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py",
         "Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile Code\\&DBs/Workflow/workflow && /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_workflow_shell_env.py Code\\&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile Code\\&DBs/Workflow/workflow && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_workflow_shell_env.py Code\\&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py"
     },
     {
       "label": "compiler_authority_contract",
@@ -107,7 +107,7 @@
         "Code&DBs/Workflow/runtime/compiler.py",
         "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_runtime_compiler_json.py -k 'authority or hydrate or compile_prose'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_runtime_compiler_json.py -k 'authority or hydrate or compile_prose'"
     },
     {
       "label": "provider_registry_fail_closed",
@@ -131,7 +131,7 @@
         "Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py",
         "Code&DBs/Workflow/tests/unit/test_structured_output.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_transport_support_and_parity.py Code\\&DBs/Workflow/tests/unit/test_mcp_health_tool.py Code\\&DBs/Workflow/tests/unit/test_structured_output.py -k 'provider_registry or transport_support or health'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_transport_support_and_parity.py Code\\&DBs/Workflow/tests/unit/test_mcp_health_tool.py Code\\&DBs/Workflow/tests/unit/test_structured_output.py -k 'provider_registry or transport_support or health'"
     },
     {
       "label": "task_profiles_fail_closed",
@@ -153,7 +153,7 @@
         "Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py",
         "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_route_authority_snapshot.py Code\\&DBs/Workflow/tests/unit/test_transport_support_and_parity.py -k 'task_profile or route_authority or profile'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_route_authority_snapshot.py Code\\&DBs/Workflow/tests/unit/test_transport_support_and_parity.py -k 'task_profile or route_authority or profile'"
     },
     {
       "label": "surface_startup_consumers",
@@ -179,7 +179,7 @@
         "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
         "Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_startup_wiring.py Code\\&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_startup_wiring.py Code\\&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py"
     },
     {
       "label": "supervisor_authority_contract",
@@ -199,7 +199,7 @@
         "Code&DBs/Workflow/runtime/praxis_supervisor.py",
         "Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_praxis_supervisor.py"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_praxis_supervisor.py"
     },
     {
       "label": "compiler_contract_tests",
@@ -210,7 +210,7 @@
       ],
       "description": "Run the compiler authority regression slice and capture the proof.",
       "outcome_goal": "Compiler authority regressions are proven in one focused test slice with a written receipt.",
-      "prompt": "Run the focused compiler authority regression slice after the compiler authority refactor.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py -k 'authority or hydrate or compile_prose'\n\nWrite `artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md` summarizing:\n- exact command run\n- pass/fail result\n- any residual gaps still visible in compiler authority behavior\n\nDo not broaden into provider or startup testing.",
+      "prompt": "Run the focused compiler authority regression slice after the compiler authority refactor.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py -k 'authority or hydrate or compile_prose'\n\nWrite `artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md` summarizing:\n- exact command run\n- pass/fail result\n- any residual gaps still visible in compiler authority behavior\n\nDo not broaden into provider or startup testing.",
       "read": [
         "Code&DBs/Workflow/runtime/compiler.py",
         "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py"
@@ -218,7 +218,7 @@
       "write": [
         "artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md"
+      "verify_command": "test -f artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md"
     },
     {
       "label": "provider_registry_contract_tests",
@@ -229,7 +229,7 @@
       ],
       "description": "Run the provider registry fail-closed regression slice and capture the proof.",
       "outcome_goal": "Provider registry fallback behavior is replaced by explicit authority failure and proven by focused tests.",
-      "prompt": "Run the focused provider registry regression slice after the runtime refactor.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py Code&DBs/Workflow/tests/unit/test_structured_output.py -k 'provider_registry or transport_support or health'\n\nWrite `artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining split-brain symptoms in provider surfaces\n\nDo not touch task profiles or compiler in this job.",
+      "prompt": "Run the focused provider registry regression slice after the runtime refactor.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py Code&DBs/Workflow/tests/unit/test_structured_output.py -k 'provider_registry or transport_support or health'\n\nWrite `artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining split-brain symptoms in provider surfaces\n\nDo not touch task profiles or compiler in this job.",
       "read": [
         "Code&DBs/Workflow/registry/provider_execution_registry.py",
         "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py",
@@ -239,7 +239,7 @@
       "write": [
         "artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md"
+      "verify_command": "test -f artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md"
     },
     {
       "label": "task_profiles_contract_tests",
@@ -250,7 +250,7 @@
       ],
       "description": "Run the task-profile authority regression slice and capture the proof.",
       "outcome_goal": "Task profile authority no longer silently degrades and the result is proven with focused tests.",
-      "prompt": "Run the focused task-profile authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py -k 'task_profile or route_authority or profile'\n\nWrite `artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining places where runtime task profiles still look code-owned\n\nDo not broaden into provider registry or startup helpers.",
+      "prompt": "Run the focused task-profile authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py -k 'task_profile or route_authority or profile'\n\nWrite `artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining places where runtime task profiles still look code-owned\n\nDo not broaden into provider registry or startup helpers.",
       "read": [
         "Code&DBs/Workflow/adapters/task_profiles.py",
         "Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py",
@@ -259,7 +259,7 @@
       "write": [
         "artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md"
+      "verify_command": "test -f artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md"
     },
     {
       "label": "startup_surface_contract_tests",
@@ -271,7 +271,7 @@
       ],
       "description": "Run the startup/frontdoor authority regression slice and capture the proof.",
       "outcome_goal": "Shell, MCP, and API startup surfaces now agree on explicit authority behavior.",
-      "prompt": "Run the focused startup/frontdoor authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py Code&DBs/Workflow/tests/unit/test_startup_wiring.py Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py\n\nWrite `artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining mismatch between shell bootstrap and Python startup helpers\n\nDo not broaden into provider or compiler testing.",
+      "prompt": "Run the focused startup/frontdoor authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py Code&DBs/Workflow/tests/unit/test_startup_wiring.py Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py\n\nWrite `artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining mismatch between shell bootstrap and Python startup helpers\n\nDo not broaden into provider or compiler testing.",
       "read": [
         "scripts/_workflow_env.sh",
         "scripts/praxis",
@@ -289,7 +289,7 @@
       "write": [
         "artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md"
+      "verify_command": "test -f artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md"
     },
     {
       "label": "supervisor_contract_tests",
@@ -300,7 +300,7 @@
       ],
       "description": "Run the supervisor authority regression slice and capture the proof.",
       "outcome_goal": "Supervisor database discovery now fails closed unless authority is explicit and the result is proven.",
-      "prompt": "Run the focused supervisor authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py\n\nWrite `artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining hidden authority sources in launch-agent or supervisor behavior\n\nDo not broaden into general startup or compiler tests.",
+      "prompt": "Run the focused supervisor authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py\n\nWrite `artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining hidden authority sources in launch-agent or supervisor behavior\n\nDo not broaden into general startup or compiler tests.",
       "read": [
         "Code&DBs/Workflow/runtime/praxis_supervisor.py",
         "Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py"
@@ -308,7 +308,7 @@
       "write": [
         "artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md"
+      "verify_command": "test -f artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md"
     },
     {
       "label": "docs_inventory_sync",
@@ -336,7 +336,7 @@
         "Code&DBs/Workflow/tests/unit/test_repo_guidance_contracts.py",
         "Code&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_repo_guidance_contracts.py Code\\&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_repo_guidance_contracts.py Code\\&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py"
     },
     {
       "label": "authority_regression_matrix",
@@ -361,7 +361,7 @@
       "write": [
         "artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md"
       ],
-      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md && grep -q 'Results summary' artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md"
+      "verify_command": "test -f artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md && grep -q 'Results summary' artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md"
     },
     {
       "label": "authority_cleanup_review",

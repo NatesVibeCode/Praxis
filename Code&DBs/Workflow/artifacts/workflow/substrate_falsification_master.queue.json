@@ -7,7 +7,7 @@
   "authoring_contract": {"artifact_kind": "code"},
   "acceptance_contract": {
     "verify_refs": [
-      "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/runtime/test_authority_resolver.py' -v",
+      "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/runtime/test_authority_resolver.py' -v",
       "praxis workflow tools call praxis_audit_primitive --input-json '{\"primitive\":\"authority_events\",\"filter\":{\"event_type\":\"comparison.completed\"},\"limit\":1}' --yes",
       "praxis workflow tools call praxis_operator_decisions --input-json '{\"action\":\"list\",\"decision_kind\":\"architecture_policy\"}' --yes"
     ]

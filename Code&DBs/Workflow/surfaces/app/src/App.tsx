@@ -8,6 +8,7 @@ import {
   createDefaultShellState,
   manifestEditorShellId,
   manifestTabShellId,
+  manifestWorkspaceLabel,
   runDetailShellId,
   upsertDynamicTab,
   type DynamicTab,
@@ -80,6 +81,24 @@ function SurfaceFallback({ title, copy }: { title: string; copy: string }) {
       <p className="app-shell__fallback-copy">{copy}</p>
     </div>
   );
+}
+
+function staticTabKindLabel(row: RouteRegistryRow): string {
+  return row.surface_name === 'manifests'
+    ? ''
+    : row.tab_kind_label || row.surface_name;
+}
+
+function staticTabLabel(row: RouteRegistryRow, state: ShellState): string {
+  return row.surface_name === 'manifests'
+    ? 'Compose'
+    : interpolateLabel(row.tab_label_template, state);
+}
+
+function staticTabDescription(row: RouteRegistryRow, state: ShellState): string {
+  return row.surface_name === 'manifests'
+    ? 'Open Compose and workspace records.'
+    : interpolateLabel(row.nav_description_template, state) || '';
 }
 
 function initialStrategyStageFromLocation(): StrategyStage {
@@ -279,7 +298,7 @@ export function AppShell() {
       const nextTab: DynamicTab = {
         id: dynamicId,
         kind: 'manifest',
-        label: normalizedTabId === 'main' ? manifestId : `${manifestId} · ${normalizedTabId}`,
+        label: manifestWorkspaceLabel(manifestId, normalizedTabId),
         closable: true,
         manifestId,
         manifestTabId: normalizedTabId,
@@ -500,8 +519,8 @@ export function AppShell() {
 
     const navigateItems = tabStripRows.map((row) => ({
       id: `navigate:${row.route_id}`,
-      label: interpolateLabel(row.tab_label_template, state) || row.surface_name,
-      description: interpolateLabel(row.nav_description_template, state) || '',
+      label: staticTabLabel(row, state) || row.surface_name,
+      description: staticTabDescription(row, state),
       keywords: row.nav_keywords || [],
       selected: state.activeRouteId === row.route_id,
       onSelect: () => {
@@ -559,6 +578,8 @@ export function AppShell() {
               {tabStripRows.map((row) => {
                 const surface = row.surface_name as 'dashboard' | 'build' | 'manifests' | 'atlas';
                 const active = state.activeTabId === surface;
+                const kindLabel = staticTabKindLabel(row);
+                const tabLabel = staticTabLabel(row, state);
                 return (
                   <div
                     key={row.route_id}
@@ -574,11 +595,11 @@ export function AppShell() {
                       className="app-shell__tab-button"
                     >
                       <span className="app-shell__tab-glyph" aria-hidden="true">
-                        {(row.tab_kind_label || row.surface_name).slice(0, 1)}
+                        {(kindLabel || tabLabel || row.surface_name).slice(0, 1)}
                       </span>
                       <span className="app-shell__tab-copy">
-                        <span className="app-shell__tab-kind">{row.tab_kind_label || row.surface_name}</span>
-                        <span className="app-shell__tab-label">{interpolateLabel(row.tab_label_template, state)}</span>
+                        {kindLabel ? <span className="app-shell__tab-kind">{kindLabel}</span> : null}
+                        <span className="app-shell__tab-label">{tabLabel}</span>
                       </span>
                     </button>
                   </div>
@@ -586,6 +607,10 @@ export function AppShell() {
               })}
               {state.dynamicTabs.map((tab) => {
                 const active = state.activeTabId === tab.id;
+                const kindLabel = tab.kind === 'manifest' ? 'workspace' : tab.kind;
+                const tabLabel = tab.kind === 'manifest' && tab.manifestId
+                  ? manifestWorkspaceLabel(tab.manifestId, tab.manifestTabId)
+                  : tab.label;
                 return (
                   <div
                     key={tab.id}
@@ -603,15 +628,15 @@ export function AppShell() {
                       }}
                       className="app-shell__tab-button"
                     >
-                      <span className="app-shell__tab-glyph" aria-hidden="true">{tab.kind.slice(0, 1)}</span>
+                      <span className="app-shell__tab-glyph" aria-hidden="true">{kindLabel.slice(0, 1)}</span>
                       <span className="app-shell__tab-copy">
-                        <span className="app-shell__tab-kind">{tab.kind}</span>
-                        <span className="app-shell__tab-label">{tab.label}</span>
+                        <span className="app-shell__tab-kind">{kindLabel}</span>
+                        <span className="app-shell__tab-label">{tabLabel}</span>
                       </span>
                     </button>
                     <button
                       type="button"
-                      aria-label={`Close ${tab.label}`}
+                      aria-label={`Close ${tabLabel}`}
                       onClick={() => {
                         void closeTab(tab.id);
                       }}

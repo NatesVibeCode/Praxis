@@ -810,12 +810,14 @@ def list_receipts(
     since_hours: int = 0,
     status: Optional[str] = None,
     agent: Optional[str] = None,
+    manifest_id: Optional[str] = None,
 ) -> list[ReceiptRecord]:
     rows = _repository().list_receipts(
         limit=max(limit, 1),
         since_hours=since_hours,
         status=status,
         agent=agent,
+        manifest_id=manifest_id,
     )
     return [_row_to_record(row) for row in rows]
 

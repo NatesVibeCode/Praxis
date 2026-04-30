@@ -243,7 +243,7 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
       return {
         tier: 'hidden',
         badge: 'Removed',
-        detail: 'Folded into Approval so Moon keeps one obvious human gate concept.',
+        detail: 'Folded into Approval so the builder keeps one obvious human gate concept.',
         hardChoice: 'Collapsed into Approval. Two human gate names for one future concept would be noise.',
       };
     }
@@ -258,7 +258,7 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
       ? {
           tier: 'advanced',
           badge: 'Later',
-          detail: 'Real edge behavior, but not part of the curated Moon gate set yet.',
+          detail: 'Real edge behavior, but not part of the curated gate set yet.',
         }
       : {
           tier: 'hidden',
@@ -285,7 +285,7 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
       ? {
           tier: 'hidden',
           badge: 'Hidden',
-          detail: 'Live catalog lanes stay out of the main Moon builder until they map cleanly onto the core primitive set.',
+          detail: 'Live catalog lanes stay out of the main builder until they map cleanly onto the core primitive set.',
         }
       : {
           tier: 'hidden',

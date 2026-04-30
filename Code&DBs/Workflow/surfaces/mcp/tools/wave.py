@@ -92,7 +92,7 @@ def tool_praxis_wave(params: dict) -> dict:
         # jobs= grammar instead of raising KeyError. This implements
         # architecture-policy::wave-orchestration::start-accepts-jobs-string.
         defined_note: str | None = None
-        if wave_id not in orch._waves:  # inspect the orch's internal registry
+        if not orch.is_wave_defined(wave_id):
             jobs_spec = str(params.get("jobs", "") or "").strip()
             if not jobs_spec:
                 return {

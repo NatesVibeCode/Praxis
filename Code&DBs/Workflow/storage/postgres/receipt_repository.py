@@ -771,31 +771,38 @@ class PostgresReceiptRepository:
         since_hours: int = 0,
         status: str | None = None,
         agent: str | None = None,
+        manifest_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         idx = 1
         if since_hours > 0:
-            clauses.append(f"COALESCE(finished_at, started_at) >= ${idx}")
+            clauses.append(f"COALESCE(r.finished_at, r.started_at) >= ${idx}")
             params.append(datetime.now(timezone.utc) - timedelta(hours=since_hours))
             idx += 1
         if status:
-            clauses.append(f"status = ${idx}")
+            clauses.append(f"r.status = ${idx}")
             params.append(_require_text(status, field_name="status"))
             idx += 1
         if agent:
             clauses.append(
-                f"COALESCE(inputs->>'agent_slug', inputs->>'agent', outputs->>'author_model', executor_type, '') = ${idx}"
+                f"COALESCE(r.inputs->>'agent_slug', r.inputs->>'agent', r.outputs->>'author_model', r.executor_type, '') = ${idx}"
             )
             params.append(_require_text(agent, field_name="agent"))
+            idx += 1
+        join = ""
+        if manifest_id:
+            join = "JOIN manifest_run_bindings AS b ON b.run_id = r.run_id"
+            clauses.append(f"b.manifest_id = ${idx}")
+            params.append(_require_text(manifest_id, field_name="manifest_id"))
             idx += 1
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(_require_positive_int(limit, field_name="limit"))
         rows = self._conn.execute(
-            "SELECT receipt_id, workflow_id, run_id, request_id, node_id, attempt_no, started_at, finished_at, "
-            "executor_type, status, inputs, outputs, artifacts, failure_code, decision_refs "
-            f"FROM receipts {where} "
-            f"ORDER BY COALESCE(finished_at, started_at) DESC NULLS LAST, receipt_id DESC LIMIT ${idx}",
+            "SELECT r.receipt_id, r.workflow_id, r.run_id, r.request_id, r.node_id, r.attempt_no, r.started_at, r.finished_at, "
+            "r.executor_type, r.status, r.inputs, r.outputs, r.artifacts, r.failure_code, r.decision_refs "
+            f"FROM receipts AS r {join} {where} "
+            f"ORDER BY COALESCE(r.finished_at, r.started_at) DESC NULLS LAST, r.receipt_id DESC LIMIT ${idx}",
             *params,
         )
         return [dict(row) for row in rows or ()]

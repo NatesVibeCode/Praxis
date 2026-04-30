@@ -10,6 +10,7 @@ import {
   composeShellId,
   manifestEditorShellId,
   manifestTabShellId,
+  manifestWorkspaceLabel,
   runDetailShellId,
   type DynamicTab,
 } from '../shell/state';
@@ -77,7 +78,7 @@ function planForDetail(detail: PraxisOpenTabDetail): OpenTabPlan | null {
       const tab: DynamicTab = {
         id: dynamicId,
         kind: 'manifest',
-        label: manifestTabId === 'main' ? manifestId : `${manifestId} · ${manifestTabId}`,
+        label: manifestWorkspaceLabel(manifestId, manifestTabId),
         closable: true,
         manifestId,
         manifestTabId,

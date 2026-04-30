@@ -48,7 +48,7 @@
         "Code&DBs/Workflow/runtime/workflow/_routing.py",
         "Code&DBs/Workflow/runtime/workflow/_execution_core.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_provider_route_runtime_wiring.py -k route"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_provider_route_runtime_wiring.py -k route"
     },
     {
       "label": "make_resolution_readonly",
@@ -68,7 +68,7 @@
       "write": [
         "Code&DBs/Workflow/runtime/task_type_router.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_task_type_router_route_health.py"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_task_type_router_route_health.py"
     },
     {
       "label": "batch_route_feedback_updates",
@@ -94,7 +94,7 @@
         "Code&DBs/Workflow/runtime/review_tracker.py",
         "Code&DBs/Workflow/tests/unit/test_task_type_router_route_health.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_task_type_router_route_health.py -k 'demot or review or outcome'"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_task_type_router_route_health.py -k 'demot or review or outcome'"
     },
     {
       "label": "route_authority_review",

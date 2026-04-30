@@ -17,7 +17,7 @@
         "Code&DBs/Databases/migrations/workflow/106_acceptance_status_index.sql"
       ],
       "write": ["Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"],
-      "verify_command": "test -f /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && grep -q 'praxis-dispatch' /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && ! grep -q 'cascade_inactive_to_routes' /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"
+      "verify_command": "test -f Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && grep -q 'praxis-dispatch' Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && ! grep -q 'cascade_inactive_to_routes' Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"
     },
     {
       "label": "verify_migration",
@@ -29,7 +29,7 @@
       "prompt": "Read the migration file `Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql` and verify:\n\n1. It does NOT rename or reference `cascade_inactive_to_routes` or `trg_cascade_inactive_to_routes`\n2. Each UPDATE statement is idempotent (safe to run multiple times)\n3. It handles the case where old values have already been renamed (WHERE clause won't match)\n4. It does NOT drop or recreate any triggers, functions, or tables\n5. It covers all five rename targets:\n   - integration_registry: dag-dispatch -> praxis-dispatch\n   - integration_registry: provider dag -> praxis (for notifications too)\n   - runtime_profile_authority: dag-project -> praxis-project\n   - compilation_spine: dag_research -> praxis_research\n   - adapter_config: DAG-APITaskAdapter -> Praxis-APITaskAdapter\n\nIf any issue is found, fix the migration file directly.",
       "read": ["Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"],
       "write": ["Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"],
-      "verify_command": "grep -q 'praxis-dispatch' /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && grep -q 'praxis-project' /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"
+      "verify_command": "grep -q 'praxis-dispatch' Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && grep -q 'praxis-project' Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"
     }
   ]
 }

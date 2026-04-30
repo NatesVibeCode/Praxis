@@ -3053,6 +3053,189 @@ def get_costs() -> dict[str, Any]:
     return get_cost_tracker().summary()
 
 
+_WORKSPACE_PATH_EXCLUDED_DIRS = {
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "venv",
+}
+
+_WORKSPACE_PATH_EXCLUDED_FILES = {
+    ".DS_Store",
+}
+
+
+def _workspace_path_matches_query(path: str, query: str) -> bool:
+    if not query:
+        return True
+    normalized_path = path.lower()
+    terms = [term for term in re.split(r"\s+", query.lower().strip()) if term]
+    return all(term in normalized_path for term in terms)
+
+
+def _workspace_path_suggestions(query: str, limit: int) -> list[dict[str, str]]:
+    root = Path(REPO_ROOT).resolve()
+    capped_limit = max(1, min(limit, 100))
+    items: list[dict[str, str]] = []
+
+    def add_candidate(path: Path, kind: str) -> bool:
+        try:
+            relative = path.resolve().relative_to(root)
+        except ValueError:
+            return False
+        rel_path = relative.as_posix()
+        if not rel_path or rel_path == ".":
+            return False
+        if kind == "directory":
+            rel_path = f"{rel_path}/"
+        if not _workspace_path_matches_query(rel_path, query):
+            return False
+        items.append({"path": rel_path, "label": rel_path, "kind": kind})
+        return len(items) >= capped_limit
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(
+            dirname
+            for dirname in dirnames
+            if dirname not in _WORKSPACE_PATH_EXCLUDED_DIRS and not dirname.startswith(".")
+        )
+        filenames = sorted(
+            filename
+            for filename in filenames
+            if filename not in _WORKSPACE_PATH_EXCLUDED_FILES and not filename.startswith(".")
+        )
+        current_dir = Path(dirpath)
+        if current_dir != root and add_candidate(current_dir, "directory"):
+            break
+        for filename in filenames:
+            if add_candidate(current_dir / filename, "file"):
+                break
+        if len(items) >= capped_limit:
+            break
+    return items
+
+
+@app.get("/api/workspace-paths")
+def get_workspace_paths(
+    q: str = Query(default="", description="Substring search across repo-relative real paths."),
+    limit: int = Query(default=30, ge=1, le=100),
+) -> dict[str, Any]:
+    """Return repo-relative path suggestions for scope pickers."""
+    return {
+        "root": "repo",
+        "query": q,
+        "items": _workspace_path_suggestions(q, limit),
+    }
+
+
+_COMMON_CONTRACT_FIELD_SUGGESTIONS = (
+    ("invoice.total_amount", "Common contract field", "field"),
+    ("invoice.line_items", "Common contract object", "field"),
+    ("ocr.calculated_total_amount", "Common contract field", "field"),
+    ("ocr.confidence", "Common contract field", "field"),
+    ("purchase_order.item_total", "Common contract field", "field"),
+    ("purchase_order.total_amount", "Common contract field", "field"),
+    ("bom.item_total", "Common contract field", "field"),
+    ("bom.reconciliation_status", "Common contract field", "field"),
+    ("line_item.review_count", "Common contract field", "field"),
+    ("line_item.reviewed_by_second_pass", "Common contract field", "field"),
+    ("reconciliation_flow.bom_check", "Common contract flow", "flow"),
+    ("receipt.ok", "Run receipt", "field"),
+    ("verifier.status", "Proof gate result", "field"),
+    ("run.status", "Run state", "field"),
+)
+
+
+def _contract_suggestion_matches(value: str, detail: str, query: str) -> bool:
+    if not query:
+        return True
+    haystack = f"{value} {detail}".lower()
+    terms = [term for term in re.split(r"\s+", query.lower().strip()) if term]
+    return all(term in haystack for term in terms)
+
+
+def _workspace_contract_field_suggestions(query: str, limit: int) -> list[dict[str, str]]:
+    capped_limit = max(1, min(limit, 100))
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(value: str, detail: str, kind: str) -> bool:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            return False
+        if not _contract_suggestion_matches(normalized, detail, query):
+            return False
+        seen.add(normalized)
+        items.append({"value": normalized, "label": normalized, "detail": detail, "kind": kind})
+        return len(items) >= capped_limit
+
+    for value, detail, kind in _COMMON_CONTRACT_FIELD_SUGGESTIONS:
+        if add(value, detail, kind):
+            return items
+
+    try:
+        from runtime.data_dictionary import describe_object, list_object_kinds
+
+        conn = _shared_pg_conn()
+        object_rows = list_object_kinds(conn)
+        for row in object_rows[:160]:
+            object_kind = str(row.get("object_kind") or "").strip()
+            if not object_kind:
+                continue
+            object_label = str(row.get("label") or object_kind).strip()
+            object_detail = f"Object · {object_label}"
+            if add(object_kind, object_detail, "object"):
+                return items
+            try:
+                description = describe_object(conn, object_kind=object_kind, include_layers=False)
+            except Exception:
+                continue
+            for field in description.get("fields") or []:
+                if not isinstance(field, dict):
+                    continue
+                field_path = str(
+                    field.get("field_path")
+                    or field.get("name")
+                    or field.get("field_name")
+                    or ""
+                ).strip()
+                if not field_path:
+                    continue
+                field_label = str(field.get("label") or field_path).strip()
+                field_kind = str(field.get("field_kind") or field.get("type") or "").strip()
+                detail = f"Field · {object_label}"
+                if field_kind:
+                    detail = f"{detail} · {field_kind}"
+                if add(f"{object_kind}.{field_path}", detail, "field"):
+                    return items
+    except Exception as exc:
+        logger.debug("workspace contract field suggestions unavailable: %s: %s", type(exc).__name__, exc)
+
+    return items
+
+
+@app.get("/api/workspace-contract-fields")
+def get_workspace_contract_fields(
+    q: str = Query(default="", description="Search object/field refs for requirement clauses."),
+    limit: int = Query(default=30, ge=1, le=100),
+) -> dict[str, Any]:
+    """Return object/field suggestions for structured contract clauses."""
+    return {
+        "root": "data_dictionary",
+        "query": q,
+        "items": _workspace_contract_field_suggestions(q, limit),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Handler-backed routes — explicit registrations, no catch-all wildcards.
 # Each route calls into the unified handler system via _route_to_handler

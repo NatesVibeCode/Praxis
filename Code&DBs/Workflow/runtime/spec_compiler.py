@@ -2428,6 +2428,13 @@ def propose_plan(
     from runtime.workflow._admission import preview_workflow_execution
 
     preview = preview_workflow_execution(conn, inline_spec=spec_dict)
+    preview_warnings = [
+        str(item)
+        for item in (preview.get("warnings") or [])
+        if str(item).strip()
+    ]
+    if preview_warnings:
+        warnings_all = [*warnings_all, *preview_warnings]
     provider_freshness = _require_provider_freshness(
         {
             "provider_route_truth": preview,

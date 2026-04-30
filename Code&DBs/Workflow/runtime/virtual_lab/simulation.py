@@ -24,8 +24,10 @@ from .state import (
     StateCommandResult,
     VirtualLabStateError,
     apply_overlay_patch_command,
+    environment_revision_from_dict,
     replace_overlay_command,
     restore_object_command,
+    object_state_record_from_dict,
     tombstone_object_command,
     virtual_lab_digest,
 )
@@ -118,10 +120,10 @@ class SimulationConfig:
 
     @property
     def config_digest(self) -> str:
-        return virtual_lab_digest(self.to_json(), purpose="virtual_lab.simulation_config.v1")
+        return virtual_lab_digest(self.to_json(include_digest=False), purpose="virtual_lab.simulation_config.v1")
 
-    def to_json(self) -> dict[str, Any]:
-        return {
+    def to_json(self, *, include_digest: bool = True) -> dict[str, Any]:
+        payload = {
             "kind": "virtual_lab.simulation_config.v1",
             "schema_version": SIMULATION_SCHEMA_VERSION,
             "seed": self.seed,
@@ -131,6 +133,9 @@ class SimulationConfig:
             "max_automation_firings": self.max_automation_firings,
             "max_recursion_depth": self.max_recursion_depth,
         }
+        if include_digest:
+            payload["config_digest"] = self.config_digest
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,6 +391,147 @@ class SimulationScenario:
         if include_digest:
             payload["scenario_digest"] = self.scenario_digest
         return payload
+
+
+def simulation_config_from_dict(payload: dict[str, Any]) -> SimulationConfig:
+    return SimulationConfig(
+        seed=payload.get("seed"),
+        clock_start=payload.get("clock_start"),
+        clock_step_seconds=int(payload.get("clock_step_seconds", 1)),
+        max_actions=int(payload.get("max_actions", 100)),
+        max_automation_firings=int(payload.get("max_automation_firings", 50)),
+        max_recursion_depth=int(payload.get("max_recursion_depth", 8)),
+    )
+
+
+def simulation_action_from_dict(payload: dict[str, Any]) -> SimulationAction:
+    actor_payload = payload.get("actor")
+    actor = None
+    if isinstance(actor_payload, dict):
+        actor = ActorIdentity(
+            actor_id=actor_payload.get("actor_id"),
+            actor_type=actor_payload.get("actor_type"),
+        )
+    return SimulationAction(
+        action_id=payload.get("action_id"),
+        action_kind=payload.get("action_kind"),
+        object_id=payload.get("object_id"),
+        instance_id=payload.get("instance_id") or "primary",
+        payload=_payload_dict(payload.get("payload"), "action.payload"),
+        actor=actor,
+        metadata=_payload_dict(payload.get("metadata"), "action.metadata"),
+    )
+
+
+def automation_predicate_from_dict(payload: dict[str, Any]) -> AutomationPredicate:
+    return AutomationPredicate(
+        predicate_kind=payload.get("predicate_kind"),
+        event_type=payload.get("event_type"),
+        object_id=payload.get("object_id"),
+        instance_id=payload.get("instance_id") or "primary",
+        field_path=_clean_path(payload.get("field_path")),
+        expected=payload.get("expected"),
+    )
+
+
+def automation_rule_from_dict(payload: dict[str, Any]) -> AutomationRule:
+    predicate_payload = payload.get("predicate")
+    if not isinstance(predicate_payload, dict):
+        raise SimulationRuntimeError(
+            "simulation.automation_predicate_required",
+            "automation rule requires predicate as a JSON object",
+            details={"rule_id": payload.get("rule_id")},
+        )
+    effects_payload = payload.get("effects") or []
+    if not isinstance(effects_payload, list) or not all(isinstance(item, dict) for item in effects_payload):
+        raise SimulationRuntimeError(
+            "simulation.automation_effects_not_list",
+            "automation rule effects must be a list of JSON objects",
+            details={"rule_id": payload.get("rule_id")},
+        )
+    return AutomationRule(
+        rule_id=payload.get("rule_id"),
+        name=payload.get("name"),
+        predicate=automation_predicate_from_dict(predicate_payload),
+        effects=tuple(simulation_action_from_dict(dict(item)) for item in effects_payload),
+        priority=int(payload.get("priority", 100)),
+        status=payload.get("status") or "active",
+        max_firings=None if payload.get("max_firings") is None else int(payload["max_firings"]),
+        metadata=_payload_dict(payload.get("metadata"), "automation_rule.metadata"),
+    )
+
+
+def simulation_assertion_from_dict(payload: dict[str, Any]) -> SimulationAssertion:
+    return SimulationAssertion(
+        assertion_id=payload.get("assertion_id"),
+        assertion_kind=payload.get("assertion_kind"),
+        object_id=payload.get("object_id"),
+        instance_id=payload.get("instance_id") or "primary",
+        field_path=_clean_path(payload.get("field_path")),
+        expected=payload.get("expected"),
+        event_type=payload.get("event_type"),
+        min_count=int(payload.get("min_count", 1)),
+        severity=payload.get("severity") or "error",
+    )
+
+
+def simulation_verifier_from_dict(payload: dict[str, Any]) -> SimulationVerifier:
+    return SimulationVerifier(
+        verifier_id=payload.get("verifier_id"),
+        verifier_kind=payload.get("verifier_kind"),
+        event_type=payload.get("event_type"),
+        min_count=int(payload.get("min_count", 1)),
+        severity=payload.get("severity") or "error",
+        metadata=_payload_dict(payload.get("metadata"), "verifier.metadata"),
+    )
+
+
+def simulation_initial_state_from_dict(payload: dict[str, Any]) -> SimulationInitialState:
+    revision_payload = payload.get("revision")
+    state_payloads = payload.get("object_states") or []
+    if not isinstance(revision_payload, dict):
+        raise SimulationRuntimeError(
+            "simulation.initial_revision_required",
+            "simulation initial state requires revision as a JSON object",
+        )
+    if not isinstance(state_payloads, list) or not all(isinstance(item, dict) for item in state_payloads):
+        raise SimulationRuntimeError(
+            "simulation.initial_object_states_not_list",
+            "simulation initial state object_states must be a list of JSON objects",
+        )
+    return SimulationInitialState(
+        revision=environment_revision_from_dict(revision_payload),
+        object_states=tuple(object_state_record_from_dict(dict(item)) for item in state_payloads),
+    )
+
+
+def simulation_scenario_from_dict(payload: dict[str, Any]) -> SimulationScenario:
+    initial_state_payload = payload.get("initial_state")
+    config_payload = payload.get("config")
+    if not isinstance(initial_state_payload, dict):
+        raise SimulationRuntimeError(
+            "simulation.initial_state_required",
+            "simulation scenario requires initial_state as a JSON object",
+        )
+    if not isinstance(config_payload, dict):
+        raise SimulationRuntimeError(
+            "simulation.config_required",
+            "simulation scenario requires config as a JSON object",
+        )
+    actions = _list_of_dicts(payload.get("actions"), "actions")
+    automation_rules = _list_of_dicts(payload.get("automation_rules"), "automation_rules")
+    assertions = _list_of_dicts(payload.get("assertions"), "assertions")
+    verifiers = _list_of_dicts(payload.get("verifiers"), "verifiers")
+    return SimulationScenario(
+        scenario_id=payload.get("scenario_id"),
+        initial_state=simulation_initial_state_from_dict(initial_state_payload),
+        actions=tuple(simulation_action_from_dict(item) for item in actions),
+        config=simulation_config_from_dict(config_payload),
+        automation_rules=tuple(automation_rule_from_dict(item) for item in automation_rules),
+        assertions=tuple(simulation_assertion_from_dict(item) for item in assertions),
+        verifiers=tuple(simulation_verifier_from_dict(item) for item in verifiers),
+        metadata=_payload_dict(payload.get("metadata"), "scenario.metadata"),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -784,6 +930,26 @@ def run_simulation_scenario(scenario: SimulationScenario, *, run_id: str | None 
 
     context.assertion_results.extend(_run_assertions(context))
     context.verifier_results.extend(_run_verifiers(context))
+    severe_assertion_failed = any(
+        not item.passed and item.severity in {"error", "blocker"}
+        for item in context.assertion_results
+    )
+    if not context.scenario.verifiers and not context.blockers and not severe_assertion_failed:
+        verifier_event = _append_event(
+            context,
+            "verifier.required",
+            "verifier",
+            None,
+            {"reason_code": "simulation.verifier_required"},
+        )
+        gap, blocker = _gap_and_blocker(
+            code="simulation.verifier_required",
+            message="simulation cannot report green status without at least one verifier",
+            source_area="verifier",
+            trace_event_id=verifier_event.event_id,
+        )
+        context.gaps.append(gap)
+        context.blockers.append(blocker)
 
     if stop_reason == "success":
         if context.blockers:
@@ -1581,6 +1747,8 @@ def _blocker_stop_reason(blockers: list[PromotionBlocker]) -> SimulationStopReas
         return "guardrail_exceeded"
     if "simulation.unsupported_action" in codes:
         return "unsupported_capability"
+    if "simulation.verifier_required" in codes or "simulation.unsupported_verifier" in codes:
+        return "verifier_failed"
     return "runtime_fault"
 
 
@@ -1662,6 +1830,24 @@ def _mapping(value: Any, field_name: str) -> dict[str, Any]:
     return dict(canonical_value(value))
 
 
+def _payload_dict(value: Any, field_name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    return _mapping(value, field_name)
+
+
+def _list_of_dicts(value: Any, field_name: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise SimulationRuntimeError(
+            f"simulation.{field_name}_not_list",
+            f"{field_name} must be a list of JSON objects",
+            details={"field_name": field_name},
+        )
+    return [dict(item) for item in value]
+
+
 def _clean_path(value: tuple[str, ...] | list[str] | str | None) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -1703,3 +1889,36 @@ def _parse_datetime(value: str) -> datetime:
 
 def _datetime_to_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+__all__ = [
+    "ActionExecutionResult",
+    "AutomationEvaluationResult",
+    "AutomationFiringResult",
+    "AutomationPredicate",
+    "AutomationRule",
+    "PromotionBlocker",
+    "SIMULATION_RUNTIME_VERSION",
+    "SIMULATION_SCHEMA_VERSION",
+    "SimulationAction",
+    "SimulationAssertion",
+    "SimulationConfig",
+    "SimulationEvent",
+    "SimulationInitialState",
+    "SimulationRunResult",
+    "SimulationRuntimeError",
+    "SimulationScenario",
+    "SimulationTrace",
+    "SimulationTypedGap",
+    "SimulationVerifier",
+    "StateTransition",
+    "automation_predicate_from_dict",
+    "automation_rule_from_dict",
+    "run_simulation_scenario",
+    "simulation_action_from_dict",
+    "simulation_assertion_from_dict",
+    "simulation_config_from_dict",
+    "simulation_initial_state_from_dict",
+    "simulation_scenario_from_dict",
+    "simulation_verifier_from_dict",
+]

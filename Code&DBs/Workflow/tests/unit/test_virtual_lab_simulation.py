@@ -10,6 +10,7 @@ from runtime.virtual_lab.simulation import (
     SimulationScenario,
     SimulationVerifier,
     run_simulation_scenario,
+    simulation_scenario_from_dict,
 )
 from runtime.virtual_lab.state import (
     ActorIdentity,
@@ -339,3 +340,62 @@ def test_verifier_output_reports_structured_findings() -> None:
         "expected_min_count": 1,
         "actual_count": 0,
     }
+
+
+def test_green_status_requires_at_least_one_verifier() -> None:
+    scenario = SimulationScenario(
+        scenario_id="scenario.no_verifier",
+        initial_state=_initial_state(),
+        config=_config(),
+        actions=(
+            SimulationAction(
+                action_id="action.qualify_account",
+                action_kind="patch_object",
+                object_id="account:001",
+                payload={"patch": {"status": "qualified"}},
+                actor=_actor(),
+            ),
+        ),
+        assertions=(
+            SimulationAssertion(
+                assertion_id="assert.status_qualified",
+                assertion_kind="final_object_field_equals",
+                object_id="account:001",
+                field_path=("status",),
+                expected="qualified",
+            ),
+        ),
+    )
+
+    result = run_simulation_scenario(scenario)
+
+    assert result.status == "blocked"
+    assert result.stop_reason == "verifier_failed"
+    assert result.blockers[0].code == "simulation.verifier_required"
+
+
+def test_simulation_scenario_from_dict_round_trips_domain_json() -> None:
+    scenario = SimulationScenario(
+        scenario_id="scenario.round_trip",
+        initial_state=_initial_state(),
+        config=_config(),
+        actions=(
+            SimulationAction(
+                action_id="action.qualify_account",
+                action_kind="patch_object",
+                object_id="account:001",
+                payload={"patch": {"status": "qualified"}},
+                actor=_actor(),
+            ),
+        ),
+        verifiers=(
+            SimulationVerifier(
+                verifier_id="verifier.no_blockers",
+                verifier_kind="no_blockers",
+            ),
+        ),
+    )
+
+    parsed = simulation_scenario_from_dict(scenario.to_json())
+
+    assert parsed.to_json() == scenario.to_json()

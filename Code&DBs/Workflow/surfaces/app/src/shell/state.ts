@@ -50,6 +50,19 @@ export function manifestTabShellId(manifestId: string, tabId?: string | null): s
   return `manifest:${manifestId}:${tabId || 'main'}`;
 }
 
+export function manifestWorkspaceLabel(manifestId: string, tabId?: string | null): string {
+  const base = manifestId
+    .replace(/^blank-workspace-[a-z0-9]+$/i, 'Compose')
+    .replace(/^entity-workspace-[a-z0-9]+$/i, 'Entity Workspace')
+    .replace(/^workspace-[a-z0-9]+$/i, 'Workspace');
+  const label = base === manifestId
+    ? manifestId
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\w/g, (character) => character.toUpperCase())
+    : base;
+  return !tabId || tabId === 'main' ? label : `${label} · ${tabId}`;
+}
+
 export function manifestEditorShellId(manifestId: string): string {
   return `manifest-editor:${manifestId}`;
 }

@@ -25,9 +25,48 @@ const QUICK_PROMPTS = [
   'Help me plan the next build step.',
   'Find the relevant context for this screen.',
 ];
-const OPERATOR_CHAT_ENGINE = 'DeepSeek V4 Pro';
-const OPERATOR_CHAT_PROVIDER = 'Together';
 const MAX_CHAT_FILES = 6;
+const DEFAULT_CHAT_TASK_SLUG = 'auto/chat';
+
+interface ChatRouteCandidate {
+  provider_slug: string;
+  model_slug: string;
+  transport_type: string | null;
+  rank: number | null;
+  permitted: boolean | null;
+  route_health_score: number | null;
+  benchmark_score: number | null;
+  route_tier: string | null;
+  latency_class: string | null;
+}
+
+function chatRouteKey(route: ChatRouteCandidate | null): string {
+  if (!route) return '';
+  return `${route.provider_slug}|${route.model_slug}|${route.transport_type ?? ''}`;
+}
+
+function chatRouteOverride(route: ChatRouteCandidate | null): string | undefined {
+  if (!route) return undefined;
+  return `${route.provider_slug}/${route.model_slug}`;
+}
+
+async function fetchChatRoutingOptions(taskSlug: string): Promise<ChatRouteCandidate[]> {
+  const res = await fetch('/api/operate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      operation: 'chat.routing_options.list',
+      input: { task_slug: taskSlug },
+      mode: 'query',
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`routing options fetch failed (${res.status})`);
+  }
+  const payload = await res.json();
+  const candidates = payload?.result?.candidates ?? payload?.candidates ?? [];
+  return Array.isArray(candidates) ? (candidates as ChatRouteCandidate[]) : [];
+}
 const MAX_FILE_CONTEXT_BYTES = 80_000;
 const MAX_TOTAL_FILE_CONTEXT_BYTES = 240_000;
 
@@ -86,10 +125,43 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const [attachedFiles, setAttachedFiles] = useState<PendingChatFile[]>([]);
   const [dropActive, setDropActive] = useState(false);
   const [moonHandoff, setMoonHandoff] = useState<MoonChatHandoff | null>(null);
+  const [routeCandidates, setRouteCandidates] = useState<ChatRouteCandidate[]>([]);
+  const [selectedRoute, setSelectedRoute] = useState<ChatRouteCandidate | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [routesError, setRoutesError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const processedHandoffIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchChatRoutingOptions(DEFAULT_CHAT_TASK_SLUG)
+      .then((candidates) => {
+        if (cancelled) return;
+        setRouteCandidates(candidates);
+        setRoutesError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setRoutesError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function handleOutside(event: MouseEvent) {
+      if (!pickerRef.current) return;
+      if (event.target instanceof Node && pickerRef.current.contains(event.target)) return;
+      setPickerOpen(false);
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [pickerOpen]);
 
   const refreshConversations = useCallback(async () => {
     setConversationsLoading(true);
@@ -201,13 +273,15 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     const mergedSelection = moonCtx.length || attachmentContext.length
       ? [...moonCtx, ...attachmentContext]
       : undefined;
+    const modelOverride = chatRouteOverride(selectedRoute);
     void sendMessage(
       content,
       mergedSelection,
       targetConversationId,
+      modelOverride ? { model: modelOverride } : undefined,
     );
     void refreshConversations();
-  }, [attachedFiles, conversationId, createConversation, input, loading, refreshConversations, sendMessage]);
+  }, [attachedFiles, conversationId, createConversation, input, loading, refreshConversations, selectedRoute, sendMessage]);
 
   useEffect(() => {
     if (stage === 'icon' || loading) return;
@@ -220,7 +294,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
       let targetConversationId = conversationId;
       if (!targetConversationId) {
         targetConversationId = await createConversation(
-          moonHandoff.workflow_id ? `Moon recovery ${moonHandoff.workflow_id}` : 'Moon materialize recovery',
+          moonHandoff.workflow_id ? `Materialize recovery ${moonHandoff.workflow_id}` : 'Materialize recovery',
         );
         if (!targetConversationId || cancelled) return;
       }
@@ -370,8 +444,8 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
       <div className="strategy-console__stream" role="log" aria-live="polite" aria-relevant="additions">
         {moonHandoff && (
           <div className={`strategy-console__handoff strategy-console__handoff--${moonHandoff.phase}`}>
-            <span className="strategy-console__handoff-kicker">Moon handoff</span>
-            <strong>{moonHandoff.phase === 'chat_fallback' ? 'Moon is looking now' : moonHandoff.phase === 'ready' ? 'Materialize ready' : moonHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
+            <span className="strategy-console__handoff-kicker">Materialize handoff</span>
+            <strong>{moonHandoff.phase === 'chat_fallback' ? 'Recovery is running' : moonHandoff.phase === 'ready' ? 'Materialize ready' : moonHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
             <p>{moonHandoff.status_message}</p>
           </div>
         )}
@@ -466,10 +540,74 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
         }}
       >
         <div className="strategy-console__composer-tools">
-          <div className="strategy-console__model-lock" aria-label="Chat model">
-            <span>Engine</span>
-            <strong>{OPERATOR_CHAT_ENGINE}</strong>
-            <em>{OPERATOR_CHAT_PROVIDER}</em>
+          <div className="strategy-console__model-picker" ref={pickerRef}>
+            <button
+              type="button"
+              className="strategy-console__model-trigger"
+              aria-haspopup="listbox"
+              aria-expanded={pickerOpen}
+              aria-label="Chat model"
+              onClick={() => setPickerOpen((open) => !open)}
+              disabled={routeCandidates.length === 0 && !routesError}
+            >
+              <span>Engine</span>
+              {selectedRoute ? (
+                <>
+                  <strong>{selectedRoute.model_slug}</strong>
+                  <em>{selectedRoute.provider_slug}</em>
+                  {selectedRoute.transport_type && (
+                    <span className="strategy-console__transport-chip">{selectedRoute.transport_type}</span>
+                  )}
+                </>
+              ) : routeCandidates.length > 0 ? (
+                <>
+                  <strong>{routeCandidates[0].model_slug}</strong>
+                  <em>{routeCandidates[0].provider_slug}</em>
+                  {routeCandidates[0].transport_type && (
+                    <span className="strategy-console__transport-chip">{routeCandidates[0].transport_type}</span>
+                  )}
+                </>
+              ) : routesError ? (
+                <em>routing unavailable</em>
+              ) : (
+                <em>loading routes…</em>
+              )}
+            </button>
+            {pickerOpen && routeCandidates.length > 0 && (
+              <ul className="strategy-console__model-list" role="listbox">
+                {routeCandidates.map((route) => {
+                  const key = chatRouteKey(route);
+                  const isSelected = selectedRoute
+                    ? chatRouteKey(selectedRoute) === key
+                    : route === routeCandidates[0];
+                  return (
+                    <li
+                      key={key}
+                      role="option"
+                      aria-selected={isSelected}
+                      className={
+                        isSelected
+                          ? 'strategy-console__model-option strategy-console__model-option--selected'
+                          : 'strategy-console__model-option'
+                      }
+                      onClick={() => {
+                        setSelectedRoute(route);
+                        setPickerOpen(false);
+                      }}
+                    >
+                      <strong>{route.model_slug}</strong>
+                      <em>{route.provider_slug}</em>
+                      {route.transport_type && (
+                        <span className="strategy-console__transport-chip">{route.transport_type}</span>
+                      )}
+                      {typeof route.rank === 'number' && (
+                        <span className="strategy-console__model-rank">#{route.rank}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
           <button
             type="button"

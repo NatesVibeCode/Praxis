@@ -48,7 +48,7 @@
       "write": [
         "Code&DBs/Databases/migrations/workflow/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_m_create_repositories",
@@ -71,7 +71,7 @@
         "Code&DBs/Workflow/storage/postgres/__init__.py",
         "Code&DBs/Workflow/authority/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_m_thin_sources",
@@ -90,7 +90,7 @@
       "write": [
         "Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile 'Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py'"
     },
     {
       "label": "wave_m_tests",
@@ -108,7 +108,7 @@
       "write": [
         "Code&DBs/Workflow/tests/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'handler' || true"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'handler' || true"
     },
     {
       "label": "wave_m_close_bugs",
@@ -119,7 +119,7 @@
       ],
       "description": "Resolve the wave's linked bugs as FIXED",
       "outcome_goal": "Every linked bug is FIXED with a resolution citing this queue_id",
-      "prompt": "Resolve the Wave M linked bugs as FIXED after regression tests pass.\n\n```bash\ncd /Users/nate/Praxis\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-73068592A574\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/handlers/workflow_run.py:1004-1043 in boundary_refactor_wave_m_handler_writes_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-24232B4DA970\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/handlers/workflow_run.py:375-403 in boundary_refactor_wave_m_handler_writes_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-7949DED00CB4\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/handlers/workflow_run.py:732-788 in boundary_refactor_wave_m_handler_writes_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
+      "prompt": "Resolve the Wave M linked bugs as FIXED after regression tests pass.\n\n```bash\ncd .\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-73068592A574\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/handlers/workflow_run.py:1004-1043 in boundary_refactor_wave_m_handler_writes_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-24232B4DA970\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/handlers/workflow_run.py:375-403 in boundary_refactor_wave_m_handler_writes_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-7949DED00CB4\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/api/handlers/workflow_run.py:732-788 in boundary_refactor_wave_m_handler_writes_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
       "read": [],
       "write": [],
       "verify_command": "true"

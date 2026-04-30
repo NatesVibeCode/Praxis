@@ -396,7 +396,7 @@ def test_bugs_command_search_forwards_status_and_severity_filters(monkeypatch) -
     assert rc == 0
     assert captured["tool_name"] == "praxis_bugs"
     assert captured["params"]["action"] == "search"
-    assert captured["params"]["title"] == "timeout"
+    assert captured["params"]["query"] == "timeout"
     assert captured["params"]["status"] == "OPEN"
     assert captured["params"]["severity"] == "P1"
     assert json.loads(stdout.getvalue()) == {"bugs": [], "count": 0, "returned_count": 0}

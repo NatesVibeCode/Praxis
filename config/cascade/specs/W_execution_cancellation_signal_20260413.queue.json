@@ -44,7 +44,7 @@
       "write": [
         "Code&DBs/Workflow/runtime/execution/orchestrator.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_workflow_runner.py -k cancel"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_workflow_runner.py -k cancel"
     },
     {
       "label": "align_control_operator_cancellation",
@@ -64,7 +64,7 @@
         "Code&DBs/Workflow/runtime/execution/control_operator.py",
         "Code&DBs/Workflow/runtime/execution/orchestrator.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_control_operator_runtime.py -k cancel"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_control_operator_runtime.py -k cancel"
     },
     {
       "label": "execution_cancellation_tests",
@@ -84,7 +84,7 @@
         "Code&DBs/Workflow/tests/integration/test_control_operator_runtime.py",
         "Code&DBs/Workflow/tests/integration/test_workflow_runner.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_control_operator_runtime.py Code\\&DBs/Workflow/tests/integration/test_workflow_runner.py -k cancel"
+      "verify_command": "python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_control_operator_runtime.py Code\\&DBs/Workflow/tests/integration/test_workflow_runner.py -k cancel"
     },
     {
       "label": "execution_cancellation_review",

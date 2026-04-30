@@ -52,7 +52,7 @@
       "write": [
         "Code&DBs/Databases/migrations/workflow/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_e_create_repositories",
@@ -77,7 +77,7 @@
         "Code&DBs/Workflow/storage/postgres/__init__.py",
         "Code&DBs/Workflow/authority/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "wave_e_thin_sources",
@@ -100,7 +100,7 @@
         "Code&DBs/Workflow/runtime/subscription_repository.py",
         "Code&DBs/Workflow/runtime/triggers.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/control_commands.py' 'Code&DBs/Workflow/runtime/subscription_repository.py' 'Code&DBs/Workflow/runtime/triggers.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/runtime/control_commands.py' 'Code&DBs/Workflow/runtime/subscription_repository.py' 'Code&DBs/Workflow/runtime/triggers.py'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile 'Code&DBs/Workflow/runtime/control_commands.py' 'Code&DBs/Workflow/runtime/subscription_repository.py' 'Code&DBs/Workflow/runtime/triggers.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/runtime/control_commands.py' 'Code&DBs/Workflow/runtime/subscription_repository.py' 'Code&DBs/Workflow/runtime/triggers.py'"
     },
     {
       "label": "wave_e_tests",
@@ -120,7 +120,7 @@
       "write": [
         "Code&DBs/Workflow/tests/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'triggers' || true"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'triggers' || true"
     },
     {
       "label": "wave_e_close_bugs",
@@ -131,7 +131,7 @@
       ],
       "description": "Resolve the wave's linked bugs as FIXED",
       "outcome_goal": "Every linked bug is FIXED with a resolution citing this queue_id",
-      "prompt": "Resolve the Wave E linked bugs as FIXED after regression tests pass.\n\n```bash\ncd /Users/nate/Praxis\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-612F9A07E104\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/triggers.py in boundary_refactor_wave_e_triggers_subscriptions_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-D77FFA613FBA\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/subscription_repository.py in boundary_refactor_wave_e_triggers_subscriptions_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-6760FE9BE1E0\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/control_commands.py in boundary_refactor_wave_e_triggers_subscriptions_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
+      "prompt": "Resolve the Wave E linked bugs as FIXED after regression tests pass.\n\n```bash\ncd .\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-612F9A07E104\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/triggers.py in boundary_refactor_wave_e_triggers_subscriptions_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-D77FFA613FBA\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/subscription_repository.py in boundary_refactor_wave_e_triggers_subscriptions_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-6760FE9BE1E0\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/control_commands.py in boundary_refactor_wave_e_triggers_subscriptions_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
       "read": [],
       "write": [],
       "verify_command": "true"

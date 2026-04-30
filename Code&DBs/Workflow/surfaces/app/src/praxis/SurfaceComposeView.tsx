@@ -151,7 +151,7 @@ export function SurfaceComposeView({ intent, pillRefs }: SurfaceComposeViewProps
   const selectedTab = resolvePraxisBundleTab(bundle, null);
   const selectedSurface = resolvePraxisBundleSurface(bundle, null);
 
-  if (!selectedSurface) {
+  if (!selectedSurface || selectedSurface.kind !== 'quadrant_manifest') {
     return (
       <div className="app-shell__fallback app-shell__fallback--error">
         <div className="app-shell__fallback-kicker">Compose unavailable</div>

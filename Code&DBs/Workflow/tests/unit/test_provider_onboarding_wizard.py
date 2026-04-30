@@ -468,6 +468,54 @@ def test_cli_auth_doctor_operation_handler_uses_core_implementation(monkeypatch)
     assert captured["params"] == {"providers": ["openai"]}
 
 
+def test_cli_auth_doctor_codex_probe_uses_longer_timeout_and_unique_output(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(provider_onboard_tool, "_which_binary", lambda binary: f"/usr/bin/{binary}")
+
+    def _run(cmd, *, input, capture_output, text, timeout):
+        calls.append(
+            {
+                "cmd": cmd,
+                "input": input,
+                "capture_output": capture_output,
+                "text": text,
+                "timeout": timeout,
+            }
+        )
+        return SimpleNamespace(returncode=0, stdout="Hi.\n", stderr="")
+
+    monkeypatch.setattr(provider_onboard_tool.subprocess, "run", _run)
+
+    payload = provider_onboard_tool.run_cli_auth_doctor({"providers": ["openai"]})
+
+    assert payload["ok"] is True
+    assert payload["reports"][0]["auth_state"] == "authenticated"
+    assert calls[0]["timeout"] == 45
+    cmd = calls[0]["cmd"]
+    assert cmd[:3] == ["/usr/bin/codex", "exec", "--output-last-message"]
+    output_path = Path(cmd[3])
+    assert output_path.name.startswith("praxis-openai-authprobe-")
+    assert output_path.suffix == ".txt"
+
+
+def test_cli_auth_doctor_non_codex_probes_keep_short_timeout(monkeypatch) -> None:
+    timeouts: dict[str, int] = {}
+
+    monkeypatch.setattr(provider_onboard_tool, "_which_binary", lambda binary: f"/usr/bin/{binary}")
+
+    def _run(cmd, *, input, capture_output, text, timeout):
+        timeouts[Path(cmd[0]).name] = timeout
+        return SimpleNamespace(returncode=0, stdout="Hi.\n", stderr="")
+
+    monkeypatch.setattr(provider_onboard_tool.subprocess, "run", _run)
+
+    payload = provider_onboard_tool.run_cli_auth_doctor({"providers": ["anthropic", "google"]})
+
+    assert payload["ok"] is True
+    assert timeouts == {"claude": 15, "gemini": 15}
+
+
 def test_provider_onboarding_resolve_spec_infers_single_declared_api_transport(monkeypatch) -> None:
     monkeypatch.setattr(
         provider_onboarding.provider_registry_mod,

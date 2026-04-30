@@ -107,9 +107,74 @@ def test_resolve_http_operation_binding_rejects_missing_reference() -> None:
             "ListStructuredDocumentContextSelectionsQuery",
         ),
         (
+            "runtime.operations.queries.structured_documents.AssembleStructuredDocumentContextQuery",
+            "runtime.operations.queries.structured_documents.handle_assemble_context",
+            "AssembleStructuredDocumentContextQuery",
+        ),
+        (
             "runtime.operations.commands.promote_experiment_winner_command.PromoteExperimentWinnerCommand",
             "runtime.operations.commands.promote_experiment_winner_command.handle_promote_experiment_winner",
             "PromoteExperimentWinnerCommand",
+        ),
+        (
+            "runtime.operations.commands.task_environment_contracts.RecordTaskEnvironmentContractCommand",
+            "runtime.operations.commands.task_environment_contracts.handle_task_environment_contract_record",
+            "RecordTaskEnvironmentContractCommand",
+        ),
+        (
+            "runtime.operations.queries.task_environment_contracts.QueryTaskEnvironmentContractRead",
+            "runtime.operations.queries.task_environment_contracts.handle_task_environment_contract_read",
+            "QueryTaskEnvironmentContractRead",
+        ),
+        (
+            "runtime.operations.commands.integration_action_contracts.RecordIntegrationActionContractCommand",
+            "runtime.operations.commands.integration_action_contracts.handle_integration_action_contract_record",
+            "RecordIntegrationActionContractCommand",
+        ),
+        (
+            "runtime.operations.queries.integration_action_contracts.QueryIntegrationActionContractRead",
+            "runtime.operations.queries.integration_action_contracts.handle_integration_action_contract_read",
+            "QueryIntegrationActionContractRead",
+        ),
+        (
+            "runtime.operations.commands.virtual_lab_state.RecordVirtualLabStateCommand",
+            "runtime.operations.commands.virtual_lab_state.handle_virtual_lab_state_record",
+            "RecordVirtualLabStateCommand",
+        ),
+        (
+            "runtime.operations.queries.virtual_lab_state.QueryVirtualLabStateRead",
+            "runtime.operations.queries.virtual_lab_state.handle_virtual_lab_state_read",
+            "QueryVirtualLabStateRead",
+        ),
+        (
+            "runtime.operations.commands.virtual_lab_simulation.RunVirtualLabSimulationCommand",
+            "runtime.operations.commands.virtual_lab_simulation.handle_virtual_lab_simulation_run",
+            "RunVirtualLabSimulationCommand",
+        ),
+        (
+            "runtime.operations.queries.virtual_lab_simulation.QueryVirtualLabSimulationRead",
+            "runtime.operations.queries.virtual_lab_simulation.handle_virtual_lab_simulation_read",
+            "QueryVirtualLabSimulationRead",
+        ),
+        (
+            "runtime.operations.commands.virtual_lab_sandbox_promotion.RecordVirtualLabSandboxPromotionCommand",
+            "runtime.operations.commands.virtual_lab_sandbox_promotion.handle_virtual_lab_sandbox_promotion_record",
+            "RecordVirtualLabSandboxPromotionCommand",
+        ),
+        (
+            "runtime.operations.queries.virtual_lab_sandbox_promotion.QueryVirtualLabSandboxPromotionRead",
+            "runtime.operations.queries.virtual_lab_sandbox_promotion.handle_virtual_lab_sandbox_promotion_read",
+            "QueryVirtualLabSandboxPromotionRead",
+        ),
+        (
+            "runtime.operations.commands.portable_cartridge.RecordPortableCartridgeCommand",
+            "runtime.operations.commands.portable_cartridge.handle_record_portable_cartridge",
+            "RecordPortableCartridgeCommand",
+        ),
+        (
+            "runtime.operations.queries.portable_cartridge.ReadPortableCartridgeQuery",
+            "runtime.operations.queries.portable_cartridge.handle_read_portable_cartridge",
+            "ReadPortableCartridgeQuery",
         ),
     ],
 )

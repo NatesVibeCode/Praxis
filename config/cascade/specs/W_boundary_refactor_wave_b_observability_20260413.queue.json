@@ -57,7 +57,7 @@
       "write_scope": [
         "Code&DBs/Databases/migrations/workflow/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "create_observability_repositories",
@@ -81,7 +81,7 @@
         "Code&DBs/Workflow/storage/postgres/",
         "Code&DBs/Workflow/storage/postgres/__init__.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
     },
     {
       "label": "thin_observability_runtime",
@@ -106,7 +106,7 @@
         "Code&DBs/Workflow/runtime/debate_metrics.py",
         "Code&DBs/Workflow/runtime/cost_tracker.py"
       ],
-      "verify_command": "cd /Users/nate/Praxis && for f in 'Code&DBs/Workflow/runtime/observability.py' 'Code&DBs/Workflow/runtime/event_log.py' 'Code&DBs/Workflow/runtime/quality_views.py' 'Code&DBs/Workflow/runtime/debate_metrics.py' 'Code&DBs/Workflow/runtime/cost_tracker.py'; do PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile \"$f\" && ! grep -E 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' \"$f\" || exit 1; done"
+      "verify_command": "for f in 'Code&DBs/Workflow/runtime/observability.py' 'Code&DBs/Workflow/runtime/event_log.py' 'Code&DBs/Workflow/runtime/quality_views.py' 'Code&DBs/Workflow/runtime/debate_metrics.py' 'Code&DBs/Workflow/runtime/cost_tracker.py'; do PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile \"$f\" && ! grep -E 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' \"$f\" || exit 1; done"
     },
     {
       "label": "observability_authority_tests",
@@ -126,7 +126,7 @@
       "write_scope": [
         "Code&DBs/Workflow/tests/"
       ],
-      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'observability or metrics or quality or debate or cost'"
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'observability or metrics or quality or debate or cost'"
     },
     {
       "label": "observability_authority_close_bugs",
@@ -135,7 +135,7 @@
       "depends_on": ["observability_authority_tests"],
       "description": "Resolve all five linked observability bugs as FIXED",
       "outcome_goal": "All five linked bugs are FIXED with resolutions citing this queue_id",
-      "prompt": "Mark each linked bug FIXED after verifying the regression assertions still pass.\n\n```bash\ncd /Users/nate/Praxis\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\nfor pair in \\\n  'BUG-B73E47948CC1|runtime/observability.py' \\\n  'BUG-0C9449F404EB|runtime/event_log.py' \\\n  'BUG-789A0F27385F|runtime/quality_views.py' \\\n  'BUG-011038E343EB|runtime/debate_metrics.py' \\\n  'BUG-5EFC81856C2C|runtime/cost_tracker.py'; do\n  bug_id=\"${pair%%|*}\"\n  source_file=\"${pair##*|}\"\n  \"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json \"{\n    \\\"command\\\": \\\"resolve\\\",\n    \\\"bug_id\\\": \\\"$bug_id\\\",\n    \\\"status\\\": \\\"FIXED\\\",\n    \\\"resolution\\\": \\\"Writes moved to storage/postgres/ repositories in boundary_refactor_wave_b_observability_20260413. Verified: no INSERT/UPDATE/DELETE/CREATE TABLE remains in Code&DBs/Workflow/$source_file.\\\"\n  }\" --yes\ndone\n```",
+      "prompt": "Mark each linked bug FIXED after verifying the regression assertions still pass.\n\n```bash\ncd .\n. ./scripts/_workflow_env.sh && workflow_load_repo_env\nfor pair in \\\n  'BUG-B73E47948CC1|runtime/observability.py' \\\n  'BUG-0C9449F404EB|runtime/event_log.py' \\\n  'BUG-789A0F27385F|runtime/quality_views.py' \\\n  'BUG-011038E343EB|runtime/debate_metrics.py' \\\n  'BUG-5EFC81856C2C|runtime/cost_tracker.py'; do\n  bug_id=\"${pair%%|*}\"\n  source_file=\"${pair##*|}\"\n  \"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json \"{\n    \\\"command\\\": \\\"resolve\\\",\n    \\\"bug_id\\\": \\\"$bug_id\\\",\n    \\\"status\\\": \\\"FIXED\\\",\n    \\\"resolution\\\": \\\"Writes moved to storage/postgres/ repositories in boundary_refactor_wave_b_observability_20260413. Verified: no INSERT/UPDATE/DELETE/CREATE TABLE remains in Code&DBs/Workflow/$source_file.\\\"\n  }\" --yes\ndone\n```",
       "read_scope": [],
       "write_scope": [],
       "verify_command": "true"

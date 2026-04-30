@@ -14,7 +14,7 @@
       "prompt": "In `Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py`, rename all test classes that use the 'Dag' prefix:\n\n- TestDagValidate (line 661) -> TestPraxisValidate\n- TestDagStatus (line 701) -> TestPraxisStatus\n- TestDagMaintenance (line 731) -> TestPraxisMaintenance\n- TestDagQuery (line 742) -> TestPraxisQuery\n- TestDagBugs (line 777) -> TestPraxisBugs\n- TestDagHealth (line 1000) -> TestPraxisHealth\n- TestDagOperatorView (line 1018) -> TestPraxisOperatorView\n- TestDagRecall (line 1027) -> TestPraxisRecall\n- TestDagIngest (line 1038) -> TestPraxisIngest\n- TestDagDispatchDryRun (line 1091) -> TestPraxisDispatchDryRun\n\nAlso update any internal strings that reference these class names (e.g. error messages like 'TestDagBugs unexpectedly touched live Postgres').\n\nDo NOT change any test logic, assertions, or fixture usage — only rename the classes and update their string references.",
       "read": ["Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"],
       "write": ["Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"],
-      "verify_command": "! grep -q 'class TestDag' /Users/nate/Praxis/Code\\&DBs/Workflow/tests/integration/test_mcp_workflow_server.py && grep -q 'class TestPraxis' /Users/nate/Praxis/Code\\&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"
+      "verify_command": "! grep -q 'class TestDag' Code\\&DBs/Workflow/tests/integration/test_mcp_workflow_server.py && grep -q 'class TestPraxis' Code\\&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"
     },
     {
       "label": "rename_test_funcs",
@@ -33,7 +33,7 @@
         "Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py",
         "Code&DBs/Workflow/tests/unit/test_runtime_context_tool.py"
       ],
-      "verify_command": "! grep -q 'def test_tool_dag_\\|def test_dag_' /Users/nate/Praxis/Code\\&DBs/Workflow/tests/unit/test_mcp_session_tools.py /Users/nate/Praxis/Code\\&DBs/Workflow/tests/unit/test_mcp_health_tool.py /Users/nate/Praxis/Code\\&DBs/Workflow/tests/unit/test_runtime_context_tool.py"
+      "verify_command": "! grep -q 'def test_tool_dag_\\|def test_dag_' Code\\&DBs/Workflow/tests/unit/test_mcp_session_tools.py Code\\&DBs/Workflow/tests/unit/test_mcp_health_tool.py Code\\&DBs/Workflow/tests/unit/test_runtime_context_tool.py"
     },
     {
       "label": "rename_test_data",
@@ -52,7 +52,7 @@
         "Code&DBs/Workflow/tests/unit/test_native_authority.py",
         "Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py"
       ],
-      "verify_command": "! grep -rn 'dag-project\\|dag-dispatch\\|dag_research' /Users/nate/Praxis/Code\\&DBs/Workflow/tests/ --include='*.py' | grep -v __pycache__"
+      "verify_command": "! grep -rn 'dag-project\\|dag-dispatch\\|dag_research' Code\\&DBs/Workflow/tests/ --include='*.py' | grep -v __pycache__"
     },
     {
       "label": "rename_existing_spec",
@@ -63,7 +63,7 @@
       "prompt": "Update the existing workflow spec `config/cascade/specs/W_moon_dag_polish_20260413.json`:\n\n1. Change `\"name\": \"Moon DAG Canvas Polish\"` to `\"name\": \"Moon Graph Canvas Polish\"`\n2. Change job slug `\"dag_css\"` to `\"graph_css\"`\n3. Change job slug `\"wire_dag_classes\"` to `\"wire_graph_classes\"`\n4. Update `depends_on` references: `\"dag_css\"` -> `\"graph_css\"`\n5. In all prompt text, replace 'DAG' with 'graph' when referring to the canvas/nodes:\n   - 'DAG canvas nodes' -> 'graph canvas nodes'\n   - 'DAG view' -> 'graph view'\n   - 'DAG Canvas' -> 'Graph Canvas'\n   - 'DAG nodes' -> 'graph nodes'\n6. Update verify_command references from 'moon-dag-node' to 'moon-graph-node' and 'moon-dag-append' to 'moon-graph-append'\n7. In the prompt text, update CSS class names from moon-dag-* to moon-graph-*",
       "read": ["config/cascade/specs/W_moon_dag_polish_20260413.json"],
       "write": ["config/cascade/specs/W_moon_dag_polish_20260413.json"],
-      "verify_command": "! grep -qi 'dag' /Users/nate/Praxis/config/cascade/specs/W_moon_dag_polish_20260413.json"
+      "verify_command": "! grep -qi 'dag' config/cascade/specs/W_moon_dag_polish_20260413.json"
     },
     {
       "label": "import_type_sweep",
@@ -77,7 +77,7 @@
         "Code&DBs/Workflow/surfaces/api/frontdoor.py"
       ],
       "write": [],
-      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow && python3 -c 'from runtime.instance import NativeWorkflowInstance; from surfaces.api.frontdoor import NativeWorkflowFrontdoor; print(\"OK\")'"
+      "verify_command": "cd Code\\&DBs/Workflow && python3 -c 'from runtime.instance import NativeWorkflowInstance; from surfaces.api.frontdoor import NativeWorkflowFrontdoor; print(\"OK\")'"
     },
     {
       "label": "final_grep",
@@ -89,7 +89,7 @@
       "prompt": "Run a final comprehensive grep sweep across the entire Praxis codebase:\n\n```\ngrep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|\"dag-dispatch\"\\|\"dag-project\"\\|dag_research\\|DagLayout\\|RunDAG\\|dag-app\\|dag-api\\|dag-ui\\|TestDag\\|test_tool_dag_\\|test_dag_context\\|DAG Dispatch\\|DAG Workflow\\|Dag Project\\|DAG REST\\|DAG MCP\\|DAG node\\|native DAG\\|DAG operations\\|DAG instance\\|DAG dispatch\\|DAG runtime\\|DAG execution\\|DAG autonomous\\|DAG-APITask\\|dag-workflow-github' Code&DBs/Workflow/ config/ --include='*.py' --include='*.ts' --include='*.tsx' --include='*.css' --include='*.json' | grep -v node_modules | grep -v __pycache__ | grep -v '.pyc' | grep -v cascade_inactive | grep -v _mine_failure\n```\n\nIf ANY hits are found, fix them by applying the standard rename mapping:\n- Class names: NativeDag* -> NativeWorkflow*\n- Interfaces: DagLayout -> GraphLayout, RunDAG -> RunGraph\n- CSS: moon-dag -> moon-graph, run-dag -> run-graph\n- Strings: dag-dispatch -> praxis-dispatch, dag-project -> praxis-project\n- Docstrings: DAG -> Praxis Engine / workflow as appropriate\n- Test names: TestDag* -> TestPraxis*, test_dag_* -> test_praxis_*\n\nReport the final count of remaining references (should be 0).",
       "read": [],
       "write": [],
-      "verify_command": "cd /Users/nate/Praxis && ! grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|\"dag-dispatch\"\\|\"dag-project\"\\|DagLayout\\|RunDAG\\|dag-app\\|TestDag\\|test_tool_dag_' Code\\&DBs/Workflow/ config/ --include='*.py' --include='*.ts' --include='*.tsx' --include='*.css' --include='*.json' | grep -v node_modules | grep -v __pycache__"
+      "verify_command": "! grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|\"dag-dispatch\"\\|\"dag-project\"\\|DagLayout\\|RunDAG\\|dag-app\\|TestDag\\|test_tool_dag_' Code\\&DBs/Workflow/ config/ --include='*.py' --include='*.ts' --include='*.tsx' --include='*.css' --include='*.json' | grep -v node_modules | grep -v __pycache__"
     }
   ]
 }

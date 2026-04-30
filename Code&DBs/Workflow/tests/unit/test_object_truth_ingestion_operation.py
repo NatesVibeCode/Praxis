@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from runtime.operations.commands import object_truth_ingestion as commands
@@ -24,9 +25,9 @@ def _command() -> commands.RecordObjectTruthIngestionSampleCommand:
         auth_context={"tenant": "acme"},
         identity_fields=["id"],
         sample_strategy="fixture",
-        source_query={"fields": ["id", "name", "email"]},
+        source_query={"fields": ["id", "name", "email", "notes"]},
         sample_payloads=[
-            {"id": "001", "name": "Acme", "email": "owner@example.com"},
+            {"id": "001", "name": "Acme", "email": "owner@example.com", "notes": "private renewal terms"},
         ],
         privacy_classification="confidential",
         retention_policy_ref="retention.object_truth.redacted_hashes",
@@ -69,7 +70,21 @@ def test_ingestion_sample_record_persists_payload_refs_and_event(monkeypatch) ->
     assert result["payload_reference_count"] == 1
     assert len(object_version_calls) == 1
     assert len(sample_calls) == 1
+    object_version = object_version_calls[0]["object_version"]
+    serialized_object_version = json.dumps(object_version, sort_keys=True)
+    assert "owner@example.com" not in serialized_object_version
+    assert "private renewal terms" not in serialized_object_version
+    assert object_version["identity"]["identity_values"]["id"]["redacted"] is True
+    observations = {item["field_path"]: item for item in object_version["field_observations"]}
+    assert observations["email"]["sensitive"] is True
+    assert observations["email"]["redacted_value_preview"]["redacted"] is True
+    assert observations["notes"]["sensitive"] is True
+    assert observations["notes"]["redacted_value_preview"]["redacted"] is True
     assert sample_calls[0]["payload_references"][0]["inline_payload_stored"] is False
+    assert sample_calls[0]["payload_references"][0]["external_record_id"].startswith("redacted:")
+    assert sample_calls[0]["payload_references"][0]["source_metadata_json"]["external_record_id"].startswith(
+        "redacted:"
+    )
     assert "raw_payload_json" not in sample_calls[0]["payload_references"][0]["raw_payload_reference_json"]
     assert result["event_payload"]["object_version_count"] == 1
     assert result["event_payload"]["payload_reference_count"] == 1

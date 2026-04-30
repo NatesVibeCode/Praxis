@@ -1082,6 +1082,18 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
                 return 2
             params["target_ref"] = value
             continue
+        if token == "--promote-to-pattern":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["promote_to_pattern"] = value
+            continue
+        if token == "--pattern-status":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["pattern_status"] = value
+            continue
         if token == "--resume-context-json":
             value = _require_value(token)
             if value is None:
@@ -1104,13 +1116,13 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             value = _require_value(token)
             if value is None:
                 return 2
-            params["tags"] = value
+            params["tags"] = [t.strip() for t in value.split(",") if t.strip()]
             continue
         if token == "--exclude-tags":
             value = _require_value(token)
             if value is None:
                 return 2
-            params["exclude_tags"] = value
+            params["exclude_tags"] = [t.strip() for t in value.split(",") if t.strip()]
             continue
         if token == "--receipt-limit":
             value = _require_value(token)
@@ -1135,7 +1147,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     params["action"] = action
     params["limit"] = limit
     if action == "search":
-        params["title"] = search_query
+        params["query"] = search_query
     if action == "duplicate_check":
         params["title_like"] = search_query or str(params.get("title") or "")
     if status_filter:

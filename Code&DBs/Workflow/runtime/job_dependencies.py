@@ -384,8 +384,8 @@ def submit_chain(
         )
         job_ids = [str(row["id"]) for row in (job_rows or [])]
     except Exception as exc:
-        _log.warning("job_dependencies: failed to submit workflow chain: %s", exc)
-        return []
+        _log.error("job_dependencies: failed to submit workflow chain: %s", exc, exc_info=True)
+        raise
 
     if not sequential or len(job_ids) < 2:
         return job_ids

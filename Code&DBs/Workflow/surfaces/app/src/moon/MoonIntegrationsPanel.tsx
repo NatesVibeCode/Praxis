@@ -318,7 +318,7 @@ export function MoonIntegrationsPanel() {
                 placeholder="Choose a provider (http, stripe, slack, …)"
                 suggestionsUrl="/api/moon/pickers/integration-providers"
                 suggestionsKey="providers"
-                hint="Picking a known provider lets Moon apply the right auth shape and request defaults."
+                hint="Picking a known provider applies the right auth shape and request defaults."
                 ariaLabel="Integration provider"
               />
 

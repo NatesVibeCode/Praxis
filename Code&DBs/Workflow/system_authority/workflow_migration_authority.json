@@ -377,7 +377,22 @@
     "359_register_receipt_structural_proof_verifier.sql",
     "360_backfill_receipt_structural_proof_verification.sql",
     "361_client_system_discovery_cqrs_authority.sql",
-    "362_object_truth_ingestion_sample_authority.sql"
+    "362_object_truth_ingestion_sample_authority.sql",
+    "363_object_truth_mdm_resolution_authority.sql",
+    "364_remove_retired_deepseek_v32_native_profile.sql",
+    "365_task_environment_contract_authority.sql",
+    "366_integration_action_contract_authority.sql",
+    "367_virtual_lab_state_authority.sql",
+    "368_blank_workspace_compose_surface_seed.sql",
+    "369_manifest_run_bindings_authority.sql",
+    "370_workspace_surface_migration_authority.sql",
+    "371_virtual_lab_simulation_authority.sql",
+    "372_cli_auth_doctor_timeout_budget.sql",
+    "373_compose_plan_interactive_lane.sql",
+    "374_virtual_lab_sandbox_promotion_authority.sql",
+    "375_cleanup_invalid_task_type_routing_transports.sql",
+    "376_portable_cartridge_authority.sql",
+    "377_register_chat_routing_options_query.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -9201,6 +9216,1340 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.object_truth_ingestion_sample_read"
       }
+    ],
+    "363_object_truth_mdm_resolution_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "object_truth_mdm_resolution_packets"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_mdm_identity_clusters"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_mdm_field_comparisons"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_mdm_normalization_rules"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_mdm_source_authority_evidence"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_mdm_hierarchy_signals"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_mdm_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_mdm_resolution_packets"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_mdm_identity_clusters"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_mdm_field_comparisons"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_mdm_normalization_rules"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_mdm_source_authority_evidence"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_mdm_hierarchy_signals"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_mdm_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_mdm_resolution_packets"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_mdm_identity_clusters"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_mdm_field_comparisons"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_mdm_normalization_rules"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_mdm_source_authority_evidence"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_mdm_hierarchy_signals"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_mdm_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.object_truth.mdm_resolution_recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_mdm_resolution_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_mdm_resolution_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_truth_mdm_resolution_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_mdm_resolution_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_mdm_resolution_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_truth_mdm_resolution_read"
+      }
+    ],
+    "364_remove_retired_deepseek_v32_native_profile.sql": [
+      {
+        "object_type": "row",
+        "object_name": "registry_native_runtime_profile_authority.praxis"
+      },
+      {
+        "object_type": "row",
+        "object_name": "registry_native_runtime_profile_authority.scratch_agent"
+      }
+    ],
+    "365_task_environment_contract_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "task_environment_contract_heads"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_task_environment_contract_heads_task"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_task_environment_contract_heads_hash"
+      },
+      {
+        "object_type": "table",
+        "object_name": "task_environment_contract_revisions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_task_environment_contract_revisions_order"
+      },
+      {
+        "object_type": "table",
+        "object_name": "task_environment_hierarchy_nodes"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_task_environment_hierarchy_nodes_parent"
+      },
+      {
+        "object_type": "table",
+        "object_name": "task_environment_contract_invalid_states"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_task_environment_contract_invalid_states_reason"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "task_environment_contract_invalid_states_revision_fkey"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_task_environment_contract_heads_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_task_environment_contract_heads_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.task_environment_contract_heads"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.task_environment_contract_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.task_environment_hierarchy_nodes"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.task_environment_contract_invalid_states"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.task_environment_contract_heads"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.task_environment_contract_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.task_environment_hierarchy_nodes"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.task_environment_contract_invalid_states"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.task_environment_contract.recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.task_environment_contract_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.task_environment_contract_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.task_environment_contract_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.task_environment_contract_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.task_environment_contract_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.task_environment_contract_read"
+      }
+    ],
+    "366_integration_action_contract_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.integration_action_contracts"
+      },
+      {
+        "object_type": "table",
+        "object_name": "integration_action_contract_heads"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_action_contract_heads_target"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_action_contract_heads_hash"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_action_contract_heads_gaps"
+      },
+      {
+        "object_type": "table",
+        "object_name": "integration_action_contract_revisions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_action_contract_revisions_order"
+      },
+      {
+        "object_type": "table",
+        "object_name": "integration_action_contract_typed_gaps"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_action_contract_typed_gaps_kind"
+      },
+      {
+        "object_type": "table",
+        "object_name": "integration_automation_rule_snapshot_heads"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_automation_rule_snapshot_heads_status"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_automation_rule_snapshot_heads_hash"
+      },
+      {
+        "object_type": "table",
+        "object_name": "integration_automation_rule_snapshot_revisions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_automation_rule_snapshot_revisions_time"
+      },
+      {
+        "object_type": "table",
+        "object_name": "integration_automation_rule_snapshot_gaps"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_automation_rule_snapshot_gaps_kind"
+      },
+      {
+        "object_type": "table",
+        "object_name": "integration_automation_action_links"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_integration_automation_action_links_action"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_integration_action_contract_heads_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_integration_action_contract_heads_touch"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_integration_automation_rule_snapshot_heads_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_integration_automation_rule_snapshot_heads_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.integration_action_contract_heads"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.integration_action_contract_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.integration_action_contract_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.integration_automation_rule_snapshot_heads"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.integration_automation_rule_snapshot_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.integration_automation_rule_snapshot_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.integration_automation_action_links"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.integration_action_contract_heads"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.integration_action_contract_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.integration_action_contract_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.integration_automation_rule_snapshot_heads"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.integration_automation_rule_snapshot_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.integration_automation_rule_snapshot_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.integration_automation_action_links"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.integration_action_contract.recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.integration_action_contract_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.integration_action_contract_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.integration_action_contract_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.integration_action_contract_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.integration_action_contract_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.integration_action_contract_read"
+      }
+    ],
+    "367_virtual_lab_state_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.virtual_lab_state"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_environment_heads"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_environment_heads_status"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_environment_revisions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_environment_revisions_created"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_environment_revisions_digest"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_seed_entries"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_seed_entries_object_truth"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_object_states"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_object_states_stream"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_object_states_digest"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_events"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_events_stream"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_events_command"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_events_type"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_command_receipts"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_command_receipts_command"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_command_receipts_status"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_typed_gaps"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_typed_gaps_kind"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_virtual_lab_environment_heads_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_virtual_lab_environment_heads_touch"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_virtual_lab_object_states_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_virtual_lab_object_states_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_environment_heads"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_environment_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_seed_entries"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_object_states"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_command_receipts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_environment_heads"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_environment_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_seed_entries"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_object_states"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_command_receipts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.virtual_lab_state.recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.virtual_lab_state_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.virtual_lab_state_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.virtual_lab_state_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.virtual_lab_state_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.virtual_lab_state_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.virtual_lab_state_read"
+      }
+    ],
+    "368_blank_workspace_compose_surface_seed.sql": [
+      {
+        "object_type": "row",
+        "object_name": "app_manifests.seed.workspace.blank"
+      }
+    ],
+    "369_manifest_run_bindings_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "manifest_run_bindings"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_manifest_run_bindings_manifest_dispatched"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_manifest_run_bindings_run"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_manifest_run_bindings_workflow"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.manifest_run_bindings"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.manifest_run_bindings"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.workspace.run_bound"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.workspace.run_binding.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.workspace.run_binding.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.workspace.run_binding.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.workspace.runs.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.workspace.runs.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.workspace.runs.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.workspace.receipts.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.workspace.receipts.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.workspace.receipts.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.verifier.catalog.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.verifier.catalog.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.verifier.catalog.list"
+      }
+    ],
+    "370_workspace_surface_migration_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.workspace_surface_migrated_event"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.workspace.surface_migrated"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.workspace.surface_migration.preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.workspace.surface_migration.preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.workspace.surface_migration.preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.workspace.surface_migration.apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.workspace.surface_migration.apply"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.workspace.surface_migration.apply"
+      }
+    ],
+    "371_virtual_lab_simulation_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.virtual_lab_simulation"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_runs"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_runs_environment"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_runs_status"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_runs_scenario"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_runtime_events"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_runtime_events_type"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_runtime_events_source"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_state_events"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_state_events_stream"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_transitions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_transitions_object"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_action_results"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_action_results_status"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_automation_evaluations"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_automation_evaluations_rule"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_automation_firings"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_automation_firings_rule"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_assertion_results"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_assertion_results_passed"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_verifier_results"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_verifier_results_status"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_typed_gaps"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_typed_gaps_code"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_simulation_promotion_blockers"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_simulation_promotion_blockers_code"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_virtual_lab_simulation_runs_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_virtual_lab_simulation_runs_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_runs"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_runtime_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_state_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_transitions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_action_results"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_automation_evaluations"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_automation_firings"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_assertion_results"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_verifier_results"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_simulation_promotion_blockers"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_runs"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_runtime_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_state_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_transitions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_action_results"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_automation_evaluations"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_automation_firings"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_assertion_results"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_verifier_results"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_typed_gaps"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_simulation_promotion_blockers"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.virtual_lab_simulation.completed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.virtual_lab_simulation_run"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.virtual_lab_simulation_run"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.virtual_lab_simulation_run"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.virtual_lab_simulation_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.virtual_lab_simulation_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.virtual_lab_simulation_read"
+      }
+    ],
+    "372_cli_auth_doctor_timeout_budget.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.cli_auth_doctor"
+      }
+    ],
+    "373_compose_plan_interactive_lane.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.operator_decision.architecture_policy.concurrency.deterministic_compose_plan_interactive"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.compose_plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.compose_plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compose_plan"
+      }
+    ],
+    "374_virtual_lab_sandbox_promotion_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.virtual_lab_sandbox_promotion"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_promotion_records"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_promotion_records_manifest"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_promotion_records_recommendation"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_promotion_candidates"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_promotion_candidates_simulation"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_promotion_candidates_target"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_executions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_executions_status"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_readback_evidence"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_readback_evidence_candidate"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_readback_evidence_trust"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_comparison_reports"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_comparison_reports_status"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_comparison_rows"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_comparison_rows_status"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_drift_ledgers"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_drift_classifications"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_drift_classifications_reason"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_drift_classifications_owner"
+      },
+      {
+        "object_type": "table",
+        "object_name": "virtual_lab_sandbox_handoffs"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_virtual_lab_sandbox_handoffs_kind"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_virtual_lab_sandbox_promotion_records_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_virtual_lab_sandbox_promotion_records_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_promotion_records"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_promotion_candidates"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_executions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_readback_evidence"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_comparison_reports"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_comparison_rows"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_drift_ledgers"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_drift_classifications"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.virtual_lab_sandbox_handoffs"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_promotion_records"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_promotion_candidates"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_executions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_readback_evidence"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_comparison_reports"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_comparison_rows"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_drift_ledgers"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_drift_classifications"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.virtual_lab_sandbox_handoffs"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.virtual_lab_sandbox_promotion.recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.virtual_lab_sandbox_promotion_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.virtual_lab_sandbox_promotion_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.virtual_lab_sandbox_promotion_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.virtual_lab_sandbox_promotion_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.virtual_lab_sandbox_promotion_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.virtual_lab_sandbox_promotion_read"
+      }
+    ],
+    "375_cleanup_invalid_task_type_routing_transports.sql": [
+      {
+        "object_type": "table",
+        "object_name": "task_type_routing"
+      },
+      {
+        "object_type": "table",
+        "object_name": "provider_transport_admissions"
+      }
+    ],
+    "376_portable_cartridge_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.portable_cartridges"
+      },
+      {
+        "object_type": "table",
+        "object_name": "portable_cartridge_records"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_records_identity"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_records_readiness"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_records_digest"
+      },
+      {
+        "object_type": "table",
+        "object_name": "portable_cartridge_object_truth_dependencies"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_deps_class"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_deps_object"
+      },
+      {
+        "object_type": "table",
+        "object_name": "portable_cartridge_assets"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_assets_role"
+      },
+      {
+        "object_type": "table",
+        "object_name": "portable_cartridge_binding_contracts"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_bindings_kind"
+      },
+      {
+        "object_type": "table",
+        "object_name": "portable_cartridge_verifier_checks"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_verifiers_category"
+      },
+      {
+        "object_type": "table",
+        "object_name": "portable_cartridge_drift_hooks"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_portable_cartridge_drift_hooks_point"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_portable_cartridge_records_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_portable_cartridge_records_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.portable_cartridge_records"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.portable_cartridge_object_truth_dependencies"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.portable_cartridge_assets"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.portable_cartridge_binding_contracts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.portable_cartridge_verifier_checks"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.portable_cartridge_drift_hooks"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.portable_cartridge_records"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.portable_cartridge_object_truth_dependencies"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.portable_cartridge_assets"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.portable_cartridge_binding_contracts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.portable_cartridge_verifier_checks"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.portable_cartridge_drift_hooks"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.portable_cartridge.recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.authority.portable_cartridge.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.authority.portable_cartridge.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.authority.portable_cartridge.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.authority.portable_cartridge.read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.authority.portable_cartridge.read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.authority.portable_cartridge.read"
+      }
+    ],
+    "377_register_chat_routing_options_query.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.chat.routing_options.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.chat.routing_options.list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.chat.routing_options.list"
+      }
     ]
   },
   "policy_buckets": {
@@ -9582,7 +10931,22 @@
       "359_register_receipt_structural_proof_verifier.sql",
       "360_backfill_receipt_structural_proof_verification.sql",
       "361_client_system_discovery_cqrs_authority.sql",
-      "362_object_truth_ingestion_sample_authority.sql"
+      "362_object_truth_ingestion_sample_authority.sql",
+      "363_object_truth_mdm_resolution_authority.sql",
+      "364_remove_retired_deepseek_v32_native_profile.sql",
+      "365_task_environment_contract_authority.sql",
+      "366_integration_action_contract_authority.sql",
+      "367_virtual_lab_state_authority.sql",
+      "368_blank_workspace_compose_surface_seed.sql",
+      "369_manifest_run_bindings_authority.sql",
+      "370_workspace_surface_migration_authority.sql",
+    "371_virtual_lab_simulation_authority.sql",
+    "372_cli_auth_doctor_timeout_budget.sql",
+    "373_compose_plan_interactive_lane.sql",
+    "374_virtual_lab_sandbox_promotion_authority.sql",
+    "375_cleanup_invalid_task_type_routing_transports.sql",
+    "376_portable_cartridge_authority.sql",
+    "377_register_chat_routing_options_query.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -9609,7 +10973,8 @@
     ],
     "deprecated": [],
     "dead": [
-      "357_client_system_discovery_authority.sql"
+      "357_client_system_discovery_authority.sql",
+      "378_task_type_routing_transport_admission_trigger.sql"
     ]
   },
   "tie_break_order": {
@@ -9778,6 +11143,7 @@
     "329_task_scoped_provider_job_catalog_admission.sql",
     "337_llm_request_contract_authority.sql",
     "338_zero_token_detector_wiring.sql",
-    "350_operation_lane_initial_classification.sql"
+    "350_operation_lane_initial_classification.sql",
+    "364_remove_retired_deepseek_v32_native_profile.sql"
   ]
 }

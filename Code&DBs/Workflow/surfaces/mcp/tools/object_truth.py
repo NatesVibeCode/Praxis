@@ -209,6 +209,56 @@ def tool_praxis_object_truth_ingestion_sample_read(params: dict, _progress_emitt
     return result
 
 
+def tool_praxis_object_truth_mdm_resolution_record(params: dict, _progress_emitter=None) -> dict:
+    """Record one Object Truth MDM/source-authority resolution packet."""
+
+    payload = {key: value for key, value in dict(params or {}).items() if value is not None}
+    if _progress_emitter:
+        _progress_emitter.emit(
+            progress=0,
+            total=1,
+            message=f"Recording MDM resolution for {payload.get('client_ref') or '?'}:{payload.get('entity_type') or '?'}",
+        )
+    result = execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name="object_truth_mdm_resolution_record",
+        payload=payload,
+    )
+    if _progress_emitter:
+        status = "ok" if result.get("ok") else "failed"
+        _progress_emitter.emit(
+            progress=1,
+            total=1,
+            message=f"Done - object truth MDM resolution record {status}",
+        )
+    return result
+
+
+def tool_praxis_object_truth_mdm_resolution_read(params: dict, _progress_emitter=None) -> dict:
+    """Read Object Truth MDM/source-authority resolution evidence."""
+
+    payload = {key: value for key, value in dict(params or {}).items() if value is not None}
+    if _progress_emitter:
+        _progress_emitter.emit(
+            progress=0,
+            total=1,
+            message="Reading object-truth MDM resolution evidence",
+        )
+    result = execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name="object_truth_mdm_resolution_read",
+        payload=payload,
+    )
+    if _progress_emitter:
+        status = "ok" if result.get("ok") else "failed"
+        _progress_emitter.emit(
+            progress=1,
+            total=1,
+            message=f"Done - object truth MDM resolution read {status}",
+        )
+    return result
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_object_truth": (
         tool_praxis_object_truth,
@@ -690,6 +740,98 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "object_truth.sample_captures",
                         "object_truth.raw_payload_references",
                         "object_truth.replay_fixture",
+                    ],
+                }
+            },
+        },
+    ),
+    "praxis_object_truth_mdm_resolution_record": (
+        tool_praxis_object_truth_mdm_resolution_record,
+        {
+            "kind": "write",
+            "operation_names": ["object_truth_mdm_resolution_record"],
+            "description": (
+                "Record receipt-backed Object Truth MDM/source-authority evidence. "
+                "This thin MCP wrapper dispatches to the gateway command "
+                "`object_truth_mdm_resolution_record`; it persists a resolution "
+                "packet plus decomposed identity clusters, field comparisons, "
+                "normalization rules, source authority evidence, hierarchy "
+                "signals, and typed gaps."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["client_ref", "entity_type", "as_of", "identity_clusters", "field_comparisons"],
+                "properties": {
+                    "client_ref": {"type": "string"},
+                    "entity_type": {
+                        "type": "string",
+                        "enum": ["person", "organization", "account", "location", "asset"],
+                    },
+                    "as_of": {"type": "string"},
+                    "identity_clusters": {"type": "array", "items": {"type": "object"}},
+                    "field_comparisons": {"type": "array", "items": {"type": "object"}},
+                    "normalization_rules": {"type": "array", "items": {"type": "object"}},
+                    "authority_evidence": {"type": "array", "items": {"type": "object"}},
+                    "hierarchy_signals": {"type": "array", "items": {"type": "object"}},
+                    "typed_gaps": {"type": "array", "items": {"type": "object"}},
+                    "packet_ref": {"type": "string"},
+                    "observed_by_ref": {"type": "string"},
+                    "source_ref": {"type": "string"},
+                },
+            },
+            "type_contract": {
+                "record_mdm_resolution": {
+                    "consumes": [
+                        "object_truth.mdm.identity_clusters",
+                        "object_truth.mdm.field_comparisons",
+                        "object_truth.mdm.source_authority_evidence",
+                    ],
+                    "produces": [
+                        "object_truth.mdm.resolution_packet",
+                        "object_truth.mdm.queryable_identity_clusters",
+                        "object_truth.mdm.queryable_field_comparisons",
+                        "object_truth.mdm.typed_gaps",
+                        "authority_operation_receipt",
+                        "authority_event.object_truth.mdm_resolution_recorded",
+                    ],
+                }
+            },
+        },
+    ),
+    "praxis_object_truth_mdm_resolution_read": (
+        tool_praxis_object_truth_mdm_resolution_read,
+        {
+            "kind": "analytics",
+            "operation_names": ["object_truth_mdm_resolution_read"],
+            "description": (
+                "Read queryable Object Truth MDM/source-authority resolution "
+                "packets and decomposed evidence through the gateway query "
+                "`object_truth_mdm_resolution_read`."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "describe"]},
+                    "client_ref": {"type": "string"},
+                    "entity_type": {"type": "string"},
+                    "packet_ref": {"type": "string"},
+                    "include_records": {"type": "boolean"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                },
+            },
+            "type_contract": {
+                "read_mdm_resolution": {
+                    "consumes": [
+                        "object_truth.client_ref",
+                        "object_truth.mdm.entity_type",
+                        "object_truth.mdm.packet_ref",
+                    ],
+                    "produces": [
+                        "object_truth.mdm.resolution_packets",
+                        "object_truth.mdm.identity_clusters",
+                        "object_truth.mdm.field_comparisons",
+                        "object_truth.mdm.source_authority_evidence",
+                        "object_truth.mdm.typed_gaps",
                     ],
                 }
             },

@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { normalizePraxisBundle, type ComposeSurfaceSpec, type PraxisSurfaceBundleV4 } from './manifest';
+import { WorkspaceComposeSurface } from './WorkspaceComposeSurface';
 import './ManifestCatalogPage.css';
 
 interface ManifestCatalogRow {
@@ -157,6 +159,47 @@ function formatUpdatedAt(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
+function isComposeWorkspaceRow(manifest: ManifestCatalogRow): boolean {
+  return /^blank-workspace-[a-z0-9]+$/i.test(manifest.id);
+}
+
+function isComposeSeedRow(manifest: ManifestCatalogRow): boolean {
+  return manifest.id === 'seed.workspace.blank'
+    || ((manifest.name || '').trim().toLowerCase() === 'blank workspace'
+      && (manifest.description || '').trim().toLowerCase().includes('workspace contract'));
+}
+
+function isComposeAuthoringRow(manifest: ManifestCatalogRow): boolean {
+  return isComposeWorkspaceRow(manifest) || isComposeSeedRow(manifest);
+}
+
+function displayWorkspaceName(manifest: ManifestCatalogRow): string {
+  if (isComposeWorkspaceRow(manifest) && (!manifest.name || manifest.name.toLowerCase() === 'blank workspace')) {
+    return 'Compose';
+  }
+  if (isComposeSeedRow(manifest)) {
+    return 'Compose seed';
+  }
+  return manifest.name || manifest.id;
+}
+
+function displayWorkspaceDescription(manifest: ManifestCatalogRow): string {
+  const description = (manifest.description || '').trim();
+  if (isComposeWorkspaceRow(manifest) && (!description || description.toLowerCase().includes('minimal workspace'))) {
+    return 'Intent to contract to dispatch. This is the standalone authoring surface, backed by a workspace record.';
+  }
+  if (isComposeSeedRow(manifest)) {
+    return 'Template for creating a Compose authoring workspace.';
+  }
+  return description || 'No description provided.';
+}
+
+function findComposeSurface(bundle: PraxisSurfaceBundleV4 | null): ComposeSurfaceSpec | null {
+  if (!bundle) return null;
+  const surface = Object.values(bundle.surfaces).find((candidate) => candidate.kind === 'compose');
+  return surface?.kind === 'compose' ? surface : null;
+}
+
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value);
 
@@ -170,12 +213,14 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 export function ManifestCatalogPage({ onOpenManifest, onEditManifest }: ManifestCatalogPageProps) {
   const [query, setQuery] = useState('');
-  const [manifestFamily, setManifestFamily] = useState('control_plane');
+  const [manifestFamily, setManifestFamily] = useState('');
   const [manifestType, setManifestType] = useState('');
   const [status, setStatus] = useState('');
   const [limit, setLimit] = useState(25);
   const [manifests, setManifests] = useState<ManifestCatalogRow[]>([]);
-  const [count, setCount] = useState(0);
+  const [composeBundle, setComposeBundle] = useState<PraxisSurfaceBundleV4 | null>(null);
+  const [composeLoading, setComposeLoading] = useState(false);
+  const [composeLoadError, setComposeLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -206,7 +251,6 @@ export function ManifestCatalogPage({ onOpenManifest, onEditManifest }: Manifest
           throw new Error(payload?.error || 'Failed to load manifest catalog');
         }
         setManifests(Array.isArray(payload.manifests) ? payload.manifests : []);
-        setCount(typeof payload.count === 'number' ? payload.count : 0);
       } catch (loadError) {
         if ((loadError as Error)?.name === 'AbortError') return;
         setError(loadError instanceof Error ? loadError.message : 'Failed to load manifest catalog');
@@ -229,132 +273,224 @@ export function ManifestCatalogPage({ onOpenManifest, onEditManifest }: Manifest
     ].filter((value): value is string => Boolean(value));
     return parts.join(' · ');
   }, [debouncedQuery, limit, manifestFamily, manifestType, status]);
+  const composeWorkspace = useMemo(
+    () => manifests.find((manifest) => isComposeWorkspaceRow(manifest)) ?? null,
+    [manifests],
+  );
+  const composeWorkspaceId = composeWorkspace?.id ?? null;
+  const composeSurface = useMemo(() => findComposeSurface(composeBundle), [composeBundle]);
+  const composeTitle = composeWorkspace ? displayWorkspaceName(composeWorkspace) : 'Compose';
+
+  useEffect(() => {
+    if (!composeWorkspaceId) {
+      setComposeBundle(null);
+      setComposeLoadError(null);
+      setComposeLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setComposeLoading(true);
+    setComposeLoadError(null);
+
+    const loadCompose = async () => {
+      try {
+        const response = await fetch(`/api/manifests/${composeWorkspaceId}`, { signal: controller.signal });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload) {
+          throw new Error(payload?.error || `Failed to load ${composeWorkspaceId}`);
+        }
+        const bundle = normalizePraxisBundle(payload, {
+          id: composeWorkspaceId,
+          title: typeof payload?.name === 'string' ? payload.name : composeTitle,
+          description: typeof payload?.description === 'string' ? payload.description : composeWorkspace?.description ?? undefined,
+        });
+        if (!findComposeSurface(bundle)) {
+          throw new Error('Compose workspace is missing its compose surface');
+        }
+        setComposeBundle(bundle);
+      } catch (loadError) {
+        if ((loadError as Error)?.name === 'AbortError') return;
+        setComposeBundle(null);
+        setComposeLoadError(loadError instanceof Error ? loadError.message : 'Compose workspace could not load');
+      } finally {
+        setComposeLoading(false);
+      }
+    };
+
+    void loadCompose();
+    return () => controller.abort();
+  }, [composeTitle, composeWorkspace?.description, composeWorkspaceId]);
+
+  const persistComposeBundle = useCallback(async (nextBundle: PraxisSurfaceBundleV4): Promise<PraxisSurfaceBundleV4> => {
+    if (!composeWorkspaceId) {
+      throw new Error('Compose workspace is not loaded');
+    }
+    const response = await fetch('/api/manifests/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: composeWorkspaceId,
+        name: nextBundle.name ?? nextBundle.title,
+        description: nextBundle.description ?? composeWorkspace?.description ?? '',
+        manifest: nextBundle,
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || payload?.detail || 'Compose workspace save failed');
+    }
+    const savedBundle = normalizePraxisBundle(payload?.manifest ?? nextBundle, {
+      id: composeWorkspaceId,
+      title: typeof payload?.name === 'string' ? payload.name : nextBundle.title,
+      description: typeof payload?.description === 'string' ? payload.description : nextBundle.description,
+    });
+    setComposeBundle(savedBundle);
+    return savedBundle;
+  }, [composeWorkspace?.description, composeWorkspaceId]);
 
   return (
     <div className="manifest-catalog">
-      <header className="manifest-catalog__header app-shell__surface-header">
-        <div className="app-shell__surface-heading">
-          <div className="app-shell__fallback-kicker">Manifest catalog</div>
-          <div className="app-shell__surface-title">Discover control-plane manifests</div>
-          <p className="app-shell__surface-copy">
-            Search raw manifests by family, type, status, or text before opening the exact id.
-          </p>
-        </div>
-        <div className="manifest-catalog__count">
-          <strong>{count}</strong>
-          <span>rows</span>
-        </div>
-      </header>
-
-      <section className="manifest-catalog__filters">
-        <label className="manifest-catalog__field">
-          <span>Search</span>
-          <input
-            type="text"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="plan, approval, cleanup..."
+      <section className="manifest-catalog__compose-workbench">
+        {composeLoading ? (
+          <div className="manifest-catalog__empty">Loading Compose...</div>
+        ) : composeLoadError ? (
+          <div className="manifest-catalog__empty manifest-catalog__empty--error">{composeLoadError}</div>
+        ) : composeBundle && composeSurface && composeWorkspaceId ? (
+          <WorkspaceComposeSurface
+            manifestId={composeWorkspaceId}
+            bundle={composeBundle}
+            surface={composeSurface}
+            workspaceTitle={composeTitle}
+            onSaveBundle={persistComposeBundle}
           />
-        </label>
-        <label className="manifest-catalog__field">
-          <span>Family</span>
-          <input
-            type="text"
-            value={manifestFamily}
-            onChange={(event) => setManifestFamily(event.target.value)}
-            placeholder="control_plane"
-          />
-        </label>
-        <label className="manifest-catalog__field">
-          <span>Type</span>
-          <input
-            type="text"
-            value={manifestType}
-            onChange={(event) => setManifestType(event.target.value)}
-            placeholder="data_plan"
-          />
-        </label>
-        <label className="manifest-catalog__field">
-          <span>Status</span>
-          <input
-            type="text"
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-            placeholder="draft"
-          />
-        </label>
-        <label className="manifest-catalog__field manifest-catalog__field--small">
-          <span>Limit</span>
-          <input
-            type="number"
-            min={1}
-            max={100}
-            value={limit}
-            onChange={(event) => setLimit(Math.min(100, Math.max(1, Number.parseInt(event.target.value || '25', 10) || 25)))}
-          />
-        </label>
-        <button
-          type="button"
-          className="manifest-catalog__reset"
-          onClick={() => {
-            setQuery('');
-            setManifestFamily('control_plane');
-            setManifestType('');
-            setStatus('');
-            setLimit(25);
-          }}
-        >
-          Reset filters
-        </button>
-      </section>
-
-      <div className="manifest-catalog__summary">
-        {loading ? 'Loading manifests...' : error ? error : activeFilterSummary}
-      </div>
-
-      <section className="manifest-catalog__results">
-        {loading ? (
-          <div className="manifest-catalog__empty">Loading catalog...</div>
-        ) : error ? (
-          <div className="manifest-catalog__empty manifest-catalog__empty--error">{error}</div>
-        ) : manifests.length === 0 ? (
-          <div className="manifest-catalog__empty">No manifests matched the current filters.</div>
         ) : (
-          manifests.map((manifest) => (
-            <article key={manifest.id} className="manifest-catalog__card">
-              <div className="manifest-catalog__card-header">
-                <div>
-                  <EditableCatalogTitle
-                    manifest={manifest}
-                    onSaved={(saved) => {
-                      setManifests((current) => current.map((row) => (row.id === saved.id ? saved : row)));
-                    }}
-                    onError={(message) => setError(message)}
-                  />
-                  <div className="manifest-catalog__card-id">{manifest.id}</div>
-                </div>
-                <div className="manifest-catalog__card-actions">
-                  <button type="button" onClick={() => onOpenManifest(manifest.id)}>
-                    Open
-                  </button>
-                  <button type="button" onClick={() => onEditManifest(manifest.id)}>
-                    Edit JSON
-                  </button>
-                </div>
-              </div>
-              <p className="manifest-catalog__card-copy">
-                {manifest.description || 'No description provided.'}
-              </p>
-              <div className="manifest-catalog__tags">
-                <span className="manifest-catalog__tag">status: {manifest.status || 'unknown'}</span>
-                <span className="manifest-catalog__tag">family: {manifest.manifest_family || 'unknown'}</span>
-                <span className="manifest-catalog__tag">type: {manifest.manifest_type || 'unknown'}</span>
-                <span className="manifest-catalog__tag">updated: {formatUpdatedAt(manifest.updated_at)}</span>
-              </div>
-            </article>
-          ))
+          <div className="manifest-catalog__empty">Compose workspace not loaded.</div>
         )}
       </section>
+
+      <details className="manifest-catalog__advanced">
+        <summary>Advanced workspace records</summary>
+        <section className="manifest-catalog__filters">
+          <label className="manifest-catalog__field">
+            <span>Search</span>
+            <input
+              type="text"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="plan, approval, cleanup..."
+            />
+          </label>
+          <label className="manifest-catalog__field">
+            <span>Family</span>
+            <input
+              type="text"
+              value={manifestFamily}
+              onChange={(event) => setManifestFamily(event.target.value)}
+              placeholder="Any family"
+            />
+          </label>
+          <label className="manifest-catalog__field">
+            <span>Type</span>
+            <input
+              type="text"
+              value={manifestType}
+              onChange={(event) => setManifestType(event.target.value)}
+              placeholder="Any type"
+            />
+          </label>
+          <label className="manifest-catalog__field">
+            <span>Status</span>
+            <input
+              type="text"
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+              placeholder="Any status"
+            />
+          </label>
+          <label className="manifest-catalog__field manifest-catalog__field--small">
+            <span>Limit</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={limit}
+              onChange={(event) => setLimit(Math.min(100, Math.max(1, Number.parseInt(event.target.value || '25', 10) || 25)))}
+            />
+          </label>
+          <button
+            type="button"
+            className="manifest-catalog__reset"
+            onClick={() => {
+              setQuery('');
+              setManifestFamily('');
+              setManifestType('');
+              setStatus('');
+              setLimit(25);
+            }}
+          >
+            Reset filters
+          </button>
+        </section>
+
+        <div className="manifest-catalog__summary">
+          {loading ? 'Loading workspaces...' : error ? error : activeFilterSummary || 'Showing recent workspace records'}
+        </div>
+
+        <section className="manifest-catalog__results">
+          {loading ? (
+            <div className="manifest-catalog__empty">Loading workspaces...</div>
+          ) : error ? (
+            <div className="manifest-catalog__empty manifest-catalog__empty--error">{error}</div>
+          ) : manifests.length === 0 ? (
+            <div className="manifest-catalog__empty">No workspaces matched the current filters.</div>
+          ) : (
+            manifests.map((manifest) => (
+              <article key={manifest.id} className="manifest-catalog__card">
+                <div className="manifest-catalog__card-header">
+                  <div>
+                    {isComposeAuthoringRow(manifest) ? (
+                      <div className="manifest-catalog__card-title">{displayWorkspaceName(manifest)}</div>
+                    ) : (
+                      <EditableCatalogTitle
+                        manifest={manifest}
+                        onSaved={(saved) => {
+                          setManifests((current) => current.map((row) => (row.id === saved.id ? saved : row)));
+                        }}
+                        onError={(message) => setError(message)}
+                      />
+                    )}
+                    <div className="manifest-catalog__card-id">
+                      {isComposeWorkspaceRow(manifest)
+                        ? 'authoring workspace'
+                        : isComposeSeedRow(manifest)
+                          ? 'workspace template'
+                          : manifest.id}
+                    </div>
+                  </div>
+                  <div className="manifest-catalog__card-actions">
+                    <button type="button" onClick={() => onOpenManifest(manifest.id)}>
+                      {isComposeWorkspaceRow(manifest) ? 'Open Compose' : 'Open'}
+                    </button>
+                    <button type="button" onClick={() => onEditManifest(manifest.id)}>
+                      Advanced JSON
+                    </button>
+                  </div>
+                </div>
+                <p className="manifest-catalog__card-copy">
+                  {displayWorkspaceDescription(manifest)}
+                </p>
+                <div className="manifest-catalog__tags">
+                  <span className="manifest-catalog__tag">status: {manifest.status || 'unknown'}</span>
+                  <span className="manifest-catalog__tag">family: {manifest.manifest_family || 'unknown'}</span>
+                  <span className="manifest-catalog__tag">type: {manifest.manifest_type || 'unknown'}</span>
+                  <span className="manifest-catalog__tag">updated: {formatUpdatedAt(manifest.updated_at)}</span>
+                </div>
+              </article>
+            ))
+          )}
+        </section>
+      </details>
     </div>
   );
 }

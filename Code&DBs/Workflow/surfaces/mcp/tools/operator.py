@@ -1651,6 +1651,35 @@ def tool_praxis_operation_forge(params: dict) -> dict:
     return _execute_catalog_tool(operation_name=operation_name, payload=payload)
 
 
+def tool_praxis_chat_routing_options_list(params: dict) -> dict:
+    """List task_type_routing candidates for the operator console picker drawer.
+
+    Replaces hardcoded OPERATOR_CHAT_ENGINE / OPERATOR_CHAT_PROVIDER constants
+    in StrategyConsole. Surfaces transport_type per candidate (anticipates the
+    future CLI-in-chat direction), filters to permitted=true rows by default,
+    sorts by rank ascending then route_health_score descending.
+    """
+
+    raw_task = params.get("task_slug") if params else None
+    task_slug = str(raw_task).strip() if isinstance(raw_task, str) else "auto/chat"
+    if not task_slug:
+        task_slug = "auto/chat"
+
+    raw_disabled = params.get("include_disabled") if params else False
+    if isinstance(raw_disabled, str):
+        include_disabled = raw_disabled.strip().lower() in _OPERATOR_BOOLEAN_TRUE
+    else:
+        include_disabled = bool(raw_disabled)
+
+    return _execute_catalog_tool(
+        operation_name="chat.routing_options.list",
+        payload={
+            "task_slug": task_slug,
+            "include_disabled": include_disabled,
+        },
+    )
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_orient": (
         tool_praxis_orient,
@@ -1699,6 +1728,50 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "risks": {"default": "read"},
                 "examples": [
                     {"title": "Show 24h status", "input": {"since_hours": 24}},
+                ],
+            },
+        },
+    ),
+    "praxis_chat_routing_options_list": (
+        tool_praxis_chat_routing_options_list,
+        {
+            "kind": "search",
+            "operation_names": ["chat.routing_options.list"],
+            "description": (
+                "List task_type_routing candidates for a chat task slug. "
+                "Surfaces provider_slug, model_slug, transport_type, rank, "
+                "route_health_score, benchmark_score, route_tier, latency_class. "
+                "Filters to permitted=true rows by default; pass include_disabled=true "
+                "to surface disabled candidates with their disable signals. "
+                "Replaces hardcoded OPERATOR_CHAT_ENGINE constants in the operator console picker drawer.\n\n"
+                "USE WHEN: rendering the chat picker drawer or auditing which routes are reachable for a chat slug.\n\n"
+                "DO NOT USE: to mutate routing — this is read-only."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_slug": {
+                        "type": "string",
+                        "description": "Task slug like 'auto/chat' or 'chat'. The 'auto/' prefix is stripped before lookup.",
+                        "default": "auto/chat",
+                    },
+                    "include_disabled": {
+                        "type": "boolean",
+                        "description": "When true, return disabled candidates with their permitted flag and route_health_score. Default false (enabled only).",
+                        "default": False,
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "stable",
+                "when_to_use": "Render the operator console picker drawer or audit chat routing candidates.",
+                "when_not_to_use": "Do not use it to mutate routing — this is read-only.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Default chat picker view", "input": {}},
+                    {"title": "Include disabled candidates", "input": {"include_disabled": True}},
+                    {"title": "Different task slug", "input": {"task_slug": "auto/build"}},
                 ],
             },
         },

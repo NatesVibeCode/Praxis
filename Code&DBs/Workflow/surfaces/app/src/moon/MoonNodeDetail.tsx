@@ -2519,7 +2519,7 @@ function BindingCard({
         target_ref: binding.binding_id,
         decision: 'approve',
         candidate_payload: target,
-        rationale: 'Accepted from Moon Build.',
+        rationale: 'Accepted from the workflow builder.',
       };
       if (onCommitAuthorityAction) {
         const targetLabel = target.enrichment?.integration_name || target.label || target.target_ref || 'selected target';
@@ -2559,7 +2559,7 @@ function BindingCard({
           label: replaceRef.trim(),
           kind: 'custom',
         },
-        rationale: 'Replaced from Moon Build.',
+        rationale: 'Replaced from the workflow builder.',
       };
       if (onCommitAuthorityAction) {
         await onCommitAuthorityAction('review_decisions', request, {
@@ -2594,7 +2594,7 @@ function BindingCard({
         target_kind: 'binding',
         target_ref: binding.binding_id,
         decision: 'reject',
-        rationale: 'Rejected from Moon Build.',
+        rationale: 'Rejected from the workflow builder.',
       };
       if (onCommitAuthorityAction) {
         await onCommitAuthorityAction('review_decisions', request, {
