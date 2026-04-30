@@ -2078,6 +2078,90 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_authority_managed_runtime_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="managed-runtime-record",
+        when_to_use=(
+            "Record an optional managed/exported/hybrid runtime accounting "
+            "snapshot with mode policy, metering, run receipt, pricing schedule "
+            "reference, heartbeat health, audit context, and customer-safe "
+            "observability through CQRS."
+        ),
+        when_not_to_use=(
+            "Do not use it as a scheduler, invoice generator, or hidden required "
+            "runtime path. It records the cost and health evidence for a run; "
+            "customers may still use exported or hybrid execution."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record one managed runtime run",
+                {
+                    "identity": {
+                        "run_id": "run.managed.demo",
+                        "tenant_ref": "tenant.acme",
+                        "environment_ref": "env.prod",
+                        "workflow_ref": "workflow.object_truth",
+                        "workload_class": "workflow_build",
+                    },
+                    "policy": {
+                        "tenant_ref": "tenant.acme",
+                        "environment_ref": "env.prod",
+                        "configured_mode": "managed",
+                        "managed_workload_classes": ["workflow_build"],
+                    },
+                    "meter_events": [
+                        {"event_kind": "run_started", "occurred_at": "2026-04-30T12:00:00Z"},
+                        {
+                            "event_kind": "resource_usage",
+                            "occurred_at": "2026-04-30T12:00:30Z",
+                            "cpu_core_seconds": "120",
+                            "memory_gib_seconds": "240",
+                        },
+                        {"event_kind": "run_finished", "occurred_at": "2026-04-30T12:01:00Z"},
+                    ],
+                    "terminal_status": "succeeded",
+                    "generated_at": "2026-04-30T12:01:01Z",
+                    "runtime_version_ref": "runtime.managed.v1",
+                },
+            ),
+        ],
+    ),
+    "praxis_authority_managed_runtime_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="managed-runtime-read",
+        when_to_use=(
+            "Inspect persisted managed-runtime run receipts, metering, cost "
+            "basis, heartbeat health, audit events, pricing schedules, and "
+            "customer observability without reading raw tables."
+        ),
+        when_not_to_use=(
+            "Do not use it to record new runtime evidence; use "
+            "praxis_authority_managed_runtime_record for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one managed runtime record",
+                {
+                    "action": "describe_record",
+                    "runtime_record_id": "managed_runtime_record.demo",
+                    "include_meter_events": True,
+                    "include_pool_health": True,
+                },
+            ),
+            _example(
+                "List recent managed runs for one tenant",
+                {
+                    "action": "list_records",
+                    "tenant_ref": "tenant.acme",
+                    "execution_mode": "managed",
+                },
+            ),
+        ],
+    ),
     "praxis_client_operating_model": _tool(
         surface="operations",
         tier="advanced",

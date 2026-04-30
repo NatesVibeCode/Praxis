@@ -176,6 +176,16 @@ def test_resolve_http_operation_binding_rejects_missing_reference() -> None:
             "runtime.operations.queries.portable_cartridge.handle_read_portable_cartridge",
             "ReadPortableCartridgeQuery",
         ),
+        (
+            "runtime.operations.commands.managed_runtime.RecordManagedRuntimeCommand",
+            "runtime.operations.commands.managed_runtime.handle_record_managed_runtime",
+            "RecordManagedRuntimeCommand",
+        ),
+        (
+            "runtime.operations.queries.managed_runtime.ReadManagedRuntimeQuery",
+            "runtime.operations.queries.managed_runtime.handle_read_managed_runtime",
+            "ReadManagedRuntimeQuery",
+        ),
     ],
 )
 def test_resolve_http_operation_binding_loads_catalog_migrated_bindings(

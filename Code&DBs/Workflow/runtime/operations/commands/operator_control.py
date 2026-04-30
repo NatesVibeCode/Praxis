@@ -12,7 +12,7 @@ class RoadmapWriteCommand(BaseModel):
     title: str | None = None
     intent_brief: str | None = None
     template: str = "single_capability"
-    priority: str = "p2"
+    priority: str | None = None
     parent_roadmap_item_id: str | None = None
     slug: str | None = None
     depends_on: tuple[str, ...] = ()

@@ -186,6 +186,7 @@ _EMPTY_EXPECTED_OBJECT_CONTRACTS_ALLOWED = frozenset(
     {
         "187_webauthn_challenges.sql",
         "188_mobile_sessions.sql",
+        "384_chat_picker_full_model_coverage.sql",
     }
 )
 

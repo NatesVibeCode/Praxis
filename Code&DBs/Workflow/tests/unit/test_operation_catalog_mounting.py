@@ -1175,6 +1175,86 @@ def test_list_api_routes_surfaces_portable_cartridge_routes(monkeypatch) -> None
     ) in route_keys
 
 
+def test_list_api_routes_surfaces_managed_runtime_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class ManagedRuntimeCommand(BaseModel):
+        identity: dict | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="authority-managed-runtime-record",
+                operation_name="authority.managed_runtime.record",
+                http_method="POST",
+                http_path="/api/authority/managed-runtime",
+                input_model_ref=(
+                    "runtime.operations.commands.managed_runtime."
+                    "RecordManagedRuntimeCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.managed_runtime."
+                    "handle_record_managed_runtime"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="authority-managed-runtime-read",
+                operation_name="authority.managed_runtime.read",
+                http_method="GET",
+                http_path="/api/authority/managed-runtime",
+                input_model_ref=(
+                    "runtime.operations.queries.managed_runtime."
+                    "ReadManagedRuntimeQuery"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.managed_runtime."
+                    "handle_read_managed_runtime"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=ManagedRuntimeCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/authority",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/authority/managed-runtime",
+        "authority.managed_runtime.record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/authority/managed-runtime",
+        "authority.managed_runtime.read",
+    ) in route_keys
+
+
 def test_compile_family_routes_are_not_static_wrappers() -> None:
     source = Path(rest.__file__).read_text(encoding="utf-8")
 

@@ -3850,7 +3850,7 @@ class OperatorControlFrontdoor:
         title: str | None,
         intent_brief: str | None,
         template: str,
-        priority: str,
+        priority: str | None,
         parent_roadmap_item_id: str | None,
         slug: str | None,
         depends_on: tuple[str, ...],
@@ -3921,12 +3921,10 @@ class OperatorControlFrontdoor:
             )
             normalized_intent_brief = "__placeholder__"
         normalized_template = _require_roadmap_template(template)
-        normalized_priority = (
-            _normalize_roadmap_priority(priority)
-            if priority != "p2" or existing_row is None
-            else _normalize_roadmap_priority(
-                existing_row.get("priority") or priority
-            )
+        normalized_priority = _normalize_roadmap_priority(
+            priority
+            if priority is not None or existing_row is None
+            else existing_row.get("priority")
         )
         normalized_parent = _optional_text(
             parent_roadmap_item_id,
@@ -4379,7 +4377,7 @@ class OperatorControlFrontdoor:
         title: str | None,
         intent_brief: str | None,
         template: str = "single_capability",
-        priority: str = "p2",
+        priority: str | None = None,
         parent_roadmap_item_id: str | None = None,
         slug: str | None = None,
         depends_on: tuple[str, ...] = (),
@@ -5606,7 +5604,7 @@ class OperatorControlFrontdoor:
         title: str | None = None,
         intent_brief: str | None = None,
         template: str = "single_capability",
-        priority: str = "p2",
+        priority: str | None = None,
         parent_roadmap_item_id: str | None = None,
         slug: str | None = None,
         depends_on: tuple[str, ...] | list[str] | None = None,
@@ -6397,7 +6395,7 @@ class OperatorControlFrontdoor:
         title: str | None = None,
         intent_brief: str | None = None,
         template: str = "single_capability",
-        priority: str = "p2",
+        priority: str | None = None,
         parent_roadmap_item_id: str | None = None,
         slug: str | None = None,
         depends_on: tuple[str, ...] | list[str] | None = None,
@@ -7508,7 +7506,7 @@ def roadmap_write(
     title: str,
     intent_brief: str,
     template: str = "single_capability",
-    priority: str = "p2",
+    priority: str | None = None,
     parent_roadmap_item_id: str | None = None,
     slug: str | None = None,
     depends_on: tuple[str, ...] | list[str] | None = None,
@@ -7559,7 +7557,7 @@ async def aroadmap_write(
     title: str,
     intent_brief: str,
     template: str = "single_capability",
-    priority: str = "p2",
+    priority: str | None = None,
     parent_roadmap_item_id: str | None = None,
     slug: str | None = None,
     depends_on: tuple[str, ...] | list[str] | None = None,

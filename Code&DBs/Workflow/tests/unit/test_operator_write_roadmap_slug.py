@@ -160,9 +160,78 @@ def test_roadmap_write_update_mode_reuses_existing_identity_and_allows_reparenti
     assert preview["normalized_payload"]["parent_roadmap_item_id"] == parent_item_id
     assert preview["normalized_payload"]["lifecycle"] == "retired"
     assert preview["normalized_payload"]["status"] == "completed"
+    assert preview["normalized_payload"]["priority"] == "p1"
     assert preview["normalized_payload"]["root_phase_order"] == "33.6"
     assert preview["preview"]["roadmap_items"][0]["roadmap_item_id"] == existing_item_id
     assert preview["preview"]["roadmap_items"][0]["parent_roadmap_item_id"] == parent_item_id
+    assert preview["preview"]["roadmap_items"][0]["priority"] == "p1"
+
+
+def test_roadmap_update_explicit_p2_priority_overrides_existing_p1(
+    monkeypatch,
+) -> None:
+    existing_item_id = "roadmap_item.stale.p1.priority"
+    existing_row = {
+        "roadmap_item_id": existing_item_id,
+        "roadmap_key": "roadmap.stale.p1.priority",
+        "title": "Stale P1 priority",
+        "summary": "Demote stale roadmap work through the update surface",
+        "item_kind": "capability",
+        "status": "active",
+        "lifecycle": "planned",
+        "priority": "p1",
+        "parent_roadmap_item_id": None,
+        "source_bug_id": None,
+        "source_idea_id": None,
+        "registry_paths": [],
+        "decision_ref": None,
+        "created_at": datetime(2026, 4, 30, 12, 0),
+        "acceptance_criteria": {},
+    }
+
+    async def _connect_database(_env=None):
+        return _PreviewOnlyConnection()
+
+    async def _fetch_roadmap_item(_self, _conn, *, roadmap_item_id: str):
+        return existing_row if roadmap_item_id == existing_item_id else None
+
+    async def _roadmap_item_exists(_self, _conn, *, roadmap_item_id: str):
+        return roadmap_item_id == existing_item_id
+
+    async def _bug_exists(_self, *_args, **_kwargs):
+        return True
+
+    async def _idea_exists(_self, *_args, **_kwargs):
+        return True
+
+    async def _roadmap_sibling_phase_orders(_self, *_args, **_kwargs):
+        return ()
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=_connect_database,
+    )
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_fetch_roadmap_item", _fetch_roadmap_item)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_roadmap_item_exists", _roadmap_item_exists)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_bug_exists", _bug_exists)
+    monkeypatch.setattr(operator_write.OperatorControlFrontdoor, "_idea_exists", _idea_exists)
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_roadmap_sibling_phase_orders",
+        _roadmap_sibling_phase_orders,
+    )
+
+    preview = asyncio.run(
+        frontdoor.roadmap_write_async(
+            action="preview",
+            roadmap_item_id=existing_item_id,
+            priority="p2",
+        )
+    )
+
+    assert preview["committed"] is False
+    assert preview["blocking_errors"] == []
+    assert preview["normalized_payload"]["priority"] == "p2"
+    assert preview["preview"]["roadmap_items"][0]["priority"] == "p2"
 
 
 def test_roadmap_retire_succeeds_when_existing_row_status_is_outside_input_enum(

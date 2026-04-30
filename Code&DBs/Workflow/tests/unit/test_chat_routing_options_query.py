@@ -75,11 +75,40 @@ def test_include_disabled_returns_all() -> None:
         _route(provider="anthropic", model="claude-sonnet-4.6", transport="CLI", rank=47, permitted=False),
     ]
     result = handle_query_chat_routing_options(
-        QueryChatRoutingOptions(include_disabled=True),
+        QueryChatRoutingOptions(include_disabled=True, include_cli=True),
         _StubSubsystems(rows),
     )
     assert result["candidate_count"] == 2
     assert [c["rank"] for c in result["candidates"]] == [3, 47]
+
+
+def test_default_filters_out_cli_transports() -> None:
+    """CLI from chat is currently broken end-to-end; default filter hides it."""
+    rows = [
+        _route(provider="openrouter", model="moonshotai/kimi-k2.6", transport="API", rank=3),
+        _route(provider="anthropic", model="claude-opus-4-7", transport="CLI", rank=1),
+        _route(provider="openai", model="gpt-5.4-mini", transport="CLI", rank=4),
+    ]
+    result = handle_query_chat_routing_options(
+        QueryChatRoutingOptions(),
+        _StubSubsystems(rows),
+    )
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["transport_type"] == "API"
+
+
+def test_include_cli_surfaces_cli_routes_for_diagnostics() -> None:
+    rows = [
+        _route(provider="openrouter", model="moonshotai/kimi-k2.6", transport="API", rank=3),
+        _route(provider="anthropic", model="claude-opus-4-7", transport="CLI", rank=1),
+    ]
+    result = handle_query_chat_routing_options(
+        QueryChatRoutingOptions(include_cli=True),
+        _StubSubsystems(rows),
+    )
+    assert result["candidate_count"] == 2
+    transports = sorted(c["transport_type"] for c in result["candidates"])
+    assert transports == ["API", "CLI"]
 
 
 def test_sort_rank_then_health_desc() -> None:

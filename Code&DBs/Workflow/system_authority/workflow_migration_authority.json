@@ -392,7 +392,13 @@
     "374_virtual_lab_sandbox_promotion_authority.sql",
     "375_cleanup_invalid_task_type_routing_transports.sql",
     "376_portable_cartridge_authority.sql",
-    "377_register_chat_routing_options_query.sql"
+    "377_register_chat_routing_options_query.sql",
+    "379_register_chat_turn_execute_command.sql",
+    "380_register_chat_template_ask_all_command.sql",
+    "381_register_chat_template_review_command.sql",
+    "382_managed_runtime_authority.sql",
+    "383_action_fingerprint_authority.sql",
+    "384_chat_picker_full_model_coverage.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -10550,7 +10556,254 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.chat.routing_options.list"
       }
-    ]
+    ],
+    "379_register_chat_turn_execute_command.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.chat.turn.execute"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.chat.command.turn_execute"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.chat.turn.execute"
+      }
+    ],
+    "380_register_chat_template_ask_all_command.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.chat.template.ask_all"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.chat.command.template_ask_all"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.chat.template.ask_all"
+      }
+    ],
+    "381_register_chat_template_review_command.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.chat.template.review"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.chat.command.template_review"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.chat.template.review"
+      }
+    ],
+    "382_managed_runtime_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.managed_runtime"
+      },
+      {
+        "object_type": "table",
+        "object_name": "managed_runtime_pricing_schedule_versions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_pricing_schedule"
+      },
+      {
+        "object_type": "table",
+        "object_name": "managed_runtime_records"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_records_identity"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_records_cost"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_records_health"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_records_receipt"
+      },
+      {
+        "object_type": "table",
+        "object_name": "managed_runtime_meter_events"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_meter_events_run"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_meter_events_kind"
+      },
+      {
+        "object_type": "table",
+        "object_name": "managed_runtime_heartbeats"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_heartbeats_pool"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_heartbeats_tenant"
+      },
+      {
+        "object_type": "table",
+        "object_name": "managed_runtime_pool_health_snapshots"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_pool_health_state"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_pool_health_tenant"
+      },
+      {
+        "object_type": "table",
+        "object_name": "managed_runtime_audit_events"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_audit_events_run"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_managed_runtime_audit_events_target"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_managed_runtime_records_updated_at"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_managed_runtime_records_touch"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.managed_runtime_pricing_schedule_versions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.managed_runtime_records"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.managed_runtime_meter_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.managed_runtime_heartbeats"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.managed_runtime_pool_health_snapshots"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.managed_runtime_audit_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.managed_runtime_pricing_schedule_versions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.managed_runtime_records"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.managed_runtime_meter_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.managed_runtime_heartbeats"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.managed_runtime_pool_health_snapshots"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.managed_runtime_audit_events"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.event_contract.managed_runtime.recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.authority.managed_runtime.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.authority.managed_runtime.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.authority.managed_runtime.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.authority.managed_runtime.read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.authority.managed_runtime.read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.authority.managed_runtime.read"
+      }
+    ],
+    "383_action_fingerprint_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "action_fingerprints"
+      },
+      {
+        "object_type": "index",
+        "object_name": "action_fingerprints_shape_ts_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "action_fingerprints_surface_ts_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "action_fingerprints_session_ts_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "action_fingerprints_operation_ts_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "action_fingerprints_receipt_idx"
+      },
+      {
+        "object_type": "function",
+        "object_name": "action_fingerprints_record_receipt"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "action_fingerprints.action_fingerprints_receipt_trg"
+      },
+      {
+        "object_type": "view",
+        "object_name": "tool_opportunities_pending"
+      }
+    ],
+    "384_chat_picker_full_model_coverage.sql": []
   },
   "policy_buckets": {
     "canonical": [
@@ -10940,13 +11193,19 @@
       "368_blank_workspace_compose_surface_seed.sql",
       "369_manifest_run_bindings_authority.sql",
       "370_workspace_surface_migration_authority.sql",
-    "371_virtual_lab_simulation_authority.sql",
-    "372_cli_auth_doctor_timeout_budget.sql",
-    "373_compose_plan_interactive_lane.sql",
-    "374_virtual_lab_sandbox_promotion_authority.sql",
-    "375_cleanup_invalid_task_type_routing_transports.sql",
-    "376_portable_cartridge_authority.sql",
-    "377_register_chat_routing_options_query.sql"
+      "371_virtual_lab_simulation_authority.sql",
+      "372_cli_auth_doctor_timeout_budget.sql",
+      "373_compose_plan_interactive_lane.sql",
+      "374_virtual_lab_sandbox_promotion_authority.sql",
+      "375_cleanup_invalid_task_type_routing_transports.sql",
+      "376_portable_cartridge_authority.sql",
+      "377_register_chat_routing_options_query.sql",
+      "379_register_chat_turn_execute_command.sql",
+      "380_register_chat_template_ask_all_command.sql",
+      "381_register_chat_template_review_command.sql",
+      "382_managed_runtime_authority.sql",
+      "383_action_fingerprint_authority.sql",
+      "384_chat_picker_full_model_coverage.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

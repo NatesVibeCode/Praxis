@@ -109,6 +109,7 @@ class PostgresTaskTypeRoutingRepository:
         task_type: str,
         model_slug: str,
         provider_slug: str,
+        transport_type: str,
         permitted: bool,
         rank: int,
         benchmark_score: float,
@@ -130,6 +131,19 @@ class PostgresTaskTypeRoutingRepository:
         last_failure_category: str,
         last_failure_zone: str,
     ) -> None:
+        # transport_type is now caller-provided. Historically this method
+        # hardcoded 'CLI' which trigger 378 (provider_transport_admissions check)
+        # rejects for HTTP-only providers, breaking chat dispatch and
+        # accumulating invalid CLI rows for openrouter / together / fireworks /
+        # deepseek (122+ rows cleaned up by migration 375). The fix routes the
+        # transport from the caller's row dict, derived from the candidate's
+        # adapter_type. Normalize uppercase here to match the CHECK constraint
+        # (`transport_type IN ('CLI', 'API')`).
+        normalized_transport = str(transport_type or "API").strip().upper()
+        if normalized_transport not in ("CLI", "API"):
+            raise ValueError(
+                f"transport_type must be 'CLI' or 'API', got {transport_type!r}"
+            )
         self._conn.execute(
             """
             INSERT INTO task_type_routing (
@@ -142,10 +156,11 @@ class PostgresTaskTypeRoutingRepository:
                 observed_downstream_failure_count, observed_downstream_bug_count,
                 consecutive_internal_failures, last_failure_category, last_failure_zone, updated_at
             ) VALUES (
-                $1, '*', $2, $3, 'CLI', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                'derived', $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, now()
+                $1, '*', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                'derived', $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, now()
             )
             ON CONFLICT (task_type, sub_task_type, provider_slug, model_slug) DO UPDATE SET
+                transport_type = EXCLUDED.transport_type,
                 permitted = EXCLUDED.permitted, rank = EXCLUDED.rank,
                 benchmark_score = EXCLUDED.benchmark_score, benchmark_name = EXCLUDED.benchmark_name,
                 cost_per_m_tokens = EXCLUDED.cost_per_m_tokens, rationale = EXCLUDED.rationale,
@@ -157,6 +172,7 @@ class PostgresTaskTypeRoutingRepository:
             _require_text(task_type, field_name="task_type"),
             str(model_slug),
             _require_text(provider_slug, field_name="provider_slug"),
+            normalized_transport,
             bool(permitted),
             int(rank),
             float(benchmark_score),

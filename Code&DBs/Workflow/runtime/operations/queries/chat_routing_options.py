@@ -39,6 +39,17 @@ class QueryChatRoutingOptions(BaseModel):
             " disable reasons."
         ),
     )
+    include_cli: bool = Field(
+        default=False,
+        description=(
+            "When false (default), only transport_type='API' rows are returned."
+            " CLI from chat is currently broken end-to-end (see"
+            " project_chat_api_only_for_now memory): the runtime hardcodes"
+            " transport_type='CLI' in upsert_derived_route, which trigger"
+            " 378 then rejects for HTTP-only providers, breaking dispatch."
+            " Set include_cli=true only for diagnostic purposes."
+        ),
+    )
 
     @field_validator("task_slug", mode="before")
     @classmethod
@@ -82,6 +93,8 @@ def handle_query_chat_routing_options(
     candidates = [_row_to_candidate(row) for row in rows]
     if not query.include_disabled:
         candidates = [c for c in candidates if c.get("permitted")]
+    if not query.include_cli:
+        candidates = [c for c in candidates if c.get("transport_type") == "API"]
 
     candidates.sort(
         key=lambda c: (
@@ -95,6 +108,7 @@ def handle_query_chat_routing_options(
         "task_slug": query.task_slug,
         "task_type": task_type,
         "include_disabled": query.include_disabled,
+        "include_cli": query.include_cli,
         "candidates": candidates,
         "candidate_count": len(candidates),
     }

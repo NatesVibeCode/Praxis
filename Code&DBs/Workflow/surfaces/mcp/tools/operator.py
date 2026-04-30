@@ -790,7 +790,7 @@ def tool_praxis_operator_write(params: dict) -> dict:
             "title": title or None,
             "intent_brief": intent_brief or None,
             "template": params.get("template", "single_capability"),
-            "priority": params.get("priority", "p2"),
+            "priority": params.get("priority"),
             "parent_roadmap_item_id": params.get("parent_roadmap_item_id"),
             "slug": params.get("slug"),
             "depends_on": _optional_sequence_payload(params, "depends_on"),
@@ -2771,8 +2771,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "priority": {
                         "type": "string",
-                        "enum": ["p1", "p2"],
-                        "default": "p2",
+                        "enum": ["p0", "p1", "p2", "p3"],
+                        "description": (
+                            "Roadmap priority. Omitted create defaults to p2; "
+                            "omitted update preserves the existing priority."
+                        ),
                     },
                     "parent_roadmap_item_id": {"type": "string"},
                     "slug": {"type": "string"},

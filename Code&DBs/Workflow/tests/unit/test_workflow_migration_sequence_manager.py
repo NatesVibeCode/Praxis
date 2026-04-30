@@ -120,6 +120,34 @@ def test_renumber_unmanaged_duplicate_prefixes_repairs_files_and_spec(tmp_path: 
     assert "100_beta.sql" not in spec["canonical_manifest"]
 
 
+def test_renumber_rewrites_migration_self_references_in_file_content(tmp_path: Path) -> None:
+    """When a duplicate-prefix file is bumped, its 'Migration <num>' self-references
+    in the file body get rewritten in place. Filename-style cross-references like
+    'Migration 101_next.sql' must be left alone (they point at sibling migrations).
+    """
+
+    workflow_root = _write_fake_workflow_tree(
+        tmp_path,
+        filenames=["100_alpha.sql", "100_beta.sql", "101_next.sql"],
+    )
+    migration_root = workflow_root.parent / "Databases" / "migrations" / "workflow"
+    (migration_root / "100_beta.sql").write_text(
+        "-- Migration 100: do the thing.\n"
+        "-- Pairs with: Migration 101_next.sql for the follow-up.\n"
+        "-- See also Migration 100, which is this one.\n"
+        "BEGIN;\nCOMMIT;\n",
+        encoding="utf-8",
+    )
+
+    renumber_unmanaged_duplicate_prefixes(workflow_root, apply=True)
+    rewritten = (migration_root / "102_beta.sql").read_text(encoding="utf-8")
+
+    assert "Migration 102:" in rewritten, "header self-reference should be rewritten to new number"
+    assert "Migration 100:" not in rewritten, "old self-reference must be gone"
+    assert "Migration 101_next.sql" in rewritten, "filename-style cross-references must be preserved"
+    assert "See also Migration 102" in rewritten, "standalone self-reference should also be rewritten"
+
+
 def test_allocate_workflow_migration_filename_auto_renumbers_and_reports_notice(tmp_path: Path) -> None:
     workflow_root = _write_fake_workflow_tree(
         tmp_path,

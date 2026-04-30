@@ -1165,10 +1165,26 @@ class TaskTypeRouter:
                 f"route_tier={candidate.get('route_tier') or 'unknown'}; "
                 f"latency={candidate.get('latency_class') or 'unknown'}"
             )
+            # Carry transport_type from the candidate's adapter_type so the
+            # derived-route upsert lands on the right transport. Hardcoding
+            # 'CLI' here (the historical bug) made every derived row trip
+            # trigger 378 for HTTP-only providers; defaulting to 'API' on a
+            # missing adapter_type tripped it the OTHER way for CLI-only
+            # providers (anthropic). Resolve through the provider-aware
+            # registry so the default matches what the provider actually
+            # admits.
+            raw_candidate_adapter = candidate.get("adapter_type")
+            resolved_adapter = (
+                str(raw_candidate_adapter).strip().lower()
+                if raw_candidate_adapter
+                else self._default_adapter_for_provider(str(candidate["provider_slug"])).lower()
+            )
+            row_transport_type = "CLI" if resolved_adapter == "cli_llm" else "API"
             built_rows.append({
                 "task_type": task_type,
                 "provider_slug": candidate["provider_slug"],
                 "model_slug": candidate["model_slug"],
+                "transport_type": row_transport_type,
                 "permitted": True,
                 "rank": int(explicit_override.get("rank") or 99) if explicit_override is not None else _derived_rank_from_score(task_rank_score),
                 "benchmark_score": benchmark_score,
@@ -1208,6 +1224,7 @@ class TaskTypeRouter:
                 task_type=task_type,
                 model_slug=str(row["model_slug"]),
                 provider_slug=str(row["provider_slug"]),
+                transport_type=str(row.get("transport_type") or "API"),
                 permitted=bool(row.get("permitted", True)),
                 rank=int(row.get("effective_rank") or row.get("rank") or 99),
                 benchmark_score=float(row.get("benchmark_score") or 0.0),

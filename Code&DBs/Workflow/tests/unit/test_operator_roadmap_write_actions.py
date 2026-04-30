@@ -36,6 +36,28 @@ def test_runtime_operator_write_update_maps_to_preview_by_default(monkeypatch) -
     assert captured["kwargs"]["roadmap_item_id"] == (
         "roadmap_item.authority.cleanup.operator_write"
     )
+    assert captured["kwargs"]["priority"] is None
+
+
+def test_runtime_operator_write_update_preserves_explicit_priority(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "surfaces.api.operator_write.OperatorControlFrontdoor",
+        lambda: _FakeFrontdoor(captured=captured),
+    )
+
+    result = operator_control.handle_operator_roadmap_write(
+        operator_control.RoadmapWriteCommand(
+            action="update",
+            roadmap_item_id="roadmap_item.authority.cleanup.operator_write",
+            priority="p2",
+        ),
+        subsystems=object(),
+    )
+
+    assert result == {"ok": True, "requested_action": "update", "dry_run": True}
+    assert captured["kwargs"]["priority"] == "p2"
 
 
 def test_runtime_operator_write_retire_commit_sets_retired_lifecycle(monkeypatch) -> None:
@@ -109,6 +131,17 @@ def test_multi_phase_program_template_visible_in_mcp_catalog_schema() -> None:
     assert "multi_phase_program" in template_enum
     assert "single_capability" in template_enum
     assert "hard_cutover_program" in template_enum
+
+
+def test_roadmap_write_priority_catalog_matches_update_semantics() -> None:
+    """Catalog metadata must not erase the distinction between omitted and p2."""
+
+    from surfaces.mcp.tools.operator import TOOLS  # noqa: PLC0415
+
+    schema = TOOLS["praxis_operator_write"][1]["inputSchema"]
+    priority_schema = schema["properties"]["priority"]
+    assert "default" not in priority_schema
+    assert priority_schema["enum"] == ["p0", "p1", "p2", "p3"]
 
 
 def test_runtime_operator_write_dispatch_parity_across_action_aliases(monkeypatch) -> None:

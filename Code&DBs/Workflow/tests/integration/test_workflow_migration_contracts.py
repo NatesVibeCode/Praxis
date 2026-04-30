@@ -145,13 +145,17 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "375_cleanup_invalid_task_type_routing_transports.sql" in filenames
     assert "376_portable_cartridge_authority.sql" in filenames
     assert "377_register_chat_routing_options_query.sql" in filenames
-    assert filenames[-1] == "377_register_chat_routing_options_query.sql"
+    assert "382_managed_runtime_authority.sql" in filenames
+    assert "383_action_fingerprint_authority.sql" in filenames
+    assert "384_chat_picker_full_model_coverage.sql" in filenames
+    assert filenames[-1] == "384_chat_picker_full_model_coverage.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
     intentionally_empty_contracts = {
         "187_webauthn_challenges.sql",
         "188_mobile_sessions.sql",
+        "384_chat_picker_full_model_coverage.sql",
     }
     missing_contracts: list[str] = []
     for entry in workflow_migration_manifest():
@@ -345,6 +349,58 @@ def test_portable_cartridge_authority_is_registered() -> None:
     assert "authority.portable_cartridge.record" in sql_text
     assert "authority.portable_cartridge.read" in sql_text
     assert "p_execution_lane        := 'interactive'" in sql_text
+
+
+def test_managed_runtime_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "382_managed_runtime_authority.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "382_managed_runtime_authority.sql"
+    )
+
+    assert "authority_domains.authority.managed_runtime" in names
+    assert "managed_runtime_pricing_schedule_versions" in names
+    assert "managed_runtime_records" in names
+    assert "managed_runtime_meter_events" in names
+    assert "managed_runtime_heartbeats" in names
+    assert "managed_runtime_pool_health_snapshots" in names
+    assert "managed_runtime_audit_events" in names
+    assert "authority_event_contracts.event_contract.managed_runtime.recorded" in names
+    assert "operation_catalog_registry.authority.managed_runtime.record" in names
+    assert "operation_catalog_registry.authority.managed_runtime.read" in names
+    assert "authority.managed_runtime.record" in sql_text
+    assert "authority.managed_runtime.read" in sql_text
+    assert "p_execution_lane        := 'interactive'" in sql_text
+
+
+def test_action_fingerprint_authority_is_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "383_action_fingerprint_authority.sql"
+    )
+    names = {item.object_name for item in objects}
+    sql_text = workflow_migration_sql_text(
+        "383_action_fingerprint_authority.sql"
+    )
+
+    assert "action_fingerprints" in names
+    assert "tool_opportunities_pending" in names
+    assert "action_fingerprints_record_receipt" in names
+    assert "action_fingerprints.action_fingerprints_receipt_trg" in names
+    assert "CREATE TRIGGER action_fingerprints_receipt_trg" in sql_text
+    assert "CREATE VIEW tool_opportunities_pending" in sql_text
+
+
+def test_chat_picker_full_model_coverage_is_classified_as_data_only() -> None:
+    assert workflow_migration_expected_objects(
+        "384_chat_picker_full_model_coverage.sql"
+    ) == ()
+    sql_text = workflow_migration_sql_text(
+        "384_chat_picker_full_model_coverage.sql"
+    )
+    assert "INSERT INTO task_type_routing" in sql_text
+    assert "task_type <> 'chat'" in sql_text
 
 
 def test_task_type_routing_transport_cleanup_is_classified() -> None:
