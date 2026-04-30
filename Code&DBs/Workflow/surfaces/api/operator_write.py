@@ -116,7 +116,7 @@ _OPERATOR_IDEA_STATUSES = frozenset(
 )
 _OPERATOR_IDEA_RESOLUTION_STATUSES = frozenset({"rejected", "superseded", "archived"})
 _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
-_ROADMAP_STATUSES = frozenset({"active", "completed", "done"})
+_ROADMAP_STATUSES = frozenset({"proposed", "active", "completed", "done"})
 _ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed", "retired"})
 _ROADMAP_RETIRED_LIFECYCLE = "retired"
 _ROADMAP_PRIORITIES = frozenset({"p0", "p1", "p2", "p3"})
@@ -3961,13 +3961,6 @@ class OperatorControlFrontdoor:
             normalized_registry_paths = _normalize_registry_paths(
                 existing_row.get("registry_paths")
             )
-        normalized_status = (
-            _normalize_roadmap_status(status)
-            if status is not None
-            else _normalize_roadmap_status(
-                existing_row.get("status") if existing_row is not None else None
-            )
-        )
         normalized_lifecycle = (
             _normalize_roadmap_lifecycle(lifecycle)
             if lifecycle is not None
@@ -3975,6 +3968,29 @@ class OperatorControlFrontdoor:
                 existing_row.get("lifecycle") if existing_row is not None else None
             )
         )
+        if status is not None:
+            normalized_status = _normalize_roadmap_status(status)
+        elif normalized_lifecycle == _ROADMAP_RETIRED_LIFECYCLE:
+            normalized_status = _ROADMAP_COMPLETED_STATUS
+            auto_fixes.append("status aligned to retired lifecycle: completed")
+        elif normalized_lifecycle == _ROADMAP_COMPLETED_LIFECYCLE:
+            normalized_status = _ROADMAP_COMPLETED_STATUS
+            auto_fixes.append("status aligned to completed lifecycle: completed")
+        else:
+            existing_status = (
+                existing_row.get("status") if existing_row is not None else None
+            )
+            if (
+                existing_status is not None
+                and str(existing_status).strip().lower() not in _ROADMAP_STATUSES
+            ):
+                auto_fixes.append(
+                    f"existing status {existing_status!r} not in canonical set "
+                    f"({sorted(_ROADMAP_STATUSES)}); coerced to 'active'"
+                )
+                normalized_status = "active"
+            else:
+                normalized_status = _normalize_roadmap_status(existing_status)
         normalized_depends_on = tuple(
             dependency
             for dependency in depends_on

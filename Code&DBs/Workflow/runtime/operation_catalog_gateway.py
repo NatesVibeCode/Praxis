@@ -1443,7 +1443,7 @@ async def aexecute_operation_binding(
     except Exception as exc:
         error_code = _error_code_for_exception(exc)
         error_details = _error_details_for_exception(exc)
-        receipt = _persist_operation_outcome(
+        failure_receipt = _persist_operation_outcome(
             conn,
             binding,
             payload=payload,
@@ -1463,11 +1463,11 @@ async def aexecute_operation_binding(
             "ok": False,
             "error": str(exc),
             "error_code": error_code,
-            "operation_receipt": receipt,
+            "operation_receipt": failure_receipt,
         }
         if error_details:
             failure["details"] = error_details
-        return failure
+        return _with_operation_receipt(binding, failure, receipt=failure_receipt)
     finally:
         CURRENT_CALLER_CONTEXT.reset(token)
     receipt = _persist_operation_outcome(
@@ -1554,7 +1554,7 @@ def execute_operation_binding(
     except Exception as exc:
         error_code = _error_code_for_exception(exc)
         error_details = _error_details_for_exception(exc)
-        receipt = _persist_operation_outcome(
+        failure_receipt = _persist_operation_outcome(
             conn,
             binding,
             payload=payload,
@@ -1574,11 +1574,11 @@ def execute_operation_binding(
             "ok": False,
             "error": str(exc),
             "error_code": error_code,
-            "operation_receipt": receipt,
+            "operation_receipt": failure_receipt,
         }
         if error_details:
             failure["details"] = error_details
-        return failure
+        return _with_operation_receipt(binding, failure, receipt=failure_receipt)
     finally:
         CURRENT_CALLER_CONTEXT.reset(token)
     receipt = _persist_operation_outcome(
