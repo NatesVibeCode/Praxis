@@ -200,13 +200,17 @@ class _FakeRepository:
 @dataclass
 class _FakeConn:
     updates: list[tuple[str, tuple[Any, ...]]] = field(default_factory=list)
+    preflight_row: dict[str, Any] | None = None
 
     def fetchrow(self, query: str, *args: Any) -> dict[str, Any] | None:
+        if "FROM candidate_latest_preflight" in query:
+            return self.preflight_row
         assert "FROM code_change_candidate_payloads" in query
         return {
             "candidate_id": str(args[0]),
             "submission_id": "workflow_job_submission:test",
             "bug_id": "BUG-12345678",
+            "base_head_ref": "abcdef1234567890",
             "review_routing": "human_review",
             "materialization_status": "pending",
             "run_id": "run:test",
@@ -220,7 +224,21 @@ class _FakeConn:
 
 
 def test_candidate_review_records_review_and_updates_projections(monkeypatch) -> None:
-    conn = _FakeConn()
+    conn = _FakeConn(
+        preflight_row={
+            "preflight_id": "preflight:test",
+            "preflight_status": "passed",
+            "base_head_ref_at_preflight": "abcdef1234567890",
+            "runtime_derived_patch_sha256": "sha:runtime",
+            "agent_declared_patch_sha256": "sha:runtime",
+            "temp_verifier_passed": True,
+            "impact_contract_complete": True,
+            "contested_impact_count": 0,
+            "runtime_addition_impact_count": 0,
+            "created_at": "2026-04-29T00:00:00+00:00",
+            "completed_at": "2026-04-29T00:00:01+00:00",
+        }
+    )
     repository = _FakeRepository()
     monkeypatch.setattr(
         candidate_review,
@@ -248,3 +266,142 @@ def test_candidate_review_records_review_and_updates_projections(monkeypatch) ->
     assert repository.review["reviewer_role"] == "human"
     assert any("UPDATE workflow_job_submissions" in query for query, _ in conn.updates)
     assert any("UPDATE code_change_candidate_payloads" in query for query, _ in conn.updates)
+
+
+def test_candidate_review_approve_refused_without_preflight(monkeypatch) -> None:
+    conn = _FakeConn(preflight_row=None)
+    repository = _FakeRepository()
+    monkeypatch.setattr(
+        candidate_review,
+        "PostgresWorkflowSubmissionRepository",
+        lambda _conn: repository,
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> _FakeConn:
+            return conn
+
+    result = candidate_review.handle_review_candidate(
+        candidate_review.ReviewCodeChangeCandidate(
+            candidate_id="11111111-1111-1111-1111-111111111111",
+            reviewer_ref="human:nate",
+            decision="approve",
+            reasons=["looks good"],
+        ),
+        _Subsystems(),
+    )
+
+    assert result["ok"] is False
+    assert result["reason_code"] == "code_change_candidate.preflight_required"
+    assert repository.review == {}
+    assert conn.updates == []
+
+
+def test_candidate_review_approve_refused_when_preflight_stale(monkeypatch) -> None:
+    conn = _FakeConn(
+        preflight_row={
+            "preflight_id": "preflight:stale",
+            "preflight_status": "passed",
+            "base_head_ref_at_preflight": "deadbeefdeadbeef",
+            "runtime_derived_patch_sha256": None,
+            "agent_declared_patch_sha256": None,
+            "temp_verifier_passed": True,
+            "impact_contract_complete": True,
+            "contested_impact_count": 0,
+            "runtime_addition_impact_count": 0,
+            "created_at": "2026-04-29T00:00:00+00:00",
+            "completed_at": "2026-04-29T00:00:01+00:00",
+        }
+    )
+    repository = _FakeRepository()
+    monkeypatch.setattr(
+        candidate_review,
+        "PostgresWorkflowSubmissionRepository",
+        lambda _conn: repository,
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> _FakeConn:
+            return conn
+
+    result = candidate_review.handle_review_candidate(
+        candidate_review.ReviewCodeChangeCandidate(
+            candidate_id="11111111-1111-1111-1111-111111111111",
+            reviewer_ref="human:nate",
+            decision="approve",
+        ),
+        _Subsystems(),
+    )
+
+    assert result["ok"] is False
+    assert result["reason_code"] == "code_change_candidate.preflight_stale"
+    assert repository.review == {}
+
+
+def test_candidate_review_approve_refused_when_preflight_not_passed(monkeypatch) -> None:
+    conn = _FakeConn(
+        preflight_row={
+            "preflight_id": "preflight:contested",
+            "preflight_status": "failed_impact_contract",
+            "base_head_ref_at_preflight": "abcdef1234567890",
+            "runtime_derived_patch_sha256": "sha:runtime",
+            "agent_declared_patch_sha256": "sha:runtime",
+            "temp_verifier_passed": True,
+            "impact_contract_complete": False,
+            "contested_impact_count": 2,
+            "runtime_addition_impact_count": 1,
+            "created_at": "2026-04-29T00:00:00+00:00",
+            "completed_at": "2026-04-29T00:00:01+00:00",
+        }
+    )
+    repository = _FakeRepository()
+    monkeypatch.setattr(
+        candidate_review,
+        "PostgresWorkflowSubmissionRepository",
+        lambda _conn: repository,
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> _FakeConn:
+            return conn
+
+    result = candidate_review.handle_review_candidate(
+        candidate_review.ReviewCodeChangeCandidate(
+            candidate_id="11111111-1111-1111-1111-111111111111",
+            reviewer_ref="human:nate",
+            decision="approve",
+        ),
+        _Subsystems(),
+    )
+
+    assert result["ok"] is False
+    assert result["reason_code"] == "code_change_candidate.preflight_not_passed"
+    assert result["details"]["preflight_status"] == "failed_impact_contract"
+    assert result["details"]["contested_impact_count"] == 2
+
+
+def test_candidate_review_reject_skips_preflight_gate(monkeypatch) -> None:
+    conn = _FakeConn(preflight_row=None)
+    repository = _FakeRepository()
+    monkeypatch.setattr(
+        candidate_review,
+        "PostgresWorkflowSubmissionRepository",
+        lambda _conn: repository,
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> _FakeConn:
+            return conn
+
+    result = candidate_review.handle_review_candidate(
+        candidate_review.ReviewCodeChangeCandidate(
+            candidate_id="11111111-1111-1111-1111-111111111111",
+            reviewer_ref="human:nate",
+            decision="reject",
+            reasons=["wrong shape"],
+        ),
+        _Subsystems(),
+    )
+
+    assert result["ok"] is True
+    assert repository.review["decision"] == "reject"

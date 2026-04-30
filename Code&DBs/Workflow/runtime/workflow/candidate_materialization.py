@@ -378,6 +378,137 @@ def _capture_patch_artifact(
     return f"sandbox_artifact:{record.artifact_id}"
 
 
+def _populate_authority_supersession_registry(
+    conn: Any,
+    *,
+    candidate_id: str,
+    promotion_decision_id: str | None,
+    materialized_by: str,
+) -> int:
+    """For a materialized candidate, write supersession rows for each
+    validated impact whose intent is replace or retire. Rows already present
+    (matching successor/predecessor pair, not rolled back) are left alone."""
+
+    impact_rows = conn.fetch(
+        """
+        SELECT impact_id::text                  AS impact_id,
+               intent::text                     AS intent,
+               unit_kind::text                  AS successor_unit_kind,
+               unit_ref                         AS successor_unit_ref,
+               predecessor_unit_kind::text      AS predecessor_unit_kind,
+               predecessor_unit_ref,
+               subsumption_evidence_ref,
+               rollback_path,
+               notes
+          FROM candidate_authority_impacts
+         WHERE candidate_id = $1::uuid
+           AND intent IN ('replace', 'retire')
+           AND validation_status IN ('validated', 'runtime_addition')
+           AND predecessor_unit_kind IS NOT NULL
+           AND predecessor_unit_ref IS NOT NULL
+        """,
+        candidate_id,
+    )
+    if not impact_rows:
+        return 0
+
+    inserted = 0
+    decision_ref = (
+        "decision.architecture_policy.platform_architecture.candidate_authority_impact_contract"
+    )
+    for row in impact_rows:
+        impact = dict(row)
+        intent = impact["intent"]
+        successor_kind: str | None
+        successor_ref: str | None
+        if intent == "replace":
+            successor_kind = impact["successor_unit_kind"]
+            successor_ref = impact["successor_unit_ref"]
+        else:
+            # intent == retire; no successor unit declared. Use the
+            # candidate_id ref as a placeholder successor to record the
+            # retirement event without a live replacement.
+            successor_kind = "operation_ref"
+            successor_ref = f"retired:{candidate_id}"
+
+        supersession_status = "compat" if intent == "replace" else "pending_retire"
+        obligation_summary_parts: list[str] = []
+        if impact.get("notes"):
+            obligation_summary_parts.append(str(impact["notes"]))
+        obligation_summary_parts.append(
+            f"Materialized via candidate {candidate_id}; intent={intent}; "
+            f"materialized_by={materialized_by}."
+        )
+        obligation_summary = " ".join(obligation_summary_parts)
+
+        evidence: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "promotion_decision_id": promotion_decision_id,
+            "materialized_by": materialized_by,
+            "intent": intent,
+        }
+        if impact.get("subsumption_evidence_ref"):
+            evidence["subsumption_evidence_ref"] = impact["subsumption_evidence_ref"]
+        if impact.get("rollback_path"):
+            evidence["rollback_path"] = impact["rollback_path"]
+
+        result = conn.execute(
+            """
+            INSERT INTO authority_supersession_registry (
+                successor_unit_kind,
+                successor_unit_ref,
+                predecessor_unit_kind,
+                predecessor_unit_ref,
+                supersession_status,
+                obligation_summary,
+                obligation_evidence,
+                source_candidate_id,
+                source_impact_id,
+                source_decision_ref
+            ) VALUES (
+                $1::candidate_authority_unit_kind,
+                $2,
+                $3::candidate_authority_unit_kind,
+                $4,
+                $5::authority_supersession_status,
+                $6,
+                $7::jsonb,
+                $8::uuid,
+                $9::uuid,
+                $10
+            )
+            ON CONFLICT (
+                successor_unit_kind,
+                successor_unit_ref,
+                predecessor_unit_kind,
+                predecessor_unit_ref
+            )
+            WHERE supersession_status <> 'rolled_back'
+            DO UPDATE SET
+                supersession_status = EXCLUDED.supersession_status,
+                obligation_summary  = EXCLUDED.obligation_summary,
+                obligation_evidence = EXCLUDED.obligation_evidence,
+                source_candidate_id = EXCLUDED.source_candidate_id,
+                source_impact_id    = EXCLUDED.source_impact_id,
+                source_decision_ref = EXCLUDED.source_decision_ref,
+                updated_at          = now()
+            """,
+            successor_kind,
+            successor_ref,
+            impact["predecessor_unit_kind"],
+            impact["predecessor_unit_ref"],
+            supersession_status,
+            obligation_summary,
+            json.dumps(evidence, sort_keys=True, default=str),
+            candidate_id,
+            impact["impact_id"],
+            decision_ref,
+        )
+        inserted += 1
+        _ = result  # asyncpg result rowcount is not needed here
+    return inserted
+
+
 def _candidate_submission_projection(candidate: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "submission_id": candidate["submission_id"],
@@ -874,6 +1005,14 @@ def materialize_candidate(
                 "canonical_commit_ref": canonical_commit_ref,
             },
         )
+
+        supersession_rows_written = _populate_authority_supersession_registry(
+            conn,
+            candidate_id=candidate_id,
+            promotion_decision_id=promotion_decision.promotion_decision_id,
+            materialized_by=materialized_by,
+        )
+
         return {
             "ok": True,
             "status": "materialized",
@@ -885,6 +1024,7 @@ def materialize_candidate(
             "promotion_decision": asdict(promotion_decision),
             "final_verification": final_verification,
             "bug": None if resolved_bug is None else {"bug_id": resolved_bug.bug_id, "status": resolved_bug.status.value},
+            "supersession_rows_written": supersession_rows_written,
             "event_payload": {
                 "candidate_id": candidate_id,
                 "submission_id": candidate["submission_id"],
@@ -893,6 +1033,7 @@ def materialize_candidate(
                 "canonical_commit_ref": canonical_commit_ref,
                 "final_verification_run_id": final_verification_run_id,
                 "promotion_decision_id": promotion_decision.promotion_decision_id,
+                "supersession_rows_written": supersession_rows_written,
             },
         }
     except CandidateMaterializationError as exc:

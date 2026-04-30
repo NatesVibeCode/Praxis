@@ -38,6 +38,10 @@ from runtime.spec_compiler import (
     propose_plan,
 )
 from runtime.system_events import emit_system_event
+from runtime.workflow.authority_overlap import classify_path
+from runtime.workflow.compose_authority_binding import (
+    resolve_compose_authority_binding,
+)
 
 
 def _best_effort_emit(
@@ -119,6 +123,67 @@ def _validate_composed_plan_type_flow(proposed: ProposedPlan) -> list[str]:
     if not request["nodes"]:
         return []
     return list(validate_workflow_request_type_flow(request) or [])
+
+
+def _packet_write_paths_to_targets(write_paths: list[str]) -> list[dict[str, str]]:
+    """Convert a packet's `write` scope into resolver target rows.
+
+    Workspace-root scope (`.` or empty entries) is skipped — resolving
+    every authority unit in the repo at compose time is wrong by design.
+    Each remaining path is classified via authority_overlap.classify_path;
+    paths that don't match a known authority pattern fall back to
+    `source_path` so the resolver can still surface predecessor obligations
+    that name the path explicitly.
+    """
+
+    targets: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in write_paths or ():
+        path = str(raw or "").strip()
+        if not path or path == ".":
+            continue
+        unit_kind = classify_path(path) or "source_path"
+        key = (unit_kind, path)
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append({"unit_kind": unit_kind, "unit_ref": path})
+    return targets
+
+
+def _binding_for_packet(conn: Any, packet: PlanPacket) -> dict[str, Any] | None:
+    """Resolve compose-time canonical binding for one packet.
+
+    Best-effort: any failure (no conn, resolver error, empty targets) returns
+    None and the packet stays unbound. Compose still completes; observability
+    of the failure goes to plan warnings via the caller.
+    """
+
+    if conn is None:
+        return None
+    targets = _packet_write_paths_to_targets(list(packet.write or []))
+    if not targets:
+        return None
+    try:
+        binding = resolve_compose_authority_binding(conn, raw_targets=targets)
+    except Exception:  # noqa: BLE001
+        return None
+    return binding.to_dict()
+
+
+def attach_authority_bindings_to_packets(
+    conn: Any, packets: list[PlanPacket]
+) -> list[PlanPacket]:
+    """Return packets with `authority_binding` populated per packet."""
+
+    rebound: list[PlanPacket] = []
+    for packet in packets:
+        binding = _binding_for_packet(conn, packet)
+        if binding is None:
+            rebound.append(packet)
+        else:
+            rebound.append(replace(packet, authority_binding=binding))
+    return rebound
 
 
 def packets_from_steps(
@@ -212,6 +277,8 @@ def compose_plan_from_intent(
     if serialize_scope_conflicts:
         packets = reorder_packets_by_write_conflicts(packets)
 
+    packets = attach_authority_bindings_to_packets(conn, packets)
+
     resolved_name = (
         str(plan_name or "").strip()
         or f"compose_plan.{decomposed.detection_mode}.{len(decomposed.steps)}_steps"
@@ -225,6 +292,7 @@ def compose_plan_from_intent(
                 "stage": p.stage,
                 "label": p.label,
                 **({"depends_on": list(p.depends_on)} if p.depends_on else {}),
+                **({"authority_binding": p.authority_binding} if p.authority_binding else {}),
             }
             for p in packets
         ],

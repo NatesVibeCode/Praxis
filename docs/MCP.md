@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 130 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 133 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -16,6 +16,8 @@ CLI discovery is generated from the same catalog metadata:
 | Tool | Surface | Tier | Alias | Risks | Replacement | Description |
 | --- | --- | --- | --- | --- | --- | --- |
 | `praxis_discover` | `code` | `stable` | `workflow discover` | `read`, `write` | - | Find existing code that already does what you need — BEFORE writing new code. Uses hybrid retrieval: vector embeddings over AST-extracted behavioral fingerprints plus Postgres full-text search, fused with reciprocal rank fusion so you get both semantic and exact-ish matches even when naming differs. |
+| `praxis_audit_authority_impact_contract` | `cqrs` | `advanced` | - | `read` | - | Audit a list of paths for impact-contract coverage. Each path is classified as not_authority_bearing, covered (a candidate exists with this path in intended_files), or uncovered (authority-bearing but no backing candidate). Closes the gap left by the candidate-path enforcement chain: catches direct commits, scripted edits, and hot-fixes that bypass the gated pipeline. |
+| `praxis_resolve_compose_authority_binding` | `cqrs` | `advanced` | - | `read` | - | Resolve the compose-time canonical authority binding for a set of target authority units. Returns the canonical write scope (units the worker may edit), the read-only predecessor obligation pack (units the worker must read but not extend), and explicit blocked-compat units. The active prevention behind the impact contract — when a packet is composed against this binding, duplicate authority becomes invisible to the worker. |
 | `praxis_data` | `data` | `stable` | `workflow data` | `launch`, `read`, `write` | - | Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, filter records, sort rows, normalize values, repair rows, run repair loops, backfill missing values, redact sensitive fields, checkpoint state, replay cursor windows, approve plans, apply approved plans, validate contracts, transform records, join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, route dead-letter rows, reconcile source vs target state, sync target state deterministically, generate workflow specs, and launch those jobs through Praxis. |
 | `praxis_artifacts` | `evidence` | `stable` | `workflow artifacts` | `read` | - | Browse and compare files produced by workflow sandbox runs. Each workflow job can write artifacts (code, logs, reports) — this tool lets you find, search, and diff them. |
 | `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `launch`, `read`, `write` | - | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
@@ -121,6 +123,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_credential_capture` | `setup` | `stable` | - | `read`, `write` | - | Request, inspect, or open the host-side secure API-key entry window for macOS Keychain-backed Praxis credentials. This is a thin MCP wrapper over the CQRS operation `credential_capture_keychain`; raw secret values never enter MCP params or tool results. |
 | `praxis_setup` | `setup` | `core` | - | `read` | - | Runtime-target setup authority for Praxis. Reports the active runtime_target_ref, substrate kind, API authority, DB authority, native_instance contract, workspace authority, provider-family thin sandbox image contract, and the empty_thin_sandbox_default pass/fail. USE WHEN: moving Praxis between machines, adopting an existing runtime, repointing the package at a DB, or checking that the CLI, MCP, and API are bound to the same repo-local instance. Operations belong to API/MCP; CLI and website are clients. SSH is build/deploy transport only. |
 | `praxis_code_change_candidate_materialize` | `submissions` | `advanced` | - | `write` | - | Materialize an approved or auto-apply code-change candidate. The CQRS handler rechecks verifier/gate evidence before applying source. |
+| `praxis_code_change_candidate_preflight` | `submissions` | `advanced` | - | `write` | - | Run the trusted preflight pass for a code-change candidate. Recomputes the patch from the real base head, runs the temp verifier, scans for runtime-derived authority impacts, and validates them against the agent-declared impact contract. Reviewers (human or LLM) read the preflight record instead of the agent-shaped submission. code_change_candidate.review approve refuses without a passed preflight. |
 | `praxis_code_change_candidate_review` | `submissions` | `advanced` | - | `write` | - | Review a sealed code-change candidate. Writes the canonical decision to workflow_job_submission_reviews through the CQRS gateway; it never mutates source. |
 | `praxis_get_submission` | `submissions` | `session` | - | `session` | - | Read a sealed workflow submission within the current workflow MCP session. The session token owns run_id/workflow_id and the tool only accepts submission_id or job_label for the target submission. |
 | `praxis_review_submission` | `submissions` | `session` | - | `session` | - | Review a sealed workflow submission within the current workflow MCP session. The session token owns run_id/workflow_id/job_label for the reviewer. The tool only accepts submission_id or job_label for the target submission. |
@@ -170,6 +173,63 @@ Example input:
 {
   "action": "search",
   "query": "retry logic with exponential backoff"
+}
+```
+
+### Cqrs
+
+#### `praxis_audit_authority_impact_contract`
+
+- Surface: `cqrs`
+- Tier: `advanced`
+- Badges: `advanced`, `cqrs`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_audit_authority_impact_contract`
+- CLI schema help: `workflow tools describe praxis_audit_authority_impact_contract`
+- When to use: Audit a path list (typically `git diff --name-only` over a window) for impact-contract coverage. Surfaces drift where authority-bearing files were edited without a backing candidate impact contract — catches direct commits, scripted edits, and hot-fixes that bypass the gated pipeline.
+- When not to use: Not for the candidate-path enforcement chain (preflight + review + materialize already enforce in-band). This is the orthogonal audit for out-of-band changes.
+- Selector: none
+- Required args: `paths`
+
+Example input:
+
+```json
+{
+  "paths": [
+    "Code&DBs/Databases/migrations/workflow/342_foo.sql",
+    "Code&DBs/Workflow/runtime/operations/commands/foo.py",
+    "docs/notes.md"
+  ]
+}
+```
+
+#### `praxis_resolve_compose_authority_binding`
+
+- Surface: `cqrs`
+- Tier: `advanced`
+- Badges: `advanced`, `cqrs`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_resolve_compose_authority_binding`
+- CLI schema help: `workflow tools describe praxis_resolve_compose_authority_binding`
+- When to use: At plan composition time, resolve the canonical write scope, the read-only predecessor obligation pack, and explicit blocked-compat units for a set of target authority units. Use this so packets bind a workspace where duplicate authority is invisible to the worker.
+- When not to use: Not for live source mutation. This is a read-only resolver; use code_change_candidate.* for write paths.
+- Selector: none
+- Required args: `targets`
+
+Example input:
+
+```json
+{
+  "targets": [
+    {
+      "unit_kind": "operation_ref",
+      "unit_ref": "compose_plan"
+    },
+    {
+      "unit_kind": "source_path",
+      "unit_ref": "Code&DBs/Workflow/runtime/operations/commands/plan_orchestration.py"
+    }
+  ]
 }
 ```
 
@@ -2567,6 +2627,28 @@ Example input:
 {
   "candidate_id": "<uuid>",
   "materialized_by": "human:nate"
+}
+```
+
+#### `praxis_code_change_candidate_preflight`
+
+- Surface: `submissions`
+- Tier: `advanced`
+- Badges: `advanced`, `submissions`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_code_change_candidate_preflight`
+- CLI schema help: `workflow tools describe praxis_code_change_candidate_preflight`
+- When to use: Run trusted preflight on a sealed candidate before review. Recomputes the patch from the real base head, runs the temp verifier, and validates agent-declared authority impacts against runtime-derived overlap. Required before code_change_candidate.review approve.
+- When not to use: Do not use it to bypass impact contract validation; preflight is the gate, not a hint.
+- Selector: none
+- Required args: `candidate_id`
+
+Example input:
+
+```json
+{
+  "candidate_id": "<uuid>",
+  "triggered_by": "human:nate"
 }
 ```
 

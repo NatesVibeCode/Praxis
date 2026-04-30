@@ -199,6 +199,117 @@ def _submission_required(metadata: Mapping[str, Any] | None) -> bool:
     return bool(contract.get("submission_required"))
 
 
+def _authority_binding_blocked_paths(
+    metadata: Mapping[str, Any] | None,
+) -> tuple[Mapping[str, Any], ...]:
+    """Extract source-path entries from authority_binding.blocked_compat_units.
+
+    Each entry in the result has the predecessor path the worker must NOT
+    extend, plus the canonical successor info so the refusal message can
+    point the agent at the correct write target. The resolver only adds
+    `source_path`-kind predecessors to blocked_compat_units; that is
+    exactly what filesystem write enforcement can act on.
+    """
+
+    if not isinstance(metadata, Mapping):
+        return ()
+    binding = metadata.get("authority_binding")
+    if not isinstance(binding, Mapping):
+        return ()
+    blocked_raw = binding.get("blocked_compat_units")
+    if not isinstance(blocked_raw, list):
+        return ()
+    out: list[Mapping[str, Any]] = []
+    for entry in blocked_raw:
+        if not isinstance(entry, Mapping):
+            continue
+        unit_kind = str(
+            entry.get("predecessor_unit_kind") or entry.get("unit_kind") or ""
+        ).strip().lower()
+        unit_ref = str(
+            entry.get("predecessor_unit_ref") or entry.get("unit_ref") or ""
+        ).strip()
+        if unit_kind != "source_path" or not unit_ref:
+            continue
+        out.append(
+            {
+                "blocked_path": unit_ref,
+                "successor_unit_kind": entry.get("successor_unit_kind"),
+                "successor_unit_ref": entry.get("successor_unit_ref"),
+                "supersession_status": entry.get("supersession_status"),
+                "obligation_summary": entry.get("obligation_summary"),
+            }
+        )
+    return tuple(out)
+
+
+def _validated_blocked_compat_refs(
+    artifact_refs: Sequence[str],
+    *,
+    blocked_compat: tuple[Mapping[str, Any], ...],
+    submission_required: bool,
+) -> tuple[Mapping[str, Any], ...]:
+    """Reject artifact refs that fall inside any blocked compat path.
+
+    Drift records share the structured shape of write-scope drift so a
+    single ingest path consumes both, distinguished by the `reason` field.
+    Submission contract: drift captured but not raised. Legacy contract:
+    raise so the worker stops before promoting predecessor extensions.
+    """
+
+    if not blocked_compat:
+        return ()
+    drift: list[Mapping[str, Any]] = []
+    seen: set[str] = set()
+    for raw_ref in artifact_refs or ():
+        if raw_ref is None or not str(raw_ref).strip():
+            continue
+        ref = _normalize_relative_path(raw_ref, field_name="artifact_ref")
+        if not ref or ref in seen:
+            continue
+        for entry in blocked_compat:
+            blocked_path = _normalize_relative_path(
+                str(entry["blocked_path"]),
+                field_name="blocked_compat_path",
+            )
+            if not blocked_path:
+                continue
+            prefix = blocked_path.rstrip("/")
+            hits = ref == blocked_path or (prefix and ref.startswith(prefix + "/"))
+            if not hits:
+                continue
+            seen.add(ref)
+            drift.append(
+                {
+                    "artifact_ref": ref,
+                    "reason": "blocked_compat_path_extension",
+                    "blocked_predecessor_path": blocked_path,
+                    "canonical_successor": {
+                        "unit_kind": entry.get("successor_unit_kind"),
+                        "unit_ref": entry.get("successor_unit_ref"),
+                    },
+                    "supersession_status": entry.get("supersession_status"),
+                    "obligation_summary": entry.get("obligation_summary"),
+                    "guidance": "do_not_imitate__preserve_tested_invariants__write_to_canonical_successor",
+                    "submission_required": submission_required,
+                }
+            )
+            break
+    if not drift:
+        return ()
+    if submission_required:
+        return tuple(drift)
+    blocked_refs = ", ".join(d["artifact_ref"] for d in drift)
+    successors = ", ".join(
+        f"{d['canonical_successor'].get('unit_kind')}:{d['canonical_successor'].get('unit_ref')}"
+        for d in drift
+    )
+    raise RuntimeError(
+        "sandbox attempted to extend blocked compat predecessor paths: "
+        f"{blocked_refs} — write to canonical successor instead ({successors})."
+    )
+
+
 def _validated_artifact_refs(
     artifact_refs: Sequence[str],
     *,
@@ -1910,6 +2021,14 @@ class SandboxRuntime:
                 write_scope=write_scope,
                 submission_required=submission_required,
             )
+            blocked_compat_paths = _authority_binding_blocked_paths(provider_metadata)
+            blocked_compat_drift = _validated_blocked_compat_refs(
+                artifact_refs,
+                blocked_compat=blocked_compat_paths,
+                submission_required=submission_required,
+            )
+            if blocked_compat_drift:
+                artifact_scope_drift = tuple(artifact_scope_drift) + tuple(blocked_compat_drift)
             # Dehydrate: copy changed in-scope files from sandbox back to host
             # workdir BEFORE the sandbox is destroyed.
             #

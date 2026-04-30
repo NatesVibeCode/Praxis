@@ -210,6 +210,7 @@ SELECT
     j.claimed_at,
     j.started_at,
     j.finished_at,
+    j.authority_binding,
     s.submission_id,
     s.result_kind AS submission_result_kind,
     s.summary AS submission_summary,
@@ -257,6 +258,49 @@ def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
     )
 
 
+def _authority_binding_summary(raw: object) -> dict[str, Any] | None:
+    """Compact projection of workflow_jobs.authority_binding for list views.
+
+    Returns a small {bound, canonical_count, predecessor_count, blocked_compat_count,
+    redirected_count} dict for compact-idle Moon rendering. Full binding payload
+    is loadable via runtime.workflow.job_runtime_context.load_workflow_job_authority_binding
+    when a caller (detail panel, agent context preview) needs the obligation
+    summaries themselves.
+    """
+
+    if raw is None:
+        return None
+    binding: Mapping[str, Any]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(parsed, Mapping):
+            return None
+        binding = parsed
+    elif isinstance(raw, Mapping):
+        binding = raw
+    else:
+        return None
+
+    canonical = binding.get("canonical_write_scope") or []
+    predecessors = binding.get("predecessor_obligations") or []
+    blocked = binding.get("blocked_compat_units") or []
+    redirected = sum(
+        1
+        for entry in canonical
+        if isinstance(entry, Mapping) and entry.get("was_redirected")
+    )
+    return {
+        "bound": True,
+        "canonical_count": len(canonical) if isinstance(canonical, list) else 0,
+        "predecessor_count": len(predecessors) if isinstance(predecessors, list) else 0,
+        "blocked_compat_count": len(blocked) if isinstance(blocked, list) else 0,
+        "redirected_count": redirected,
+    }
+
+
 async def _load_run_jobs_with_submission_summary(
     conn: _Connection,
     *,
@@ -292,6 +336,9 @@ async def _load_run_jobs_with_submission_summary(
         submission = _submission_summary_from_row(payload)
         if submission is not None:
             job_summary["submission"] = submission
+        binding_summary = _authority_binding_summary(payload.get("authority_binding"))
+        if binding_summary is not None:
+            job_summary["authority_binding"] = binding_summary
         jobs.append(job_summary)
     return jobs
 

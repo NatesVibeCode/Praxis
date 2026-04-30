@@ -32,6 +32,14 @@ export interface RecentRun {
   finished_at: string | null;
 }
 
+export interface RunJobAuthorityBindingSummary {
+  bound: true;
+  canonical_count: number;
+  predecessor_count: number;
+  blocked_compat_count: number;
+  redirected_count: number;
+}
+
 export interface RunJob {
   id: number;
   label: string;
@@ -53,6 +61,12 @@ export interface RunJob {
   started_at: string | null;
   finished_at: string | null;
   created_at: string | null;
+  // Compose-time canonical authority binding summary, present when the job
+  // was composed against authority-bearing targets. Full binding payload is
+  // available via the per-job detail endpoint; this is the compact-idle
+  // projection for list rendering. See architecture-policy::platform-
+  // architecture::workflow-job-authority-binding-persisted.
+  authority_binding?: RunJobAuthorityBindingSummary | null;
 }
 
 export interface RunCompletionContract {

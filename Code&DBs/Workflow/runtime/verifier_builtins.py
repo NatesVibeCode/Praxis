@@ -177,7 +177,162 @@ def run_builtin_verifier(
         return builtin_verify_memory_proof_links(inputs=inputs, conn=conn, connection_fn=connection_fn)
     if builtin_ref == "connector_capability":
         return builtin_verify_connector_capability(inputs=inputs, conn=conn, connection_fn=connection_fn)
+    if builtin_ref == "authority_impact_contract":
+        return builtin_verify_authority_impact_contract(
+            inputs=inputs, conn=conn, connection_fn=connection_fn
+        )
     raise VerifierBuiltinsError(f"unknown builtin verifier: {builtin_ref}")
+
+
+def builtin_verify_authority_impact_contract(
+    *,
+    inputs: dict[str, Any],
+    conn: "SyncPostgresConnection | None" = None,
+    connection_fn,
+) -> tuple[str, dict[str, Any]]:
+    """Defense-in-depth verifier for the authority impact contract.
+
+    Inputs require `candidate_id`. The verifier:
+
+    1. Loads the candidate row (intended_files + base_head_ref).
+    2. Decides whether the candidate is authority-bearing via
+       runtime.workflow.authority_overlap.is_authority_bearing.
+    3. If authority-bearing, asserts the impact contract is complete:
+       - declared `agent_declared` impact rows exist,
+       - the latest preflight record is `passed`,
+       - preflight `base_head_ref_at_preflight` matches the candidate base,
+       - preflight `impact_contract_complete=True` and `contested_count=0`.
+    4. Returns `passed` only when all gates are green; otherwise `failed`
+       with a structured findings dict naming the specific reason.
+
+    This verifier may be added to a candidate's verifier_inputs as a
+    second check alongside the test verifier, so materialize refuses the
+    candidate even if preflight or review somehow bypassed the gate.
+    """
+
+    from runtime.workflow.authority_overlap import is_authority_bearing
+
+    candidate_id = str(inputs.get("candidate_id") or "").strip()
+    if not candidate_id:
+        return "error", {
+            "reason_code": "verifier.authority_impact_contract.candidate_id_required",
+            "error": "candidate_id is required in verifier inputs",
+        }
+
+    db = connection_fn(conn)
+    candidate_row = db.fetchrow(
+        """
+        SELECT candidate_id::text       AS candidate_id,
+               base_head_ref,
+               intended_files
+          FROM code_change_candidate_payloads
+         WHERE candidate_id = $1::uuid
+        """,
+        candidate_id,
+    )
+    if candidate_row is None:
+        return "failed", {
+            "reason_code": "verifier.authority_impact_contract.candidate_not_found",
+            "candidate_id": candidate_id,
+        }
+    candidate = dict(candidate_row)
+    intended_files = list(candidate.get("intended_files") or [])
+    requires_contract = is_authority_bearing(intended_files)
+
+    if not requires_contract:
+        return "passed", {
+            "reason_code": "verifier.authority_impact_contract.not_authority_bearing",
+            "candidate_id": candidate_id,
+            "intended_files": intended_files,
+            "verdict": "no contract required for this candidate",
+        }
+
+    declared_count_row = db.fetchrow(
+        """
+        SELECT COUNT(*) AS declared_count
+          FROM candidate_authority_impacts
+         WHERE candidate_id = $1::uuid
+           AND discovery_source = 'agent_declared'
+        """,
+        candidate_id,
+    )
+    declared_count = int((dict(declared_count_row) if declared_count_row else {}).get("declared_count") or 0)
+    if declared_count == 0:
+        return "failed", {
+            "reason_code": "verifier.authority_impact_contract.declared_impacts_missing",
+            "candidate_id": candidate_id,
+            "intended_files": intended_files,
+            "declared_impact_count": 0,
+        }
+
+    preflight_row = db.fetchrow(
+        """
+        SELECT preflight_id::text       AS preflight_id,
+               preflight_status::text   AS preflight_status,
+               base_head_ref_at_preflight,
+               impact_contract_complete,
+               contested_impact_count,
+               temp_verifier_passed,
+               runtime_addition_impact_count
+          FROM candidate_latest_preflight
+         WHERE candidate_id = $1::uuid
+        """,
+        candidate_id,
+    )
+    if preflight_row is None:
+        return "failed", {
+            "reason_code": "verifier.authority_impact_contract.preflight_required",
+            "candidate_id": candidate_id,
+            "declared_impact_count": declared_count,
+        }
+    preflight = dict(preflight_row)
+
+    candidate_base = str(candidate.get("base_head_ref") or "")
+    preflight_base = str(preflight.get("base_head_ref_at_preflight") or "")
+    if candidate_base and preflight_base and candidate_base != preflight_base:
+        return "failed", {
+            "reason_code": "verifier.authority_impact_contract.preflight_stale",
+            "candidate_id": candidate_id,
+            "candidate_base_head_ref": candidate_base,
+            "preflight_base_head_ref": preflight_base,
+            "preflight_id": preflight.get("preflight_id"),
+        }
+
+    status = str(preflight.get("preflight_status") or "")
+    if status != "passed":
+        return "failed", {
+            "reason_code": "verifier.authority_impact_contract.preflight_not_passed",
+            "candidate_id": candidate_id,
+            "preflight_id": preflight.get("preflight_id"),
+            "preflight_status": status,
+            "contested_impact_count": preflight.get("contested_impact_count"),
+        }
+
+    if not bool(preflight.get("impact_contract_complete")):
+        return "failed", {
+            "reason_code": "verifier.authority_impact_contract.contract_incomplete",
+            "candidate_id": candidate_id,
+            "preflight_id": preflight.get("preflight_id"),
+            "contested_impact_count": preflight.get("contested_impact_count"),
+        }
+
+    contested = int(preflight.get("contested_impact_count") or 0)
+    if contested > 0:
+        return "failed", {
+            "reason_code": "verifier.authority_impact_contract.contested_impacts_present",
+            "candidate_id": candidate_id,
+            "preflight_id": preflight.get("preflight_id"),
+            "contested_impact_count": contested,
+        }
+
+    return "passed", {
+        "reason_code": "verifier.authority_impact_contract.green",
+        "candidate_id": candidate_id,
+        "preflight_id": preflight.get("preflight_id"),
+        "declared_impact_count": declared_count,
+        "runtime_addition_impact_count": preflight.get("runtime_addition_impact_count"),
+        "temp_verifier_passed": preflight.get("temp_verifier_passed"),
+    }
 
 
 def builtin_verify_connector_capability(

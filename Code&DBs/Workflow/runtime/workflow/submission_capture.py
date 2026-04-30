@@ -42,6 +42,7 @@ from runtime.workflow.submission_contract import (
     optional_datetime as _optional_datetime_impl,
     strip_str as _strip_str_impl,
 )
+from runtime.workflow.authority_overlap import is_authority_bearing
 from runtime.workflow.candidate_authoring import (
     CandidateAuthoringError,
     derive_candidate_patch_from_sources,
@@ -85,6 +86,213 @@ class WorkflowSubmissionServiceError(RuntimeError):
         super().__init__(message)
         self.reason_code = reason_code
         self.details = dict(details or {})
+
+
+_AUTHORITY_IMPACT_INTENTS = frozenset(
+    {"fix", "extend", "replace", "retire", "adapter", "compat_only"}
+)
+_AUTHORITY_IMPACT_UNIT_KINDS = frozenset(
+    {
+        "operation_ref",
+        "authority_object_ref",
+        "data_dictionary_object_kind",
+        "http_route",
+        "mcp_tool",
+        "cli_alias",
+        "migration_ref",
+        "database_object",
+        "handler_ref",
+        "verifier_ref",
+        "event_type",
+        "provider_route_ref",
+        "source_path",
+    }
+)
+_AUTHORITY_IMPACT_DISPATCH_EFFECTS = frozenset(
+    {"none", "register", "retire", "reroute", "shadow"}
+)
+_AUTHORITY_IMPACT_PREDECESSOR_REQUIRED = frozenset({"replace", "retire"})
+_AUTHORITY_IMPACT_PREDECESSOR_FORBIDDEN = frozenset({"fix", "extend", "compat_only"})
+
+
+def _normalize_authority_impact_rows(
+    raw_rows: object,
+    *,
+    intended_files: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Validate agent-declared authority impact rows; return normalized list.
+
+    The candidate's writing agent declares one row per authority unit it
+    intends to touch. Preflight validates these against the runtime-derived
+    overlap. Submission only enforces the structural shape so agents fail
+    early on malformed contracts.
+    """
+
+    if raw_rows is None:
+        return []
+    if isinstance(raw_rows, Mapping):
+        raw_rows = [raw_rows]
+    if not isinstance(raw_rows, Sequence) or isinstance(raw_rows, (str, bytes)):
+        raise WorkflowSubmissionServiceError(
+            "code_change_candidate.authority_impact_contract_malformed",
+            "authority_impacts must be a list of impact dicts",
+            details={"received_type": type(raw_rows).__name__},
+        )
+
+    normalized: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_rows):
+        if not isinstance(raw, Mapping):
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.authority_impact_contract_malformed",
+                f"authority_impacts[{index}] must be an object",
+                details={"index": index, "received_type": type(raw).__name__},
+            )
+        intent = str(raw.get("intent") or "").strip().lower()
+        unit_kind = str(raw.get("unit_kind") or "").strip().lower()
+        unit_ref = str(raw.get("unit_ref") or "").strip()
+        dispatch_effect = str(raw.get("dispatch_effect") or "").strip().lower()
+        predecessor_unit_kind_raw = raw.get("predecessor_unit_kind")
+        predecessor_unit_kind = (
+            str(predecessor_unit_kind_raw).strip().lower()
+            if predecessor_unit_kind_raw not in (None, "")
+            else None
+        )
+        predecessor_unit_ref_raw = raw.get("predecessor_unit_ref")
+        predecessor_unit_ref = (
+            str(predecessor_unit_ref_raw).strip()
+            if predecessor_unit_ref_raw not in (None, "")
+            else None
+        )
+        subsumption_evidence_ref_raw = raw.get("subsumption_evidence_ref")
+        subsumption_evidence_ref = (
+            str(subsumption_evidence_ref_raw).strip()
+            if subsumption_evidence_ref_raw not in (None, "")
+            else None
+        )
+        rollback_path_raw = raw.get("rollback_path")
+        rollback_path = (
+            str(rollback_path_raw).strip()
+            if rollback_path_raw not in (None, "")
+            else None
+        )
+
+        if intent not in _AUTHORITY_IMPACT_INTENTS:
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.authority_impact_intent_invalid",
+                f"authority_impacts[{index}].intent must be one of {sorted(_AUTHORITY_IMPACT_INTENTS)}",
+                details={"index": index, "intent": intent},
+            )
+        if unit_kind not in _AUTHORITY_IMPACT_UNIT_KINDS:
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.authority_impact_unit_kind_invalid",
+                f"authority_impacts[{index}].unit_kind must be one of {sorted(_AUTHORITY_IMPACT_UNIT_KINDS)}",
+                details={"index": index, "unit_kind": unit_kind},
+            )
+        if not unit_ref:
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.authority_impact_unit_ref_missing",
+                f"authority_impacts[{index}].unit_ref is required",
+                details={"index": index},
+            )
+        if dispatch_effect not in _AUTHORITY_IMPACT_DISPATCH_EFFECTS:
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.authority_impact_dispatch_effect_invalid",
+                f"authority_impacts[{index}].dispatch_effect must be one of {sorted(_AUTHORITY_IMPACT_DISPATCH_EFFECTS)}",
+                details={"index": index, "dispatch_effect": dispatch_effect},
+            )
+        if intent in _AUTHORITY_IMPACT_PREDECESSOR_REQUIRED and (
+            not predecessor_unit_kind or not predecessor_unit_ref
+        ):
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.authority_impact_predecessor_required",
+                f"authority_impacts[{index}].intent={intent} requires predecessor_unit_kind and predecessor_unit_ref",
+                details={"index": index, "intent": intent},
+            )
+        if intent in _AUTHORITY_IMPACT_PREDECESSOR_FORBIDDEN and (
+            predecessor_unit_kind or predecessor_unit_ref
+        ):
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.authority_impact_predecessor_forbidden",
+                f"authority_impacts[{index}].intent={intent} must not name a predecessor",
+                details={"index": index, "intent": intent},
+            )
+        if predecessor_unit_kind and predecessor_unit_kind not in _AUTHORITY_IMPACT_UNIT_KINDS:
+            raise WorkflowSubmissionServiceError(
+                "code_change_candidate.authority_impact_predecessor_unit_kind_invalid",
+                f"authority_impacts[{index}].predecessor_unit_kind invalid",
+                details={"index": index, "predecessor_unit_kind": predecessor_unit_kind},
+            )
+
+        normalized.append(
+            {
+                "intent": intent,
+                "unit_kind": unit_kind,
+                "unit_ref": unit_ref,
+                "predecessor_unit_kind": predecessor_unit_kind,
+                "predecessor_unit_ref": predecessor_unit_ref,
+                "dispatch_effect": dispatch_effect,
+                "subsumption_evidence_ref": subsumption_evidence_ref,
+                "rollback_path": rollback_path,
+            }
+        )
+
+    if is_authority_bearing(intended_files) and not normalized:
+        raise WorkflowSubmissionServiceError(
+            "code_change_candidate.authority_impact_contract_required",
+            "intended_files include authority-bearing paths; proposal_payload.authority_impacts is required",
+            details={"intended_files": list(intended_files)},
+        )
+
+    return normalized
+
+
+def _insert_declared_authority_impacts(
+    conn: Any,
+    *,
+    candidate_id: str,
+    impacts: Sequence[dict[str, Any]],
+) -> None:
+    if not impacts:
+        return
+    for impact in impacts:
+        conn.execute(
+            """
+            INSERT INTO candidate_authority_impacts (
+                candidate_id,
+                intent,
+                unit_kind,
+                unit_ref,
+                predecessor_unit_kind,
+                predecessor_unit_ref,
+                dispatch_effect,
+                subsumption_evidence_ref,
+                rollback_path,
+                discovery_source,
+                validation_status
+            ) VALUES (
+                $1::uuid,
+                $2::candidate_authority_impact_intent,
+                $3::candidate_authority_unit_kind,
+                $4,
+                $5::candidate_authority_unit_kind,
+                $6,
+                $7::candidate_authority_dispatch_effect,
+                $8,
+                $9,
+                'agent_declared',
+                'pending'
+            )
+            """,
+            candidate_id,
+            impact["intent"],
+            impact["unit_kind"],
+            impact["unit_ref"],
+            impact["predecessor_unit_kind"],
+            impact["predecessor_unit_ref"],
+            impact["dispatch_effect"],
+            impact["subsumption_evidence_ref"],
+            impact["rollback_path"],
+        )
 
 
 def _utc_now() -> datetime:
@@ -712,6 +920,13 @@ def submit_code_change_candidate(
             details=exc.details,
         ) from exc
 
+    declared_authority_impacts = _normalize_authority_impact_rows(
+        (proposal_payload or {}).get("authority_impacts")
+        if isinstance(proposal_payload, Mapping)
+        else None,
+        intended_files=list(projection.intended_files),
+    )
+
     normalized_verifier_ref = (
         _strip_str(verifier_ref)
         or _strip_str(projection.normalized_proposal.get("verifier_ref"))
@@ -925,6 +1140,12 @@ def submit_code_change_candidate(
             "candidate payload insert returned no row",
             details={"submission_id": recorded["submission_id"]},
         )
+
+    _insert_declared_authority_impacts(
+        active_conn,
+        candidate_id=str(row["candidate_id"]),
+        impacts=declared_authority_impacts,
+    )
 
     if existing_submission is None:
         _emit_workflow_event(

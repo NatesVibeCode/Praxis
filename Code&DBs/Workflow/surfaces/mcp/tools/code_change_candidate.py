@@ -27,6 +27,15 @@ def tool_praxis_code_change_candidate_materialize(params: dict) -> dict:
     )
 
 
+def tool_praxis_code_change_candidate_preflight(params: dict) -> dict:
+    payload = {key: value for key, value in params.items() if value is not None}
+    return execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name="code_change_candidate.preflight",
+        payload=payload,
+    )
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_code_change_candidate_review": (
         tool_praxis_code_change_candidate_review,
@@ -70,6 +79,30 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "candidate_id": {"type": "string"},
                     "materialized_by": {"type": "string"},
+                    "repo_root": {"type": "string"},
+                },
+                "required": ["candidate_id"],
+            },
+        },
+    ),
+    "praxis_code_change_candidate_preflight": (
+        tool_praxis_code_change_candidate_preflight,
+        {
+            "kind": "write",
+            "operation_names": ["code_change_candidate.preflight"],
+            "description": (
+                "Run the trusted preflight pass for a code-change candidate. Recomputes "
+                "the patch from the real base head, runs the temp verifier, scans for "
+                "runtime-derived authority impacts, and validates them against the "
+                "agent-declared impact contract. Reviewers (human or LLM) read the "
+                "preflight record instead of the agent-shaped submission. "
+                "code_change_candidate.review approve refuses without a passed preflight."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "candidate_id": {"type": "string"},
+                    "triggered_by": {"type": "string"},
                     "repo_root": {"type": "string"},
                 },
                 "required": ["candidate_id"],

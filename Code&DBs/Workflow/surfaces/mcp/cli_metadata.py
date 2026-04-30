@@ -107,7 +107,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         },
         examples=[
             _example("List open P1 bugs", {"action": "list", "status": "OPEN", "severity": "P1"}),
-            _example("Search open routing bugs", {"action": "search", "title": "routing", "status": "OPEN"}),
+            _example("Search open routing bugs", {"action": "search", "query": "routing", "status": "OPEN"}),
             _example(
                 "File a new bug",
                 {
@@ -1678,6 +1678,54 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         risks={"default": "write"},
         examples=[
             _example("Materialize a candidate", {"candidate_id": "<uuid>", "materialized_by": "human:nate"}),
+        ],
+    ),
+    "praxis_code_change_candidate_preflight": _tool(
+        surface="submissions",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Run trusted preflight on a sealed candidate before review. Recomputes the patch from the real base head, runs the temp verifier, and validates agent-declared authority impacts against runtime-derived overlap. Required before code_change_candidate.review approve.",
+        when_not_to_use="Do not use it to bypass impact contract validation; preflight is the gate, not a hint.",
+        risks={"default": "write"},
+        examples=[
+            _example("Preflight a candidate", {"candidate_id": "<uuid>", "triggered_by": "human:nate"}),
+        ],
+    ),
+    "praxis_resolve_compose_authority_binding": _tool(
+        surface="cqrs",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="At plan composition time, resolve the canonical write scope, the read-only predecessor obligation pack, and explicit blocked-compat units for a set of target authority units. Use this so packets bind a workspace where duplicate authority is invisible to the worker.",
+        when_not_to_use="Not for live source mutation. This is a read-only resolver; use code_change_candidate.* for write paths.",
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Resolve binding for an operation target",
+                {
+                    "targets": [
+                        {"unit_kind": "operation_ref", "unit_ref": "compose_plan"},
+                        {"unit_kind": "source_path", "unit_ref": "Code&DBs/Workflow/runtime/operations/commands/plan_orchestration.py"},
+                    ]
+                },
+            ),
+        ],
+    ),
+    "praxis_audit_authority_impact_contract": _tool(
+        surface="cqrs",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Audit a path list (typically `git diff --name-only` over a window) for impact-contract coverage. Surfaces drift where authority-bearing files were edited without a backing candidate impact contract — catches direct commits, scripted edits, and hot-fixes that bypass the gated pipeline.",
+        when_not_to_use="Not for the candidate-path enforcement chain (preflight + review + materialize already enforce in-band). This is the orthogonal audit for out-of-band changes.",
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Audit a recent change set",
+                {"paths": [
+                    "Code&DBs/Databases/migrations/workflow/342_foo.sql",
+                    "Code&DBs/Workflow/runtime/operations/commands/foo.py",
+                    "docs/notes.md",
+                ]},
+            ),
         ],
     ),
     "praxis_submit_research_result": _tool(

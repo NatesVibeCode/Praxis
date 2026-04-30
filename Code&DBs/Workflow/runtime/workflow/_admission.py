@@ -1996,6 +1996,13 @@ def _do_submit_workflow(
 
         _enforce_queue_admission(conn, job_count=1)
 
+        authority_binding_payload = job.get("authority_binding")
+        authority_binding_json = (
+            json.dumps(authority_binding_payload, sort_keys=True, default=str)
+            if isinstance(authority_binding_payload, dict) and authority_binding_payload
+            else None
+        )
+
         rows = conn.execute(
             """INSERT INTO workflow_jobs
                (run_id, label, job_type, phase, agent_slug, resolved_agent, prompt,
@@ -2003,10 +2010,12 @@ def _do_submit_workflow(
                 route_origin_slug, idempotency_key,
                 max_attempts, created_at,
                 integration_id, integration_action, integration_args, touch_keys,
-                dependency_threshold, complexity)
+                dependency_threshold, complexity, authority_binding)
                VALUES ($1, $2, 'dispatch', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                       $15, $16, $17, $18::jsonb, $19::jsonb, $20, $21)
-               ON CONFLICT (run_id, label) DO UPDATE SET status = EXCLUDED.status
+                       $15, $16, $17, $18::jsonb, $19::jsonb, $20, $21, $22::jsonb)
+               ON CONFLICT (run_id, label) DO UPDATE SET
+                   status = EXCLUDED.status,
+                   authority_binding = COALESCE(EXCLUDED.authority_binding, workflow_jobs.authority_binding)
                RETURNING id""",
             run_id, label, spec.phase, agent_slug,
             agent_slug if not agent_slug.startswith("auto/") else None,
@@ -2021,6 +2030,7 @@ def _do_submit_workflow(
             json.dumps(_derive_touch_keys(job)),
             dependency_threshold,
             complexity,
+            authority_binding_json,
         )
         job_id = rows[0]["id"]
         record_idempotency(conn, "workflow.run", ledger_idempotency_key, payload_hash, run_id=run_id)

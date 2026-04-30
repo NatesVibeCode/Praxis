@@ -82,4 +82,54 @@ def load_workflow_job_runtime_context(
             row[key] = {}
         else:
             row[key] = dict(value)
+    row["authority_binding"] = load_workflow_job_authority_binding(
+        conn,
+        run_id=normalized_run_id,
+        job_label=normalized_job_label,
+    )
     return row
+
+
+def load_workflow_job_authority_binding(
+    conn,
+    *,
+    run_id: str,
+    job_label: str,
+) -> dict[str, Any] | None:
+    """Return the compose-time authority binding for one workflow job.
+
+    The binding is the workspace-narrowing payload the worker uses to honor
+    canonical write scope and predecessor obligations. Surfaced as a discrete
+    field (not nested in execution_bundle) so the operator's field-level
+    mutation tooling can compose with it directly.
+    """
+
+    normalized_run_id = str(run_id or "").strip()
+    normalized_job_label = str(job_label or "").strip()
+    if not normalized_run_id or not normalized_job_label:
+        return None
+    row = conn.fetchrow(
+        """
+        SELECT authority_binding
+          FROM workflow_jobs
+         WHERE run_id = $1
+           AND label = $2
+         ORDER BY id DESC
+         LIMIT 1
+        """,
+        normalized_run_id,
+        normalized_job_label,
+    )
+    if row is None:
+        return None
+    binding = row.get("authority_binding") if isinstance(row, Mapping) else row[0]
+    if binding is None:
+        return None
+    if isinstance(binding, str):
+        try:
+            return json.loads(binding)
+        except json.JSONDecodeError:
+            return None
+    if isinstance(binding, Mapping):
+        return dict(binding)
+    return None

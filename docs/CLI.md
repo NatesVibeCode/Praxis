@@ -79,6 +79,13 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | --- | --- | --- | --- | --- | --- |
 | `praxis workflow discover` | `praxis_discover` | `stable` | action: search, reindex, stats, stale_check | `read`, `write` | - |
 
+### Cqrs
+
+| Entrypoint | Tool | Tier | Selector | Risks | Replacement |
+| --- | --- | --- | --- | --- | --- |
+| `praxis workflow tools call praxis_audit_authority_impact_contract` | `praxis_audit_authority_impact_contract` | `advanced` | - | `read` | - |
+| `praxis workflow tools call praxis_resolve_compose_authority_binding` | `praxis_resolve_compose_authority_binding` | `advanced` | - | `read` | - |
+
 ### Data
 
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
@@ -253,6 +260,7 @@ The operation catalog gateway is the CQRS write/read front door when you already
 | Entrypoint | Tool | Tier | Selector | Risks | Replacement |
 | --- | --- | --- | --- | --- | --- |
 | `praxis workflow tools call praxis_code_change_candidate_materialize` | `praxis_code_change_candidate_materialize` | `advanced` | - | `write` | - |
+| `praxis workflow tools call praxis_code_change_candidate_preflight` | `praxis_code_change_candidate_preflight` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_code_change_candidate_review` | `praxis_code_change_candidate_review` | `advanced` | - | `write` | - |
 | `praxis workflow tools call praxis_get_submission` | `praxis_get_submission` | `session` | - | `session` | - |
 | `praxis workflow tools call praxis_review_submission` | `praxis_review_submission` | `session` | - | `session` | - |

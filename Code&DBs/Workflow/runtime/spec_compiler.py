@@ -854,6 +854,7 @@ class PlanPacket:
     bug_refs: list[str] | None = None
     agent: str | None = None
     complexity: str | None = None
+    authority_binding: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -1826,6 +1827,8 @@ def _packet_to_job(
             job["bug_ref"] = packet.bug_refs[0]
     if packet.bug_ref and "bug_ref" not in job:
         job["bug_ref"] = packet.bug_ref
+    if packet.authority_binding:
+        job["authority_binding"] = dict(packet.authority_binding)
     return job
 
 

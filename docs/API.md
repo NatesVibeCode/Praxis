@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `372`.
+Public route count: `8`. All route count: `374`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -51,6 +51,7 @@ Public route count: `8`. All route count: `372`.
 | `GET` | `/api/audit/registered` | `internal` | - | audit_registered_get |
 | `POST` | `/api/authority-domain/forge` | `internal` | `operations` | authority_domain_forge |
 | `POST` | `/api/authority-domain/register` | `internal` | `operations` | authority_domain_register |
+| `POST` | `/api/authority/compose_binding/resolve` | `internal` | `operations` | authority.compose_binding.resolve |
 | `GET` | `/api/authority/objects` | `internal` | `operations` | authority.objects.list |
 | `GET` | `/api/authority/objects/adoption` | `internal` | `operations` | authority.objects.adoption |
 | `GET` | `/api/authority/objects/domain-summary` | `internal` | `operations` | authority.objects.domain_summary |
@@ -80,12 +81,13 @@ Public route count: `8`. All route count: `372`.
 | `POST` | `/api/circuits` | `internal` | `operations` | operator.circuit_override |
 | `GET` | `/api/circuits/history` | `internal` | `operations` | operator.circuit_history |
 | `POST` | `/api/cli_auth_doctor` | `internal` | `operations` | cli_auth_doctor |
+| `POST` | `/api/code_change_candidate/preflight` | `internal` | `operations` | code_change_candidate.preflight |
 | `POST` | `/api/code_change_candidate_materialize` | `internal` | `operations` | code_change_candidate.materialize |
 | `POST` | `/api/code_change_candidate_review` | `internal` | `operations` | code_change_candidate.review |
 | `POST` | `/api/code_change_candidate_submit` | `internal` | `operations` | code_change_candidate.submit |
 | `POST` | `/api/compile/materialize` | `internal` | `operations` | compile_materialize |
-| `POST` | `/api/compile/preview` | `internal` | - | compile_preview_post |
-| `POST` | `/api/compile_materialize` | `internal` | - | Legacy compatibility alias for stale compile materialize callers. |
+| `POST` | `/api/compile/preview` | `internal` | `operations` | compile_preview |
+| `POST` | `/api/compile_materialize` | `internal` | - | Structured deprecation for the retired underscore compile route. |
 | `POST` | `/api/compliance.list_receipts` | `internal` | `operations` | compliance.list_receipts |
 | `POST` | `/api/compose_experiment` | `internal` | `operations` | compose_experiment |
 | `POST` | `/api/compose_plan` | `internal` | `operations` | compose_plan |
