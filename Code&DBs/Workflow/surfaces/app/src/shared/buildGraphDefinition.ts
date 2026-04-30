@@ -34,6 +34,11 @@ function stringList(value: unknown): string[] {
     .filter((item): item is string => item.length > 0);
 }
 
+function plainObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return { ...(value as Record<string, unknown>) };
+}
+
 function triggerIntentFromNode(
   node: BuildNode,
   index: number,
@@ -179,16 +184,19 @@ export function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']):
       step_id: n.node_id,
       agent_route: n.route!,
       system_prompt: (n.prompt || '').trim(),
+      task_type: typeof n.task_type === 'string' && n.task_type.trim() ? n.task_type.trim() : null,
+      agent: typeof n.agent === 'string' && n.agent.trim() ? n.agent.trim() : null,
       required_inputs: stringList(n.required_inputs),
       outputs: stringList(n.outputs),
       persistence_targets: stringList(n.persistence_targets),
+      capabilities: stringList(n.capabilities),
+      write_scope: stringList(n.write_scope),
       handoff_target: typeof n.handoff_target === 'string' && n.handoff_target.trim()
         ? n.handoff_target.trim()
         : null,
-      integration_args:
-        n.integration_args && typeof n.integration_args === 'object' && !Array.isArray(n.integration_args)
-          ? { ...n.integration_args }
-          : {},
+      integration_args: plainObject(n.integration_args),
+      agent_tool_plan: plainObject(n.agent_tool_plan),
+      completion_contract: plainObject(n.completion_contract),
     }));
   return {
     trigger_intent,

@@ -1,0 +1,33 @@
+{
+  "name": "Client Operating Model Phase 9 Portable Cartridge",
+  "workflow_id": "client_operating_model_phase_09_portable_cartridge_20260430",
+  "queue_id": "client_operating_model_phase_09_portable_cartridge_20260430",
+  "phase": "architecture",
+  "outcome_goal": "Produce the portable cartridge and deployment contract implementation packet.",
+  "anti_requirements": [
+    "Do not edit production code.",
+    "Do not design mandatory Praxis runtime lock-in.",
+    "Do not omit verifier and drift re-audit hooks from exported workflows."
+  ],
+  "jobs": [
+    {
+      "label": "phase_09_portable_cartridge_packet",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "architecture",
+      "timeout": 900,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "docs/architecture/object-truth-trust-toolbelt/README.md",
+        "docs/architecture/object-truth-trust-toolbelt/task-types-and-contracts.md",
+        "artifacts/workflow/client_operating_model/packets/phase_04_hierarchy_task_contracts/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_05_integration_automation_contracts/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_08_sandbox_drift/PLAN.md"
+      ],
+      "write_scope": [
+        "artifacts/workflow/client_operating_model/packets/phase_09_portable_cartridge/PLAN.md"
+      ],
+      "prompt": "Write artifacts/workflow/client_operating_model/packets/phase_09_portable_cartridge/PLAN.md. Produce a bounded build packet for Phase 9: Portable Cartridge and Deployment Contract. Include cartridge manifest shape, object truth dependencies, task contracts, integration bindings, verifier suite, deployment modes, runtime assumptions, compute expectations, drift audit hooks, tests, and validation. Do not edit code."
+    }
+  ]
+}

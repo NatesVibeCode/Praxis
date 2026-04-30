@@ -6,6 +6,7 @@ INSERT calls and verify the right event_type + payload.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -151,7 +152,21 @@ def test_shell_session_bootstrapped_defaults_initial_route():
     )
     out = handle_shell_session_bootstrapped(cmd, subsystems=subs)
     assert out["initial_route_id"] == "route.app.dashboard"
+    assert out["initial_slot_values"] == {}
     assert out["deep_link_search"] == "?intent=research"
     _, args = _last_event_call(subs)
     assert args[3] == "session.bootstrapped"
     assert args[2] == "sess-1"
+
+
+def test_shell_session_bootstrapped_preserves_initial_slot_values():
+    subs = _StubSubs()
+    cmd = ShellSessionBootstrappedCommand(
+        session_aggregate_ref="sess-1",
+        initial_route_id="route.app.workflow",
+        initial_slot_values={"workflow": "wf_42"},
+    )
+    out = handle_shell_session_bootstrapped(cmd, subsystems=subs)
+    assert out["initial_slot_values"] == {"workflow": "wf_42"}
+    _, args = _last_event_call(subs)
+    assert json.loads(args[4])["initial_slot_values"] == {"workflow": "wf_42"}

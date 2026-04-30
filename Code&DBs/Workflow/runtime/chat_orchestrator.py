@@ -79,6 +79,8 @@ Workflow mutations are command-bus backed. If a tool returns approval_required o
 
 When the user has the Moon canvas open, the selection_context will contain a single entry with kind="moon_context" carrying workflow_id (and possibly selected_node_id, selected_edge_id). The moon_* tools auto-default workflow_id to that entry when you omit it — so when the user says "what's in this workflow" or "add a Slack node here", you can call moon_get_build / moon_mutate_field WITHOUT passing workflow_id and it will target the workflow they're looking at. Only pass workflow_id explicitly when the user names a different workflow.
 
+The moon_context may also include visible_ui_snapshot. Treat it as a read-only witness of what the operator can currently see, not as saved state. If moon_get_build returns state_mismatch=visible_ui_has_graph_persisted_read_empty, do not say the workflow is empty; say that you can see the visible canvas but the saved build read is stale or unsaved, then use moon_mutate_field/workflow build authority for durable repairs.
+
 If the user has selected items (shown in the context), reference them when relevant. If they ask to "route these" or "send these to a workflow", use the run_workflow tool with the selected items.
 
 When showing workflow status, always include cost and token information when available.

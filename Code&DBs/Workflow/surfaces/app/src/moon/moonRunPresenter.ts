@@ -19,7 +19,7 @@ import type {
   GraphLayout,
   LayoutNode,
 } from './moonBuildPresenter';
-import { RANK_SPACING, COLUMN_SPACING, glyphFromLabel, computeLineage } from './moonBuildPresenter';
+import { RANK_SPACING, COLUMN_SPACING, NODE_SHAPE_DIMENSIONS, glyphFromLabel, computeLineage } from './moonBuildPresenter';
 
 const COMPONENT_ROW_GAP = 40;
 const COMPONENT_COLUMN_GAP = 120;
@@ -148,7 +148,16 @@ function layoutLayeredRunNodes(
     }
     const ox = -(ids.length - 1) * COLUMN_SPACING / 2;
     for (let c = 0; c < ids.length; c++) {
-      positions.set(ids[c], { id: ids[c], rank: r, column: c, x: r * RANK_SPACING, y: ox + c * COLUMN_SPACING });
+      positions.set(ids[c], {
+        id: ids[c],
+        rank: r,
+        column: c,
+        height: NODE_SHAPE_DIMENSIONS.task.height,
+        shape: 'task',
+        width: NODE_SHAPE_DIMENSIONS.task.width,
+        x: r * RANK_SPACING,
+        y: ox + c * COLUMN_SPACING,
+      });
     }
   }
 
@@ -159,13 +168,13 @@ function layoutLayeredRunNodes(
   }
 
   const layers = sortedRanks.map(r => ({ rank: r, nodeIds: layerMap.get(r)! }));
-  const xs = [...positions.values()].map(p => p.x);
-  const ys = [...positions.values()].map(p => p.y);
+  const rights = [...positions.values()].map(p => p.x + p.width / 2);
+  const bottoms = [...positions.values()].map(p => p.y + p.height / 2);
   return {
     nodes: positions,
     layers,
-    width: xs.length ? Math.max(...xs) + RANK_SPACING : 0,
-    height: ys.length ? Math.max(...ys) + COLUMN_SPACING : 0,
+    width: rights.length ? Math.max(...rights) : 0,
+    height: bottoms.length ? Math.max(...bottoms) : 0,
   };
 }
 
@@ -217,9 +226,9 @@ function countRoots(graph: RunGraph): number {
 function layoutRootHeavyRunGraph(graph: RunGraph, components: string[][]): GraphLayout {
   const componentLayouts = components.map((nodeIds) => layoutLayeredRunNodes(graph, nodeIds));
   const columnCount = Math.max(1, Math.ceil(Math.sqrt(components.length)));
-  const cellWidth = Math.max(...componentLayouts.map((layout) => layout.width), RANK_SPACING)
+  const cellWidth = Math.max(...componentLayouts.map((layout) => layout.width), NODE_SHAPE_DIMENSIONS.task.width)
     + COMPONENT_COLUMN_GAP;
-  const cellHeight = Math.max(...componentLayouts.map((layout) => layout.height), COLUMN_SPACING)
+  const cellHeight = Math.max(...componentLayouts.map((layout) => layout.height), NODE_SHAPE_DIMENSIONS.task.height)
     + COMPONENT_ROW_GAP;
   const positions = new Map<string, LayoutNode>();
 
@@ -239,13 +248,13 @@ function layoutRootHeavyRunGraph(graph: RunGraph, components: string[][]): Graph
     }
   });
 
-  const xs = [...positions.values()].map(p => p.x);
-  const ys = [...positions.values()].map(p => p.y);
+  const rights = [...positions.values()].map(p => p.x + p.width / 2);
+  const bottoms = [...positions.values()].map(p => p.y + p.height / 2);
   return {
     nodes: positions,
     layers: components.map((nodeIds, index) => ({ rank: index, nodeIds })),
-    width: xs.length ? Math.max(...xs) + RANK_SPACING : 0,
-    height: ys.length ? Math.max(...ys) + COLUMN_SPACING : 0,
+    width: rights.length ? Math.max(...rights) : 0,
+    height: bottoms.length ? Math.max(...bottoms) : 0,
   };
 }
 
@@ -345,6 +354,7 @@ export function presentRun(
     nodes: [],
     edges: [],
     dominantPath: [],
+    branchBoard: [],
     layout: emptyLayout,
     release: { readiness: 'draft', blockers: [], projectedJobs: [], checklist: [] },
     dockContent: null,
@@ -383,7 +393,14 @@ export function presentRun(
   }
 
   const nodes: OrbitNode[] = graph.nodes.map((n) => {
-    const pos = layout.nodes.get(n.id) || { x: 0, y: 0, rank: 0 };
+    const pos = layout.nodes.get(n.id) || {
+      x: 0,
+      y: 0,
+      rank: 0,
+      width: NODE_SHAPE_DIMENSIONS.task.width,
+      height: NODE_SHAPE_DIMENSIONS.task.height,
+      shape: 'task' as const,
+    };
     const ringState = jobStatusToRingState(n.status);
     const job = jobsByLabel.get(n.label) || jobsByLabel.get(n.id);
     const glyph = inferGlyph(n, job);
@@ -393,6 +410,9 @@ export function presentRun(
       kind: 'step' as const,
       title: n.label || n.id,
       summary,
+      shape: pos.shape,
+      width: pos.width,
+      height: pos.height,
       glyphType: glyph,
       ringState,
       isOnDominantPath: pathSet.has(n.id),
@@ -467,6 +487,7 @@ export function presentRun(
     nodes,
     edges,
     dominantPath: criticalPath,
+    branchBoard: [],
     layout,
     release: runReleaseStatus(run),
     dockContent: null,

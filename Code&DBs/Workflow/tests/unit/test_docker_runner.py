@@ -126,34 +126,63 @@ class TestProcessIsolation:
         assert result.timed_out
 
 
-def test_cli_auth_env_forward_is_provider_scoped(monkeypatch):
-    monkeypatch.setattr(
-        docker_runner,
-        "resolve_api_key_env_vars",
-        lambda provider_slug: {
-            "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"),
-            "openai": ("OPENAI_API_KEY",),
-            "cursor": ("CURSOR_API_KEY",),
-            "cursor_local": ("CURSOR_API_KEY",),
-            "openrouter": ("OPENROUTER_API_KEY",),
-        }.get(provider_slug, ()),
-    )
-    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
-    monkeypatch.setenv("GOOGLE_API_KEY", "google-test-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+def test_cli_auth_env_forward_resolves_through_credential_authority(monkeypatch):
+    """Per architecture-policy::auth::credentials-per-sandbox-per-provider,
+    sandbox spawn must read from the DB-backed credential authority — never
+    from host-shell env vars. Setting host env should NOT leak into the sandbox.
+    """
+    from runtime import credential_authority
 
-    assert docker_runner._cli_auth_env_forward("google") == {"GEMINI_API_KEY": "gemini-test-key"}
-    assert docker_runner._cli_auth_env_forward("openai") == {"OPENAI_API_KEY": "openai-test-key"}
+    monkeypatch.setenv("OPENAI_API_KEY", "host-shell-leak-not-allowed")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-shell-leak-not-allowed")
 
+    def _fake_resolve(*, provider_slug, sandbox_session_id=None):
+        return {
+            "google": {"GEMINI_API_KEY": "from-db-google-key"},
+            "openai": {"OPENAI_API_KEY": "from-db-openai-key"},
+            "anthropic": {"CLAUDE_CODE_OAUTH_TOKEN": "from-db-anthropic-token"},
+        }.get(provider_slug, {})
 
-def test_cli_auth_env_forward_keeps_anthropic_oauth_forwarding(monkeypatch):
-    monkeypatch.setattr(docker_runner, "resolve_api_key_env_vars", lambda _provider_slug: ())
-    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-oauth-token")
-    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "anthropic-auth-token")
+    monkeypatch.setattr(credential_authority, "resolve_provider_credentials", _fake_resolve)
 
+    assert docker_runner._cli_auth_env_forward("google") == {"GEMINI_API_KEY": "from-db-google-key"}
+    assert docker_runner._cli_auth_env_forward("openai") == {"OPENAI_API_KEY": "from-db-openai-key"}
     assert docker_runner._cli_auth_env_forward("anthropic") == {
-        "CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-token"
+        "CLAUDE_CODE_OAUTH_TOKEN": "from-db-anthropic-token"
     }
+
+
+def test_cli_auth_env_forward_returns_empty_when_credential_not_provisioned(monkeypatch):
+    """No credential row → empty dict. The sandbox runs with no auth and the
+    CLI surfaces its own auth-required error. Host env is NEVER consulted as
+    a fallback.
+    """
+    from runtime import credential_authority
+
+    monkeypatch.setenv("OPENAI_API_KEY", "host-shell-must-not-leak")
+    monkeypatch.setattr(
+        credential_authority,
+        "resolve_provider_credentials",
+        lambda *, provider_slug, sandbox_session_id=None: {},
+    )
+
+    assert docker_runner._cli_auth_env_forward("openai") == {}
+
+
+def test_cli_auth_env_forward_swallows_authority_errors(monkeypatch):
+    """If the credential authority raises (DB down, etc.), the sandbox runs
+    without credentials rather than falling back to host env.
+    """
+    from runtime import credential_authority
+
+    monkeypatch.setenv("OPENAI_API_KEY", "host-shell-must-not-leak")
+
+    def _explode(*, provider_slug, sandbox_session_id=None):
+        raise RuntimeError("authority unavailable")
+
+    monkeypatch.setattr(credential_authority, "resolve_provider_credentials", _explode)
+
+    assert docker_runner._cli_auth_env_forward("openai") == {}
 
 
 def test_run_model_fails_closed_when_docker_is_unavailable(monkeypatch):

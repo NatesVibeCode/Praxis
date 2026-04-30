@@ -354,10 +354,10 @@ class CapabilityTracker:
         try:
             from .feedback_authority import (
                 RecordAuthorityFeedbackCommand,
-                record_feedback_event,
+                record_feedback_event_via_gateway,
             )
 
-            record_feedback_event(
+            record_feedback_event_via_gateway(
                 conn,
                 RecordAuthorityFeedbackCommand(
                     feedback_stream_ref="feedback.capability_outcome",

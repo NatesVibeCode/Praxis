@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -78,18 +80,19 @@ class _FakeAuthorityConn:
                 "output_hash": args[9],
                 "idempotency_key": args[10],
                 "caller_ref": args[11],
-                "execution_status": args[12],
-                "result_status": args[13],
-                "error_code": args[14],
-                "error_detail": args[15],
-                "event_ids": args[16],
-                "projection_freshness": args[17],
-                "result_payload": args[18],
-                "duration_ms": args[19],
-                "binding_revision": args[20],
-                "decision_ref": args[21],
-                "cause_receipt_id": args[22],
-                "correlation_id": args[23],
+                "transport_kind": args[12],
+                "execution_status": args[13],
+                "result_status": args[14],
+                "error_code": args[15],
+                "error_detail": args[16],
+                "event_ids": args[17],
+                "projection_freshness": args[18],
+                "result_payload": args[19],
+                "duration_ms": args[20],
+                "binding_revision": args[21],
+                "decision_ref": args[22],
+                "cause_receipt_id": args[23],
+                "correlation_id": args[24],
             }
         return []
 
@@ -212,10 +215,11 @@ def test_execute_operation_from_env_builds_env_backed_subsystems(monkeypatch) ->
     monkeypatch.setattr(gateway, "get_workflow_pool", lambda env: object())
     monkeypatch.setattr(gateway, "SyncPostgresConnection", lambda pool: _FakeConn())
 
-    def _execute(subsystems, *, operation_name: str, payload):
+    def _execute(subsystems, *, operation_name: str, payload, caller_context=None):
         captured["subsystems"] = subsystems
         captured["operation_name"] = operation_name
         captured["payload"] = payload
+        captured["caller_context"] = caller_context
         return {"ok": True}
 
     monkeypatch.setattr(gateway, "execute_operation_from_subsystems", _execute)
@@ -229,6 +233,7 @@ def test_execute_operation_from_env_builds_env_backed_subsystems(monkeypatch) ->
     assert result == {"ok": True}
     assert captured["operation_name"] == "operator.example"
     assert captured["payload"] == {"value": "gateway"}
+    assert captured["caller_context"].transport_kind == "cli"
     assert captured["subsystems"].get_pg_conn().__class__ is _FakeConn
 
 
@@ -273,6 +278,59 @@ def test_execute_query_operation_also_attaches_operation_receipt(monkeypatch) ->
     assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
     assert "INSERT INTO authority_events" not in conn.executed_sql()
     assert conn.transaction_commits == 1
+
+
+def test_command_exception_returns_failed_receipt_without_event(monkeypatch) -> None:
+    class _TypedMaterializeFailure(RuntimeError):
+        reason_code = "compile.materialize.empty_graph"
+        details = {"workflow_id": "wf_empty", "graph_summary": {"node_count": 0}}
+
+    def _handler(command: _ExampleCommand, _subsystems: object) -> dict[str, object]:
+        raise _TypedMaterializeFailure(f"blocked {command.value}")
+
+    binding = SimpleNamespace(
+        operation_ref="compile.materialize",
+        operation_name="compile_materialize",
+        source_kind="operation_command",
+        operation_kind="command",
+        command_class=_ExampleCommand,
+        handler=_handler,
+        authority_ref="authority.compile",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="non_idempotent",
+        binding_revision="binding.operation.compile_materialize.20260429",
+        decision_ref="decision.operation.compile_materialize.20260429",
+        event_required=True,
+    )
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="compile_materialize",
+        payload={"value": "empty graph"},
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "compile.materialize.empty_graph"
+    assert result["details"] == {"workflow_id": "wf_empty", "graph_summary": {"node_count": 0}}
+    receipt = result["operation_receipt"]
+    assert receipt["operation_name"] == "compile_materialize"
+    assert receipt["execution_status"] == "failed"
+    assert receipt["error_code"] == "compile.materialize.empty_graph"
+    assert receipt["event_ids"] == []
+    assert "INSERT INTO authority_operation_receipts" in conn.executed_sql()
+    assert "INSERT INTO authority_events" not in conn.executed_sql()
 
 
 def test_requested_query_mode_rejects_command_before_handler_or_receipt(monkeypatch) -> None:
@@ -448,6 +506,62 @@ def test_gateway_preserves_typed_reason_code_and_details(monkeypatch) -> None:
     assert result["ok"] is False
     assert result["error_code"] == "provider_authority.transport_admission_missing"
     assert result["details"] == {"provider_slug": "openai", "adapter_type": "llm_task"}
+
+
+def test_sync_interactive_operation_timeout_returns_failed_receipt(monkeypatch) -> None:
+    def _handler(command: _ExampleCommand, _subsystems: object) -> dict[str, object]:
+        time.sleep(0.05)
+        return {"value": command.value}
+
+    binding = SimpleNamespace(
+        operation_ref="operator.interactive_example",
+        operation_name="operator.interactive_example",
+        source_kind="operation_query",
+        operation_kind="query",
+        command_class=_ExampleCommand,
+        handler=_handler,
+        authority_ref="authority.example_query",
+        projection_ref="projection.example_query",
+        posture="observe",
+        idempotency_policy="read_only",
+        execution_lane="interactive",
+        timeout_ms=1,
+        binding_revision="binding.operation.interactive_example.20260430",
+        decision_ref="decision.operation.interactive_example.20260430",
+    )
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.interactive_example",
+        payload={"value": "slow"},
+        caller_context=gateway.CallerContext(
+            cause_receipt_id=None,
+            correlation_id="00000000-0000-0000-0000-000000000123",
+            transport_kind="mcp",
+        ),
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "operation.interactive_timeout"
+    assert result["details"] == {
+        "operation_ref": "operator.interactive_example",
+        "timeout_ms": 1,
+    }
+    receipt = result["operation_receipt"]
+    assert receipt["execution_status"] == "failed"
+    assert receipt["error_code"] == "operation.interactive_timeout"
+    assert receipt["transport_kind"] == "mcp"
 
 
 def test_command_receipt_event_persistence_rolls_back_as_one_proof_write(monkeypatch) -> None:
@@ -636,3 +750,209 @@ def test_idempotent_operation_rejects_same_key_with_different_input(monkeypatch)
         raise AssertionError("idempotency conflict should reject different input")
 
     assert conn.execute_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Phase B — execution_lane + kickoff_required enforcement (migration 348).
+# ---------------------------------------------------------------------------
+
+def _kickoff_required_binding() -> SimpleNamespace:
+    return SimpleNamespace(
+        operation_ref="operator.background_example",
+        operation_name="operator.background_example",
+        source_kind="operation_command",
+        operation_kind="command",
+        command_class=_ExampleCommand,
+        handler=lambda _command, _subsystems: {"value": "should-not-run"},
+        authority_ref="authority.background_example",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="non_idempotent",
+        execution_lane="background",
+        kickoff_required=True,
+        timeout_ms=15000,
+        binding_revision="binding.operation.background_example.20260430",
+        decision_ref="decision.operation.background_example.20260430",
+    )
+
+
+def test_kickoff_required_rejects_interactive_transport_sync(monkeypatch) -> None:
+    """kickoff_required=true on a background op refuses direct sync dispatch
+    from interactive transports (cli/mcp/http). The handler never runs and
+    a failed receipt is persisted so the rejection is observable."""
+
+    binding = _kickoff_required_binding()
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.background_example",
+        payload={"value": "interactive-cli"},
+        caller_context=gateway.CallerContext(
+            cause_receipt_id=None,
+            correlation_id="00000000-0000-0000-0000-000000000200",
+            transport_kind="cli",
+        ),
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "operation.kickoff_required"
+    assert result["details"]["transport_kind"] == "cli"
+    receipt = result["operation_receipt"]
+    assert receipt["execution_status"] == "failed"
+    assert receipt["error_code"] == "operation.kickoff_required"
+    assert receipt["transport_kind"] == "cli"
+
+
+def test_kickoff_required_rejects_interactive_transport_async(monkeypatch) -> None:
+    """Same enforcement, async dispatch path."""
+
+    binding = _kickoff_required_binding()
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = asyncio.run(
+        gateway.aexecute_operation_from_subsystems(
+            _Subsystems(),
+            operation_name="operator.background_example",
+            payload={"value": "interactive-mcp"},
+            caller_context=gateway.CallerContext(
+                cause_receipt_id=None,
+                correlation_id="00000000-0000-0000-0000-000000000201",
+                transport_kind="mcp",
+            ),
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "operation.kickoff_required"
+    assert result["details"]["transport_kind"] == "mcp"
+    receipt = result["operation_receipt"]
+    assert receipt["execution_status"] == "failed"
+    assert receipt["transport_kind"] == "mcp"
+
+
+def test_kickoff_required_admits_workflow_transport(monkeypatch) -> None:
+    """Worker/runtime callers still execute a kickoff_required operation —
+    the gate is at the *interactive* edge, not on the operation entirely.
+    A workflow-lane caller picking up the kicked-off work must not be
+    blocked."""
+
+    handler_calls: list[dict[str, Any]] = []
+
+    def _handler(command: _ExampleCommand, _subsystems: object) -> dict[str, object]:
+        handler_calls.append({"value": command.value})
+        return {"value": command.value, "ran": True}
+
+    binding = _kickoff_required_binding()
+    binding.handler = _handler
+
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.background_example",
+        payload={"value": "worker-claim"},
+        caller_context=gateway.CallerContext(
+            cause_receipt_id=None,
+            correlation_id="00000000-0000-0000-0000-000000000202",
+            transport_kind="workflow",
+        ),
+    )
+
+    assert handler_calls == [{"value": "worker-claim"}]
+    assert result["ok"] is True
+    assert result["operation_receipt"]["transport_kind"] == "workflow"
+
+
+def test_async_interactive_timeout_returns_failed_receipt(monkeypatch) -> None:
+    """asyncio.wait_for around the handler enforces the interactive
+    deadline on the async dispatch path, mirroring the sync path's
+    thread+queue enforcement."""
+
+    async def _handler(command: _ExampleCommand, _subsystems: object) -> dict[str, object]:
+        await asyncio.sleep(0.05)
+        return {"value": command.value}
+
+    binding = SimpleNamespace(
+        operation_ref="operator.async_interactive_example",
+        operation_name="operator.async_interactive_example",
+        source_kind="operation_query",
+        operation_kind="query",
+        command_class=_ExampleCommand,
+        handler=_handler,
+        authority_ref="authority.async_interactive",
+        projection_ref="projection.async_interactive",
+        posture="observe",
+        idempotency_policy="read_only",
+        execution_lane="interactive",
+        kickoff_required=False,
+        timeout_ms=1,
+        binding_revision="binding.operation.async_interactive.20260430",
+        decision_ref="decision.operation.async_interactive.20260430",
+    )
+
+    conn = _FakeAuthorityConn()
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return conn
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = asyncio.run(
+        gateway.aexecute_operation_from_subsystems(
+            _Subsystems(),
+            operation_name="operator.async_interactive_example",
+            payload={"value": "slow-async"},
+            caller_context=gateway.CallerContext(
+                cause_receipt_id=None,
+                correlation_id="00000000-0000-0000-0000-000000000203",
+                transport_kind="http",
+            ),
+        )
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "operation.interactive_timeout"
+    assert result["details"] == {
+        "operation_ref": "operator.async_interactive_example",
+        "timeout_ms": 1,
+    }
+    receipt = result["operation_receipt"]
+    assert receipt["execution_status"] == "failed"
+    assert receipt["error_code"] == "operation.interactive_timeout"
+    assert receipt["transport_kind"] == "http"

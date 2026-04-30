@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
-# praxis-agent — canonical agent dispatcher for Praxis.
+# praxis-agent — canonical agent dispatcher for Praxis (broker-front-door).
 #
 # This is THE one front door for Claude Code and any other Mac-host agent
 # that operates against Praxis. It bypasses host-shell pollution
 # (CLAUDECODE nested-session guard, macOS Gatekeeper / Claude.app disclaimer
-# wrapper on unsigned Python) by dispatching through the api-server's
-# existing /mcp HTTP endpoint, where the runtime is clean and the
-# operation_catalog_gateway is the canonical engine bus.
+# wrapper on unsigned Python) by POSTing to the local praxis-agentd broker,
+# which dispatches through the canonical MCP/CQRS path
+# (handle_request → invoke_tool → operation_catalog_gateway) inside the
+# credentialed Docker runtime.
 #
-# Why this surface exists (standing-order references):
-#   architecture-policy::surfaces::cli-mcp-parallel
-#       — CLI and MCP are siblings over operation_catalog_gateway. This is
-#         a third sibling: a thin HTTP wrapper, audience = host agents
-#         whose shell or stdio MCP transport is blocked by Mac security
-#         policy.
-#   architecture-policy::agent-behavior::claude-code-uses-mcp
-#       — Claude Code's bash CLI is denied by .claude/settings.json. This
-#         script is exempt because it does NOT spawn host Python and does
-#         NOT spawn the `claude` binary.
+# Why broker, not api-server:
+#   The previous implementation POSTed to http://localhost:8420/mcp on the
+#   api-server, which:
+#     1. Required PRAXIS_API_TOKEN to be read via `docker exec` per call,
+#     2. Forced workflow-worker MCP traffic to depend on api-server health,
+#     3. Tied "the API got stuck" directly to "every CLI agent wedged".
+#   praxis-agentd is a separate, long-lived broker process whose only job is
+#   to be the local front door for CLI/MCP traffic. The api-server stays
+#   for human-facing surfaces (Moon, REST API).
 #
-# Why HTTP (not docker exec python3):
-#   The previous implementation spawned `docker exec praxis-api-server-1
+# Why not docker exec python3:
+#   An earlier implementation spawned `docker exec praxis-api-server-1
 #   python3 -` per call. Each spawn created its own asyncpg pool with
 #   min_size=1 and exited without shutdown_workflow_pool(), leaking one
 #   idle Postgres connection per call (BUG-D7A939CA). Postgres saturates
-#   at max_connections (100 by default), blocking every gateway op
-#   including compile.
+#   at max_connections (100 by default), blocking every gateway op.
 #
-#   POSTing to the api-server's existing /mcp endpoint reuses the long-
-#   lived pool — single canonical entrance, no leak.
+# Standing-order references:
+#   architecture-policy::auth::via-docker-creds-not-shell
+#   architecture-policy::surfaces::cli-mcp-parallel
 #
 # Usage:
 #   praxis-agent <tool_name> --input-json '{...}'
@@ -47,26 +47,32 @@
 # Returns: tool result as JSON on stdout. Non-zero exit on dispatch error.
 #
 # Configuration:
-#   PRAXIS_AGENT_CONTAINER (default: praxis-api-server-1) — which container
-#       to read PRAXIS_API_TOKEN from.
-#   PRAXIS_AGENT_URL (default: http://localhost:8420/mcp) — the api-server
-#       MCP HTTP endpoint.
+#   PRAXIS_AGENT_BROKER_URL       (default: http://127.0.0.1:8422/rpc)
+#   PRAXIS_AGENT_BROKER_STATE_DIR (default: <repo>/artifacts/agent-broker)
+#   PRAXIS_AGENT_BROKER_TOKEN_FILE
+#                                 (default: $STATE_DIR/token)
+#   PRAXIS_AGENT_BROKER_SOCKET    optional UDS path; if set + present, used
+#                                 instead of the loopback HTTP URL.
 #
 # Operator notes:
-#   - If the container is not running, this script exits 3 with a hint to
-#     run `scripts/praxis-up`.
-#   - If you need to refresh provider auth state (Keychain → container env),
-#     run `scripts/praxis-up` first; it does the keychain export and
-#     compose recreate dance in one step.
+#   - If the broker token/state file is missing, this script exits 3 with
+#     a hint to run `scripts/praxis-up agent-broker`.
+#   - This script never falls back to the api-server, never reads host
+#     provider env vars, and never invokes `docker exec`.
 
 set -euo pipefail
 
-CONTAINER="${PRAXIS_AGENT_CONTAINER:-praxis-api-server-1}"
-URL="${PRAXIS_AGENT_URL:-http://localhost:8420/mcp}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+DEFAULT_STATE_DIR="${REPO_ROOT}/artifacts/agent-broker"
+STATE_DIR="${PRAXIS_AGENT_BROKER_STATE_DIR:-$DEFAULT_STATE_DIR}"
+URL="${PRAXIS_AGENT_BROKER_URL:-http://127.0.0.1:8422/rpc}"
+TOKEN_FILE="${PRAXIS_AGENT_BROKER_TOKEN_FILE:-$STATE_DIR/token}"
+SOCKET="${PRAXIS_AGENT_BROKER_SOCKET:-}"
 
 usage() {
   cat <<'USAGE'
-praxis-agent — canonical agent dispatcher (HTTP → /mcp → operation_catalog_gateway)
+praxis-agent — canonical agent dispatcher (HTTP → praxis-agentd → operation_catalog_gateway)
 
 Usage:
   praxis-agent <tool_name> --input-json '{...}'
@@ -76,8 +82,11 @@ Usage:
   praxis-agent --help
 
 Environment:
-  PRAXIS_AGENT_CONTAINER    Container to read PRAXIS_API_TOKEN from (default: praxis-api-server-1).
-  PRAXIS_AGENT_URL          MCP HTTP endpoint (default: http://localhost:8420/mcp).
+  PRAXIS_AGENT_BROKER_URL       Broker /rpc endpoint (default: http://127.0.0.1:8422/rpc).
+  PRAXIS_AGENT_BROKER_STATE_DIR Directory containing the broker token (default: <repo>/artifacts/agent-broker).
+  PRAXIS_AGENT_BROKER_TOKEN_FILE
+                                Override the token file path (default: $STATE_DIR/token).
+  PRAXIS_AGENT_BROKER_SOCKET    Optional UDS path; if set + present, takes precedence over BROKER_URL.
 USAGE
 }
 
@@ -93,47 +102,57 @@ case "$1" in
     ;;
 esac
 
-# Confirm the container is alive before doing anything.
-if ! docker ps --filter "name=^${CONTAINER}$" --filter "status=running" -q | grep -q .; then
+# Read the broker token. The broker writes it at boot to $STATE_DIR/token,
+# which is the same path inside the container (mounted via the workspace
+# volume) and on the host. No `docker exec`; no host env inheritance.
+if [[ ! -f "$TOKEN_FILE" ]]; then
   cat >&2 <<EOF
-praxis-agent: container "${CONTAINER}" is not running.
+praxis-agent: broker token file not found at $TOKEN_FILE.
 
-Run scripts/praxis-up from the repo root to rehydrate Keychain auth and
-recreate the api-server / workflow-worker / scheduler containers, then
-retry.
+The praxis-agentd broker is not running, or its state directory is not
+mounted. Start (or recreate) the broker with:
+
+    scripts/praxis-up agent-broker
+
+If you've moved the state directory, set PRAXIS_AGENT_BROKER_STATE_DIR or
+PRAXIS_AGENT_BROKER_TOKEN_FILE.
 EOF
   exit 3
 fi
 
-# Read the api token from the container env (cheap — no Python pool).
-TOKEN="$(docker exec "$CONTAINER" sh -c 'printf %s "$PRAXIS_API_TOKEN"')"
+TOKEN="$(tr -d '\n' < "$TOKEN_FILE")"
 if [[ -z "$TOKEN" ]]; then
-  echo "praxis-agent: container ${CONTAINER} does not have PRAXIS_API_TOKEN set" >&2
+  echo "praxis-agent: broker token file is empty: $TOKEN_FILE" >&2
   exit 4
 fi
 
 # _post_jsonrpc <method> <params_json>
-# Sends a JSON-RPC 2.0 request and prints the inner result on stdout, or
-# the error envelope on stderr (and exits non-zero).
+# Sends a JSON-RPC 2.0 request to the broker and prints the inner result on
+# stdout, or the error envelope on stderr (and exits non-zero).
 _post_jsonrpc() {
   local method="$1"
   local params="$2"
   local body
   body=$(printf '{"jsonrpc":"2.0","id":1,"method":"%s","params":%s}' "$method" "$params")
 
-  local response http_status
-  response=$(curl -sS -w '\n%{http_code}' -X POST "$URL" \
+  local response http_status curl_args
+  if [[ -n "$SOCKET" && -S "$SOCKET" ]]; then
+    curl_args=(--unix-socket "$SOCKET" "http://localhost/rpc")
+  else
+    curl_args=("$URL")
+  fi
+  response=$(curl -sS -w '\n%{http_code}' -X POST "${curl_args[@]}" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
     --data-binary "$body") || {
-    echo "praxis-agent: HTTP request to $URL failed" >&2
+    echo "praxis-agent: HTTP request to broker failed (${curl_args[*]})" >&2
     exit 5
   }
   http_status="${response##*$'\n'}"
   body="${response%$'\n'*}"
 
   if [[ "$http_status" != "200" && "$http_status" != "202" ]]; then
-    echo "praxis-agent: HTTP $http_status from $URL" >&2
+    echo "praxis-agent: HTTP $http_status from broker" >&2
     echo "$body" >&2
     exit 6
   fi

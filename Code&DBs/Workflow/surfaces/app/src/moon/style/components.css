@@ -360,6 +360,94 @@
   font-size: var(--moon-font-size-xs);
   line-height: 1.45;
 }
+.moon-dock-workflow {
+  display: grid;
+  gap: 10px;
+}
+.moon-dock-workflow__title {
+  color: var(--moon-fg);
+  font-size: var(--moon-font-size-lg);
+  font-weight: 700;
+  line-height: 1.25;
+}
+.moon-dock-workflow__tone {
+  justify-self: start;
+  width: max-content;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--moon-white-a10);
+  color: var(--moon-fg-muted);
+  font-family: var(--moon-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.moon-dock-workflow__tone--ready {
+  border-color: rgba(63, 185, 80, 0.28);
+  color: var(--moon-palette-success-bright);
+}
+.moon-dock-workflow__tone--blocked,
+.moon-dock-workflow__tone--warning {
+  border-color: rgba(210, 153, 34, 0.32);
+  color: var(--moon-palette-amber);
+}
+.moon-dock-workflow__grid {
+  display: grid;
+  gap: 6px;
+}
+.moon-dock-workflow__row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 30px;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--moon-white-a08);
+  background: var(--moon-white-a03);
+}
+.moon-dock-workflow__row span {
+  color: var(--moon-fg-muted);
+  font-family: var(--moon-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.moon-dock-workflow__row strong {
+  min-width: 0;
+  color: var(--moon-fg);
+  font-size: var(--moon-font-size-xs);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.moon-dock-workflow__row--warn {
+  border-color: rgba(210, 153, 34, 0.32);
+  background: rgba(210, 153, 34, 0.07);
+}
+.moon-dock-workflow__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.moon-dock-workflow__pills span {
+  min-height: 22px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--moon-white-a08);
+  background: var(--moon-white-a03);
+  color: var(--moon-fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.moon-dock-workflow__pills .moon-dock-workflow__pill-empty {
+  border-color: rgba(210, 153, 34, 0.32);
+  background: rgba(210, 153, 34, 0.07);
+  color: var(--moon-palette-amber);
+}
 .moon-dock-form__actions {
   display: flex;
   flex-wrap: wrap;
@@ -397,6 +485,30 @@
   line-height: 1.5;
   word-break: break-word;
 }
+
+.moon-review-queue .moon-dock__close {
+  position: static;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+}
+
+.moon-review-queue__header {
+  gap: 12px;
+  margin-bottom: 8px;
+  padding-right: 0 !important;
+}
+
+.moon-review-queue__header .moon-dock-form__btn {
+  flex: 0 0 auto;
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.moon-review-queue .moon-dock__list {
+  padding-right: 4px !important;
+}
+
 .moon-http-request__preset-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

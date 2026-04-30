@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { QuadrantProps } from '../types';
 import { LoadingSkeleton } from '../../primitives/LoadingSkeleton';
 import { publishSelection } from '../../hooks/useWorldSelection';
+import { useSlice } from '../../hooks/useSlice';
 import { world } from '../../world';
+import { sourceBindingFor, sourceSelectionPath, type SourceBoundConfig } from '../sourceBindings';
 
 interface SearchResult {
   name: string;
@@ -17,12 +19,21 @@ interface SearchPanelConfig {
   objectType?: string;
   publishSelection?: string;  // world key for selected result (e.g. 'search_result')
   publishQuery?: string;      // world key for live query text (e.g. 'search_query')
+  sourceSelection?: string;
+  sourceBindings?: Record<string, SourceBoundConfig>;
+  disabledMessage?: string;
 }
 
 function SearchPanelModule({ config }: QuadrantProps) {
   const cfg = (config ?? {}) as SearchPanelConfig;
-  const endpoint = cfg.endpoint ?? 'search';
-  const placeholder = cfg.placeholder ?? 'Search...';
+  const activeSource = useSlice(world, sourceSelectionPath(cfg.sourceSelection));
+  const sourceBinding = sourceBindingFor(cfg.sourceBindings, activeSource);
+  const effectiveCfg = sourceBinding ? { ...cfg, ...sourceBinding } : cfg;
+  const endpoint = effectiveCfg.endpoint ?? 'search';
+  const placeholder = effectiveCfg.placeholder ?? 'Search...';
+  const disabledMessage = typeof effectiveCfg.disabledMessage === 'string'
+    ? effectiveCfg.disabledMessage.trim()
+    : '';
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -43,13 +54,13 @@ function SearchPanelModule({ config }: QuadrantProps) {
 
   // Publish selected result + fire DOM event for imperative listeners
   const handleResultClick = useCallback((result: SearchResult) => {
-    if (cfg.publishSelection) {
-      publishSelection(cfg.publishSelection, result);
+    if (effectiveCfg.publishSelection) {
+      publishSelection(effectiveCfg.publishSelection, result);
     }
     window.dispatchEvent(new CustomEvent('module-search', {
-      detail: { query, result, objectType: cfg.objectType ?? result.kind },
+      detail: { query, result, objectType: effectiveCfg.objectType ?? result.kind },
     }));
-  }, [query, cfg.publishSelection, cfg.objectType]);
+  }, [query, effectiveCfg.publishSelection, effectiveCfg.objectType]);
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -59,12 +70,17 @@ function SearchPanelModule({ config }: QuadrantProps) {
       return;
     }
     timerRef.current = setTimeout(async () => {
+      if (disabledMessage) {
+        publishQueryState(query);
+        setResults([]);
+        return;
+      }
       setLoading(true);
       publishQueryState(query);
       try {
         let mapped: SearchResult[];
-        if (cfg.objectType) {
-          const res = await fetch(`/api/objects?type=${encodeURIComponent(cfg.objectType)}&q=${encodeURIComponent(query)}`);
+        if (effectiveCfg.objectType) {
+          const res = await fetch(`/api/objects?type=${encodeURIComponent(effectiveCfg.objectType)}&q=${encodeURIComponent(query)}`);
           if (!res.ok) throw new Error(res.statusText);
           const data = await res.json();
           const objects = Array.isArray(data) ? data : data.objects ?? [];
@@ -74,7 +90,7 @@ function SearchPanelModule({ config }: QuadrantProps) {
             const textEntries = entries.filter(([, v]) => typeof v === 'string');
             const name = textEntries.length > 0 ? String(textEntries[0][1]) : obj.object_id;
             const rest = textEntries.slice(1).map(([, v]) => String(v)).join(' · ');
-            return { name, description: rest || undefined, kind: cfg.objectType };
+            return { name, description: rest || undefined, kind: effectiveCfg.objectType };
           });
         } else {
           const res = await fetch(`/api/${endpoint}?q=${encodeURIComponent(query)}`);
@@ -85,7 +101,7 @@ function SearchPanelModule({ config }: QuadrantProps) {
         setResults(mapped);
         // Emit search event with full results for imperative consumers
         window.dispatchEvent(new CustomEvent('module-search', {
-          detail: { query, results: mapped, objectType: cfg.objectType },
+          detail: { query, results: mapped, objectType: effectiveCfg.objectType },
         }));
       } catch {
         setResults([]);
@@ -94,7 +110,7 @@ function SearchPanelModule({ config }: QuadrantProps) {
       }
     }, 300);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [query, endpoint]);
+  }, [query, endpoint, effectiveCfg.objectType, disabledMessage, publishQueryState]);
 
   return (
     <div style={{
@@ -121,7 +137,12 @@ function SearchPanelModule({ config }: QuadrantProps) {
             <LoadingSkeleton lines={4} height={16} widths={['100%', '88%', '94%', '72%']} />
           </div>
         )}
-        {!loading && query.trim() && results.length === 0 && (
+        {!loading && disabledMessage && (
+          <div style={{ color: 'var(--text-muted, #8b949e)', padding: '8px 0', fontSize: '13px' }}>
+            {disabledMessage}
+          </div>
+        )}
+        {!loading && !disabledMessage && query.trim() && results.length === 0 && (
           <div style={{ color: 'var(--text-muted, #8b949e)', padding: '8px 0', fontSize: '13px' }}>
             No results
           </div>

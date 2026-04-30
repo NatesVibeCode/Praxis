@@ -68,6 +68,7 @@ artifacts/debates/
 artifacts/duplicate_absorption/
 artifacts/runtime_receipts/
 artifacts/cutover/
+artifacts/agent-broker/
 scratch/
 
 # External tool leftovers

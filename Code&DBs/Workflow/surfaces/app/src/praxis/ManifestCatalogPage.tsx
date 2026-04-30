@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './ManifestCatalogPage.css';
 
 interface ManifestCatalogRow {
@@ -27,6 +27,128 @@ interface ManifestCatalogResponse {
 interface ManifestCatalogPageProps {
   onOpenManifest: (manifestId: string) => void;
   onEditManifest: (manifestId: string) => void;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function retitleManifestPayload(value: unknown, nextTitle: string, previousTitle: string): Record<string, unknown> {
+  const manifest = structuredClone(isRecord(value) ? value : {}) as Record<string, unknown>;
+  manifest.title = nextTitle;
+  manifest.name = nextTitle;
+
+  const surfaces = isRecord(manifest.surfaces) ? manifest.surfaces : {};
+  for (const surface of Object.values(surfaces)) {
+    if (!isRecord(surface)) continue;
+    if (surface.title === previousTitle || surface.title === undefined) {
+      surface.title = nextTitle;
+    }
+    const surfaceManifest = isRecord(surface.manifest) ? surface.manifest : null;
+    if (surfaceManifest && (surfaceManifest.title === previousTitle || surfaceManifest.title === undefined)) {
+      surfaceManifest.title = nextTitle;
+    }
+  }
+
+  return manifest;
+}
+
+async function saveManifestTitle(manifest: ManifestCatalogRow, nextTitle: string): Promise<ManifestCatalogRow> {
+  const currentTitle = manifest.name || manifest.id;
+  const manifestResponse = await fetch(`/api/manifests/${manifest.id}`);
+  const manifestPayload = await manifestResponse.json().catch(() => null);
+  if (!manifestResponse.ok || !manifestPayload) {
+    throw new Error(manifestPayload?.error || `Failed to load ${manifest.id}`);
+  }
+
+  const nextManifest = retitleManifestPayload(manifestPayload, nextTitle, currentTitle);
+  const saveResponse = await fetch('/api/manifests/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: manifest.id,
+      name: nextTitle,
+      description: manifestPayload.description ?? manifest.description ?? '',
+      manifest: nextManifest,
+    }),
+  });
+  const savePayload = await saveResponse.json().catch(() => null);
+  if (!saveResponse.ok) {
+    throw new Error(savePayload?.error || `Failed to rename ${manifest.id}`);
+  }
+
+  return {
+    ...manifest,
+    name: typeof savePayload?.name === 'string' ? savePayload.name : nextTitle,
+    description: typeof savePayload?.description === 'string' ? savePayload.description : manifest.description,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function EditableCatalogTitle({
+  manifest,
+  onSaved,
+  onError,
+}: {
+  manifest: ManifestCatalogRow;
+  onSaved: (row: ManifestCatalogRow) => void;
+  onError: (message: string) => void;
+}) {
+  const currentTitle = manifest.name || manifest.id;
+  const [draftTitle, setDraftTitle] = useState(currentTitle);
+  const [saving, setSaving] = useState(false);
+  const skipNextBlurSave = useRef(false);
+
+  useEffect(() => {
+    setDraftTitle(currentTitle);
+  }, [currentTitle]);
+
+  const commit = async () => {
+    const nextTitle = draftTitle.trim();
+    if (!nextTitle || nextTitle === currentTitle) {
+      setDraftTitle(currentTitle);
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await saveManifestTitle(manifest, nextTitle);
+      onSaved(saved);
+    } catch (err) {
+      setDraftTitle(currentTitle);
+      onError(err instanceof Error ? err.message : 'Rename failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <input
+      className="manifest-catalog__card-title manifest-catalog__card-title-input"
+      aria-label={`Rename ${currentTitle} (${manifest.id})`}
+      value={draftTitle}
+      disabled={saving}
+      onChange={(event) => setDraftTitle(event.target.value)}
+      onFocus={(event) => event.currentTarget.select()}
+      onBlur={() => {
+        if (skipNextBlurSave.current) {
+          skipNextBlurSave.current = false;
+          return;
+        }
+        void commit();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.currentTarget.blur();
+        }
+        if (event.key === 'Escape') {
+          skipNextBlurSave.current = true;
+          setDraftTitle(currentTitle);
+          event.currentTarget.blur();
+        }
+      }}
+      spellCheck={false}
+    />
+  );
 }
 
 function formatUpdatedAt(value?: string | null): string {
@@ -202,7 +324,13 @@ export function ManifestCatalogPage({ onOpenManifest, onEditManifest }: Manifest
             <article key={manifest.id} className="manifest-catalog__card">
               <div className="manifest-catalog__card-header">
                 <div>
-                  <div className="manifest-catalog__card-title">{manifest.name || manifest.id}</div>
+                  <EditableCatalogTitle
+                    manifest={manifest}
+                    onSaved={(saved) => {
+                      setManifests((current) => current.map((row) => (row.id === saved.id ? saved : row)));
+                    }}
+                    onError={(message) => setError(message)}
+                  />
                   <div className="manifest-catalog__card-id">{manifest.id}</div>
                 </div>
                 <div className="manifest-catalog__card-actions">

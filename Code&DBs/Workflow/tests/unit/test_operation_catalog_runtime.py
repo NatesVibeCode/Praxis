@@ -71,6 +71,8 @@ def test_get_resolved_operation_definition_applies_source_policy_defaults(monkey
     assert resolved.operation_name == "workflow_build.suggest_next"
     assert resolved.posture == "observe"
     assert resolved.idempotency_policy == "read_only"
+    assert resolved.execution_lane == "background"
+    assert resolved.kickoff_required is False
     assert resolved.enabled is True
     assert resolved.source_policy_ref == "operation-query"
 

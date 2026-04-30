@@ -31,6 +31,89 @@ if [[ "${1:-}" == "--dotenv" ]]; then
   emit_mode="dotenv"
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+emit_env() {
+  local name="$1"
+  local value="$2"
+  if [[ -z "$value" ]]; then
+    return 0
+  fi
+  case "$emit_mode" in
+    shell)
+      printf "export %s=%s\n" "$name" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/")"
+      ;;
+    dotenv)
+      printf "%s=%s\n" "$name" "$value"
+      ;;
+  esac
+}
+
+repo_env_value() {
+  local key="$1"
+  local env_file="${REPO_ROOT}/.env"
+  if [[ ! -f "$env_file" ]]; then
+    return 0
+  fi
+  awk -F= -v key="$key" '
+    $0 !~ /^[[:space:]]*#/ && $1 == key {
+      sub(/^[^=]*=/, "")
+      gsub(/^["'\''"]|["'\''"]$/, "")
+      print
+      exit
+    }
+  ' "$env_file"
+}
+
+derive_database_urls() {
+  local upstream="${PRAXIS_PGBOUNCER_UPSTREAM_URL:-}"
+  if [[ -z "$upstream" ]]; then
+    upstream="$(repo_env_value PRAXIS_PGBOUNCER_UPSTREAM_URL)"
+  fi
+  if [[ -z "$upstream" ]]; then
+    upstream="${WORKFLOW_DATABASE_URL:-}"
+  fi
+  if [[ -z "$upstream" ]]; then
+    upstream="$(repo_env_value WORKFLOW_DATABASE_URL)"
+  fi
+  if [[ -z "$upstream" ]]; then
+    return 0
+  fi
+
+  PRAXIS_DATABASE_UPSTREAM_URL="$upstream" /usr/bin/python3 - <<'PY'
+import os
+from urllib.parse import urlsplit, urlunsplit
+
+upstream = os.environ["PRAXIS_DATABASE_UPSTREAM_URL"].strip()
+parts = urlsplit(upstream)
+if not parts.scheme or not parts.netloc:
+    raise SystemExit(0)
+
+username = parts.username or ""
+password = parts.password or ""
+database = parts.path or "/praxis"
+query = parts.query
+
+def netloc(host: str, port: int) -> str:
+    auth = ""
+    if username:
+        auth = username
+        if password:
+            auth = f"{auth}:{password}"
+        auth = f"{auth}@"
+    return f"{auth}{host}:{port}"
+
+host = parts.hostname or ""
+upstream_host = "host.docker.internal" if host in {"", "localhost", "127.0.0.1", "::1"} else host
+upstream_port = parts.port or 5432
+upstream_url = urlunsplit((parts.scheme, netloc(upstream_host, upstream_port), database, query, ""))
+client_url = urlunsplit((parts.scheme, netloc("pgbouncer", 6432), database, query, ""))
+print(upstream_url)
+print(client_url)
+PY
+}
+
 if ! command -v security >/dev/null 2>&1; then
   echo "praxis-compose-env: 'security' CLI not found — macOS Keychain required" >&2
   exit 2
@@ -81,10 +164,10 @@ while IFS= read -r name; do
   case "$emit_mode" in
     shell)
       # export NAME='value'  (single-quote escape any interior ')
-      printf "export %s=%s\n" "$name" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/")"
+      emit_env "$name" "$value"
       ;;
     dotenv)
-      printf "%s=%s\n" "$name" "$value"
+      emit_env "$name" "$value"
       ;;
   esac
 done <<< "$services"
@@ -103,11 +186,17 @@ if [[ -n "$claude_oauth_json" ]]; then
   if [[ -n "$claude_oauth_token" ]]; then
     case "$emit_mode" in
       shell)
-        printf "export %s=%s\n" "CLAUDE_CODE_OAUTH_TOKEN" "$(printf '%s' "$claude_oauth_token" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/")"
+        emit_env "CLAUDE_CODE_OAUTH_TOKEN" "$claude_oauth_token"
         ;;
       dotenv)
-        printf "%s=%s\n" "CLAUDE_CODE_OAUTH_TOKEN" "$claude_oauth_token"
+        emit_env "CLAUDE_CODE_OAUTH_TOKEN" "$claude_oauth_token"
         ;;
     esac
   fi
 fi
+
+database_urls="$(derive_database_urls || true)"
+pgbouncer_upstream_url="$(printf '%s\n' "$database_urls" | sed -n '1p')"
+docker_database_url="$(printf '%s\n' "$database_urls" | sed -n '2p')"
+emit_env "PRAXIS_PGBOUNCER_UPSTREAM_URL" "$pgbouncer_upstream_url"
+emit_env "PRAXIS_DOCKER_WORKFLOW_DATABASE_URL" "$docker_database_url"

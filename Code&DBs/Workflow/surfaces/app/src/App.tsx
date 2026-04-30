@@ -665,7 +665,13 @@ export function AppShell() {
           onClose={() => setCommandMenuOpen(false)}
         />
         <div className="app-shell__content">
-          <main className={`app-shell__main ${strategyStage === 'full' ? 'app-shell__main--hidden' : ''}`}>
+          <main
+            className={[
+              'app-shell__main',
+              strategyStage === 'sidebar' ? 'app-shell__main--with-console' : '',
+              strategyStage === 'full' ? 'app-shell__main--hidden' : '',
+            ].filter(Boolean).join(' ')}
+          >
             {renderActiveTab()}
           </main>
           {strategyStage !== 'icon' && (

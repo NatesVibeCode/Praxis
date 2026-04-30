@@ -48,6 +48,8 @@ def test_build_operation_catalog_payload_returns_versioned_contract(monkeypatch)
         projection_freshness_policy_ref="projection_freshness.default",
         posture="observe",
         idempotency_policy="read_only",
+        execution_lane="background",
+        kickoff_required=False,
         enabled=True,
         operation_enabled=True,
         source_policy_ref="operation-query",

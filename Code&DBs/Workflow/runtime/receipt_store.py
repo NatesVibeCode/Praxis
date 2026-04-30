@@ -614,6 +614,49 @@ def _derive_verified_paths(
     return extract_write_paths(payload.get("verified_paths"))
 
 
+def _attach_receipt_structural_proof(
+    *,
+    receipt_id: str,
+    outputs: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach a per-receipt verification block by running the structural-proof
+    builtin inline.
+
+    Pure-function check (no DB I/O). Preserves any pre-existing
+    ``verification_status`` if a caller has already attempted real verification
+    on this receipt.
+    """
+    try:
+        from runtime.verifier_builtins import (
+            RECEIPT_STRUCTURAL_PROOF_VERIFIER_REF,
+            builtin_verify_receipt_structural_proof,
+        )
+    except Exception:
+        return outputs
+
+    receipt_view = {
+        "receipt_id": receipt_id,
+        "outputs": outputs,
+    }
+    try:
+        status, builtin_outputs = builtin_verify_receipt_structural_proof(
+            inputs={"receipt": receipt_view},
+        )
+    except Exception:
+        return outputs
+
+    verification_block = {
+        "verifier_ref": RECEIPT_STRUCTURAL_PROOF_VERIFIER_REF,
+        "status": status,
+        "checks": builtin_outputs.get("checks", {}),
+        "missing": builtin_outputs.get("missing", []),
+        "kind": "structural_proof",
+    }
+    outputs["verification"] = verification_block
+    outputs.setdefault("verification_status", status)
+    return outputs
+
+
 def _git_provenance_needs_refresh(existing_git: Any, *, conn=None) -> bool:
     if not isinstance(existing_git, dict):
         return True
@@ -1125,6 +1168,8 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> dict[str, Any]:
         outputs=outputs,
         conn=conn,
     )
+    if "verification" not in outputs:
+        outputs = _attach_receipt_structural_proof(receipt_id=receipt_id, outputs=outputs)
     artifacts = normalized.get("artifacts") if isinstance(normalized.get("artifacts"), dict) else {}
     decision_refs = normalized.get("decision_refs") if isinstance(normalized.get("decision_refs"), list) else []
 

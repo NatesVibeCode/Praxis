@@ -18,8 +18,15 @@ export function useBuildPayload(workflowId: string | null) {
   const requestSeqRef = useRef(0);
 
   const load = useCallback(async () => {
-    if (!workflowId) return;
     loadAbortRef.current?.abort();
+    if (!workflowId) {
+      loadAbortRef.current = null;
+      requestSeqRef.current += 1;
+      setPayload(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     const controller = new AbortController();
     loadAbortRef.current = controller;
     const requestSeq = requestSeqRef.current + 1;

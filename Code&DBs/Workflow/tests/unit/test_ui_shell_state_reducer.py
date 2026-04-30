@@ -69,6 +69,28 @@ def test_session_bootstrapped_applies_initial_route():
     assert state["activeTabId"] == "build"
 
 
+def test_session_bootstrapped_applies_workflow_deep_link_slot():
+    rows = [
+        _ev(
+            "session.bootstrapped",
+            {
+                "session_aggregate_ref": "s1",
+                "initial_route_id": "route.app.workflow",
+                "initial_slot_values": {"workflow": "wf_42"},
+            },
+        ),
+    ]
+    state = _reduce_ui_shell_state(
+        _StubSubs(rows),
+        source_ref="stream.shell_navigation",
+        query_params={"session": "s1"},
+    )
+    assert state["activeRouteId"] == "route.app.workflow"
+    assert state["activeTabId"] == "build"
+    assert state["buildWorkflowId"] == "wf_42"
+    assert state["moonRunId"] is None
+
+
 def test_surface_opened_applies_state_diff_after_bootstrap():
     rows = [
         _ev("session.bootstrapped", {"session_aggregate_ref": "s1", "initial_route_id": "route.app.dashboard"}),

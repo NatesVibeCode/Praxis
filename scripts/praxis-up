@@ -24,7 +24,7 @@
 #   architecture-policy::deployment::docker-restart-caches-env
 #
 # Usage:
-#   scripts/praxis-up               # recreate api-server + workflow-worker + scheduler
+#   scripts/praxis-up               # recreate agent-broker + api-server + worker + scheduler
 #   scripts/praxis-up <service>...  # recreate only the named services
 #   scripts/praxis-up --verify-only # skip recreate, just run auth_doctor
 #
@@ -39,7 +39,16 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_ENV_BIN="${REPO_ROOT}/bin/praxis-compose-env"
 
-DEFAULT_SERVICES=(api-server workflow-worker scheduler)
+DEFAULT_SERVICES=(agent-broker api-server workflow-worker scheduler)
+
+service_selected() {
+  local target="$1"
+  local service
+  for service in "${SERVICES[@]}"; do
+    [[ "$service" == "$target" ]] && return 0
+  done
+  return 1
+}
 
 VERIFY_ONLY=0
 SERVICES=()
@@ -55,7 +64,7 @@ Usage:
   scripts/praxis-up --verify-only
 
 Examples:
-  scripts/praxis-up                           # default 3 services
+  scripts/praxis-up                           # default broker/API/worker/scheduler
   scripts/praxis-up workflow-worker           # just the worker
   scripts/praxis-up --verify-only             # skip recreate, run auth_doctor
 
@@ -126,17 +135,34 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
   echo "→ docker compose up -d --force-recreate ${SERVICES[*]}"
   docker compose up -d --force-recreate "${SERVICES[@]}"
 
-  echo "→ waiting for the api-server service to come back online..."
-  for _ in $(seq 1 30); do
-    if docker compose exec -T api-server python3 -c "print(1)" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 1
-  done
+  if service_selected api-server; then
+    echo "→ waiting for the api-server service to come back online..."
+    for _ in $(seq 1 30); do
+      if docker compose exec -T api-server python3 -c "print(1)" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+
+  if service_selected agent-broker; then
+    echo "→ waiting for the agent-broker service to come back online..."
+    for _ in $(seq 1 30); do
+      if docker compose exec -T agent-broker python3 -c "print(1)" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+  fi
 fi
 
 # Run the auth doctor inside the worker — that's the container that
 # actually executes LLM jobs, so its auth state is the real authority.
+if [[ $VERIFY_ONLY -eq 0 ]] && ! service_selected workflow-worker; then
+  echo "→ skipping workflow-worker auth doctor (workflow-worker was not requested)"
+  exit 0
+fi
+
 echo "→ running praxis_cli_auth_doctor inside the workflow-worker service"
 DOCTOR_OUT="$(
   docker compose exec -T workflow-worker python3 - <<'PY'

@@ -1,0 +1,55 @@
+{
+  "name": "Client Operating Model Phase 11 Build Operator Surfaces",
+  "workflow_id": "client_operating_model_build_phase_11_operator_surfaces_20260430",
+  "queue_id": "client_operating_model_build_phase_11_operator_surfaces_20260430",
+  "phase": "implementation",
+  "outcome_goal": "Implement operator inspection surfaces and bounded workflow-builder read models across census, Object Truth, source authority, simulation, verifiers, drift, cartridge status, and next safe actions.",
+  "anti_requirements": [
+    "Do not stage or commit git changes.",
+    "Do not introduce freeform workflow programming.",
+    "Do not mutate state from inspection surfaces except bounded safe actions that call existing command authority.",
+    "Do not duplicate upstream authority in UI-only state.",
+    "Do not hide stale or partial data."
+  ],
+  "jobs": [
+    {
+      "label": "phase_11_operator_surfaces_build",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "build",
+      "timeout": 3600,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "AGENTS.md",
+        "artifacts/workflow/client_operating_model/packets/phase_01_client_system_discovery/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_03_mdm_source_authority/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_07_simulation_runtime/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_08_sandbox_drift/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_09_portable_cartridge/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_10_managed_runtime/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_11_operator_surfaces/PLAN.md",
+        "Code&DBs/Workflow/surfaces/mcp/tools",
+        "Code&DBs/Workflow/surfaces/api/handlers",
+        "Code&DBs/Workflow/runtime/operations",
+        "Code&DBs/Workflow/tests/unit",
+        "docs/MCP.md",
+        "docs/CLI.md",
+        "docs/API.md"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/tools",
+        "Code&DBs/Workflow/surfaces/api/handlers",
+        "Code&DBs/Workflow/runtime/operations/queries",
+        "Code&DBs/Workflow/runtime/operator_surfaces",
+        "Code&DBs/Workflow/surfaces/mcp/cli_metadata.py",
+        "Code&DBs/Workflow/tests/unit",
+        "docs/MCP.md",
+        "docs/CLI.md",
+        "docs/API.md",
+        "docs/architecture/object-truth-trust-toolbelt",
+        "artifacts/workflow/client_operating_model/build_reports/phase_11_IMPLEMENTATION.md"
+      ],
+      "prompt": "Build Phase 11 from artifacts/workflow/client_operating_model/packets/phase_11_operator_surfaces/PLAN.md after prior wave outputs are present. Implement bounded read-oriented operator surfaces/read models for system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, and next safe actions. Expose API/MCP/CLI metadata through existing gateway/tool patterns. Keep actions suggested and bounded; no freeform workflow programming and no UI-only authority. Regenerate shared docs if surface metadata changed, then add tests for empty states, stale data, permission/partial data states where patterns exist, conflict states, and safe-action blockers. Write artifacts/workflow/client_operating_model/build_reports/phase_11_IMPLEMENTATION.md with changed files, validation, blockers, and final integration notes. Do not stage or commit."
+    }
+  ]
+}

@@ -437,15 +437,15 @@ def search_bugs_payload(
     parse_severity: BugParser = parse_bug_severity,
     parse_category: BugParser = parse_bug_category,
 ) -> dict[str, Any]:
-    title = str(body.get("title") or "").strip()
-    if not title:
-        raise ValueError("title is required for search")
+    query = str(body.get("query") or "").strip()
+    if not query:
+        raise ValueError("query is required for search")
     limit = max(1, int(body.get("limit", default_limit) or default_limit))
     include_replay_state = bool(body.get("include_replay_state", False))
     include_clusters = bool(body.get("include_clusters", True))
     filter_kwargs = _source_issue_filter_kwargs(body)
     bugs = bt.search(
-        title,
+        query,
         limit=limit,
         status=parse_status(bt_mod, body.get("status")),
         severity=parse_severity(bt_mod, body.get("severity")),

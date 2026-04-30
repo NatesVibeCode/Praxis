@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TextIO
 
 from surfaces.cli._db import cli_sync_conn
@@ -103,33 +104,39 @@ def _run_plan_generation(
             conn = None
 
         if materialize:
-            from runtime.compile_cqrs import materialize_workflow
+            from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
-            payload = materialize_workflow(
-                description,
-                conn=conn,
-                workflow_id=str(parsed.get("workflow_id") or "").strip() or None,
-                title=str(parsed.get("title") or "").strip() or None,
-                enable_llm=(
-                    bool(parsed["enable_llm"])
-                    if "enable_llm" in parsed
-                    else None
-                ),
+            op_payload: dict[str, object] = {"intent": description}
+            workflow_id = str(parsed.get("workflow_id") or "").strip()
+            title = str(parsed.get("title") or "").strip()
+            if workflow_id:
+                op_payload["workflow_id"] = workflow_id
+            if title:
+                op_payload["title"] = title
+            if "enable_llm" in parsed:
+                op_payload["enable_llm"] = bool(parsed["enable_llm"])
+            payload = execute_operation_from_subsystems(
+                SimpleNamespace(get_pg_conn=lambda: conn),
+                operation_name="compile_materialize",
+                payload=op_payload,
             )
         else:
-            from runtime.compile_cqrs import preview_compile
+            from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
-            payload = preview_compile(
-                description,
-                conn=conn,
-                match_limit=int(parsed.get("match_limit") or 5),
-            ).to_dict()
+            payload = execute_operation_from_subsystems(
+                SimpleNamespace(get_pg_conn=lambda: conn),
+                operation_name="compile_preview",
+                payload={
+                    "intent": description,
+                    "match_limit": int(parsed.get("match_limit") or 5),
+                },
+            )
     except ValueError as exc:
         stdout.write(f"error: {exc}\n")
         return 1
 
     stdout.write(_json.dumps(payload, indent=2) + "\n")
-    return 0
+    return 0 if not (isinstance(payload, dict) and payload.get("ok") is False) else 1
 
 
 def _generate_plan_command(args: list[str], *, stdout: TextIO) -> int:

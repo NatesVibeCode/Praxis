@@ -27,6 +27,8 @@ SOURCE_CODE = "code"
 SOURCE_KNOWLEDGE = "knowledge"
 SOURCE_BUGS = "bugs"
 SOURCE_RECEIPTS = "receipts"
+SOURCE_AUTHORITY_RECEIPTS = "authority_receipts"
+SOURCE_COMPLIANCE_RECEIPTS = "compliance_receipts"
 SOURCE_DECISIONS = "decisions"
 SOURCE_RESEARCH = "research"
 SOURCE_GIT = "git_history"
@@ -297,8 +299,10 @@ __all__ = [
     "SHAPE_CONTEXT",
     "SHAPE_FULL",
     "SHAPE_MATCH",
+    "SOURCE_AUTHORITY_RECEIPTS",
     "SOURCE_BUGS",
     "SOURCE_CODE",
+    "SOURCE_COMPLIANCE_RECEIPTS",
     "SOURCE_DATA_DICTIONARY",
     "SOURCE_DB",
     "SOURCE_DECISIONS",

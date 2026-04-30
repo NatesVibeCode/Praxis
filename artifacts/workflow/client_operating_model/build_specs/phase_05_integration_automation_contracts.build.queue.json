@@ -1,0 +1,45 @@
+{
+  "name": "Client Operating Model Phase 5 Build Integration Automation Contracts",
+  "workflow_id": "client_operating_model_build_phase_05_integration_automation_contracts_20260430",
+  "queue_id": "client_operating_model_build_phase_05_integration_automation_contracts_20260430",
+  "phase": "implementation",
+  "outcome_goal": "Implement typed integration action and automation contract capture: action inputs/outputs, idempotency, side effects, permissions, webhook/event semantics, rollback classes, observability, and tests.",
+  "anti_requirements": [
+    "Do not stage or commit git changes.",
+    "Do not invoke live integration actions.",
+    "Do not mark idempotency known without evidence.",
+    "Do not store secrets.",
+    "Do not regenerate shared docs/API.md, docs/CLI.md, or docs/MCP.md in this parallel chain; Phase 11 owns final shared surface docs."
+  ],
+  "jobs": [
+    {
+      "label": "phase_05_integration_automation_contracts_build",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "build",
+      "timeout": 3600,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "AGENTS.md",
+        "artifacts/workflow/client_operating_model/packets/phase_01_client_system_discovery/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_05_integration_automation_contracts/PLAN.md",
+        "Code&DBs/Workflow/runtime/integration_manifest.py",
+        "Code&DBs/Workflow/runtime/integrations",
+        "Code&DBs/Workflow/surfaces/mcp/tools/integration.py",
+        "Code&DBs/Workflow/tests/unit/test_integration_manifest.py",
+        "Code&DBs/Workflow/tests/unit/test_platform_integrations.py",
+        "Code&DBs/Workflow/tests/unit/test_webhook_integration.py"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/integrations",
+        "Code&DBs/Workflow/runtime/integration_manifest.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/integration.py",
+        "Code&DBs/Workflow/tests/unit",
+        "Code&DBs/Databases/migrations/workflow",
+        "docs/architecture/object-truth-trust-toolbelt",
+        "artifacts/workflow/client_operating_model/build_reports/phase_05_IMPLEMENTATION.md"
+      ],
+      "prompt": "Build Phase 5 from artifacts/workflow/client_operating_model/packets/phase_05_integration_automation_contracts/PLAN.md. Implement bounded typed contracts for integration actions and automation snapshots: action identity, typed input/output/error envelopes, idempotency status, side effects, retry/replay behavior, permissions/identity references, webhook/event delivery semantics, rollback class, observability/audit requirements, and typed gaps for unknowns. Keep this capture-only; do not execute live actions. Add deterministic tests with fixture contracts. Write artifacts/workflow/client_operating_model/build_reports/phase_05_IMPLEMENTATION.md with changed files, validation, blockers, and Phase 7 simulation dependencies. Do not stage or commit."
+    }
+  ]
+}

@@ -152,6 +152,8 @@ describe('Dashboard', () => {
     expect(screen.getAllByText('Healthy').length).toBeGreaterThan(0);
     expect(screen.getByText('dashboard.health')).toBeInTheDocument();
     expect(screen.getByText('$14.25')).toBeInTheDocument();
+    expect(screen.getByText('Toolbelt Review')).toBeInTheDocument();
+    expect(screen.getByText('Execution queue')).toBeInTheDocument();
 
     await waitFor(() => {
       const urls = fetchMock.mock.calls.map(([url]) => String(url));

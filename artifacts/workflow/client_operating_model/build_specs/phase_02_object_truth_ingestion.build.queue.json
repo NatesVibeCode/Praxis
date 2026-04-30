@@ -1,0 +1,50 @@
+{
+  "name": "Client Operating Model Phase 2 Build Object Truth Ingestion",
+  "workflow_id": "client_operating_model_build_phase_02_object_truth_ingestion_20260430",
+  "queue_id": "client_operating_model_build_phase_02_object_truth_ingestion_20260430",
+  "phase": "implementation",
+  "outcome_goal": "Extend existing Object Truth authority from inline evidence into client-system ingestion: system snapshots, sample capture, privacy-aware payload references, source metadata, replay fixtures, and tests.",
+  "anti_requirements": [
+    "Do not stage or commit git changes.",
+    "Do not claim Object Truth is missing; use the existing substrate.",
+    "Do not store raw client payloads without explicit privacy classification and redaction policy.",
+    "Do not execute live connector writes.",
+    "Do not regenerate shared docs/API.md, docs/CLI.md, or docs/MCP.md in this parallel chain; note docs requirements in the report."
+  ],
+  "jobs": [
+    {
+      "label": "phase_02_object_truth_ingestion_build",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "build",
+      "timeout": 3600,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "AGENTS.md",
+        "docs/architecture/object-truth-trust-toolbelt/build-plan.md",
+        "docs/architecture/object-truth-trust-toolbelt/readiness-gate-2026-04-30.md",
+        "artifacts/workflow/client_operating_model/packets/phase_01_client_system_discovery/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_02_object_truth_ingestion/PLAN.md",
+        "Code&DBs/Workflow/core/object_truth_ops.py",
+        "Code&DBs/Workflow/storage/postgres/object_truth_repository.py",
+        "Code&DBs/Workflow/runtime/operations/commands/object_truth.py",
+        "Code&DBs/Workflow/runtime/operations/queries/object_truth.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/object_truth.py",
+        "Code&DBs/Workflow/tests/unit"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/core/object_truth_ops.py",
+        "Code&DBs/Workflow/runtime/object_truth",
+        "Code&DBs/Workflow/runtime/operations/commands/object_truth.py",
+        "Code&DBs/Workflow/runtime/operations/queries/object_truth.py",
+        "Code&DBs/Workflow/storage/postgres/object_truth_repository.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/object_truth.py",
+        "Code&DBs/Workflow/tests/unit",
+        "Code&DBs/Databases/migrations/workflow",
+        "docs/architecture/object-truth-trust-toolbelt",
+        "artifacts/workflow/client_operating_model/build_reports/phase_02_IMPLEMENTATION.md"
+      ],
+      "prompt": "Build Phase 2 from artifacts/workflow/client_operating_model/packets/phase_02_object_truth_ingestion/PLAN.md, treating the existing Object Truth implementation as authority. Extend it with bounded client-system ingestion primitives: system snapshot records, sample capture records, source query/cursor/window evidence, source metadata normalization, raw payload reference and redacted preview policy, replay fixtures, and readiness/read-model updates where needed. Use gateway/CQRS patterns and migration authority when adding operations or tables. Do not apply global schema backlog. Add focused deterministic tests and write artifacts/workflow/client_operating_model/build_reports/phase_02_IMPLEMENTATION.md with changed files, validation evidence, live-registration needs if any, and blockers. Do not stage or commit."
+    }
+  ]
+}

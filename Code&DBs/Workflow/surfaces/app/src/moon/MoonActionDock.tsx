@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
-  compileDefinition,
+  materializePlan,
   refineDefinition,
   commitDefinition,
   createWorkflow,
@@ -304,19 +304,19 @@ export function MoonActionDock({
     setError(null);
     setSuccess(null);
     try {
-      const result = await compileDefinition(actionSource.trim(), {
+      const result = await materializePlan(actionSource.trim(), {
         workflowId: payload?.workflow?.id ?? workflowId,
         title: payload?.workflow?.name,
       });
       adoptBuildPayload(result);
       const createdWorkflowId = result.workflow?.id;
       if (createdWorkflowId && createdWorkflowId !== workflowId) onWorkflowCreated?.(createdWorkflowId);
-      setSuccess('Compiled');
+      setSuccess('Materialized');
       setProse('');
       setOutcomeSuccessCriteria('');
       setOutcomeFailureCriteria('');
     } catch (e: any) {
-      setError(e.message || 'Compilation failed');
+      setError(e.message || 'Materialize failed');
     } finally {
       setLoading(false);
     }
@@ -409,7 +409,7 @@ export function MoonActionDock({
       <div className="moon-action__compiler-loop">
         <div className="moon-action__compiler-head">
           <div>
-            <div className="moon-dock__section-label">Compiler loop</div>
+            <div className="moon-dock__section-label">Plan loop</div>
             <div className="moon-action__surface-note">One accepted unit per pass · draft only until saved</div>
           </div>
           <span className="moon-action__compiler-count">
@@ -426,13 +426,13 @@ export function MoonActionDock({
               <div className="moon-action__unit-summary">{progressiveUnit.summary}</div>
             )}
             <div className="moon-action__unit-meta">
-              <span>{progressiveUnit.gate_label || 'compiler accepted'}</span>
+              <span>{progressiveUnit.gate_label || 'plan accepted'}</span>
               <span>{progressiveUnit.outputs?.length ? progressiveUnit.outputs.join(', ') : 'no outputs yet'}</span>
             </div>
           </div>
         ) : (
           <div className="moon-action__unit-empty">
-            The next pass adds one node, one release gate, and a compiler receipt.
+            The next pass adds one node, one release gate, and a materialize receipt.
           </div>
         )}
         {progressiveChecks.length > 0 && (

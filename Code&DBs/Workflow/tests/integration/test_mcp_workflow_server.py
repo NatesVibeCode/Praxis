@@ -1311,7 +1311,7 @@ class TestDagBugs:
                 "discovered_in_receipt_id": "receipt-123",
             },
         )
-        found = _call_tool("praxis_bugs", {"action": "search", "title": "dispatch failure"})
+        found = _call_tool("praxis_bugs", {"action": "search", "query": "dispatch failure"})
         assert found["count"] >= 1
 
     def test_bug_stats(self):

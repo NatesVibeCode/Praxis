@@ -158,6 +158,21 @@ def _fold_shell_event(state: dict[str, Any], event_type: str, payload: dict[str,
         surface = _surface_name_for_route(initial_route)
         if surface:
             next_state["activeTabId"] = surface
+        slot_values = payload.get("initial_slot_values") if isinstance(payload.get("initial_slot_values"), dict) else {}
+        if initial_route == "route.app.workflow":
+            workflow_id = str(slot_values.get("workflow") or "").strip()
+            intent = str(slot_values.get("intent") or "").strip()
+            next_state["activeTabId"] = "build"
+            next_state["buildWorkflowId"] = workflow_id or None
+            next_state["buildIntent"] = intent or None
+            next_state["buildView"] = "moon"
+            next_state["moonRunId"] = None
+            next_state["dashboardDetail"] = None
+        elif initial_route == "route.app.run":
+            run_id = str(slot_values.get("run_id") or "").strip()
+            next_state["activeTabId"] = "build"
+            next_state["moonRunId"] = run_id or None
+            next_state["dashboardDetail"] = None
         return next_state
 
     if event_type == "surface.opened":

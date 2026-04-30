@@ -45,6 +45,39 @@ _PROVIDER_TELEMETRY_FAMILY_BY_SLUG: dict[str, str] = {
     "deepseek": "openai_chat_completions",
 }
 
+# Phase E rate-limit gate: protocol_family -> provider_slug. Used to look
+# up the right per-provider token bucket before each outbound LLM call.
+# Multiple slugs can share a family (openai_chat_completions covers
+# openai/openrouter/deepseek); the protocol_family is the wire shape, but
+# the rate-limit policy is per provider — we choose the most specific slug
+# the caller provided when available, falling back to a representative
+# slug for the family.
+_PROVIDER_SLUG_BY_PROTOCOL_FAMILY: dict[str, str] = {
+    "anthropic_messages": "anthropic",
+    "google_generate_content": "google",
+    "openai_chat_completions": "openai",
+}
+
+
+def _resolve_rate_limit_provider_slug(
+    protocol_family: str,
+    *,
+    explicit_provider_slug: str | None = None,
+) -> str | None:
+    """Pick the provider_slug used for rate-limiter bucket lookup.
+
+    Prefer an explicit slug if the caller passed one (lets shared protocol
+    families like ``openai_chat_completions`` differentiate openai vs
+    openrouter vs deepseek). Otherwise fall back to the family's
+    representative slug. Returns ``None`` when no mapping is known —
+    callers treat that as "no rate-limit gate", which is the safe v1
+    default for unmapped protocol families.
+    """
+
+    if explicit_provider_slug:
+        return explicit_provider_slug.strip().lower() or None
+    return _PROVIDER_SLUG_BY_PROTOCOL_FAMILY.get(protocol_family)
+
 _CURSOR_API_BASE = "https://api.cursor.com"
 _CURSOR_NONTERMINAL_STATUSES = frozenset({"CREATING", "RUNNING"})
 _CURSOR_SUCCESS_STATUSES = frozenset({"FINISHED"})
@@ -179,14 +212,31 @@ def _call_chat_completion_protocol(
     api_endpoint: str,
     api_key_env: str,
     api_key: str | None = None,
+    provider_slug: str | None = None,
     **_: Any,
 ) -> str:
+    # Phase E rate-limit gate is now applied inside ``adapters.llm_client.call_llm``
+    # itself, which means every direct caller of ``call_llm`` (chat_orchestrator,
+    # plan_synthesis, plan_fork_author, compiler_llm, etc.) gets the same gate.
+    # Wiring it here too would double-acquire on the calls that flow through
+    # this wrapper, so the gate-at-call_llm layer is the single source of
+    # enforcement.
+    #
+    # ``provider_slug`` lets the caller direct the gate to a specific bucket
+    # for the OpenAI-compatible families that span openai/openrouter/deepseek/
+    # together/fireworks. Default falls back to the family's representative
+    # slug; ``call_llm`` reads ``request.provider_slug`` for the bucket lookup.
+    effective_slug = (
+        provider_slug
+        or _resolve_rate_limit_provider_slug(protocol_family)
+        or protocol_family
+    )
     try:
         response = call_llm(
             LLMRequest(
                 endpoint_uri=api_endpoint,
                 api_key=_required_api_key(api_key_env, api_key=api_key),
-                provider_slug=protocol_family,
+                provider_slug=effective_slug,
                 model_slug=model,
                 messages=({"role": "user", "content": prompt},),
                 max_tokens=max_tokens,
@@ -199,6 +249,11 @@ def _call_chat_completion_protocol(
             )
         )
     except LLMClientError as exc:
+        if exc.reason_code == "llm_client.concurrency_cap_timeout":
+            raise TransportExecutionError(
+                "http_transport.rate_limit_timeout",
+                str(exc),
+            ) from exc
         raise RuntimeError(f"{exc.reason_code}: {exc}") from exc
     return response.content
 
@@ -387,6 +442,59 @@ def _call_cursor_background_agent(
     api_key: str | None = None,
     workdir: str | None = None,
     **_: Any,
+) -> str:
+    # Phase E gate: cursor background agents have a small budget per app;
+    # acquire a slot before posting the launch + status polls.
+    slot = None
+    try:
+        from runtime.provider_rate_limiter import (
+            ProviderRateLimitTimeout,
+            UnknownProviderRateLimit,
+            default_rate_limiter,
+        )
+
+        try:
+            slot = default_rate_limiter().acquire_sync(
+                "cursor",
+                timeout=max(float(timeout), 1.0),
+            )
+        except UnknownProviderRateLimit:
+            slot = None
+        except ProviderRateLimitTimeout as exc:
+            raise TransportExecutionError(
+                "http_transport.rate_limit_timeout",
+                str(exc),
+            ) from exc
+    except ImportError:
+        slot = None
+
+    try:
+        return _call_cursor_background_agent_inner(
+            prompt,
+            model=model,
+            timeout=timeout,
+            api_key_env=api_key_env,
+            api_key=api_key,
+            workdir=workdir,
+        )
+    finally:
+        if slot is not None:
+            try:
+                from runtime.provider_rate_limiter import default_rate_limiter
+
+                default_rate_limiter().release(slot)
+            except Exception:
+                pass
+
+
+def _call_cursor_background_agent_inner(
+    prompt: str,
+    *,
+    model: str,
+    timeout: int,
+    api_key_env: str,
+    api_key: str | None = None,
+    workdir: str | None = None,
 ) -> str:
     api_key = _required_api_key(api_key_env, api_key=api_key)
     repository, base_ref, branch_name = _cursor_repo_context(workdir)

@@ -1,4 +1,4 @@
--- Migration 336: Knowledge digest and structured context assembly authority.
+-- Migration 339: Knowledge digest and structured context assembly authority.
 --
 -- Condensed knowledge is a projection with input hashes, not source truth.
 -- Section/document tags are typed semantic assertions against a small tag
@@ -139,7 +139,7 @@ INSERT INTO data_dictionary_objects (
         'Knowledge tag catalog',
         'table',
         'Typed knowledge tag vocabulary. Actual section/document tag assignment is expressed through semantic_assertions using predicate tagged_as.',
-        '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb,
+        '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb,
         '{"authority_domain_ref":"authority.structured_documents"}'::jsonb
     ),
     (
@@ -147,7 +147,7 @@ INSERT INTO data_dictionary_objects (
         'Knowledge digest revisions',
         'table',
         'Append-only digest projections for condensed knowledge with input refs, input hash, output hash, recipe, status, and provenance.',
-        '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb,
+        '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb,
         '{"authority_domain_ref":"authority.structured_documents","truth_status":"projection_only"}'::jsonb
     ),
     (
@@ -155,7 +155,7 @@ INSERT INTO data_dictionary_objects (
         'Knowledge tag definition',
         'definition',
         'Definition for one typed knowledge tag. Tags are assigned by semantic assertion, not JSON metadata.',
-        '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb,
+        '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb,
         '{"authority_domain_ref":"authority.structured_documents","object_kind":"knowledge_tag"}'::jsonb
     ),
     (
@@ -163,7 +163,7 @@ INSERT INTO data_dictionary_objects (
         'Knowledge digest definition',
         'definition',
         'Definition for one condensed knowledge projection revision.',
-        '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb,
+        '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb,
         '{"authority_domain_ref":"authority.structured_documents","truth_status":"projection_only"}'::jsonb
     ),
     (
@@ -171,7 +171,7 @@ INSERT INTO data_dictionary_objects (
         'Semantic predicate tagged_as',
         'definition',
         'Typed assertion that a knowledge object carries a cataloged knowledge tag.',
-        '{"migration":"336_knowledge_digest_context_assembly.sql","semantic_predicate":"tagged_as"}'::jsonb,
+        '{"migration":"339_knowledge_digest_context_assembly.sql","semantic_predicate":"tagged_as"}'::jsonb,
         '{"authority_domain_ref":"authority.semantic_predicates"}'::jsonb
     ),
     (
@@ -179,7 +179,7 @@ INSERT INTO data_dictionary_objects (
         'Structured document knowledge digests projection',
         'projection',
         'Read model for active condensed knowledge projections used during context assembly.',
-        '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb,
+        '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb,
         '{"authority_domain_ref":"authority.structured_documents","truth_status":"projection_only"}'::jsonb
     )
 ON CONFLICT (object_kind) DO UPDATE SET
@@ -202,14 +202,14 @@ INSERT INTO data_dictionary_entries (
     origin_ref,
     metadata
 ) VALUES
-    ('definition.knowledge_tag', 'tag_ref', 'auto', 'text', 'Tag ref', 'Stable knowledge tag reference used as semantic assertion object_ref.', TRUE, 10, '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
-    ('definition.knowledge_tag', 'tag_key', 'auto', 'text', 'Tag key', 'Typed tag category.', TRUE, 20, '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
-    ('definition.knowledge_tag', 'tag_value', 'auto', 'text', 'Tag value', 'Typed tag value inside the category.', FALSE, 30, '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
-    ('definition.knowledge_digest', 'input_refs', 'auto', 'json', 'Input refs', 'Exact authority refs condensed into this digest revision.', TRUE, 10, '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
-    ('definition.knowledge_digest', 'input_hash', 'auto', 'text', 'Input hash', 'Canonical sha256 hash of the digest inputs.', TRUE, 20, '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb, '{"hash_algorithm":"sha256"}'::jsonb),
-    ('definition.knowledge_digest', 'output_hash', 'auto', 'text', 'Output hash', 'Canonical sha256 hash of the condensed output text.', TRUE, 30, '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb, '{"hash_algorithm":"sha256"}'::jsonb),
-    ('definition.knowledge_digest', 'recipe_ref', 'auto', 'text', 'Recipe ref', 'Deterministic condensation recipe identity.', TRUE, 40, '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
-    ('definition.knowledge_digest', 'recipe_version', 'auto', 'text', 'Recipe version', 'Version of the condensation recipe used for this digest.', TRUE, 50, '{"migration":"336_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb)
+    ('definition.knowledge_tag', 'tag_ref', 'auto', 'text', 'Tag ref', 'Stable knowledge tag reference used as semantic assertion object_ref.', TRUE, 10, '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
+    ('definition.knowledge_tag', 'tag_key', 'auto', 'text', 'Tag key', 'Typed tag category.', TRUE, 20, '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
+    ('definition.knowledge_tag', 'tag_value', 'auto', 'text', 'Tag value', 'Typed tag value inside the category.', FALSE, 30, '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
+    ('definition.knowledge_digest', 'input_refs', 'auto', 'json', 'Input refs', 'Exact authority refs condensed into this digest revision.', TRUE, 10, '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
+    ('definition.knowledge_digest', 'input_hash', 'auto', 'text', 'Input hash', 'Canonical sha256 hash of the digest inputs.', TRUE, 20, '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb, '{"hash_algorithm":"sha256"}'::jsonb),
+    ('definition.knowledge_digest', 'output_hash', 'auto', 'text', 'Output hash', 'Canonical sha256 hash of the condensed output text.', TRUE, 30, '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb, '{"hash_algorithm":"sha256"}'::jsonb),
+    ('definition.knowledge_digest', 'recipe_ref', 'auto', 'text', 'Recipe ref', 'Deterministic condensation recipe identity.', TRUE, 40, '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb),
+    ('definition.knowledge_digest', 'recipe_version', 'auto', 'text', 'Recipe version', 'Version of the condensation recipe used for this digest.', TRUE, 50, '{"migration":"339_knowledge_digest_context_assembly.sql"}'::jsonb, '{}'::jsonb)
 ON CONFLICT (object_kind, field_path, source) DO UPDATE SET
     field_kind = EXCLUDED.field_kind,
     label = EXCLUDED.label,

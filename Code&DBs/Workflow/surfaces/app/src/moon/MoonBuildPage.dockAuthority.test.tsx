@@ -175,7 +175,7 @@ describe('MoonBuildPage dock authority', () => {
 
     expect(screen.getByTestId('node-popout')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open Release dock' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open release checklist' }));
 
     expect(screen.getByTestId('release-tray')).toBeInTheDocument();
     expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
@@ -183,5 +183,30 @@ describe('MoonBuildPage dock authority', () => {
     fireEvent.click(screen.getByText('Webhook'));
 
     expect(screen.queryByTestId('node-popout')).not.toBeInTheDocument();
+  });
+
+  test('shows review as the primary decision and keeps release blocked in the top dock', () => {
+    moonBuildPageDockMocks.payload = {
+      ...payload,
+      binding_ledger: [
+        {
+          binding_id: 'binding-routing',
+          source_label: 'Routing authority',
+          state: 'suggested',
+          candidate_targets: [{ target_ref: 'tool:moon_mutate_field', label: 'Moon field editor' }],
+        },
+      ],
+    };
+
+    const { container } = render(<MoonBuildPage workflowId="wf-123" />);
+
+    expect(screen.getByRole('button', { name: 'Open review decisions' })).toHaveTextContent('Review 1 decision');
+    expect(screen.getByRole('button', { name: 'Open release checklist' })).toHaveTextContent('Release blocked');
+    expect(container.querySelector('.moon-halfmoon--bottom')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open release checklist' }));
+
+    expect(screen.getByText('Review readiness (1)')).toBeInTheDocument();
+    expect(screen.queryByTestId('release-tray')).not.toBeInTheDocument();
   });
 });

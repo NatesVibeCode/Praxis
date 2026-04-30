@@ -123,7 +123,21 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "261_provider_control_plane_snapshot.sql" in filenames
     assert "262_together_compile_primary.sql" in filenames
     assert "263_provider_cli_auth_mount_catalog.sql" in filenames
-    assert filenames[-1] == "263_provider_cli_auth_mount_catalog.sql"
+    assert "339_knowledge_digest_context_assembly.sql" in filenames
+    assert "340_register_compile_preview_query_operation.sql" in filenames
+    assert "341_candidate_authority_impacts.sql" in filenames
+    assert "342_candidate_preflight_records.sql" in filenames
+    assert "343_authority_supersession_registry.sql" in filenames
+    assert "344_register_authority_compose_binding_resolve.sql" in filenames
+    assert "345_workflow_jobs_authority_binding.sql" in filenames
+    assert "346_backfill_authority_supersession_registry.sql" in filenames
+    assert "347_immutable_receipts_and_transport_kind.sql" in filenames
+    assert "347_register_authority_impact_contract_verifier.sql" in filenames
+    assert "348_operation_execution_lane.sql" in filenames
+    assert "349_register_authority_impact_contract_audit_scan.sql" in filenames
+    assert "350_operation_lane_initial_classification.sql" in filenames
+    assert "351_register_authority_audit_query_operations.sql" in filenames
+    assert filenames[-1] == "351_register_authority_audit_query_operations.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -150,8 +164,6 @@ def test_together_compile_primary_declares_full_control_plane_authority() -> Non
     assert "provider_cli_profiles.together" in names
     assert "provider_lane_policy.together" in names
     assert "provider_transport_admissions.provider_transport_admission.together.llm_task" in names
-    assert "registry_native_runtime_profile_authority.together_compile_allowlist" in names
-    assert "registry_sandbox_profile_authority.TOGETHER_API_KEY" in names
     assert "provider_model_candidates.candidate.together.deepseek-v4-pro" in names
     assert "provider_model_candidates.candidate.together.deepseek-v3.2" in names
     assert "runtime_profile_admitted_routes.candidate.together.deepseek-v4-pro" in names

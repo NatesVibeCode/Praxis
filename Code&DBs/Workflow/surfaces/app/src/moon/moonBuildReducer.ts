@@ -56,6 +56,7 @@ export type MoonBuildAction =
   | { type: 'COMPILE_START' }
   | { type: 'COMPILE_SUCCESS' }
   | { type: 'COMPILE_ERROR'; error: string }
+  | { type: 'COMPILE_FALLBACK'; error: string }
   | { type: 'DRAG_START'; itemId: string; dropKind: DragDropKind }
   | { type: 'DRAG_PREVIEW'; targetId: string | null }
   | { type: 'DRAG_END' }
@@ -141,6 +142,8 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
       return { ...state, compilePhase: 'idle', compileProse: '', advanceQueued: true, emptyMode: null };
     case 'COMPILE_ERROR':
       return { ...state, compilePhase: 'error', compileError: action.error };
+    case 'COMPILE_FALLBACK':
+      return { ...state, compilePhase: 'error', compileError: action.error, emptyMode: 'trigger-picker' as const };
     case 'DRAG_START':
       return { ...state, dragItemId: action.itemId, dragDropKind: action.dropKind };
     case 'DRAG_PREVIEW':

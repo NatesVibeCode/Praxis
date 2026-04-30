@@ -112,6 +112,15 @@ interface WorkflowSection {
   tone: 'live' | 'saved' | 'draft';
 }
 
+interface ToolbeltReviewItem {
+  id: string;
+  tone: 'neutral' | 'healthy' | 'warning' | 'danger';
+  title: string;
+  detail: string;
+  meta: string;
+  onClick?: () => void;
+}
+
 function useDashboardSnapshot() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -171,6 +180,12 @@ function scheduleCopy(wf: Workflow): string {
   if (wf.trigger?.cron_expression) return wf.trigger.cron_expression;
   if (wf.trigger?.enabled) return wf.trigger.event_type || 'Live trigger enabled';
   return 'Manual launch';
+}
+
+function runDisplayName(run: RecentRun): string {
+  return (run.spec_name || run.run_id.slice(0, 12))
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (character: string) => character.toUpperCase());
 }
 
 function WorkflowCard({
@@ -535,6 +550,63 @@ export function Dashboard({
       .map((workflowId) => workflowById.get(workflowId))
       .filter((workflow): workflow is Workflow => workflow !== undefined),
   }));
+  const draftWorkflows = workflowSections.find((section) => section.key === 'draft')?.workflows ?? [];
+  const failedRuns = visibleRuns.filter((run) => run.status === 'failed' || run.status === 'cancelled');
+  const toolbeltReviewItems: ToolbeltReviewItem[] = [];
+
+  failedRuns.slice(0, 2).forEach((run) => {
+    toolbeltReviewItems.push({
+      id: `run-${run.run_id}`,
+      tone: 'danger',
+      title: runDisplayName(run),
+      detail: `${run.status} - ${run.total_jobs > 0 ? `${run.completed_jobs}/${run.total_jobs} jobs` : 'no job receipts yet'}`,
+      meta: run.created_at ? timeAgo(run.created_at) : 'queued',
+      onClick: () => onViewRun(run.run_id),
+    });
+  });
+
+  if (health.tone === 'warning' || health.tone === 'danger') {
+    toolbeltReviewItems.push({
+      id: 'health',
+      tone: health.tone,
+      title: 'Platform state',
+      detail: health.copy,
+      meta: health.label,
+      onClick: onOpenCosts,
+    });
+  }
+
+  if (summary.queue.depth > 0 || summary.active_runs > 0) {
+    toolbeltReviewItems.push({
+      id: 'queue',
+      tone: summary.queue.status === 'critical' ? 'danger' : summary.queue.status === 'warning' ? 'warning' : 'neutral',
+      title: 'Execution queue',
+      detail: `${summary.queue.pending} pending - ${summary.queue.ready} ready - ${summary.queue.running} running`,
+      meta: `${summary.queue.depth} waiting`,
+      onClick: onChat,
+    });
+  }
+
+  draftWorkflows.slice(0, Math.max(0, 5 - toolbeltReviewItems.length)).forEach((workflow) => {
+    toolbeltReviewItems.push({
+      id: `draft-${workflow.id}`,
+      tone: 'warning',
+      title: workflow.name,
+      detail: workflow.description || 'Draft lane waiting for a contract, verifier, or promotion decision.',
+      meta: 'draft',
+      onClick: () => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id),
+    });
+  });
+
+  if (!loading && toolbeltReviewItems.length === 0) {
+    toolbeltReviewItems.push({
+      id: 'clear',
+      tone: 'healthy',
+      title: 'No review pressure',
+      detail: 'Current snapshot has no failed runs, health alerts, queue backlog, or draft lanes.',
+      meta: 'ready',
+    });
+  }
 
   return (
     <div className="dash-page">
@@ -853,6 +925,48 @@ export function Dashboard({
             </div>
 
             <aside className="dash-board__rail">
+              <section className="dash-panel dash-toolbelt-panel">
+                <div className="dash-panel__header">
+                  <div>
+                    <div className="dash-panel__eyebrow">Moon</div>
+                    <h2 className="dash-panel__title">Toolbelt Review</h2>
+                  </div>
+                  <span className="dash-review-count">{loading ? '...' : toolbeltReviewItems.length}</span>
+                </div>
+
+                <div className="dash-review-list">
+                  {toolbeltReviewItems.map((item) => {
+                    const body = (
+                      <>
+                        <span className={`dash-review-item__dot dash-review-item__dot--${item.tone}`} />
+                        <span className="dash-review-item__body">
+                          <strong>{item.title}</strong>
+                          <span>{item.detail}</span>
+                        </span>
+                        <em>{item.meta}</em>
+                      </>
+                    );
+                    if (item.onClick) {
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="dash-review-item"
+                          onClick={item.onClick}
+                        >
+                          {body}
+                        </button>
+                      );
+                    }
+                    return (
+                      <div key={item.id} className="dash-review-item dash-review-item--static">
+                        {body}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+
               <section className="dash-panel">
                 <div className="dash-panel__header">
                   <div>
@@ -873,9 +987,7 @@ export function Dashboard({
                         <div className={`dash-run__status dash-run__status--${run.status}`} />
                         <div className="dash-run__body">
                           <div className="dash-run__title">
-                            {(run.spec_name || run.run_id.slice(0, 12))
-                              .replace(/[_-]+/g, ' ')
-                              .replace(/\b\w/g, (character: string) => character.toUpperCase())}
+                            {runDisplayName(run)}
                           </div>
                           <div className="dash-run__meta">
                             <span>{run.status}</span>

@@ -35,3 +35,12 @@ psycopg2-binary==2.9.11
 # Embedding and semantic retrieval support
 numpy==2.4.4
 sentence-transformers==5.3.0
+
+# scopes: api_server,workflow_worker,scheduler,runtime
+# Verifier-backed bug-tracker proof surface. The bug-resolve handler
+# dispatches verifier.job.python.pytest_file by spawning
+# `python3 -m pytest -xvs {path}` via the verification_registry
+# argv_template. Without pytest in the runtime container, every
+# pytest_file verifier run errors with `No module named pytest`,
+# blocking FIXED transitions for any pytest-backed bug. (BUG-589A4D78.)
+pytest==8.4.2

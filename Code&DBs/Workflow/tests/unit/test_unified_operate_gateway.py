@@ -74,18 +74,19 @@ class _FakeGatewayConn:
                 "output_hash": args[9],
                 "idempotency_key": args[10],
                 "caller_ref": args[11],
-                "execution_status": args[12],
-                "result_status": args[13],
-                "error_code": args[14],
-                "error_detail": args[15],
-                "event_ids": args[16],
-                "projection_freshness": args[17],
-                "result_payload": args[18],
-                "duration_ms": args[19],
-                "binding_revision": args[20],
-                "decision_ref": args[21],
-                "cause_receipt_id": args[22],
-                "correlation_id": args[23],
+                "transport_kind": args[12],
+                "execution_status": args[13],
+                "result_status": args[14],
+                "error_code": args[15],
+                "error_detail": args[16],
+                "event_ids": args[17],
+                "projection_freshness": args[18],
+                "result_payload": args[19],
+                "duration_ms": args[20],
+                "binding_revision": args[21],
+                "decision_ref": args[22],
+                "cause_receipt_id": args[23],
+                "correlation_id": args[24],
             }
         return []
 
@@ -227,31 +228,8 @@ def test_operate_endpoint_uses_idempotency_header_when_body_key_absent(monkeypat
     assert calls == [("operator.echo", "idem-header-456")]
 
 
-def test_compile_materialize_legacy_alias_delegates_through_gateway(monkeypatch) -> None:
-    calls: list[tuple[str, str, dict[str, Any], str | None, str | None]] = []
+def test_compile_materialize_legacy_alias_returns_structured_deprecation(monkeypatch) -> None:
     monkeypatch.setattr(rest, "mount_capabilities", lambda _app: None)
-
-    def _fake_execute(body, *, header_idempotency_key=None, header_workflow_token=None):
-        calls.append(
-            (
-                body.operation,
-                body.mode,
-                body.input,
-                header_idempotency_key,
-                header_workflow_token,
-            )
-        )
-        return 200, {
-            "ok": True,
-            "operation": body.operation,
-            "result": {"workflow_id": "wf_compile_123"},
-            "operation_receipt": {
-                "operation_name": body.operation,
-                "idempotency_key": header_idempotency_key,
-            },
-        }
-
-    monkeypatch.setattr(rest, "execute_operate_request", _fake_execute)
 
     with TestClient(rest.app) as client:
         response = client.post(
@@ -267,24 +245,12 @@ def test_compile_materialize_legacy_alias_delegates_through_gateway(monkeypatch)
             },
         )
 
-    assert response.status_code == 200
+    assert response.status_code == 410
     payload = response.json()
-    assert payload["ok"] is True
-    assert payload["operation"] == "compile_materialize"
-    assert payload["result"]["workflow_id"] == "wf_compile_123"
-    assert calls == [
-        (
-            "compile_materialize",
-            "command",
-            {
-                "intent": "Build a Gmail review workflow",
-                "title": "Inbox review",
-                "match_limit": 7,
-            },
-            "idem-compile-1",
-            "wf-token-1",
-        )
-    ]
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "compile_materialize.legacy_route_deprecated"
+    assert payload["migration_hint"] == "/api/compile/materialize"
+    assert payload["operation_name"] == "compile_materialize"
 
 
 def test_workflow_operate_catalog_cli_uses_existing_gateway_catalog(monkeypatch) -> None:

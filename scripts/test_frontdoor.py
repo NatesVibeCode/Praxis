@@ -20,7 +20,7 @@ FOCUS_FILE = CACHE_DIR / "focused_suite.json"
 DEFAULT_SUITE = "workflow_first_slice"
 USAGE = (
     "usage: ./scripts/test.sh "
-    "suite list|suite focus|plan|check-affected|validate|selftest|moon-style-lint|python-dependency-audit"
+    "suite list|suite focus|plan|check-affected|validate|selftest|moon-style-lint|python-dependency-audit|compile-delivery-probe"
 )
 
 SUITE_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -311,6 +311,7 @@ def _help_payload() -> dict[str, Any]:
                 "selftest",
                 "moon-style-lint",
                 "python-dependency-audit",
+                "compile-delivery-probe",
             ],
         },
         "errors": [],
@@ -618,6 +619,33 @@ def _python_dependency_audit_payload(args: list[str]) -> dict[str, Any]:
     }
 
 
+def _compile_delivery_probe_payload(args: list[str]) -> dict[str, Any]:
+    mode = "deterministic"
+    for arg in args:
+        if arg.startswith("--mode="):
+            mode = arg.split("=", 1)[1]
+            continue
+        return {
+            "ok": False,
+            "results": {},
+            "errors": [f"unknown compile-delivery-probe argument: {arg}"],
+            "warnings": [],
+        }
+
+    probe_path = REPO_ROOT / "scripts" / "probes" / "compile_delivery_probe.py"
+    spec = importlib.util.spec_from_file_location("compile_delivery_probe", probe_path)
+    if spec is None or spec.loader is None:
+        return {
+            "ok": False,
+            "results": {"probe_path": str(probe_path)},
+            "errors": ["compile delivery probe could not be loaded"],
+            "warnings": [],
+        }
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.run_probe(mode=mode)
+
+
 def _dispatch(argv: list[str]) -> dict[str, Any]:
     if not argv:
         return {
@@ -673,6 +701,8 @@ def _dispatch(argv: list[str]) -> dict[str, Any]:
         return _moon_style_lint_payload(tail)
     if command == "python-dependency-audit":
         return _python_dependency_audit_payload(tail)
+    if command == "compile-delivery-probe":
+        return _compile_delivery_probe_payload(tail)
 
     return {
         "ok": False,

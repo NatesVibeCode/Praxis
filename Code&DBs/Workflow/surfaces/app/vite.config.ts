@@ -374,19 +374,6 @@ export default defineConfig(async ({ command }) => {
             if (id.includes('/src/modules/composite/')) {
               return 'modules-composite';
             }
-            if (
-              id.includes('/src/grid/')
-              || id.includes('/src/canvas/')
-              || id.includes('/src/hooks/')
-              || id.includes('/src/world')
-              || id.includes('/src/modules/moduleRegistry')
-              || id.includes('/src/modules/types')
-            ) {
-              return 'editor-grid-core';
-            }
-            if (id.includes('/src/dashboard/')) {
-              return 'dashboard';
-            }
             if (id.includes('/src/workspace/')) {
               return 'workspace';
             }

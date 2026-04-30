@@ -422,16 +422,21 @@
   margin-bottom: 10px;
 }
 
-.strategy-console__model-picker {
+.strategy-console__model-lock {
   min-width: 0;
   flex: 1 1 auto;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+  min-height: 32px;
+  border: 1px solid rgba(243, 238, 228, 0.12);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 0 8px;
 }
 
-.strategy-console__model-picker span {
+.strategy-console__model-lock span {
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 9px;
@@ -439,16 +444,23 @@
   text-transform: uppercase;
 }
 
-.strategy-console__model-picker select {
-  width: 100%;
-  min-height: 32px;
-  border: 1px solid rgba(243, 238, 228, 0.12);
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.035);
+.strategy-console__model-lock strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text);
-  padding: 0 8px;
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+.strategy-console__model-lock em {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .strategy-console__file-button {

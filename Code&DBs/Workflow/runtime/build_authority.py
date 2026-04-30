@@ -764,6 +764,20 @@ def _build_graph(
                 "outputs": _string_list(phase.get("outputs")),
                 "persistence_targets": persistence_targets,
                 "handoff_target": _as_text(phase.get("handoff_target")) or None,
+                "task_type": _as_text(phase.get("task_type")) or None,
+                "agent": _as_text(phase.get("agent")) or None,
+                "capabilities": _string_list(phase.get("capabilities")),
+                "write_scope": _string_list(phase.get("write_scope")),
+                "agent_tool_plan": (
+                    _json_clone(phase.get("agent_tool_plan"))
+                    if isinstance(phase.get("agent_tool_plan"), dict)
+                    else {}
+                ),
+                "completion_contract": (
+                    _json_clone(phase.get("completion_contract"))
+                    if isinstance(phase.get("completion_contract"), dict)
+                    else {}
+                ),
                 "source_block_ids": _string_list(step.get("source_block_ids")),
                 "binding_ids": sorted(bindings_by_node.get(step_id, [])),
                 "status": node_status,

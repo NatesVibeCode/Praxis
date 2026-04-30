@@ -25,23 +25,55 @@
             "module": "search-panel",
             "span": "2x1",
             "config": {
-              "placeholder": "Find records, entities, or artifacts"
+              "placeholder": "Find records, entities, or artifacts",
+              "objectType": "doc_type_document",
+              "sourceSelection": "active_source_option",
+              "sourceBindings": {
+                "workspace_records": {
+                  "objectType": "doc_type_document",
+                  "placeholder": "Find workspace records, entities, or artifacts"
+                },
+                "connected_crm": {
+                  "disabledMessage": "Connected CRM is preview-only until a live integration is attached."
+                },
+                "external_api": {
+                  "disabledMessage": "External API requires setup before it can return entities."
+                }
+              },
+              "publishQuery": "entity_search_query",
+              "publishSelection": "entity"
             }
           },
           "A3": {
-            "module": "data-table",
-            "span": "2x2",
-            "config": {
-              "objectType": "task",
-              "columns": []
-            }
-          },
-          "C1": {
             "module": "key-value",
-            "span": "2x2",
+            "span": "2x1",
             "config": {
               "title": "Selection Details",
-              "subscribeSelection": "task"
+              "subscribeSelection": "entity"
+            }
+          },
+          "B1": {
+            "module": "data-table",
+            "span": "4x3",
+            "config": {
+              "objectType": "doc_type_document",
+              "sourceSelection": "active_source_option",
+              "sourceBindings": {
+                "workspace_records": {
+                  "objectType": "doc_type_document",
+                  "emptyMessage": "No workspace records yet",
+                  "emptyDetail": "The source is attached; the workspace object store returned no records."
+                },
+                "connected_crm": {
+                  "disabledMessage": "Connected CRM is preview-only until a live integration is attached."
+                },
+                "external_api": {
+                  "disabledMessage": "External API requires setup before it can return entities."
+                }
+              },
+              "publishSelection": "entity",
+              "searchQuery": "entity_search_query",
+              "columns": []
             }
           }
         }

@@ -23,7 +23,8 @@ interface ManifestRow {
  * architecture-policy::surface-catalog::surface-composition-cqrs-direction
  * debt that called seedBundles.ts a parallel registry. Seeds now live in
  * app_manifests with status='seed' (migration 241), so adding a new seed is
- * a row UPSERT, not a code edit.
+ * a row UPSERT, not a code edit. This hook opts into manifest payloads because
+ * it clones the actual bundle; normal catalog listings stay compact.
  */
 export function useSeedBundles(): {
   seeds: SeedBundleEntry[];
@@ -42,7 +43,7 @@ export function useSeedBundles(): {
     const load = async () => {
       try {
         const payload = await fetchJson<{ manifests?: ManifestRow[] }>(
-          '/api/manifests?status=seed&limit=20',
+          '/api/manifests?status=seed&limit=20&include_manifest=true',
           {},
           { signal: controller.signal },
         );

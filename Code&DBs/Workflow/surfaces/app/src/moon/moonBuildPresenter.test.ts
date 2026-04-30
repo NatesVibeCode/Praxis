@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { computeLineage, presentBuild } from './moonBuildPresenter';
 import type { BuildPayload, BuildNode, BuildEdge } from '../shared/types';
+import { withBuildEdgeRelease } from '../shared/edgeRelease';
 
 function makeNode(id: string, overrides: Partial<BuildNode> = {}): BuildNode {
   return { node_id: id, kind: 'step', title: id, route: '', status: '', summary: '', ...overrides };
@@ -93,5 +94,143 @@ describe('presentBuild focus-lineage', () => {
     const vm = presentBuild(payload, 'not-in-graph', null);
     expect(vm.focusActive).toBe(false);
     for (const n of vm.nodes) expect(n.inLineage).toBe(true);
+  });
+
+  test('keeps artifact state nodes out of the human review map', () => {
+    const artifactPayload = makePayload(
+      [
+        makeNode('step-1', { title: 'Plan discovery' }),
+        makeNode('step-2', { title: 'Search and retrieve' }),
+        makeNode('artifact-1', { kind: 'state', title: 'evidence_pack.json' }),
+      ],
+      [
+        makeEdge('step-1', 'step-2'),
+        makeEdge('step-1', 'artifact-1'),
+      ],
+    );
+
+    const vm = presentBuild(artifactPayload, null, null);
+
+    expect(vm.nodes.map(node => node.id)).toEqual(['step-1', 'step-2']);
+    expect(vm.edges.map(edge => `${edge.from}->${edge.to}`)).toEqual(['step-1->step-2']);
+    expect(vm.totalNodes).toBe(2);
+  });
+
+  test('keeps gate review nodes out of the main workflow map', () => {
+    const gatePayload = makePayload(
+      [
+        makeNode('step-1', { title: 'Plan discovery' }),
+        makeNode('gate-1', { kind: 'gate', title: 'Resolve input text' }),
+        makeNode('step-2', { title: 'Search and retrieve' }),
+      ],
+      [
+        makeEdge('step-1', 'gate-1'),
+        makeEdge('gate-1', 'step-2'),
+      ],
+    );
+
+    const vm = presentBuild(gatePayload, null, null);
+
+    expect(vm.nodes.map(node => node.id)).toEqual(['step-1', 'step-2']);
+    expect(vm.edges.map(edge => `${edge.from}->${edge.to}`)).toEqual(['step-1->step-2']);
+    expect(vm.totalNodes).toBe(2);
+  });
+
+  test('keeps a branched graph as branches instead of flattening every node into the spine', () => {
+    const branchPayload = makePayload(
+      [
+        makeNode('start', { title: 'Normalize app' }),
+        makeNode('decide', { title: 'Evaluate fit' }),
+        makeNode('build', { title: 'Build integration' }),
+        makeNode('manual', { title: 'Manual review' }),
+        makeNode('finish', { title: 'Package result' }),
+      ],
+      [
+        makeEdge('start', 'decide'),
+        withBuildEdgeRelease(makeEdge('decide', 'build'), {
+          family: 'conditional',
+          edge_type: 'conditional',
+          branch_reason: 'then',
+          label: 'Then',
+        }),
+        withBuildEdgeRelease(makeEdge('decide', 'manual'), {
+          family: 'conditional',
+          edge_type: 'conditional',
+          branch_reason: 'else',
+          label: 'Else',
+        }),
+        makeEdge('build', 'finish'),
+        makeEdge('manual', 'finish'),
+      ],
+    );
+
+    const vm = presentBuild(branchPayload, null, null);
+
+    expect(vm.dominantPath).toEqual(['start', 'decide', 'build', 'finish']);
+    expect(vm.nodes.find(node => node.id === 'start')!.y).toBeLessThan(vm.nodes.find(node => node.id === 'decide')!.y);
+    expect(vm.nodes.find(node => node.id === 'decide')!.y).toBeLessThan(vm.nodes.find(node => node.id === 'finish')!.y);
+    expect(vm.nodes.find(node => node.id === 'build')!.x).not.toBe(vm.nodes.find(node => node.id === 'manual')!.x);
+    expect(vm.nodes.find(node => node.id === 'manual')?.dominantPathIndex).toBe(-1);
+    expect(vm.edges.find(edge => edge.from === 'decide' && edge.to === 'build')?.isOnDominantPath).toBe(true);
+    expect(vm.edges.find(edge => edge.from === 'decide' && edge.to === 'manual')?.isOnDominantPath).toBe(false);
+    expect(vm.branchBoard).toHaveLength(1);
+    expect(vm.branchBoard[0].sourceTitle).toBe('Evaluate fit');
+    expect(vm.branchBoard[0].lanes.map(lane => lane.label)).toEqual(['Then', 'Else']);
+    expect(vm.branchBoard[0].lanes[0].nodeIds).toEqual(['build']);
+    expect(vm.branchBoard[0].lanes[0].terminal.label).toBe('Rejoins at Package result');
+    expect(vm.branchBoard[0].lanes[1].nodeIds).toEqual(['manual']);
+  });
+
+  test('builds a review board for nested multi-step branch paths', () => {
+    const branchPayload = makePayload(
+      [
+        makeNode('start', { title: 'Normalize app' }),
+        makeNode('decide', { title: 'Evaluate fit' }),
+        makeNode('auto', { title: 'Prepare build lane' }),
+        makeNode('manual', { title: 'Manual approval' }),
+        makeNode('route', { title: 'Route integration path' }),
+        makeNode('docs', { title: 'Retrieve docs' }),
+        makeNode('api', { title: 'Inspect API' }),
+        makeNode('finish', { title: 'Package result' }),
+      ],
+      [
+        makeEdge('start', 'decide'),
+        withBuildEdgeRelease(makeEdge('decide', 'auto'), {
+          family: 'conditional',
+          edge_type: 'conditional',
+          branch_reason: 'then',
+          label: 'Then',
+        }),
+        withBuildEdgeRelease(makeEdge('decide', 'manual'), {
+          family: 'conditional',
+          edge_type: 'conditional',
+          branch_reason: 'else',
+          label: 'Else',
+        }),
+        makeEdge('auto', 'route'),
+        withBuildEdgeRelease(makeEdge('route', 'docs'), {
+          family: 'conditional',
+          edge_type: 'conditional',
+          label: 'Docs',
+        }),
+        withBuildEdgeRelease(makeEdge('route', 'api'), {
+          family: 'conditional',
+          edge_type: 'conditional',
+          label: 'API',
+        }),
+        makeEdge('docs', 'finish'),
+        makeEdge('api', 'finish'),
+        makeEdge('manual', 'finish'),
+      ],
+    );
+
+    const vm = presentBuild(branchPayload, null, null);
+
+    expect(vm.branchBoard).toHaveLength(2);
+    expect(vm.branchBoard.map(split => split.sourceTitle)).toEqual(['Evaluate fit', 'Route integration path']);
+    expect(vm.branchBoard[0].lanes[0].nodeIds).toEqual(['auto', 'route']);
+    expect(vm.branchBoard[0].lanes[0].terminal.label).toBe('Next split at Route integration path');
+    expect(vm.branchBoard[1].lanes.map(lane => lane.label)).toEqual(['API', 'Docs']);
+    expect(vm.branchBoard[1].lanes[0].terminal.label).toBe('Rejoins at Package result');
   });
 });

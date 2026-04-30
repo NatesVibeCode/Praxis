@@ -231,8 +231,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  File a new bug:    praxis_bugs(action='file', title='TaskAssembler fails on empty manifests', "
                 "severity='P1', description='...')\n"
                 "  Fast dedupe:       praxis_bugs(action='duplicate_check', title_like='routing timeout')\n"
-                "  Search for a bug:  praxis_bugs(action='search', title='routing')\n"
-                "  Search open bugs:  praxis_bugs(action='search', title='timeout', status='OPEN')\n"
+                "  Search for a bug:  praxis_bugs(action='search', query='routing')\n"
+                "  Search open bugs:  praxis_bugs(action='search', query='timeout', status='OPEN')\n"
                 "  Packet for a bug:  praxis_bugs(action='packet', bug_id='BUG-1234')\n"
                 "  History for bug:   praxis_bugs(action='history', bug_id='BUG-1234')\n"
                 "  Replay a bug:      praxis_bugs(action='replay', bug_id='BUG-1234')\n"
@@ -257,7 +257,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "enum": ["list", "file", "search", "duplicate_check", "stats", "show", "packet", "history", "replay", "backfill_replay", "attach_evidence", "patch_resume", "resolve"],
                     },
                     "bug_id": {"type": "string", "description": "Bug id (for resolve)."},
-                    "title": {"type": "string", "description": "Bug title (for file/search)."},
+                    "title": {"type": "string", "description": "Bug title (for file)."},
+                    "query": {"type": "string", "description": "Search query string (for search). Postgres FTS-ranked, optionally blended with vector similarity."},
                     "severity": {"type": "string", "description": "Bug severity: P0, P1, P2, P3.", "default": "P2"},
                     "status": {
                         "type": "string",

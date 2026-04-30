@@ -1,0 +1,32 @@
+{
+  "name": "Client Operating Model Phase 7 Simulation Runtime",
+  "workflow_id": "client_operating_model_phase_07_simulation_runtime_20260430",
+  "queue_id": "client_operating_model_phase_07_simulation_runtime_20260430",
+  "phase": "architecture",
+  "outcome_goal": "Produce the simulation runtime, automation firing, and verifier implementation packet.",
+  "anti_requirements": [
+    "Do not edit production code.",
+    "Do not declare simulation success without verifier proof.",
+    "Do not hide automation ambiguity in prose."
+  ],
+  "jobs": [
+    {
+      "label": "phase_07_simulation_runtime_packet",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "architecture",
+      "timeout": 900,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "docs/architecture/object-truth-trust-toolbelt/task-types-and-contracts.md",
+        "Code&DBs/Workflow/runtime/verifier_builtins.py",
+        "artifacts/workflow/client_operating_model/packets/phase_05_integration_automation_contracts/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_06_virtual_lab_state/PLAN.md"
+      ],
+      "write_scope": [
+        "artifacts/workflow/client_operating_model/packets/phase_07_simulation_runtime/PLAN.md"
+      ],
+      "prompt": "Write artifacts/workflow/client_operating_model/packets/phase_07_simulation_runtime/PLAN.md. Produce a bounded build packet for Phase 7: Simulation Runtime, Automation Firing, and Verifiers. Cover execution of simulated actions, automation rule evaluation, state transition emission, assertion/verifier contracts, typed gaps, promotion blockers, tests, and validation. Do not edit code."
+    }
+  ]
+}

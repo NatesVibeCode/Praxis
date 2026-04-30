@@ -1,18 +1,18 @@
 import React, { useReducer, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useBuildPayload } from '../shared/hooks/useBuildPayload';
 import { useObjectTypes } from '../shared/hooks/useObjectTypes';
-import { compileDefinition, previewCompile } from '../shared/buildController';
+import { materializePlan, previewCompile } from '../shared/buildController';
 import { presentBuild } from './moonBuildPresenter';
-import type { OrbitNode, OrbitEdge, RunJobStatus } from './moonBuildPresenter';
+import type { MoonBuildViewModel, OrbitNode, OrbitEdge, RunJobStatus } from './moonBuildPresenter';
 import { presentRun } from './moonRunPresenter';
 import { useLiveRunSnapshot } from '../dashboard/useLiveRunSnapshot';
 import { moonBuildReducer, initialMoonBuildState } from './moonBuildReducer';
 import { MoonGlyph } from './MoonGlyph';
 import { MoonPopout } from './MoonPopout';
-import { MoonNodeDetail, type AuthorityActionMeta } from './MoonNodeDetail';
+import { MoonNodeDetail, type AuthorityActionMeta, type WorkflowInspectorSummary } from './MoonNodeDetail';
 import { MoonActionDock } from './MoonActionDock';
 import { MoonReleaseTray } from './MoonReleaseTray';
-import { MoonBindingReviewQueue } from './MoonBindingReviewQueue';
+import { MoonBindingReviewQueue, reviewReadinessCount } from './MoonBindingReviewQueue';
 import { MoonRunPanel } from './MoonRunPanel';
 import { MoonRunOverlay } from './MoonRunOverlay';
 import { MoonDragGhost } from './MoonDragGhost';
@@ -88,55 +88,361 @@ function readMoonGlowProfile(): MoonGlowProfile {
   }
 }
 
-function materializeReviewPrompt(workflowId: string): string {
+function buildMaterializeFallbackPrompt(params: {
+  intent: string;
+  workflowId?: string | null;
+  reason: string;
+  graphSummary?: Record<string, unknown> | null;
+}): string {
   return [
-    'Materialize has handed you the final workflow build pass.',
-    `Workflow id: ${workflowId}`,
-    'Open with: "I have the final pass from materialize. Let me make a quick review pass and I will share the cleaned version in a second."',
-    'Then call moon_get_build before making any claim about the graph.',
-    'Review nodes, edges, gates, contracts, unresolved issues, and approval/readiness state.',
-    'If you find small safe cleanup edits, apply them with moon_mutate_field and then call moon_get_build again.',
+    "Open with: \"I'm looking at this right now. Let me see what I can do.\"",
+    'Materialize did not produce a usable agent-authored workflow graph, so you own the recovery pass.',
+    params.workflowId ? `Workflow id: ${params.workflowId}` : 'No durable workflow id was confirmed.',
+    `Blocker: ${params.reason}`,
+    params.graphSummary ? `Graph summary: ${JSON.stringify(params.graphSummary)}` : '',
+    'Original operator intent:',
+    params.intent,
+    '',
+    'Do not apply a generic workflow.',
+    'If a workflow id exists, first call moon_get_build before making any claim about the graph.',
+    'If you can repair the draft, use moon_mutate_field one field of one node at a time.',
+    'Use one repeated tool lane per packet; do not mix unrelated tools inside a single packet.',
+    'If the draft cannot be repaired, say the exact blocker and what Nate can approve manually.',
     'Do not launch the workflow unless the user explicitly asks.',
-    'Finish with a concise summary of what changed, what is ready, and what still needs human approval.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
-// Half-moon dock invitation
-function HalfMoon({ position, label, onClick }: {
-  position: 'top' | 'left' | 'right' | 'bottom'; label: string; onClick: () => void;
-}) {
-  return (
-    <button
-      className={`moon-halfmoon moon-halfmoon--${position}`}
-      onClick={onClick}
-      aria-label={`Open ${label} dock`}
-    >
-      <span className="moon-halfmoon__text">{label}</span>
-    </button>
-  );
+function recordFromUnknown(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, any>
+    : {};
+}
+
+function materializeFailureInfo(error: unknown): {
+  message: string;
+  workflowId: string | null;
+  receiptId: string | null;
+  correlationId: string | null;
+  graphSummary: Record<string, unknown> | null;
+} {
+  const fallbackMessage = error instanceof Error ? error.message : 'Materialize failed';
+  const root = recordFromUnknown((error as { response?: unknown })?.response ?? (error as { body?: unknown })?.body);
+  const details = recordFromUnknown(root.details ?? root.detail ?? root.result ?? root.payload);
+  const operationReceipt = recordFromUnknown(root.operation_receipt ?? details.operation_receipt);
+  const graphSummary = recordFromUnknown(root.graph_summary ?? details.graph_summary);
+  const workflowId = String(root.workflow_id || details.workflow_id || graphSummary.workflow_id || '').trim() || null;
+  const receiptId = String(
+    operationReceipt.receipt_id
+    || root.operation_receipt_id
+    || details.operation_receipt_id
+    || root.receipt_id
+    || details.receipt_id
+    || '',
+  ).trim() || null;
+  const correlationId = String(
+    operationReceipt.correlation_id
+    || root.correlation_id
+    || details.correlation_id
+    || '',
+  ).trim() || null;
+  const reason = String(root.reason_code || details.reason_code || root.error_code || details.error_code || '').trim();
+  const message = reason
+    ? `${fallbackMessage} (${reason})`
+    : fallbackMessage;
+  return {
+    message,
+    workflowId,
+    receiptId,
+    correlationId,
+    graphSummary: Object.keys(graphSummary).length > 0 ? graphSummary : null,
+  };
 }
 
 function DockToggleButton({
   active,
+  ariaLabel,
   label,
   onClick,
+  tone = 'default',
 }: {
   active: boolean;
+  ariaLabel?: string;
   label: string;
   onClick: () => void;
+  tone?: 'default' | 'warning' | 'blocked' | 'ready';
 }) {
+  const toneClass = tone === 'default' ? '' : ` moon-center__dock-btn--${tone}`;
   return (
     <button
       type="button"
-      className={`moon-center__dock-btn${active ? ' moon-center__dock-btn--active' : ''}`}
+      className={`moon-center__dock-btn${toneClass}${active ? ' moon-center__dock-btn--active' : ''}`}
       data-keep-edge-menu-open="true"
-      aria-label={`Open ${label} dock`}
+      aria-label={ariaLabel || `Open ${label} dock`}
       aria-pressed={active}
       onClick={onClick}
     >
       <span className="moon-center__dock-btn-label">{label}</span>
     </button>
   );
+}
+
+function shortReadableRef(value: unknown): string | null {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return null;
+  if (raw.length <= 12) return raw;
+  return `${raw.slice(0, 8)}...${raw.slice(-4)}`;
+}
+
+function isMechanicalDisplayName(value: string, nodeId?: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+  if (nodeId && normalized === nodeId.trim().toLowerCase()) return true;
+  return /^(node|step|task|stage|untitled)[-_ ]?\d*$/i.test(normalized)
+    || /^wf[_-]/i.test(normalized)
+    || /^[a-f0-9]{8,}$/i.test(normalized);
+}
+
+function compactWorkflowLabel(value: string): string {
+  const cleaned = value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return cleaned;
+  const replacements: Array<[RegExp, string]> = [
+    [/^normalize app identity$/i, 'Normalize app'],
+    [/^plan discovery strategy$/i, 'Plan discovery'],
+    [/^execute search and retrieval$/i, 'Search & retrieve'],
+    [/^evaluate integration feasibility$/i, 'Evaluate fit'],
+    [/^build custom integration$/i, 'Build integration'],
+    [/^retrieve documentation and api details$/i, 'Retrieve docs'],
+    [/^evaluate integration options$/i, 'Evaluate options'],
+  ];
+  for (const [pattern, label] of replacements) {
+    if (pattern.test(cleaned)) return label;
+  }
+  const sentenceLike = cleaned
+    .replace(/\bAnd\b/g, '&')
+    .replace(/\bApi\b/g, 'API')
+    .replace(/\bUrl\b/g, 'URL');
+  if (!/^[A-Z][a-z]+(?: [A-Z][a-z]+){2,}$/.test(sentenceLike)) return sentenceLike;
+  const words = sentenceLike.split(' ');
+  return words.map((word, index) => (
+    index === 0 || /^[A-Z0-9&]+$/.test(word)
+      ? word
+      : word.toLowerCase()
+  )).join(' ');
+}
+
+function reviewNodeName(
+  node: ({ node_id?: string; id?: string; title?: string } | null | undefined),
+  fallbackIndex = 0,
+): string {
+  const nodeId = node?.node_id ?? node?.id;
+  const rawTitle = typeof node?.title === 'string' ? node.title.replace(/\.\s*Step$/i, '').trim() : '';
+  if (rawTitle.includes('/')) {
+    const compact = rawTitle.split('/').filter(Boolean).pop();
+    if (compact) return compact;
+  }
+  if (!isMechanicalDisplayName(rawTitle, nodeId)) return compactWorkflowLabel(rawTitle);
+  const numeric = nodeId?.match(/(\d+)(?!.*\d)/)?.[1];
+  return `Step ${numeric ? Number(numeric) : fallbackIndex + 1}`;
+}
+
+function workflowReviewTitle(payload: BuildPayload | null): string {
+  const workflowName = typeof payload?.workflow?.name === 'string' ? payload.workflow.name.trim() : '';
+  if (workflowName && !isMechanicalDisplayName(workflowName)) return workflowName;
+  const definition = recordFromUnknown(payload?.definition);
+  const title = String(definition.title || definition.name || definition.workflow_name || '').trim();
+  return title && !isMechanicalDisplayName(title) ? title : 'Workflow review';
+}
+
+function graphDisconnectedCount(graph: NonNullable<BuildPayload['build_graph']> | null | undefined): number {
+  const nodes = graph?.nodes || [];
+  if (nodes.length <= 1) return 0;
+  const connected = new Set<string>();
+  for (const edge of graph?.edges || []) {
+    connected.add(edge.from_node_id);
+    connected.add(edge.to_node_id);
+  }
+  return nodes.filter((node) => !connected.has(node.node_id)).length;
+}
+
+function collectDataPillLabels(payload: BuildPayload | null, limit = 5): string[] {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  const normalize = (value: string) => value
+    .split('/')
+    .filter(Boolean)
+    .pop()
+    ?.replace(/[_-]+/g, ' ')
+    .trim()
+    || value.trim();
+  const add = (_prefix: string, value: unknown) => {
+    const label = typeof value === 'string' ? normalize(value) : '';
+    if (!label) return;
+    const display = label;
+    const key = display.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    labels.push(display);
+  };
+  for (const node of payload?.build_graph?.nodes || []) {
+    (node.required_inputs || []).forEach((value) => add('input', value));
+    (node.outputs || []).forEach((value) => add('output', value));
+    if (node.kind === 'state') {
+      add('artifact', node.title);
+    }
+  }
+  if (labels.length < limit) {
+    for (const match of payload?.compile_preview?.scope_packet?.matches || []) {
+      add(match.object_kind || 'context', match.label || match.span_text);
+      if (labels.length >= limit) break;
+    }
+  }
+  return labels.slice(0, limit);
+}
+
+function agentToolPlanSummary(viewModel: MoonBuildViewModel): string {
+  const toolCounts = new Map<string, number>();
+  for (const node of viewModel.nodes) {
+    const tool = typeof node.agentToolPlan?.tool_name === 'string' ? node.agentToolPlan.tool_name.trim() : '';
+    if (!tool) continue;
+    const repeats = typeof node.agentToolPlan?.repeats === 'number' && node.agentToolPlan.repeats > 0
+      ? node.agentToolPlan.repeats
+      : 1;
+    toolCounts.set(tool, (toolCounts.get(tool) || 0) + repeats);
+  }
+  const first = [...toolCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return first ? `${first[0]} x${first[1]}` : 'Tool lanes pending';
+}
+
+function branchReviewSummary(viewModel: MoonBuildViewModel): string {
+  const branchPoints = viewModel.branchBoard;
+  if (!branchPoints.length) return 'none';
+  const first = branchPoints[0];
+  const branchLabels = first.lanes
+    .map((lane) => lane.label)
+    .slice(0, 3)
+    .join(' / ');
+  const suffix = branchPoints.length > 1 ? ` +${branchPoints.length - 1}` : '';
+  return `${branchPoints.length} split${branchPoints.length > 1 ? 's' : ''}: ${first.sourceTitle || 'step'}${branchLabels ? ` (${branchLabels})` : ''}${suffix}`;
+}
+
+function workflowInspectorSummary(
+  payload: BuildPayload | null,
+  viewModel: MoonBuildViewModel,
+  pendingReviewCount: number,
+): WorkflowInspectorSummary | null {
+  if (!payload) return null;
+  const graph = payload.build_graph;
+  const stepNodes = viewModel.nodes.filter((node) => node.kind === 'step');
+  const workStepCount = stepNodes.length || viewModel.totalNodes;
+  const dataPills = collectDataPillLabels(payload);
+  const receipt = recordFromUnknown(payload.operation_receipt);
+  const receiptId = shortReadableRef(receipt.receipt_id || payload.mutation_event_id || null);
+  return {
+    title: workflowReviewTitle(payload),
+    readiness: viewModel.release.readiness,
+    stepCount: workStepCount,
+    linkCount: viewModel.edges.length,
+    reviewCount: pendingReviewCount,
+    toolLane: agentToolPlanSummary(viewModel),
+    branches: branchReviewSummary(viewModel),
+    dataPills,
+    receipt: receiptId,
+    disconnected: graphDisconnectedCount(graph),
+  };
+}
+
+function compactMoonVisibleNode(node: BuildNode): Record<string, unknown> {
+  const toolPlan = recordFromUnknown(node.agent_tool_plan);
+  const contract = recordFromUnknown(node.completion_contract);
+  const toolName = typeof toolPlan.tool_name === 'string' ? toolPlan.tool_name : null;
+  const repeats = typeof toolPlan.repeats === 'number' && toolPlan.repeats > 0 ? toolPlan.repeats : null;
+  const out: Record<string, unknown> = {
+    node_id: node.node_id,
+    kind: node.kind,
+    title: node.title || node.summary || node.node_id,
+  };
+  if (node.route) out.route = node.route;
+  if (node.status) out.status = node.status;
+  if (node.task_type) out.task_type = node.task_type;
+  if (toolName) out.tool_name = toolName;
+  if (repeats) out.tool_repeats = repeats;
+  if (Array.isArray(node.required_inputs) && node.required_inputs.length) {
+    out.required_inputs = node.required_inputs.slice(0, 6);
+  }
+  if (Array.isArray(node.outputs) && node.outputs.length) {
+    out.outputs = node.outputs.slice(0, 6);
+  }
+  if (contract.result_kind) out.result_kind = contract.result_kind;
+  return out;
+}
+
+function compactMoonVisibleEdge(edge: BuildEdge): Record<string, unknown> {
+  const release = normalizeBuildEdgeRelease(edge);
+  const branchSide = typeof release.config?.branch_side === 'string'
+    ? release.config.branch_side
+    : null;
+  const releaseReason = typeof release.branch_reason === 'string'
+    ? release.branch_reason
+    : null;
+  return {
+    edge_id: edge.edge_id,
+    from_node_id: edge.from_node_id,
+    to_node_id: edge.to_node_id,
+    kind: edge.kind,
+    release_family: release.family,
+    release_type: release.edge_type,
+    label: release.label || branchLabel(branchSide || releaseReason || release.edge_type),
+  };
+}
+
+function moonVisibleSnapshot(
+  payload: BuildPayload | null,
+  selectedNodeId: string | null,
+  selectedEdgeId: string | null,
+  pendingReviewCount: number,
+): Record<string, unknown> | null {
+  if (!payload) return null;
+  const graph = payload.build_graph;
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+  const selectedNode = selectedNodeId
+    ? nodes.find((node) => node.node_id === selectedNodeId) || null
+    : null;
+  const selectedEdge = selectedEdgeId
+    ? edges.find((edge) => edge.edge_id === selectedEdgeId) || null
+    : null;
+  const workflow = payload.workflow || null;
+  const receipt = recordFromUnknown(payload.operation_receipt);
+  const snapshot: Record<string, unknown> = {
+    kind: 'moon_visible_snapshot',
+    source: 'ui',
+    read_only: true,
+    durability: 'visible_ui_snapshot_not_write_authority',
+    workflow_id: workflow?.id ?? null,
+    workflow_name: workflow?.name ?? null,
+    node_count: nodes.length,
+    edge_count: edges.length,
+    selected_node_id: selectedNodeId,
+    selected_edge_id: selectedEdgeId,
+    review_count: pendingReviewCount,
+    build_state: payload.build_state ?? null,
+    nodes: nodes.slice(0, 16).map(compactMoonVisibleNode),
+    edges: edges.slice(0, 24).map(compactMoonVisibleEdge),
+  };
+  if (selectedNode) {
+    snapshot.selected_node_title = selectedNode.title || selectedNode.summary || selectedNode.node_id;
+    if (selectedNode.route) snapshot.selected_node_route = selectedNode.route;
+    if (selectedNode.status) snapshot.selected_node_status = selectedNode.status;
+  }
+  if (selectedEdge) {
+    snapshot.selected_edge = compactMoonVisibleEdge(selectedEdge);
+  }
+  if (typeof receipt.receipt_id === 'string') snapshot.operation_receipt_id = receipt.receipt_id;
+  if (typeof receipt.correlation_id === 'string') snapshot.correlation_id = receipt.correlation_id;
+  return snapshot;
 }
 
 type GatePodTone = 'empty' | 'core' | 'later' | 'legacy';
@@ -181,22 +487,77 @@ function gatePodGlyphType(edge: OrbitEdge): import('./moonBuildPresenter').Glyph
   }
 }
 
-// Ring class from state
-function ringClass(node: OrbitNode, isSelected: boolean): string {
-  const classes = [`moon-chain__ring`, `moon-chain__ring--${node.ringState}`];
-  if (isSelected) classes.push('moon-chain__ring--selected');
-  if (node.route && node.ringState === 'blocked') classes.push('moon-chain__ring--has-route');
-  return classes.join(' ');
+function nodeCardClass(node: OrbitNode, isSelected: boolean, isDragOver: boolean): string {
+  const classes = [
+    'moon-graph-node',
+    `moon-graph-node--kind-${node.kind}`,
+    `moon-graph-node--shape-${node.shape}`,
+    `moon-graph-node--state-${node.ringState}`,
+    isSelected ? 'moon-graph-node--selected' : '',
+    isDragOver ? 'moon-graph-node--drag-over' : '',
+    node.multiplicity ? `moon-graph-node--stack moon-graph-node--stack-${node.multiplicity.kind}` : '',
+  ];
+  return classes.filter(Boolean).join(' ');
 }
 
-// Should this node show an icon?
-function showIcon(node: OrbitNode): boolean {
-  return node.ringState === 'decided-grounded' ||
-    node.ringState === 'decided-incomplete' ||
-    node.ringState === 'run-active' ||
-    node.ringState === 'run-succeeded' ||
-    node.ringState === 'run-failed' ||
-    (node.ringState === 'blocked' && !!node.route);
+function nodeStatusLabel(node: OrbitNode): string {
+  switch (node.ringState) {
+    case 'blocked': return 'blocked';
+    case 'decided-grounded': return 'ready';
+    case 'decided-incomplete': return 'needs detail';
+    case 'active-unresolved': return 'active';
+    case 'run-pending': return 'queued';
+    case 'run-active': return 'running';
+    case 'run-succeeded': return 'done';
+    case 'run-failed': return 'failed';
+    case 'projected': return 'projected';
+    case 'unresolved':
+    default:
+      return 'draft';
+  }
+}
+
+function compactNodeToken(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const tail = trimmed.split(/[/.]/).filter(Boolean).pop() || trimmed;
+  return tail.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 36) || null;
+}
+
+function nodeToolSummary(node: OrbitNode): string {
+  const tool = compactNodeToken(node.agentToolPlan?.tool_name);
+  const operation = compactNodeToken(node.agentToolPlan?.operation);
+  const repeats = typeof node.agentToolPlan?.repeats === 'number' && node.agentToolPlan.repeats > 1
+    ? `${node.agentToolPlan.repeats}x`
+    : null;
+  const lane = tool || operation || compactNodeToken(node.taskType) || compactNodeToken(node.route);
+  if (!lane) return nodeStatusLabel(node);
+  return repeats ? `${lane} ${repeats}` : lane;
+}
+
+function compactAgentLabel(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const tail = trimmed.split('/').filter(Boolean).pop() || trimmed;
+  const label = tail
+    .replace(/^google:/i, '')
+    .replace(/^openrouter:/i, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\bgemini\b/i, 'Gemini')
+    .replace(/\bflash\b/i, 'Flash')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return label ? label.slice(0, 28) : null;
+}
+
+function nodeDecisionAgentLabel(node: OrbitNode): string {
+  return compactAgentLabel(node.agent)
+    || compactAgentLabel(node.agentToolPlan?.model)
+    || compactAgentLabel(node.agentToolPlan?.provider_model)
+    || compactAgentLabel(node.agentToolPlan?.agent)
+    || 'LLM gate';
 }
 
 const TRIGGER_MANUAL_ROUTE = 'trigger';
@@ -309,8 +670,7 @@ function nextGraphEdgeId(edges: BuildEdge[], fromNodeId: string, toNodeId: strin
 }
 
 function nodeDisplayName(node: Pick<BuildNode, 'node_id' | 'title'> | null | undefined): string {
-  const title = typeof node?.title === 'string' ? node.title.trim() : '';
-  return title || node?.node_id || 'step';
+  return reviewNodeName(node);
 }
 
 function nodeTarget(node: Pick<BuildNode, 'node_id' | 'title'> | null | undefined): UiActionTarget | null {
@@ -462,6 +822,11 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     () => resolvePersistedWorkflowId(workflowId, payload),
     [payload, workflowId],
   );
+  const pendingReviewCount = useMemo(() => reviewReadinessCount(payload), [payload]);
+  const visibleMoonSnapshot = useMemo(
+    () => moonVisibleSnapshot(payload, state.selectedNodeId, state.selectedEdgeId, pendingReviewCount),
+    [payload, pendingReviewCount, state.selectedEdgeId, state.selectedNodeId],
+  );
   // Push the active workflow + selection state into the shared chat context
   // store so ChatPanel can forward it as selection_context on every send.
   // The chat orchestrator threads this down to the moon_* tools so they
@@ -473,6 +838,16 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     }
     const workflowName =
       (payload?.workflow as { name?: string | null } | undefined)?.name ?? null;
+    const receipt = recordFromUnknown(payload?.operation_receipt);
+    const resultGraphSummary = recordFromUnknown(payload?.graph_summary);
+    const visibleGraphSummary = visibleMoonSnapshot
+      ? {
+          source: 'visible_ui',
+          node_count: visibleMoonSnapshot.node_count,
+          edge_count: visibleMoonSnapshot.edge_count,
+          review_count: visibleMoonSnapshot.review_count,
+        }
+      : null;
     setMoonChatContext({
       workflow_id: persistedWorkflowId,
       workflow_name: workflowName,
@@ -482,14 +857,23 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       hint:
         state.viewMode === 'run'
           ? 'User is viewing a run. moon_get_build still works; mutations are typically not appropriate while observing a live run.'
-          : 'User is authoring a workflow graph. Default-target this workflow_id when the user does not name another.',
+          : 'User is authoring a workflow graph. Default-target this workflow_id when the user does not name another. Compare moon_get_build against visible_ui_snapshot before claiming the graph is empty.',
+      materialize_status: payload?.build_state ?? null,
+      operation_receipt_id: typeof receipt.receipt_id === 'string' ? receipt.receipt_id : null,
+      correlation_id: typeof receipt.correlation_id === 'string' ? receipt.correlation_id : null,
+      graph_summary: Object.keys(resultGraphSummary).length ? resultGraphSummary : visibleGraphSummary,
+      visible_ui_snapshot: visibleMoonSnapshot,
     });
   }, [
     persistedWorkflowId,
     payload?.workflow,
+    payload?.operation_receipt,
+    payload?.graph_summary,
+    payload?.build_state,
     state.selectedNodeId,
     state.selectedEdgeId,
     state.viewMode,
+    visibleMoonSnapshot,
   ]);
   // Clear context on unmount so chat opened from elsewhere isn't haunted by
   // a stale Moon stanza pointing at a workflow the user has navigated away from.
@@ -671,7 +1055,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       runJobs,
     ],
   );
-
   const contractSuggestionExtras = useMemo(
     () =>
       payload
@@ -1223,26 +1606,50 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
         triggerLabel: state.selectedTrigger?.label,
         summary: composeAuthority,
       });
-      const result = await compileDefinition(compileProse, {
-        workflowId,
-        onWorkflowReady: (readyWorkflowId) => {
-          materializeWorkflowId = readyWorkflowId;
+      const handoffToMoonFallback = (params: {
+        workflowId?: string | null;
+        reason: string;
+        receiptId?: string | null;
+        correlationId?: string | null;
+        graphSummary?: Record<string, unknown> | null;
+      }) => {
+        const fallbackWorkflowId = params.workflowId || null;
+        if (fallbackWorkflowId) {
           setMoonChatContext({
-            workflow_id: readyWorkflowId,
+            workflow_id: fallbackWorkflowId,
             workflow_name: null,
             selected_node_id: null,
             selected_edge_id: null,
             view_mode: 'build',
-            hint: 'Materialize is running for this workflow. Use moon_get_build after the final pass lands before editing.',
+            hint: 'Materialize could not finish this graph. Moon chat owns the recovery pass and must read before editing.',
+            materialize_status: 'chat_fallback',
+            operation_receipt_id: params.receiptId ?? null,
+            correlation_id: params.correlationId ?? null,
+            graph_summary: params.graphSummary ?? null,
           });
-          publishMoonChatHandoff({
-            handoff_id: `${handoffBaseId}:started`,
-            workflow_id: readyWorkflowId,
-            phase: 'started',
-            status_message: 'Materialize is compiling the workflow. Moon chat is open and will review the graph when the final pass lands.',
-          });
-          onMaterializeHandoff?.();
-        },
+        }
+        publishMoonChatHandoff({
+          handoff_id: `${handoffBaseId}:chat-fallback`,
+          workflow_id: fallbackWorkflowId,
+          workflow_name: null,
+          phase: 'chat_fallback',
+          status_message: "Materialize could not build a usable graph. Moon chat is looking at it now; the manual builder stays available.",
+          prompt: buildMaterializeFallbackPrompt({
+            intent: compileProse,
+            workflowId: fallbackWorkflowId,
+            reason: params.reason,
+            graphSummary: params.graphSummary ?? null,
+          }),
+          operation_receipt_id: params.receiptId ?? null,
+          correlation_id: params.correlationId ?? null,
+          graph_summary: params.graphSummary ?? null,
+        });
+        onMaterializeHandoff?.();
+        dispatch({ type: 'COMPILE_FALLBACK', error: params.reason });
+      };
+      const result = await materializePlan(compileProse, {
+        workflowId,
+        llmTimeoutSeconds: 35,
       });
       // Surface compose_provenance failures as compile errors so the user
       // sees the LLM-gate finding (validation, fork-out, etc.) instead of
@@ -1264,21 +1671,42 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
         const summary = errorFindings
           ? `Compose blocked by ${reason} (${findings.length} finding${findings.length === 1 ? '' : 's'}):\n${errorFindings}`
           : `Compose blocked by ${reason}: ${provenance.error || 'no detail'}`;
-        if (materializeWorkflowId) {
-          publishMoonChatHandoff({
-            handoff_id: `${handoffBaseId}:blocked`,
-            workflow_id: materializeWorkflowId,
-            phase: 'blocked',
-            status_message: summary,
-          });
-          onMaterializeHandoff?.();
-        }
-        dispatch({ type: 'COMPILE_ERROR', error: summary });
+        const wfIdFromResult = (result as any)?.definition?.workflow_id || (result as any)?.workflow?.id || materializeWorkflowId || null;
+        handoffToMoonFallback({
+          workflowId: wfIdFromResult,
+          reason: summary,
+          graphSummary: (result as any)?.graph_summary ?? null,
+        });
         return;
       }
+      const wfId = (result as any)?.definition?.workflow_id || (result as any)?.workflow?.id || materializeWorkflowId;
+      const graph = (result as any)?.build_graph;
+      const graphSummary = (result as any)?.graph_summary;
+      const nodeCount = Array.isArray(graph?.nodes)
+        ? graph.nodes.length
+        : Number(graphSummary?.node_count || 0);
+      const operationReceipt = (result as any)?.operation_receipt;
+      const receiptId = typeof operationReceipt?.receipt_id === 'string' ? operationReceipt.receipt_id : null;
+      const correlationId = typeof operationReceipt?.correlation_id === 'string' ? operationReceipt.correlation_id : null;
+      if (!wfId || !receiptId || nodeCount < 2) {
+        const summary = !wfId
+          ? 'Materialize blocked: no workflow id was returned.'
+          : !receiptId
+            ? 'Materialize blocked: no operation receipt was returned.'
+            : 'Materialize needs the agent to break this into multiple steps before it is ready.';
+        handoffToMoonFallback({
+          workflowId: wfId || null,
+          reason: summary,
+          receiptId,
+          correlationId,
+          graphSummary: graphSummary ?? null,
+        });
+        return;
+      }
+      materializeWorkflowId = wfId;
+
       // Patch first node with trigger route if trigger was selected
       if (state.selectedTrigger) {
-        const graph = (result as any)?.build_graph;
         if (graph?.nodes?.length) {
           graph.nodes[0] = {
             ...graph.nodes[0],
@@ -1288,7 +1716,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           };
         }
       }
-      const wfId = (result as any)?.definition?.workflow_id || (result as any)?.workflow?.id || materializeWorkflowId;
       const workflowName = (result as any)?.definition?.compiled_prose?.slice(0, 60) || '';
       const asPayload = {
         ...result,
@@ -1305,29 +1732,67 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
           selected_edge_id: null,
           view_mode: 'build',
           hint: 'Materialize completed for this workflow. Review with moon_get_build before making edits.',
+          materialize_status: 'ready',
+          operation_receipt_id: receiptId,
+          correlation_id: correlationId,
+          graph_summary: graphSummary ?? null,
         });
         publishMoonChatHandoff({
           handoff_id: `${handoffBaseId}:ready`,
           workflow_id: wfId,
           workflow_name: workflowName || null,
           phase: 'ready',
-          status_message: 'Materialize handed Moon the final pass. I am reviewing the graph and making small safe tweaks if needed.',
-          prompt: materializeReviewPrompt(wfId),
+          status_message: 'Materialize handed Moon a multi-step graph. Review is available when you ask for it.',
+          operation_receipt_id: receiptId,
+          correlation_id: correlationId,
+          graph_summary: graphSummary ?? null,
         });
         onMaterializeHandoff?.();
       }
       dispatch({ type: 'COMPILE_SUCCESS' });
     } catch (e: any) {
-      if (materializeWorkflowId) {
-        publishMoonChatHandoff({
-          handoff_id: `${handoffBaseId}:blocked`,
-          workflow_id: materializeWorkflowId,
-          phase: 'blocked',
-          status_message: e.message || 'Materialize failed before Moon could review the graph.',
-        });
-        onMaterializeHandoff?.();
+      const failure = materializeFailureInfo(e);
+      const fallbackWorkflowId = failure.workflowId || materializeWorkflowId || null;
+      if (fallbackWorkflowId) {
+        materializeWorkflowId = fallbackWorkflowId;
       }
-      dispatch({ type: 'COMPILE_ERROR', error: e.message || 'Compilation failed' });
+      const compileProse = buildAuthorityCompileProse({
+        prose: compileSource,
+        triggerLabel: state.selectedTrigger?.label,
+        summary: composeAuthority,
+      });
+      if (fallbackWorkflowId) {
+        setMoonChatContext({
+          workflow_id: fallbackWorkflowId,
+          workflow_name: null,
+          selected_node_id: null,
+          selected_edge_id: null,
+          view_mode: 'build',
+          hint: 'Materialize failed. Moon chat owns the recovery pass and must read before editing.',
+          materialize_status: 'chat_fallback',
+          operation_receipt_id: failure.receiptId,
+          correlation_id: failure.correlationId,
+          graph_summary: failure.graphSummary,
+        });
+      }
+      publishMoonChatHandoff({
+        handoff_id: `${handoffBaseId}:chat-fallback`,
+        workflow_id: fallbackWorkflowId,
+        workflow_name: null,
+        phase: 'chat_fallback',
+        status_message: "Materialize failed. Moon chat is looking at it now; the manual builder stays available.",
+        prompt: buildMaterializeFallbackPrompt({
+          intent: compileProse,
+          workflowId: fallbackWorkflowId,
+          reason: failure.message,
+          graphSummary: failure.graphSummary,
+        }),
+        operation_receipt_id: failure.receiptId,
+        correlation_id: failure.correlationId,
+        graph_summary: failure.graphSummary,
+      });
+      onMaterializeHandoff?.();
+      dispatch({ type: 'COMPILE_FALLBACK', error: failure.message });
     }
   }, [compilePreview, compileSource, composeAuthority, onMaterializeHandoff, onWorkflowCreated, setPayload, state.selectedTrigger, workflowId]);
 
@@ -1807,19 +2272,22 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const actionOpen = state.openDock === 'action';
   const contextOpen = state.openDock === 'context';
   const releaseOpen = state.releaseOpen;
-  const pendingBindingCount = useMemo(() => {
-    const ledger = payload?.binding_ledger || [];
-    let count = 0;
-    for (const binding of ledger) {
-      if (!binding) continue;
-      const s = String(binding.state || '').toLowerCase();
-      if (s === 'accepted' || s === 'rejected') continue;
-      if (Array.isArray(binding.candidate_targets) && binding.candidate_targets.length > 0) {
-        count += 1;
-      }
+  const inspectorWorkflowSummary = useMemo(
+    () => workflowInspectorSummary(payload, viewModel, pendingReviewCount),
+    [payload, pendingReviewCount, viewModel],
+  );
+  const reviewDockLabel = pendingReviewCount === 1 ? 'Review 1 decision' : `Review ${pendingReviewCount} decisions`;
+  const releaseNeedsReview = pendingReviewCount > 0;
+  const releaseBlocked = releaseNeedsReview || viewModel.release.readiness !== 'ready';
+  const releaseDockLabel = releaseBlocked ? 'Release blocked' : 'Release ready';
+  const releaseDockTone = releaseBlocked ? 'blocked' : 'ready';
+  const openReleaseChecklist = useCallback(() => {
+    if (releaseNeedsReview) {
+      if (!state.reviewQueueOpen) dispatch({ type: 'TOGGLE_REVIEW_QUEUE' });
+      return;
     }
-    return count;
-  }, [payload]);
+    dispatch({ type: 'TOGGLE_RELEASE' });
+  }, [releaseNeedsReview, state.reviewQueueOpen]);
   const compiling = state.compilePhase === 'compiling';
   const previewTargetId = drag.drag.hoveredTarget?.id ?? null;
   const previewEdgeId = drag.drag.hoveredTarget?.zone === 'edge'
@@ -1903,25 +2371,28 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     return [{
       centerX: geometry.centerX,
       centerY: geometry.centerY,
+      endX: geometry.endX,
+      endY: geometry.endY,
       edge,
       fromLabel: nodeById.get(edge.from)?.title || edge.from,
       gateItem,
       gatePolicy,
       gateTruth,
       label: gatePodLabel(edge, gateItem),
+      startX: geometry.startX,
+      startY: geometry.startY,
       toLabel: nodeById.get(edge.to)?.title || edge.to,
       tone: gatePodTone(edge, gateItem),
     }];
   }), [gateCatalogByFamily, nodeById, state.viewMode, viewModel.edges, viewModel.layout]);
   const appendPosition = useMemo(
-    () => getMoonAppendPosition(viewModel.layout.width),
-    [viewModel.layout.width],
+    () => getMoonAppendPosition(viewModel.layout),
+    [viewModel.layout],
   );
+  const leftControlOpen = actionOpen || contextOpen || releaseOpen || state.reviewQueueOpen;
   const middleClassName = [
     'moon-middle',
-    actionOpen ? 'moon-middle--action-open' : '',
-    contextOpen ? 'moon-middle--context-open' : '',
-    releaseOpen ? 'moon-middle--release-open' : '',
+    leftControlOpen ? 'moon-middle--action-open' : '',
   ].filter(Boolean).join(' ');
 
   // Run-view cancel: fires the public v1 cancel endpoint. The run's next
@@ -1970,9 +2441,33 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       <div className="moon-body">
         {/* Middle row */}
         <div className={middleClassName} data-testid="moon-middle">
-          {/* Left dock: Action (Overlay) */}
-          <div className={`moon-dock-overlay moon-dock-overlay--left${actionOpen ? ' moon-dock-overlay--open' : ''}`}>
-            {actionOpen && (
+          {/* Left dock: all review/workflow controls. Chat owns the right lane. */}
+          <div className={`moon-dock-overlay moon-dock-overlay--left${leftControlOpen ? ' moon-dock-overlay--open' : ''}`}>
+            {state.reviewQueueOpen ? (
+              <MoonBindingReviewQueue
+                payload={payload}
+                onCommitAuthorityAction={async (subpath, body, meta) => {
+                  await commitMoonAuthorityAction({
+                    subpath,
+                    body,
+                    ...meta,
+                  });
+                }}
+                onClose={() => dispatch({ type: 'TOGGLE_REVIEW_QUEUE' })}
+              />
+            ) : releaseOpen ? (
+              <MoonReleaseTray
+                release={viewModel.release}
+                payload={payload}
+                workflowId={workflowId}
+                onWorkflowCreated={onWorkflowCreated}
+                onClose={() => dispatch({ type: 'TOGGLE_RELEASE' })}
+                onSelectNode={(nodeId) => dispatch({ type: 'SELECT_NODE', nodeId })}
+                onOpenDock={(dock) => dispatch({ type: 'OPEN_DOCK', dock: dock as 'action' | 'context' })}
+                onViewRun={onViewRun}
+                onDispatchSuccess={(runId) => dispatch({ type: 'DISPATCH_SUCCESS', runId })}
+              />
+            ) : actionOpen ? (
               <MoonActionDock
                 workflowId={workflowId}
                 payload={payload}
@@ -1985,7 +2480,58 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                 onWorkflowCreated={onWorkflowCreated}
                 onCatalogChange={setCatalog}
               />
-            )}
+            ) : contextOpen ? (
+              <MoonNodeDetail
+                node={viewModel.selectedNode}
+                content={viewModel.dockContent}
+                contractSuggestionExtras={contractSuggestionExtras}
+                workflowId={workflowId}
+                onMutate={async (subpath, body) => {
+                  await runMutation(subpath, body);
+                }}
+                buildGraph={payload?.build_graph}
+                onUpdateBuildGraph={updateBuildGraph}
+                onCommitGraphAction={async (graph, meta) => {
+                  await commitMoonGraphAction({
+                    ...meta,
+                    nextPayload: payload ? { ...payload, build_graph: graph } : null,
+                    afterApply: () => {
+                      if (viewModel.selectedNode) {
+                        dispatch({ type: 'SELECT_NODE', nodeId: viewModel.selectedNode.id });
+                      } else if (selectedEdge) {
+                        dispatch({ type: 'SELECT_EDGE', edgeId: selectedEdge.id });
+                        dispatch({ type: 'OPEN_DOCK', dock: 'context' });
+                      }
+                    },
+                    afterUndo: () => {
+                      if (viewModel.selectedNode) {
+                        dispatch({ type: 'SELECT_NODE', nodeId: viewModel.selectedNode.id });
+                      } else if (selectedEdge) {
+                        dispatch({ type: 'SELECT_EDGE', edgeId: selectedEdge.id });
+                        dispatch({ type: 'OPEN_DOCK', dock: 'context' });
+                      }
+                    },
+                  });
+                }}
+                onCommitAuthorityAction={async (subpath, body, meta) => {
+                  await commitMoonAuthorityAction({
+                    subpath,
+                    body,
+                    ...meta,
+                  });
+                }}
+                onClose={() => {
+                  if (selectedEdge) dismissSelectedEdgeMenus();
+                  else dispatch({ type: 'CLOSE_DOCK' });
+                }}
+                selectedEdge={selectedEdge}
+                edgeFromLabel={edgeFromNode?.title}
+                edgeToLabel={edgeToNode?.title}
+                onApplyGate={handleApplyGate}
+                gateItems={catalog.filter(c => c.family === 'control' && c.status === 'ready')}
+                workflowSummary={inspectorWorkflowSummary}
+              />
+            ) : null}
           </div>
 
           {/* Center */}
@@ -1994,18 +2540,26 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
               <>
                 <div className="moon-center__dock-actions" aria-label="Workspace panels">
                   <div className="moon-center__dock-group">
-                    <DockToggleButton active={actionOpen} label="Authority" onClick={() => openDock('action')} />
-                    <DockToggleButton active={contextOpen} label="Inspector" onClick={() => openDock('context')} />
-                    {pendingBindingCount > 0 && (
+                    {pendingReviewCount > 0 && (
                       <DockToggleButton
                         active={state.reviewQueueOpen}
-                        label={`Review (${pendingBindingCount})`}
+                        ariaLabel="Open review decisions"
+                        label={reviewDockLabel}
                         onClick={() => dispatch({ type: 'TOGGLE_REVIEW_QUEUE' })}
+                        tone="warning"
                       />
                     )}
+                    <DockToggleButton
+                      active={releaseOpen}
+                      ariaLabel="Open release checklist"
+                      label={releaseDockLabel}
+                      onClick={openReleaseChecklist}
+                      tone={releaseDockTone}
+                    />
+                    <DockToggleButton active={actionOpen} label="Authority" onClick={() => openDock('action')} />
+                    <DockToggleButton active={contextOpen} label="Inspector" onClick={() => openDock('context')} />
                   </div>
                 </div>
-                {!releaseOpen && !state.reviewQueueOpen && !state.runViewOpen && <HalfMoon position="bottom" label="Release" onClick={() => dispatch({ type: 'TOGGLE_RELEASE' })} />}
               </>
             )}
 
@@ -2026,8 +2580,15 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     <span className="moon-spinner" aria-hidden="true" />
                     <div>
                       <strong>Materialize is building the graph.</strong>
-                      <p>Moon chat is open. When the final pass lands, it gets a larger review budget and will inspect the graph before proposing tweaks.</p>
+                      <p>The synthesis agent chooses the steps, then packet authors fill tools, gates, outputs, and handoffs.</p>
                     </div>
+                  </div>
+                )}
+
+                {state.compileError && !showComposePanel && (
+                  <div className="moon-compose__error" role="alert">
+                    {state.compileError}
+                    <div>Manual build is open; Moon chat is handling the recovery pass.</div>
                   </div>
                 )}
 
@@ -2112,7 +2673,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     )}
                     <div className="moon-compose__actions">
                       <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !compileSource.trim()}>
-                        {compiling ? 'Composing... (synthesis + 20 parallel forks)' : 'Compose workflow'}
+                        {compiling ? 'Composing workflow...' : 'Compose workflow'}
                       </button>
                       <button
                         type="button"
@@ -2133,11 +2694,11 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                         fontSize: 12,
                         color: 'var(--fg3)',
                       }}>
-                        <div style={{ fontWeight: 500, marginBottom: 4 }}>LLM compile gates running</div>
-                        <div>1. Synthesis — Together V4-Pro decomposing intent into ~20 packet seeds (≈30s)</div>
-                        <div>2. Fork-out — 20 parallel author calls, prefix-cached (≈2-3 min)</div>
-                        <div>3. Pill triage + validation</div>
-                        <div style={{ marginTop: 6, opacity: 0.7 }}>Nothing renders until all gates pass.</div>
+                        <div style={{ fontWeight: 500, marginBottom: 4 }}>Agent composition running</div>
+                        <div>1. Compile preview reads context and existing authority</div>
+                        <div>2. Synthesis chooses the work packets and step count</div>
+                        <div>3. Packet authors fill one tool lane, gates, outputs, and submit contracts</div>
+                        <div style={{ marginTop: 6, opacity: 0.7 }}>The graph appears only after those contracts are persisted.</div>
                       </div>
                     )}
                     {state.compileError && (
@@ -2202,7 +2763,11 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     // On any / Else path" labels stop shouting when the user
                     // is inspecting a different branch. inLineage defaults
                     // true at rest, so nothing dims until a node is selected.
-                    const gateOpacity = control.edge.inLineage ? 1 : 0.2;
+                    const gateOpacity = isSelected
+                      ? 1
+                      : control.edge.inLineage
+                        ? (control.edge.gateFamily ? 0.82 : 0.2)
+                        : 0.12;
                     return (
                       <div
                         key={control.edge.id}
@@ -2309,17 +2874,28 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     const position = getMoonNodeCanvasPosition(node);
                     const multiplicityAttr = node.multiplicity?.kind ?? null;
                     const multiplicityCount = node.multiplicity?.count ?? null;
-                    const nodeClass = [
-                      'moon-graph-node',
-                      ringClass(node, isSelected),
-                      isSelected ? 'moon-graph-node--selected' : '',
-                      previewTargetId === node.id ? 'moon-graph-node--drag-over' : '',
-                      multiplicityAttr ? `moon-graph-node--stack moon-graph-node--stack-${multiplicityAttr}` : '',
-                    ].filter(Boolean).join(' ');
+                    const nodeClass = nodeCardClass(node, isSelected, previewTargetId === node.id);
+                    const displayTitle = nodeDisplayName({ node_id: node.id, title: node.title });
+                    const summary = node.summary.trim();
+                    const stepIndex = node.dominantPathIndex >= 0
+                      ? String(node.dominantPathIndex + 1).padStart(2, '0')
+                      : String(node.rank + 1).padStart(2, '0');
+                    const statusLabel = nodeStatusLabel(node);
+                    const toolSummary = nodeToolSummary(node);
+                    const decisionAgentLabel = node.shape === 'decision'
+                      ? nodeDecisionAgentLabel(node)
+                      : null;
                     // Focus-lineage dim: nodes outside the selected lineage
                     // fade to ghost. inLineage defaults true when nothing is
                     // selected, so rest-state opacity is unchanged.
                     const nodeOpacity = node.inLineage ? 1 : 0.28;
+                    const nodeStyle = {
+                      ...position,
+                      '--moon-node-instance-width': `${node.width}px`,
+                      '--moon-node-instance-height': `${node.height}px`,
+                      opacity: nodeOpacity,
+                      transition: 'opacity 240ms ease',
+                    } as React.CSSProperties;
                     const nodeAriaLabel = state.viewMode === 'run'
                       ? `Inspect run job ${node.title}${node.summary ? `, ${node.summary}` : ''}`
                       : `Select workflow step ${node.title}${node.summary ? `, ${node.summary}` : ''}`;
@@ -2327,13 +2903,14 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       <div
                         key={node.id}
                         className={nodeClass}
-                        style={{ ...position, opacity: nodeOpacity, transition: 'opacity 240ms ease' }}
+                        style={nodeStyle}
                         role="button"
                         tabIndex={0}
                         aria-label={nodeAriaLabel}
                         aria-pressed={isSelected}
                         data-drop-node={node.id}
                         data-multiplicity={multiplicityAttr || undefined}
+                        data-node-shape={node.shape}
                         data-in-lineage={node.inLineage || undefined}
                         onClick={() => handleNodeClick(node.id, isSelected)}
                         onDoubleClick={() => handleNodeDoubleClick(node.id)}
@@ -2344,22 +2921,32 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                         }}
                         onPointerDown={state.viewMode === 'run' ? undefined : e => startNodeDrag(e, node)}
                       >
-                        {/*
-                          Back rings for the multiplicity stack. Rendered as
-                          real siblings (not pseudo-elements) so the main ring
-                          keeps its flex centering for the glyph/index.
-                        */}
-                        {multiplicityAttr && (
-                          <>
-                            <span className="moon-graph-node__stack-ring moon-graph-node__stack-ring--back" aria-hidden="true" />
-                            <span className="moon-graph-node__stack-ring moon-graph-node__stack-ring--mid" aria-hidden="true" />
-                          </>
-                        )}
-                        {showIcon(node) ? (
-                          <MoonGlyph type={node.glyphType} size={22} color="#fff" />
-                        ) : (
-                          <span className="moon-chain__step-index">{node.dominantPathIndex >= 0 ? node.dominantPathIndex + 1 : ''}</span>
-                        )}
+                        <span className="moon-graph-node__index" aria-hidden="true">
+                          <span className="moon-graph-node__status-dot" />
+                          <span className="moon-graph-node__index-number">{stepIndex}</span>
+                        </span>
+                        <span className="moon-graph-node__body">
+                          <span className="moon-graph-node__title">{displayTitle}</span>
+                          {decisionAgentLabel && (
+                            <span className="moon-graph-node__decision-agent" aria-hidden="true">
+                              <span>{decisionAgentLabel}</span>
+                              <span className="moon-graph-node__dots" aria-hidden="true">
+                                <span>.</span><span>.</span><span>.</span>
+                              </span>
+                            </span>
+                          )}
+                          <span className="moon-graph-node__terminal" aria-hidden="true">
+                            <span className="moon-graph-node__terminal-label">tool</span>
+                            <span className="moon-graph-node__terminal-value">{toolSummary}</span>
+                            <span className="moon-graph-node__terminal-label">state</span>
+                            <span className="moon-graph-node__terminal-value moon-graph-node__terminal-value--cadence">
+                              {statusLabel}
+                              <span className="moon-graph-node__dots" aria-hidden="true">
+                                <span>.</span><span>.</span><span>.</span>
+                              </span>
+                            </span>
+                          </span>
+                        </span>
                         {multiplicityAttr && (
                           <span className="moon-graph-node__count-pill" aria-label={`${multiplicityAttr} count`}>
                             {multiplicityCount !== null
@@ -2367,7 +2954,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                               : multiplicityAttr === 'loop' ? 'N\u00d7' : 'N\u2016'}
                           </span>
                         )}
-                        <span className="moon-graph-node__label">{node.title}</span>
                       </div>
                     );
                   })}
@@ -2382,8 +2968,8 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     .filter(node => node.kind === 'step')
                     .map((node) => {
                       const position = getMoonNodeCanvasPosition(node);
-                      const podLeft = position.left + MOON_LAYOUT.nodeSize + 10;
-                      const podTop = position.top + MOON_LAYOUT.nodeRadius - 14;
+                      const podLeft = position.left + node.width + 10;
+                      const podTop = position.top + node.height / 2 - 14;
                       const open = branchPickerNodeId === node.id;
                       return (
                         <div
@@ -2451,94 +3037,16 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
 
           </div>
 
-          {/* Right dock: Detail (Overlay) */}
-          <div className={`moon-dock-overlay moon-dock-overlay--right${contextOpen ? ' moon-dock-overlay--open' : ''}`}>
-            {contextOpen && (
-              <MoonNodeDetail
-                node={viewModel.selectedNode}
-                content={viewModel.dockContent}
-                contractSuggestionExtras={contractSuggestionExtras}
-                workflowId={workflowId}
-                onMutate={async (subpath, body) => {
-                  await runMutation(subpath, body);
-                }}
-                buildGraph={payload?.build_graph}
-                onUpdateBuildGraph={updateBuildGraph}
-                onCommitGraphAction={async (graph, meta) => {
-                  await commitMoonGraphAction({
-                    ...meta,
-                    nextPayload: payload ? { ...payload, build_graph: graph } : null,
-                    afterApply: () => {
-                      if (viewModel.selectedNode) {
-                        dispatch({ type: 'SELECT_NODE', nodeId: viewModel.selectedNode.id });
-                      } else if (selectedEdge) {
-                        dispatch({ type: 'SELECT_EDGE', edgeId: selectedEdge.id });
-                        dispatch({ type: 'OPEN_DOCK', dock: 'context' });
-                      }
-                    },
-                    afterUndo: () => {
-                      if (viewModel.selectedNode) {
-                        dispatch({ type: 'SELECT_NODE', nodeId: viewModel.selectedNode.id });
-                      } else if (selectedEdge) {
-                        dispatch({ type: 'SELECT_EDGE', edgeId: selectedEdge.id });
-                        dispatch({ type: 'OPEN_DOCK', dock: 'context' });
-                      }
-                    },
-                  });
-                }}
-                onCommitAuthorityAction={async (subpath, body, meta) => {
-                  await commitMoonAuthorityAction({
-                    subpath,
-                    body,
-                    ...meta,
-                  });
-                }}
-                onClose={() => {
-                  if (selectedEdge) dismissSelectedEdgeMenus();
-                  else dispatch({ type: 'CLOSE_DOCK' });
-                }}
-                selectedEdge={selectedEdge}
-                edgeFromLabel={edgeFromNode?.title}
-                edgeToLabel={edgeToNode?.title}
-                onApplyGate={handleApplyGate}
-                gateItems={catalog.filter(c => c.family === 'control' && c.status === 'ready')}
-              />
-            )}
-          </div>
         </div>
 
-        {/* Bottom dock: Release or Run */}
-        <div className={`moon-dock-bottom${(releaseOpen || state.reviewQueueOpen || state.runViewOpen) ? ' moon-dock-bottom--open' : ' moon-dock-bottom--closed'}`}>
+        {/* Bottom dock: run status only. Workflow controls live on the left. */}
+        <div className={`moon-dock-bottom${state.runViewOpen ? ' moon-dock-bottom--open' : ' moon-dock-bottom--closed'}`}>
           {state.runViewOpen && state.activeRunId ? (
             <MoonRunPanel
               runId={state.activeRunId}
               workflowId={workflowId}
               onClose={() => dispatch({ type: 'CLOSE_RUN' })}
               onSwitchRun={(newRunId) => dispatch({ type: 'DISPATCH_SUCCESS', runId: newRunId })}
-            />
-          ) : state.reviewQueueOpen ? (
-            <MoonBindingReviewQueue
-              payload={payload}
-              onCommitAuthorityAction={async (subpath, body, meta) => {
-                await commitMoonAuthorityAction({
-                  subpath,
-                  body,
-                  ...meta,
-                });
-              }}
-              onClose={() => dispatch({ type: 'TOGGLE_REVIEW_QUEUE' })}
-            />
-          ) : releaseOpen ? (
-            <MoonReleaseTray
-              release={viewModel.release}
-              payload={payload}
-              workflowId={workflowId}
-              onWorkflowCreated={onWorkflowCreated}
-              onClose={() => dispatch({ type: 'TOGGLE_RELEASE' })}
-              onSelectNode={(nodeId) => dispatch({ type: 'SELECT_NODE', nodeId })}
-              onOpenDock={(dock) => dispatch({ type: 'OPEN_DOCK', dock: dock as 'action' | 'context' })}
-              onViewRun={onViewRun}
-              onDispatchSuccess={(runId) => dispatch({ type: 'DISPATCH_SUCCESS', runId })}
             />
           ) : null}
         </div>

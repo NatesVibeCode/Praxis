@@ -56,6 +56,13 @@ class CompileMaterializeCommand(BaseModel):
         default=5,
         description="Maximum authority candidates per recognized span.",
     )
+    llm_timeout_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Optional per-call LLM timeout for interactive materialization. "
+            "Keeps UI compose from pinning the API worker when a provider stalls."
+        ),
+    )
 
 
 def handle_compile_materialize(
@@ -67,12 +74,12 @@ def handle_compile_materialize(
     `compile.materialized` to `authority_events` (event_required=TRUE on the
     operation_catalog_registry row registered for this operation).
 
-    Known input failures are returned as `{ok: False, ...}` dicts so callers
-    preserve the structured reason_code; unknown exceptions raise and the
-    gateway records execution_status=failed with the traceback in the receipt.
+    Known materialization blockers raise ``CompileMaterializationError`` so the
+    gateway records execution_status=failed and does not emit a false
+    ``compile.materialized`` event.
     """
 
-    from runtime.compile_cqrs import materialize_workflow
+    from runtime.compile_cqrs import CompileMaterializationError, materialize_workflow
 
     conn = subsystems.get_pg_conn()
     try:
@@ -84,10 +91,11 @@ def handle_compile_materialize(
             enable_llm=command.enable_llm,
             enable_full_compose=command.enable_full_compose,
             match_limit=command.match_limit,
+            llm_timeout_seconds=command.llm_timeout_seconds,
         )
     except ValueError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "reason_code": "compile.intent.invalid",
-        }
+        raise CompileMaterializationError(
+            "compile.intent.invalid",
+            str(exc),
+            details={"intent": command.intent},
+        ) from exc

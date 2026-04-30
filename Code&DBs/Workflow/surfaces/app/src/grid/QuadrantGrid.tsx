@@ -139,11 +139,18 @@ function summarizeModuleChanges(
 export function QuadrantGrid({
   manifest: initialManifest,
   saveTarget,
+  editable = true,
+  layoutPath = 'ui.layout.quadrants',
+  showHeaderTitle = true,
 }: {
   manifest: QuadrantManifest;
   saveTarget?: QuadrantSaveTarget | null;
+  editable?: boolean;
+  layoutPath?: string;
+  showHeaderTitle?: boolean;
 }) {
-  const manifest = useManifestOverlay(initialManifest);
+  const overlayManifest = useManifestOverlay(initialManifest, layoutPath);
+  const manifest = editable ? overlayManifest : initialManifest;
   const occupied = getOccupiedCells(manifest.quadrants);
   const [editingQuadrant, setEditingQuadrant] = useState<{ quadrantId: string; focusKey?: string | null } | null>(null);
   const [showPalette, setShowPalette] = useState(false);
@@ -183,18 +190,18 @@ export function QuadrantGrid({
         undoScope: GRID_UNDO_SCOPE,
         category: 'layout',
         label: details.label,
-        authority: 'ui.layout.quadrants',
+        authority: layoutPath,
         reason: details.reason,
         outcome: details.outcome,
         target: details.target ?? null,
         changeSummary: details.changeSummary,
         apply: () => {
-          world.propose('ui.layout.quadrants', nextQuadrants);
+          world.propose(layoutPath, nextQuadrants);
           details.afterApply?.();
         },
         undoDescriptor: {
           kind: 'world.propose',
-          path: 'ui.layout.quadrants',
+          path: layoutPath,
           value: previousQuadrants,
         },
         onUndone: () => {
@@ -217,7 +224,7 @@ export function QuadrantGrid({
         },
       });
     })();
-  }, [manifest.quadrants, show]);
+  }, [layoutPath, manifest.quadrants, show]);
 
   const saveQuadrantConfig = useCallback((
     quadrantId: string,
@@ -484,49 +491,58 @@ export function QuadrantGrid({
   const ghostInvalid = drag.active && drag.hoveredCell !== null && !drag.valid;
 
   return (
-    <div style={{ padding: 'var(--space-lg)', maxWidth: 1600, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
-        {manifest.title && (
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, marginRight: 'var(--space-md)' }}>
-            {manifest.title}
-          </h1>
-        )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-          <button
-            type="button"
-            onClick={() => setShowAuditLog(true)}
-            className="grid-audit-trigger"
-          >
-            Audit log
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowPalette(true)}
-            style={{
-              background: 'var(--accent)',
-              color: 'var(--text-inverse)',
-              border: 'none',
-              borderRadius: '50%',
-              width: 28,
-              height: 28,
-              fontSize: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              padding: 0,
-              lineHeight: 1,
-            }}
-            title="Add Module"
-          >
-            +
-          </button>
+    <div
+      className={editable ? 'quadrant-grid-shell' : 'quadrant-grid-shell quadrant-grid-shell--readonly'}
+      style={{
+        padding: editable ? 'var(--space-lg)' : '12px 20px 20px',
+        maxWidth: 1600,
+        margin: '0 auto',
+      }}
+    >
+      {editable && (
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 'var(--space-lg)' }}>
+          {showHeaderTitle && manifest.title && (
+            <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, marginRight: 'var(--space-md)' }}>
+              {manifest.title}
+            </h1>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+            <button
+              type="button"
+              onClick={() => setShowAuditLog(true)}
+              className="grid-audit-trigger"
+            >
+              Audit log
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPalette(true)}
+              style={{
+                background: 'var(--accent)',
+                color: 'var(--text-inverse)',
+                border: 'none',
+                borderRadius: '50%',
+                width: 28,
+                height: 28,
+                fontSize: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                padding: 0,
+                lineHeight: 1,
+              }}
+              title="Add Module"
+            >
+              +
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <SaveLayoutBar manifest={initialManifest} saveTarget={saveTarget} />
+      {editable && <SaveLayoutBar manifest={initialManifest} saveTarget={saveTarget} layoutPath={layoutPath} />}
 
-      <ModulePalette isOpen={showPalette} onClose={() => setShowPalette(false)} startDrag={startDrag} />
+      {editable && <ModulePalette isOpen={showPalette} onClose={() => setShowPalette(false)} startDrag={startDrag} />}
 
       <div className="quadrant-grid">
         {ALL_CELLS.map(cellId => {
@@ -537,6 +553,7 @@ export function QuadrantGrid({
           const isHovered = drag.hoveredCell === cellId;
 
           if (!def) {
+            if (!editable) return null;
             return (
               <div
                 key={cellId}
@@ -586,6 +603,7 @@ export function QuadrantGrid({
                 isHovered ? 'drag-over' : '',
                 isHovered && !drag.valid ? 'invalid' : '',
                 justPlaced === cellId ? 'quadrant-cell-just-placed' : '',
+                !editable ? 'quadrant-cell--readonly' : '',
               ].filter(Boolean).join(' ')}
               data-module-focusable="true"
               data-grid-drop={cellId}
@@ -595,9 +613,10 @@ export function QuadrantGrid({
                 gridColumn: `${col + 1} / span ${cols}`,
                 gridRow: `${row + 1} / span ${rows}`,
                 position: 'relative',
-                cursor: 'grab',
+                cursor: editable ? 'grab' : 'default',
               }}
               onPointerDown={(e) => {
+                if (!editable) return;
                 if ((e.target as HTMLElement).closest('button, input, textarea, a, [contenteditable]')) return;
                 startDrag(e, {
                   kind: 'cell',
@@ -606,17 +625,20 @@ export function QuadrantGrid({
                 });
               }}
               onContextMenu={(event) => {
+                if (!editable) return;
                 event.preventDefault();
                 openModuleActions(new DOMRect(event.clientX, event.clientY, 1, 1));
               }}
               onKeyDown={(event) => {
+                if (!editable) return;
                 if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
                   event.preventDefault();
                   openModuleActions((event.currentTarget as HTMLDivElement).getBoundingClientRect());
                 }
               }}
             >
-              <button
+              {editable && (
+                <button
                 type="button"
                 className="gear-icon"
                 aria-label={`Open actions for ${moduleDef?.name ?? def.module}`}
@@ -639,6 +661,7 @@ export function QuadrantGrid({
               >
                 ⋯
               </button>
+              )}
               {editingQuadrant?.quadrantId === cellId && (
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 }}>
                   <ConfigEditorPanel
@@ -687,7 +710,7 @@ export function QuadrantGrid({
       </div>
 
       {/* Drag ghost — hidden over valid targets, red over invalid */}
-      {drag.active && drag.payload && !ghostHidden && (
+      {editable && drag.active && drag.payload && !ghostHidden && (
         <div
           className={`grid-drag-ghost${ghostInvalid ? ' grid-drag-ghost-invalid' : ''}`}
           style={{ left: drag.ghostX, top: drag.ghostY }}
@@ -696,7 +719,7 @@ export function QuadrantGrid({
         </div>
       )}
 
-      {actionMenu && manifest.quadrants[actionMenu.quadrantId] && (
+      {editable && actionMenu && manifest.quadrants[actionMenu.quadrantId] && (
         <ModuleActionMenu
           open
           anchorRect={actionMenu.anchorRect}
@@ -720,7 +743,7 @@ export function QuadrantGrid({
           onRemoveModule={() => removeQuadrant(actionMenu.quadrantId)}
         />
       )}
-      {showAuditLog && (
+      {editable && showAuditLog && (
         <div
           className="grid-audit-overlay"
           role="presentation"
@@ -761,7 +784,7 @@ export function QuadrantGrid({
         </div>
       )}
       <Toast />
-      <DetailSlidePanel />
+      {editable && <DetailSlidePanel />}
     </div>
   );
 }

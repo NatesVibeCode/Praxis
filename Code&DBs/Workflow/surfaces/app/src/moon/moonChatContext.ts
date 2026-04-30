@@ -28,16 +28,31 @@ export interface MoonChatContext {
   view_mode: 'build' | 'run' | null;
   /** Brief one-line hint the LLM uses to orient — kept short on purpose. */
   hint?: string | null;
+  materialize_status?: string | null;
+  operation_receipt_id?: string | null;
+  correlation_id?: string | null;
+  graph_summary?: Record<string, unknown> | null;
+  /**
+   * Read-only snapshot of the graph the operator can currently see.
+   *
+   * This is intentionally not write authority. It lets Moon chat reconcile
+   * "visible canvas has steps" against a stale/empty persisted read without
+   * pretending ephemeral UI state has been saved.
+   */
+  visible_ui_snapshot?: Record<string, unknown> | null;
 }
 
 export interface MoonChatHandoff {
   kind: typeof MOON_MATERIALIZE_HANDOFF_KIND;
   handoff_id: string;
-  workflow_id: string;
+  workflow_id: string | null;
   workflow_name?: string | null;
-  phase: 'started' | 'ready' | 'blocked';
+  phase: 'started' | 'ready' | 'blocked' | 'chat_fallback';
   status_message: string;
   prompt?: string | null;
+  operation_receipt_id?: string | null;
+  correlation_id?: string | null;
+  graph_summary?: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -50,6 +65,11 @@ export function emptyMoonChatContext(): MoonChatContext {
     selected_edge_id: null,
     view_mode: null,
     hint: null,
+    materialize_status: null,
+    operation_receipt_id: null,
+    correlation_id: null,
+    graph_summary: null,
+    visible_ui_snapshot: null,
   };
 }
 
@@ -145,5 +165,10 @@ export function moonChatSelectionContext(): Record<string, unknown>[] {
   if (ctx.selected_edge_id) entry.selected_edge_id = ctx.selected_edge_id;
   if (ctx.view_mode) entry.view_mode = ctx.view_mode;
   if (ctx.hint) entry.hint = ctx.hint;
+  if (ctx.materialize_status) entry.materialize_status = ctx.materialize_status;
+  if (ctx.operation_receipt_id) entry.operation_receipt_id = ctx.operation_receipt_id;
+  if (ctx.correlation_id) entry.correlation_id = ctx.correlation_id;
+  if (ctx.graph_summary) entry.graph_summary = ctx.graph_summary;
+  if (ctx.visible_ui_snapshot) entry.visible_ui_snapshot = ctx.visible_ui_snapshot;
   return [entry];
 }

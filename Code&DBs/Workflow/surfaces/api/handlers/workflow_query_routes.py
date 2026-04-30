@@ -49,7 +49,6 @@ def _object_type_field_path(candidate: str) -> bool:
 
 QUERY_POST_ROUTES: list[RouteEntry] = [
     (_exact("/query"), _handler._handle_query_post),
-    (_exact("/api/compile/preview"), _handler._handle_compile_preview_post),
     (_exact("/api/catalog/review-decisions"), _handler._handle_catalog_review_decisions_post),
     (_exact("/api/object-types"), _handler._handle_object_types_post),
     (_object_type_fields_path, _handler._handle_object_fields_post),

@@ -12,9 +12,12 @@ OPERATION_KINDS = frozenset({"command", "query"})
 OPERATION_SOURCE_KINDS = frozenset({"operation_command", "operation_query"})
 OPERATION_POSTURES = frozenset({"observe", "operate", "build"})
 OPERATION_IDEMPOTENCY_POLICIES = frozenset({"non_idempotent", "idempotent", "read_only"})
+OPERATION_EXECUTION_LANES = frozenset({"interactive", "background", "system"})
 DEFAULT_AUTHORITY_STORAGE_TARGET = "praxis.primary_postgres"
 DEFAULT_OPERATION_TIMEOUT_MS = 15000
 DEFAULT_OPERATION_ALLOWED_CALLERS = ("cli", "mcp", "http", "workflow", "heartbeat")
+DEFAULT_OPERATION_EXECUTION_LANE = "background"
+DEFAULT_OPERATION_KICKOFF_REQUIRED = False
 
 
 def _normalize_enum(
@@ -72,6 +75,20 @@ def normalize_operation_idempotency_policy(
     )
 
 
+def normalize_operation_execution_lane(
+    value: object | None,
+    *,
+    field_name: str = "execution_lane",
+    allow_none: bool = False,
+) -> str | None:
+    return _normalize_enum(
+        value,
+        field_name=field_name,
+        allowed=OPERATION_EXECUTION_LANES,
+        allow_none=allow_none,
+    )
+
+
 def _normalize_iso(value: object) -> str | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
@@ -112,6 +129,8 @@ def operation_catalog_contract_descriptor() -> dict[str, Any]:
             "projection_freshness_policy_ref",
             "posture",
             "idempotency_policy",
+            "execution_lane",
+            "kickoff_required",
             "enabled",
             "operation_enabled",
             "source_policy_ref",
@@ -153,14 +172,18 @@ def build_operation_catalog_response(
 __all__ = [
     "OPERATION_CATALOG_CONTRACT_VERSION",
     "OPERATION_CATALOG_QUERY_PATH",
+    "OPERATION_EXECUTION_LANES",
     "OPERATION_IDEMPOTENCY_POLICIES",
     "OPERATION_KINDS",
     "OPERATION_POSTURES",
     "OPERATION_SOURCE_KINDS",
     "DEFAULT_AUTHORITY_STORAGE_TARGET",
     "DEFAULT_OPERATION_ALLOWED_CALLERS",
+    "DEFAULT_OPERATION_EXECUTION_LANE",
+    "DEFAULT_OPERATION_KICKOFF_REQUIRED",
     "DEFAULT_OPERATION_TIMEOUT_MS",
     "build_operation_catalog_response",
+    "normalize_operation_execution_lane",
     "normalize_operation_idempotency_policy",
     "normalize_operation_kind",
     "normalize_operation_posture",

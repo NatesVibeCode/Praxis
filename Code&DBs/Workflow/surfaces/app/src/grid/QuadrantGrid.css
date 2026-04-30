@@ -1,3 +1,8 @@
+.quadrant-grid-shell--readonly .quadrant-grid {
+  grid-auto-rows: minmax(88px, auto);
+  gap: 12px;
+}
+
 .quadrant-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -12,6 +17,10 @@
   border-radius: var(--radius);
   overflow: visible;
   min-width: 0;
+}
+
+.quadrant-cell--readonly {
+  cursor: default;
 }
 
 .grid-audit-trigger {

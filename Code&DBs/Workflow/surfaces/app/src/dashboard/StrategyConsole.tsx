@@ -25,19 +25,11 @@ const QUICK_PROMPTS = [
   'Help me plan the next build step.',
   'Find the relevant context for this screen.',
 ];
-const CHAT_MODEL_STORAGE_KEY = 'praxis-chat-model';
+const OPERATOR_CHAT_ENGINE = 'DeepSeek V4 Pro';
+const OPERATOR_CHAT_PROVIDER = 'Together';
 const MAX_CHAT_FILES = 6;
 const MAX_FILE_CONTEXT_BYTES = 80_000;
 const MAX_TOTAL_FILE_CONTEXT_BYTES = 240_000;
-
-interface ChatModelOption {
-  slug: string;
-  provider: string;
-  model: string;
-  route_rank?: number;
-  route_tier?: string | null;
-  latency_class?: string | null;
-}
 
 interface PendingChatFile {
   id: string;
@@ -48,26 +40,6 @@ interface PendingChatFile {
   clipped: boolean;
 }
 
-function readStoredChatModel(): string {
-  try {
-    return window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
-function storeChatModel(value: string): void {
-  try {
-    if (value) {
-      window.localStorage.setItem(CHAT_MODEL_STORAGE_KEY, value);
-      return;
-    }
-    window.localStorage.removeItem(CHAT_MODEL_STORAGE_KEY);
-  } catch {
-    // Local storage can be unavailable in private or test contexts.
-  }
-}
-
 function formatFileSize(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
@@ -76,11 +48,6 @@ function formatFileSize(size: number): string {
 
 function chatFileId(file: File): string {
   return `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`;
-}
-
-function modelLabel(option: ChatModelOption): string {
-  const rank = option.route_rank ? `#${option.route_rank} ` : '';
-  return `${rank}${option.provider}/${option.model}`;
 }
 
 function formatConversationTime(value?: string): string {
@@ -116,9 +83,6 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(false);
   const [conversationQuery, setConversationQuery] = useState('');
-  const [availableModels, setAvailableModels] = useState<ChatModelOption[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState(readStoredChatModel);
   const [attachedFiles, setAttachedFiles] = useState<PendingChatFile[]>([]);
   const [dropActive, setDropActive] = useState(false);
   const [moonHandoff, setMoonHandoff] = useState<MoonChatHandoff | null>(null);
@@ -154,39 +118,6 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
 
   useEffect(() => {
     if (stage === 'icon') return;
-    let cancelled = false;
-    setModelsLoading(true);
-    fetch('/api/models?task_type=chat')
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`models ${response.status}`)))
-      .then((data) => {
-        if (cancelled) return;
-        const models = Array.isArray(data?.models) ? data.models : [];
-        setAvailableModels(models.map((model: any) => ({
-          slug: String(model.slug || ''),
-          provider: String(model.provider || ''),
-          model: String(model.model || ''),
-          route_rank: typeof model.route_rank === 'number' ? model.route_rank : undefined,
-          route_tier: typeof model.route_tier === 'string' ? model.route_tier : null,
-          latency_class: typeof model.latency_class === 'string' ? model.latency_class : null,
-        })).filter((model: ChatModelOption) => model.slug && model.provider && model.model));
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAvailableModels([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setModelsLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [stage]);
-
-  useEffect(() => {
-    if (stage === 'icon') return;
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, streamingText, stage]);
 
@@ -209,14 +140,6 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
   const charsRemaining = INPUT_MAX_LENGTH - input.length;
   const showCounter = charsRemaining <= INPUT_COUNTER_THRESHOLD;
   const statusLabel = loading || streamingText ? 'Thinking' : conversationId ? 'Ready' : 'No thread';
-  const selectedModelKnown = selectedModel
-    ? availableModels.some((model) => model.slug === selectedModel)
-    : true;
-
-  const handleModelChange = useCallback((value: string) => {
-    setSelectedModel(value);
-    storeChatModel(value);
-  }, []);
 
   const attachFiles = useCallback(async (fileList: FileList | File[]) => {
     const files = Array.from(fileList).slice(0, MAX_CHAT_FILES);
@@ -282,14 +205,13 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
       content,
       mergedSelection,
       targetConversationId,
-      { model: selectedModel || null },
     );
     void refreshConversations();
-  }, [attachedFiles, conversationId, createConversation, input, loading, refreshConversations, selectedModel, sendMessage]);
+  }, [attachedFiles, conversationId, createConversation, input, loading, refreshConversations, sendMessage]);
 
   useEffect(() => {
     if (stage === 'icon' || loading) return;
-    if (!moonHandoff || moonHandoff.phase !== 'ready' || !moonHandoff.prompt) return;
+    if (!moonHandoff || moonHandoff.phase !== 'chat_fallback' || !moonHandoff.prompt) return;
     if (processedHandoffIdsRef.current.has(moonHandoff.handoff_id)) return;
     processedHandoffIdsRef.current.add(moonHandoff.handoff_id);
 
@@ -297,7 +219,9 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     const runHandoff = async () => {
       let targetConversationId = conversationId;
       if (!targetConversationId) {
-        targetConversationId = await createConversation(`Moon review ${moonHandoff.workflow_id}`);
+        targetConversationId = await createConversation(
+          moonHandoff.workflow_id ? `Moon recovery ${moonHandoff.workflow_id}` : 'Moon materialize recovery',
+        );
         if (!targetConversationId || cancelled) return;
       }
       const moonCtx = moonChatSelectionContext();
@@ -309,13 +233,16 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
           workflow_name: moonHandoff.workflow_name ?? null,
           phase: moonHandoff.phase,
           status_message: moonHandoff.status_message,
+          operation_receipt_id: moonHandoff.operation_receipt_id ?? null,
+          correlation_id: moonHandoff.correlation_id ?? null,
+          graph_summary: moonHandoff.graph_summary ?? null,
         },
       ];
       void sendMessage(
         moonHandoff.prompt || '',
         selectionContext,
         targetConversationId,
-        { model: selectedModel || null, timeoutMs: 240000 },
+        { timeoutMs: 240000 },
       );
       clearMoonChatHandoff();
       setMoonHandoff(moonHandoff);
@@ -326,7 +253,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
     return () => {
       cancelled = true;
     };
-  }, [conversationId, createConversation, loading, moonHandoff, refreshConversations, selectedModel, sendMessage, stage]);
+  }, [conversationId, createConversation, loading, moonHandoff, refreshConversations, sendMessage, stage]);
 
   const handleStartNew = useCallback(async () => {
     const id = await createConversation();
@@ -444,7 +371,7 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
         {moonHandoff && (
           <div className={`strategy-console__handoff strategy-console__handoff--${moonHandoff.phase}`}>
             <span className="strategy-console__handoff-kicker">Moon handoff</span>
-            <strong>{moonHandoff.phase === 'ready' ? 'Reviewing materialize output' : moonHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
+            <strong>{moonHandoff.phase === 'chat_fallback' ? 'Moon is looking now' : moonHandoff.phase === 'ready' ? 'Materialize ready' : moonHandoff.phase === 'blocked' ? 'Materialize needs attention' : 'Materialize in progress'}</strong>
             <p>{moonHandoff.status_message}</p>
           </div>
         )}
@@ -539,25 +466,11 @@ export function StrategyConsole({ stage, onStageChange }: StrategyConsoleProps) 
         }}
       >
         <div className="strategy-console__composer-tools">
-          <label className="strategy-console__model-picker">
-            <span>Model</span>
-            <select
-              value={selectedModel}
-              onChange={(event) => handleModelChange(event.target.value)}
-              aria-label="Chat model"
-              disabled={modelsLoading}
-            >
-              <option value="">{modelsLoading ? 'Loading routes...' : 'Auto route'}</option>
-              {selectedModel && !selectedModelKnown && (
-                <option value={selectedModel}>{selectedModel}</option>
-              )}
-              {availableModels.map((model) => (
-                <option key={model.slug} value={model.slug}>
-                  {modelLabel(model)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="strategy-console__model-lock" aria-label="Chat model">
+            <span>Engine</span>
+            <strong>{OPERATOR_CHAT_ENGINE}</strong>
+            <em>{OPERATOR_CHAT_PROVIDER}</em>
+          </div>
           <button
             type="button"
             className="strategy-console__file-button"

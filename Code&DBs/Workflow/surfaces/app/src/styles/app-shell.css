@@ -434,14 +434,16 @@
 
 .app-shell__main {
   flex: 1;
+  position: relative;
   container-name: app-main;
   container-type: inline-size;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: flex-basis 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
 }
 
-.app-shell__main--shrunk {
+.app-shell__main--with-console {
   flex: 1 1 auto;
   opacity: 1;
   filter: none;
@@ -558,7 +560,7 @@
   font-size: 24px;
   font-weight: 700;
   line-height: 1.15;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   color: var(--text);
 }
 
@@ -642,6 +644,10 @@
   color: var(--text);
 }
 
+.app-shell__fallback-actions {
+  margin-top: 8px;
+}
+
 .app-shell__surface {
   min-height: 100%;
   display: flex;
@@ -669,6 +675,12 @@
   box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16);
 }
 
+.app-shell__surface-header--workbench {
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+}
+
 .app-shell__surface-heading {
   display: flex;
   flex-direction: column;
@@ -676,11 +688,64 @@
   min-width: 0;
 }
 
+.app-shell__surface-heading--workbench {
+  gap: 6px;
+  flex: 1 1 320px;
+}
+
+.app-shell__surface-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
 .app-shell__surface-title {
   font-size: 22px;
   font-weight: 700;
   line-height: 1.15;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.app-shell__surface-title-input {
+  min-width: 9ch;
+  max-width: min(38vw, 520px);
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: var(--text);
+  outline: none;
+  text-overflow: ellipsis;
+}
+
+.app-shell__surface-title-input:hover {
+  border-color: rgba(243, 238, 228, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.app-shell__surface-title-input:focus {
+  border-color: rgba(243, 238, 228, 0.34);
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: 0 0 0 3px rgba(243, 238, 228, 0.08);
+}
+
+.app-shell__surface-title-input:disabled {
+  opacity: 0.72;
+}
+
+.app-shell__surface-rename-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.app-shell__surface-rename-status--error {
+  color: var(--danger);
 }
 
 .app-shell__surface-copy {
@@ -688,6 +753,38 @@
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-muted);
+}
+
+.app-shell__surface-copy--inline {
+  max-width: min(54ch, 42vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell__surface-workbench-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 520px;
+}
+
+.app-shell__surface-source-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-shell__surface-source-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .app-shell__surface-action {
@@ -701,6 +798,16 @@
   font-weight: 700;
   cursor: pointer;
   transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.app-shell__surface-action--primary {
+  border-color: rgba(243, 238, 228, 0.2);
+  background: rgba(243, 238, 228, 0.12);
+}
+
+.app-shell__surface-action--active {
+  border-color: rgba(243, 238, 228, 0.36);
+  background: rgba(243, 238, 228, 0.18);
 }
 
 .app-shell__surface-action:hover {
@@ -718,6 +825,10 @@
   flex-wrap: wrap;
   gap: 8px;
   padding: 14px 20px 0;
+}
+
+.app-shell__surface-tabs--inline {
+  padding: 0;
 }
 
 .app-shell__surface-tab,
@@ -778,6 +889,12 @@
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.18);
 }
 
+.app-shell__surface-chip--active {
+  border-color: rgba(243, 238, 228, 0.42) !important;
+  background: rgba(243, 238, 228, 0.1) !important;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
 .app-shell__surface-chip:active {
   transform: translateY(0);
 }
@@ -817,6 +934,22 @@
   flex: 1;
   overflow: auto;
   scrollbar-gutter: stable;
+}
+
+.app-shell__surface-header--workbench .app-shell__surface-chip {
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 12px;
+}
+
+.app-shell__surface-header--workbench .app-shell__surface-chip-subtitle {
+  display: none;
+}
+
+.app-shell__surface-header--workbench .app-shell__surface-action {
+  min-height: 34px;
+  border-radius: 12px;
+  padding: 0 12px;
 }
 
 .ws-skeleton {

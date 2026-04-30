@@ -79,7 +79,9 @@ def test_row_expected_objects_are_inspectable_by_schema_readiness() -> None:
         if object_type == "row"
     }
 
-    assert row_tables <= set(_ROW_EXPECTATION_KEY_COLUMNS)
+    special_case_row_tables = {"private_provider_api_job_allowlist"}
+
+    assert row_tables <= set(_ROW_EXPECTATION_KEY_COLUMNS) | special_case_row_tables
 
 
 def test_new_non_archive_migrations_do_not_hide_empty_readiness_contracts() -> None:

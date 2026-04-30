@@ -1,0 +1,35 @@
+{
+  "name": "Client Operating Model Phase 11 Operator Surfaces",
+  "workflow_id": "client_operating_model_phase_11_operator_surfaces_20260430",
+  "queue_id": "client_operating_model_phase_11_operator_surfaces_20260430",
+  "phase": "architecture",
+  "outcome_goal": "Produce the operator inspection, Moon surfaces, and workflow builder UX implementation packet.",
+  "anti_requirements": [
+    "Do not edit production code.",
+    "Do not make UI a second authority.",
+    "Do not expose green states without receipts, verifiers, or drift evidence."
+  ],
+  "jobs": [
+    {
+      "label": "phase_11_operator_surfaces_packet",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "architecture",
+      "timeout": 900,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "docs/architecture/object-truth-trust-toolbelt/README.md",
+        "Code&DBs/Workflow/surfaces/app/src/moon",
+        "Code&DBs/Workflow/surfaces/api",
+        "Code&DBs/Workflow/surfaces/mcp/tools",
+        "artifacts/workflow/client_operating_model/packets/phase_08_sandbox_drift/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_09_portable_cartridge/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_10_managed_runtime/PLAN.md"
+      ],
+      "write_scope": [
+        "artifacts/workflow/client_operating_model/packets/phase_11_operator_surfaces/PLAN.md"
+      ],
+      "prompt": "Write artifacts/workflow/client_operating_model/packets/phase_11_operator_surfaces/PLAN.md. Produce a bounded build packet for Phase 11: Operator Inspection, Moon Surfaces, and Workflow Builder UX. Cover system census views, object truth inspection, identity/source authority views, simulation timeline, verifier results, sandbox drift, cartridge status, next safe actions, API/MCP surfaces, tests, and validation. Do not edit code."
+    }
+  ]
+}

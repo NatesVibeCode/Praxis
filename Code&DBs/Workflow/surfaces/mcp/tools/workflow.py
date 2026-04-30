@@ -2228,7 +2228,11 @@ def tool_praxis_compose_and_launch(params: dict) -> dict:
     kickoff_started_at = time.time()
     kickoff_correlation_id = str(uuid.uuid4())
     _ctx_token = CURRENT_CALLER_CONTEXT.set(
-        CallerContext(cause_receipt_id=None, correlation_id=kickoff_correlation_id)
+        CallerContext(
+            cause_receipt_id=None,
+            correlation_id=kickoff_correlation_id,
+            transport_kind="workflow",
+        )
     )
 
     def _run_compose_launch_in_background() -> None:
@@ -2529,10 +2533,14 @@ def tool_praxis_generate_plan(params: dict) -> dict:
         }
 
     try:
-        from runtime.compile_cqrs import preview_compile
-
         if action == "generate_plan":
-            return preview_compile(intent, conn=pg_conn, match_limit=match_limit).to_dict()
+            from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+
+            return execute_operation_from_subsystems(
+                _subs,
+                operation_name="compile_preview",
+                payload={"intent": intent, "match_limit": match_limit},
+            )
 
         enable_llm = params.get("enable_llm")
         if enable_llm is not None and not isinstance(enable_llm, bool):
@@ -2568,11 +2576,30 @@ def tool_praxis_generate_plan(params: dict) -> dict:
         if isinstance(enable_full_compose, bool):
             payload["enable_full_compose"] = enable_full_compose
 
-        return execute_operation_from_subsystems(
+        materialized = execute_operation_from_subsystems(
             _subs,
             operation_name="compile_materialize",
             payload=payload,
         )
+        if not isinstance(materialized, dict) or materialized.get("ok") is False:
+            return materialized if isinstance(materialized, dict) else {"ok": False, "result": materialized}
+        materialized_workflow_id = str(materialized.get("workflow_id") or "").strip()
+        if not materialized_workflow_id:
+            return materialized
+        build = execute_operation_from_subsystems(
+            _subs,
+            operation_name="workflow_build_get",
+            payload={"workflow_id": materialized_workflow_id},
+        )
+        return {
+            "ok": True,
+            "action": "materialize_plan",
+            "workflow_id": materialized_workflow_id,
+            "graph_summary": materialized.get("graph_summary"),
+            "operation_receipt": materialized.get("operation_receipt"),
+            "materialization": materialized,
+            "build": build,
+        }
     except Exception as exc:
         return _structured_runtime_error(exc, action="plan_generation_cqrs")
 
@@ -2691,7 +2718,11 @@ def tool_praxis_compose_plan_via_llm(params: dict) -> dict:
     )
     kickoff_correlation_id = str(uuid.uuid4())
     _ctx_token = CURRENT_CALLER_CONTEXT.set(
-        CallerContext(cause_receipt_id=None, correlation_id=kickoff_correlation_id)
+        CallerContext(
+            cause_receipt_id=None,
+            correlation_id=kickoff_correlation_id,
+            transport_kind="workflow",
+        )
     )
 
     def _run_compose_in_background() -> None:

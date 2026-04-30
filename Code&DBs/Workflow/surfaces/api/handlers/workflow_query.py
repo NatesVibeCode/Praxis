@@ -1681,21 +1681,18 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
         workflow_id, subpath = _workflow_build_subpath(path)
         pg = request.subsystems.get_pg_conn()
         if subpath == "bootstrap":
-            from runtime.compile_cqrs import materialize_workflow
-
-            enable_full_compose = (
-                body.get("enable_full_compose")
-                if isinstance(body.get("enable_full_compose"), bool)
-                else None
+            request._send_json(
+                410,
+                {
+                    "ok": False,
+                    "error": "workflow build bootstrap is deprecated; use compile materialize",
+                    "reason_code": "workflow_build.bootstrap.deprecated",
+                    "migration_hint": "/api/compile/materialize",
+                    "operation_name": "compile_materialize",
+                    "workflow_id": workflow_id,
+                },
             )
-            result = materialize_workflow(
-                str(body.get("prose") or ""),
-                conn=pg,
-                workflow_id=workflow_id,
-                title=body.get("title") if isinstance(body.get("title"), str) else None,
-                enable_llm=body.get("enable_llm") if isinstance(body.get("enable_llm"), bool) else None,
-                enable_full_compose=enable_full_compose,
-            )["mutation"]
+            return
         else:
             result = mutate_workflow_build(
                 pg,
@@ -1738,10 +1735,16 @@ def _handle_compile_preview_post(request: Any, path: str) -> None:
         request._send_json(400, {"error": "intent must be a non-empty string"})
         return
     try:
-        pg = request.subsystems.get_pg_conn()
-        from runtime.compile_cqrs import preview_compile
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
-        request._send_json(200, preview_compile(intent, conn=pg).to_dict())
+        request._send_json(
+            200,
+            execute_operation_from_subsystems(
+                request.subsystems,
+                operation_name="compile_preview",
+                payload={"intent": intent},
+            ),
+        )
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 
@@ -2059,9 +2062,9 @@ def _control_manifest_row_base(row: dict[str, Any], *, manifest_key: str) -> dic
     }
 
 
-def _manifest_listing_row(row: dict[str, Any]) -> dict[str, Any]:
+def _manifest_listing_row(row: dict[str, Any], *, include_manifest: bool = False) -> dict[str, Any]:
     manifest = row.get("manifest")
-    return {
+    payload = {
         "id": row.get("id"),
         "name": row.get("name"),
         "description": row.get("description") or "",
@@ -2070,6 +2073,9 @@ def _manifest_listing_row(row: dict[str, Any]) -> dict[str, Any]:
         "manifest_type": _manifest_type_from_payload(manifest),
         "updated_at": row.get("updated_at"),
     }
+    if include_manifest:
+        payload["manifest"] = manifest if isinstance(manifest, dict) else _parse_json_field(manifest)
+    return payload
 
 
 def _control_manifest_filter_sql(column: str, field: str) -> str:
@@ -2187,6 +2193,11 @@ def _handle_manifests_get(request: Any, path: str) -> None:
         manifest_family = str((params.get("manifest_family") or [""])[0]).strip()
         manifest_type = str((params.get("manifest_type") or [""])[0]).strip()
         status = str((params.get("status") or [""])[0]).strip()
+        include_manifest = coerce_query_bool(
+            params.get("include_manifest"),
+            field_name="include_manifest",
+            default=False,
+        )
         limit = coerce_query_int(
             params.get("limit"),
             field_name="limit",
@@ -2225,13 +2236,17 @@ def _handle_manifests_get(request: Any, path: str) -> None:
             200,
             _serialize(
                 {
-                    "manifests": [_manifest_listing_row(dict(row)) for row in rows],
+                    "manifests": [
+                        _manifest_listing_row(dict(row), include_manifest=include_manifest)
+                        for row in rows
+                    ],
                     "count": len(rows),
                     "filters": {
                         "q": query or None,
                         "manifest_family": manifest_family or None,
-                    "manifest_type": manifest_type or None,
+                        "manifest_type": manifest_type or None,
                         "status": status or None,
+                        "include_manifest": include_manifest,
                         "limit": limit,
                     },
                 }
@@ -3153,7 +3168,8 @@ def _handle_object_fields_delete(request: Any, path: str) -> None:
 
 
 def _handle_objects_get(request: Any, path: str) -> None:
-    if path == "/api/objects":
+    base_path = path.split("?", 1)[0]
+    if base_path == "/api/objects":
         try:
             params = _query_params(request.path)
             type_id = (params.get("type") or [""])[0].strip()
@@ -3205,7 +3221,7 @@ def _handle_objects_get(request: Any, path: str) -> None:
             request._send_json(500, {"error": str(exc)})
         return
 
-    object_id = path.split("/api/objects/")[-1]
+    object_id = base_path.split("/api/objects/")[-1]
     if object_id:
         try:
             pg = request.subsystems.get_pg_conn()

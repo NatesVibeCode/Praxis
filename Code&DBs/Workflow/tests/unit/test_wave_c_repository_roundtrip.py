@@ -130,6 +130,12 @@ class _WorkflowJobRuntimeContextConn:
 
     def fetchrow(self, query: str, *args):
         normalized = " ".join(query.split())
+        if "FROM workflow_jobs" in normalized:
+            # load_workflow_job_authority_binding queries this table to merge
+            # the per-job authority binding into the runtime context. The
+            # fake has no binding to return; the loader treats None as
+            # unbound and the round-trip remains stable.
+            return {"authority_binding": None}
         if "FROM workflow_job_runtime_context" not in normalized:
             raise AssertionError(query)
         row = self.rows.get((str(args[0]), str(args[1])))

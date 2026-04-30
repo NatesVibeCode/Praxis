@@ -1,0 +1,33 @@
+{
+  "authority_domain_ref": "authority.client_system_discovery",
+  "phase_ref": "phase_01_client_system_discovery",
+  "status": "implemented_in_trimmed_checkout",
+  "migration_files": [
+    "314_client_system_discovery_authority.sql"
+  ],
+  "expected_objects": [
+    {
+      "object_type": "table",
+      "object_name": "client_system_census"
+    },
+    {
+      "object_type": "table",
+      "object_name": "client_connector_census"
+    },
+    {
+      "object_type": "table",
+      "object_name": "client_connector_surface_evidence"
+    },
+    {
+      "object_type": "table",
+      "object_name": "client_connector_credential_health_refs"
+    }
+  ],
+  "tool_surfaces": [
+    "praxis_client_system_discovery"
+  ],
+  "notes": [
+    "Phase 1 substrate only: durable census, surface evidence, credential refs, and typed discovery gaps.",
+    "Not wired into generated workflow migration authority in this checkout because the broader authority generator inputs are absent."
+  ]
+}

@@ -83,13 +83,25 @@ export type GateState = 'empty' | 'proposed' | 'configured' | 'blocked' | 'passe
 
 // --- Graph layout ---
 
-export const RANK_SPACING = 200;   // horizontal: distance between steps
-export const COLUMN_SPACING = 168; // vertical: distance between parallel branches — needs to fit 2-line labels between sibling rings
+export const RANK_SPACING = 228;   // vertical: distance between readable workflow cards
+export const COLUMN_SPACING = 368; // horizontal: card-width branch lanes with readable labels
+
+export type NodeShape = 'task' | 'decision' | 'checkpoint' | 'note';
+
+export const NODE_SHAPE_DIMENSIONS: Record<NodeShape, { width: number; height: number }> = {
+  checkpoint: { width: 118, height: 118 },
+  decision: { width: 154, height: 118 },
+  note: { width: 244, height: 138 },
+  task: { width: 244, height: 96 },
+};
 
 export interface LayoutNode {
   id: string;
   rank: number;
   column: number;
+  height: number;
+  shape: NodeShape;
+  width: number;
   x: number;
   y: number;
 }
@@ -123,11 +135,25 @@ export interface NodeCompletionContract {
   [key: string]: unknown;
 }
 
+export interface NodeAgentToolPlan {
+  tool_name?: string;
+  operation?: string;
+  repeats?: number;
+  focus?: string;
+  cadence?: 'single' | 'sequential' | 'parallel';
+  target_fields?: string[];
+  notes?: string;
+  [key: string]: unknown;
+}
+
 export interface OrbitNode {
   id: string;
   kind: 'step' | 'gate' | 'state';
   title: string;
   summary: string;
+  shape: NodeShape;
+  width: number;
+  height: number;
   glyphType: GlyphType;
   ringState: RingState;
   isOnDominantPath: boolean;
@@ -143,6 +169,10 @@ export interface OrbitNode {
   outcomeGoal?: string;
   prompt?: string;
   completionContract?: NodeCompletionContract | null;
+  agent?: string | null;
+  capabilities?: string[];
+  writeScope?: string[];
+  agentToolPlan?: NodeAgentToolPlan | null;
   /** Number of outgoing edges that leave this node in the graph. */
   outgoingEdgeCount: number;
   /**
@@ -207,10 +237,30 @@ export interface ReleaseStatus {
   checklist: ReadinessItem[];
 }
 
+export interface BranchLane {
+  edgeId: string;
+  label: string;
+  family?: string;
+  nodeIds: string[];
+  isOnDominantPath: boolean;
+  terminal: {
+    kind: 'rejoin' | 'end' | 'nested_split';
+    nodeId?: string;
+    label: string;
+  };
+}
+
+export interface BranchBoard {
+  sourceNodeId: string;
+  sourceTitle: string;
+  lanes: BranchLane[];
+}
+
 export interface MoonBuildViewModel {
   nodes: OrbitNode[];
   edges: OrbitEdge[];
   dominantPath: string[];
+  branchBoard: BranchBoard[];
   layout: GraphLayout;
   release: ReleaseStatus;
   dockContent: DockContent | null;
@@ -308,6 +358,266 @@ function nodeToGlyph(node: BuildNode): GlyphType {
   return glyphFromLabel(`${route} ${label}`) ?? 'step';
 }
 
+function nodeText(node: BuildNode): string {
+  return [
+    (node as { label?: string }).label,
+    node.title,
+    node.route,
+    node.task_type,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join(' ');
+}
+
+function nodeToReviewShape(node: BuildNode, outgoingEdgeCount: number): NodeShape {
+  const text = nodeText(node).toLowerCase();
+  if (
+    outgoingEdgeCount > 1
+    || /\b(decide|decision|choose|evaluate|review|approve|approval|gate|route|branch|fit|keep going)\b/.test(text)
+  ) {
+    return 'decision';
+  }
+  if (/\b(log|note|notes|summary|report|record|message|explain|rationale|outcome|decision log)\b/.test(text)) {
+    return 'note';
+  }
+  if (/\b(start|finish|complete|completed|promote|test|launch|fire|checkpoint)\b/.test(text)) {
+    return 'checkpoint';
+  }
+  return 'task';
+}
+
+function isReviewMapNode(node: BuildNode): boolean {
+  return node.kind === 'step';
+}
+
+function deriveReviewEdges(nodes: BuildNode[], edges: BuildEdge[]): BuildEdge[] {
+  const stepIds = new Set(nodes.filter(isReviewMapNode).map(node => node.node_id));
+  const nodeById = new Map(nodes.map(node => [node.node_id, node]));
+  const reviewEdgesByPair = new Map<string, BuildEdge>();
+  const pairKey = (from: string, to: string) => `${from}->${to}`;
+
+  for (const edge of edges) {
+    if (!stepIds.has(edge.from_node_id) || !stepIds.has(edge.to_node_id)) continue;
+    reviewEdgesByPair.set(pairKey(edge.from_node_id, edge.to_node_id), edge);
+  }
+
+  for (const gate of nodes) {
+    if (isReviewMapNode(gate)) continue;
+    const incoming = edges.filter(edge => edge.to_node_id === gate.node_id && stepIds.has(edge.from_node_id));
+    const outgoing = edges.filter(edge => edge.from_node_id === gate.node_id && stepIds.has(edge.to_node_id));
+    for (const source of incoming) {
+      for (const target of outgoing) {
+        const key = pairKey(source.from_node_id, target.to_node_id);
+        if (reviewEdgesByPair.has(key)) continue;
+        const sourceRelease = normalizeBuildEdgeRelease(source);
+        const targetRelease = normalizeBuildEdgeRelease(target);
+        const carrier = targetRelease.family !== 'after_success' ? target : sourceRelease.family !== 'after_success' ? source : target;
+        const sourceNode = nodeById.get(source.from_node_id);
+        const targetNode = nodeById.get(target.to_node_id);
+        reviewEdgesByPair.set(key, {
+          ...carrier,
+          edge_id: carrier.edge_id || target.edge_id || source.edge_id || `review-${source.from_node_id}-${target.to_node_id}`,
+          from_node_id: source.from_node_id,
+          to_node_id: target.to_node_id,
+          kind: carrier.kind || target.kind || source.kind || 'sequence',
+          metadata: {
+            ...(((carrier as unknown as { metadata?: Record<string, unknown> }).metadata) || {}),
+            collapsed_gate_node_id: gate.node_id,
+            collapsed_gate_title: gate.title,
+            collapsed_from_title: sourceNode?.title,
+            collapsed_to_title: targetNode?.title,
+          },
+        } as BuildEdge);
+      }
+    }
+  }
+
+  return [...reviewEdgesByPair.values()];
+}
+
+function isMechanicalNodeTitle(value: string, nodeId: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized === nodeId.trim().toLowerCase()) return true;
+  return /^(node|step|task|stage|untitled)[-_ ]?\d*$/i.test(normalized)
+    || /^wf[_-]/i.test(normalized)
+    || /^[a-f0-9]{8,}$/i.test(normalized);
+}
+
+function compactArtifactTitle(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed.includes('/')) return null;
+  const parts = trimmed.split('/').filter(Boolean);
+  const last = parts[parts.length - 1];
+  return last || null;
+}
+
+function nodeToReviewTitle(node: BuildNode, index: number): string {
+  const rawTitle = ((node as { label?: string; title?: string }).label || node.title || '').replace(/\.\s*Step$/i, '').trim();
+  const compactArtifact = compactArtifactTitle(rawTitle);
+  if (compactArtifact) return compactArtifact;
+  if (!isMechanicalNodeTitle(rawTitle, node.node_id)) return rawTitle;
+  const numeric = node.node_id.match(/(\d+)(?!.*\d)/)?.[1];
+  return `Step ${numeric ? Number(numeric) : index + 1}`;
+}
+
+function edgeDominantPriority(edge: BuildEdge): number {
+  const release = normalizeBuildEdgeRelease(edge);
+  if (release.family === 'conditional' && release.branch_reason === 'then') return 0;
+  if (!release.family || release.family === 'after_success') return 1;
+  if (release.family === 'after_any') return 2;
+  if (release.family === 'conditional' && release.branch_reason === 'else') return 3;
+  if (release.family === 'after_failure') return 4;
+  return 5;
+}
+
+function orbitEdgePriority(edge: OrbitEdge): number {
+  if (edge.gateFamily === 'conditional' && edge.branchReason === 'then') return 0;
+  if (!edge.gateFamily || edge.gateFamily === 'after_success') return 1;
+  if (edge.gateFamily === 'after_any') return 2;
+  if (edge.gateFamily === 'conditional' && edge.branchReason === 'else') return 3;
+  if (edge.gateFamily === 'after_failure') return 4;
+  return 5;
+}
+
+function branchLaneLabel(edge: OrbitEdge): string {
+  return edge.gateLabel || branchLabel(edge.branchReason) || (
+    edge.gateFamily === 'after_failure' ? 'Failure'
+      : edge.gateFamily === 'after_any' ? 'Always'
+        : edge.gateFamily === 'conditional' ? 'Condition'
+          : 'Success'
+  );
+}
+
+function computeDominantReviewPath(nodes: BuildNode[], edges: BuildEdge[]): string[] {
+  if (!nodes.length) return [];
+  const nodeIds = new Set(nodes.map(node => node.node_id));
+  const outgoing = new Map<string, BuildEdge[]>();
+  const inDegree = new Map<string, number>();
+  for (const node of nodes) {
+    outgoing.set(node.node_id, []);
+    inDegree.set(node.node_id, 0);
+  }
+  for (const edge of edges) {
+    if (!nodeIds.has(edge.from_node_id) || !nodeIds.has(edge.to_node_id)) continue;
+    outgoing.get(edge.from_node_id)?.push(edge);
+    inDegree.set(edge.to_node_id, (inDegree.get(edge.to_node_id) || 0) + 1);
+  }
+  for (const bucket of outgoing.values()) {
+    bucket.sort((a, b) => {
+      const priority = edgeDominantPriority(a) - edgeDominantPriority(b);
+      return priority || a.to_node_id.localeCompare(b.to_node_id);
+    });
+  }
+
+  const memo = new Map<string, string[]>();
+  const visiting = new Set<string>();
+  const bestFrom = (id: string): string[] => {
+    if (memo.has(id)) return memo.get(id)!;
+    if (visiting.has(id)) return [id];
+    visiting.add(id);
+    let best = [id];
+    for (const edge of outgoing.get(id) || []) {
+      const candidate = [id, ...bestFrom(edge.to_node_id)];
+      if (candidate.length > best.length) best = candidate;
+    }
+    visiting.delete(id);
+    memo.set(id, best);
+    return best;
+  };
+
+  const roots = [...inDegree.entries()]
+    .filter(([, degree]) => degree === 0)
+    .map(([id]) => id)
+    .sort();
+  const candidates = roots.length > 0 ? roots : nodes.map(node => node.node_id);
+  let bestPath: string[] = [];
+  for (const id of candidates) {
+    const candidate = bestFrom(id);
+    if (candidate.length > bestPath.length) bestPath = candidate;
+  }
+  return bestPath;
+}
+
+function buildBranchBoard(nodes: OrbitNode[], edges: OrbitEdge[]): BranchBoard[] {
+  const nodeById = new Map(nodes.map(node => [node.id, node]));
+  const incomingCount = new Map<string, number>();
+  const outgoing = new Map<string, OrbitEdge[]>();
+  for (const node of nodes) {
+    incomingCount.set(node.id, 0);
+    outgoing.set(node.id, []);
+  }
+  for (const edge of edges) {
+    if (!nodeById.has(edge.from) || !nodeById.has(edge.to)) continue;
+    incomingCount.set(edge.to, (incomingCount.get(edge.to) || 0) + 1);
+    const bucket = outgoing.get(edge.from) || [];
+    bucket.push(edge);
+    outgoing.set(edge.from, bucket);
+  }
+  for (const bucket of outgoing.values()) {
+    bucket.sort((a, b) => orbitEdgePriority(a) - orbitEdgePriority(b) || a.to.localeCompare(b.to));
+  }
+
+  const branchSources = [...outgoing.entries()]
+    .filter(([, bucket]) => bucket.length > 1)
+    .sort(([a], [b]) => {
+      const nodeA = nodeById.get(a);
+      const nodeB = nodeById.get(b);
+      if (!nodeA || !nodeB) return a.localeCompare(b);
+      if (nodeA.rank !== nodeB.rank) return nodeA.rank - nodeB.rank;
+      return nodeA.y - nodeB.y;
+    });
+
+  return branchSources.map(([sourceId, bucket]) => {
+    const source = nodeById.get(sourceId)!;
+    const lanes: BranchLane[] = bucket.map((edge) => {
+      const nodeIds: string[] = [];
+      const seen = new Set<string>([sourceId]);
+      let currentId: string | undefined = edge.to;
+      let terminal: BranchLane['terminal'] | null = null;
+
+      while (currentId && nodeById.has(currentId) && !seen.has(currentId)) {
+        seen.add(currentId);
+        const currentNode = nodeById.get(currentId)!;
+        nodeIds.push(currentId);
+        const nextEdges: OrbitEdge[] = outgoing.get(currentId) || [];
+        if (!nextEdges.length) {
+          terminal = { kind: 'end', nodeId: currentId, label: `Ends at ${currentNode.title}` };
+          break;
+        }
+        if (nextEdges.length > 1) {
+          terminal = { kind: 'nested_split', nodeId: currentId, label: `Next split at ${currentNode.title}` };
+          break;
+        }
+        const nextId: string = nextEdges[0].to;
+        if ((incomingCount.get(nextId) || 0) > 1) {
+          const joinNode = nodeById.get(nextId);
+          terminal = {
+            kind: 'rejoin',
+            nodeId: nextId,
+            label: joinNode ? `Rejoins at ${joinNode.title}` : 'Rejoins',
+          };
+          break;
+        }
+        currentId = nextId;
+      }
+
+      return {
+        edgeId: edge.id,
+        label: branchLaneLabel(edge),
+        family: edge.gateFamily,
+        nodeIds,
+        isOnDominantPath: edge.isOnDominantPath,
+        terminal: terminal || { kind: 'end', nodeId: currentId, label: 'Ends' },
+      };
+    });
+
+    return {
+      sourceNodeId: sourceId,
+      sourceTitle: source.title,
+      lanes,
+    };
+  });
+}
+
 function isNodeDecided(node: BuildNode): boolean {
   const route = (node.route || '').trim();
   return route.length > 0;
@@ -366,15 +676,21 @@ function runStatusToRingState(status: string | undefined): RingState | null {
 
 function extractDominantPath(payload: BuildPayload): string[] {
   // Prefer compiled spec job ordering -> node mapping
+  const graphNodes = payload.build_graph?.nodes || [];
+  const reviewNodeIds = new Set(graphNodes.filter(isReviewMapNode).map(node => node.node_id));
+  const reviewNodes = graphNodes.filter(node => reviewNodeIds.has(node.node_id));
+  const reviewEdges = deriveReviewEdges(graphNodes, payload.build_graph?.edges || []);
+  if (reviewEdges.length > 0) return computeDominantReviewPath(reviewNodes, reviewEdges);
+
   const spec = payload.compiled_spec_projection?.compiled_spec;
   if (spec?.jobs?.length) {
     return spec.jobs
       .map(j => j.source_node_id || j.source_step_id || '')
-      .filter(Boolean);
+      .filter(id => Boolean(id) && reviewNodeIds.has(id));
   }
   // Fallback: topological order from edges
-  const nodes = payload.build_graph?.nodes || [];
-  const edges = payload.build_graph?.edges || [];
+  const nodes = reviewNodes;
+  const edges = reviewEdges;
   if (!nodes.length) return [];
 
   const inDegree = new Map<string, number>();
@@ -402,8 +718,10 @@ function extractDominantPath(payload: BuildPayload): string[] {
 }
 
 export function extractLayout(payload: BuildPayload): GraphLayout {
-  const nodes = payload.build_graph?.nodes || [];
-  const edges = payload.build_graph?.edges || [];
+  const rawNodes = payload.build_graph?.nodes || [];
+  const nodeIds = new Set(rawNodes.filter(isReviewMapNode).map(node => node.node_id));
+  const nodes = rawNodes.filter(node => nodeIds.has(node.node_id));
+  const edges = deriveReviewEdges(rawNodes, payload.build_graph?.edges || []);
   const empty: GraphLayout = { nodes: new Map(), layers: [], width: 0, height: 0 };
   if (!nodes.length) return empty;
 
@@ -421,9 +739,11 @@ export function extractLayout(payload: BuildPayload): GraphLayout {
     inDeg.set(e.to_node_id, (inDeg.get(e.to_node_id) || 0) + 1);
   }
   const branchBiasByNode = new Map<string, number>();
+  const outgoingCountByNode = new Map<string, number>();
   for (const edge of edges) {
     const score = branchSideScore(edge);
     if (score !== 0) branchBiasByNode.set(edge.to_node_id, score);
+    outgoingCountByNode.set(edge.from_node_id, (outgoingCountByNode.get(edge.from_node_id) || 0) + 1);
   }
 
   // Assign rank = longest path from any root
@@ -468,29 +788,39 @@ export function extractLayout(payload: BuildPayload): GraphLayout {
     }
     const ox = -(ids.length - 1) * COLUMN_SPACING / 2;
     for (let c = 0; c < ids.length; c++) {
-      positions.set(ids[c], { id: ids[c], rank: r, column: c, x: r * RANK_SPACING, y: ox + c * COLUMN_SPACING });
+      const rawNode = nodes.find(node => node.node_id === ids[c]);
+      const shape = rawNode ? nodeToReviewShape(rawNode, outgoingCountByNode.get(ids[c]) || 0) : 'task';
+      const dimensions = NODE_SHAPE_DIMENSIONS[shape];
+      positions.set(ids[c], {
+        id: ids[c],
+        rank: r,
+        column: c,
+        height: dimensions.height,
+        shape,
+        width: dimensions.width,
+        x: ox + c * COLUMN_SPACING,
+        y: r * RANK_SPACING,
+      });
     }
   }
 
-  // Per-layer positions are centered around y=0 for visual balance, which
-  // leaves top-column nodes at negative y. The canvas container starts at
-  // y=0, so negative-y nodes would overflow its top edge and clip. Shift
-  // every position down by minY so the topmost node lands at y=0 while
-  // relative spacing stays intact.
-  const rawYs = [...positions.values()].map(p => p.y);
-  const minY = rawYs.length ? Math.min(...rawYs) : 0;
-  if (minY !== 0) {
-    for (const lnode of positions.values()) lnode.y -= minY;
+  // Vertical review maps read top-to-bottom. Branches fan left/right, which
+  // means some layer x positions start negative; shift the whole projection
+  // right so every lane remains inside the canvas while preserving spacing.
+  const lefts = [...positions.values()].map(p => p.x - p.width / 2);
+  const minLeft = lefts.length ? Math.min(...lefts) : 0;
+  if (minLeft !== 0) {
+    for (const lnode of positions.values()) lnode.x -= minLeft;
   }
 
   const layers = sortedRanks.map(r => ({ rank: r, nodeIds: layerMap.get(r)! }));
-  const xs = [...positions.values()].map(p => p.x);
-  const ys = [...positions.values()].map(p => p.y);
+  const rights = [...positions.values()].map(p => p.x + p.width / 2);
+  const bottoms = [...positions.values()].map(p => p.y + p.height / 2);
   return {
     nodes: positions,
     layers,
-    width: xs.length ? Math.max(...xs) + RANK_SPACING : 0,
-    height: ys.length ? Math.max(...ys) + COLUMN_SPACING : 0,
+    width: rights.length ? Math.max(...rights) : 0,
+    height: bottoms.length ? Math.max(...bottoms) : 0,
   };
 }
 
@@ -555,7 +885,7 @@ export function presentBuild(
 ): MoonBuildViewModel {
   const emptyLayout: GraphLayout = { nodes: new Map(), layers: [], width: 0, height: 0 };
   const empty: MoonBuildViewModel = {
-    nodes: [], edges: [], dominantPath: [], layout: emptyLayout,
+    nodes: [], edges: [], dominantPath: [], branchBoard: [], layout: emptyLayout,
     release: { readiness: 'draft', blockers: [], projectedJobs: [], checklist: [] },
     dockContent: null, selectedNode: null, activeNode: null, firstUnresolvedId: null,
     totalNodes: 0, resolvedNodes: 0, blockedNodes: 0, focusActive: false,
@@ -563,13 +893,15 @@ export function presentBuild(
   if (!payload) return empty;
 
   const rawNodes = payload.build_graph?.nodes || [];
-  const rawEdges = payload.build_graph?.edges || [];
+  const reviewNodeIds = new Set(rawNodes.filter(isReviewMapNode).map(node => node.node_id));
+  const rawEdges = deriveReviewEdges(rawNodes, payload.build_graph?.edges || []);
   const issues = payload.build_issues || [];
   const dominantPath = extractDominantPath(payload);
   const layout = extractLayout(payload);
   const pathSet = new Set(dominantPath);
   const pathIndexMap = new Map(dominantPath.map((id, i) => [id, i]));
-  const lineage = computeLineage(selectedNodeId, rawEdges, rawNodes.map(n => n.node_id));
+  const reviewNodes = rawNodes.filter(node => reviewNodeIds.has(node.node_id));
+  const lineage = computeLineage(selectedNodeId, rawEdges, reviewNodes.map(n => n.node_id));
   const focusActive = lineage !== null;
   const isInLineage = (id: string) => !focusActive || lineage!.has(id);
 
@@ -582,8 +914,8 @@ export function presentBuild(
   }
 
   // Position dominant path nodes along spine, others as satellites
-  const pathNodes = dominantPath.map(id => rawNodes.find(n => n.node_id === id)).filter(Boolean) as BuildNode[];
-  const otherNodes = rawNodes.filter(n => !pathSet.has(n.node_id));
+  const pathNodes = dominantPath.map(id => reviewNodes.find(n => n.node_id === id)).filter(Boolean) as BuildNode[];
+  const otherNodes = reviewNodes.filter(n => !pathSet.has(n.node_id));
   const allOrdered = [...pathNodes, ...otherNodes];
 
   const issuesByNode = new Map<string, number>();
@@ -597,28 +929,46 @@ export function presentBuild(
     outgoingByNode.set(e.from_node_id, (outgoingByNode.get(e.from_node_id) || 0) + 1);
   }
 
-  const nodes: OrbitNode[] = allOrdered.map((n) => {
+  const nodes: OrbitNode[] = allOrdered.map((n, index) => {
     let ring = nodeToRingState(n, payload, activeNodeId);
 
     // Override with run status when a run is active
     ring = runStatusToRingState(runStatusByTitle.get((n.title || n.node_id).toLowerCase())) || ring;
 
+    const layoutNode = layout.nodes.get(n.node_id);
+    const outgoingEdgeCount = outgoingByNode.get(n.node_id) || 0;
+    const shape = layoutNode?.shape ?? nodeToReviewShape(n, outgoingEdgeCount);
+    const dimensions = layoutNode ?? NODE_SHAPE_DIMENSIONS[shape];
+
     return {
       id: n.node_id,
       kind: n.kind,
-      title: (n.title || n.node_id).replace(/\.\s*Step$/i, '').trim(),
+      title: nodeToReviewTitle(n, index),
       summary: n.summary || '',
+      shape,
+      width: dimensions.width,
+      height: dimensions.height,
       glyphType: nodeToGlyph(n),
       ringState: ring,
       isOnDominantPath: pathSet.has(n.node_id),
       issueCount: issuesByNode.get(n.node_id) || 0,
       route: n.route,
+      taskType: n.task_type || undefined,
+      description: n.summary || undefined,
+      prompt: n.prompt || undefined,
+      completionContract: n.completion_contract ?? null,
+      agent: n.agent || null,
+      capabilities: Array.isArray(n.capabilities) ? n.capabilities.filter((value): value is string => typeof value === 'string') : [],
+      writeScope: Array.isArray(n.write_scope) ? n.write_scope.filter((value): value is string => typeof value === 'string') : [],
+      agentToolPlan: n.agent_tool_plan && typeof n.agent_tool_plan === 'object' && !Array.isArray(n.agent_tool_plan)
+        ? { ...n.agent_tool_plan as Record<string, unknown> }
+        : null,
       dominantPathIndex: pathIndexMap.get(n.node_id) ?? -1,
-      x: layout.nodes.get(n.node_id)?.x ?? 0,
-      y: layout.nodes.get(n.node_id)?.y ?? 0,
-      rank: layout.nodes.get(n.node_id)?.rank ?? 0,
+      x: layoutNode?.x ?? 0,
+      y: layoutNode?.y ?? 0,
+      rank: layoutNode?.rank ?? 0,
       multiplicity: nodeToMultiplicity(n),
-      outgoingEdgeCount: outgoingByNode.get(n.node_id) || 0,
+      outgoingEdgeCount,
       inLineage: isInLineage(n.node_id),
     };
   });
@@ -757,8 +1107,10 @@ export function presentBuild(
     message: projectedJobs.length > 0 ? `${projectedJobs.length} jobs ready` : 'No jobs — compile first',
   });
 
+  const branchBoard = buildBranchBoard(nodes, edges);
+
   return {
-    nodes, edges, dominantPath, layout, release: { readiness, blockers, projectedJobs, checklist },
+    nodes, edges, dominantPath, branchBoard, layout, release: { readiness, blockers, projectedJobs, checklist },
     dockContent, selectedNode, activeNode, firstUnresolvedId,
     totalNodes: nodes.length, resolvedNodes, blockedNodes, focusActive,
   };

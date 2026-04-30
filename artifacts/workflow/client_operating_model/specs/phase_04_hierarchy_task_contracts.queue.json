@@ -1,0 +1,33 @@
+{
+  "name": "Client Operating Model Phase 4 Hierarchy and Task Contracts",
+  "workflow_id": "client_operating_model_phase_04_hierarchy_task_contracts_20260430",
+  "queue_id": "client_operating_model_phase_04_hierarchy_task_contracts_20260430",
+  "phase": "architecture",
+  "outcome_goal": "Produce the hierarchy management and task environment contract implementation packet.",
+  "anti_requirements": [
+    "Do not edit production code.",
+    "Do not make human approval the default blocking path.",
+    "Do not mutate contract revisions in place."
+  ],
+  "jobs": [
+    {
+      "label": "phase_04_hierarchy_task_contracts_packet",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "architecture",
+      "timeout": 900,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "docs/architecture/object-truth-trust-toolbelt/task-types-and-contracts.md",
+        "docs/architecture/object-truth-trust-toolbelt/build-plan.md",
+        "Code&DBs/Workflow/core/object_truth_ops.py",
+        "Code&DBs/Workflow/runtime/repo_policy_onboarding.py",
+        "artifacts/workflow/client_operating_model/packets/phase_03_mdm_source_authority/PLAN.md"
+      ],
+      "write_scope": [
+        "artifacts/workflow/client_operating_model/packets/phase_04_hierarchy_task_contracts/PLAN.md"
+      ],
+      "prompt": "Write artifacts/workflow/client_operating_model/packets/phase_04_hierarchy_task_contracts/PLAN.md. Produce a bounded build packet for Phase 4: Hierarchy Management and Task Environment Contracts. Cover business hierarchy, ownership/stewardship, SOP refs, allowed tools, read/write scopes, model policy, verifier refs, append-only revisions, staleness, tests, and validation. Do not edit code."
+    }
+  ]
+}

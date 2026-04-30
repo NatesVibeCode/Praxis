@@ -162,6 +162,80 @@ def builtin_verify_memory_proof_links(
     )
 
 
+RECEIPT_STRUCTURAL_PROOF_VERIFIER_REF = "verifier.receipt.structural_proof"
+
+
+def builtin_verify_receipt_structural_proof(*, inputs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Per-receipt structural proof check.
+
+    Validates a single receipt dict carries the provenance fields the platform
+    aggregate verifier (verifier.platform.receipt_provenance) scans for.
+    Pure-function check — no DB I/O — so it is cheap to call inline at
+    receipt-write time.
+    """
+    receipt = inputs.get("receipt")
+    if not isinstance(receipt, dict):
+        return (
+            "failed",
+            {
+                "checks": {},
+                "missing": ["receipt_input"],
+                "reason_code": "verifier.receipt.structural_proof.input_missing",
+            },
+        )
+
+    outputs_block: Any = receipt.get("outputs")
+    if not isinstance(outputs_block, dict):
+        outputs_block = {}
+
+    git_prov = outputs_block.get("git_provenance")
+    if not isinstance(git_prov, dict):
+        git_prov = {}
+
+    has_git_provenance = bool(outputs_block.get("git_provenance"))
+    git_unavailable = (
+        str(git_prov.get("reason_code") or "").strip() == "git_provenance_unavailable"
+    )
+    has_repo_snapshot_ref = bool(str(git_prov.get("repo_snapshot_ref") or "").strip())
+    duplicated_git_fields = bool(
+        "workspace_root" in git_prov
+        or "workspace_ref" in git_prov
+        or "runtime_profile_ref" in git_prov
+    )
+    has_workspace_provenance = bool(outputs_block.get("workspace_provenance")) or bool(
+        receipt.get("workspace_provenance")
+    )
+    has_route_identity = bool(outputs_block.get("route_identity")) or bool(
+        receipt.get("route_identity")
+    )
+
+    missing: list[str] = []
+    if not has_git_provenance:
+        missing.append("git_provenance")
+    if has_git_provenance and not git_unavailable and not has_repo_snapshot_ref:
+        missing.append("git_provenance.repo_snapshot_ref")
+    if duplicated_git_fields:
+        missing.append("git_provenance.no_duplicated_workspace_fields")
+
+    checks = {
+        "has_git_provenance": has_git_provenance,
+        "git_unavailable_marker": git_unavailable,
+        "has_repo_snapshot_ref": has_repo_snapshot_ref,
+        "duplicated_git_fields": duplicated_git_fields,
+        "has_workspace_provenance": has_workspace_provenance,
+        "has_route_identity": has_route_identity,
+    }
+    passed = not missing
+    return (
+        "passed" if passed else "failed",
+        {
+            "verifier_ref": RECEIPT_STRUCTURAL_PROOF_VERIFIER_REF,
+            "checks": checks,
+            "missing": missing,
+        },
+    )
+
+
 def run_builtin_verifier(
     builtin_ref: str,
     *,
@@ -181,6 +255,8 @@ def run_builtin_verifier(
         return builtin_verify_authority_impact_contract(
             inputs=inputs, conn=conn, connection_fn=connection_fn
         )
+    if builtin_ref == "receipt_structural_proof":
+        return builtin_verify_receipt_structural_proof(inputs=inputs)
     raise VerifierBuiltinsError(f"unknown builtin verifier: {builtin_ref}")
 
 

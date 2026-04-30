@@ -3,9 +3,11 @@
 @layer moon-tokens {
   .moon-page {
     /* ---- Base geometry & rhythm ---- */
+    --moon-node-height: var(--moon-layout-node-height, 116px);
     --moon-node-size: var(--moon-layout-node-size, 72px);
     --moon-node-shadow: var(--moon-layout-projected-node-size, 52px);
     --moon-node-spacing: var(--moon-layout-node-spacing, 144px);
+    --moon-node-width: var(--moon-layout-node-width, 300px);
     --moon-canvas-pad: var(--moon-layout-canvas-pad, 120px);
     --moon-graph-append-size: var(--moon-layout-graph-append-size, 48px);
     --moon-label-max: 16ch;

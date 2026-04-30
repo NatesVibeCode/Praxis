@@ -42,6 +42,8 @@ class ResolvedHttpOperationBinding:
     projection_freshness_policy_ref: str | None
     posture: str
     idempotency_policy: str
+    execution_lane: str
+    kickoff_required: bool
     binding_revision: str
     decision_ref: str
     summary: str
@@ -138,6 +140,8 @@ def resolve_http_operation_binding(
         projection_freshness_policy_ref=definition.projection_freshness_policy_ref,
         posture=definition.posture,
         idempotency_policy=definition.idempotency_policy,
+        execution_lane=definition.execution_lane,
+        kickoff_required=definition.kickoff_required,
         binding_revision=definition.binding_revision,
         decision_ref=definition.decision_ref,
         summary=definition.operation_name,

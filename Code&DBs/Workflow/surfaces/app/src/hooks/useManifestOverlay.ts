@@ -20,8 +20,11 @@ function deepMerge(target: any, source: any) {
   return output;
 }
 
-export function useManifestOverlay(manifest: QuadrantManifest): QuadrantManifest {
-  const overrides = useSlice(world, 'ui.layout.quadrants') as Record<string, any> | null;
+export function useManifestOverlay(
+  manifest: QuadrantManifest,
+  layoutPath = 'ui.layout.quadrants',
+): QuadrantManifest {
+  const overrides = useSlice(world, layoutPath) as Record<string, any> | null;
   if (!overrides || Object.keys(overrides).length === 0) return manifest;
   
   // Deep merge overrides into the manifest quadrants

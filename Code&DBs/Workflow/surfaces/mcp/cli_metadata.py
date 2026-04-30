@@ -1471,6 +1471,32 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_object_truth_readiness": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-readiness",
+        when_to_use=(
+            "Inspect whether Object Truth authority is ready for downstream "
+            "client-system discovery, ingestion, and Virtual Lab planning. "
+            "Returns explicit no-go conditions instead of treating a blocked "
+            "state as a tool failure."
+        ),
+        when_not_to_use=(
+            "Do not use it to persist client evidence or compare object "
+            "versions; it is the pre-build authority gate only."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Check Object Truth readiness",
+                {
+                    "client_payload_mode": "redacted_hashes",
+                    "planned_fanout": 1,
+                    "include_counts": True,
+                },
+            ),
+        ],
+    ),
     "praxis_object_truth_record_comparison_run": _tool(
         surface="operations",
         tier="advanced",
@@ -1492,6 +1518,288 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "right_object_version_digest": "right-digest",
                     "observed_by_ref": "operator:nate",
                     "source_ref": "comparison:accounts:demo",
+                },
+            ),
+        ],
+    ),
+    "praxis_object_truth_ingestion_sample_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-ingestion-sample-record",
+        when_to_use=(
+            "Persist a receipt-backed Object Truth ingestion sample: system "
+            "snapshot, source query, sample capture, raw payload references, "
+            "redacted previews, object versions, field observations, and replay "
+            "fixture evidence."
+        ),
+        when_not_to_use=(
+            "Do not use it for direct connector execution or final business-truth "
+            "decisions. It records observed evidence for later source-authority "
+            "and Virtual Lab work."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record one fixture sample",
+                {
+                    "client_ref": "client.acme",
+                    "system_ref": "salesforce",
+                    "integration_id": "integration.salesforce.prod",
+                    "connector_ref": "connector.salesforce",
+                    "environment_ref": "sandbox",
+                    "object_ref": "account",
+                    "schema_snapshot_digest": "schema.digest.account",
+                    "captured_at": "2026-04-30T16:00:00Z",
+                    "capture_receipt_id": "receipt.capture.demo",
+                    "identity_fields": ["id"],
+                    "sample_strategy": "fixture",
+                    "sample_payloads": [{"id": "001", "name": "Acme"}],
+                    "privacy_classification": "confidential",
+                    "retention_policy_ref": "retention.object_truth.redacted_hashes",
+                },
+            ),
+        ],
+    ),
+    "praxis_object_truth_ingestion_sample_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="object-truth-ingestion-sample-read",
+        when_to_use=(
+            "Read stored Object Truth ingestion samples, payload references, "
+            "object-version refs, and replay fixture evidence."
+        ),
+        when_not_to_use=(
+            "Do not use it to mutate ingestion evidence; use "
+            "praxis_object_truth_ingestion_sample_record for writes."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Describe one ingestion sample",
+                {
+                    "action": "describe",
+                    "sample_id": "object_truth_sample.demo",
+                    "include_payload_references": True,
+                },
+            ),
+        ],
+    ),
+    "praxis_client_operating_model": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="client-operating-model",
+        when_to_use=(
+            "Build one read-only Client Operating Model operator view from "
+            "provided evidence: system census, Object Truth inspection, "
+            "identity/source authority, simulation timeline, verifier results, "
+            "sandbox drift, cartridge status, managed-runtime accounting, next "
+            "safe actions, or workflow-builder validation."
+        ),
+        when_not_to_use=(
+            "Do not use it to persist client evidence, mutate workflows, call live "
+            "systems, or claim a source of truth not backed by the supplied evidence. "
+            "This is the CQRS read-surface slice; durable projections remain separate."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Build an empty system census view",
+                {
+                    "view": "system_census",
+                    "generated_at": "2026-04-30T12:00:00Z",
+                    "permission_scope": {"scope_ref": "tenant.acme", "visibility": "full"},
+                    "inputs": {"system_records": []},
+                },
+            ),
+            _example(
+                "Validate a bounded workflow-builder graph",
+                {
+                    "view": "workflow_builder_validation",
+                    "inputs": {
+                        "graph": {
+                            "nodes": [
+                                {"node_id": "refresh", "block_ref": "source.refresh"},
+                                {"node_id": "verify", "block_ref": "verifier.run"},
+                            ],
+                            "edges": [{"from": "refresh", "to": "verify"}],
+                        },
+                        "approved_blocks": {
+                            "source.refresh": {"provides": ["fresh_snapshot"]},
+                            "verifier.run": {"requires": ["fresh_snapshot"]},
+                        },
+                        "allowed_edges": [
+                            {"from_block": "source.refresh", "to_block": "verifier.run"}
+                        ],
+                    },
+                },
+            ),
+        ],
+    ),
+    "praxis_client_operating_model_snapshot_store": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Persist an already-built Client Operating Model operator_view "
+            "snapshot for historical readback and proof receipts."
+        ),
+        when_not_to_use=(
+            "Do not use it to build the view, call client systems, or persist raw "
+            "source payloads. Build the read model first with "
+            "praxis_client_operating_model, then store the operator_view."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Store an operator-view snapshot",
+                {
+                    "operator_view": {
+                        "kind": "client_operating_model.operator_surface.system_census.v1",
+                        "view_id": "system_census.demo",
+                        "state": "empty",
+                        "freshness": {"status": "unknown"},
+                        "permission_scope": {"scope_ref": "tenant.acme"},
+                        "evidence_refs": [],
+                        "correlation_ids": [],
+                        "payload": {"counts": {"systems": 0}},
+                    },
+                    "observed_by_ref": "operator:nate",
+                    "source_ref": "phase_13.http_route_proof",
+                },
+            ),
+        ],
+    ),
+    "praxis_client_operating_model_snapshots": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Read stored Client Operating Model operator-view snapshots by "
+            "snapshot ref, digest, view, or scope."
+        ),
+        when_not_to_use=(
+            "Do not use it for request-time derivation from fresh evidence; use "
+            "praxis_client_operating_model for that."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Read latest stored system census snapshots for a tenant",
+                {
+                    "view": "system_census",
+                    "scope_ref": "tenant.acme",
+                    "limit": 5,
+                },
+            ),
+        ],
+    ),
+    "praxis_client_system_discovery": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="client-system-discovery",
+        when_to_use=(
+            "Persist or query client-system discovery authority: system census "
+            "records, connector surface evidence, credential-health references, "
+            "and typed discovery gaps. Use this before designing integrations "
+            "from guessed connector behavior."
+        ),
+        when_not_to_use=(
+            "Do not use it for Object Truth field normalization or Virtual Lab "
+            "simulation. It owns discovery/census evidence only; downstream "
+            "truth and consequence models use their own surfaces."
+        ),
+        risks={"discover": "write", "record_gap": "write", "list": "read", "search": "read", "describe": "read"},
+        examples=[
+            _example(
+                "List systems for a tenant",
+                {"action": "list", "tenant_ref": "tenant.acme"},
+            ),
+            _example(
+                "Record a discovery gap",
+                {
+                    "action": "record_gap",
+                    "gap_kind": "missing_connector",
+                    "reason_code": "client_system.connector.missing",
+                    "source_ref": "tenant.acme/salesforce",
+                    "detail": "Salesforce connector exists but credential-health evidence is absent.",
+                    "legal_repair_actions": ["refresh credential health evidence"],
+                },
+            ),
+        ],
+    ),
+    "praxis_client_system_discovery_census_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Persist one client-system census record and connector evidence "
+            "through the CQRS gateway."
+        ),
+        when_not_to_use=(
+            "Do not use it for readback or search; use "
+            "praxis_client_system_discovery_census_read for reads."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record a fixture client-system census",
+                {
+                    "tenant_ref": "tenant.acme",
+                    "workspace_ref": "workspace.acme",
+                    "system_slug": "crm",
+                    "system_name": "CRM",
+                    "discovery_source": "fixture",
+                    "captured_at": "2026-04-30T12:00:00Z",
+                    "connectors": [],
+                },
+            ),
+        ],
+    ),
+    "praxis_client_system_discovery_census_read": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Read client-system census authority by list, search, or describe "
+            "through the CQRS gateway."
+        ),
+        when_not_to_use=(
+            "Do not use it to persist discovery results or gaps."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "List systems for a tenant",
+                {"action": "list", "tenant_ref": "tenant.acme"},
+            ),
+            _example(
+                "Search connector census",
+                {"action": "search", "query": "salesforce", "limit": 10},
+            ),
+        ],
+    ),
+    "praxis_client_system_discovery_gap_record": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use=(
+            "Record one typed client-system discovery gap with a gateway "
+            "receipt and authority event."
+        ),
+        when_not_to_use=(
+            "Do not use it to persist census rows; use "
+            "praxis_client_system_discovery_census_record."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record missing credential-health evidence",
+                {
+                    "gap_kind": "credential_health_unknown",
+                    "reason_code": "credential.health.unknown",
+                    "source_ref": "census:client_system_census.demo",
+                    "detail": "Credential check has not run.",
+                    "legal_repair_actions": ["run credential health probe"],
                 },
             ),
         ],
@@ -1726,6 +2034,19 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "docs/notes.md",
                 ]},
             ),
+        ],
+    ),
+    "praxis_audit_summary": _tool(
+        surface="cqrs",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use="Aggregate audit lens over the gateway dispatch ledger and policy-enforcement ledger. One call returns trailing-window totals (receipts, completed, replayed, failed, untagged_transport), per-transport / per-execution-status / per-operation-kind buckets, top-10 operations with failure counts, and a compliance breakdown (admits, rejects, top tables, top policies). Use it for 'are receipts healthy?' / 'what surface is generating failures?' / 'which policies blocked mutations recently?' questions.",
+        when_not_to_use="Not for row-level audit queries — use praxis_search with sources=['authority_receipts'] or ['compliance_receipts'] for individual receipt lookups. Not a real-time monitor; the trailing window is bounded by since_hours.",
+        risks={"default": "read"},
+        examples=[
+            _example("Last 24h aggregates", {"since_hours": 24}),
+            _example("Last hour audit pulse", {"since_hours": 1}),
+            _example("Trailing week breakdown", {"since_hours": 168}),
         ],
     ),
     "praxis_submit_research_result": _tool(

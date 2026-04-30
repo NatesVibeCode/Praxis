@@ -435,7 +435,7 @@ def test_list_and_search_payloads_apply_source_issue_filter() -> None:
         bt=tracker,
         bt_mod=_FakeBugTrackerMod(),
         body={
-            "title": "lineage",
+            "query": "lineage",
             "source_issue_id": "issue.dispatch-gap",
         },
         serialize_bug=_bug_to_dict,

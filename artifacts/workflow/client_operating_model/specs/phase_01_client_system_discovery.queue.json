@@ -1,0 +1,34 @@
+{
+  "name": "Client Operating Model Phase 1 Client System Discovery",
+  "workflow_id": "client_operating_model_phase_01_client_system_discovery_20260430",
+  "queue_id": "client_operating_model_phase_01_client_system_discovery_20260430",
+  "phase": "architecture",
+  "outcome_goal": "Produce the client system discovery and connector census implementation packet.",
+  "anti_requirements": [
+    "Do not edit production code.",
+    "Do not turn connector discovery into hidden script authority.",
+    "Do not assume connector behavior without catalog or integration evidence."
+  ],
+  "jobs": [
+    {
+      "label": "phase_01_client_system_discovery_packet",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "architecture",
+      "timeout": 900,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "docs/architecture/object-truth-trust-toolbelt/build-plan.md",
+        "docs/architecture/object-truth-trust-toolbelt/risk-mitigation.md",
+        "Code&DBs/Workflow/runtime/integration_manifest.py",
+        "Code&DBs/Workflow/runtime/integrations",
+        "Code&DBs/Workflow/surfaces/mcp/tools/integration.py",
+        "artifacts/workflow/client_operating_model/packets/phase_00_authority_readiness/PLAN.md"
+      ],
+      "write_scope": [
+        "artifacts/workflow/client_operating_model/packets/phase_01_client_system_discovery/PLAN.md"
+      ],
+      "prompt": "Write artifacts/workflow/client_operating_model/packets/phase_01_client_system_discovery/PLAN.md. Produce a bounded build packet for Phase 1: Client System Discovery and Connector Census. Specify how Praxis inventories systems, integrations, connector capabilities, credential health, object catalogs, API limits, webhook/event surfaces, and automation-bearing tools. Include authority model, proposed tables/projections if needed, CQRS operations, typed gaps, fixture strategy, tests, validation commands, and failure containment. Do not edit code."
+    }
+  ]
+}

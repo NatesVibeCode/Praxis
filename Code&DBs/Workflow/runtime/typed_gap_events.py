@@ -26,39 +26,46 @@ Payload shape (matches ``payload_keys`` declared in migration 226):
         "source_ref": str | None,
         "context": {...}
     }
+
+Gateway routing (Phase D — close-the-bypass):
+    Migration 354 registers ``typed_gap.emit`` in ``operation_catalog_registry``
+    so emission flows through ``operation_catalog_gateway`` and produces a
+    gateway receipt with ``receipt_id`` linkage on the resulting
+    ``authority_events`` row. Direct-write fallback is preserved for
+    bootstrap/test contexts where the catalog row isn't loaded yet.
 """
 from __future__ import annotations
 
 import uuid
 from typing import Any
 
+from pydantic import BaseModel, Field
 
-def emit_typed_gap(
-    conn: Any,
+
+class EmitTypedGapCommand(BaseModel):
+    """Gateway-dispatch shape for ``typed_gap.emit``.
+
+    Mirrors the kwargs of the legacy ``emit_typed_gap`` helper so callers can
+    keep using the helper while the dispatch goes through the gateway.
+    """
+
+    gap_kind: str
+    missing_type: str
+    reason_code: str
+    legal_repair_actions: list[str] = Field(default_factory=list)
+    source_ref: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+def _build_typed_gap_payload(
     *,
     gap_kind: str,
     missing_type: str,
     reason_code: str,
-    legal_repair_actions: list[str] | None = None,
-    source_ref: str | None = None,
-    context: dict[str, Any] | None = None,
-) -> str | None:
-    """Emit a ``typed_gap.created`` event and return the generated gap_id.
-
-    Dual-writes during the CQRS transition:
-      1. ``authority_events`` — canonical CQRS stream (authority_event_contracts
-         row registered in migration 226). New consumers read here. Per
-         architecture-policy::event-architecture::authority-events-canonical-
-         source-for-receipt-backed-conceptual-events filed 2026-04-24.
-      2. ``runtime.system_events.emit_system_event`` — sidecar observability
-         path. Existing consumers (Moon observability, replay tooling) still
-         read here. Removed once they migrate.
-
-    Best-effort: returns ``None`` if BOTH writes fail (module import or
-    per-call exception on every path). A failure on one path does not
-    block the other — the gap is still surfaced through the surviving
-    stream.
-    """
+    legal_repair_actions: list[str] | None,
+    source_ref: str | None,
+    context: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any]]:
     gap_id = f"typed_gap.{uuid.uuid4().hex[:16]}"
     payload: dict[str, Any] = {
         "gap_id": gap_id,
@@ -69,7 +76,32 @@ def emit_typed_gap(
         "source_ref": None if source_ref is None else str(source_ref),
         "context": dict(context or {}),
     }
-    authority_event_written = _write_typed_gap_to_authority_events(
+    return gap_id, payload
+
+
+def _emit_typed_gap_inner(
+    conn: Any,
+    *,
+    gap_kind: str,
+    missing_type: str,
+    reason_code: str,
+    legal_repair_actions: list[str] | None,
+    source_ref: str | None,
+    context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Inner emission logic — writes the authority_event row + system_events
+    sidecar, returns ``{gap_id, authority_event_ids}``. Used by both the
+    gateway-dispatched handler and the direct-write fallback."""
+
+    gap_id, payload = _build_typed_gap_payload(
+        gap_kind=gap_kind,
+        missing_type=missing_type,
+        reason_code=reason_code,
+        legal_repair_actions=legal_repair_actions,
+        source_ref=source_ref,
+        context=context,
+    )
+    authority_event_id = _write_typed_gap_to_authority_events(
         conn,
         gap_id=gap_id,
         payload=payload,
@@ -92,9 +124,102 @@ def emit_typed_gap(
             sidecar_written = True
         except Exception:
             sidecar_written = False
-    if not authority_event_written and not sidecar_written:
+    if authority_event_id is None and not sidecar_written:
+        return {"gap_id": None, "authority_event_ids": []}
+    return {
+        "gap_id": gap_id,
+        "authority_event_ids": [authority_event_id] if authority_event_id else [],
+    }
+
+
+def emit_typed_gap(
+    conn: Any,
+    *,
+    gap_kind: str,
+    missing_type: str,
+    reason_code: str,
+    legal_repair_actions: list[str] | None = None,
+    source_ref: str | None = None,
+    context: dict[str, Any] | None = None,
+) -> str | None:
+    """Emit a ``typed_gap.created`` event and return the generated gap_id.
+
+    Routes through the CQRS gateway (operation ``typed_gap.emit``) so the
+    resulting authority_events row carries a ``receipt_id``. Falls back to
+    a direct inner write when the gateway can't be reached (bootstrap,
+    isolated test contexts, or operation_catalog_registry pre-migration-354).
+    """
+
+    command = EmitTypedGapCommand(
+        gap_kind=gap_kind,
+        missing_type=missing_type,
+        reason_code=reason_code,
+        legal_repair_actions=list(legal_repair_actions or ()),
+        source_ref=source_ref,
+        context=dict(context or {}),
+    )
+    try:
+        from runtime.operation_catalog_gateway import (
+            execute_operation_from_subsystems,
+        )
+
+        class _ConnSubsystems:
+            def __init__(self, c: Any) -> None:
+                self._c = c
+
+            def get_pg_conn(self) -> Any:
+                return self._c
+
+        result = execute_operation_from_subsystems(
+            _ConnSubsystems(conn),
+            operation_name="typed_gap.emit",
+            payload=command.model_dump(),
+        )
+        if isinstance(result, dict):
+            inner = result if "gap_id" in result else result.get("result", {})
+            if isinstance(inner, dict) and inner.get("gap_id"):
+                return str(inner["gap_id"])
+        # Gateway dispatch landed but the inner result is empty — that's
+        # the same "both writes failed" path the legacy helper returned
+        # None on. Surface it the same way.
         return None
-    return gap_id
+    except Exception:
+        # Gateway not reachable — bootstrap, missing operation row, or
+        # transient. Fall through to a direct inner write so observability
+        # of the gap is never lost.
+        inner = _emit_typed_gap_inner(
+            conn,
+            gap_kind=gap_kind,
+            missing_type=missing_type,
+            reason_code=reason_code,
+            legal_repair_actions=legal_repair_actions,
+            source_ref=source_ref,
+            context=context,
+        )
+        return inner.get("gap_id")
+
+
+def handle_emit_typed_gap(
+    command: EmitTypedGapCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    """Gateway handler for ``typed_gap.emit``.
+
+    The handler writes the authority_event row directly and returns the
+    list of event_ids so the gateway's receipt-stitching path
+    (``_attach_receipt_to_authority_events``) can back-fill ``receipt_id``
+    on the row it just inserted.
+    """
+
+    return _emit_typed_gap_inner(
+        subsystems.get_pg_conn(),
+        gap_kind=command.gap_kind,
+        missing_type=command.missing_type,
+        reason_code=command.reason_code,
+        legal_repair_actions=command.legal_repair_actions,
+        source_ref=command.source_ref,
+        context=command.context,
+    )
 
 
 def _write_typed_gap_to_authority_events(
@@ -103,25 +228,30 @@ def _write_typed_gap_to_authority_events(
     gap_id: str,
     payload: dict[str, Any],
     source_ref: str | None,
-) -> bool:
+) -> str | None:
     """Write the typed_gap.created event directly to authority_events.
 
     operation_ref is set to the source_ref (the calling operation, e.g.
     'compose_plan_from_intent:smoke_test') when provided; otherwise the
     synthetic 'typed_gap.emit' fallback so the foreign key constraint on
     operation_ref still validates against operation_catalog_registry-style
-    refs. receipt_id is left NULL — gap emission is not gateway-dispatched
-    today; that follow-up is the second half of CQRS migration.
+    refs.
+
+    Returns the freshly-minted ``event_id`` (UUID string) so the gateway's
+    ``_attach_receipt_to_authority_events`` can back-fill ``receipt_id``
+    on this row when the dispatch happens through ``typed_gap.emit``.
+    Returns ``None`` if the write failed or the connection rejected it.
     """
-    try:
-        import json as _json
-    except Exception:
-        return False
+
+    import json as _json
+    from uuid import uuid4
+
     operation_ref = (source_ref or "typed_gap.emit").strip() or "typed_gap.emit"
+    event_id = str(uuid4())
     try:
         execute = getattr(conn, "execute", None)
         if execute is None:
-            return False
+            return None
         execute(
             """
             INSERT INTO authority_events (
@@ -133,15 +263,16 @@ def _write_typed_gap_to_authority_events(
                 operation_ref,
                 emitted_by
             ) VALUES (
-                gen_random_uuid(),
-                $1,
+                $1::uuid,
                 $2,
                 $3,
-                $4::jsonb,
-                $5,
-                $6
+                $4,
+                $5::jsonb,
+                $6,
+                $7
             )
             """,
+            event_id,
             "authority.workflow_runs",
             gap_id,
             "typed_gap.created",
@@ -149,9 +280,9 @@ def _write_typed_gap_to_authority_events(
             operation_ref,
             "typed_gap_helper",
         )
-        return True
+        return event_id
     except Exception:
-        return False
+        return None
 
 
 def emit_typed_gaps_for_compile_errors(

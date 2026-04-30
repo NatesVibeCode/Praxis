@@ -116,6 +116,26 @@ def unresolved_reference_slugs(definition: Any) -> list[str]:
     return sorted(set(unresolved))
 
 
+def _approved_reference_slugs(review: dict[str, Any] | None) -> set[str]:
+    if not isinstance(review, dict):
+        return set()
+    approved: set[str] = set()
+    for raw in review.get("approved_binding_refs", []) if isinstance(review.get("approved_binding_refs"), list) else []:
+        if isinstance(raw, dict):
+            for key in ("candidate_ref", "target_ref"):
+                value = _as_text(raw.get(key))
+                if value:
+                    approved.add(value)
+            slot_ref = _as_text(raw.get("slot_ref"))
+        else:
+            slot_ref = _as_text(raw)
+        if slot_ref:
+            approved.add(slot_ref)
+            if slot_ref.startswith("binding:ref-"):
+                approved.add(slot_ref[len("binding:ref-"):].replace("-", "_"))
+    return approved
+
+
 def _has_explicit_build_authority_state(definition: dict[str, Any]) -> bool:
     return any(
         key in definition
@@ -229,10 +249,6 @@ def harden_reviewed_definition(
         raise ValueError("definition is required and must be an object")
     definition = materialize_definition(definition)
 
-    unresolved = unresolved_reference_slugs(definition)
-    if unresolved:
-        raise PlanningBlockedError(unresolved)
-
     authority_bundle = build_authority_bundle(definition)
     projection_status = authority_bundle.get("projection_status") if isinstance(authority_bundle, dict) else {}
     if _as_text((projection_status or {}).get("state")) == "blocked":
@@ -252,6 +268,15 @@ def harden_reviewed_definition(
     hardening_blockers = _review_hardening_blockers(manifest=manifest, review=review)
     if hardening_blockers:
         raise PlanningBlockedError(hardening_blockers)
+
+    approved_references = _approved_reference_slugs(review)
+    unresolved = [
+        slug
+        for slug in unresolved_reference_slugs(definition)
+        if slug not in approved_references
+    ]
+    if unresolved:
+        raise PlanningBlockedError(unresolved)
 
     return _compile_planned_definition(
         definition,

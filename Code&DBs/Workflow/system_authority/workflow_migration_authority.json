@@ -250,7 +250,10 @@
     "241_app_manifests_workspace_seed_bundles.sql",
     "242_workflow_type_token_data_dictionary_objects.sql",
     "243_deepseek_v4_pro_primary_build_engine.sql",
+    "243_runtime_profile_admitted_routes_projection.sql",
     "244_openrouter_api_payg_lane_open.sql",
+    "244_ui_surface_file_anchor_registry.sql",
+    "245_compile_run_trace.sql",
     "245_compile_task_type_route.sql",
     "246_deepseek_compile_only_no_build_route.sql",
     "247_workflow_plumbing_data_dictionary_objects.sql",
@@ -259,9 +262,6 @@
     "250_plan_section_author_cross_provider_failover.sql",
     "251_register_together_direct_provider.sql",
     "252_plan_section_author_together_primary.sql",
-    "243_runtime_profile_admitted_routes_projection.sql",
-    "244_ui_surface_file_anchor_registry.sql",
-    "245_compile_run_trace.sql",
     "253_plan_synthesis_and_fork_author_routes.sql",
     "254_restore_cli_default_for_build_and_plan_section_author.sql",
     "255_private_provider_job_catalog.sql",
@@ -277,8 +277,8 @@
     "264_operator_decision_scope_clamp.sql",
     "264_plan_section_author_together_flash.sql",
     "265_plan_section_author_drop_v32.sql",
-    "266_private_api_compile_only_allowlist.sql",
     "266_drop_openrouter_auto.sql",
+    "266_private_api_compile_only_allowlist.sql",
     "267_provider_transport_control_panel_policy.sql",
     "268_seed_object_type_contact.sql",
     "269_model_access_method_control_panel_denials.sql",
@@ -354,7 +354,30 @@
     "335_workflow_build_moon_tool_allowlist.sql",
     "336_code_change_candidate_payloads.sql",
     "337_llm_request_contract_authority.sql",
-    "338_zero_token_detector_wiring.sql"
+    "338_zero_token_detector_wiring.sql",
+    "339_knowledge_digest_context_assembly.sql",
+    "340_register_compile_preview_query_operation.sql",
+    "341_candidate_authority_impacts.sql",
+    "342_candidate_preflight_records.sql",
+    "343_authority_supersession_registry.sql",
+    "344_register_authority_compose_binding_resolve.sql",
+    "345_workflow_jobs_authority_binding.sql",
+    "346_backfill_authority_supersession_registry.sql",
+    "347_immutable_receipts_and_transport_kind.sql",
+    "347_register_authority_impact_contract_verifier.sql",
+    "348_operation_execution_lane.sql",
+    "349_register_authority_impact_contract_audit_scan.sql",
+    "350_operation_lane_initial_classification.sql",
+    "351_register_authority_audit_query_operations.sql",
+    "353_operation_lane_bulk_classification.sql",
+    "354_register_typed_gap_emit_operation.sql",
+    "355_register_object_truth_readiness_operation.sql",
+    "356_register_client_operating_model_operator_view.sql",
+    "358_client_operating_model_projection_storage.sql",
+    "359_register_receipt_structural_proof_verifier.sql",
+    "360_backfill_receipt_structural_proof_verification.sql",
+    "361_client_system_discovery_cqrs_authority.sql",
+    "362_object_truth_ingestion_sample_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -6511,10 +6534,84 @@
         "object_name": "schema_migrations.243_deepseek_v4_pro_primary_build_engine.sql"
       }
     ],
+    "243_runtime_profile_admitted_routes_projection.sql": [
+      {
+        "object_type": "table",
+        "object_name": "runtime_profile_admitted_routes"
+      },
+      {
+        "object_type": "index",
+        "object_name": "runtime_profile_admitted_routes_slug_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "runtime_profile_admitted_routes_projection_idx"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_registry.projection.runtime_profile_admitted_routes"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_contracts.projection_contract.runtime_profile_admitted_routes"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_state.projection.runtime_profile_admitted_routes"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.runtime_profile_admitted_routes"
+      }
+    ],
     "244_openrouter_api_payg_lane_open.sql": [
       {
         "object_type": "row",
         "object_name": "schema_migrations.244_openrouter_api_payg_lane_open.sql"
+      }
+    ],
+    "244_ui_surface_file_anchor_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "ui_surface_file_anchor_registry"
+      },
+      {
+        "object_type": "index",
+        "object_name": "ui_surface_file_anchor_registry_surface_order_idx"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.ui_surface_file_anchor_registry"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.ui_surface_file_anchor_registry"
+      }
+    ],
+    "245_compile_run_trace.sql": [
+      {
+        "object_type": "table",
+        "object_name": "compile_runs"
+      },
+      {
+        "object_type": "index",
+        "object_name": "compile_runs_started_at_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "compile_runs_silent_degradation_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "compile_runs_empty_output_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "compile_runs_workflow_idx"
+      },
+      {
+        "object_type": "view",
+        "object_name": "compile_health"
       }
     ],
     "245_compile_task_type_route.sql": [
@@ -6563,80 +6660,6 @@
       {
         "object_type": "row",
         "object_name": "schema_migrations.252_plan_section_author_together_primary.sql"
-      }
-    ],
-    "243_runtime_profile_admitted_routes_projection.sql": [
-      {
-        "object_type": "table",
-        "object_name": "runtime_profile_admitted_routes"
-      },
-      {
-        "object_type": "index",
-        "object_name": "runtime_profile_admitted_routes_slug_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "runtime_profile_admitted_routes_projection_idx"
-      },
-      {
-        "object_type": "row",
-        "object_name": "authority_projection_registry.projection.runtime_profile_admitted_routes"
-      },
-      {
-        "object_type": "row",
-        "object_name": "authority_projection_contracts.projection_contract.runtime_profile_admitted_routes"
-      },
-      {
-        "object_type": "row",
-        "object_name": "authority_projection_state.projection.runtime_profile_admitted_routes"
-      },
-      {
-        "object_type": "row",
-        "object_name": "data_dictionary_objects.runtime_profile_admitted_routes"
-      }
-    ],
-    "244_ui_surface_file_anchor_registry.sql": [
-      {
-        "object_type": "table",
-        "object_name": "ui_surface_file_anchor_registry"
-      },
-      {
-        "object_type": "index",
-        "object_name": "ui_surface_file_anchor_registry_surface_order_idx"
-      },
-      {
-        "object_type": "row",
-        "object_name": "data_dictionary_objects.ui_surface_file_anchor_registry"
-      },
-      {
-        "object_type": "row",
-        "object_name": "authority_object_registry.table.public.ui_surface_file_anchor_registry"
-      }
-    ],
-    "245_compile_run_trace.sql": [
-      {
-        "object_type": "table",
-        "object_name": "compile_runs"
-      },
-      {
-        "object_type": "index",
-        "object_name": "compile_runs_started_at_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "compile_runs_silent_degradation_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "compile_runs_empty_output_idx"
-      },
-      {
-        "object_type": "index",
-        "object_name": "compile_runs_workflow_idx"
-      },
-      {
-        "object_type": "view",
-        "object_name": "compile_health"
       }
     ],
     "253_plan_synthesis_and_fork_author_routes.sql": [
@@ -7059,7 +7082,24 @@
         "object_name": "provider_transport_admissions.provider_transport_admission.google.cli_llm"
       }
     ],
-    "264_operator_decision_scope_clamp.sql": [],
+    "264_operator_decision_scope_clamp.sql": [
+      {
+        "object_type": "column",
+        "object_name": "operator_decisions.scope_clamp"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_decisions.operator_decisions_scope_clamp_shape"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_decisions_scope_clamp_gin_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_decisions_scope_clamp_pending_review_idx"
+      }
+    ],
     "264_plan_section_author_together_flash.sql": [
       {
         "object_type": "row",
@@ -7074,6 +7114,16 @@
       {
         "object_type": "row",
         "object_name": "task_type_routing.plan_section_author|together|deepseek-ai/DeepSeek-V4-Pro"
+      }
+    ],
+    "266_drop_openrouter_auto.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.266_drop_openrouter_auto.sql"
+      },
+      {
+        "object_type": "absent_row",
+        "object_name": "provider_model_candidates.candidate.openrouter.auto"
       }
     ],
     "266_private_api_compile_only_allowlist.sql": [
@@ -7094,7 +7144,6 @@
         "object_name": "private_provider_api_job_allowlist.scratch_agent|compile|llm_task|together|deepseek-ai/DeepSeek-V4-Pro"
       }
     ],
-    "266_drop_openrouter_auto.sql": [],
     "267_provider_transport_control_panel_policy.sql": [
       {
         "object_type": "table",
@@ -7485,7 +7534,16 @@
         "object_name": "operation_catalog_registry.search.db"
       }
     ],
-    "279_authority_object_registry_query_kind.sql": [],
+    "279_authority_object_registry_query_kind.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.279_authority_object_registry_query_kind.sql"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "authority_object_registry.authority_object_registry_object_kind_check"
+      }
+    ],
     "279_register_bug_triage_packet_operation.sql": [
       {
         "object_type": "row",
@@ -7824,18 +7882,94 @@
         "object_name": "policy_authority_detach_table_policy"
       }
     ],
-    "300_policy_authority_receipt_writer_bypasses_self.sql": [],
-    "301_policy_definitions_enforcement_kind_widen.sql": [],
-    "302_operator_decisions_drillable_provenance_and_why.sql": [],
-    "303_compile_sub_task_routing_split.sql": [],
-    "304_compile_author_gemini_fallback.sql": [],
-    "305_extend_aa_creator_aliases_for_openrouter_prefixes.sql": [],
-    "306_compile_author_cascade_flip_and_finalize_voters.sql": [],
-    "307_compile_author_try_kimi_primary.sql": [],
-    "308_revert_kimi_author_try_kimi_synthesize.sql": [],
-    "309_revert_kimi_off_synthesize.sql": [],
-    "310_backfill_receipt_route_identity.sql": [],
-    "311_bug_operation_receipt_provenance.sql": [],
+    "300_policy_authority_receipt_writer_bypasses_self.sql": [
+      {
+        "object_type": "function",
+        "object_name": "policy_authority_record_compliance_receipt"
+      }
+    ],
+    "301_policy_definitions_enforcement_kind_widen.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "policy_definitions.policy_definitions_enforcement_kind_check"
+      }
+    ],
+    "302_operator_decisions_drillable_provenance_and_why.sql": [
+      {
+        "object_type": "column",
+        "object_name": "operator_decisions.decision_provenance"
+      },
+      {
+        "object_type": "column",
+        "object_name": "operator_decisions.decision_why"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_decisions.operator_decisions_provenance_check"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_decisions_provenance_kind_idx"
+      }
+    ],
+    "303_compile_sub_task_routing_split.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.303_compile_sub_task_routing_split.sql"
+      }
+    ],
+    "304_compile_author_gemini_fallback.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.304_compile_author_gemini_fallback.sql"
+      }
+    ],
+    "305_extend_aa_creator_aliases_for_openrouter_prefixes.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.305_extend_aa_creator_aliases_for_openrouter_prefixes.sql"
+      }
+    ],
+    "306_compile_author_cascade_flip_and_finalize_voters.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.306_compile_author_cascade_flip_and_finalize_voters.sql"
+      }
+    ],
+    "307_compile_author_try_kimi_primary.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.307_compile_author_try_kimi_primary.sql"
+      }
+    ],
+    "308_revert_kimi_author_try_kimi_synthesize.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.308_revert_kimi_author_try_kimi_synthesize.sql"
+      }
+    ],
+    "309_revert_kimi_off_synthesize.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.309_revert_kimi_off_synthesize.sql"
+      }
+    ],
+    "310_backfill_receipt_route_identity.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.310_backfill_receipt_route_identity.sql"
+      }
+    ],
+    "311_bug_operation_receipt_provenance.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.311_bug_operation_receipt_provenance.sql"
+      },
+      {
+        "object_type": "absent_constraint",
+        "object_name": "bugs.bugs_discovered_in_receipt_fkey"
+      }
+    ],
     "312_register_operator_composed_tools.sql": [
       {
         "object_type": "row",
@@ -8473,6 +8607,600 @@
         "object_type": "trigger",
         "object_name": "trg_refresh_build_antipattern_hits"
       }
+    ],
+    "339_knowledge_digest_context_assembly.sql": [
+      {
+        "object_type": "table",
+        "object_name": "knowledge_tag_catalog"
+      },
+      {
+        "object_type": "table",
+        "object_name": "knowledge_digest_revisions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "knowledge_digest_revisions_one_active_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "knowledge_digest_revisions_subject_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "knowledge_digest_revisions_input_refs_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "knowledge_tag_catalog_key_value_idx"
+      },
+      {
+        "object_type": "row",
+        "object_name": "semantic_predicates.tagged_as"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_registry.projection.structured_document.knowledge_digests"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_state.projection.structured_document.knowledge_digests"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.knowledge_tag_catalog"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.knowledge_digest_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.definition.knowledge_tag"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.definition.knowledge_digest"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.semantic.predicate.tagged_as"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.projection.structured_document.knowledge_digests"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.knowledge_tag_catalog"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.knowledge_digest_revisions"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.definition.knowledge_tag"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.definition.knowledge_digest"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.definition.semantic_predicate.tagged_as"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.projection.projection.structured_document.knowledge_digests"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_projection_contracts.projection_contract.projection.structured_document.knowledge_digests"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.structured_documents.context_assemble"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.structured_documents.context_assemble"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.structured_documents.context_assemble"
+      }
+    ],
+    "340_register_compile_preview_query_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.compile_preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.compile_preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compile_preview"
+      }
+    ],
+    "341_candidate_authority_impacts.sql": [
+      {
+        "object_type": "table",
+        "object_name": "candidate_authority_impacts"
+      },
+      {
+        "object_type": "index",
+        "object_name": "candidate_authority_impacts_candidate_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "candidate_authority_impacts_unit_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "candidate_authority_impacts_predecessor_idx"
+      }
+    ],
+    "342_candidate_preflight_records.sql": [
+      {
+        "object_type": "table",
+        "object_name": "candidate_preflight_records"
+      },
+      {
+        "object_type": "view",
+        "object_name": "candidate_latest_preflight"
+      },
+      {
+        "object_type": "index",
+        "object_name": "candidate_preflight_records_candidate_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "candidate_preflight_records_status_idx"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.code_change_candidate.preflight_completed"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.code_change_candidate.preflight"
+      }
+    ],
+    "343_authority_supersession_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "authority_supersession_registry"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_active_predecessor_obligations"
+      },
+      {
+        "object_type": "view",
+        "object_name": "authority_canonical_successor_for"
+      },
+      {
+        "object_type": "index",
+        "object_name": "authority_supersession_registry_pair_uq"
+      },
+      {
+        "object_type": "index",
+        "object_name": "authority_supersession_registry_successor_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "authority_supersession_registry_predecessor_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "authority_supersession_registry_source_candidate_idx"
+      }
+    ],
+    "344_register_authority_compose_binding_resolve.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.authority.compose_binding.resolve"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.authority.compose_binding.resolve"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.authority.compose_binding.resolve"
+      }
+    ],
+    "345_workflow_jobs_authority_binding.sql": [
+      {
+        "object_type": "column",
+        "object_name": "workflow_jobs.authority_binding"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_wj_authority_bound"
+      }
+    ],
+    "346_backfill_authority_supersession_registry.sql": [
+      {
+        "object_type": "row",
+        "object_name": "schema_migrations.346_backfill_authority_supersession_registry.sql"
+      }
+    ],
+    "347_immutable_receipts_and_transport_kind.sql": [
+      {
+        "object_type": "column",
+        "object_name": "authority_operation_receipts.transport_kind"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "authority_operation_receipts.authority_operation_receipts_transport_kind_check"
+      },
+      {
+        "object_type": "index",
+        "object_name": "authority_operation_receipts_transport_kind_idx"
+      },
+      {
+        "object_type": "function",
+        "object_name": "policy_authority_reject_update"
+      },
+      {
+        "object_type": "row",
+        "object_name": "policy_definitions.policy.authority_operation_receipts.update_reject"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "policy_authority_operation_receipts_no_update"
+      }
+    ],
+    "347_register_authority_impact_contract_verifier.sql": [
+      {
+        "object_type": "row",
+        "object_name": "verifier_registry.verifier.authority.impact_contract_complete"
+      }
+    ],
+    "348_operation_execution_lane.sql": [
+      {
+        "object_type": "column",
+        "object_name": "operation_catalog_registry.execution_lane"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operation_catalog_registry.operation_catalog_registry_execution_lane_check"
+      },
+      {
+        "object_type": "column",
+        "object_name": "operation_catalog_registry.kickoff_required"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operation_catalog_registry_execution_lane_idx"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.architecture-policy::concurrency::operation-execution-lane-typing"
+      }
+    ],
+    "349_register_authority_impact_contract_audit_scan.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.authority.impact_contract_audit.scan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.authority.impact_contract_audit.scan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.authority.impact_contract_audit.scan"
+      }
+    ],
+    "350_operation_lane_initial_classification.sql": [
+      {
+        "object_type": "function",
+        "object_name": "register_operation_atomic"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compile_materialize"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compose_plan_via_llm"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compose_experiment"
+      }
+    ],
+    "351_register_authority_audit_query_operations.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.search.authority_receipts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.search.compliance_receipts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.audit.summary"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.search.authority_receipts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.search.compliance_receipts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.audit.summary"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.search.authority_receipts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.search.compliance_receipts"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.audit.summary"
+      }
+    ],
+    "353_operation_lane_bulk_classification.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compile_preview"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.compose_plan"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.launch_plan"
+      }
+    ],
+    "354_register_typed_gap_emit_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.typed_gap.emit"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.typed_gap.emit"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.typed-gap-emit"
+      }
+    ],
+    "355_register_object_truth_readiness_operation.sql": [
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_readiness"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_readiness"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_truth_readiness"
+      }
+    ],
+    "356_register_client_operating_model_operator_view.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.client_operating_model"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.client_operating_model_operator_view"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.client_operating_model_operator_view"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.client_operating_model_operator_view"
+      }
+    ],
+    "358_client_operating_model_projection_storage.sql": [
+      {
+        "object_type": "table",
+        "object_name": "client_operating_model_operator_view_snapshots"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.client_operating_model_operator_view_snapshots"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.client_operating_model_operator_view_snapshots"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.client_operating_model.operator_view_snapshot_stored"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.client_operating_model_operator_view_snapshot_store"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.client_operating_model_operator_view_snapshot_store"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.client_operating_model_operator_view_snapshot_store"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.client_operating_model_operator_view_snapshot_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.client_operating_model_operator_view_snapshot_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.client_operating_model_operator_view_snapshot_read"
+      }
+    ],
+    "359_register_receipt_structural_proof_verifier.sql": [
+      {
+        "object_type": "row",
+        "object_name": "verifier_registry.verifier.receipt.structural_proof"
+      }
+    ],
+    "360_backfill_receipt_structural_proof_verification.sql": [
+      {
+        "object_type": "row",
+        "object_name": "platform_config.receipts.structural_proof_backfill.20260430"
+      }
+    ],
+    "361_client_system_discovery_cqrs_authority.sql": [
+      {
+        "object_type": "row",
+        "object_name": "authority_domains.authority.client_system_discovery"
+      },
+      {
+        "object_type": "table",
+        "object_name": "client_system_census"
+      },
+      {
+        "object_type": "table",
+        "object_name": "client_connector_census"
+      },
+      {
+        "object_type": "table",
+        "object_name": "client_connector_surface_evidence"
+      },
+      {
+        "object_type": "table",
+        "object_name": "client_connector_credential_health_refs"
+      },
+      {
+        "object_type": "table",
+        "object_name": "client_system_integration_evidence"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.client_system_discovery.census_recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.client_system_discovery.typed_gap_recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.client_system_discovery_census_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.client_system_discovery_census_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.client_system_discovery_census_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.client_system_discovery_census_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.client_system_discovery_census_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.client_system_discovery_census_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.client_system_discovery_gap_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.client_system_discovery_gap_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.client_system_discovery_gap_record"
+      }
+    ],
+    "362_object_truth_ingestion_sample_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "object_truth_system_snapshots"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_sample_captures"
+      },
+      {
+        "object_type": "table",
+        "object_name": "object_truth_raw_payload_references"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_system_snapshots"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_sample_captures"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.object_truth_raw_payload_references"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_system_snapshots"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_sample_captures"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.table.public.object_truth_raw_payload_references"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_event_contracts.object_truth.ingestion_sample_recorded"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_ingestion_sample_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_ingestion_sample_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_truth_ingestion_sample_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "data_dictionary_objects.operation.object_truth_ingestion_sample_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "authority_object_registry.operation.object_truth_ingestion_sample_read"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_truth_ingestion_sample_read"
+      }
     ]
   },
   "policy_buckets": {
@@ -8727,7 +9455,10 @@
       "241_app_manifests_workspace_seed_bundles.sql",
       "242_workflow_type_token_data_dictionary_objects.sql",
       "243_deepseek_v4_pro_primary_build_engine.sql",
+      "243_runtime_profile_admitted_routes_projection.sql",
       "244_openrouter_api_payg_lane_open.sql",
+      "244_ui_surface_file_anchor_registry.sql",
+      "245_compile_run_trace.sql",
       "245_compile_task_type_route.sql",
       "246_deepseek_compile_only_no_build_route.sql",
       "247_workflow_plumbing_data_dictionary_objects.sql",
@@ -8736,9 +9467,6 @@
       "250_plan_section_author_cross_provider_failover.sql",
       "251_register_together_direct_provider.sql",
       "252_plan_section_author_together_primary.sql",
-      "243_runtime_profile_admitted_routes_projection.sql",
-      "244_ui_surface_file_anchor_registry.sql",
-      "245_compile_run_trace.sql",
       "253_plan_synthesis_and_fork_author_routes.sql",
       "254_restore_cli_default_for_build_and_plan_section_author.sql",
       "255_private_provider_job_catalog.sql",
@@ -8754,8 +9482,8 @@
       "264_operator_decision_scope_clamp.sql",
       "264_plan_section_author_together_flash.sql",
       "265_plan_section_author_drop_v32.sql",
-      "266_private_api_compile_only_allowlist.sql",
       "266_drop_openrouter_auto.sql",
+      "266_private_api_compile_only_allowlist.sql",
       "267_provider_transport_control_panel_policy.sql",
       "268_seed_object_type_contact.sql",
       "269_model_access_method_control_panel_denials.sql",
@@ -8831,7 +9559,30 @@
       "335_workflow_build_moon_tool_allowlist.sql",
       "336_code_change_candidate_payloads.sql",
       "337_llm_request_contract_authority.sql",
-      "338_zero_token_detector_wiring.sql"
+      "338_zero_token_detector_wiring.sql",
+      "339_knowledge_digest_context_assembly.sql",
+      "340_register_compile_preview_query_operation.sql",
+      "341_candidate_authority_impacts.sql",
+      "342_candidate_preflight_records.sql",
+      "343_authority_supersession_registry.sql",
+      "344_register_authority_compose_binding_resolve.sql",
+      "345_workflow_jobs_authority_binding.sql",
+      "346_backfill_authority_supersession_registry.sql",
+      "347_immutable_receipts_and_transport_kind.sql",
+      "347_register_authority_impact_contract_verifier.sql",
+      "348_operation_execution_lane.sql",
+      "349_register_authority_impact_contract_audit_scan.sql",
+      "350_operation_lane_initial_classification.sql",
+      "351_register_authority_audit_query_operations.sql",
+      "353_operation_lane_bulk_classification.sql",
+      "354_register_typed_gap_emit_operation.sql",
+      "355_register_object_truth_readiness_operation.sql",
+      "356_register_client_operating_model_operator_view.sql",
+      "358_client_operating_model_projection_storage.sql",
+      "359_register_receipt_structural_proof_verifier.sql",
+      "360_backfill_receipt_structural_proof_verification.sql",
+      "361_client_system_discovery_cqrs_authority.sql",
+      "362_object_truth_ingestion_sample_authority.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -8857,7 +9608,9 @@
       "107_workflow_notifications_resource_telemetry.sql"
     ],
     "deprecated": [],
-    "dead": []
+    "dead": [
+      "357_client_system_discovery_authority.sql"
+    ]
   },
   "tie_break_order": {
     "012": [
@@ -9012,6 +9765,10 @@
     "334": [
       "334_partial_success_run_state.sql",
       "334_zero_token_silent_failure_projection.sql"
+    ],
+    "347": [
+      "347_immutable_receipts_and_transport_kind.sql",
+      "347_register_authority_impact_contract_verifier.sql"
     ]
   },
   "migrations_always_reapply": [
@@ -9020,6 +9777,7 @@
     "311_bug_operation_receipt_provenance.sql",
     "329_task_scoped_provider_job_catalog_admission.sql",
     "337_llm_request_contract_authority.sql",
-    "338_zero_token_detector_wiring.sql"
+    "338_zero_token_detector_wiring.sql",
+    "350_operation_lane_initial_classification.sql"
   ]
 }

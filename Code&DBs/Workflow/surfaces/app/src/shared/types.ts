@@ -53,6 +53,27 @@ export interface BuildNode {
   title?: string;
   summary?: string;
   route?: string;
+  task_type?: string | null;
+  agent?: string | null;
+  capabilities?: string[];
+  write_scope?: string[];
+  agent_tool_plan?: {
+    tool_name?: string;
+    operation?: string;
+    repeats?: number;
+    focus?: string;
+    cadence?: 'single' | 'sequential' | 'parallel';
+    target_fields?: string[];
+    notes?: string;
+    [key: string]: unknown;
+  };
+  completion_contract?: {
+    result_kind?: string;
+    submit_tool_names?: string[];
+    submission_required?: boolean;
+    verification_required?: boolean;
+    [key: string]: unknown;
+  };
   integration_args?: BuildNodeIntegrationArgs;
   trigger?: {
     event_type?: string;
@@ -320,6 +341,8 @@ export interface BuildPayload {
   progressive_build?: ProgressiveBuildState | null;
   compile_preview?: CompilePreviewPayload | null;
   mutation_event_id?: number | null;
+  operation_receipt?: Record<string, unknown> | null;
+  graph_summary?: Record<string, unknown> | null;
 }
 
 // Service bus event types

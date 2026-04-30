@@ -723,12 +723,26 @@ def _iso_now() -> str:
     return _utc_now().isoformat()
 
 
+_DOCKER_PROBE_RETRY_ATTEMPTS = 3
+_DOCKER_PROBE_RETRY_DELAY_SECONDS = 2.0
+
+
 def _docker_available() -> bool:
-    try:
-        result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0
+    last_returncode: int | None = None
+    for attempt in range(_DOCKER_PROBE_RETRY_ATTEMPTS):
+        try:
+            result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
+        except FileNotFoundError:
+            return False
+        except subprocess.TimeoutExpired:
+            last_returncode = None
+        else:
+            if result.returncode == 0:
+                return True
+            last_returncode = result.returncode
+        if attempt < _DOCKER_PROBE_RETRY_ATTEMPTS - 1:
+            time.sleep(_DOCKER_PROBE_RETRY_DELAY_SECONDS)
+    return last_returncode == 0
 
 
 def _docker_image_available(image: str) -> bool:

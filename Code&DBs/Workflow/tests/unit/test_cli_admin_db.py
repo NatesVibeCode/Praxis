@@ -12,21 +12,17 @@ def test_generate_plan_uses_cli_db_authority_when_available(monkeypatch) -> None
 
     monkeypatch.setattr(admin_commands, "cli_sync_conn", lambda: sentinel)
 
-    class _Preview:
-        def to_dict(self):
-            return {
-                "kind": "compile_preview",
-                "cqrs_role": "query",
-                "scope_packet": {"suggested_steps": [{"label": "discover"}]},
-            }
+    def _fake_execute(subsystems, *, operation_name, payload):
+        captured["operation_name"] = operation_name
+        captured["conn"] = subsystems.get_pg_conn()
+        captured["payload"] = payload
+        return {
+            "kind": "compile_preview",
+            "cqrs_role": "query",
+            "scope_packet": {"suggested_steps": [{"label": "discover"}]},
+        }
 
-    def _fake_preview(intent, *, conn, match_limit):
-        captured["intent"] = intent
-        captured["conn"] = conn
-        captured["match_limit"] = match_limit
-        return _Preview()
-
-    monkeypatch.setattr("runtime.compile_cqrs.preview_compile", _fake_preview)
+    monkeypatch.setattr("runtime.operation_catalog_gateway.execute_operation_from_subsystems", _fake_execute)
 
     stdout = StringIO()
     exit_code = admin_commands._generate_plan_command(
@@ -40,7 +36,11 @@ def test_generate_plan_uses_cli_db_authority_when_available(monkeypatch) -> None
     )
 
     assert exit_code == 0
-    assert captured == {"intent": "Add retry logic", "conn": sentinel, "match_limit": 8}
+    assert captured == {
+        "operation_name": "compile_preview",
+        "conn": sentinel,
+        "payload": {"intent": "Add retry logic", "match_limit": 8},
+    }
     payload = json.loads(stdout.getvalue())
     assert payload["kind"] == "compile_preview"
 
@@ -51,21 +51,17 @@ def test_generate_plan_previews_prose(monkeypatch) -> None:
 
     monkeypatch.setattr(admin_commands, "cli_sync_conn", lambda: sentinel)
 
-    class _Preview:
-        def to_dict(self):
-            return {
-                "kind": "compile_preview",
-                "cqrs_role": "query",
-                "scope_packet": {"suggested_steps": [{"label": "discover"}]},
-            }
+    def _fake_execute(subsystems, *, operation_name, payload):
+        captured["operation_name"] = operation_name
+        captured["conn"] = subsystems.get_pg_conn()
+        captured["payload"] = payload
+        return {
+            "kind": "compile_preview",
+            "cqrs_role": "query",
+            "scope_packet": {"suggested_steps": [{"label": "discover"}]},
+        }
 
-    def _fake_preview(intent, *, conn, match_limit):
-        captured["intent"] = intent
-        captured["conn"] = conn
-        captured["match_limit"] = match_limit
-        return _Preview()
-
-    monkeypatch.setattr("runtime.compile_cqrs.preview_compile", _fake_preview)
+    monkeypatch.setattr("runtime.operation_catalog_gateway.execute_operation_from_subsystems", _fake_execute)
 
     stdout = StringIO()
     exit_code = admin_commands._generate_plan_command(
@@ -75,9 +71,9 @@ def test_generate_plan_previews_prose(monkeypatch) -> None:
 
     assert exit_code == 0
     assert captured == {
-        "intent": "Build a custom Gmail integration workflow",
+        "operation_name": "compile_preview",
         "conn": sentinel,
-        "match_limit": 5,
+        "payload": {"intent": "Build a custom Gmail integration workflow", "match_limit": 5},
     }
     payload = json.loads(stdout.getvalue())
     assert payload["kind"] == "compile_preview"
@@ -116,19 +112,17 @@ def test_materialize_plan_materializes_prose(monkeypatch) -> None:
 
     monkeypatch.setattr(admin_commands, "cli_sync_conn", lambda: sentinel)
 
-    def _fake_materialize(intent, *, conn, workflow_id, title, enable_llm):
+    def _fake_execute(subsystems, *, operation_name, payload):
         captured.update(
             {
-                "intent": intent,
-                "conn": conn,
-                "workflow_id": workflow_id,
-                "title": title,
-                "enable_llm": enable_llm,
+                "operation_name": operation_name,
+                "conn": subsystems.get_pg_conn(),
+                "payload": payload,
             }
         )
-        return {"kind": "compile_materialization", "workflow_id": workflow_id}
+        return {"kind": "compile_materialization", "workflow_id": payload.get("workflow_id")}
 
-    monkeypatch.setattr("runtime.compile_cqrs.materialize_workflow", _fake_materialize)
+    monkeypatch.setattr("runtime.operation_catalog_gateway.execute_operation_from_subsystems", _fake_execute)
 
     stdout = StringIO()
     exit_code = admin_commands._materialize_plan_command(
@@ -146,11 +140,14 @@ def test_materialize_plan_materializes_prose(monkeypatch) -> None:
 
     assert exit_code == 0
     assert captured == {
-        "intent": "Build a custom Gmail integration workflow",
+        "operation_name": "compile_materialize",
         "conn": sentinel,
-        "workflow_id": "wf_cli_plan",
-        "title": "Gmail workflow",
-        "enable_llm": False,
+        "payload": {
+            "intent": "Build a custom Gmail integration workflow",
+            "workflow_id": "wf_cli_plan",
+            "title": "Gmail workflow",
+            "enable_llm": False,
+        },
     }
     payload = json.loads(stdout.getvalue())
     assert payload["kind"] == "compile_materialization"

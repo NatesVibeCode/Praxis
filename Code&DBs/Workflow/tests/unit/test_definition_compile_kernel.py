@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from runtime.definition_compile_kernel import build_definition, split_sentences
+from runtime.definition_compile_kernel import materialize_definition, build_definition, split_sentences
 
 
 def test_split_sentences_breaks_inline_numbered_steps() -> None:
@@ -59,6 +59,24 @@ def test_build_definition_creates_draft_flow_for_inline_numbered_steps() -> None
     assert definition["draft_flow"][1]["depends_on"] == ["step-001"]
     assert definition["draft_flow"][2]["depends_on"] == ["step-002"]
     assert definition["draft_flow"][3]["depends_on"] == ["step-003"]
+
+
+def test_materialize_definition_accepts_compact_capability_labels() -> None:
+    definition = {
+        "source_prose": "Search for docs, then build an integration.",
+        "compiled_prose": "Search for docs, then build an integration.",
+        "references": [],
+        "capabilities": ["search", "integration_build"],
+        "authority": "",
+        "sla": {},
+    }
+
+    materialized = materialize_definition(definition)
+
+    assert [capability["slug"] for capability in materialized["capabilities"]] == [
+        "search",
+        "integration_build",
+    ]
 
 
 def test_build_definition_keeps_long_inline_step_titles_intact() -> None:

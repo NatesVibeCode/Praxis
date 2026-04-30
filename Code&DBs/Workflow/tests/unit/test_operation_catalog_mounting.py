@@ -68,18 +68,19 @@ class _FakeAuthorityConn:
                 "output_hash": args[9],
                 "idempotency_key": args[10],
                 "caller_ref": args[11],
-                "execution_status": args[12],
-                "result_status": args[13],
-                "error_code": args[14],
-                "error_detail": args[15],
-                "event_ids": args[16],
-                "projection_freshness": args[17],
-                "result_payload": args[18],
-                "duration_ms": args[19],
-                "binding_revision": args[20],
-                "decision_ref": args[21],
-                "cause_receipt_id": args[22],
-                "correlation_id": args[23],
+                "transport_kind": args[12],
+                "execution_status": args[13],
+                "result_status": args[14],
+                "error_code": args[15],
+                "error_detail": args[16],
+                "event_ids": args[17],
+                "projection_freshness": args[18],
+                "result_payload": args[19],
+                "duration_ms": args[20],
+                "binding_revision": args[21],
+                "decision_ref": args[22],
+                "cause_receipt_id": args[23],
+                "correlation_id": args[24],
             }
             return "INSERT 0 1"
         if "INSERT INTO authority_events" in query:
@@ -293,7 +294,7 @@ def test_list_api_routes_mounts_operation_catalog_routes_before_discovery(monkey
     assert payload["routes"][0]["visibility"] == "internal"
 
 
-def test_list_api_routes_surfaces_compile_materialize_under_canonical_compile_family(monkeypatch) -> None:
+def test_list_api_routes_surfaces_compile_family_through_operation_catalog(monkeypatch) -> None:
     target_app = FastAPI()
 
     class CompileCommand(BaseModel):
@@ -316,7 +317,15 @@ def test_list_api_routes_surfaces_compile_materialize_under_canonical_compile_fa
                 http_path="/api/compile/materialize",
                 input_model_ref="runtime.operations.commands.compile_materialize.CompileMaterializeCommand",
                 handler_ref="runtime.operations.commands.compile_materialize.handle_compile_materialize",
-            )
+            ),
+            SimpleNamespace(
+                operation_ref="compile.preview",
+                operation_name="compile_preview",
+                http_method="POST",
+                http_path="/api/compile/preview",
+                input_model_ref="runtime.operations.queries.compile_preview.CompilePreviewQuery",
+                handler_ref="runtime.operations.queries.compile_preview.handle_compile_preview",
+            ),
         ],
     )
     monkeypatch.setattr(
@@ -338,10 +347,279 @@ def test_list_api_routes_surfaces_compile_materialize_under_canonical_compile_fa
     )
 
     assert target_app.state.capabilities_mounted is True
-    assert payload["count"] == 1
-    assert payload["routes"][0]["path"] == "/api/compile/materialize"
-    assert payload["routes"][0]["name"] == "compile_materialize"
-    assert payload["routes"][0]["tags"] == ["operations"]
+    paths = {route["path"]: route for route in payload["routes"]}
+    assert target_app.state.capabilities_mounted is True
+    assert payload["count"] == 2
+    assert paths["/api/compile/materialize"]["name"] == "compile_materialize"
+    assert paths["/api/compile/materialize"]["tags"] == ["operations"]
+    assert paths["/api/compile/preview"]["name"] == "compile_preview"
+    assert paths["/api/compile/preview"]["tags"] == ["operations"]
+
+
+def test_list_api_routes_surfaces_client_operating_model_snapshot_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class SnapshotCommand(BaseModel):
+        operator_view: dict = {}
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="client-operating-model-operator-view-snapshot-store",
+                operation_name="client_operating_model_operator_view_snapshot_store",
+                http_method="POST",
+                http_path="/api/operator/client-operating-model/snapshots",
+                input_model_ref=(
+                    "runtime.operations.commands.client_operating_model."
+                    "StoreOperatorViewSnapshotCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.client_operating_model."
+                    "handle_store_operator_view_snapshot"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="client-operating-model-operator-view-snapshot-read",
+                operation_name="client_operating_model_operator_view_snapshot_read",
+                http_method="GET",
+                http_path="/api/operator/client-operating-model/snapshots",
+                input_model_ref=(
+                    "runtime.operations.queries.client_operating_model."
+                    "QueryClientOperatingModelSnapshotRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.client_operating_model."
+                    "handle_client_operating_model_snapshot_read"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=SnapshotCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/operator/client-operating-model",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/operator/client-operating-model/snapshots",
+        "client_operating_model_operator_view_snapshot_store",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/operator/client-operating-model/snapshots",
+        "client_operating_model_operator_view_snapshot_read",
+    ) in route_keys
+
+
+def test_list_api_routes_surfaces_client_system_discovery_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class DiscoveryCommand(BaseModel):
+        tenant_ref: str | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="client-system-discovery-census-record",
+                operation_name="client_system_discovery_census_record",
+                http_method="POST",
+                http_path="/api/operator/client-system-discovery/census",
+                input_model_ref=(
+                    "runtime.operations.commands.client_system_discovery."
+                    "RecordClientSystemCensusCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.client_system_discovery."
+                    "handle_client_system_discovery_census_record"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="client-system-discovery-census-read",
+                operation_name="client_system_discovery_census_read",
+                http_method="GET",
+                http_path="/api/operator/client-system-discovery/census",
+                input_model_ref=(
+                    "runtime.operations.queries.client_system_discovery."
+                    "QueryClientSystemDiscoveryCensusRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.client_system_discovery."
+                    "handle_client_system_discovery_census_read"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="client-system-discovery-gap-record",
+                operation_name="client_system_discovery_gap_record",
+                http_method="POST",
+                http_path="/api/operator/client-system-discovery/gaps",
+                input_model_ref=(
+                    "runtime.operations.commands.client_system_discovery."
+                    "RecordClientSystemDiscoveryGapCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.client_system_discovery."
+                    "handle_client_system_discovery_gap_record"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=DiscoveryCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/operator/client-system-discovery",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/operator/client-system-discovery/census",
+        "client_system_discovery_census_record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/operator/client-system-discovery/census",
+        "client_system_discovery_census_read",
+    ) in route_keys
+    assert (
+        "POST",
+        "/api/operator/client-system-discovery/gaps",
+        "client_system_discovery_gap_record",
+    ) in route_keys
+
+
+def test_list_api_routes_surfaces_object_truth_ingestion_routes(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    class IngestionCommand(BaseModel):
+        client_ref: str | None = None
+
+    monkeypatch.setattr(rest, "app", target_app)
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: _fake_shared_subsystems(),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_ref="object_truth.command.ingestion_sample_record",
+                operation_name="object_truth_ingestion_sample_record",
+                http_method="POST",
+                http_path="/api/object-truth/ingestion/samples",
+                input_model_ref=(
+                    "runtime.operations.commands.object_truth_ingestion."
+                    "RecordObjectTruthIngestionSampleCommand"
+                ),
+                handler_ref=(
+                    "runtime.operations.commands.object_truth_ingestion."
+                    "handle_object_truth_ingestion_sample_record"
+                ),
+            ),
+            SimpleNamespace(
+                operation_ref="object_truth.query.ingestion_sample_read",
+                operation_name="object_truth_ingestion_sample_read",
+                http_method="GET",
+                http_path="/api/object-truth/ingestion/samples",
+                input_model_ref=(
+                    "runtime.operations.queries.object_truth_ingestion."
+                    "QueryObjectTruthIngestionSampleRead"
+                ),
+                handler_ref=(
+                    "runtime.operations.queries.object_truth_ingestion."
+                    "handle_object_truth_ingestion_sample_read"
+                ),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=IngestionCommand,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    payload = rest.list_api_routes(
+        path_prefix="/api/object-truth/ingestion",
+        tag="operations",
+        visibility="all",
+    )
+
+    route_keys = {
+        (route["methods"][0], route["path"], route["name"])
+        for route in payload["routes"]
+    }
+    assert (
+        "POST",
+        "/api/object-truth/ingestion/samples",
+        "object_truth_ingestion_sample_record",
+    ) in route_keys
+    assert (
+        "GET",
+        "/api/object-truth/ingestion/samples",
+        "object_truth_ingestion_sample_read",
+    ) in route_keys
+
+
+def test_compile_family_routes_are_not_static_wrappers() -> None:
+    source = Path(rest.__file__).read_text(encoding="utf-8")
+
+    assert '@app.post("/api/compile/materialize")' not in source
+    assert '@app.post("/api/compile/preview")' not in source
 
 
 def test_workflow_query_routes_do_not_import_dead_trampoline_modules() -> None:

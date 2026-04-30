@@ -8,7 +8,7 @@
       "id": "main",
       "label": "Workspace",
       "surface_id": "main",
-      "source_option_ids": ["workspace_notes", "web_search"]
+      "source_option_ids": []
     }
   ],
   "surfaces": {
@@ -25,39 +25,20 @@
             "module": "markdown",
             "span": "2x1",
             "config": {
-              "content": "Start with a source pill or add blocks to shape this workspace."
+              "content": "Add the blocks this workspace needs."
             }
           },
           "A3": {
             "module": "search-panel",
             "span": "2x1",
             "config": {
-              "placeholder": "Search across attached sources"
+              "placeholder": "Search this workspace"
             }
           }
         }
       }
     }
   },
-  "source_options": {
-    "workspace_notes": {
-      "id": "workspace_notes",
-      "label": "Workspace Notes",
-      "family": "workspace",
-      "kind": "document",
-      "availability": "ready",
-      "activation": "open",
-      "description": "Open the local notes and scratch context for this workspace."
-    },
-    "web_search": {
-      "id": "web_search",
-      "label": "Web Search",
-      "family": "external",
-      "kind": "web_search",
-      "availability": "ready",
-      "activation": "open",
-      "description": "Look up current public information when local state is not enough."
-    }
-  },
-  "description": "Minimal workspace seed with lightweight source pills."
+  "source_options": {},
+  "description": "Minimal workspace seed."
 }

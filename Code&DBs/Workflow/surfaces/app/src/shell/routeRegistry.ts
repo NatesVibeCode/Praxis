@@ -142,7 +142,12 @@ function pathnameRegex(pathTemplate: string): { regex: RegExp; slotNames: string
 export function matchPath(pathname: string, search: string): MatchResult | null {
   if (!_routes) return null;
   const params = new URLSearchParams(search);
-  const candidates = [..._routes].sort((a, b) => a.display_order - b.display_order);
+  const candidates = [..._routes].sort((a, b) => {
+    const aQueryCount = Object.keys(parsePathTemplate(a.path_template).query).length;
+    const bQueryCount = Object.keys(parsePathTemplate(b.path_template).query).length;
+    if (aQueryCount !== bQueryCount) return bQueryCount - aQueryCount;
+    return a.display_order - b.display_order;
+  });
 
   for (const row of candidates) {
     const parts = parsePathTemplate(row.path_template);
@@ -188,6 +193,12 @@ export function matchPath(pathname: string, search: string): MatchResult | null 
     }
     if (!allQuerySlotsBound) continue;
 
+    if (row.route_id === 'route.app.workflow') {
+      const workflow = params.get('workflow');
+      const intent = params.get('intent');
+      if (workflow) slotValues.workflow = workflow;
+      if (intent) slotValues.intent = intent;
+    }
     return { route_id: row.route_id, slot_values: slotValues };
   }
   return null;
@@ -237,6 +248,12 @@ export function buildPath(
     } else if (Array.isArray(v) && v.length > 0) {
       params.set(key, v.join(','));
     }
+  }
+  if (routeId === 'route.app.workflow') {
+    const workflow = slotValues.workflow;
+    const intent = slotValues.intent;
+    if (typeof workflow === 'string' && workflow) params.set('workflow', workflow);
+    if (typeof intent === 'string' && intent) params.set('intent', intent);
   }
   const query = params.toString();
   return query ? `${path}?${query}` : path;

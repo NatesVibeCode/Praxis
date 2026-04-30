@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from runtime.operations.commands.workflow_build import (
     MutateWorkflowBuildCommand,
+    WorkflowBuildMutationDeprecatedError,
     handle_mutate_workflow_build,
 )
 
@@ -58,3 +59,19 @@ def test_handle_mutate_workflow_build_uses_runtime_build_moment() -> None:
         mutation_event_id=runtime_result["mutation_event_id"],
     )
     assert result == built_payload
+
+
+def test_handle_mutate_workflow_build_rejects_bootstrap_surface() -> None:
+    command = MutateWorkflowBuildCommand(
+        workflow_id="wf_build",
+        subpath="bootstrap",
+        body={"prose": "make a workflow"},
+    )
+
+    try:
+        handle_mutate_workflow_build(command, SimpleNamespace(get_pg_conn=lambda: object()))
+    except WorkflowBuildMutationDeprecatedError as exc:
+        assert exc.reason_code == "workflow_build.bootstrap.deprecated"
+        assert exc.details["migration_hint"] == "/api/compile/materialize"
+    else:  # pragma: no cover - explicit fail branch for assertion clarity
+        raise AssertionError("bootstrap surface should be deprecated")

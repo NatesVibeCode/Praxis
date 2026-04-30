@@ -2081,10 +2081,10 @@ class TaskTypeRouter:
         try:
             from .feedback_authority import (
                 RecordAuthorityFeedbackCommand,
-                record_feedback_event,
+                record_feedback_event_via_gateway,
             )
 
-            record_feedback_event(
+            record_feedback_event_via_gateway(
                 self._conn,
                 RecordAuthorityFeedbackCommand(
                     feedback_stream_ref="feedback.route_review",

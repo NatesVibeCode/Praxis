@@ -2,7 +2,7 @@ import React from 'react';
 import type { OrbitEdge, GraphLayout } from './moonBuildPresenter';
 import { MOON_LAYOUT } from './moonLayout';
 
-const NODE_RADIUS = MOON_LAYOUT.nodeRadius;
+const EDGE_STEM = 32;
 export const MOON_GRAPH_CANVAS_PAD = MOON_LAYOUT.canvasPad;
 
 export interface MoonEdgeGeometry {
@@ -24,18 +24,41 @@ export function getEdgeGeometry(
   const to = layout.nodes.get(edge.to);
   if (!from || !to) return null;
 
-  const startX = from.x + pad + NODE_RADIUS;
-  const startY = from.y + pad;
-  const endX = to.x + pad - NODE_RADIUS;
-  const endY = to.y + pad;
-  const dx = endX - startX;
+  const rawDx = to.x - from.x;
+  const rawDy = to.y - from.y;
+  const fromHalfWidth = (from.width ?? MOON_LAYOUT.nodeWidth) / 2;
+  const fromHalfHeight = (from.height ?? MOON_LAYOUT.nodeHeight) / 2;
+  const toHalfWidth = (to.width ?? MOON_LAYOUT.nodeWidth) / 2;
+  const toHalfHeight = (to.height ?? MOON_LAYOUT.nodeHeight) / 2;
+  const verticalFlow = Math.abs(rawDy) >= Math.max(fromHalfHeight, toHalfHeight) / 2;
+  const xSign = rawDx >= 0 ? 1 : -1;
+  const ySign = rawDy >= 0 ? 1 : -1;
+
+  const startX = verticalFlow ? from.x + pad : from.x + pad + xSign * fromHalfWidth;
+  const startY = verticalFlow ? from.y + pad + ySign * fromHalfHeight : from.y + pad;
+  const endX = verticalFlow ? to.x + pad : to.x + pad - xSign * toHalfWidth;
+  const endY = verticalFlow ? to.y + pad - ySign * toHalfHeight : to.y + pad;
+
+  let path: string;
+  if (verticalFlow) {
+    if (Math.abs(startX - endX) < 1) {
+      path = `M${startX} ${startY}L${endX} ${endY}`;
+    } else {
+      const startLeadY = startY + ySign * EDGE_STEM;
+      const endLeadY = endY - ySign * EDGE_STEM;
+      path = `M${startX} ${startY}L${startX} ${startLeadY}L${endX} ${endLeadY}L${endX} ${endY}`;
+    }
+  } else {
+    const midX = (startX + endX) / 2;
+    path = `M${startX} ${startY}L${midX} ${startY}L${midX} ${endY}L${endX} ${endY}`;
+  }
 
   return {
     centerX: (startX + endX) / 2,
     centerY: (startY + endY) / 2,
     endX,
     endY,
-    path: `M${startX} ${startY}C${startX + dx * 0.4} ${startY},${endX - dx * 0.4} ${endY},${endX} ${endY}`,
+    path,
     startX,
     startY,
   };
@@ -93,13 +116,16 @@ interface MoonEdgesProps {
 export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEdgesProps) {
   return (
     <svg
+      className="moon-graph-edges"
       style={{
         position: 'absolute',
         top: 0,
         left: 0,
         width: layout.width + MOON_GRAPH_CANVAS_PAD * 2,
         height: layout.height + MOON_GRAPH_CANVAS_PAD * 2,
+        overflow: 'visible',
         pointerEvents: 'none',
+        zIndex: 4,
       }}
     >
       <defs>
@@ -134,6 +160,15 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
           >
             <path
               d={geometry.path}
+              stroke={isFlowing ? 'rgba(246, 241, 232, 0.52)' : 'rgba(246, 241, 232, 0.36)'}
+              strokeWidth={Math.max(9, width * 3.6)}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+              style={{ pointerEvents: 'none' }}
+            />
+            <path
+              d={geometry.path}
               stroke="transparent"
               strokeWidth={18}
               fill="none"
@@ -146,17 +181,38 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
             />
             <path
               d={geometry.path}
-              stroke={style.color}
-              strokeWidth={width}
+              stroke={isFlowing ? 'rgba(255, 255, 255, 0.92)' : style.color}
+              strokeWidth={Math.max(width, 3.25)}
+              strokeLinecap="round"
+              strokeLinejoin="round"
               fill="none"
               strokeDasharray={style.strokeDasharray}
               style={{ pointerEvents: 'none', transition: 'stroke 300ms ease, stroke-width 300ms ease' }}
+            />
+            <circle
+              cx={geometry.startX}
+              cy={geometry.startY}
+              r={4.4}
+              fill={isFlowing ? 'rgba(255, 255, 255, 0.96)' : 'rgba(246, 241, 232, 0.76)'}
+              stroke="rgba(8, 8, 8, 0.82)"
+              strokeWidth={1.8}
+              style={{ pointerEvents: 'none' }}
+            />
+            <circle
+              cx={geometry.endX}
+              cy={geometry.endY}
+              r={4.4}
+              fill={isFlowing ? 'rgba(255, 255, 255, 0.96)' : 'rgba(246, 241, 232, 0.76)'}
+              stroke="rgba(8, 8, 8, 0.82)"
+              strokeWidth={1.8}
+              style={{ pointerEvents: 'none' }}
             />
             {isFlowing && (
               <path
                 d={geometry.path}
                 stroke={style.color}
                 strokeWidth={width * 1.6}
+                strokeLinecap="round"
                 fill="none"
                 strokeDasharray="4 24"
                 style={{

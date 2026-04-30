@@ -197,13 +197,13 @@ CHAT_TOOLS: list[dict[str, Any]] = [
     # ------------------------------------------------------------------
     {
         "name": "moon_get_build",
-        "description": "Load the current Moon BuildPayload for a workflow — every node, edge, gate, contract, outcome, and any compile/binding issues. Use this BEFORE proposing edits so you reason about real graph state, not an assumed one.",
+        "description": "Load the current Moon BuildPayload for a workflow — every node, edge, gate, contract, outcome, and any compile/binding issues. Use this BEFORE proposing edits. If the Moon canvas is open, omit workflow_id and the active context will target it; the result may also include a read-only visible_ui_snapshot witness when saved state lags the UI.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "workflow_id": {"type": "string", "description": "Workflow id to load"},
+                "workflow_id": {"type": "string", "description": "Optional workflow id to load; omit to use the active Moon canvas context"},
             },
-            "required": ["workflow_id"],
+            "required": [],
         },
     },
     {
@@ -222,15 +222,15 @@ CHAT_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "moon_mutate_field",
-        "description": "Edit any field on a node, edge, or workflow-level contract. The subpath identifies WHAT to change (e.g. 'append', 'nodes/{node_id}', 'edges/{edge_id}/release', 'outcome', 'bootstrap'); the body carries the new value. Use after moon_get_build so you target real ids. This is the single universal mutation entrypoint.",
+        "description": "Edit one field on one Moon node at a time. Prefer repeated focused calls such as nodes/{node_id}/prompt, nodes/{node_id}/outputs, nodes/{node_id}/agent_tool_plan, nodes/{node_id}/completion_contract. Body shape is {\"value\": ...}. Use after moon_get_build so you target real ids. Whole-graph edits are reserved for structural changes.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "workflow_id": {"type": "string", "description": "Workflow being edited"},
-                "subpath": {"type": "string", "description": "Mutation subpath (e.g. 'append', 'nodes/{id}', 'edges/{id}/release', 'outcome', 'bootstrap')"},
+                "subpath": {"type": "string", "description": "Mutation subpath (e.g. 'nodes/{id}/prompt', 'nodes/{id}/outputs', 'nodes/{id}/completion_contract')"},
                 "body": {"type": "object", "description": "Mutation body — shape depends on subpath"},
             },
-            "required": ["workflow_id", "subpath", "body"],
+            "required": ["subpath", "body"],
         },
     },
     {
@@ -242,7 +242,7 @@ CHAT_TOOLS: list[dict[str, Any]] = [
                 "workflow_id": {"type": "string", "description": "Workflow being authored"},
                 "node_id": {"type": "string", "description": "Optional anchor node to suggest from (default: latest)"},
             },
-            "required": ["workflow_id"],
+            "required": [],
         },
     },
     {
@@ -255,7 +255,7 @@ CHAT_TOOLS: list[dict[str, Any]] = [
                 "approved_by": {"type": "string", "description": "Operator ref recording who approved this launch"},
                 "plan_name": {"type": "string", "description": "Optional friendly name"},
             },
-            "required": ["workflow_id"],
+            "required": [],
         },
     },
 ]
@@ -522,7 +522,8 @@ _NODE_FIELD_KEEP = {
 }
 _NODE_DETAIL_KEEP = {
     "trigger", "integration_args", "prompt", "required_inputs", "outputs",
-    "handoff_target", "binding_ids", "issue_ids",
+    "handoff_target", "binding_ids", "issue_ids", "task_type", "agent",
+    "capabilities", "write_scope", "agent_tool_plan", "completion_contract",
 }
 
 
@@ -591,6 +592,136 @@ def _compact_build_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+_VISIBLE_SNAPSHOT_KEEP = {
+    "kind",
+    "source",
+    "read_only",
+    "durability",
+    "workflow_id",
+    "workflow_name",
+    "node_count",
+    "edge_count",
+    "selected_node_id",
+    "selected_node_title",
+    "selected_node_route",
+    "selected_node_status",
+    "selected_edge_id",
+    "selected_edge",
+    "review_count",
+    "build_state",
+    "operation_receipt_id",
+    "correlation_id",
+}
+_VISIBLE_NODE_KEEP = {
+    "node_id",
+    "kind",
+    "title",
+    "route",
+    "status",
+    "task_type",
+    "tool_name",
+    "tool_repeats",
+    "required_inputs",
+    "outputs",
+    "result_kind",
+}
+_VISIBLE_EDGE_KEEP = {
+    "edge_id",
+    "from_node_id",
+    "to_node_id",
+    "kind",
+    "release_family",
+    "release_type",
+    "label",
+}
+
+
+def _compact_visible_record(
+    value: Any,
+    keep: set[str],
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    out = {k: value[k] for k in keep if k in value and value[k] not in (None, "", [], {})}
+    return out or None
+
+
+def _compact_visible_list(
+    value: Any,
+    keep: set[str],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for raw in value[:limit]:
+        compact = _compact_visible_record(raw, keep)
+        if compact:
+            items.append(compact)
+    return items
+
+
+def _compact_visible_ui_snapshot(moon_ctx: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not moon_ctx:
+        return None
+    snapshot = moon_ctx.get("visible_ui_snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    compact = {
+        k: snapshot[k]
+        for k in _VISIBLE_SNAPSHOT_KEEP
+        if k in snapshot and snapshot[k] not in (None, "", [], {})
+    }
+    nodes = _compact_visible_list(snapshot.get("nodes"), _VISIBLE_NODE_KEEP, limit=16)
+    edges = _compact_visible_list(snapshot.get("edges"), _VISIBLE_EDGE_KEEP, limit=24)
+    if nodes:
+        compact["nodes"] = nodes
+    if edges:
+        compact["edges"] = edges
+    if not compact:
+        return None
+    compact["read_authority"] = "visible_ui_snapshot_only"
+    return compact
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _attach_visible_ui_witness(
+    compact: dict[str, Any],
+    selection_context: list[dict[str, Any]] | None,
+) -> None:
+    """Attach the visible canvas witness and mark durable/UI disagreement.
+
+    ``moon_get_build`` is still the write/read authority for saved workflow
+    state. The visible snapshot is a read-only UI witness so the chat agent
+    can avoid falsely claiming "no graph" when the operator is looking at an
+    unsaved or projection-stale graph.
+    """
+    visible = _compact_visible_ui_snapshot(_extract_moon_context(selection_context))
+    if not visible:
+        return
+    compact["visible_ui_snapshot"] = visible
+    durable_nodes = _as_int(compact.get("node_count"))
+    durable_edges = _as_int(compact.get("edge_count"))
+    visible_nodes = _as_int(visible.get("node_count")) or len(visible.get("nodes") or [])
+    visible_edges = _as_int(visible.get("edge_count")) or len(visible.get("edges") or [])
+    if (visible_nodes > 0 or visible_edges > 0) and durable_nodes == 0 and durable_edges == 0:
+        compact["state_mismatch"] = {
+            "kind": "visible_ui_has_graph_persisted_read_empty",
+            "durable_node_count": durable_nodes,
+            "durable_edge_count": durable_edges,
+            "visible_node_count": visible_nodes,
+            "visible_edge_count": visible_edges,
+            "instruction": "Use visible_ui_snapshot for orientation, but save repairs through moon_mutate_field/workflow build authority.",
+        }
+
+
 def _resolve_workflow_id(
     args: dict[str, Any],
     selection_context: list[dict[str, Any]] | None,
@@ -631,6 +762,7 @@ def _moon_get_build(
     compact = _compact_build_payload(payload)
     if from_context:
         compact["targeted_via"] = "moon_context"
+    _attach_visible_ui_witness(compact, selection_context)
     return {
         "type": "status",
         "data": {"status": "moon_build_loaded", **compact, "full_payload": payload},
@@ -644,18 +776,7 @@ def _moon_compose_from_prose(
     pg_conn: Any,
     selection_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Compose prose into a real, editable Moon workflow.
-
-    Two paths:
-      1. ``workflow_id`` provided (explicit OR from moon_context): bootstrap
-         prose into the existing workflow's graph via workflow_build_mutate.
-      2. No workflow_id: create a fresh draft via workflow_create_draft, then
-         bootstrap prose into it. Returns the new workflow_id so the user can
-         immediately edit / launch it.
-
-    Either way the user lands on a real persisted graph the chat can keep
-    editing via moon_get_build / moon_mutate_field / moon_launch.
-    """
+    """Materialize prose into a real, editable Moon workflow."""
     intent = str(args.get("intent") or "").strip()
     if not intent:
         return _moon_error("intent is required", action="moon_compose_from_prose")
@@ -667,68 +788,76 @@ def _moon_compose_from_prose(
 
     # Reuse the active Moon workflow if the user is on the canvas.
     workflow_id, from_context = _resolve_workflow_id(args, selection_context)
-    created_new = False
-    if not workflow_id:
-        draft_payload: dict[str, Any] = {}
-        if plan_name:
-            draft_payload["name"] = plan_name
-        try:
-            draft_result = _dispatch_op(pg_conn, "workflow_create_draft", draft_payload)
-        except Exception as exc:
-            return _moon_error(
-                f"workflow_create_draft failed: {exc}",
-                action="moon_compose_from_prose",
-            )
-        if not isinstance(draft_result, dict) or not draft_result.get("workflow_id"):
-            return _moon_error(
-                f"workflow_create_draft returned no workflow_id: {draft_result!r}",
-                action="moon_compose_from_prose",
-            )
-        workflow_id = str(draft_result["workflow_id"])
-        created_new = True
+    created_new = not bool(workflow_id)
 
     enable_llm = args.get("enable_llm", True)
     enable_full_compose = args.get("enable_full_compose", True)
-    bootstrap_body: dict[str, Any] = {
-        "prose": intent,
+    materialize_body: dict[str, Any] = {
+        "intent": intent,
         "enable_llm": bool(enable_llm),
         "enable_full_compose": bool(enable_full_compose),
     }
+    if workflow_id:
+        materialize_body["workflow_id"] = workflow_id
     if plan_name:
-        bootstrap_body["title"] = plan_name
-    raw_concurrency = args.get("concurrency")
-    if raw_concurrency is not None:
-        try:
-            bootstrap_body["concurrency"] = max(1, min(100, int(raw_concurrency)))
-        except (TypeError, ValueError):
-            return _moon_error(
-                "concurrency must be an integer 1-100",
-                action="moon_compose_from_prose",
-            )
-    raw_why = args.get("why")
-    if isinstance(raw_why, str) and raw_why.strip():
-        bootstrap_body["why"] = raw_why.strip()
+        materialize_body["title"] = plan_name
 
     try:
-        result = _dispatch_op(
-            pg_conn,
-            "workflow_build.mutate",
-            {"workflow_id": workflow_id, "subpath": "bootstrap", "body": bootstrap_body},
-        )
+        materialized = _dispatch_op(pg_conn, "compile_materialize", materialize_body)
     except Exception as exc:
-        # Surface the workflow_id even on failure so the user can recover the draft.
-        msg = f"bootstrap failed (workflow_id={workflow_id}): {exc}"
+        msg = f"compile_materialize failed: {exc}"
+        if workflow_id:
+            msg = f"{msg} (workflow_id={workflow_id})"
         return _moon_error(msg, action="moon_compose_from_prose")
+
+    if not isinstance(materialized, dict):
+        return _moon_error(
+            f"compile_materialize returned non-object payload: {materialized!r}",
+            action="moon_compose_from_prose",
+        )
+    if materialized.get("ok") is False:
+        return _moon_error(
+            str(materialized.get("error") or "compile materialization blocked"),
+            action="moon_compose_from_prose",
+            details=materialized,
+        )
+    workflow_id = str(materialized.get("workflow_id") or workflow_id or "").strip()
+    if not workflow_id:
+        return _moon_error(
+            f"compile_materialize returned no workflow_id: {materialized!r}",
+            action="moon_compose_from_prose",
+        )
+
+    try:
+        result = _dispatch_op(pg_conn, "workflow_build_get", {"workflow_id": workflow_id})
+    except Exception as exc:
+        return _moon_error(
+            f"moon_get_build after materialize failed (workflow_id={workflow_id}): {exc}",
+            action="moon_compose_from_prose",
+            details={"materialization": materialized},
+        )
 
     payload = result if isinstance(result, dict) else {"raw": result}
     compact = _compact_build_payload(payload)
     compact["workflow_id"] = compact.get("workflow_id") or workflow_id
     compact["created_new_draft"] = created_new
+    compact["materialize_receipt_id"] = (
+        materialized.get("operation_receipt", {}).get("receipt_id")
+        if isinstance(materialized.get("operation_receipt"), dict)
+        else None
+    )
+    if isinstance(materialized.get("graph_summary"), dict):
+        compact["graph_summary"] = materialized["graph_summary"]
     if from_context and not created_new:
         compact["targeted_via"] = "moon_context"
     return {
         "type": "status",
-        "data": {"status": "moon_composed", **compact, "full_payload": payload},
+        "data": {
+            "status": "moon_composed",
+            **compact,
+            "full_payload": payload,
+            "materialization": materialized,
+        },
         "selectable": False,
         "summary": _moon_status_summary("moon_compose_from_prose", compact),
     }

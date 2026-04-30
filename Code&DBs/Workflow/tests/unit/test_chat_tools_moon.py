@@ -105,15 +105,16 @@ def test_moon_get_build_surfaces_dispatch_errors(monkeypatch):
 # moon_compose_from_prose
 # ---------------------------------------------------------------------------
 
-def test_moon_compose_from_prose_creates_draft_and_bootstraps_when_no_workflow_id(monkeypatch):
-    """Path A: no active Moon workflow → chain create_draft + bootstrap."""
+def test_moon_compose_from_prose_materializes_and_reads_build_when_no_workflow_id(monkeypatch):
+    """Path A: no active Moon workflow -> compile_materialize creates one."""
     recorder = _patch_dispatch(monkeypatch, {
-        "workflow_create_draft": {
+        "compile_materialize": {
             "ok": True,
             "workflow_id": "wf_new_draft",
-            "name": "demo plan",
+            "graph_summary": {"node_count": 3, "edge_count": 0},
+            "operation_receipt": {"receipt_id": "receipt-1"},
         },
-        "workflow_build.mutate": {
+        "workflow_build_get": {
             "workflow": {"id": "wf_new_draft", "name": "demo plan"},
             "build_graph": {
                 "nodes": [
@@ -134,29 +135,32 @@ def test_moon_compose_from_prose_creates_draft_and_bootstraps_when_no_workflow_i
         selection_context=None,
     )
 
-    # Two ops, in order: create draft, then bootstrap on the new id
-    assert [c[0] for c in recorder.calls] == ["workflow_create_draft", "workflow_build.mutate"]
-    assert recorder.calls[0][1] == {"name": "demo plan"}
-    bootstrap_call = recorder.calls[1][1]
-    assert bootstrap_call["workflow_id"] == "wf_new_draft"
-    assert bootstrap_call["subpath"] == "bootstrap"
-    assert bootstrap_call["body"]["prose"] == "Search GH issues, draft summary, notify Slack"
-    assert bootstrap_call["body"]["enable_llm"] is True
-    assert bootstrap_call["body"]["enable_full_compose"] is True
-    assert bootstrap_call["body"]["concurrency"] == 8
-    assert bootstrap_call["body"]["title"] == "demo plan"
+    assert [c[0] for c in recorder.calls] == ["compile_materialize", "workflow_build_get"]
+    assert recorder.calls[0][1] == {
+        "intent": "Search GH issues, draft summary, notify Slack",
+        "enable_llm": True,
+        "enable_full_compose": True,
+        "title": "demo plan",
+    }
+    assert recorder.calls[1][1] == {"workflow_id": "wf_new_draft"}
 
     assert result["type"] == "status"
     payload = _summary_payload(result)
     assert payload["workflow_id"] == "wf_new_draft"
     assert payload["created_new_draft"] is True
     assert payload["node_count"] == 3
+    assert payload["materialize_receipt_id"] == "receipt-1"
 
 
-def test_moon_compose_from_prose_bootstraps_existing_workflow_from_context(monkeypatch):
-    """Path B: active Moon workflow in context → bootstrap that one, no create."""
+def test_moon_compose_from_prose_materializes_existing_workflow_from_context(monkeypatch):
+    """Path B: active Moon workflow in context -> compile_materialize targets it."""
     recorder = _patch_dispatch(monkeypatch, {
-        "workflow_build.mutate": {
+        "compile_materialize": {
+            "ok": True,
+            "workflow_id": "wf_active",
+            "graph_summary": {"node_count": 1, "edge_count": 0},
+        },
+        "workflow_build_get": {
             "workflow": {"id": "wf_active", "name": "moon-demo"},
             "build_graph": {"nodes": [{"node_id": "n1"}], "edges": []},
         },
@@ -170,10 +174,8 @@ def test_moon_compose_from_prose_bootstraps_existing_workflow_from_context(monke
         selection_context=_MOON_CTX,
     )
 
-    # Only one op: bootstrap on the existing workflow_id
-    assert [c[0] for c in recorder.calls] == ["workflow_build.mutate"]
+    assert [c[0] for c in recorder.calls] == ["compile_materialize", "workflow_build_get"]
     assert recorder.calls[0][1]["workflow_id"] == "wf_active"
-    assert recorder.calls[0][1]["subpath"] == "bootstrap"
     payload = _summary_payload(result)
     assert payload["workflow_id"] == "wf_active"
     assert payload["created_new_draft"] is False
@@ -185,19 +187,27 @@ def test_moon_compose_from_prose_requires_intent():
     assert result["type"] == "error"
 
 
-def test_moon_compose_from_prose_clamps_concurrency(monkeypatch):
+def test_moon_compose_from_prose_surfaces_materialize_blocker(monkeypatch):
     recorder = _patch_dispatch(monkeypatch, {
-        "workflow_create_draft": {"ok": True, "workflow_id": "wf_x"},
-        "workflow_build.mutate": {"workflow": {"id": "wf_x"}, "build_graph": {"nodes": [], "edges": []}},
+        "compile_materialize": {
+            "ok": False,
+            "error": "empty graph",
+            "error_code": "compile.materialize.empty_graph",
+            "operation_receipt": {"receipt_id": "receipt-failed"},
+        },
     })
-    chat_tools.execute_tool(
+    result = chat_tools.execute_tool(
         "moon_compose_from_prose",
-        {"intent": "anything", "concurrency": 999},
+        {"intent": "anything"},
         pg_conn=object(),
         repo_root="/tmp",
     )
-    bootstrap_body = recorder.calls[1][1]["body"]
-    assert bootstrap_body["concurrency"] == 100
+    assert recorder.calls == [(
+        "compile_materialize",
+        {"intent": "anything", "enable_llm": True, "enable_full_compose": True},
+    )]
+    assert result["type"] == "error"
+    assert result["data"]["details"]["operation_receipt"]["receipt_id"] == "receipt-failed"
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +385,51 @@ def test_moon_get_build_default_targets_active_workflow_from_context(monkeypatch
     assert payload["targeted_via"] == "moon_context"
 
 
+def test_moon_get_build_reconciles_visible_ui_snapshot_when_persisted_read_is_empty(monkeypatch):
+    recorder = _patch_dispatch(monkeypatch, {
+        "workflow_build_get": {
+            "workflow_id": "wf_active",
+            "name": "moon-demo",
+            "build_graph": {"nodes": [], "edges": []},
+        },
+    })
+    visible_ctx = [{
+        **_MOON_CTX[0],
+        "visible_ui_snapshot": {
+            "kind": "moon_visible_snapshot",
+            "source": "ui",
+            "read_only": True,
+            "durability": "visible_ui_snapshot_not_write_authority",
+            "workflow_id": "wf_active",
+            "node_count": 4,
+            "edge_count": 3,
+            "selected_node_id": "node_search",
+            "nodes": [
+                {"node_id": "node_search", "title": "Search app docs", "route": "search"},
+            ],
+            "edges": [
+                {"edge_id": "edge_1", "from_node_id": "node_a", "to_node_id": "node_b"},
+            ],
+        },
+    }]
+
+    result = chat_tools.execute_tool(
+        "moon_get_build",
+        {},
+        pg_conn=object(),
+        repo_root="/tmp",
+        selection_context=visible_ctx,
+    )
+
+    assert recorder.calls == [("workflow_build_get", {"workflow_id": "wf_active"})]
+    payload = _summary_payload(result)
+    assert payload["node_count"] == 0
+    assert payload["visible_ui_snapshot"]["node_count"] == 4
+    assert payload["visible_ui_snapshot"]["nodes"][0]["title"] == "Search app docs"
+    assert payload["state_mismatch"]["kind"] == "visible_ui_has_graph_persisted_read_empty"
+    assert payload["state_mismatch"]["visible_node_count"] == 4
+
+
 def test_moon_get_build_errors_when_no_explicit_id_and_no_context(monkeypatch):
     monkeypatch.setattr(chat_tools, "_dispatch_op", lambda *a, **k: pytest.fail("should not dispatch"))
     result = chat_tools.execute_tool(
@@ -481,3 +536,11 @@ def test_explicit_workflow_id_overrides_context(monkeypatch):
 def test_chat_tools_registers_all_five_moon_entries():
     names = {t["name"] for t in chat_tools.CHAT_TOOLS}
     assert {"moon_get_build", "moon_compose_from_prose", "moon_mutate_field", "moon_suggest_next", "moon_launch"} <= names
+
+
+def test_moon_tool_schemas_do_not_force_workflow_id_when_context_can_target_canvas():
+    by_name = {t["name"]: t for t in chat_tools.CHAT_TOOLS}
+    assert by_name["moon_get_build"]["input_schema"]["required"] == []
+    assert "workflow_id" not in by_name["moon_mutate_field"]["input_schema"]["required"]
+    assert by_name["moon_suggest_next"]["input_schema"]["required"] == []
+    assert by_name["moon_launch"]["input_schema"]["required"] == []

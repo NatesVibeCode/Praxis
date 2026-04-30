@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 133 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 144 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -17,6 +17,7 @@ CLI discovery is generated from the same catalog metadata:
 | --- | --- | --- | --- | --- | --- | --- |
 | `praxis_discover` | `code` | `stable` | `workflow discover` | `read`, `write` | - | Find existing code that already does what you need — BEFORE writing new code. Uses hybrid retrieval: vector embeddings over AST-extracted behavioral fingerprints plus Postgres full-text search, fused with reciprocal rank fusion so you get both semantic and exact-ish matches even when naming differs. |
 | `praxis_audit_authority_impact_contract` | `cqrs` | `advanced` | - | `read` | - | Audit a list of paths for impact-contract coverage. Each path is classified as not_authority_bearing, covered (a candidate exists with this path in intended_files), or uncovered (authority-bearing but no backing candidate). Closes the gap left by the candidate-path enforcement chain: catches direct commits, scripted edits, and hot-fixes that bypass the gated pipeline. |
+| `praxis_audit_summary` | `cqrs` | `stable` | - | `read` | - | Aggregate audit lens over the gateway dispatch ledger and policy-enforcement ledger. Returns trailing-window totals (receipts, completed, replayed, failed, untagged_transport) plus per-transport / per-execution-status / per-operation-kind buckets, top-10 operations with failure counts, and a compliance breakdown (admits, rejects, top tables, top policies). Backed by authority_operation_receipts + authority_compliance_receipts. |
 | `praxis_resolve_compose_authority_binding` | `cqrs` | `advanced` | - | `read` | - | Resolve the compose-time canonical authority binding for a set of target authority units. Returns the canonical write scope (units the worker may edit), the read-only predecessor obligation pack (units the worker must read but not extend), and explicit blocked-compat units. The active prevention behind the impact contract — when a packet is composed against this binding, duplicate authority becomes invisible to the worker. |
 | `praxis_data` | `data` | `stable` | `workflow data` | `launch`, `read`, `write` | - | Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, filter records, sort rows, normalize values, repair rows, run repair loops, backfill missing values, redact sensitive fields, checkpoint state, replay cursor windows, approve plans, apply approved plans, validate contracts, transform records, join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, route dead-letter rows, reconcile source vs target state, sync target state deterministically, generate workflow specs, and launch those jobs through Praxis. |
 | `praxis_artifacts` | `evidence` | `stable` | `workflow artifacts` | `read` | - | Browse and compare files produced by workflow sandbox runs. Each workflow job can write artifacts (code, logs, reports) — this tool lets you find, search, and diff them. |
@@ -52,6 +53,13 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_authority_memory_refresh` | `operations` | `advanced` | - | `write` | - | Project authority FK data into memory_edges so the knowledge graph reflects real structure. Upserts canonical-class edges for roadmap parent_of/dependencies, roadmap resolves_bug, operator_object_relations, workflow build intent links, bug and issue lineage, bug evidence links, workflow job/chain relationships, and operator decision scopes. Idempotent; safe to re-run. |
 | `praxis_bug_replay_provenance_backfill` | `operations` | `advanced` | - | `write` | - | Backfill replay provenance from canonical bug and receipt authority. |
 | `praxis_circuits` | `operations` | `stable` | `workflow circuits` | `read`, `write` | - | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
+| `praxis_client_operating_model` | `operations` | `advanced` | `workflow client-operating-model` | `read` | - | Build one read-only Client Operating Model operator view through the CQRS gateway. Views include system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed runtime accounting, next safe actions, and workflow-builder validation. The tool normalizes provided evidence into an operator read model; it does not persist, mutate, or call live client systems. |
+| `praxis_client_operating_model_snapshot_store` | `operations` | `advanced` | - | `write` | - | Persist one Client Operating Model operator-view snapshot through the CQRS gateway for historical readback. This stores the already built operator_view payload; it does not call client systems. |
+| `praxis_client_operating_model_snapshots` | `operations` | `advanced` | - | `read` | - | Read stored Client Operating Model operator-view snapshots by snapshot ref, digest, view, or scope through the CQRS gateway. |
+| `praxis_client_system_discovery` | `operations` | `advanced` | `workflow client-system-discovery` | `read` | - | Persist or query client system discovery authority: typed system census rows, connector surface evidence, credential-health references, and typed discovery gaps. This compatibility wrapper dispatches to the CQRS gateway operations for census record/read and gap record. |
+| `praxis_client_system_discovery_census_read` | `operations` | `advanced` | - | `read` | - | Read client-system census records by list, search, or describe through the CQRS gateway. |
+| `praxis_client_system_discovery_census_record` | `operations` | `advanced` | - | `write` | - | Persist one client-system census record and connector evidence through the CQRS gateway. |
+| `praxis_client_system_discovery_gap_record` | `operations` | `advanced` | - | `write` | - | Record one typed client-system discovery gap as a receipt-backed gateway event. |
 | `praxis_daily_heartbeat` | `operations` | `advanced` | `workflow heartbeat` | `write` | - | Run one daily-heartbeat probe cycle on demand and persist the results to heartbeat_runs + heartbeat_probe_snapshots through CQRS authority. Probes cover provider CLI usage (claude/codex/gemini latency + token counts), connector liveness (catalog health), credential expiry (keychain/env API keys + OAuth tokens), and MCP server liveness (stdio initialize handshake). |
 | `praxis_dataset` | `operations` | `stable` | `workflow dataset` | `read`, `write` | - | Praxis dataset refinery: turn evidence-linked execution receipts into curated, lineage-preserving training and eval data for specialist SLMs (slm/review first). |
 | `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | - | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
@@ -64,6 +72,9 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_model_access_control_matrix` | `operations` | `stable` | - | `read` | - | Read the live model-access ON/OFF switchboard that drives the private provider catalog. |
 | `praxis_object_truth` | `operations` | `advanced` | `workflow object-truth` | `read` | - | Build deterministic object-truth evidence for one inline record. This is a thin read-only MCP wrapper over the gateway operation `object_truth_observe_record`; it normalizes identity, field observations, value digests, source metadata, hierarchy signals, and redaction-safe previews without deciding business truth. |
 | `praxis_object_truth_compare_versions` | `operations` | `advanced` | `workflow object-truth-compare` | `read` | - | Compare two persisted object-truth object versions by digest. This is a thin read-only MCP wrapper over the gateway query `object_truth_compare_versions`; it compares field observations and freshness hints without deciding business truth. |
+| `praxis_object_truth_ingestion_sample_read` | `operations` | `advanced` | `workflow object-truth-ingestion-sample-read` | `read` | - | Read queryable Object Truth ingestion sample evidence and replay fixture packets through the gateway query `object_truth_ingestion_sample_read`. |
+| `praxis_object_truth_ingestion_sample_record` | `operations` | `advanced` | `workflow object-truth-ingestion-sample-record` | `write` | - | Record receipt-backed Object Truth ingestion sample evidence. This thin MCP wrapper dispatches to the gateway command `object_truth_ingestion_sample_record`; it persists a system snapshot, source-query evidence, sample capture, redacted payload previews, raw payload references, object versions, field observations, and replay fixture evidence. |
+| `praxis_object_truth_readiness` | `operations` | `advanced` | `workflow object-truth-readiness` | `read` | - | Inspect whether Object Truth authority is ready for downstream client-system discovery, ingestion, and Virtual Lab planning. This is a thin read-only MCP wrapper over the gateway query `object_truth_readiness`; blocked readiness is returned as a query result with explicit no-go conditions. |
 | `praxis_object_truth_record_comparison_run` | `operations` | `advanced` | `workflow object-truth-record-comparison` | `write` | - | Compare two persisted object-truth object versions and store the comparison output as durable evidence. This is a thin write MCP wrapper over the gateway command `object_truth_record_comparison_run`. |
 | `praxis_object_truth_store` | `operations` | `advanced` | `workflow object-truth-store` | `write` | - | Build and persist deterministic object-truth evidence for one inline record. This is a thin write MCP wrapper over the gateway command `object_truth_store_observed_record`; it creates durable object-version and field-observation evidence, plus the command receipt/event. |
 | `praxis_object_truth_store_schema_snapshot` | `operations` | `advanced` | `workflow object-truth-store-schema` | `write` | - | Normalize and persist deterministic schema-snapshot evidence for one external object. This is a thin write MCP wrapper over the gateway command `object_truth_store_schema_snapshot`. |
@@ -200,6 +211,27 @@ Example input:
     "Code&DBs/Workflow/runtime/operations/commands/foo.py",
     "docs/notes.md"
   ]
+}
+```
+
+#### `praxis_audit_summary`
+
+- Surface: `cqrs`
+- Tier: `stable`
+- Badges: `stable`, `cqrs`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_audit_summary`
+- CLI schema help: `workflow tools describe praxis_audit_summary`
+- When to use: Aggregate audit lens over the gateway dispatch ledger and policy-enforcement ledger. One call returns trailing-window totals (receipts, completed, replayed, failed, untagged_transport), per-transport / per-execution-status / per-operation-kind buckets, top-10 operations with failure counts, and a compliance breakdown (admits, rejects, top tables, top policies). Use it for 'are receipts healthy?' / 'what surface is generating failures?' / 'which policies blocked mutations recently?' questions.
+- When not to use: Not for row-level audit queries — use praxis_search with sources=['authority_receipts'] or ['compliance_receipts'] for individual receipt lookups. Not a real-time monitor; the trailing window is bounded by since_hours.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "since_hours": 24
 }
 ```
 
@@ -995,6 +1027,198 @@ Example input:
 }
 ```
 
+#### `praxis_client_operating_model`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:client-operating-model`
+- Risks: `read`
+- CLI entrypoint: `workflow client-operating-model`
+- CLI schema help: `workflow tools describe praxis_client_operating_model`
+- When to use: Build one read-only Client Operating Model operator view from provided evidence: system census, Object Truth inspection, identity/source authority, simulation timeline, verifier results, sandbox drift, cartridge status, managed-runtime accounting, next safe actions, or workflow-builder validation.
+- When not to use: Do not use it to persist client evidence, mutate workflows, call live systems, or claim a source of truth not backed by the supplied evidence. This is the CQRS read-surface slice; durable projections remain separate.
+- Recommended alias: `workflow client-operating-model`
+- Selector: `view`; default `system_census`; values `system_census`, `object_truth`, `identity_authority`, `simulation_timeline`, `verifier_results`, `sandbox_drift`, `cartridge_status`, `managed_runtime`, `next_safe_actions`, `workflow_builder_validation`
+- Required args: `view`
+
+Example input:
+
+```json
+{
+  "view": "system_census",
+  "generated_at": "2026-04-30T12:00:00Z",
+  "permission_scope": {
+    "scope_ref": "tenant.acme",
+    "visibility": "full"
+  },
+  "inputs": {
+    "system_records": []
+  }
+}
+```
+
+#### `praxis_client_operating_model_snapshot_store`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_client_operating_model_snapshot_store`
+- CLI schema help: `workflow tools describe praxis_client_operating_model_snapshot_store`
+- When to use: Persist an already-built Client Operating Model operator_view snapshot for historical readback and proof receipts.
+- When not to use: Do not use it to build the view, call client systems, or persist raw source payloads. Build the read model first with praxis_client_operating_model, then store the operator_view.
+- Selector: none
+- Required args: `operator_view`
+
+Example input:
+
+```json
+{
+  "operator_view": {
+    "kind": "client_operating_model.operator_surface.system_census.v1",
+    "view_id": "system_census.demo",
+    "state": "empty",
+    "freshness": {
+      "status": "unknown"
+    },
+    "permission_scope": {
+      "scope_ref": "tenant.acme"
+    },
+    "evidence_refs": [],
+    "correlation_ids": [],
+    "payload": {
+      "counts": {
+        "systems": 0
+      }
+    }
+  },
+  "observed_by_ref": "operator:nate",
+  "source_ref": "phase_13.http_route_proof"
+}
+```
+
+#### `praxis_client_operating_model_snapshots`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_client_operating_model_snapshots`
+- CLI schema help: `workflow tools describe praxis_client_operating_model_snapshots`
+- When to use: Read stored Client Operating Model operator-view snapshots by snapshot ref, digest, view, or scope.
+- When not to use: Do not use it for request-time derivation from fresh evidence; use praxis_client_operating_model for that.
+- Selector: `view`; default `system_census`; values `system_census`, `object_truth`, `identity_authority`, `simulation_timeline`, `verifier_results`, `sandbox_drift`, `cartridge_status`, `managed_runtime`, `next_safe_actions`, `workflow_builder_validation`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "view": "system_census",
+  "scope_ref": "tenant.acme",
+  "limit": 5
+}
+```
+
+#### `praxis_client_system_discovery`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:client-system-discovery`
+- Risks: `read`
+- CLI entrypoint: `workflow client-system-discovery`
+- CLI schema help: `workflow tools describe praxis_client_system_discovery`
+- When to use: Persist or query client-system discovery authority: system census records, connector surface evidence, credential-health references, and typed discovery gaps. Use this before designing integrations from guessed connector behavior.
+- When not to use: Do not use it for Object Truth field normalization or Virtual Lab simulation. It owns discovery/census evidence only; downstream truth and consequence models use their own surfaces.
+- Recommended alias: `workflow client-system-discovery`
+- Selector: `action`; default `list`; values `discover`, `list`, `search`, `describe`, `record_gap`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "list",
+  "tenant_ref": "tenant.acme"
+}
+```
+
+#### `praxis_client_system_discovery_census_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_client_system_discovery_census_read`
+- CLI schema help: `workflow tools describe praxis_client_system_discovery_census_read`
+- When to use: Read client-system census authority by list, search, or describe through the CQRS gateway.
+- When not to use: Do not use it to persist discovery results or gaps.
+- Selector: `action`; default `list`; values `list`, `search`, `describe`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "list",
+  "tenant_ref": "tenant.acme"
+}
+```
+
+#### `praxis_client_system_discovery_census_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_client_system_discovery_census_record`
+- CLI schema help: `workflow tools describe praxis_client_system_discovery_census_record`
+- When to use: Persist one client-system census record and connector evidence through the CQRS gateway.
+- When not to use: Do not use it for readback or search; use praxis_client_system_discovery_census_read for reads.
+- Selector: none
+- Required args: `tenant_ref`, `workspace_ref`, `system_slug`, `captured_at`
+
+Example input:
+
+```json
+{
+  "tenant_ref": "tenant.acme",
+  "workspace_ref": "workspace.acme",
+  "system_slug": "crm",
+  "system_name": "CRM",
+  "discovery_source": "fixture",
+  "captured_at": "2026-04-30T12:00:00Z",
+  "connectors": []
+}
+```
+
+#### `praxis_client_system_discovery_gap_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_client_system_discovery_gap_record`
+- CLI schema help: `workflow tools describe praxis_client_system_discovery_gap_record`
+- When to use: Record one typed client-system discovery gap with a gateway receipt and authority event.
+- When not to use: Do not use it to persist census rows; use praxis_client_system_discovery_census_record.
+- Selector: none
+- Required args: `reason_code`, `source_ref`, `detail`
+
+Example input:
+
+```json
+{
+  "gap_kind": "credential_health_unknown",
+  "reason_code": "credential.health.unknown",
+  "source_ref": "census:client_system_census.demo",
+  "detail": "Credential check has not run.",
+  "legal_repair_actions": [
+    "run credential health probe"
+  ]
+}
+```
+
 #### `praxis_daily_heartbeat`
 
 - Surface: `operations`
@@ -1274,6 +1498,96 @@ Example input:
 {
   "left_object_version_digest": "left-digest",
   "right_object_version_digest": "right-digest"
+}
+```
+
+#### `praxis_object_truth_ingestion_sample_read`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:object-truth-ingestion-sample-read`
+- Risks: `read`
+- CLI entrypoint: `workflow object-truth-ingestion-sample-read`
+- CLI schema help: `workflow tools describe praxis_object_truth_ingestion_sample_read`
+- When to use: Read stored Object Truth ingestion samples, payload references, object-version refs, and replay fixture evidence.
+- When not to use: Do not use it to mutate ingestion evidence; use praxis_object_truth_ingestion_sample_record for writes.
+- Recommended alias: `workflow object-truth-ingestion-sample-read`
+- Selector: `action`; default `list`; values `list`, `describe`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "describe",
+  "sample_id": "object_truth_sample.demo",
+  "include_payload_references": true
+}
+```
+
+#### `praxis_object_truth_ingestion_sample_record`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:object-truth-ingestion-sample-record`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow object-truth-ingestion-sample-record`
+- CLI schema help: `workflow tools describe praxis_object_truth_ingestion_sample_record`
+- When to use: Persist a receipt-backed Object Truth ingestion sample: system snapshot, source query, sample capture, raw payload references, redacted previews, object versions, field observations, and replay fixture evidence.
+- When not to use: Do not use it for direct connector execution or final business-truth decisions. It records observed evidence for later source-authority and Virtual Lab work.
+- Recommended alias: `workflow object-truth-ingestion-sample-record`
+- Selector: none
+- Required args: `client_ref`, `system_ref`, `integration_id`, `connector_ref`, `environment_ref`, `object_ref`, `schema_snapshot_digest`, `captured_at`, `capture_receipt_id`, `identity_fields`, `sample_payloads`
+
+Example input:
+
+```json
+{
+  "client_ref": "client.acme",
+  "system_ref": "salesforce",
+  "integration_id": "integration.salesforce.prod",
+  "connector_ref": "connector.salesforce",
+  "environment_ref": "sandbox",
+  "object_ref": "account",
+  "schema_snapshot_digest": "schema.digest.account",
+  "captured_at": "2026-04-30T16:00:00Z",
+  "capture_receipt_id": "receipt.capture.demo",
+  "identity_fields": [
+    "id"
+  ],
+  "sample_strategy": "fixture",
+  "sample_payloads": [
+    {
+      "id": "001",
+      "name": "Acme"
+    }
+  ],
+  "privacy_classification": "confidential",
+  "retention_policy_ref": "retention.object_truth.redacted_hashes"
+}
+```
+
+#### `praxis_object_truth_readiness`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:object-truth-readiness`
+- Risks: `read`
+- CLI entrypoint: `workflow object-truth-readiness`
+- CLI schema help: `workflow tools describe praxis_object_truth_readiness`
+- When to use: Inspect whether Object Truth authority is ready for downstream client-system discovery, ingestion, and Virtual Lab planning. Returns explicit no-go conditions instead of treating a blocked state as a tool failure.
+- When not to use: Do not use it to persist client evidence or compare object versions; it is the pre-build authority gate only.
+- Recommended alias: `workflow object-truth-readiness`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "client_payload_mode": "redacted_hashes",
+  "planned_fanout": 1,
+  "include_counts": true
 }
 ```
 

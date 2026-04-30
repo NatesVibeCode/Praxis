@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from core.object_truth_ops import build_object_version, compare_object_versions
-from storage.postgres.object_truth_repository import load_object_version
+from storage.postgres.object_truth_repository import inspect_readiness, load_object_version
 
 
 class QueryObserveRecord(BaseModel):
@@ -74,6 +74,39 @@ class QueryCompareVersions(BaseModel):
         return value.strip()
 
 
+class QueryReadiness(BaseModel):
+    """Inspect whether object-truth authority is safe to build on."""
+
+    client_payload_mode: str = Field(
+        default="redacted_hashes",
+        description="Expected client payload mode: redacted_hashes or raw_client_payloads.",
+    )
+    privacy_policy_ref: str | None = None
+    planned_fanout: int = Field(
+        default=1,
+        ge=1,
+        description="Number of downstream jobs the caller expects to launch after this gate.",
+    )
+    include_counts: bool = True
+
+    @field_validator("client_payload_mode", mode="before")
+    @classmethod
+    def _normalize_client_payload_mode(cls, value: object) -> str:
+        text = str(value or "redacted_hashes").strip()
+        if text not in {"redacted_hashes", "raw_client_payloads"}:
+            raise ValueError("client_payload_mode must be redacted_hashes or raw_client_payloads")
+        return text
+
+    @field_validator("privacy_policy_ref", mode="before")
+    @classmethod
+    def _normalize_optional_text(cls, value: object) -> str | None:
+        if value is None or value == "":
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("privacy_policy_ref must be a non-empty string when provided")
+        return value.strip()
+
+
 def handle_observe_record(query: QueryObserveRecord, subsystems: Any) -> dict[str, Any]:
     """Return deterministic evidence only; durable persistence comes later."""
 
@@ -132,9 +165,28 @@ def handle_compare_versions(query: QueryCompareVersions, subsystems: Any) -> dic
     }
 
 
+def handle_readiness(query: QueryReadiness, subsystems: Any) -> dict[str, Any]:
+    """Return the fail-closed Object Truth readiness gate."""
+
+    readiness = inspect_readiness(
+        subsystems.get_pg_conn(),
+        client_payload_mode=query.client_payload_mode,
+        privacy_policy_ref=query.privacy_policy_ref,
+        planned_fanout=query.planned_fanout,
+        include_counts=query.include_counts,
+    )
+    return {
+        "ok": True,
+        "operation": "object_truth_readiness",
+        **readiness,
+    }
+
+
 __all__ = [
     "QueryCompareVersions",
     "QueryObserveRecord",
+    "QueryReadiness",
     "handle_compare_versions",
     "handle_observe_record",
+    "handle_readiness",
 ]

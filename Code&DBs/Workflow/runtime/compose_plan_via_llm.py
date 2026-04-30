@@ -134,19 +134,39 @@ def compose_plan_via_llm(
     # work-volume decomposition is the LLM's job in the synthesis call.
     bootstrap_skeleton = synthesize_skeleton(atoms, conn=conn)
 
-    synthesis = synthesize_plan_statement(
-        atoms=atoms, skeleton=bootstrap_skeleton, conn=conn,
-        hydrate_env=hydrate_env, llm_overrides=llm_overrides,
-    )
+    try:
+        synthesis = synthesize_plan_statement(
+            atoms=atoms, skeleton=bootstrap_skeleton, conn=conn,
+            hydrate_env=hydrate_env, llm_overrides=llm_overrides,
+        )
+    except Exception as exc:  # noqa: BLE001 - surface a typed materialization blocker.
+        return ComposeViaLLMResult(
+            ok=False, intent=intent, atoms=atoms, skeleton=bootstrap_skeleton,
+            synthesis=None,
+            authored=AuthoredPlan(packets=[], errors=[]),
+            validation=_empty_report(),
+            reason_code="synthesis.llm_call_failed",
+            error=str(exc),
+            notes=notes + bootstrap_skeleton.notes,
+        )
 
     # If the synthesis call emitted packet seeds, those drive fan-out (work
-    # volume); otherwise fall back to the deterministic clause-based skeleton.
+    # volume). Compile recognition is only context; deterministic fallback is
+    # intentionally not allowed to masquerade as an agent-authored plan.
     if synthesis.packet_seeds:
         skeleton = skeleton_from_seeds(
             seeds=synthesis.packet_seeds, atoms=atoms, conn=conn,
         )
     else:
-        skeleton = bootstrap_skeleton
+        return ComposeViaLLMResult(
+            ok=False, intent=intent, atoms=atoms, skeleton=bootstrap_skeleton,
+            synthesis=synthesis,
+            authored=AuthoredPlan(packets=[], errors=[]),
+            validation=_empty_report(),
+            reason_code="synthesis.empty",
+            error="synthesis emitted no usable packet seeds",
+            notes=notes + bootstrap_skeleton.notes + list(synthesis.notes or []),
+        )
 
     if not skeleton.packets:
         return ComposeViaLLMResult(

@@ -129,10 +129,9 @@ def _build_synthesis_prompt(
     will ship, so this synthesis call primes the provider's prefix cache for
     the N parallel author calls that follow.
 
-    The RECOGNIZED block (when ``recognition`` is provided) tells the model
-    exactly which spans Praxis already extracted from the intent, so it
-    anchors decomposition on those instead of inferring them from scratch.
-    Decomposition target = ``len(spans)``, not a hardcoded 20.
+    The RECOGNIZED block (when ``recognition`` is provided) is context, not
+    authority. It tells the model what Praxis already noticed; the synthesis
+    agent still owns the number of packet seeds and their boundaries.
     """
     from runtime.plan_section_author import build_shared_prefix
 
@@ -142,7 +141,11 @@ def _build_synthesis_prompt(
 
     if span_count > 0:
         target_clause = (
-            f"Emit one packet seed per recognized span (~{span_count} here). "
+            f"Praxis recognized {span_count} span(s). Treat them as context, "
+            f"not as a one-span-one-packet rule. You choose the packet count "
+            f"by work volume and tool rhythm. Prefer packets where one agent "
+            f"can repeat one similar tool/action shape several times; one "
+            f"tool four times is better than three unrelated tools once. "
             f"Suggested_step labels above are HINTS — only use them when the "
             f"suggested label semantically matches THIS intent's domain. "
             f"When the suggestions don't fit (e.g. they're from a different "
@@ -154,8 +157,9 @@ def _build_synthesis_prompt(
         # but with a much tighter cap that doesn't push the model toward
         # filler decomposition.
         target_clause = (
-            "Decompose by WORK VOLUME into 1-5 concrete packet seeds — "
-            "no filler, no padding."
+            "Decompose by WORK VOLUME and tool rhythm into concrete packet "
+            "seeds — no filler, no padding. Prefer packets where one agent "
+            "can stay focused on one repeated tool/action shape."
         )
 
     sections: list[str] = [build_shared_prefix(atoms, sandbox)]
@@ -165,6 +169,10 @@ def _build_synthesis_prompt(
     sections.append(
         "TASK: " + target_clause + " "
         "Stages limited to research / review / build (NO test, NO fix). "
+        "For app-integration workflows, a good decomposition usually separates "
+        "input normalization, search planning, repeated discovery/search, "
+        "retrieval, evaluation, build-attempt/spec authoring, verification, "
+        "and handoff when those are real work units. "
         "Pill triage and pill proposals are NOT your job — fork-out authors "
         "handle those per-packet. Just emit seeds."
     )
@@ -233,7 +241,7 @@ def _call_synthesis_llm(
     ``{latency_ms, finish_reason, content_len, reasoning_len}``.
 
     Override keys honoured: provider_slug, model_slug, temperature,
-    max_tokens. All optional inside the override; missing keys keep their
+    max_tokens, timeout_seconds. All optional inside the override; missing keys keep their
     task-level defaults (provider/model from routing if neither is set;
     temp = LLMRequest default; max_tokens = 4096).
     """
@@ -251,11 +259,12 @@ def _call_synthesis_llm(
     overrides = dict(llm_overrides or {})
     override_temperature = overrides.get("temperature")
     override_max_tokens = overrides.get("max_tokens")
+    override_timeout = overrides.get("timeout_seconds")
     override_provider = overrides.get("provider_slug")
     override_model = overrides.get("model_slug")
 
     from runtime.compiler_llm import resolve_matrix_gated_route_configs
-    timeout = int(_section_author_timeout_seconds())
+    timeout = int(override_timeout) if override_timeout is not None else int(_section_author_timeout_seconds())
 
     # Pull the full row config (provider, model, temperature, max_tokens)
     # from task_type_routing. Migration 276 lifted the LLM knobs into

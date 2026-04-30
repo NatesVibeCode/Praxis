@@ -234,6 +234,7 @@
 .dash-panel__action:focus-visible,
 .dash-empty__action:focus-visible,
 .wf-card__btn:focus-visible,
+.dash-review-item:focus-visible,
 .dash-run:focus-visible,
 .dash-file__remove:focus-visible {
   outline: none;
@@ -911,6 +912,103 @@ button.dash-hero-card__stat--link:focus-visible {
   color: #ffb3af;
   border-color: rgba(248, 81, 73, 0.26);
   background: rgba(248, 81, 73, 0.08);
+}
+
+.dash-review-count {
+  flex: 0 0 auto;
+  min-width: 34px;
+  min-height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.dash-review-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.dash-review-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.dash-review-item--static {
+  cursor: default;
+}
+
+.dash-review-item:not(.dash-review-item--static):hover {
+  transform: translateY(-1px);
+  border-color: rgba(243, 238, 228, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dash-review-item__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.dash-review-item__dot--healthy {
+  background: var(--success);
+}
+
+.dash-review-item__dot--warning {
+  background: var(--warning);
+}
+
+.dash-review-item__dot--danger {
+  background: var(--danger);
+}
+
+.dash-review-item__body {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.dash-review-item__body strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.dash-review-item__body span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.dash-review-item em {
+  align-self: start;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  white-space: nowrap;
 }
 
 .dash-run-list,

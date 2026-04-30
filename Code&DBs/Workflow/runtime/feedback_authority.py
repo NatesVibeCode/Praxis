@@ -312,6 +312,57 @@ def handle_record_feedback(
     return record_feedback_event(subsystems.get_pg_conn(), command)
 
 
+def record_feedback_event_via_gateway(
+    conn: Any,
+    command: RecordAuthorityFeedbackCommand,
+    *,
+    caller_context: Any = None,
+) -> dict[str, Any]:
+    """Phase D close-the-bypass shim.
+
+    Callers that have a ``conn`` but not full ``subsystems`` use this to
+    route through the CQRS gateway (operation ``feedback.record``). The
+    gateway writes a receipt and back-fills ``receipt_id`` on the
+    ``authority_events`` row the inner helper inserts, instead of leaving
+    that row receipt-orphaned.
+
+    Falls back to the direct inner call if the gateway can't be reached
+    (bootstrap, isolated tests). The fallback's authority_events row keeps
+    the legacy receipt-orphan shape but the data is still recorded.
+    """
+
+    try:
+        from runtime.operation_catalog_gateway import (
+            execute_operation_from_subsystems,
+        )
+
+        class _ConnSubsystems:
+            def __init__(self, c: Any) -> None:
+                self._c = c
+
+            def get_pg_conn(self) -> Any:
+                return self._c
+
+        result = execute_operation_from_subsystems(
+            _ConnSubsystems(conn),
+            operation_name="feedback.record",
+            payload=command.model_dump(),
+            caller_context=caller_context,
+        )
+        if isinstance(result, dict):
+            # The gateway wraps the handler return in a {"ok": True, ...,
+            # "operation_receipt": {...}} envelope when the inner result is
+            # a Mapping. Surface the inner shape that callers expect.
+            if "feedback_event" in result:
+                return result
+            inner = result.get("result")
+            if isinstance(inner, dict):
+                return inner
+        return record_feedback_event(conn, command)
+    except Exception:
+        return record_feedback_event(conn, command)
+
+
 def handle_list_feedback_events(
     command: ListAuthorityFeedbackCommand,
     subsystems: Any,
@@ -334,4 +385,5 @@ __all__ = [
     "handle_record_feedback",
     "list_feedback_events",
     "record_feedback_event",
+    "record_feedback_event_via_gateway",
 ]

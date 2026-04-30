@@ -137,7 +137,7 @@ def _call_fork_llm(
     digging into raw responses.
 
     ``llm_overrides`` honours provider_slug, model_slug, temperature,
-    max_tokens (all optional). When provider+model are both pinned via the
+    max_tokens, timeout_seconds (all optional). When provider+model are both pinned via the
     override, route resolution is skipped entirely. Mirrors
     ``plan_synthesis._call_synthesis_llm``.
     """
@@ -155,6 +155,7 @@ def _call_fork_llm(
     overrides = dict(llm_overrides or {})
     override_temperature = overrides.get("temperature")
     override_max_tokens = overrides.get("max_tokens")
+    override_timeout = overrides.get("timeout_seconds")
     override_provider = overrides.get("provider_slug")
     override_model = overrides.get("model_slug")
 
@@ -207,7 +208,7 @@ def _call_fork_llm(
         else:
             route_configs = all_configs
 
-    timeout = int(_section_author_timeout_seconds())
+    timeout = int(override_timeout) if override_timeout is not None else int(_section_author_timeout_seconds())
     last_error: Exception | None = None
     for route_config in route_configs:
         provider_slug = route_config["provider_slug"]

@@ -1,0 +1,40 @@
+{
+  "name": "platform_refactor_probe_20260429",
+  "workflow_id": "platform_refactor_probe_20260429",
+  "phase": "review",
+  "workdir": "/Users/nate/Praxis",
+  "outcome_goal": "One read-only agent report proves the workflow lane can inspect Praxis and return cleanup recommendations before any larger refactor report wave.",
+  "anti_requirements": [
+    "Do not edit files.",
+    "Do not stage or commit changes.",
+    "Do not launch child workflows.",
+    "Do not resolve bugs or mutate operator state."
+  ],
+  "jobs": [
+    {
+      "label": "probe_platform_cleanup_report",
+      "agent": "auto/review",
+      "task_type": "review",
+      "workdir": "/Users/nate/Praxis",
+      "write_scope": [],
+      "mcp_tools": [
+        "praxis_query",
+        "praxis_discover",
+        "praxis_search",
+        "praxis_refactor_heatmap",
+        "praxis_next_work",
+        "praxis_submit_research_result"
+      ],
+      "submission_required": true,
+      "completion_contract": {
+        "submission_required": true,
+        "verification_required": false,
+        "result_kind": "research_result",
+        "submit_tool_names": [
+          "praxis_submit_research_result"
+        ]
+      },
+      "prompt": "You are producing a read-only cleanup and quality report for the Praxis repository. Inspect the repo from /Users/nate/Praxis. Focus on the highest-leverage refactoring targets, not syntax-level polish. Anchor the report in authority failures: duplicated source of truth, hidden state, direct subsystem writes, drift between CLI/API/MCP/UI, weak receipts, migration authority drift, provider routing ambiguity, workspace/path leakage, and test gaps. Use current repo truth and the Praxis workflow tools available to you. Do not edit files. Do not mutate bug state. Submit the final report with praxis_submit_research_result. The report must include: 1. verdict, 2. top five cleanup targets, 3. evidence with file paths, 4. recommended sequence, 5. validation/proof gates, 6. any workflow runtime blockers you observed."
+    }
+  ]
+}

@@ -39,6 +39,8 @@ def _definition(
         projection_freshness_policy_ref=None,
         posture="operate",
         idempotency_policy="non_idempotent",
+        execution_lane="background",
+        kickoff_required=False,
         enabled=True,
         operation_enabled=True,
         source_policy_ref="operation-command",

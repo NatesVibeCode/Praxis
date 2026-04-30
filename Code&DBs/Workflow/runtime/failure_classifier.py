@@ -647,6 +647,23 @@ def _classify_model_error(failure_code: str, *, outputs: dict | None = None) -> 
 
 def _classify_sandbox_error(failure_code: str, *, outputs: dict | None = None) -> FailureClassification | None:
     """Check if failure is a sandbox, CLI tooling, or code execution error."""
+    stderr_lower = ""
+    if outputs and isinstance(outputs, dict):
+        stderr_lower = str(outputs.get("stderr", "")).lower()
+    if failure_code in ("sandbox_error",) or stderr_lower:
+        if "docker is required for docker_local" in stderr_lower or (
+            "docker" in stderr_lower and "unavailable" in stderr_lower
+        ):
+            return FailureClassification(
+                category=FailureCategory.INFRASTRUCTURE,
+                is_retryable=True,
+                is_transient=True,
+                recommended_action=(
+                    "Docker engine is unreachable on the worker host. "
+                    "Requeue the job; it will retry once the daemon recovers."
+                ),
+                severity="high",
+            )
     if failure_code in ("sandbox_error",):
         return FailureClassification(
             category=FailureCategory.SANDBOX_ERROR,

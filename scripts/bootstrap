@@ -272,9 +272,12 @@ ok "dependencies installed from requirements.runtime.txt"
 # --- Step 3: praxis CLI on PATH ---------------------------------------------
 step "Installing praxis runtime launcher"
 
-local_bin="${PRAXIS_LOCAL_BIN_DIR:-${XDG_BIN_HOME:-}}"
+local_bin="${PRAXIS_LOCAL_BIN_DIR:-${XDG_BIN_HOME:-$HOME/.local/bin}}"
 if [ -z "$local_bin" ]; then
-  die "set PRAXIS_LOCAL_BIN_DIR or XDG_BIN_HOME before running ./scripts/bootstrap"
+  die "could not determine launcher install path: set PRAXIS_LOCAL_BIN_DIR, XDG_BIN_HOME, or HOME"
+fi
+if [ -z "${PRAXIS_LOCAL_BIN_DIR:-}" ] && [ -z "${XDG_BIN_HOME:-}" ]; then
+  warn "PRAXIS_LOCAL_BIN_DIR / XDG_BIN_HOME not set; defaulting launcher install path to $local_bin"
 fi
 mkdir -p "$local_bin"
 launcher_target="$local_bin/praxis"
@@ -403,12 +406,19 @@ cat <<DONE
 
 ==> Bootstrap complete.
 
-API:
-  http://$api_probe_host:$api_port/api/health
+API:     http://$api_probe_host:$api_port/api/health
+Moon:    (cd "Code&DBs/Workflow/surfaces/app" && npm install && npm run dev)
+         Vite prints a URL — open it; Moon auto-connects to the API.
 
 Next:
-  praxis workflow query "status"
-  praxis workflow run examples/hello_world.queue.json
-  (cd "Code&DBs/Workflow/surfaces/app" && npm install && npm run dev)   # Moon UI
+  praxis workflow query "status"                          # standing orders + status
+  praxis workflow run examples/bootstrap_smoke.queue.json # deterministic smoke (no LLM)
+  praxis workflow run examples/hello_world.queue.json     # LLM demo (needs provider key)
+
+Host CLI dispatcher (Claude Code / Codex / Gemini):
+  scripts/praxis-up agent-broker
+  bin/praxis-agent --list
+
+See README.md "First 5 minutes with Praxis" for the full demo walkthrough.
 
 DONE

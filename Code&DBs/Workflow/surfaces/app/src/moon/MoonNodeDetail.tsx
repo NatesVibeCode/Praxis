@@ -57,6 +57,19 @@ export interface AuthorityActionMeta {
   changeSummary?: string[];
 }
 
+export interface WorkflowInspectorSummary {
+  title: string;
+  readiness: string;
+  stepCount: number;
+  linkCount: number;
+  reviewCount: number;
+  toolLane: string;
+  branches: string;
+  dataPills: string[];
+  receipt: string | null;
+  disconnected: number;
+}
+
 interface Props {
   node: OrbitNode | null;
   content: DockContent | null;
@@ -87,6 +100,7 @@ interface Props {
   ) => Promise<void>;
   /** Compiled plan + issues for richer primitive field suggestions */
   contractSuggestionExtras?: PrimitiveContractExtras | null;
+  workflowSummary?: WorkflowInspectorSummary | null;
 }
 
 const TRIGGER_MANUAL_ROUTE = 'trigger';
@@ -211,6 +225,58 @@ function formatTriggerFilterValueText(value: unknown, valueType: TriggerFilterVa
   if (valueType === 'string') return typeof value === 'string' ? value : String(value ?? '');
   if (valueType === 'number' || valueType === 'boolean') return String(value);
   return formatJsonValue(value);
+}
+
+function WorkflowInspector({ summary }: { summary: WorkflowInspectorSummary | null | undefined }) {
+  if (!summary) {
+    return <div className="moon-dock__empty">Select a node or gate.</div>;
+  }
+  const mapTone = summary.disconnected > 0 ? 'warning' : summary.readiness === 'ready' ? 'ready' : summary.readiness;
+  return (
+    <div className="moon-dock-workflow" aria-label="Workflow inspector summary">
+      <div className="moon-dock-section-card moon-dock-section-card--dense">
+        <div className="moon-dock-section-card__header">
+          <div className="moon-dock__section-label">Workflow</div>
+          <span className={`moon-dock-workflow__tone moon-dock-workflow__tone--${mapTone}`}>
+            {summary.readiness}
+          </span>
+        </div>
+        <div className="moon-dock-workflow__title">{summary.title}</div>
+      </div>
+
+      <div className="moon-dock-workflow__grid">
+        <div className="moon-dock-workflow__row">
+          <span>Map</span>
+          <strong>{summary.stepCount} steps · {summary.linkCount} links</strong>
+        </div>
+        <div className="moon-dock-workflow__row">
+          <span>Review</span>
+          <strong>{summary.reviewCount > 0 ? `${summary.reviewCount} decisions` : 'clear'}</strong>
+        </div>
+        <div className="moon-dock-workflow__row">
+          <span>Tools</span>
+          <strong>{summary.toolLane}</strong>
+        </div>
+        <div className="moon-dock-workflow__row">
+          <span>Branches</span>
+          <strong>{summary.branches}</strong>
+        </div>
+        <div className={`moon-dock-workflow__row${summary.disconnected > 0 ? ' moon-dock-workflow__row--warn' : ''}`}>
+          <span>{summary.disconnected > 0 ? 'Unplaced' : 'Receipt'}</span>
+          <strong>{summary.disconnected > 0 ? `${summary.disconnected} disconnected` : summary.receipt || 'pending'}</strong>
+        </div>
+      </div>
+
+      <div className="moon-dock-section-card moon-dock-section-card--dense">
+        <div className="moon-dock__section-label">Data pills</div>
+        <div className="moon-dock-workflow__pills">
+          {summary.dataPills.length > 0
+            ? summary.dataPills.map((label) => <span key={label}>{label}</span>)
+            : <span className="moon-dock-workflow__pill-empty">none declared</span>}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function triggerFilterRowsFromObject(filter: Record<string, unknown>): TriggerFilterFieldRow[] {
@@ -421,7 +487,7 @@ function buildSimpleBranchCondition(
   return condition;
 }
 
-export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAuthorityAction, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [], buildGraph, onUpdateBuildGraph, onCommitGraphAction, contractSuggestionExtras = null }: Props) {
+export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAuthorityAction, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [], buildGraph, onUpdateBuildGraph, onCommitGraphAction, contractSuggestionExtras = null, workflowSummary = null }: Props) {
   const { objectTypes, loading: objectTypesLoading } = useObjectTypes();
   const [objectSearch, setObjectSearch] = useState('');
   const [attachKind, setAttachKind] = useState('reference');
@@ -1417,12 +1483,34 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     return (order[a.state || 'unresolved'] || 0) - (order[b.state || 'unresolved'] || 0);
   });
   const runCompletionContract = node?.completionContract ?? null;
+  const agentToolPlan = node?.agentToolPlan ?? null;
   const runContractResultKind = typeof runCompletionContract?.result_kind === 'string'
     ? runCompletionContract.result_kind.trim()
     : '';
   const runContractSubmitTools = Array.isArray(runCompletionContract?.submit_tool_names)
     ? runCompletionContract.submit_tool_names.filter((tool): tool is string => typeof tool === 'string' && tool.trim().length > 0)
     : [];
+  const agentToolName = typeof agentToolPlan?.tool_name === 'string' ? agentToolPlan.tool_name.trim() : '';
+  const agentToolOperation = typeof agentToolPlan?.operation === 'string' ? agentToolPlan.operation.trim() : '';
+  const agentToolFocus = typeof agentToolPlan?.focus === 'string' ? agentToolPlan.focus.trim() : '';
+  const agentToolRepeats = typeof agentToolPlan?.repeats === 'number' && Number.isFinite(agentToolPlan.repeats)
+    ? agentToolPlan.repeats
+    : null;
+  const agentToolTargets = Array.isArray(agentToolPlan?.target_fields)
+    ? agentToolPlan.target_fields.filter((field): field is string => typeof field === 'string' && field.trim().length > 0)
+    : [];
+  const nodeCapabilities = Array.isArray(node?.capabilities) ? node.capabilities.filter(Boolean) : [];
+  const nodeWriteScope = Array.isArray(node?.writeScope) ? node.writeScope.filter(Boolean) : [];
+  const hasAgentPacket = Boolean(
+    node
+    && (
+      agentToolPlan
+      || node.agent
+      || nodeCapabilities.length
+      || nodeWriteScope.length
+      || node.taskType
+    ),
+  );
   const hasRunContract = Boolean(
     node
     && (
@@ -1588,7 +1676,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
       )}
 
       {!node && !selectedEdge ? (
-        <div className="moon-dock__empty">Select a node or gate.</div>
+        <WorkflowInspector summary={workflowSummary} />
       ) : node ? (
         <>
           {/* Context ribbon — upstream producers and downstream consumers.
@@ -1626,6 +1714,64 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       <span className="moon-detail__ribbon-dot" aria-hidden="true" />
                     </div>
                   ))
+                )}
+              </div>
+            </div>
+          )}
+          {hasAgentPacket && (
+            <div className="moon-dock-section-card moon-dock-section-card--dense" aria-label="Agent packet contract">
+              <div className="moon-dock-section-card__header">
+                <div className="moon-dock__section-label">Agent packet</div>
+                <div className="moon-run-contract__badges">
+                  <span className="moon-truth-badge moon-truth-badge--runtime">One node</span>
+                  <span className="moon-truth-badge moon-truth-badge--persisted">Field edits</span>
+                </div>
+              </div>
+              <div className="moon-run-contract__grid">
+                {node.taskType && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Task</span>
+                    <span className="moon-run-contract__value">{node.taskType}</span>
+                  </div>
+                )}
+                {node.agent && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Agent</span>
+                    <span className="moon-run-contract__value">{node.agent}</span>
+                  </div>
+                )}
+                {agentToolName && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Tool lane</span>
+                    <span className="moon-run-contract__value">
+                      {agentToolName}{agentToolOperation ? ` · ${agentToolOperation}` : ''}
+                      {agentToolRepeats ? ` · ${agentToolRepeats}x` : ''}
+                    </span>
+                  </div>
+                )}
+                {agentToolTargets.length > 0 && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Fields</span>
+                    <span className="moon-run-contract__value">{agentToolTargets.join(', ')}</span>
+                  </div>
+                )}
+                {nodeCapabilities.length > 0 && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Capabilities</span>
+                    <span className="moon-run-contract__value">{nodeCapabilities.join(', ')}</span>
+                  </div>
+                )}
+                {nodeWriteScope.length > 0 && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Writes</span>
+                    <span className="moon-run-contract__value">{nodeWriteScope.join(', ')}</span>
+                  </div>
+                )}
+                {agentToolFocus && (
+                  <div className="moon-run-contract__row">
+                    <span className="moon-run-contract__label">Focus</span>
+                    <span className="moon-run-contract__value">{agentToolFocus}</span>
+                  </div>
                 )}
               </div>
             </div>

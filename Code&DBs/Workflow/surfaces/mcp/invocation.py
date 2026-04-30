@@ -4,17 +4,46 @@ from __future__ import annotations
 
 import inspect
 import json
+import uuid
 from collections.abc import Sequence
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any
 
+from runtime.operation_catalog_gateway import (
+    CURRENT_CALLER_CONTEXT,
+    CallerContext,
+)
 from runtime.workflow.mcp_session import (
     WorkflowMcpSessionError,
     verify_workflow_mcp_session_token,
 )
 
 from .catalog import canonical_tool_name, get_tool_catalog, resolve_tool_entry
+
+
+@contextmanager
+def _mcp_gateway_transport_context():
+    """Set the gateway caller context for the duration of an MCP handler.
+
+    Every MCP tool handler dispatches through ``execute_operation_from_subsystems``;
+    setting ``CURRENT_CALLER_CONTEXT`` here means each receipt produced by
+    those dispatches records ``transport_kind="mcp"`` without per-tool
+    threading. The context manager is scoped to one tool invocation so
+    nested gateway calls share a single correlation_id while distinct
+    invocations get fresh trace trees.
+    """
+
+    ctx = CallerContext(
+        cause_receipt_id=None,
+        correlation_id=str(uuid.uuid4()),
+        transport_kind="mcp",
+    )
+    token = CURRENT_CALLER_CONTEXT.set(ctx)
+    try:
+        yield ctx
+    finally:
+        CURRENT_CALLER_CONTEXT.reset(token)
 
 _EMBEDDING_PREWARM_TOOLS = frozenset(
     {
@@ -215,7 +244,7 @@ def invoke_tool(
 
         handler, _ = resolve_tool_entry(canonical_name)
         call_context = _context_manager_for_claims(claims)
-        with call_context:
+        with call_context, _mcp_gateway_transport_context():
             result_payload = _call_handler(
                 handler,
                 tool_input,

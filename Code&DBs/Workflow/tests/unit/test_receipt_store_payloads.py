@@ -351,6 +351,52 @@ def test_post_receipt_hooks_emit_event_for_auto_bug_failures(monkeypatch):
     assert event["payload"]["error_type"] == "RuntimeError"
 
 
+def test_attach_receipt_structural_proof_passes_for_compact_git_provenance() -> None:
+    outputs = {
+        "git_provenance": {
+            "available": True,
+            "repo_snapshot_ref": "repo_snapshot:abc",
+        },
+    }
+    enriched = receipt_store._attach_receipt_structural_proof(
+        receipt_id="receipt:run:abc",
+        outputs=outputs,
+    )
+    assert enriched["verification"]["status"] == "passed"
+    assert enriched["verification"]["verifier_ref"] == "verifier.receipt.structural_proof"
+    assert enriched["verification"]["kind"] == "structural_proof"
+    assert enriched["verification_status"] == "passed"
+
+
+def test_attach_receipt_structural_proof_marks_failed_when_provenance_missing() -> None:
+    outputs = {"workspace_provenance": {}}
+    enriched = receipt_store._attach_receipt_structural_proof(
+        receipt_id="receipt:run:xyz",
+        outputs=outputs,
+    )
+    assert enriched["verification"]["status"] == "failed"
+    assert "git_provenance" in enriched["verification"]["missing"]
+    assert enriched["verification_status"] == "failed"
+
+
+def test_attach_receipt_structural_proof_preserves_existing_verification_status() -> None:
+    outputs = {
+        "git_provenance": {
+            "available": True,
+            "repo_snapshot_ref": "repo_snapshot:abc",
+        },
+        "verification_status": "passed_by_explicit_run",
+    }
+    enriched = receipt_store._attach_receipt_structural_proof(
+        receipt_id="receipt:run:abc",
+        outputs=outputs,
+    )
+    # New verification block was attached, but pre-existing verification_status
+    # was not overwritten because setdefault is used for that field.
+    assert enriched["verification"]["status"] == "passed"
+    assert enriched["verification_status"] == "passed_by_explicit_run"
+
+
 def test_apply_receipt_provenance_rewrites_legacy_git_payload_when_repo_snapshot_is_available(
     monkeypatch,
 ):

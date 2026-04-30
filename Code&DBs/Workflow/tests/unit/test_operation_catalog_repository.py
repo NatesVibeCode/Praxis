@@ -25,6 +25,8 @@ _VALID_OPERATION_ROW = {
     "projection_ref": "projection.capability_catalog",
     "posture": None,
     "idempotency_policy": None,
+    "execution_lane": "background",
+    "kickoff_required": False,
     "enabled": True,
     "binding_revision": "binding.operation_catalog_registry.bootstrap.20260416",
     "decision_ref": "decision.operation_catalog_registry.bootstrap.20260416",
@@ -144,3 +146,69 @@ def test_source_policy_repository_rejects_invalid_posture() -> None:
 
     assert exc_info.value.reason_code == "operation_catalog.invalid_submission"
     assert "posture" in str(exc_info.value)
+
+
+def test_operation_repository_rejects_invalid_execution_lane() -> None:
+    """Invalid lane values must be rejected at the boundary so a typo or
+    drifted DB row never reaches the gateway dispatch with an unknown lane.
+    """
+
+    conn = FakeConn(
+        operation_rows=[
+            {**_VALID_OPERATION_ROW, "execution_lane": "synchronous"}
+        ]
+    )
+
+    with pytest.raises(PostgresWriteError) as exc_info:
+        list_operation_catalog_records(conn, include_disabled=True)
+
+    assert exc_info.value.reason_code == "operation_catalog.invalid_submission"
+    assert "execution_lane" in str(exc_info.value)
+
+
+def test_operation_repository_normalizes_execution_lane_and_kickoff_defaults() -> None:
+    """Rows that were inserted before migration 348 added defaults still
+    normalize cleanly: missing `execution_lane` falls back to ``background``
+    and missing `kickoff_required` falls back to ``False`` so older rows
+    keep working without re-classification.
+    """
+
+    legacy_row = {
+        key: value
+        for key, value in _VALID_OPERATION_ROW.items()
+        if key not in {"execution_lane", "kickoff_required"}
+    }
+    conn = FakeConn(operation_rows=[legacy_row])
+
+    rows = list_operation_catalog_records(
+        conn, source_kind="operation_query", include_disabled=True
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["execution_lane"] == "background"
+    assert rows[0]["kickoff_required"] is False
+
+
+def test_operation_repository_round_trips_interactive_kickoff_required() -> None:
+    """A row marked ``execution_lane='interactive'`` and
+    ``kickoff_required=True`` keeps both fields through normalization so the
+    gateway sees the lane it was registered with.
+    """
+
+    conn = FakeConn(
+        operation_rows=[
+            {
+                **_VALID_OPERATION_ROW,
+                "execution_lane": "interactive",
+                "kickoff_required": True,
+            }
+        ]
+    )
+
+    rows = list_operation_catalog_records(
+        conn, source_kind="operation_query", include_disabled=True
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["execution_lane"] == "interactive"
+    assert rows[0]["kickoff_required"] is True

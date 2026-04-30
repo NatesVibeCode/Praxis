@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `374`.
+Public route count: `8`. All route count: `388`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -49,9 +49,11 @@ Public route count: `8`. All route count: `374`.
 | `GET` | `/api/audit/plan` | `internal` | - | audit_plan_get |
 | `GET` | `/api/audit/playbook` | `internal` | - | audit_playbook_get |
 | `GET` | `/api/audit/registered` | `internal` | - | audit_registered_get |
+| `POST` | `/api/audit/summary` | `internal` | `operations` | audit.summary |
 | `POST` | `/api/authority-domain/forge` | `internal` | `operations` | authority_domain_forge |
 | `POST` | `/api/authority-domain/register` | `internal` | `operations` | authority_domain_register |
 | `POST` | `/api/authority/compose_binding/resolve` | `internal` | `operations` | authority.compose_binding.resolve |
+| `POST` | `/api/authority/impact_contract_audit/scan` | `internal` | `operations` | authority.impact_contract_audit.scan |
 | `GET` | `/api/authority/objects` | `internal` | `operations` | authority.objects.list |
 | `GET` | `/api/authority/objects/adoption` | `internal` | `operations` | authority.objects.adoption |
 | `GET` | `/api/authority/objects/domain-summary` | `internal` | `operations` | authority.objects.domain_summary |
@@ -193,7 +195,10 @@ Public route count: `8`. All route count: `374`.
 | `POST` | `/api/models/runs/{rest_of_path:path}` | `internal` | - | models_runs_path_post |
 | `GET` | `/api/moon/pickers/{rest_of_path:path}` | `internal` | - | moon_pickers_get |
 | `GET` | `/api/object-truth/compare-versions` | `internal` | `operations` | object_truth_compare_versions |
+| `GET` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_read |
+| `POST` | `/api/object-truth/ingestion/samples` | `internal` | `operations` | object_truth_ingestion_sample_record |
 | `POST` | `/api/object-truth/observe-record` | `internal` | `operations` | object_truth_observe_record |
+| `GET` | `/api/object-truth/readiness` | `internal` | `operations` | object_truth_readiness |
 | `POST` | `/api/object-truth/record-comparison-run` | `internal` | `operations` | object_truth_record_comparison_run |
 | `POST` | `/api/object-truth/store-observed-record` | `internal` | `operations` | object_truth_store_observed_record |
 | `POST` | `/api/object-truth/store-schema-snapshot` | `internal` | `operations` | object_truth_store_schema_snapshot |
@@ -221,6 +226,12 @@ Public route count: `8`. All route count: `374`.
 | `POST` | `/api/operator.next` | `internal` | `operations` | operator.next |
 | `POST` | `/api/operator/architecture-policy` | `internal` | `operations` | operator.architecture_policy_record |
 | `GET` | `/api/operator/bug-triage-packet` | `internal` | `operations` | operator.bug_triage_packet |
+| `GET` | `/api/operator/client-operating-model/snapshots` | `internal` | `operations` | client_operating_model_operator_view_snapshot_read |
+| `POST` | `/api/operator/client-operating-model/snapshots` | `internal` | `operations` | client_operating_model_operator_view_snapshot_store |
+| `GET` | `/api/operator/client-operating-model/view` | `internal` | `operations` | client_operating_model_operator_view |
+| `GET` | `/api/operator/client-system-discovery/census` | `internal` | `operations` | client_system_discovery_census_read |
+| `POST` | `/api/operator/client-system-discovery/census` | `internal` | `operations` | client_system_discovery_census_record |
+| `POST` | `/api/operator/client-system-discovery/gaps` | `internal` | `operations` | client_system_discovery_gap_record |
 | `POST` | `/api/operator/daily-heartbeat-refresh` | `internal` | `operations` | operator.daily_heartbeat_refresh |
 | `GET` | `/api/operator/data-dictionary` | `internal` | `operations` | operator.data_dictionary |
 | `POST` | `/api/operator/decision` | `internal` | `operations` | operator.decision_record |
@@ -291,8 +302,10 @@ Public route count: `8`. All route count: `374`.
 | `GET` | `/api/runs/{run_id}/proof` | `internal` | - | Return the 4-authority reconciliation for a run. |
 | `GET` | `/api/scope` | `internal` | - | Resolve read scope, blast radius, and test scope for write-scope files. |
 | `GET` | `/api/search` | `internal` | - | search_get |
+| `POST` | `/api/search/authority-receipts` | `internal` | `operations` | search.authority_receipts |
 | `POST` | `/api/search/bugs` | `internal` | `operations` | search.bugs |
 | `POST` | `/api/search/code` | `internal` | `operations` | search.code |
+| `POST` | `/api/search/compliance-receipts` | `internal` | `operations` | search.compliance_receipts |
 | `POST` | `/api/search/db` | `internal` | `operations` | search.db |
 | `POST` | `/api/search/decisions` | `internal` | `operations` | search.decisions |
 | `POST` | `/api/search/federated` | `internal` | `operations` | search.federated |
@@ -338,6 +351,7 @@ Public route count: `8`. All route count: `374`.
 | `POST` | `/api/trace.walk` | `internal` | `operations` | trace.walk |
 | `POST` | `/api/trigger/{rest_of_path:path}` | `internal` | - | trigger_post |
 | `GET` | `/api/trust` | `internal` | - | Return ELO-based trust scores for all (provider, model) pairs. |
+| `POST` | `/api/typed_gap/emit` | `internal` | `operations` | typed_gap.emit |
 | `POST` | `/api/webhooks/endpoints` | `internal` | `webhooks` | Register a new webhook endpoint. Auto-creates workflow_trigger if target_workflow_id is set. |
 | `POST` | `/api/webhooks/{slug}` | `internal` | `webhooks` | Receive an incoming webhook, validate signature, store event. |
 | `POST` | `/api/workflow-job` | `internal` | - | workflow_job_post |

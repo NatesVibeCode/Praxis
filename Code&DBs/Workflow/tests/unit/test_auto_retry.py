@@ -412,3 +412,28 @@ class TestRetryOrchestrator:
         assert decision.action == "retry_same"
         assert decision.next_agent == "google/gemini-3.1-pro-preview"
         assert decision.should_requeue is True
+
+
+class TestDockerLocalUnavailableClassification:
+    """A docker daemon hiccup is transient infrastructure, not a permanent sandbox config error."""
+
+    def test_docker_local_unavailable_stderr_is_transient_infrastructure(self):
+        c = failure_classifier.classify_failure(
+            "sandbox_error",
+            outputs={
+                "stderr": "Docker is required for docker_local sandbox execution but is unavailable.",
+                "exit_code": 1,
+            },
+        )
+        assert c.category == OrchestratorFailureCategory.INFRASTRUCTURE
+        assert c.is_retryable is True
+        assert c.is_transient is True
+
+    def test_bare_sandbox_error_without_docker_signal_stays_terminal(self):
+        c = failure_classifier.classify_failure(
+            "sandbox_error",
+            outputs={"stderr": "command not found: codex", "exit_code": 127},
+        )
+        assert c.category == OrchestratorFailureCategory.SANDBOX_ERROR
+        assert c.is_retryable is False
+        assert c.is_transient is False

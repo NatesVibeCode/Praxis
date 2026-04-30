@@ -157,6 +157,91 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
+  # praxis-agentd — local broker for CLI/MCP traffic.
+  #
+  # Transport, not authority. Reuses the canonical MCP path
+  # (handle_request → invoke_tool → operation_catalog_gateway), exposes:
+  #   GET  /health  liveness probe
+  #   POST /rpc     host bin/praxis-agent dispatch (broker token)
+  #   POST /mcp     workflow-worker MCP traffic (signed token OR broker token)
+  #
+  # Why a separate service: the api-server stays for human-facing REST/Moon
+  # surfaces; the broker takes the agent + worker MCP traffic so "API got
+  # stuck" does not equal "every CLI agent and every worker MCP call wedged".
+  # Standing-order ref: architecture-policy::auth::via-docker-creds-not-shell.
+  agent-broker:
+    build:
+      context: ./Code&DBs/Workflow
+      dockerfile: docker/praxis-control.Dockerfile
+      args:
+        PRAXIS_DEPENDENCY_SCOPE: api_server
+        PRAXIS_CONTAINER_WORKSPACE_ROOT: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+        PRAXIS_CONTAINER_HOME: ${PRAXIS_CONTAINER_HOME:-/home/praxis-agent}
+    image: praxis-api:latest
+    depends_on:
+      semantic-backend:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      WORKFLOW_DATABASE_URL: ${PRAXIS_DOCKER_WORKFLOW_DATABASE_URL:-${WORKFLOW_DATABASE_URL:?WORKFLOW_DATABASE_URL must be set}}
+      WORKFLOW_POOL_MIN_SIZE: ${PRAXIS_AGENT_BROKER_WORKFLOW_POOL_MIN_SIZE:-1}
+      WORKFLOW_POOL_MAX_SIZE: ${PRAXIS_AGENT_BROKER_WORKFLOW_POOL_MAX_SIZE:-4}
+      WORKFLOW_EMBEDDING_BACKEND: service
+      WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
+      PYTHONPATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/Code&DBs/Workflow"
+      PRAXIS_WORKSPACE_BASE_PATH: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}"
+      PRAXIS_AGENT_BROKER_HOST: 0.0.0.0
+      PRAXIS_AGENT_BROKER_PORT: "8422"
+      PRAXIS_AGENT_BROKER_STATE_DIR: "${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}/artifacts/agent-broker"
+      WORKFLOW_COMPILER_ENABLE_LLM: ${WORKFLOW_COMPILER_ENABLE_LLM:-1}
+      PRAXIS_OPERATOR_DEV_MODE: ${PRAXIS_OPERATOR_DEV_MODE:-0}
+      PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
+      PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
+      # Integration secrets — same hydration channel as api-server. The
+      # broker dispatches through the same MCP catalog so any tool that
+      # touches an external API (Brave, HubSpot, OpenRouter, etc.) needs
+      # these in the broker's container env, not the host shell.
+      HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      HTTPBIN_DEMO_TOKEN: ${HTTPBIN_DEMO_TOKEN:-}
+      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+      FIREWORKS_API_KEY: ${FIREWORKS_API_KEY:-}
+      ARTIFICIAL_ANALYSIS_API_KEY: ${ARTIFICIAL_ANALYSIS_API_KEY:-}
+      # Same provider auth single-authority posture as api-server.
+      ANTHROPIC_API_KEY: ""
+      ANTHROPIC_AUTH_TOKEN: ""
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      PRAXIS_AGENT_CWD: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+      PRAXIS_AGENT_SESSIONS_RUNNER_URL: ${PRAXIS_AGENT_SESSIONS_RUNNER_URL:-}
+    working_dir: ${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+    volumes:
+      - .:${PRAXIS_CONTAINER_WORKSPACE_ROOT:-/workspace}
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.codex:/root/.codex
+      - ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}/.claude/.credentials.json:/root/.claude/.credentials.json
+    command:
+      - python3
+      - -m
+      - surfaces.agent_broker.server
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8422"
+    ports:
+      - "127.0.0.1:8422:8422"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8422/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
   scheduler:
     build:
       context: ./Code&DBs/Workflow
@@ -205,7 +290,7 @@ services:
     depends_on:
       semantic-backend:
         condition: service_healthy
-      api-server:
+      agent-broker:
         condition: service_healthy
       scheduler:
         condition: service_started
@@ -243,7 +328,7 @@ services:
       # worker runtime derives local slots from visible CPU and memory.
       PRAXIS_WORKER_MAX_PARALLEL: ${PRAXIS_WORKER_MAX_PARALLEL:-}
       PRAXIS_CLI_AUTH_HOME: ${PRAXIS_CLI_AUTH_HOME:-${HOME:?HOME must be set}}
-      PRAXIS_WORKFLOW_MCP_URL: ${PRAXIS_WORKFLOW_MCP_URL:-http://host.docker.internal:8420/mcp}
+      PRAXIS_WORKFLOW_MCP_URL: ${PRAXIS_WORKFLOW_MCP_URL:-http://host.docker.internal:8422/mcp}
       PRAXIS_WORKFLOW_MCP_SIGNING_SECRET: ${PRAXIS_WORKFLOW_MCP_SIGNING_SECRET:?PRAXIS_WORKFLOW_MCP_SIGNING_SECRET must be set}
       # Anthropic in the worker is a noninteractive Linux consumer of a macOS
       # host login. The durable auth rail is the Keychain-derived

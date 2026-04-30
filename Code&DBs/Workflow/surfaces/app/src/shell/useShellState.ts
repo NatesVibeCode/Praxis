@@ -30,7 +30,12 @@ import {
   type RouteRegistryRow,
 } from './routeRegistry';
 import {
+  composeShellId,
   createDefaultShellState,
+  manifestEditorShellId,
+  manifestTabShellId,
+  upsertDynamicTab,
+  type DynamicTab,
   type ShellState,
 } from './state';
 
@@ -68,6 +73,87 @@ function inferActiveTabFromRoute(routeId: string, routes: RouteRegistryRow[]): s
   if (!row) return null;
   if (row.is_dynamic) return null;
   return row.surface_name;
+}
+
+export function routeSlotState(
+  routeId: string,
+  slotValues: Record<string, string | string[]>,
+  routes: RouteRegistryRow[],
+  currentTabs: DynamicTab[] = [],
+): Partial<ShellState> {
+  const patch: Partial<ShellState> = { activeRouteId: routeId };
+  const tab = inferActiveTabFromRoute(routeId, routes);
+  if (tab) patch.activeTabId = tab;
+  if (routeId === 'route.app.workflow') {
+    const workflow = typeof slotValues.workflow === 'string' ? slotValues.workflow : null;
+    const intent = typeof slotValues.intent === 'string' ? slotValues.intent : null;
+    patch.activeTabId = 'build';
+    patch.buildWorkflowId = workflow || null;
+    patch.buildIntent = intent || null;
+    patch.buildView = 'moon';
+    patch.moonRunId = null;
+    patch.dashboardDetail = null;
+  } else if (routeId === 'route.app.run') {
+    const runId = typeof slotValues.run_id === 'string' ? slotValues.run_id : null;
+    patch.activeTabId = 'build';
+    patch.moonRunId = runId;
+    patch.dashboardDetail = null;
+  } else if (routeId === 'route.app.manifest') {
+    const manifestId = typeof slotValues.manifest_id === 'string' ? slotValues.manifest_id : null;
+    const manifestTabId = typeof slotValues.manifest_tab_id === 'string' ? slotValues.manifest_tab_id : 'main';
+    if (manifestId) {
+      const dynamicId = manifestTabShellId(manifestId, manifestTabId);
+      const nextTab: DynamicTab = {
+        id: dynamicId,
+        kind: 'manifest',
+        label: manifestTabId === 'main' ? manifestId : `${manifestId} · ${manifestTabId}`,
+        closable: true,
+        manifestId,
+        manifestTabId,
+      };
+      patch.activeTabId = dynamicId;
+      patch.dynamicTabs = upsertDynamicTab(currentTabs, nextTab);
+      patch.dashboardDetail = null;
+    }
+  } else if (routeId === 'route.app.manifest_editor') {
+    const manifestId = typeof slotValues.manifest_id === 'string' ? slotValues.manifest_id : null;
+    if (manifestId) {
+      const dynamicId = manifestEditorShellId(manifestId);
+      const nextTab: DynamicTab = {
+        id: dynamicId,
+        kind: 'manifest-editor',
+        label: `Edit ${manifestId}`,
+        closable: true,
+        manifestId,
+      };
+      patch.activeTabId = dynamicId;
+      patch.dynamicTabs = upsertDynamicTab(currentTabs, nextTab);
+      patch.dashboardDetail = null;
+    }
+  } else if (routeId === 'route.app.compose') {
+    const intent = typeof slotValues.intent === 'string' ? slotValues.intent : null;
+    const pillRefs = Array.isArray(slotValues.pill_refs)
+      ? slotValues.pill_refs.filter((value): value is string => typeof value === 'string')
+      : [];
+    if (intent) {
+      const dynamicId = composeShellId(intent, pillRefs);
+      const labelPills = pillRefs.length > 0
+        ? ` · ${pillRefs.length} pill${pillRefs.length === 1 ? '' : 's'}`
+        : '';
+      const nextTab: DynamicTab = {
+        id: dynamicId,
+        kind: 'compose',
+        label: `Compose ${intent}${labelPills}`,
+        closable: true,
+        intent,
+        pillRefs,
+      };
+      patch.activeTabId = dynamicId;
+      patch.dynamicTabs = upsertDynamicTab(currentTabs, nextTab);
+      patch.dashboardDetail = null;
+    }
+  }
+  return patch;
 }
 
 function resolveDeepLink(routes: RouteRegistryRow[]): {
@@ -114,6 +200,7 @@ export function useShellState(): UseShellStateResult {
           input: {
             session_aggregate_ref: sid,
             initial_route_id: deepLink.routeId,
+            initial_slot_values: deepLink.slotValues,
             deep_link_search: typeof window !== 'undefined' ? window.location.search : '',
           },
         });
@@ -123,12 +210,32 @@ export function useShellState(): UseShellStateResult {
         const res = await fetch(`/api/projections/ui_shell_state.live?session=${encodeURIComponent(sid)}`);
         if (res.ok) {
           const env = (await res.json()) as ProjectionEnvelope;
-          if (env.output && !cancelled) {
-            setState((prev) => ({ ...prev, ...env.output }));
+          if (!cancelled) {
+            setState((prev) => {
+              const base = { ...prev, ...(env.output || {}) };
+              const deepLinkPatch = routeSlotState(
+                deepLink.routeId,
+                deepLink.slotValues,
+                loaded,
+                base.dynamicTabs || [],
+              );
+              return { ...base, ...deepLinkPatch };
+            });
           }
+        } else if (!cancelled) {
+          setState((prev) => {
+            const deepLinkPatch = routeSlotState(deepLink.routeId, deepLink.slotValues, loaded, prev.dynamicTabs || []);
+            return { ...prev, ...deepLinkPatch };
+          });
         }
       } catch {
         // Projection unavailable — keep default state.
+        if (!cancelled) {
+          setState((prev) => {
+            const deepLinkPatch = routeSlotState(deepLink.routeId, deepLink.slotValues, loaded, prev.dynamicTabs || []);
+            return { ...prev, ...deepLinkPatch };
+          });
+        }
       }
       if (!cancelled) setReady(true);
     })();
@@ -163,10 +270,9 @@ export function useShellState(): UseShellStateResult {
       switch (ev.event_type) {
         case 'session.bootstrapped': {
           const initialRoute = String(payload.initial_route_id || 'route.app.dashboard');
+          const slotValues = (payload.initial_slot_values as Record<string, string | string[]>) || {};
           const next = createDefaultShellState();
-          next.activeRouteId = initialRoute;
-          const tab = inferActiveTabFromRoute(initialRoute, routesRef.current);
-          if (tab) next.activeTabId = tab;
+          Object.assign(next, routeSlotState(initialRoute, slotValues, routesRef.current, next.dynamicTabs));
           setState(next);
           return;
         }

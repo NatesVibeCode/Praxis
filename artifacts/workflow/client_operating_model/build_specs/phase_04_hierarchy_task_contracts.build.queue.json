@@ -1,0 +1,46 @@
+{
+  "name": "Client Operating Model Phase 4 Build Hierarchy Task Contracts",
+  "workflow_id": "client_operating_model_build_phase_04_hierarchy_task_contracts_20260430",
+  "queue_id": "client_operating_model_build_phase_04_hierarchy_task_contracts_20260430",
+  "phase": "implementation",
+  "outcome_goal": "Implement hierarchy and task-environment contract primitives: active path validation, owners/stewards, SOP refs, allowed tools/scopes/models/verifiers, append-only revisions, staleness, and tests.",
+  "anti_requirements": [
+    "Do not stage or commit git changes.",
+    "Do not create task execution authority without a contract gate.",
+    "Do not mutate hierarchy history in place.",
+    "Do not broaden inherited policies implicitly.",
+    "Do not regenerate shared docs/API.md, docs/CLI.md, or docs/MCP.md in this parallel chain; Phase 11 owns final shared surface docs."
+  ],
+  "jobs": [
+    {
+      "label": "phase_04_hierarchy_task_contracts_build",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "build",
+      "timeout": 3600,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "AGENTS.md",
+        "docs/architecture/object-truth-trust-toolbelt/build-plan.md",
+        "docs/architecture/object-truth-trust-toolbelt/task-types-and-contracts.md",
+        "artifacts/workflow/client_operating_model/packets/phase_03_mdm_source_authority/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_04_hierarchy_task_contracts/PLAN.md",
+        "Code&DBs/Workflow/runtime/operations",
+        "Code&DBs/Workflow/storage/postgres",
+        "Code&DBs/Workflow/tests/unit"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/object_truth/task_environment_contracts.py",
+        "Code&DBs/Workflow/runtime/task_contracts",
+        "Code&DBs/Workflow/runtime/operations/commands",
+        "Code&DBs/Workflow/runtime/operations/queries",
+        "Code&DBs/Workflow/storage/postgres",
+        "Code&DBs/Workflow/tests/unit",
+        "Code&DBs/Databases/migrations/workflow",
+        "docs/architecture/object-truth-trust-toolbelt",
+        "artifacts/workflow/client_operating_model/build_reports/phase_04_IMPLEMENTATION.md"
+      ],
+      "prompt": "Build Phase 4 from artifacts/workflow/client_operating_model/packets/phase_04_hierarchy_task_contracts/PLAN.md. Implement the smallest durable hierarchy/task contract substrate: hierarchy node/path validation, owner/steward resolution, SOP or SOP-gap refs, allowed tool/read/write/model/verifier policies, append-only revision semantics, staleness decisions, and typed invalid states. Keep it contract-first and queryable. Avoid broad runtime orchestration changes. Add focused tests for valid contracts, missing owner/steward, retired node, broadened scope, stale contract, and verifier policy. Write artifacts/workflow/client_operating_model/build_reports/phase_04_IMPLEMENTATION.md with changed files, validation, blockers, and any Phase 11 surface needs. Do not stage or commit."
+    }
+  ]
+}

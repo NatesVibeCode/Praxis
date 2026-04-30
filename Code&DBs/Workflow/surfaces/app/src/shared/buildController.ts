@@ -4,6 +4,16 @@
 import type { BuildPayload, CompilePreviewPayload } from './types';
 import { fetchJson, type JsonRequestOptions } from './request';
 
+export class MaterializePlanError extends Error {
+  readonly response: unknown;
+
+  constructor(message: string, response: unknown) {
+    super(message);
+    this.name = 'MaterializePlanError';
+    this.response = response;
+  }
+}
+
 interface BuildDefinitionRequest {
   workflowId?: string | null;
   title?: string;
@@ -58,22 +68,51 @@ export async function compileDefinition(
   prose: string,
   opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'> & {
     fullCompose?: boolean;
+    enableLlm?: boolean;
+    llmTimeoutSeconds?: number;
     onWorkflowReady?: (workflowId: string) => void;
   },
 ): Promise<BuildPayload> {
-  const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, { definition: {} });
-  if (workflowId) opts?.onWorkflowReady?.(workflowId);
-  // Default to the full compose path: synthesis + bounded parallel fork-out
-  // author calls. The build canvas renders nothing until this returns —
-  // operator standing order feedback_autonomous_first_no_review_gates +
-  // feedback_fanout_by_work_volume.
+  return materializePlan(prose, opts);
+}
+
+export async function materializePlan(
+  prose: string,
+  opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'> & {
+    fullCompose?: boolean;
+    enableLlm?: boolean;
+    llmTimeoutSeconds?: number;
+    onWorkflowReady?: (workflowId: string) => void;
+  },
+): Promise<BuildPayload> {
   const enableFullCompose = opts?.fullCompose !== false;
-  return postBuildMutation(workflowId, 'bootstrap', {
-    prose,
-    title: opts?.title,
-    enable_llm: true,
-    enable_full_compose: enableFullCompose,
-  });
+  const enableLlm = opts?.enableLlm !== false;
+  const response = await fetchJson<any>('/api/compile/materialize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      intent: prose,
+      workflow_id: opts?.workflowId || undefined,
+      title: opts?.title,
+      enable_llm: enableLlm,
+      enable_full_compose: enableFullCompose,
+      llm_timeout_seconds: opts?.llmTimeoutSeconds,
+    }),
+  }, { timeoutMs: enableFullCompose ? Math.max(45000, (opts?.llmTimeoutSeconds ?? 60) * 1000 + 15000) : 45000 });
+  if (response?.ok === false) {
+    const reason = response.error_code || response.reason_code || 'compile.materialize.failed';
+    throw new MaterializePlanError(response.error || `Materialize blocked: ${reason}`, response);
+  }
+  const workflowId = response?.workflow_id || response?.build_payload?.workflow?.id || response?.workflow?.id;
+  if (workflowId) opts?.onWorkflowReady?.(workflowId);
+  const payload = response?.build_payload ?? response?.mutation ?? response;
+  return {
+    ...payload,
+    workflow: payload?.workflow ?? response?.workflow ?? null,
+    compile_preview: payload?.compile_preview ?? response?.compile_preview ?? null,
+    operation_receipt: response?.operation_receipt,
+    graph_summary: response?.graph_summary,
+  };
 }
 
 export async function previewCompile(prose: string): Promise<CompilePreviewPayload> {
@@ -88,11 +127,10 @@ export async function refineDefinition(
   prose: string,
   opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'>,
 ): Promise<BuildPayload> {
-  const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, { definition: {} });
-  return postBuildMutation(workflowId, 'bootstrap', {
-    prose,
+  return materializePlan(prose, {
+    workflowId: opts?.workflowId,
     title: opts?.title,
-    enable_llm: true,
+    fullCompose: true,
   });
 }
 
@@ -175,6 +213,11 @@ export async function createWorkflow(
 }
 
 export async function planDefinition(opts?: Omit<BuildDefinitionRequest, 'compiled_spec'>): Promise<any> {
+  if (opts?.workflowId) {
+    return postBuildMutation(opts.workflowId, 'harden', {
+      title: opts?.title,
+    });
+  }
   const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, {
     definition: opts?.definition,
     buildGraph: opts?.buildGraph,
@@ -207,16 +250,12 @@ export async function postBuildMutation(
   subpath: string,
   body: Record<string, unknown>,
 ): Promise<BuildPayload> {
-  // Full compose path runs synthesis (~30s) + bounded parallel fork-out author
-  // calls (~3 min wall-clock). Single-call compile fits the 45s budget;
-  // give bootstrap-with-full-compose a 6 min ceiling so the LLM compile
-  // gates can finish before the canvas renders anything.
-  const isBootstrap = subpath === 'bootstrap';
-  const fullCompose = isBootstrap && body['enable_full_compose'] !== false;
-  const timeoutMs = fullCompose ? 360000 : (isBootstrap ? 45000 : 25000);
+  if (subpath === 'bootstrap') {
+    throw new Error('Bootstrap materialization moved to materializePlan().');
+  }
   return fetchJson(`/api/workflows/${workflowId}/build/${subpath}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, { timeoutMs });
+  }, { timeoutMs: 25000 });
 }

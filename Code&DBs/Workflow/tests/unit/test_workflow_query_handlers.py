@@ -1055,100 +1055,11 @@ def test_handle_trigger_post_records_surface_usage_on_success(monkeypatch) -> No
     assert recorded[0]["response_payload"]["run_id"] == "run_123"
 
 
-def test_handle_workflow_build_post_bootstrap_compiles_into_workflow_build_payload() -> None:
-    workflow_row = {
-        "id": "wf_build_bootstrap",
-        "name": "Bootstrap Draft",
-        "description": "Bootstrap Draft",
-        "definition": {},
-        "compiled_spec": None,
-        "version": 1,
-        "updated_at": "2026-04-15T10:00:00Z",
-    }
-    pg = _MutableWorkflowPg(workflow_rows={"wf_build_bootstrap": workflow_row})
+def test_handle_workflow_build_post_bootstrap_is_deprecated() -> None:
     request = _RequestStub(
         {
             "prose": "Review support inbox",
             "title": "Bootstrap Draft",
-            "enable_full_compose": False,
-        },
-        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
-        path="/api/workflows/wf_build_bootstrap/build/bootstrap",
-    )
-
-    with patch(
-        "runtime.compiler.compile_prose",
-        return_value={
-            "definition": {
-                "type": "operating_model",
-                "source_prose": "Review support inbox",
-                "compiled_prose": "Review support inbox",
-                "references": [],
-                "capabilities": [],
-                "trigger_intent": [],
-                "draft_flow": [],
-                "definition_revision": "def_bootstrap_001",
-            }
-        },
-    ) as compile_mock:
-        workflow_query._handle_workflow_build_post(
-            request,
-            "/api/workflows/wf_build_bootstrap/build/bootstrap",
-        )
-
-    compile_mock.assert_called_once()
-    assert request.sent is not None
-    status, payload = request.sent
-    assert status == 200
-    assert payload["workflow"]["id"] == "wf_build_bootstrap"
-    assert payload["definition"]["workflow_id"] == "wf_build_bootstrap"
-    assert payload["compile_preview"]["cqrs_role"] == "query"
-
-
-def test_handle_workflow_build_post_bootstrap_forwards_full_compose_flag(monkeypatch) -> None:
-    calls: dict[str, Any] = {}
-
-    def fake_materialize_workflow(
-        intent: str,
-        *,
-        conn: Any,
-        workflow_id: str | None = None,
-        title: str | None = None,
-        enable_llm: bool | None = None,
-        enable_full_compose: bool | None = None,
-    ) -> dict[str, Any]:
-        calls.update(
-            {
-                "intent": intent,
-                "conn": conn,
-                "workflow_id": workflow_id,
-                "title": title,
-                "enable_llm": enable_llm,
-                "enable_full_compose": enable_full_compose,
-            }
-        )
-        return {
-            "mutation": {
-                "row": {"id": workflow_id},
-                "definition": {"workflow_id": workflow_id},
-                "compiled_spec": {},
-                "build_bundle": {},
-                "planning_notes": [],
-            }
-        }
-
-    monkeypatch.setattr("runtime.compile_cqrs.materialize_workflow", fake_materialize_workflow)
-    monkeypatch.setattr(
-        workflow_query,
-        "build_workflow_build_moment",
-        lambda *_args, **_kwargs: {"ok": True},
-    )
-
-    request = _RequestStub(
-        {
-            "prose": "Review support inbox",
-            "title": "Bootstrap Draft",
-            "enable_llm": True,
             "enable_full_compose": False,
         },
         subsystems=SimpleNamespace(get_pg_conn=lambda: "db"),
@@ -1160,30 +1071,29 @@ def test_handle_workflow_build_post_bootstrap_forwards_full_compose_flag(monkeyp
         "/api/workflows/wf_build_bootstrap/build/bootstrap",
     )
 
-    assert request.sent == (200, {"ok": True})
-    assert calls == {
-        "intent": "Review support inbox",
-        "conn": "db",
-        "workflow_id": "wf_build_bootstrap",
-        "title": "Bootstrap Draft",
-        "enable_llm": True,
-        "enable_full_compose": False,
-    }
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 410
+    assert payload["reason_code"] == "workflow_build.bootstrap.deprecated"
+    assert payload["migration_hint"] == "/api/compile/materialize"
 
 
 def test_handle_compile_preview_post_returns_query_payload(monkeypatch) -> None:
-    class _Preview:
-        def to_dict(self) -> dict[str, Any]:
-            return {
-                "kind": "compile_preview",
-                "cqrs_role": "query",
-                "scope_packet": {"suggested_steps": [{"label": "discover"}]},
-            }
+    calls: list[dict[str, Any]] = []
 
-    monkeypatch.setattr("runtime.compile_cqrs.preview_compile", lambda intent, *, conn: _Preview())
+    def _fake_execute(subsystems: Any, *, operation_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append({"subsystems": subsystems, "operation_name": operation_name, "payload": payload})
+        return {
+            "kind": "compile_preview",
+            "cqrs_role": "query",
+            "scope_packet": {"suggested_steps": [{"label": "discover"}]},
+        }
+
+    monkeypatch.setattr("runtime.operation_catalog_gateway.execute_operation_from_subsystems", _fake_execute)
+    subsystems = SimpleNamespace(get_pg_conn=lambda: "db")
     request = _RequestStub(
         {"intent": "Build a custom integration"},
-        subsystems=SimpleNamespace(get_pg_conn=lambda: "db"),
+        subsystems=subsystems,
         path="/api/compile/preview",
     )
 
@@ -1197,6 +1107,13 @@ def test_handle_compile_preview_post_returns_query_payload(monkeypatch) -> None:
             "scope_packet": {"suggested_steps": [{"label": "discover"}]},
         },
     )
+    assert calls == [
+        {
+            "subsystems": subsystems,
+            "operation_name": "compile_preview",
+            "payload": {"intent": "Build a custom integration"},
+        }
+    ]
 
 
 def test_handle_workflow_build_post_harden_uses_workflow_scoped_build_state() -> None:
@@ -3827,12 +3744,16 @@ def test_handle_workflows_post_creates_graph_backed_workflow_without_browser_def
     assert workflow["definition"]["execution_setup"]["phases"] == [
         {
             "step_id": "step-001",
+            "agent": None,
             "agent_route": "@notifications/send",
+            "capabilities": [],
             "system_prompt": "",
             "required_inputs": [],
             "outputs": [],
             "persistence_targets": [],
             "handoff_target": None,
+            "task_type": None,
+            "write_scope": [],
             "integration_args": {
                 "title": "Notify ops",
                 "message": "Run complete",
@@ -4183,9 +4104,73 @@ def test_handle_manifests_get_returns_compact_listing() -> None:
     assert [row["id"] for row in payload["manifests"]] == ["plan_123", "manifest_456"]
     assert payload["manifests"][0]["manifest_family"] == "control_plane"
     assert payload["manifests"][0]["manifest_type"] == "data_plan"
+    assert "manifest" not in payload["manifests"][0]
     assert payload["manifests"][1]["manifest_family"] is None
     assert payload["manifests"][1]["manifest_type"] is None
+    assert "manifest" not in payload["manifests"][1]
     assert any("FROM app_manifests" in query for query, _ in pg.executed)
+
+
+def test_handle_manifests_get_can_include_payload_for_seed_cloning() -> None:
+    seed_manifest = {
+        "version": 4,
+        "kind": "praxis_surface_bundle",
+        "title": "Entity Workspace",
+        "default_tab_id": "main",
+        "tabs": [
+            {
+                "id": "main",
+                "label": "Entities",
+                "surface_id": "main",
+                "source_option_ids": ["workspace_records", "external_api"],
+            }
+        ],
+        "surfaces": {
+            "main": {
+                "id": "main",
+                "title": "Entities",
+                "kind": "quadrant_manifest",
+                "manifest": {
+                    "version": 2,
+                    "grid": "4x4",
+                    "quadrants": {"A1": {"module": "search-panel"}},
+                },
+            }
+        },
+        "source_options": {
+            "workspace_records": {"label": "Workspace Records"},
+            "external_api": {"label": "External API", "availability": "setup_required"},
+        },
+    }
+    pg = _RecordingPg(
+        manifest_rows={
+            "seed.workspace.entity": {
+                "id": "seed.workspace.entity",
+                "name": "Entity Workspace",
+                "description": "Records + detail pane",
+                "status": "seed",
+                "updated_at": "2026-04-15T12:00:00+00:00",
+                "manifest": seed_manifest,
+            }
+        }
+    )
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/manifests?status=seed&limit=20&include_manifest=true",
+    )
+
+    workflow_query._handle_manifests_get(request, "/api/manifests")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["count"] == 1
+    row = payload["manifests"][0]
+    assert row["id"] == "seed.workspace.entity"
+    assert row["manifest"]["tabs"][0]["source_option_ids"] == ["workspace_records", "external_api"]
+    assert row["manifest"]["surfaces"]["main"]["manifest"]["quadrants"]["A1"]["module"] == "search-panel"
+    assert row["manifest"]["source_options"]["external_api"]["availability"] == "setup_required"
+    assert payload["filters"]["include_manifest"] is True
 
 
 def test_handle_manifests_get_filters_control_plane_rows() -> None:
@@ -5340,7 +5325,7 @@ def test_handle_bugs_search_include_replay_state_uses_read_only_hint() -> None:
         subs,
         {
             "action": "search",
-            "title": "replayable drift",
+            "query": "replayable drift",
             "limit": 1,
             "include_replay_state": True,
         },
@@ -5512,6 +5497,71 @@ def test_handle_decompose_empty_result_is_machine_first() -> None:
     assert result["status"] == "empty"
     assert result["reason_code"] == "decompose.no_sprints"
     assert result["sprints"] == []
+
+
+def test_handle_objects_get_list_accepts_query_string_path() -> None:
+    class _Pg:
+        def __init__(self) -> None:
+            self.executed: list[tuple[str, tuple[Any, ...]]] = []
+
+        def execute(self, query: str, *params: Any) -> list[dict[str, Any]]:
+            self.executed.append((query, params))
+            normalized = " ".join(query.split())
+            assert "FROM objects WHERE type_id = $1 AND status = $2 LIMIT $3" in normalized
+            return [
+                {
+                    "object_id": "doc.type.policy",
+                    "type_id": "doc_type_document",
+                    "properties": '{"title": "Policy"}',
+                    "status": "active",
+                    "created_at": "2026-04-29T00:00:00Z",
+                    "updated_at": "2026-04-29T00:00:00Z",
+                }
+            ]
+
+    pg = _Pg()
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/objects?type=doc_type_document",
+    )
+
+    workflow_query._handle_objects_get(request, request.path)
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["type_id"] == "doc_type_document"
+    assert payload["count"] == 1
+    assert payload["objects"][0]["properties"] == {"title": "Policy"}
+    assert pg.executed[0][1] == ("doc_type_document", "active", 100)
+
+
+def test_entity_workspace_seed_uses_registered_object_source_and_selection_bus() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    seed_path = repo_root / "config/helm_human_layer/seeds/entity_workspace.json"
+    seed = json.loads(seed_path.read_text(encoding="utf-8"))
+    quadrants = seed["surfaces"]["main"]["manifest"]["quadrants"]
+
+    search_config = quadrants["A1"]["config"]
+    detail_config = quadrants["A3"]["config"]
+    table_config = quadrants["B1"]["config"]
+
+    assert search_config["objectType"] == "doc_type_document"
+    assert search_config["sourceSelection"] == "active_source_option"
+    assert search_config["sourceBindings"]["workspace_records"]["objectType"] == "doc_type_document"
+    assert "preview-only" in search_config["sourceBindings"]["connected_crm"]["disabledMessage"]
+    assert search_config["publishQuery"] == "entity_search_query"
+    assert quadrants["A3"]["module"] == "key-value"
+    assert quadrants["A3"]["span"] == "2x1"
+    assert quadrants["B1"]["module"] == "data-table"
+    assert quadrants["B1"]["span"] == "4x3"
+    assert table_config["objectType"] == "doc_type_document"
+    assert table_config["sourceSelection"] == "active_source_option"
+    assert table_config["sourceBindings"]["workspace_records"]["objectType"] == "doc_type_document"
+    assert "requires setup" in table_config["sourceBindings"]["external_api"]["disabledMessage"]
+    assert table_config["publishSelection"] == "entity"
+    assert table_config["searchQuery"] == "entity_search_query"
+    assert detail_config["subscribeSelection"] == "entity"
 
 
 def test_handle_search_get_includes_platform_registry_results() -> None:

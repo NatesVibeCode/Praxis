@@ -18,11 +18,13 @@ interface SaveLayoutTarget {
 export function SaveLayoutBar({
   manifest,
   saveTarget,
+  layoutPath = 'ui.layout.quadrants',
 }: {
   manifest: QuadrantManifest;
   saveTarget?: SaveLayoutTarget | null;
+  layoutPath?: string;
 }) {
-  const overrides = useSlice(world, 'ui.layout.quadrants') as Record<string, any> | null;
+  const overrides = useSlice(world, layoutPath) as Record<string, any> | null;
   const { show } = useToast();
   const [isSaving, setIsSaving] = useState(false);
   const [isSaveAs, setIsSaveAs] = useState(false);
@@ -97,10 +99,10 @@ export function SaveLayoutBar({
       if (!res.ok) throw new Error('Failed to save manifest');
 
       // Commit proposed changes into world state so UI doesn't revert
-      const savedQuadrants = world.get('ui.layout.quadrants');
+      const savedQuadrants = world.get(layoutPath);
       world.clearProposed();
       if (savedQuadrants && typeof savedQuadrants === 'object') {
-        world.set('ui.layout.quadrants', savedQuadrants);
+        world.set(layoutPath, savedQuadrants);
       }
       show('Layout saved', 'success');
     } catch (err: any) {
@@ -130,10 +132,10 @@ export function SaveLayoutBar({
       if (!res.ok) throw new Error('Failed to save manifest as ' + saveAsName);
 
       const payload = await res.json().catch(() => null);
-      const savedQuadrants = world.get('ui.layout.quadrants');
+      const savedQuadrants = world.get(layoutPath);
       world.clearProposed();
       if (savedQuadrants && typeof savedQuadrants === 'object') {
-        world.set('ui.layout.quadrants', savedQuadrants);
+        world.set(layoutPath, savedQuadrants);
       }
       show('Saved as ' + saveAsName, 'success');
       if (payload?.id) {

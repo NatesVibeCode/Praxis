@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExecutionProof, executionProofPath } from '../../dashboard/proofApi';
+import { executionProofPath, type ExecutionProof } from '../../dashboard/proofApi';
 
 export type ExecutionProofStatus = 'idle' | 'loading' | 'ready' | 'error';
 

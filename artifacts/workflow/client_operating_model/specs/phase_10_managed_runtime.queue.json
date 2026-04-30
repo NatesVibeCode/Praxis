@@ -1,0 +1,32 @@
+{
+  "name": "Client Operating Model Phase 10 Managed Runtime",
+  "workflow_id": "client_operating_model_phase_10_managed_runtime_20260430",
+  "queue_id": "client_operating_model_phase_10_managed_runtime_20260430",
+  "phase": "architecture",
+  "outcome_goal": "Produce the optional managed runtime, compute accounting, and observability implementation packet.",
+  "anti_requirements": [
+    "Do not edit production code.",
+    "Do not conflate discovery/build/proof value with recurring task execution value.",
+    "Do not hide compute costs."
+  ],
+  "jobs": [
+    {
+      "label": "phase_10_managed_runtime_packet",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "architecture",
+      "timeout": 900,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "docs/architecture/object-truth-trust-toolbelt/risk-mitigation.md",
+        "Code&DBs/Workflow/runtime/workflow",
+        "Code&DBs/Workflow/observability",
+        "artifacts/workflow/client_operating_model/packets/phase_09_portable_cartridge/PLAN.md"
+      ],
+      "write_scope": [
+        "artifacts/workflow/client_operating_model/packets/phase_10_managed_runtime/PLAN.md"
+      ],
+      "prompt": "Write artifacts/workflow/client_operating_model/packets/phase_10_managed_runtime/PLAN.md. Produce a bounded build packet for Phase 10: Optional Managed Runtime, Compute Accounting, and Observability. Cover managed execution, exported/hybrid alternatives, compute metering, cost visibility, run receipts, heartbeat health, audit views, customer-facing observability, tests, and validation. Do not edit code."
+    }
+  ]
+}

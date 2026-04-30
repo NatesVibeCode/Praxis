@@ -54,12 +54,34 @@ def build_definition(
     return definition
 
 
+def normalize_capabilities(capabilities: list[Any]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for capability in capabilities:
+        if isinstance(capability, dict):
+            normalized.append(dict(capability))
+            continue
+        slug = as_text(capability)
+        if not slug:
+            continue
+        normalized.append(
+            {
+                "slug": slug,
+                "label": titleize_fragment(slug, fallback=slug),
+                "route": slug,
+                "signals": [slug],
+                "reference_slugs": [],
+            }
+        )
+    return normalized
+
+
 def materialize_definition(definition: dict[str, Any]) -> dict[str, Any]:
     materialized = json.loads(json.dumps(definition, default=str)) if isinstance(definition, dict) else {}
     source_prose = as_text(materialized.get("source_prose"))
     compiled_prose = as_text(materialized.get("compiled_prose"))
     references = materialized.get("references") if isinstance(materialized.get("references"), list) else []
-    capabilities = materialized.get("capabilities") if isinstance(materialized.get("capabilities"), list) else []
+    raw_capabilities = materialized.get("capabilities") if isinstance(materialized.get("capabilities"), list) else []
+    capabilities = normalize_capabilities(raw_capabilities)
     trigger_intent = materialized.get("trigger_intent") if isinstance(materialized.get("trigger_intent"), list) else []
     narrative_blocks = (
         materialized.get("narrative_blocks") if isinstance(materialized.get("narrative_blocks"), list) else []

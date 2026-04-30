@@ -249,6 +249,7 @@ class ShellSessionBootstrappedCommand(BaseModel):
 
     session_aggregate_ref: str
     initial_route_id: str = "route.app.dashboard"
+    initial_slot_values: dict[str, Any] = Field(default_factory=dict)
     deep_link_search: str = ""
 
 
@@ -259,6 +260,7 @@ def handle_shell_session_bootstrapped(
     payload = {
         "session_aggregate_ref": _normalize(command.session_aggregate_ref),
         "initial_route_id": _normalize(command.initial_route_id, default="route.app.dashboard"),
+        "initial_slot_values": dict(command.initial_slot_values or {}),
         "deep_link_search": _normalize(command.deep_link_search),
     }
     event_id = _emit_event(

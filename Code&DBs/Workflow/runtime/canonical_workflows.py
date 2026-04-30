@@ -35,9 +35,18 @@ from runtime.build_review_decisions import (
 class WorkflowRuntimeBoundaryError(RuntimeError):
     """Raised when canonical workflow runtime ownership rejects a request."""
 
-    def __init__(self, message: str, *, status_code: int = 400) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 400,
+        reason_code: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.reason_code = _text(reason_code) or None
+        self.details = dict(details or {})
 
 
 def _text(value: Any) -> str:
@@ -327,10 +336,22 @@ def materialize_definition_from_build_graph(
             phase["outputs"] = [value for value in (_text(item) for item in (node.get("outputs") or [])) if value]
             phase["persistence_targets"] = [value for value in (_text(item) for item in (node.get("persistence_targets") or [])) if value]
             phase["handoff_target"] = _text(node.get("handoff_target")) or None
+            phase["task_type"] = _text(node.get("task_type")) or phase.get("task_type") or None
+            phase["agent"] = _text(node.get("agent")) or phase.get("agent") or None
+            phase["capabilities"] = [value for value in (_text(item) for item in (node.get("capabilities") or [])) if value]
+            phase["write_scope"] = [value for value in (_text(item) for item in (node.get("write_scope") or [])) if value]
             if isinstance(node.get("integration_args"), dict):
                 phase["integration_args"] = _json_clone(node.get("integration_args"))
             else:
                 phase.pop("integration_args", None)
+            if isinstance(node.get("agent_tool_plan"), dict):
+                phase["agent_tool_plan"] = _json_clone(node.get("agent_tool_plan"))
+            else:
+                phase.pop("agent_tool_plan", None)
+            if isinstance(node.get("completion_contract"), dict):
+                phase["completion_contract"] = _json_clone(node.get("completion_contract"))
+            else:
+                phase.pop("completion_contract", None)
             new_phases.append(phase)
 
     base_definition["draft_flow"] = draft_flow
@@ -348,6 +369,134 @@ def materialize_definition_from_build_graph(
             edge_gates.append(gate_entry)
     base_definition["execution_setup"]["edge_gates"] = edge_gates
     return recompute_definition_revision(base_definition)
+
+
+_NODE_FIELD_PATCH_ALLOWLIST = {
+    "title",
+    "summary",
+    "route",
+    "status",
+    "prompt",
+    "required_inputs",
+    "outputs",
+    "persistence_targets",
+    "handoff_target",
+    "integration_args",
+    "trigger",
+    "task_type",
+    "agent",
+    "capabilities",
+    "write_scope",
+    "agent_tool_plan",
+    "completion_contract",
+}
+
+_NODE_STRING_FIELDS = {"title", "summary", "route", "status", "prompt", "task_type", "agent"}
+_NODE_STRING_OR_NULL_FIELDS = {"handoff_target"}
+_NODE_STRING_LIST_FIELDS = {"required_inputs", "outputs", "persistence_targets", "capabilities", "write_scope"}
+_NODE_OBJECT_FIELDS = {"integration_args", "trigger", "agent_tool_plan", "completion_contract"}
+
+
+def _current_build_graph_for_field_patch(
+    definition: dict[str, Any],
+    *,
+    current_compiled_spec: dict[str, Any] | None,
+) -> dict[str, Any]:
+    from runtime.build_authority import build_authority_bundle
+
+    bundle = build_authority_bundle(definition, compiled_spec=current_compiled_spec)
+    graph = bundle.get("build_graph") if isinstance(bundle.get("build_graph"), dict) else {}
+    return _json_clone(graph)
+
+
+def _parse_node_field_patch(subpath: str, body: dict[str, Any]) -> tuple[str, str, Any]:
+    parts = [part for part in subpath.split("/") if part]
+    if len(parts) not in (2, 3) or parts[0] != "nodes":
+        raise WorkflowRuntimeBoundaryError(
+            "node field edits must use nodes/{node_id}/{field} or nodes/{node_id}",
+        )
+    node_id = _text(parts[1])
+    if not node_id:
+        raise WorkflowRuntimeBoundaryError("node_id is required")
+
+    if len(parts) == 3:
+        field_name = _text(parts[2])
+        if "value" not in body:
+            raise WorkflowRuntimeBoundaryError("node field patch body must include value")
+        value = body.get("value")
+    else:
+        explicit_field = _text(body.get("field"))
+        if explicit_field:
+            field_name = explicit_field
+            if "value" not in body:
+                raise WorkflowRuntimeBoundaryError("node field patch body must include value")
+            value = body.get("value")
+        else:
+            patch_keys = [key for key in body.keys() if key not in {"reason", "actor_ref"}]
+            if len(patch_keys) != 1:
+                raise WorkflowRuntimeBoundaryError(
+                    "node field patches must touch exactly one field",
+                )
+            field_name = _text(patch_keys[0])
+            value = body.get(patch_keys[0])
+
+    if field_name not in _NODE_FIELD_PATCH_ALLOWLIST:
+        raise WorkflowRuntimeBoundaryError(f"node field is not patchable: {field_name}")
+    return node_id, field_name, _normalize_node_field_value(field_name, value)
+
+
+def _normalize_node_field_value(field_name: str, value: Any) -> Any:
+    if field_name in _NODE_STRING_FIELDS:
+        return _text(value)
+    if field_name in _NODE_STRING_OR_NULL_FIELDS:
+        normalized = _text(value)
+        return normalized or None
+    if field_name in _NODE_STRING_LIST_FIELDS:
+        if not isinstance(value, list):
+            raise WorkflowRuntimeBoundaryError(f"{field_name} must be a list")
+        return [item for item in (_text(entry) for entry in value) if item]
+    if field_name in _NODE_OBJECT_FIELDS:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise WorkflowRuntimeBoundaryError(f"{field_name} must be an object")
+        return _json_clone(value)
+    return _json_clone(value)
+
+
+def _apply_node_field_patch(
+    definition: dict[str, Any],
+    *,
+    row: dict[str, Any],
+    subpath: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    from runtime.operating_model_planner import current_compiled_spec
+
+    node_id, field_name, value = _parse_node_field_patch(subpath, body)
+    persisted_compiled_spec = current_compiled_spec(
+        definition,
+        _parse_json_field(row.get("compiled_spec")),
+    )
+    graph = _current_build_graph_for_field_patch(
+        definition,
+        current_compiled_spec=persisted_compiled_spec,
+    )
+    nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
+    for index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            continue
+        if _text(node.get("node_id") or node.get("id")) != node_id:
+            continue
+        next_node = dict(node)
+        if value in (None, "", [], {}):
+            next_node.pop(field_name, None)
+        else:
+            next_node[field_name] = value
+        nodes[index] = next_node
+        graph["nodes"] = nodes
+        return materialize_definition_from_build_graph(definition, build_graph=graph)
+    raise WorkflowRuntimeBoundaryError(f"Node not found: {node_id}", status_code=404)
 
 
 def _slug_fragment(value: str, *, fallback: str = "step") -> str:
@@ -1039,6 +1188,16 @@ def mutate_workflow_build(
         full_compose_raw = body.get("enable_full_compose")
         if full_compose_raw is not None and not isinstance(full_compose_raw, bool):
             raise WorkflowRuntimeBoundaryError("enable_full_compose must be a boolean")
+        timeout_raw = body.get("llm_timeout_seconds")
+        llm_overrides: dict[str, Any] | None = None
+        if timeout_raw is not None:
+            try:
+                timeout_seconds = int(timeout_raw)
+            except (TypeError, ValueError) as exc:
+                raise WorkflowRuntimeBoundaryError("llm_timeout_seconds must be an integer") from exc
+            if timeout_seconds < 5 or timeout_seconds > 600:
+                raise WorkflowRuntimeBoundaryError("llm_timeout_seconds must be between 5 and 600")
+            llm_overrides = {"timeout_seconds": timeout_seconds}
         # Default to the full synthesis + N fork-out compose path. Single-call
         # compile is opt-out via enable_full_compose=false; nothing surfaces in
         # the build canvas until the LLM compile gates have run.
@@ -1054,17 +1213,27 @@ def mutate_workflow_build(
             # upstream. 5-way fan-out still gets the prefix-cache benefit
             # without overwhelming Together. Bump back to 20 once the operator
             # account tier is raised, or wire request-level retry-with-backoff.
-            compose_result = compose_plan_via_llm(
-                prose,
-                conn=conn,
-                plan_name=title,
-                concurrency=5,
-            )
-            # Always translate — even on failure. The translator carries
-            # compose_provenance (synthesis usage, validation findings,
-            # pill triage) onto the definition so the React compose panel
-            # can show the user what failed instead of black-holing them
-            # for 3 minutes with "Compilation failed" and an empty canvas.
+            compose_result = body.get("_compose_result")
+            if compose_result is None:
+                compose_result = compose_plan_via_llm(
+                    prose,
+                    conn=conn,
+                    plan_name=title,
+                    concurrency=5,
+                    llm_overrides=llm_overrides,
+                )
+            if getattr(compose_result, "ok", False) is not True:
+                compose_payload = (
+                    compose_result.to_dict()
+                    if hasattr(compose_result, "to_dict")
+                    else {"ok": False, "error": str(compose_result)}
+                )
+                reason_code = _text(compose_payload.get("reason_code")) or "compose.failed"
+                raise WorkflowRuntimeBoundaryError(
+                    f"bootstrap compose failed: {reason_code}",
+                    reason_code=reason_code,
+                    details={"workflow_id": workflow_id, "compose_provenance": compose_payload},
+                )
             definition = packets_to_definition(
                 workflow_id=workflow_id,
                 intent=prose,
@@ -1218,6 +1387,13 @@ def mutate_workflow_build(
         restore_body["decision"] = _text(body.get("decision")) or "revoke"
         review_decision_payload = _normalize_build_review_decision_body(restore_body)
         undo_receipt = None
+    elif subpath.startswith("nodes/"):
+        definition = _apply_node_field_patch(
+            definition,
+            row=row,
+            subpath=subpath,
+            body=body,
+        )
     elif subpath == "build_graph":
         definition = materialize_definition_from_build_graph(
             definition,

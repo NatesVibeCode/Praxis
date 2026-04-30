@@ -25,6 +25,20 @@ BEGIN;
 -- ──────────────────────────────────────────────────────────────────────────
 -- (1) Fix register_operation_atomic: query → 'read_model', not 'query_model'
 -- ──────────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+    v_signature text;
+BEGIN
+    FOR v_signature IN
+        SELECT oid::regprocedure::text
+          FROM pg_proc
+         WHERE pronamespace = 'public'::regnamespace
+           AND proname = 'register_operation_atomic'
+    LOOP
+        EXECUTE format('DROP FUNCTION IF EXISTS %s', v_signature);
+    END LOOP;
+END $$;
+
 CREATE OR REPLACE FUNCTION register_operation_atomic(
     p_operation_ref            TEXT,
     p_operation_name           TEXT,

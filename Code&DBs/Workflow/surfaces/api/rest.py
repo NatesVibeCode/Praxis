@@ -56,6 +56,8 @@ from runtime.operation_catalog_bindings import (
     resolve_http_operation_binding,
 )
 from runtime.operation_catalog_gateway import (
+    CURRENT_CALLER_CONTEXT,
+    CallerContext,
     OperationIdempotencyConflict,
     OperationModeViolation,
     aexecute_operation_binding,
@@ -779,7 +781,22 @@ async def _praxis_transport_middleware(request: Request, call_next):
     request.state.client_version = _client_version_from_request(request)
     request.state.idempotency_key = str(request.headers.get(_IDEMPOTENCY_HEADER, "")).strip() or None
 
-    response = await call_next(request)
+    # Set the gateway caller context so every nested execute_operation
+    # call dispatched while serving this request records transport_kind=
+    # "http" on its receipt. The middleware-level set means individual
+    # route handlers do not need to thread caller_context through every
+    # gateway dispatch — _prepare_call_context picks it up from the
+    # ContextVar.
+    transport_context = CallerContext(
+        cause_receipt_id=None,
+        correlation_id=str(uuid4()),
+        transport_kind="http",
+    )
+    token = CURRENT_CALLER_CONTEXT.set(transport_context)
+    try:
+        response = await call_next(request)
+    finally:
+        CURRENT_CALLER_CONTEXT.reset(token)
     response.headers.setdefault(_REQUEST_ID_HEADER, request.state.request_id)
     if _is_public_request_path(request.url.path):
         response.headers.setdefault("X-Praxis-Api-Version", _PUBLIC_API_VERSION)
@@ -4541,11 +4558,6 @@ async def catalog_review_decisions_post(request: Request) -> Response:
     return await _route_to_handler(request)
 
 
-@app.post("/api/compile/preview")
-async def compile_preview_post(request: Request) -> Response:
-    return await _route_to_handler(request)
-
-
 @app.post(
     "/api/compile_materialize",
     include_in_schema=False,
@@ -4555,19 +4567,18 @@ async def compile_materialize_legacy_alias_post(
     x_workflow_token: str | None = Header(default=None, alias="X-Workflow-Token"),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
-    """Legacy compatibility alias for stale compile materialize callers.
+    """Structured deprecation for the retired underscore compile route."""
 
-    The catalog-backed canonical route is ``/api/compile/materialize``. Keep
-    the legacy underscore path as a thin gateway alias so older callers keep
-    landing on the same CQRS operation while discovery points new callers at
-    the compile-family path.
-    """
-
-    return await _gateway_command_response(
-        operation_name="compile_materialize",
-        command=body,
-        workflow_token=x_workflow_token,
-        idempotency_key=idempotency_key,
+    return JSONResponse(
+        status_code=410,
+        content={
+            "ok": False,
+            "error": "compile materialize moved to the catalog-owned slash route",
+            "reason_code": "compile_materialize.legacy_route_deprecated",
+            "migration_hint": "/api/compile/materialize",
+            "operation_name": "compile_materialize",
+            "received_intent": body.intent,
+        },
     )
 
 

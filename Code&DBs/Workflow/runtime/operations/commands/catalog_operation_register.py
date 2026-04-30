@@ -164,6 +164,18 @@ def handle_register_operation(
         return validation_failure
 
     conn = subsystems.get_pg_conn()
+    # NOTE: There are no explicit ::text/::boolean casts on the named
+    # parameters below because casts cannot disambiguate when both
+    # overloads have identical types at the supplied positions — Postgres
+    # named-argument resolution drops candidates by name match first,
+    # then by type compatibility. Two overloads of register_operation_atomic
+    # with the same names at the same types remain co-equal candidates
+    # regardless of how the caller types its inputs. The structural
+    # invariant — exactly one register_operation_atomic overload after
+    # migrations apply — is enforced by a separate test
+    # (test_register_operation_atomic_overload_singleton). Any migration
+    # that redefines this function MUST follow migration 350's
+    # drop-all-then-create pattern. (BUG-8DC8A3BA.)
     conn.execute(
         """
         SELECT register_operation_atomic(

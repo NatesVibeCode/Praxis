@@ -649,3 +649,101 @@ def test_maybe_resolve_verifier_bug_links_evidence_once_and_resolves_once(
         ("BUG-VERIFY", "verification_run", "verification_run:test", "validates_fix"),
     ]
     assert resolves == [("BUG-VERIFY", bug_tracker.BugStatus.FIXED)]
+
+
+class _AgeConn:
+    def __init__(self, ages: dict[str, float | None]) -> None:
+        self._ages = ages
+
+    def fetchrow(self, query: str, *args):
+        normalized = " ".join(query.split())
+        assert normalized.startswith("SELECT EXTRACT(EPOCH FROM (now() - MAX(attempted_at)))")
+        verifier_ref = args[0]
+        return {"age_seconds": self._ages.get(verifier_ref)}
+
+
+def test_run_due_platform_verifications_skips_when_recent(monkeypatch) -> None:
+    conn = _AgeConn({"verifier.platform.receipt_provenance": 600.0})
+
+    def _should_not_dispatch(*_args, **_kwargs):
+        raise AssertionError("verifier should not have been dispatched while inside interval")
+
+    monkeypatch.setattr(verifier_authority, "run_registered_verifier", _should_not_dispatch)
+
+    results = verifier_authority.run_due_platform_verifications(
+        conn=conn,
+        due_after_seconds=3600,
+        verifier_refs=("verifier.platform.receipt_provenance",),
+    )
+    assert len(results) == 1
+    assert results[0]["skipped"] is True
+    assert results[0]["reason_code"] == "verifier.periodic.not_due"
+
+
+def test_run_due_platform_verifications_dispatches_when_due(monkeypatch) -> None:
+    conn = _AgeConn(
+        {
+            "verifier.platform.receipt_provenance": 7200.0,
+            "verifier.platform.schema_authority": None,
+        }
+    )
+
+    dispatched: list[str] = []
+
+    def _fake_dispatch(verifier_ref, **kwargs):
+        dispatched.append(verifier_ref)
+        return {
+            "status": "passed",
+            "verification_run_id": f"verification_run:{verifier_ref}",
+            "duration_ms": 5,
+        }
+
+    monkeypatch.setattr(verifier_authority, "run_registered_verifier", _fake_dispatch)
+
+    results = verifier_authority.run_due_platform_verifications(
+        conn=conn,
+        due_after_seconds=3600,
+        verifier_refs=(
+            "verifier.platform.receipt_provenance",
+            "verifier.platform.schema_authority",
+        ),
+    )
+    assert dispatched == [
+        "verifier.platform.receipt_provenance",
+        "verifier.platform.schema_authority",
+    ]
+    assert all(r["skipped"] is False for r in results)
+    assert all(r["status"] == "passed" for r in results)
+
+
+def test_run_due_platform_verifications_captures_per_verifier_errors(monkeypatch) -> None:
+    conn = _AgeConn(
+        {
+            "verifier.platform.receipt_provenance": None,
+            "verifier.platform.schema_authority": None,
+        }
+    )
+
+    def _fake_dispatch(verifier_ref, **kwargs):
+        if verifier_ref == "verifier.platform.receipt_provenance":
+            raise RuntimeError("db down")
+        return {
+            "status": "passed",
+            "verification_run_id": f"verification_run:{verifier_ref}",
+            "duration_ms": 3,
+        }
+
+    monkeypatch.setattr(verifier_authority, "run_registered_verifier", _fake_dispatch)
+
+    results = verifier_authority.run_due_platform_verifications(
+        conn=conn,
+        due_after_seconds=3600,
+        verifier_refs=(
+            "verifier.platform.receipt_provenance",
+            "verifier.platform.schema_authority",
+        ),
+    )
+    by_ref = {r["verifier_ref"]: r for r in results}
+    assert by_ref["verifier.platform.receipt_provenance"]["status"] == "error"
+    assert "db down" in by_ref["verifier.platform.receipt_provenance"]["error"]
+    assert by_ref["verifier.platform.schema_authority"]["status"] == "passed"

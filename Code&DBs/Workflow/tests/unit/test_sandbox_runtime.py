@@ -1409,11 +1409,33 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
         provider.destroy_session(session, "completed")
 
 
-def test_docker_local_exec_forwards_anthropic_oauth_token(monkeypatch, tmp_path) -> None:
+def test_docker_local_exec_resolves_anthropic_credential_through_authority(
+    monkeypatch, tmp_path
+) -> None:
+    """Per architecture-policy::auth::credentials-per-sandbox-per-provider,
+    sandbox spawn must resolve the provider credential from credential_authority,
+    not from host-shell env vars. Setting CLAUDE_CODE_OAUTH_TOKEN on the host
+    must NOT leak into the sandbox; the value forwarded must come from the
+    DB-backed authority.
+    """
     docker_cmds: list[list[str]] = []
 
-    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-oauth-token")
-    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "fallback-token")
+    # Host env carries a *different* token. The authority returns the real one.
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-shell-leak-not-allowed")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "host-shell-fallback-not-allowed")
+
+    from runtime import credential_authority
+
+    monkeypatch.setattr(
+        credential_authority,
+        "resolve_provider_credentials",
+        lambda *, provider_slug, sandbox_session_id=None: (
+            {"CLAUDE_CODE_OAUTH_TOKEN": "from-db-anthropic-token"}
+            if provider_slug == "anthropic"
+            else {}
+        ),
+    )
+
     monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
     monkeypatch.setattr("runtime.sandbox_runtime._docker_image_available", lambda image: True)
     monkeypatch.setattr("runtime.sandbox_runtime.os.path.isfile", lambda path: False)
@@ -1471,8 +1493,9 @@ def test_docker_local_exec_forwards_anthropic_oauth_token(monkeypatch, tmp_path)
             for index, value in enumerate(run_cmd)
             if index > 0 and run_cmd[index - 1] == "-e"
         ]
-        assert "CLAUDE_CODE_OAUTH_TOKEN=claude-oauth-token" in env_values
-        assert "ANTHROPIC_AUTH_TOKEN=fallback-token" not in env_values
+        assert "CLAUDE_CODE_OAUTH_TOKEN=from-db-anthropic-token" in env_values
+        assert "CLAUDE_CODE_OAUTH_TOKEN=host-shell-leak-not-allowed" not in env_values
+        assert "ANTHROPIC_AUTH_TOKEN=host-shell-fallback-not-allowed" not in env_values
     finally:
         provider.destroy_session(session, "completed")
 
@@ -1814,3 +1837,54 @@ def test_write_workspace_snapshot_archive_writes_only_shard(tmp_path) -> None:
     assert names == {"keep.py"}, (
         f"archive must contain only the shard files, got {names}"
     )
+
+
+def test_docker_available_retries_transient_failures(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    class _Result:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+
+    def _fake_run(cmd, capture_output, timeout):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            return _Result(1)
+        return _Result(0)
+
+    monkeypatch.setattr(sandbox_runtime.subprocess, "run", _fake_run)
+    monkeypatch.setattr(sandbox_runtime.time, "sleep", lambda _: None)
+
+    assert sandbox_runtime._docker_available() is True
+    assert calls["count"] == 3
+
+
+def test_docker_available_returns_false_after_retry_budget(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    class _Result:
+        returncode = 1
+
+    def _fake_run(cmd, capture_output, timeout):
+        calls["count"] += 1
+        return _Result()
+
+    monkeypatch.setattr(sandbox_runtime.subprocess, "run", _fake_run)
+    monkeypatch.setattr(sandbox_runtime.time, "sleep", lambda _: None)
+
+    assert sandbox_runtime._docker_available() is False
+    assert calls["count"] == sandbox_runtime._DOCKER_PROBE_RETRY_ATTEMPTS
+
+
+def test_docker_available_returns_false_when_binary_missing(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    def _fake_run(cmd, capture_output, timeout):
+        calls["count"] += 1
+        raise FileNotFoundError("docker not on PATH")
+
+    monkeypatch.setattr(sandbox_runtime.subprocess, "run", _fake_run)
+    monkeypatch.setattr(sandbox_runtime.time, "sleep", lambda _: None)
+
+    assert sandbox_runtime._docker_available() is False
+    assert calls["count"] == 1

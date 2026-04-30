@@ -833,6 +833,102 @@ def run_registered_verifier(
     }
 
 
+_DEFAULT_PERIODIC_PLATFORM_VERIFIER_REFS: tuple[str, ...] = (
+    "verifier.platform.receipt_provenance",
+    "verifier.platform.schema_authority",
+    "verifier.platform.memory_proof_links",
+)
+_DEFAULT_PERIODIC_VERIFICATION_INTERVAL_SECONDS = 3600
+
+
+def _last_verification_run_age_seconds(
+    verifier_ref: str,
+    *,
+    conn: "SyncPostgresConnection | None" = None,
+) -> float | None:
+    """Return seconds since the most recent verification_runs row for ``verifier_ref``.
+
+    Returns None when no run exists yet.
+    """
+    db = _connection(conn)
+    row = db.fetchrow(
+        """
+        SELECT EXTRACT(EPOCH FROM (now() - MAX(attempted_at))) AS age_seconds
+        FROM verification_runs
+        WHERE verifier_ref = $1
+        """,
+        verifier_ref,
+    )
+    if not row:
+        return None
+    age = row.get("age_seconds")
+    if age is None:
+        return None
+    try:
+        return float(age)
+    except (TypeError, ValueError):
+        return None
+
+
+def run_due_platform_verifications(
+    *,
+    conn: "SyncPostgresConnection | None" = None,
+    due_after_seconds: int = _DEFAULT_PERIODIC_VERIFICATION_INTERVAL_SECONDS,
+    verifier_refs: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Run any platform verifier whose last verification_runs row is older than
+    ``due_after_seconds`` (or has no prior run).
+
+    Designed to be called from a periodic background tick. Each run is recorded
+    via ``run_registered_verifier`` (which appends to ``verification_runs``),
+    so ``verification_runs_ready`` and the platform-aggregate proof metrics
+    keep refreshing automatically. Best-effort: failures are caught per
+    verifier and returned in the result list, never raised.
+    """
+    refs = verifier_refs if verifier_refs is not None else _DEFAULT_PERIODIC_PLATFORM_VERIFIER_REFS
+    results: list[dict[str, Any]] = []
+    for verifier_ref in refs:
+        age_seconds = _last_verification_run_age_seconds(verifier_ref, conn=conn)
+        if age_seconds is not None and age_seconds < due_after_seconds:
+            results.append(
+                {
+                    "verifier_ref": verifier_ref,
+                    "skipped": True,
+                    "reason_code": "verifier.periodic.not_due",
+                    "age_seconds": age_seconds,
+                }
+            )
+            continue
+        try:
+            outcome = run_registered_verifier(
+                verifier_ref,
+                conn=conn,
+                target_kind="platform",
+                target_ref=verifier_ref,
+                record_run=True,
+                promote_bug=False,
+            )
+            results.append(
+                {
+                    "verifier_ref": verifier_ref,
+                    "skipped": False,
+                    "status": outcome.get("status"),
+                    "verification_run_id": outcome.get("verification_run_id"),
+                    "duration_ms": outcome.get("duration_ms"),
+                }
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "verifier_ref": verifier_ref,
+                    "skipped": False,
+                    "status": "error",
+                    "error": str(exc),
+                }
+            )
+    return results
+
+
 def _builtin_heal_schema_bootstrap(*, inputs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return _verifier_builtins.builtin_heal_schema_bootstrap(inputs=inputs)
 

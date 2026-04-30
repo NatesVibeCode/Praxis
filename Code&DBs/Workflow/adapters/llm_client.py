@@ -611,10 +611,69 @@ def _wait_backoff_or_cancel(
     if request.execution_control.wait_for_cancel(timeout=backoff_seconds):
         raise _cancelled_client_error()
 
+def _acquire_concurrency_slot(request: LLMRequest, timeout_seconds: int) -> Any:
+    """Acquire a per-provider concurrency slot from the Phase E rate-limit
+    gateway (``runtime.provider_rate_limiter``). Layered on top of the
+    existing token-bucket throttle (``runtime.integrations.rate_limiter``):
+    the token-bucket gates RPS, this gates *in-flight count*. Returns an
+    opaque slot handle (or ``None`` if the gateway is unavailable / the
+    provider has no policy / running in a stripped runtime); pass it to
+    ``_release_concurrency_slot`` in a finally block.
+
+    Raises ``LLMClientError(reason_code='llm_client.concurrency_cap_timeout')``
+    when the cap is hit and the wait budget is exhausted, so callers see
+    the same shape as a token-bucket timeout.
+    """
+    try:
+        from runtime.provider_rate_limiter import (
+            ProviderRateLimitTimeout,
+            UnknownProviderRateLimit,
+            default_rate_limiter,
+        )
+    except ImportError:
+        return None
+
+    slug = (request.provider_slug or "").strip().lower()
+    if not slug:
+        return None
+    try:
+        return default_rate_limiter().acquire_sync(
+            slug,
+            timeout=max(float(timeout_seconds), 1.0),
+        )
+    except UnknownProviderRateLimit:
+        return None
+    except ProviderRateLimitTimeout as exc:
+        raise LLMClientError(
+            "llm_client.concurrency_cap_timeout",
+            str(exc),
+        ) from exc
+
+
+def _release_concurrency_slot(slot: Any) -> None:
+    if slot is None:
+        return
+    try:
+        from runtime.provider_rate_limiter import default_rate_limiter
+
+        default_rate_limiter().release(slot)
+    except Exception:
+        # Slot release must never raise — the LLM call has already
+        # completed (success or failure) and we're in a finally block.
+        return
+
+
 def call_llm(request: LLMRequest) -> LLMResponse:
     """Call an LLM chat completion API and return the response.
 
     Supports Anthropic and OpenAI, including tool calling.
+
+    Phase E gating: every call acquires a per-provider concurrency slot
+    from ``runtime.provider_rate_limiter`` before dispatch (released in a
+    finally so 429s, timeouts, and successes all hand the slot back).
+    The slot is layered on top of the existing token-bucket throttle in
+    ``runtime.integrations.rate_limiter`` — token-bucket gates RPS, the
+    concurrency cap gates how many calls are simultaneously in flight.
     """
 
     family = _require_protocol_family(request)
@@ -637,6 +696,37 @@ def call_llm(request: LLMRequest) -> LLMResponse:
     retry_backoff_seconds = _request_retry_backoff_seconds(request)
     retryable_status_codes = set(_request_retryable_status_codes(request))
 
+    # Phase E concurrency-cap gate. Acquire BEFORE the retry loop so the
+    # whole request lifecycle (initial + retries) holds one slot, not N.
+    # ``_acquire_concurrency_slot`` returns None for unmapped providers
+    # and stripped runtimes — those callers fall through unchanged.
+    _concurrency_slot = _acquire_concurrency_slot(request, timeout_seconds)
+    try:
+        return _call_llm_with_slot(
+            request=request,
+            family=family,
+            body_bytes=body_bytes,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            retry_attempts=retry_attempts,
+            retry_backoff_seconds=retry_backoff_seconds,
+            retryable_status_codes=retryable_status_codes,
+        )
+    finally:
+        _release_concurrency_slot(_concurrency_slot)
+
+
+def _call_llm_with_slot(
+    *,
+    request: LLMRequest,
+    family: str,
+    body_bytes: bytes,
+    headers: dict[str, str],
+    timeout_seconds: int,
+    retry_attempts: int,
+    retry_backoff_seconds: tuple[int, ...],
+    retryable_status_codes: set[int],
+) -> LLMResponse:
     start_ns = time.monotonic_ns()
     last_exc: Exception | None = None
     status_code: int = 0

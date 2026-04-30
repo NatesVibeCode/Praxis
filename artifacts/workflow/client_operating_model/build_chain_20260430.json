@@ -1,0 +1,107 @@
+{
+  "program": "client_operating_model_virtual_lab_build_20260430_retry1",
+  "mode": "dependency_gated_implementation_chain",
+  "why": "Phase 0 readiness is complete. This chain builds the remaining Object Truth client operating model and Virtual Lab roadmap without requiring manual go-aheads between phases. Early authority layers are sequential; independent contract/delivery layers run in parallel only after their dependencies exist.",
+  "preconditions": {
+    "phase_00_status": "completed",
+    "phase_00_readiness_receipt": "26078ffe-b278-4285-9891-e0b363f6ee9f",
+    "roadmap_root": "roadmap_item.object.truth.trust.toolbelt.authority",
+    "known_runtime_control_bug": "BUG-DE856873",
+    "control_note": "Retry 1 switches implementation jobs from code_generation to build after the first proof run produced a stale cli_llm claim with no backing process. If chain projection stalls again, inspect and advance through canonical workflow status before using direct runtime evaluator as last resort."
+  },
+  "validate_order": [
+    "artifacts/workflow/client_operating_model/build_specs/phase_01_client_system_discovery.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_02_object_truth_ingestion.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_03_mdm_source_authority.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_04_hierarchy_task_contracts.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_05_integration_automation_contracts.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_06_virtual_lab_state.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_07_simulation_runtime.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_08_sandbox_drift.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_09_portable_cartridge.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_10_managed_runtime.build.queue.json",
+    "artifacts/workflow/client_operating_model/build_specs/phase_11_operator_surfaces.build.queue.json"
+  ],
+  "waves": [
+    {
+      "wave_id": "wave_1_client_system_discovery_proof",
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_01_client_system_discovery.build.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_2_object_truth_ingestion",
+      "depends_on": [
+        "wave_1_client_system_discovery_proof"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_02_object_truth_ingestion.build.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_3_mdm_source_authority",
+      "depends_on": [
+        "wave_2_object_truth_ingestion"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_03_mdm_source_authority.build.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_4_parallel_contract_capture",
+      "depends_on": [
+        "wave_3_mdm_source_authority"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_04_hierarchy_task_contracts.build.queue.json",
+        "artifacts/workflow/client_operating_model/build_specs/phase_05_integration_automation_contracts.build.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_5_virtual_lab_state",
+      "depends_on": [
+        "wave_4_parallel_contract_capture"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_06_virtual_lab_state.build.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_6_simulation_runtime",
+      "depends_on": [
+        "wave_5_virtual_lab_state"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_07_simulation_runtime.build.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_7_sandbox_drift_feedback",
+      "depends_on": [
+        "wave_6_simulation_runtime"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_08_sandbox_drift.build.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_8_parallel_delivery_models",
+      "depends_on": [
+        "wave_7_sandbox_drift_feedback"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_09_portable_cartridge.build.queue.json",
+        "artifacts/workflow/client_operating_model/build_specs/phase_10_managed_runtime.build.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_9_operator_surfaces",
+      "depends_on": [
+        "wave_8_parallel_delivery_models"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/build_specs/phase_11_operator_surfaces.build.queue.json"
+      ]
+    }
+  ]
+}

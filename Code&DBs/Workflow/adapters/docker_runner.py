@@ -23,7 +23,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from registry.provider_execution_registry import resolve_api_key_env_vars
 from runtime.docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
 from runtime.sandbox_runtime import (
     _cli_auth_bootstrap_command,
@@ -41,34 +40,40 @@ if TYPE_CHECKING:
 _PRAXIS_DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _PRAXIS_DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 
-# Anthropic is OAuth/subscription only (no API key) per
-# decision.2026-04-20.anthropic-cli-only-restored. ANTHROPIC_API_KEY is
-# intentionally omitted here and from the CLI profile's api_key_env_vars so
-# the worker cannot fall through to a direct API call even if the env var is
-# present in the host shell.
-_ANTHROPIC_OAUTH_ENV_CANDIDATES: tuple[str, ...] = (
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_AUTH_TOKEN",
-)
+def _cli_auth_env_forward(
+    provider_slug: str | None,
+    *,
+    sandbox_session_id: str | None = None,
+) -> dict[str, str]:
+    """Resolve the provider auth env var(s) for a sandbox via credential_authority.
 
+    Per architecture-policy::auth::credentials-per-sandbox-per-provider, the
+    runtime no longer forwards host-shell env vars (CLAUDE_CODE_OAUTH_TOKEN
+    etc.) into the worker container. Credentials must be provisioned through
+    ``praxis credential onboard`` so they live in ``credential_tokens``, and
+    resolved at sandbox-spawn time keyed by provider_slug.
 
-def _cli_auth_env_forward(provider_slug: str | None) -> dict[str, str]:
-    """Return the single provider auth env var to forward into the container."""
+    Returns an empty dict when no credential is provisioned. The sandbox
+    will run without auth and the CLI will surface its own auth-required
+    error — which is the correct failure mode under the policy.
+    """
     normalized_provider = str(provider_slug or "").strip().lower()
     if not normalized_provider:
         return {}
 
-    forwarded: dict[str, str] = {}
-    if normalized_provider == "anthropic":
-        candidates = _ANTHROPIC_OAUTH_ENV_CANDIDATES
-    else:
-        candidates = resolve_api_key_env_vars(normalized_provider)
-    for key in candidates:
-        value = os.environ.get(key)
-        if value:
-            forwarded[key] = value
-            break
-    return forwarded
+    try:
+        from runtime.credential_authority import resolve_provider_credentials
+
+        resolved = resolve_provider_credentials(
+            provider_slug=normalized_provider,
+            sandbox_session_id=sandbox_session_id,
+        )
+    except Exception:
+        # Authority unavailable — the sandbox runs without credentials and
+        # the CLI surfaces a clear auth error. Never fall back to host env.
+        return {}
+
+    return dict(resolved)
 
 
 def _docker_image() -> str:

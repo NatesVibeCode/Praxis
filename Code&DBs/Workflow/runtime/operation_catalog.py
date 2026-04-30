@@ -6,6 +6,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from contracts.operation_catalog import (
+    DEFAULT_OPERATION_EXECUTION_LANE,
+    DEFAULT_OPERATION_KICKOFF_REQUIRED,
+)
 from storage.postgres.operation_catalog_repository import (
     list_operation_catalog_records as _list_operation_catalog_records,
     list_operation_source_policy_records as _list_operation_source_policy_records,
@@ -41,6 +45,8 @@ class OperationCatalogRecord:
     projection_freshness_policy_ref: str | None
     posture: str | None
     idempotency_policy: str | None
+    execution_lane: str
+    kickoff_required: bool
     enabled: bool
     binding_revision: str
     decision_ref: str
@@ -83,6 +89,8 @@ class ResolvedOperationDefinition:
     projection_freshness_policy_ref: str | None
     posture: str
     idempotency_policy: str
+    execution_lane: str
+    kickoff_required: bool
     enabled: bool
     operation_enabled: bool
     source_policy_ref: str | None
@@ -114,15 +122,17 @@ def _canonicalize_operation_catalog_row(row: dict[str, Any]) -> dict[str, Any]:
     letting route discovery and capability mounting diverge.
     """
 
+    repaired = deepcopy(row)
+    repaired.setdefault("execution_lane", DEFAULT_OPERATION_EXECUTION_LANE)
+    repaired.setdefault("kickoff_required", DEFAULT_OPERATION_KICKOFF_REQUIRED)
+
     if (
         row.get("operation_ref") == "compile.materialize"
         and row.get("operation_name") == "compile_materialize"
         and row.get("http_path") == "/api/compile_materialize"
     ):
-        repaired = deepcopy(row)
         repaired["http_path"] = "/api/compile/materialize"
-        return repaired
-    return row
+    return repaired
 
 
 def _operation_record_from_row(row: dict[str, Any]) -> OperationCatalogRecord:
@@ -175,6 +185,8 @@ def _resolve_operation_definition(
         projection_freshness_policy_ref=record.projection_freshness_policy_ref,
         posture=posture,
         idempotency_policy=idempotency_policy,
+        execution_lane=record.execution_lane,
+        kickoff_required=record.kickoff_required,
         enabled=enabled,
         operation_enabled=record.enabled,
         source_policy_ref=source_policy.policy_ref if source_policy else None,

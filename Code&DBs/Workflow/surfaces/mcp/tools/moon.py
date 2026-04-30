@@ -59,21 +59,40 @@ def tool_praxis_moon(params: dict) -> dict:
         if not intent:
             return _err("intent is required for action=compose", action=action)
         payload: dict[str, Any] = {"intent": intent}
-        for key in ("plan_name", "why"):
-            value = _string_arg(params, key)
-            if value:
+        workflow_id = _string_arg(params, "workflow_id")
+        if workflow_id:
+            payload["workflow_id"] = workflow_id
+        plan_name = _string_arg(params, "plan_name")
+        if plan_name:
+            payload["title"] = plan_name
+        for key in ("enable_llm", "enable_full_compose"):
+            value = params.get(key)
+            if isinstance(value, bool):
                 payload[key] = value
-        raw_concurrency = params.get("concurrency")
-        if raw_concurrency is not None:
-            try:
-                payload["concurrency"] = max(1, min(100, int(raw_concurrency)))
-            except (TypeError, ValueError):
-                return _err("concurrency must be an integer 1-100", action=action)
-        return execute_operation_from_subsystems(
+        materialized = execute_operation_from_subsystems(
             _subs,
-            operation_name="compose_plan_via_llm",
+            operation_name="compile_materialize",
             payload=payload,
         )
+        if not isinstance(materialized, dict) or materialized.get("ok") is False:
+            return materialized if isinstance(materialized, dict) else {"ok": False, "result": materialized}
+        materialized_workflow_id = _string_arg(materialized, "workflow_id")
+        if not materialized_workflow_id:
+            return materialized
+        build = execute_operation_from_subsystems(
+            _subs,
+            operation_name="workflow_build_get",
+            payload={"workflow_id": materialized_workflow_id},
+        )
+        return {
+            "ok": True,
+            "action": "compose",
+            "workflow_id": materialized_workflow_id,
+            "graph_summary": materialized.get("graph_summary"),
+            "operation_receipt": materialized.get("operation_receipt"),
+            "materialization": materialized,
+            "build": build,
+        }
 
     if action == "suggest_next":
         workflow_id = _string_arg(params, "workflow_id")
@@ -148,11 +167,11 @@ TOOLS: dict[str, tuple[Any, dict[str, Any]]] = {
                 "ACTIONS:\n"
                 "  get_build       Load BuildPayload (nodes, edges, gates, contracts, issues).\n"
                 "                  ALWAYS read before proposing edits so you reason about real state.\n"
-                "  compose         Generate a whole graph from prose (intent → atoms → skeleton →\n"
-                "                  synthesis → N parallel author calls → validate).\n"
+                "  compose         Materialize a whole graph from prose through compile_materialize,\n"
+                "                  then read it back from workflow build authority.\n"
                 "  suggest_next    Ask the graph what's LEGAL to add next given accumulator types.\n"
                 "  mutate_field    Edit any field via subpath (nodes/{id}, edges/{id}/release,\n"
-                "                  outcome, append, bootstrap, ...). One universal mutation entrypoint.\n"
+                "                  outcome, append, ...). One universal mutation entrypoint.\n"
                 "  launch          Launch the composed workflow as a real run.\n\n"
                 "EXAMPLES:\n"
                 "  Read graph:    praxis_moon(action='get_build', workflow_id='wf_abc')\n"
@@ -184,7 +203,7 @@ TOOLS: dict[str, tuple[Any, dict[str, Any]]] = {
                     "node_id": {"type": "string", "description": "Anchor node for suggest_next (default: latest)."},
                     "subpath": {
                         "type": "string",
-                        "description": "Mutation subpath: 'append', 'nodes/{id}', 'edges/{id}/release', 'outcome', 'bootstrap', etc. (mutate_field).",
+                        "description": "Mutation subpath: 'append', 'nodes/{id}', 'edges/{id}/release', 'outcome', etc. (mutate_field).",
                     },
                     "body": {
                         "type": "object",

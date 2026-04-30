@@ -24,10 +24,16 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from runtime.operations.queries.search_clustering import build_clusters
+from runtime.sources.authority_receipts_source import (
+    search_authority_receipts as _impl_authority_receipts,
+)
 from runtime.sources.bugs_source import search_bugs as _impl_bugs
 from runtime.sources.code_source import (
     maybe_refresh_index as _impl_maybe_refresh,
     search_code as _impl_code,
+)
+from runtime.sources.compliance_receipts_source import (
+    search_compliance_receipts as _impl_compliance_receipts,
 )
 from runtime.sources.db_read_source import search_db as _impl_db
 from runtime.sources.files_source import search_files as _impl_files
@@ -35,8 +41,10 @@ from runtime.sources.git_source import search_git as _impl_git
 from runtime.sources.knowledge_source import search_knowledge as _impl_knowledge
 from runtime.sources.receipts_source import search_receipts as _impl_receipts
 from surfaces.mcp.tools._search_envelope import (
+    SOURCE_AUTHORITY_RECEIPTS,
     SOURCE_BUGS,
     SOURCE_CODE,
+    SOURCE_COMPLIANCE_RECEIPTS,
     SOURCE_DB,
     SOURCE_DECISIONS,
     SOURCE_FILES,
@@ -114,6 +122,14 @@ class ReceiptsSearchQuery(SearchEnvelopeQuery):
     pass
 
 
+class AuthorityReceiptsSearchQuery(SearchEnvelopeQuery):
+    pass
+
+
+class ComplianceReceiptsSearchQuery(SearchEnvelopeQuery):
+    pass
+
+
 class GitSearchQuery(SearchEnvelopeQuery):
     pass
 
@@ -186,6 +202,20 @@ def _run_receipts(
     return results, freshness, freshness.get("status") or "ok"
 
 
+def _run_authority_receipts(
+    envelope: SearchEnvelope, subsystems: Any
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    results, freshness = _impl_authority_receipts(envelope=envelope, subsystems=subsystems)
+    return results, freshness, freshness.get("status") or "ok"
+
+
+def _run_compliance_receipts(
+    envelope: SearchEnvelope, subsystems: Any
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    results, freshness = _impl_compliance_receipts(envelope=envelope, subsystems=subsystems)
+    return results, freshness, freshness.get("status") or "ok"
+
+
 def _run_git(
     envelope: SearchEnvelope, subsystems: Any
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
@@ -220,6 +250,8 @@ _SOURCE_DISPATCH = {
     ),
     SOURCE_BUGS: lambda env, subs, **kw: _run_bugs(env, subs),
     SOURCE_RECEIPTS: lambda env, subs, **kw: _run_receipts(env, subs),
+    SOURCE_AUTHORITY_RECEIPTS: lambda env, subs, **kw: _run_authority_receipts(env, subs),
+    SOURCE_COMPLIANCE_RECEIPTS: lambda env, subs, **kw: _run_compliance_receipts(env, subs),
     SOURCE_GIT: lambda env, subs, **kw: _run_git(env, subs),
     SOURCE_FILES: lambda env, subs, **kw: _run_files(env, subs),
     SOURCE_DB: lambda env, subs, **kw: _run_db(env, subs),
@@ -368,6 +400,18 @@ def handle_receipts_search(
     query: ReceiptsSearchQuery, subsystems: Any
 ) -> dict[str, Any]:
     return _run_single_source(query, subsystems, source_label=SOURCE_RECEIPTS)
+
+
+def handle_authority_receipts_search(
+    query: AuthorityReceiptsSearchQuery, subsystems: Any
+) -> dict[str, Any]:
+    return _run_single_source(query, subsystems, source_label=SOURCE_AUTHORITY_RECEIPTS)
+
+
+def handle_compliance_receipts_search(
+    query: ComplianceReceiptsSearchQuery, subsystems: Any
+) -> dict[str, Any]:
+    return _run_single_source(query, subsystems, source_label=SOURCE_COMPLIANCE_RECEIPTS)
 
 
 def handle_git_search(query: GitSearchQuery, subsystems: Any) -> dict[str, Any]:

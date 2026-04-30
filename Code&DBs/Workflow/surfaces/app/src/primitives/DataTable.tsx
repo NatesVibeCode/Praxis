@@ -11,9 +11,10 @@ interface DataTableProps {
   data: Record<string, unknown>[];
   onRowClick?: (row: Record<string, unknown>, index: number) => void;
   selectedIndex?: number | null;
+  emptyState?: React.ReactNode;
 }
 
-export function DataTable({ columns, data, onRowClick, selectedIndex }: DataTableProps) {
+export function DataTable({ columns, data, onRowClick, selectedIndex, emptyState }: DataTableProps) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -86,7 +87,7 @@ export function DataTable({ columns, data, onRowClick, selectedIndex }: DataTabl
                 colSpan={columns.length}
                 style={{ padding: '16px 12px', color: 'var(--text-muted, #8b949e)', textAlign: 'center' }}
               >
-                No data
+                {emptyState ?? 'No data'}
               </td>
             </tr>
           ) : (

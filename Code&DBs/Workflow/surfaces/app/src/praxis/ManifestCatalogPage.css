@@ -127,6 +127,35 @@
   font-weight: 700;
 }
 
+.manifest-catalog__card-title-input {
+  display: block;
+  width: min(420px, 52vw);
+  max-width: 100%;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  text-overflow: ellipsis;
+}
+
+.manifest-catalog__card-title-input:hover {
+  border-color: rgba(243, 238, 228, 0.12);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.manifest-catalog__card-title-input:focus {
+  border-color: rgba(243, 238, 228, 0.34);
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: 0 0 0 3px rgba(243, 238, 228, 0.08);
+}
+
+.manifest-catalog__card-title-input:disabled {
+  opacity: 0.72;
+}
+
 .manifest-catalog__card-id {
   color: var(--text-muted);
   font-size: 0.8rem;

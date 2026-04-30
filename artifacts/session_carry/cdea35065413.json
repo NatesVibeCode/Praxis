@@ -1,0 +1,16 @@
+{
+  "pack_id": "cdea35065413",
+  "objective": "Materialize has handed you the final workflow build pass.\nWorkflow id: wf_85ad47bf7955\nOpen with: \"I have the final pass from materialize. Let me make a quick review pass and I will share the cleaned version in a second.\"\nThen call moon_get_build before making any claim about the graph.\nReview nodes, edges, gates, contracts, unresolved issues, and approval/readiness state.\nIf you find small safe cleanup edits, apply them with moon_mutate_field and then call moon_get_build again.\nDo not launch the workflow unless the user explicitly asks.\nFinish with a concise summary of what changed, what is ready, and what still needs human approval.",
+  "decisions": [],
+  "open_questions": [],
+  "constraints": [],
+  "risks": [],
+  "artifacts": [],
+  "next_actions": [
+    "Changed: none. I could not access `moon_get_build` in this session, so I did not touch the graph.",
+    "Ready: the handoff itself is marked `ready`, but I have not independently verified nodes, edges, gates, contracts, or unresolved issues.",
+    "Needs human approval: provide the Moon build snapshot or enable the Moon build tool for `wf_85ad47bf7955`, and I can do the actual review plus any safe `moon_mutate_field` cleanup."
+  ],
+  "created_at": "2026-04-29T20:52:40.467416+00:00",
+  "token_estimate": 331
+}

@@ -1,0 +1,46 @@
+{
+  "name": "Client Operating Model Phase 6 Build Virtual Lab State",
+  "workflow_id": "client_operating_model_build_phase_06_virtual_lab_state_20260430",
+  "queue_id": "client_operating_model_build_phase_06_virtual_lab_state_20260430",
+  "phase": "implementation",
+  "outcome_goal": "Implement Virtual Lab environment revision, seed, copy-on-write state, event envelope, causality, digest, receipt, CQRS contract, and tests.",
+  "anti_requirements": [
+    "Do not stage or commit git changes.",
+    "Do not mutate Object Truth directly from Virtual Lab commands.",
+    "Do not create an unqueryable event model.",
+    "Do not skip pre/post state digest checks on mutating events.",
+    "Do not regenerate shared docs/API.md, docs/CLI.md, or docs/MCP.md in this parallel chain; Phase 11 owns final shared surface docs."
+  ],
+  "jobs": [
+    {
+      "label": "phase_06_virtual_lab_state_build",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "build",
+      "timeout": 3600,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "AGENTS.md",
+        "docs/architecture/object-truth-trust-toolbelt/build-plan.md",
+        "artifacts/workflow/client_operating_model/packets/phase_02_object_truth_ingestion/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_06_virtual_lab_state/PLAN.md",
+        "Code&DBs/Workflow/core/object_truth_ops.py",
+        "Code&DBs/Workflow/runtime/operations",
+        "Code&DBs/Workflow/storage/postgres",
+        "Code&DBs/Workflow/tests/unit"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/virtual_lab",
+        "Code&DBs/Workflow/runtime/operations/commands/virtual_lab.py",
+        "Code&DBs/Workflow/runtime/operations/queries/virtual_lab.py",
+        "Code&DBs/Workflow/storage/postgres/virtual_lab_repository.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/virtual_lab.py",
+        "Code&DBs/Workflow/tests/unit",
+        "Code&DBs/Databases/migrations/workflow",
+        "docs/architecture/object-truth-trust-toolbelt",
+        "artifacts/workflow/client_operating_model/build_reports/phase_06_IMPLEMENTATION.md"
+      ],
+      "prompt": "Build Phase 6 from artifacts/workflow/client_operating_model/packets/phase_06_virtual_lab_state/PLAN.md. Implement a bounded Virtual Lab state substrate: immutable environment revisions, deterministic seed manifests from Object Truth refs, copy-on-write object overlays, canonical event envelopes with causality, pre/post digests, stream sequence rules, snapshot/digest helpers, and read/write operation contracts where appropriate. Preserve CQRS/gateway patterns and migration authority. Add tests for deterministic seeds, copy-on-write isolation, event ordering, digest recomputation, closed revision rejection, and replay. Write artifacts/workflow/client_operating_model/build_reports/phase_06_IMPLEMENTATION.md with changed files, validation, blockers, and Phase 7 runtime contract notes. Do not stage or commit."
+    }
+  ]
+}

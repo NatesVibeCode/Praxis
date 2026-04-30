@@ -1,0 +1,74 @@
+{
+  "program": "client_operating_model_virtual_lab_20260430_wave1_continuation",
+  "mode": "wave_gated_packet_authoring_recovery",
+  "why": "Continue after Phase 0 succeeded in workflow_chain_5ab94b6de6d4. The original chain failed while submitting Wave 1 because Postgres runtime authority was temporarily unavailable. This continuation preserves failure containment by launching Phase 1 alone first, then Phase 2, then the remaining waves.",
+  "preconditions": {
+    "previous_chain_id": "workflow_chain_5ab94b6de6d4",
+    "phase_00_run_id": "run:client_operating_model_phase_00_authority_readiness_20260430:a7e8ee82b562d8c9",
+    "phase_00_packet": "artifacts/workflow/client_operating_model/packets/phase_00_authority_readiness/PLAN.md",
+    "retry_delta": "Fresh firecheck reports ready; Phase 0 packet was operator-corrected to use actual repo authority; continuation starts at Wave 1 instead of re-running Phase 0."
+  },
+  "validate_order": [
+    "artifacts/workflow/client_operating_model/specs/phase_01_client_system_discovery.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_02_object_truth_ingestion.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_03_mdm_source_authority.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_04_hierarchy_task_contracts.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_05_integration_automation_contracts.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_06_virtual_lab_state.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_07_simulation_runtime.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_08_sandbox_drift.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_09_portable_cartridge.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_10_managed_runtime.queue.json",
+    "artifacts/workflow/client_operating_model/specs/phase_11_operator_surfaces.queue.json"
+  ],
+  "waves": [
+    {
+      "wave_id": "wave_1a_client_system_discovery",
+      "specs": [
+        "artifacts/workflow/client_operating_model/specs/phase_01_client_system_discovery.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_1b_object_truth_ingestion",
+      "depends_on": [
+        "wave_1a_client_system_discovery"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/specs/phase_02_object_truth_ingestion.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_2_unification_contracts",
+      "depends_on": [
+        "wave_1b_object_truth_ingestion"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/specs/phase_03_mdm_source_authority.queue.json",
+        "artifacts/workflow/client_operating_model/specs/phase_04_hierarchy_task_contracts.queue.json",
+        "artifacts/workflow/client_operating_model/specs/phase_05_integration_automation_contracts.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_3_virtual_execution",
+      "depends_on": [
+        "wave_2_unification_contracts"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/specs/phase_06_virtual_lab_state.queue.json",
+        "artifacts/workflow/client_operating_model/specs/phase_07_simulation_runtime.queue.json",
+        "artifacts/workflow/client_operating_model/specs/phase_08_sandbox_drift.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_4_delivery_surfaces",
+      "depends_on": [
+        "wave_3_virtual_execution"
+      ],
+      "specs": [
+        "artifacts/workflow/client_operating_model/specs/phase_09_portable_cartridge.queue.json",
+        "artifacts/workflow/client_operating_model/specs/phase_10_managed_runtime.queue.json",
+        "artifacts/workflow/client_operating_model/specs/phase_11_operator_surfaces.queue.json"
+      ]
+    }
+  ]
+}

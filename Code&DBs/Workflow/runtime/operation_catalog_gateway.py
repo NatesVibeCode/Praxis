@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import inspect
 import json
+import queue
 import threading
 import time
 from typing import Any
@@ -49,10 +50,18 @@ class CallerContext:
     correlation_id. When ``caller_context`` is None at an entry point
     (HTTP/CLI/MCP boundary), the gateway mints a fresh correlation_id
     and the receipt is the root of a new trace tree.
+
+    ``transport_kind`` records which surface produced the call
+    (``cli``, ``mcp``, ``http``, ``workflow``, ``heartbeat``,
+    ``internal``, ``sandbox``, ``test``). Entry-point surfaces set it
+    explicitly; nested calls inherit it from the parent so a whole
+    cause-chain reflects the originating surface. ``None`` means the
+    caller did not declare a transport.
     """
 
     cause_receipt_id: str | None
     correlation_id: str
+    transport_kind: str | None = None
 
 
 def caller_context_from_receipt(receipt: Mapping[str, Any]) -> CallerContext:
@@ -61,7 +70,9 @@ def caller_context_from_receipt(receipt: Mapping[str, Any]) -> CallerContext:
     Use this in handlers that call ``execute_operation_from_subsystems``
     on behalf of a parent operation: pass the parent's receipt mapping
     in, get a context whose ``cause_receipt_id`` points at the parent
-    and ``correlation_id`` is inherited.
+    and ``correlation_id`` is inherited. ``transport_kind`` is inherited
+    from the parent receipt when present so the entire cause-chain
+    reflects the originating surface.
     """
 
     receipt_id = receipt.get("receipt_id")
@@ -70,7 +81,13 @@ def caller_context_from_receipt(receipt: Mapping[str, Any]) -> CallerContext:
         raise ValueError("caller_context_from_receipt: receipt is missing receipt_id")
     if correlation is None:
         raise ValueError("caller_context_from_receipt: receipt is missing correlation_id")
-    return CallerContext(cause_receipt_id=str(receipt_id), correlation_id=str(correlation))
+    transport = receipt.get("transport_kind")
+    transport_kind = transport.strip() if isinstance(transport, str) and transport.strip() else None
+    return CallerContext(
+        cause_receipt_id=str(receipt_id),
+        correlation_id=str(correlation),
+        transport_kind=transport_kind,
+    )
 
 
 # ContextVar holding the caller context that nested gateway calls should
@@ -196,6 +213,193 @@ class OperationModeViolation(RuntimeError):
         self.requested_mode = requested_mode
         self.operation_kind = operation_kind
         self.posture = posture
+
+
+class OperationLaneViolation(RuntimeError):
+    """Raised when an operation's execution lane forbids the caller's transport.
+
+    See migration 348 + standing order
+    ``architecture-policy::concurrency::operation-execution-lane-typing``.
+    Operations marked ``kickoff_required=true`` may only be dispatched
+    synchronously from worker/runtime lanes; interactive transports
+    (cli/mcp/http) must hand off via a kickoff/run handle instead.
+    """
+
+    reason_code = "operation.kickoff_required"
+
+    def __init__(
+        self,
+        *,
+        operation_ref: str,
+        execution_lane: str,
+        transport_kind: str | None,
+    ) -> None:
+        super().__init__(
+            f"Operation {operation_ref} is kickoff_required and cannot be "
+            f"dispatched synchronously from interactive transport "
+            f"{transport_kind or 'unknown'!r}; submit through a worker/runtime lane."
+        )
+        self.operation_ref = operation_ref
+        self.execution_lane = execution_lane
+        self.transport_kind = transport_kind
+        self.details = {
+            "operation_ref": operation_ref,
+            "execution_lane": execution_lane,
+            "transport_kind": transport_kind or "",
+        }
+
+
+class OperationInteractiveTimeout(RuntimeError):
+    """Raised when an interactive-lane operation exceeds its ``timeout_ms``.
+
+    Async dispatch wraps the handler in ``asyncio.wait_for`` for
+    ``execution_lane='interactive'`` operations so a stuck provider call
+    cannot pin the request thread for the full handler duration. The
+    receipt persisted on this failure carries
+    ``error_code='operation.interactive_timeout'`` for observability.
+    """
+
+    reason_code = "operation.interactive_timeout"
+
+    def __init__(
+        self,
+        *,
+        operation_ref: str,
+        timeout_ms: int,
+    ) -> None:
+        super().__init__(
+            f"Operation {operation_ref} exceeded interactive lane timeout_ms={timeout_ms}"
+        )
+        self.operation_ref = operation_ref
+        self.timeout_ms = timeout_ms
+        self.details = {
+            "operation_ref": operation_ref,
+            "timeout_ms": timeout_ms,
+        }
+
+
+def _call_sync_handler_with_interactive_timeout(
+    binding: ResolvedHttpOperationBinding,
+    command: Any,
+    subsystems: Any,
+) -> Any:
+    """Run sync-surface interactive work behind the same caller deadline.
+
+    A blocking sync provider call cannot be cancelled safely from Python once it
+    is in a socket read, but it can be moved off the caller thread. The caller
+    gets a typed timeout receipt while the abandoned daemon thread is left to
+    finish or die on the provider/client timeout. That is still a smaller blast
+    radius than pinning the API/MCP/CLI request lane.
+    """
+
+    if (
+        getattr(binding, "execution_lane", "background") != "interactive"
+        or getattr(binding, "timeout_ms", 0) <= 0
+    ):
+        result = binding.handler(command, subsystems)
+        if inspect.isawaitable(result):
+            return _run_awaitable_sync(result)
+        return result
+
+    result_queue: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+    def _run_handler() -> None:
+        try:
+            result = binding.handler(command, subsystems)
+            if inspect.isawaitable(result):
+                result = _run_awaitable_sync(result)
+        except Exception as exc:  # noqa: BLE001 - re-raised on caller thread.
+            result_queue.put(("error", exc))
+            return
+        result_queue.put(("ok", result))
+
+    spawn_threaded(
+        _run_handler,
+        name=f"operation_interactive:{binding.operation_ref}",
+    )
+    try:
+        state, value = result_queue.get(timeout=binding.timeout_ms / 1000.0)
+    except queue.Empty as timeout_exc:
+        raise OperationInteractiveTimeout(
+            operation_ref=binding.operation_ref,
+            timeout_ms=binding.timeout_ms,
+        ) from timeout_exc
+    if state == "error":
+        raise value
+    return value
+
+
+_INTERACTIVE_TRANSPORTS: frozenset[str] = frozenset({"cli", "mcp", "http"})
+
+
+def _assert_lane_admits_dispatch(
+    binding: ResolvedHttpOperationBinding,
+    *,
+    transport_kind: str | None,
+) -> None:
+    """Reject direct synchronous dispatch when the operation is marked
+    ``kickoff_required=true`` and the caller is on an interactive transport.
+
+    Worker/runtime callers (``workflow``, ``heartbeat``, ``internal``,
+    ``sandbox``, ``test``) and unattributed callers (``transport_kind=None``)
+    are admitted unchanged — they're either picking up a queued kickoff
+    handoff or running outside the interactive request path entirely.
+    """
+
+    if not getattr(binding, "kickoff_required", False):
+        return
+    if transport_kind in _INTERACTIVE_TRANSPORTS:
+        raise OperationLaneViolation(
+            operation_ref=binding.operation_ref,
+            execution_lane=getattr(binding, "execution_lane", "background"),
+            transport_kind=transport_kind,
+        )
+
+
+def _persist_lane_failure(
+    conn: Any,
+    binding: ResolvedHttpOperationBinding,
+    *,
+    exc: OperationLaneViolation,
+    payload: Mapping[str, Any] | None,
+    input_hash: str,
+    idempotency_key: str,
+    receipt_id: str,
+    correlation_id: str,
+    cause_receipt_id: str | None,
+    transport_kind: str | None,
+) -> dict[str, Any]:
+    """Write a failed receipt for a kickoff_required violation and return
+    the structured failure dict the gateway hands back to callers.
+
+    Mirrors the failure shape produced when a handler raises mid-call so
+    surface-level consumers can treat both the same way.
+    """
+
+    started_ns = time.monotonic_ns()
+    receipt = _persist_operation_outcome(
+        conn,
+        binding,
+        payload=payload,
+        result=None,
+        input_hash=input_hash,
+        idempotency_key=idempotency_key,
+        started_ns=started_ns,
+        execution_status="failed",
+        error_code=exc.reason_code,
+        error_detail=str(exc),
+        receipt_id=receipt_id,
+        correlation_id=correlation_id,
+        cause_receipt_id=cause_receipt_id,
+        transport_kind=transport_kind,
+    )
+    return {
+        "ok": False,
+        "error": str(exc),
+        "error_code": exc.reason_code,
+        "operation_receipt": receipt,
+        "details": dict(exc.details),
+    }
 
 
 def _normalized_requested_mode(requested_mode: str | None) -> str:
@@ -550,6 +754,8 @@ def _receipt_payload(
     duration_ms: int,
     cause_receipt_id: str | None,
     correlation_id: str,
+    transport_kind: str | None,
+    caller_ref: str,
 ) -> dict[str, Any]:
     return {
         "receipt_id": receipt_id,
@@ -577,6 +783,8 @@ def _receipt_payload(
         "duration_ms": duration_ms,
         "cause_receipt_id": cause_receipt_id,
         "correlation_id": correlation_id,
+        "transport_kind": transport_kind,
+        "caller_ref": caller_ref,
     }
 
 
@@ -602,6 +810,7 @@ def _insert_operation_receipt(
             output_hash,
             idempotency_key,
             caller_ref,
+            transport_kind,
             execution_status,
             result_status,
             error_code,
@@ -616,8 +825,8 @@ def _insert_operation_receipt(
             correlation_id
         ) VALUES (
             $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-            $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb,
-            $19::jsonb, $20, $21, $22, $23::uuid, $24::uuid
+            $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb,
+            $20::jsonb, $21, $22, $23, $24::uuid, $25::uuid
         )
         """,
         receipt["receipt_id"],
@@ -631,7 +840,8 @@ def _insert_operation_receipt(
         receipt["input_hash"],
         receipt["output_hash"],
         receipt["idempotency_key"],
-        "authority_gateway",
+        receipt.get("caller_ref") or "authority_gateway",
+        receipt.get("transport_kind"),
         receipt["execution_status"],
         receipt["result_status"],
         receipt["error_code"],
@@ -686,6 +896,8 @@ def _fetch_persisted_operation_receipt(
                input_hash,
                output_hash,
                idempotency_key,
+               caller_ref,
+               transport_kind,
                execution_status,
                result_status,
                error_code,
@@ -744,6 +956,8 @@ def _fetch_persisted_operation_receipt(
         "duration_ms": _row_value(row, "duration_ms"),
         "cause_receipt_id": _row_value(row, "cause_receipt_id"),
         "correlation_id": _row_value(row, "correlation_id"),
+        "transport_kind": _row_value(row, "transport_kind"),
+        "caller_ref": _row_value(row, "caller_ref"),
     }
 
 
@@ -918,20 +1132,24 @@ def _write_operation_proof(
 
 def _prepare_call_context(
     caller_context: CallerContext | None,
-) -> tuple[str, str, str | None, CallerContext]:
+) -> tuple[str, str, str | None, str | None, CallerContext]:
     """Resolve caller context and pre-mint receipt_id + correlation_id.
 
-    Returns ``(receipt_id, correlation_id, cause_receipt_id, nested_context)``.
+    Returns ``(receipt_id, correlation_id, cause_receipt_id,
+    transport_kind, nested_context)``.
 
     ``nested_context`` is the context that nested gateway calls inherit
     from the ContextVar set around the handler invocation: its
     ``cause_receipt_id`` is the freshly-minted receipt_id (so children
-    point at this receipt) and its ``correlation_id`` matches this
-    receipt (so the whole tree shares the same correlation).
+    point at this receipt), its ``correlation_id`` matches this receipt
+    (so the whole tree shares the same correlation), and its
+    ``transport_kind`` is inherited from the parent so a child receipt
+    is attributed to the same originating surface as its caller.
 
     When caller_context is None and the ContextVar is also empty, this
-    is a root entry-point call: cause_receipt_id is None and a fresh
-    correlation_id is minted.
+    is a root entry-point call: cause_receipt_id is None, a fresh
+    correlation_id is minted, and transport_kind is None until an
+    entry-point surface declares one.
     """
 
     effective = caller_context if caller_context is not None else CURRENT_CALLER_CONTEXT.get()
@@ -939,14 +1157,61 @@ def _prepare_call_context(
     if effective is None:
         correlation_id = str(uuid4())
         cause_receipt_id: str | None = None
+        transport_kind: str | None = None
     else:
         correlation_id = effective.correlation_id
         cause_receipt_id = effective.cause_receipt_id
+        transport_kind = effective.transport_kind
     nested_context = CallerContext(
         cause_receipt_id=receipt_id,
         correlation_id=correlation_id,
+        transport_kind=transport_kind,
     )
-    return receipt_id, correlation_id, cause_receipt_id, nested_context
+    return receipt_id, correlation_id, cause_receipt_id, transport_kind, nested_context
+
+
+_TRANSPORT_KIND_ALLOWED: frozenset[str] = frozenset(
+    {"cli", "mcp", "http", "workflow", "heartbeat", "internal", "sandbox", "test", "unknown"}
+)
+
+
+def _normalize_transport_kind(value: Any) -> str | None:
+    """Validate transport_kind against the migration-347 CHECK enum.
+
+    The DB constraint admits NULL or one of the documented values.
+    Anything else gets coerced to NULL so a stray string from a misbehaving
+    surface doesn't fail the receipt insert; the surface should be fixed
+    upstream rather than let bad transports slip through.
+    """
+
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip().lower()
+    if candidate in _TRANSPORT_KIND_ALLOWED:
+        return candidate
+    return None
+
+
+def _extract_caller_ref(payload: Mapping[str, Any] | None, transport_kind: str | None) -> str:
+    """Pick a caller_ref string for the receipt.
+
+    Order of preference:
+      1. ``payload['caller_ref']`` when the input declares it (handlers
+         like ``compose_experiment``, ``surface_actions``, and
+         ``shell_navigation`` all populate this).
+      2. ``f"{transport_kind}.unknown"`` when transport is known but
+         the input did not declare a caller (so per-surface audit
+         queries still bucket the call correctly).
+      3. ``"authority_gateway"`` as a final fallback for legacy paths.
+    """
+
+    if isinstance(payload, Mapping):
+        candidate = payload.get("caller_ref")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    if transport_kind:
+        return f"{transport_kind}.unknown"
+    return "authority_gateway"
 
 
 def _persist_operation_outcome(
@@ -961,6 +1226,7 @@ def _persist_operation_outcome(
     receipt_id: str,
     correlation_id: str,
     cause_receipt_id: str | None,
+    transport_kind: str | None = None,
     execution_status: str = "completed",
     error_code: str | None = None,
     error_detail: str | None = None,
@@ -971,6 +1237,8 @@ def _persist_operation_outcome(
     projection_freshness = _projection_freshness(result)
     duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
     event_ids: list[str] = _result_authority_event_ids(result)
+    normalized_transport_kind = _normalize_transport_kind(transport_kind)
+    caller_ref = _extract_caller_ref(payload, normalized_transport_kind)
     receipt = _receipt_payload(
         binding,
         receipt_id=receipt_id,
@@ -986,6 +1254,8 @@ def _persist_operation_outcome(
         duration_ms=duration_ms,
         cause_receipt_id=cause_receipt_id,
         correlation_id=correlation_id,
+        transport_kind=normalized_transport_kind,
+        caller_ref=caller_ref,
     )
     with _operation_proof_transaction(conn) as proof_conn:
         receipt = _write_operation_proof(
@@ -1108,9 +1378,24 @@ async def aexecute_operation_binding(
         input_hash=input_hash,
         idempotency_key_override=idempotency_key_override,
     )
-    receipt_id, correlation_id, cause_receipt_id, nested_context = _prepare_call_context(
+    receipt_id, correlation_id, cause_receipt_id, transport_kind, nested_context = _prepare_call_context(
         caller_context
     )
+    try:
+        _assert_lane_admits_dispatch(binding, transport_kind=transport_kind)
+    except OperationLaneViolation as exc:
+        return _persist_lane_failure(
+            conn,
+            binding,
+            exc=exc,
+            payload=payload,
+            input_hash=input_hash,
+            idempotency_key=idempotency_key,
+            receipt_id=receipt_id,
+            correlation_id=correlation_id,
+            cause_receipt_id=cause_receipt_id,
+            transport_kind=transport_kind,
+        )
     cached = _fetch_existing_idempotent_result(
         conn,
         operation_ref=binding.operation_ref,
@@ -1132,17 +1417,33 @@ async def aexecute_operation_binding(
             receipt_id=receipt_id,
             correlation_id=correlation_id,
             cause_receipt_id=cause_receipt_id,
+            transport_kind=transport_kind,
         )
         return _with_operation_receipt(binding, result, receipt=receipt)
     command = build_operation_command(binding, payload=payload)
     started_ns = time.monotonic_ns()
     token = CURRENT_CALLER_CONTEXT.set(nested_context)
     try:
-        result = await _await_handler_result(binding.handler(command, subsystems))
+        if (
+            getattr(binding, "execution_lane", "background") == "interactive"
+            and binding.timeout_ms > 0
+        ):
+            try:
+                result = await asyncio.wait_for(
+                    _await_handler_result(binding.handler(command, subsystems)),
+                    timeout=binding.timeout_ms / 1000.0,
+                )
+            except asyncio.TimeoutError as timeout_exc:
+                raise OperationInteractiveTimeout(
+                    operation_ref=binding.operation_ref,
+                    timeout_ms=binding.timeout_ms,
+                ) from timeout_exc
+        else:
+            result = await _await_handler_result(binding.handler(command, subsystems))
     except Exception as exc:
         error_code = _error_code_for_exception(exc)
         error_details = _error_details_for_exception(exc)
-        _persist_operation_outcome(
+        receipt = _persist_operation_outcome(
             conn,
             binding,
             payload=payload,
@@ -1156,11 +1457,13 @@ async def aexecute_operation_binding(
             receipt_id=receipt_id,
             correlation_id=correlation_id,
             cause_receipt_id=cause_receipt_id,
+            transport_kind=transport_kind,
         )
         failure = {
             "ok": False,
             "error": str(exc),
             "error_code": error_code,
+            "operation_receipt": receipt,
         }
         if error_details:
             failure["details"] = error_details
@@ -1178,6 +1481,7 @@ async def aexecute_operation_binding(
         receipt_id=receipt_id,
         correlation_id=correlation_id,
         cause_receipt_id=cause_receipt_id,
+        transport_kind=transport_kind,
     )
     return _with_operation_receipt(binding, result, receipt=receipt)
 
@@ -1200,9 +1504,24 @@ def execute_operation_binding(
         input_hash=input_hash,
         idempotency_key_override=idempotency_key_override,
     )
-    receipt_id, correlation_id, cause_receipt_id, nested_context = _prepare_call_context(
+    receipt_id, correlation_id, cause_receipt_id, transport_kind, nested_context = _prepare_call_context(
         caller_context
     )
+    try:
+        _assert_lane_admits_dispatch(binding, transport_kind=transport_kind)
+    except OperationLaneViolation as exc:
+        return _persist_lane_failure(
+            conn,
+            binding,
+            exc=exc,
+            payload=payload,
+            input_hash=input_hash,
+            idempotency_key=idempotency_key,
+            receipt_id=receipt_id,
+            correlation_id=correlation_id,
+            cause_receipt_id=cause_receipt_id,
+            transport_kind=transport_kind,
+        )
     cached = _fetch_existing_idempotent_result(
         conn,
         operation_ref=binding.operation_ref,
@@ -1224,19 +1543,18 @@ def execute_operation_binding(
             receipt_id=receipt_id,
             correlation_id=correlation_id,
             cause_receipt_id=cause_receipt_id,
+            transport_kind=transport_kind,
         )
         return _with_operation_receipt(binding, result, receipt=receipt)
     command = build_operation_command(binding, payload=payload)
     started_ns = time.monotonic_ns()
     token = CURRENT_CALLER_CONTEXT.set(nested_context)
     try:
-        result = binding.handler(command, subsystems)
-        if inspect.isawaitable(result):
-            result = _run_awaitable_sync(result)
+        result = _call_sync_handler_with_interactive_timeout(binding, command, subsystems)
     except Exception as exc:
         error_code = _error_code_for_exception(exc)
         error_details = _error_details_for_exception(exc)
-        _persist_operation_outcome(
+        receipt = _persist_operation_outcome(
             conn,
             binding,
             payload=payload,
@@ -1250,11 +1568,13 @@ def execute_operation_binding(
             receipt_id=receipt_id,
             correlation_id=correlation_id,
             cause_receipt_id=cause_receipt_id,
+            transport_kind=transport_kind,
         )
         failure = {
             "ok": False,
             "error": str(exc),
             "error_code": error_code,
+            "operation_receipt": receipt,
         }
         if error_details:
             failure["details"] = error_details
@@ -1272,6 +1592,7 @@ def execute_operation_binding(
         receipt_id=receipt_id,
         correlation_id=correlation_id,
         cause_receipt_id=cause_receipt_id,
+        transport_kind=transport_kind,
     )
     return _with_operation_receipt(binding, result, receipt=receipt)
 
@@ -1331,14 +1652,35 @@ def execute_operation_from_env(
     env: Mapping[str, str],
     operation_name: str,
     payload: Mapping[str, Any] | None = None,
+    caller_context: CallerContext | None = None,
 ) -> Any:
+    """Dispatch a gateway operation using an environment-mapped subsystems
+    facade.
+
+    This is the canonical CLI entry point. When the caller does not supply
+    a ``caller_context`` and there is no inherited
+    ``CURRENT_CALLER_CONTEXT`` (e.g. an operator typing
+    ``praxis workflow tools call ...``), default the receipt's
+    ``transport_kind`` to ``"cli"`` so per-surface audit queries bucket
+    the call correctly. Surfaces with a different transport (workflow
+    runner, MCP-over-HTTP) construct their own ``CallerContext`` and
+    pass it explicitly.
+    """
+
     source = dict(env)
     conn = SyncPostgresConnection(get_workflow_pool(env=source))
     subsystems = _EnvironmentBackedSubsystems(env=source, conn=conn)
+    if caller_context is None and CURRENT_CALLER_CONTEXT.get() is None:
+        caller_context = CallerContext(
+            cause_receipt_id=None,
+            correlation_id=str(uuid4()),
+            transport_kind="cli",
+        )
     return execute_operation_from_subsystems(
         subsystems,
         operation_name=operation_name,
         payload=payload,
+        caller_context=caller_context,
     )
 
 
@@ -1347,6 +1689,8 @@ __all__ = [
     "CallerContext",
     "CURRENT_CALLER_CONTEXT",
     "OperationIdempotencyConflict",
+    "OperationInteractiveTimeout",
+    "OperationLaneViolation",
     "OperationModeViolation",
     "aexecute_operation_binding",
     "aexecute_operation_from_subsystems",

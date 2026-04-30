@@ -175,7 +175,7 @@ PYTHONPATH="Code&DBs/Workflow" \
 
 ## Database Bootstrap
 
-Migrations live in `Code&DBs/Databases/migrations/workflow/` — the repo is currently at migration **209**. They run in order, are idempotent, and are split into `canonical` (always applied) and `bootstrap_only` (applied on fresh instances). The classification is authored by `_generated_workflow_migration_authority.py`; fresh-install runtime rows are then reconciled from `config/runtime_profiles.json`.
+Migrations live in `Code&DBs/Databases/migrations/workflow/`. The canonical manifest lives in `Code&DBs/Workflow/system_authority/workflow_migration_authority.json` and is regenerated into `Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py` whenever a new migration lands — that's where you check the live count and apply order, not by counting files. Migrations run in order, are idempotent, and are split into `canonical` (always applied) and `bootstrap_only` (applied on fresh instances). Fresh-install runtime rows are then reconciled from `config/runtime_profiles.json`.
 
 ```bash
 # Apply everything — idempotent

@@ -7,6 +7,7 @@ import { LoadingSkeleton } from '../../primitives/LoadingSkeleton';
 import { publishSelection } from '../../hooks/useWorldSelection';
 import { getPath } from '../../utils/format';
 import { world } from '../../world';
+import { sourceBindingFor, sourceSelectionPath, type SourceBoundConfig } from '../sourceBindings';
 
 interface PropertyDef {
   name: string;
@@ -36,17 +37,46 @@ interface DataTableConfig {
   refreshInterval?: number;
   publishSelection?: string;
   searchQuery?: string;
+  sourceSelection?: string;
+  sourceBindings?: Record<string, SourceBoundConfig>;
+  disabledMessage?: string;
+  emptyMessage?: string;
+  emptyDetail?: string;
+}
+
+function activeSourceLabel(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const label = typeof record.label === 'string' ? record.label.trim() : '';
+  if (label) return label;
+  const id = typeof record.id === 'string' ? record.id.trim() : '';
+  return id || null;
 }
 
 function DataTableModule({ config }: QuadrantProps) {
   const cfg = (config ?? {}) as DataTableConfig;
   const [propDefs, setPropDefs] = useState<PropertyDef[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const activeSource = useSlice(world, sourceSelectionPath(cfg.sourceSelection));
+  const sourceBinding = sourceBindingFor(cfg.sourceBindings, activeSource);
+  const effectiveCfg = useMemo(
+    () => ({ ...cfg, ...(sourceBinding ?? {}) }) as DataTableConfig,
+    [cfg, sourceBinding],
+  );
+  const disabledMessage = typeof effectiveCfg.disabledMessage === 'string'
+    ? effectiveCfg.disabledMessage.trim()
+    : '';
+  const emptyMessage = typeof effectiveCfg.emptyMessage === 'string' && effectiveCfg.emptyMessage.trim()
+    ? effectiveCfg.emptyMessage.trim()
+    : 'No records returned';
+  const emptyDetail = typeof effectiveCfg.emptyDetail === 'string'
+    ? effectiveCfg.emptyDetail.trim()
+    : '';
   const searchQueryPath =
-    cfg.searchQuery === undefined
+    effectiveCfg.searchQuery === undefined
       ? 'shared.search_query'
-      : cfg.searchQuery
-        ? `shared.${cfg.searchQuery}`
+      : effectiveCfg.searchQuery
+        ? `shared.${effectiveCfg.searchQuery}`
         : null;
   const searchQueryRaw = useSlice(world, searchQueryPath);
 
@@ -64,8 +94,11 @@ function DataTableModule({ config }: QuadrantProps) {
 
   // Fetch field definitions for objectType
   useEffect(() => {
-    if (!cfg.objectType) return;
-    fetch(`/api/object-types/${cfg.objectType}`)
+    if (!effectiveCfg.objectType) {
+      setPropDefs([]);
+      return;
+    }
+    fetch(`/api/object-types/${effectiveCfg.objectType}`)
       .then(r => r.json())
       .then(data => {
         const typePayload = (data as { type?: { fields?: PropertyDef[] } } | null)?.type;
@@ -73,19 +106,28 @@ function DataTableModule({ config }: QuadrantProps) {
         setPropDefs(typePayload?.fields ?? directPayload ?? []);
       })
       .catch(() => setPropDefs([]));
-  }, [cfg.objectType]);
+  }, [effectiveCfg.objectType]);
 
   // Determine fetch endpoint — prefer explicit endpoint over objectType-derived
-  const fetchEndpoint = cfg.endpoint
-    ? cfg.endpoint
-    : cfg.objectType
-      ? `objects?type=${cfg.objectType}`
+  const fetchEndpoint = disabledMessage
+    ? ''
+    : effectiveCfg.endpoint
+    ? effectiveCfg.endpoint
+    : effectiveCfg.objectType
+      ? `objects?type=${effectiveCfg.objectType}`
       : '';
 
   const { data: rawData, loading, error } = useModuleData<unknown>(
     fetchEndpoint,
-    { enabled: !!fetchEndpoint, refreshInterval: cfg.refreshInterval ?? 30000 },
+    { enabled: !!fetchEndpoint, refreshInterval: effectiveCfg.refreshInterval ?? 30000 },
   );
+
+  useEffect(() => {
+    setSelectedIndex(null);
+    if (cfg.publishSelection) {
+      publishSelection(cfg.publishSelection, null);
+    }
+  }, [fetchEndpoint, cfg.publishSelection]);
 
   // Build rows — handle objects, bugs, and generic array responses (must be before columns)
   const rows = useMemo(() => {
@@ -94,8 +136,8 @@ function DataTableModule({ config }: QuadrantProps) {
 
     // Try common response shapes: {objects: [...]}, {bugs: [...]}, or direct array
     let items: unknown[] = [];
-    if (cfg.path) {
-      const resolved = getPath(d, cfg.path);
+    if (effectiveCfg.path) {
+      const resolved = getPath(d, effectiveCfg.path);
       items = Array.isArray(resolved) ? resolved : [];
     } else if (Array.isArray(d)) {
       items = d;
@@ -117,7 +159,7 @@ function DataTableModule({ config }: QuadrantProps) {
       // Bug or generic record — use as-is
       return item;
     });
-  }, [rawData, cfg.path]);
+  }, [rawData, effectiveCfg.path]);
 
   const filteredRows = useMemo(() => {
     const query = typeof searchQueryRaw === 'string' ? searchQueryRaw.trim().toLowerCase() : '';
@@ -130,10 +172,60 @@ function DataTableModule({ config }: QuadrantProps) {
     );
   }, [rows, searchQueryRaw]);
 
+  const emptyState = useMemo(() => {
+    const sourceLabel = activeSourceLabel(activeSource);
+    const query = typeof searchQueryRaw === 'string' ? searchQueryRaw.trim() : '';
+    const facts = [
+      sourceLabel ? `Source: ${sourceLabel}` : null,
+      effectiveCfg.objectType ? `Object type: ${effectiveCfg.objectType}` : null,
+      query ? `Filter: "${query}"` : null,
+      'Rows: 0',
+    ].filter((fact): fact is string => Boolean(fact));
+
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        minHeight: 120,
+        color: 'var(--text-muted, #8b949e)',
+      }}>
+        <div style={{ color: 'var(--text, #e6edf3)', fontSize: 14, fontWeight: 650 }}>
+          {emptyMessage}
+        </div>
+        {emptyDetail && (
+          <div style={{ maxWidth: 520, fontSize: 12, lineHeight: 1.5 }}>
+            {emptyDetail}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>
+          {facts.map((fact) => (
+            <span
+              key={fact}
+              style={{
+                border: '1px solid var(--border, #30363d)',
+                borderRadius: 999,
+                color: 'var(--text-muted, #8b949e)',
+                fontSize: 11,
+                fontWeight: 650,
+                padding: '3px 8px',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {fact}
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }, [activeSource, effectiveCfg.objectType, emptyDetail, emptyMessage, searchQueryRaw]);
+
   // Derive columns — explicit config → property defs → auto-detect from first row
   const columns = useMemo(() => {
-    if (cfg.columns && cfg.columns.length > 0) return cfg.columns;
-    if (cfg.objectType && propDefs.length > 0) {
+    if (effectiveCfg.columns && effectiveCfg.columns.length > 0) return effectiveCfg.columns;
+    if (effectiveCfg.objectType && propDefs.length > 0) {
       return [
         { key: 'object_id', label: 'ID' },
         ...propDefs.map(p => ({ key: p.name, label: p.name.charAt(0).toUpperCase() + p.name.slice(1) })),
@@ -152,7 +244,7 @@ function DataTableModule({ config }: QuadrantProps) {
         }));
     }
     return [];
-  }, [cfg.columns, cfg.objectType, propDefs, filteredRows]);
+  }, [effectiveCfg.columns, effectiveCfg.objectType, propDefs, filteredRows]);
 
   if (loading) {
     return (
@@ -162,6 +254,19 @@ function DataTableModule({ config }: QuadrantProps) {
         width: '100%', height: '100%', boxSizing: 'border-box',
       }}>
         <LoadingSkeleton lines={6} height={18} widths={['100%', '96%', '88%', '92%', '80%', '72%']} />
+      </div>
+    );
+  }
+
+  if (disabledMessage) {
+    return (
+      <div style={{
+        background: 'var(--bg-card)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)', padding: 'var(--space-lg)',
+        color: 'var(--text-muted)', width: '100%', height: '100%', boxSizing: 'border-box',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+      }}>
+        {disabledMessage}
       </div>
     );
   }
@@ -185,6 +290,7 @@ function DataTableModule({ config }: QuadrantProps) {
         data={filteredRows as Record<string, unknown>[]}
         onRowClick={handleRowClick}
         selectedIndex={selectedIndex}
+        emptyState={emptyState}
       />
     </div>
   );

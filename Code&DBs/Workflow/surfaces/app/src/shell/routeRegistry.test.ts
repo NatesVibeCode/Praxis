@@ -85,6 +85,56 @@ const MIN_ROUTES: RouteRegistryRow[] = [
     is_canonical_for_surface: false,
     tab_strip_position: null,
   },
+  {
+    route_id: 'route.app.manifests',
+    path_template: '/app/manifests',
+    surface_name: 'manifests',
+    state_effect: '',
+    notes: '',
+    source_refs: [],
+    status: 'ready',
+    display_order: 50,
+    binding_revision: 'b',
+    decision_ref: 'd',
+    component_ref: 'praxis/ManifestCatalogPage.ManifestCatalogPage',
+    tab_kind_label: 'Catalog',
+    tab_label_template: 'Manifests',
+    context_label: 'Manifest catalog',
+    context_detail_template: '',
+    nav_description_template: '',
+    nav_keywords: [],
+    event_bus_kind: null,
+    keyboard_shortcut: null,
+    draft_guard_required: false,
+    is_dynamic: false,
+    is_canonical_for_surface: true,
+    tab_strip_position: 40,
+  },
+  {
+    route_id: 'route.app.manifest',
+    path_template: '/app/manifests?manifest={manifest_id}&tab={manifest_tab_id}',
+    surface_name: 'manifests',
+    state_effect: '',
+    notes: '',
+    source_refs: [],
+    status: 'ready',
+    display_order: 55,
+    binding_revision: 'b',
+    decision_ref: 'd',
+    component_ref: 'praxis/ManifestBundleView.ManifestBundleView',
+    tab_kind_label: 'manifest',
+    tab_label_template: '{{manifest_id}}',
+    context_label: 'Manifest bundle',
+    context_detail_template: '',
+    nav_description_template: '',
+    nav_keywords: [],
+    event_bus_kind: 'manifest',
+    keyboard_shortcut: null,
+    draft_guard_required: false,
+    is_dynamic: true,
+    is_canonical_for_surface: false,
+    tab_strip_position: null,
+  },
 ];
 
 describe('routeRegistry', () => {
@@ -115,6 +165,27 @@ describe('routeRegistry', () => {
       const m = matchPath('/app/workflow', '');
       expect(m).toEqual({ route_id: 'route.app.workflow', slot_values: {} });
     });
+
+    test('preserves workflow id on /app/workflow deep links', () => {
+      const m = matchPath('/app/workflow', '?workflow=wf_42');
+      expect(m).toEqual({ route_id: 'route.app.workflow', slot_values: { workflow: 'wf_42' } });
+    });
+
+    test('prefers manifest detail route over the manifest catalog route when query slots are bound', () => {
+      const m = matchPath('/app/manifests', '?manifest=entity-workspace-2a1a7c&tab=main');
+      expect(m).toEqual({
+        route_id: 'route.app.manifest',
+        slot_values: {
+          manifest_id: 'entity-workspace-2a1a7c',
+          manifest_tab_id: 'main',
+        },
+      });
+    });
+
+    test('keeps bare /app/manifests on the catalog route', () => {
+      const m = matchPath('/app/manifests', '');
+      expect(m).toEqual({ route_id: 'route.app.manifests', slot_values: {} });
+    });
   });
 
   describe('buildPath', () => {
@@ -128,6 +199,15 @@ describe('routeRegistry', () => {
 
     test('renders /app for dashboard', () => {
       expect(buildPath('route.app.dashboard')).toBe('/app');
+    });
+
+    test('renders workflow id on workflow route', () => {
+      expect(buildPath('route.app.workflow', { workflow: 'wf_42' })).toBe('/app/workflow?workflow=wf_42');
+    });
+
+    test('renders manifest detail query slots', () => {
+      expect(buildPath('route.app.manifest', { manifest_id: 'entity-workspace-2a1a7c', manifest_tab_id: 'main' }))
+        .toBe('/app/manifests?manifest=entity-workspace-2a1a7c&tab=main');
     });
   });
 

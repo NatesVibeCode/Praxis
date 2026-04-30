@@ -344,6 +344,21 @@ def run_scheduler_tick(
         except Exception:
             logger.debug("scheduler.tick emission unavailable", exc_info=True)
 
+    if not dry_run:
+        try:
+            from runtime.verifier_authority import run_due_platform_verifications
+
+            verifier_results = run_due_platform_verifications()
+            fired_count = sum(1 for r in verifier_results if not r.get("skipped"))
+            if fired_count:
+                logger.info(
+                    "Periodic platform verification fired %d verifier(s)", fired_count
+                )
+        except Exception as exc:
+            logger.warning(
+                "Periodic platform verification failed: %s", exc, exc_info=True
+            )
+
     for job in config.jobs:
         last_run = state.get_last_run(job.name)
 

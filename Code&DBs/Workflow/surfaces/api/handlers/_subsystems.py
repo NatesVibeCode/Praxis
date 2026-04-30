@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 from ._shared import (
@@ -37,9 +38,12 @@ class _Subsystems(_BaseSubsystems):
         return workflow_database_env()
 
     def _should_start_heartbeat_background(self) -> bool:
-        # API surface is long-lived and now gets heartbeat-driven maintenance
-        # during startup, so trigger processing remains active.
-        return True
+        # Request-serving API lanes must not be forced to run heavyweight
+        # maintenance projections. Local UI proof/debug lanes can disable the
+        # background heartbeat and leave maintenance to the explicit heartbeat
+        # operator surface.
+        enabled = os.getenv("PRAXIS_API_ENABLE_BACKGROUND_HEARTBEAT", "").strip().lower()
+        return enabled in {"1", "true", "yes", "on"}
 
 
 __all__ = ["_Subsystems", "workflow_database_env"]

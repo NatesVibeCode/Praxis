@@ -92,7 +92,7 @@
 }
 
 .moon-middle--action-open {
-  grid-template-columns: clamp(360px, 30vw, 460px) minmax(0, 1fr) 0;
+  grid-template-columns: clamp(420px, 34vw, 560px) minmax(0, 1fr) 0;
 }
 
 .moon-middle--context-open {
@@ -207,14 +207,14 @@
 .moon-center {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   position: relative;
   overflow: auto;
   scrollbar-width: none;
   min-width: 0;
   transition: flex var(--moon-motion-dock), padding var(--moon-motion-dock);
-  padding: 28px 32px 72px;
+  padding: 84px 32px 96px;
 }
 
 .moon-center::-webkit-scrollbar {
@@ -229,7 +229,7 @@
 
 .moon-center__dock-actions {
   position: absolute;
-  top: calc(var(--moon-nav-clearance) - 8px);
+  top: 16px;
   left: 24px;
   right: 24px;
   z-index: var(--moon-z-overlay);
@@ -278,8 +278,279 @@
   box-shadow: var(--moon-shadow-accent-line-soft);
 }
 
+.moon-center__dock-btn--warning {
+  border-color: rgba(245, 158, 11, 0.48);
+  color: #f8d38a;
+  background: rgba(245, 158, 11, 0.10);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.08), 0 12px 26px rgba(245, 158, 11, 0.10);
+}
+
+.moon-center__dock-btn--warning:hover,
+.moon-center__dock-btn--warning.moon-center__dock-btn--active {
+  border-color: rgba(245, 158, 11, 0.72);
+  color: #ffe4ad;
+  background: rgba(245, 158, 11, 0.16);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.14), 0 16px 32px rgba(245, 158, 11, 0.16);
+}
+
+.moon-center__dock-btn--blocked {
+  border-color: rgba(248, 113, 113, 0.44);
+  color: #f3b0a7;
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.moon-center__dock-btn--blocked:hover,
+.moon-center__dock-btn--blocked.moon-center__dock-btn--active {
+  border-color: rgba(248, 113, 113, 0.68);
+  color: #ffd0c7;
+  background: rgba(248, 113, 113, 0.13);
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.13), 0 14px 28px rgba(248, 113, 113, 0.12);
+}
+
+.moon-center__dock-btn--ready {
+  border-color: rgba(74, 222, 128, 0.42);
+  color: #9af0b2;
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.moon-center__dock-btn--ready:hover,
+.moon-center__dock-btn--ready.moon-center__dock-btn--active {
+  border-color: rgba(74, 222, 128, 0.66);
+  color: #c2ffd1;
+  background: rgba(74, 222, 128, 0.13);
+  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.12), 0 14px 28px rgba(74, 222, 128, 0.12);
+}
+
 .moon-center__dock-btn-label {
   white-space: nowrap;
+}
+
+.moon-review-strip {
+  position: relative;
+  z-index: var(--moon-z-overlay);
+  display: grid;
+  grid-template-columns: minmax(420px, 1.35fr) minmax(250px, 0.62fr) minmax(340px, 0.82fr);
+  align-items: start;
+  gap: 8px;
+  flex-shrink: 0;
+  margin: calc(var(--moon-nav-clearance) + 12px) 68px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--moon-white-a08);
+  border-radius: 7px;
+  background:
+    linear-gradient(90deg, rgba(243, 238, 228, 0.045), transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(8, 8, 8, 0.82));
+  background-size: 56px 100%, 100% 100%;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+.moon-review-strip__contract,
+.moon-review-strip__spine,
+.moon-review-strip__proof {
+  min-width: 0;
+}
+
+.moon-review-strip__head,
+.moon-review-strip__proof-row > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--moon-fg-muted);
+}
+
+.moon-review-strip__title {
+  margin-top: 5px;
+  color: var(--moon-fg);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moon-review-strip__route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 8px;
+  overflow: visible;
+}
+
+.moon-review-strip__route-step,
+.moon-review-strip__route-more,
+.moon-review-strip__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  max-width: 180px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid var(--moon-white-a08);
+  background: var(--moon-white-a03);
+  color: var(--moon-fg);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.moon-review-strip__route-step {
+  flex: 1 1 132px;
+  max-width: 230px;
+  white-space: normal;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moon-review-strip__route-step > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--moon-accent-a10);
+  color: var(--moon-fg);
+  font-size: 10px;
+}
+
+.moon-review-strip__route-arrow {
+  color: var(--moon-fg-dim);
+  font-size: 12px;
+}
+
+.moon-review-strip__route-more {
+  flex-shrink: 0;
+  color: var(--moon-fg-muted);
+}
+
+.moon-review-strip__spine {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.moon-review-strip__spine-row {
+  display: grid;
+  grid-template-columns: 8px minmax(46px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid var(--moon-white-a08);
+  background: rgba(255, 255, 255, 0.026);
+  color: var(--moon-fg-muted);
+  font-size: 11px;
+}
+
+.moon-review-strip__spine-row strong {
+  min-width: 0;
+  color: var(--moon-fg);
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moon-review-strip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--moon-white-a25);
+  box-shadow: 0 0 0 3px var(--moon-white-a04);
+}
+
+.moon-review-strip__dot--healthy {
+  background: var(--moon-state-success);
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.1);
+}
+
+.moon-review-strip__dot--warning {
+  background: var(--moon-warning);
+  box-shadow: 0 0 0 3px rgba(210, 153, 34, 0.1);
+}
+
+.moon-review-strip__dot--danger {
+  background: var(--moon-danger);
+  box-shadow: 0 0 0 3px var(--moon-danger-a16);
+}
+
+.moon-review-strip__dot--neutral {
+  background: var(--moon-fg-dim);
+}
+
+.moon-review-strip__proof {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.moon-review-strip__proof-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-height: 30px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--moon-white-a08);
+  background: rgba(255, 255, 255, 0.026);
+}
+
+.moon-review-strip__proof-row strong {
+  min-width: 0;
+  color: var(--moon-fg);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moon-review-strip__proof-row--warn {
+  border-color: rgba(210, 153, 34, 0.35);
+  background: rgba(210, 153, 34, 0.08);
+}
+
+.moon-review-strip__pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: visible;
+}
+
+.moon-review-strip__pill {
+  min-height: 22px;
+  max-width: 220px;
+  padding: 0 8px;
+  color: var(--moon-fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moon-review-strip__pill--empty {
+  color: var(--moon-warning);
+  border-color: rgba(210, 153, 34, 0.35);
+  background: rgba(210, 153, 34, 0.08);
 }
 
 /* Bottom dock (Release) */
@@ -351,8 +622,8 @@
 /* Bottom half-moon */
 .moon-halfmoon--bottom {
   bottom: 10px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 34px;
+  transform: none;
   min-height: 44px;
   padding: 0 42px;
   border-top-left-radius: 28px;
@@ -392,6 +663,11 @@
 @media (max-width: 900px) {
   .moon-body {
     padding-bottom: 0;
+  }
+
+  .moon-review-strip {
+    grid-template-columns: 1fr;
+    margin: calc(var(--moon-nav-clearance) + 10px) 14px 8px;
   }
 
   .moon-middle {
@@ -472,6 +748,20 @@
 
   .moon-center {
     padding: 18px 12px 72px;
+  }
+
+  .moon-review-strip {
+    margin: calc(var(--moon-nav-clearance) + 8px) 10px 8px;
+    padding: 8px;
+  }
+
+  .moon-review-strip__title {
+    white-space: normal;
+  }
+
+  .moon-review-strip__spine-row,
+  .moon-review-strip__proof-row {
+    min-height: 34px;
   }
 
   .moon-center__dock-actions {

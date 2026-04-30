@@ -7,7 +7,10 @@ from typing import Any
 from contracts.operation_catalog import (
     DEFAULT_AUTHORITY_STORAGE_TARGET,
     DEFAULT_OPERATION_ALLOWED_CALLERS,
+    DEFAULT_OPERATION_EXECUTION_LANE,
+    DEFAULT_OPERATION_KICKOFF_REQUIRED,
     DEFAULT_OPERATION_TIMEOUT_MS,
+    normalize_operation_execution_lane,
     normalize_operation_idempotency_policy,
     normalize_operation_kind,
     normalize_operation_posture,
@@ -155,6 +158,15 @@ def _normalize_operation_row(row: dict[str, Any]) -> dict[str, Any]:
             "idempotency_policy": normalize_operation_idempotency_policy(
                 row.get("idempotency_policy"),
                 allow_none=True,
+            ),
+            "execution_lane": str(
+                normalize_operation_execution_lane(
+                    row.get("execution_lane") or DEFAULT_OPERATION_EXECUTION_LANE,
+                )
+            ),
+            "kickoff_required": _require_bool(
+                row.get("kickoff_required", DEFAULT_OPERATION_KICKOFF_REQUIRED),
+                field_name="kickoff_required",
             ),
             "enabled": _require_bool(row.get("enabled"), field_name="enabled"),
             "binding_revision": _require_text(

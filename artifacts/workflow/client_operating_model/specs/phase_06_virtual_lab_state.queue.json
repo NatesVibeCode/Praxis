@@ -1,0 +1,33 @@
+{
+  "name": "Client Operating Model Phase 6 Virtual Lab State",
+  "workflow_id": "client_operating_model_phase_06_virtual_lab_state_20260430",
+  "queue_id": "client_operating_model_phase_06_virtual_lab_state_20260430",
+  "phase": "architecture",
+  "outcome_goal": "Produce the Virtual Lab authority and event-sourced state model implementation packet.",
+  "anti_requirements": [
+    "Do not edit production code.",
+    "Do not mix observed facts with predicted consequences.",
+    "Do not copy whole fake databases when event-sourced state is enough."
+  ],
+  "jobs": [
+    {
+      "label": "phase_06_virtual_lab_state_packet",
+      "agent": "openai/gpt-5.4",
+      "adapter_type": "cli_llm",
+      "task_type": "architecture",
+      "timeout": 900,
+      "workdir": "/Users/nate/Praxis",
+      "read_scope": [
+        "docs/architecture/object-truth-trust-toolbelt/build-plan.md",
+        "docs/architecture/object-truth-trust-toolbelt/risk-mitigation.md",
+        "artifacts/workflow/client_operating_model/packets/phase_03_mdm_source_authority/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_04_hierarchy_task_contracts/PLAN.md",
+        "artifacts/workflow/client_operating_model/packets/phase_05_integration_automation_contracts/PLAN.md"
+      ],
+      "write_scope": [
+        "artifacts/workflow/client_operating_model/packets/phase_06_virtual_lab_state/PLAN.md"
+      ],
+      "prompt": "Write artifacts/workflow/client_operating_model/packets/phase_06_virtual_lab_state/PLAN.md. Produce a bounded build packet for Phase 6: Virtual Lab Authority and Event-Sourced State Model. Define virtual environment revisions, state seeds from Object Truth, copy-on-write object state, state events, causality, digests, receipts/events, CQRS ops, tests, and validation. Do not edit code."
+    }
+  ]
+}
