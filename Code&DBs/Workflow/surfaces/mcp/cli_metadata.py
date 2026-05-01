@@ -2257,6 +2257,86 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_verifier_register": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="verifier-register",
+        when_to_use=(
+            "Register (or update) a verifier authority ref without authoring "
+            "a SQL migration. Use when adding a new verifier — replaces the "
+            "old hand-edited verifier_builtins.py + migration pattern. "
+            "Optional bind_healer_refs creates verifier_healer_bindings in "
+            "the same call."
+        ),
+        when_not_to_use=(
+            "Do not use this to RUN a verifier — that's praxis_verifier_run. "
+            "Do not use it to register healers — that's praxis_healer_register."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Register a builtin verifier",
+                {
+                    "verifier_ref": "verifier.platform.example_check",
+                    "display_name": "Example platform check",
+                    "verifier_kind": "builtin",
+                    "builtin_ref": "verify_schema_authority",
+                    "decision_ref": "decision.example.check.20260501",
+                },
+            ),
+            _example(
+                "Register a verification_ref-backed verifier with a healer binding",
+                {
+                    "verifier_ref": "verifier.platform.foo",
+                    "display_name": "Foo verifier",
+                    "verifier_kind": "verification_ref",
+                    "verification_ref": "verification.foo.20260501",
+                    "decision_ref": "decision.foo.20260501",
+                    "bind_healer_refs": ["healer.platform.foo_repair"],
+                },
+            ),
+        ],
+    ),
+    "praxis_healer_register": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="healer-register",
+        when_to_use=(
+            "Register (or update) a healer authority ref without authoring a "
+            "SQL migration. Use when adding a new healer that will be bound "
+            "to one or more verifiers. action_ref must name a built-in "
+            "handler from runtime.verifier_builtins.run_builtin_healer."
+        ),
+        when_not_to_use=(
+            "Do not use this to RUN a healer — that's praxis_healer_run. "
+            "Do not use it to register verifiers — that's praxis_verifier_register."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Register a guarded manual healer",
+                {
+                    "healer_ref": "healer.platform.example_repair",
+                    "display_name": "Example platform repair",
+                    "action_ref": "heal_schema_bootstrap",
+                    "auto_mode": "manual",
+                    "safety_mode": "guarded",
+                    "decision_ref": "decision.example.repair.20260501",
+                },
+            ),
+            _example(
+                "Register an automatic guarded healer",
+                {
+                    "healer_ref": "healer.platform.auto_repair",
+                    "display_name": "Auto repair",
+                    "action_ref": "heal_proof_backfill",
+                    "auto_mode": "automatic",
+                    "safety_mode": "guarded",
+                    "decision_ref": "decision.auto_repair.20260501",
+                },
+            ),
+        ],
+    ),
     "praxis_verifier_run": _tool(
         surface="evidence",
         tier="stable",
