@@ -470,23 +470,46 @@ def _manifest_audit_snapshot(
         """,
         *params,
     )
+    latest_success_index_by_job: dict[tuple[str, str], tuple[int, str]] = {}
+    for index, row in enumerate(rows):
+        row_run_id = str(_row_value(row, "run_id") or "")
+        node_id = str(_row_value(row, "node_id") or "")
+        if not row_run_id or not node_id:
+            continue
+        if str(_row_value(row, "status") or "") != "succeeded":
+            continue
+        latest_success_index_by_job.setdefault(
+            (row_run_id, node_id),
+            (index, str(_row_value(row, "receipt_id") or "")),
+        )
+
     records: list[dict[str, Any]] = []
     total_missing = 0
     outside_observed = 0
-    for row in rows:
+    for index, row in enumerate(rows):
         audit = _as_mapping(_row_value(row, "workspace_manifest_audit"))
         missing = list(audit.get("missing_intended_paths") or [])
         observed = list(audit.get("observed_file_read_refs") or [])
         observed_mode = str(audit.get("observed_file_read_mode") or "")
         status = str(_row_value(row, "status") or "")
+        row_run_id = str(_row_value(row, "run_id") or "")
+        node_id = str(_row_value(row, "node_id") or "")
+        success_index, success_receipt_id = latest_success_index_by_job.get(
+            (row_run_id, node_id),
+            (-1, ""),
+        )
+        superseded_by_success = success_index >= 0 and success_index < index
         actionable_missing = [
             path
             for path in missing
-            if status != "succeeded"
-            or (
-                observed_mode != "provider_output_path_mentions"
-                and observed_mode
-                and path in observed
+            if not superseded_by_success
+            and (
+                status != "succeeded"
+                or (
+                    observed_mode != "provider_output_path_mentions"
+                    and observed_mode
+                    and path in observed
+                )
             )
         ]
         total_missing += len(actionable_missing)
@@ -494,13 +517,15 @@ def _manifest_audit_snapshot(
         records.append(
             {
                 "receipt_id": str(_row_value(row, "receipt_id") or ""),
-                "run_id": str(_row_value(row, "run_id") or ""),
-                "job_label": str(_row_value(row, "node_id") or ""),
+                "run_id": row_run_id,
+                "job_label": node_id,
                 "status": status,
                 "failure_code": str(_row_value(row, "failure_code") or ""),
                 "finished_at": _iso(_row_value(row, "finished_at")),
                 "missing_intended_paths": missing,
                 "actionable_missing_intended_paths": actionable_missing,
+                "superseded_by_success": superseded_by_success,
+                "superseded_by_receipt_id": success_receipt_id if superseded_by_success else None,
                 "hydrated_manifest_paths": list(audit.get("hydrated_manifest_paths") or []),
                 "observed_file_read_refs": observed,
                 "observed_file_read_mode": observed_mode,

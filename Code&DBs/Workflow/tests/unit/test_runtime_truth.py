@@ -217,6 +217,54 @@ def test_succeeded_manifest_gap_with_authoritative_read_proof_blocks_firecheck(m
     assert {item["code"] for item in result["blockers"]} == {"context_not_hydrated"}
 
 
+def test_superseded_failed_manifest_gap_does_not_block_firecheck(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
+    conn = _FakeConn(
+        manifest_records=[
+            {
+                "receipt_id": "receipt_success",
+                "run_id": "run_4",
+                "node_id": "job_d",
+                "status": "succeeded",
+                "failure_code": "",
+                "finished_at": "2026-05-01T20:01:31+00:00",
+                "workspace_manifest_audit": {
+                    "intended_manifest_paths": ["runtime/context.py"],
+                    "hydrated_manifest_paths": [".gemini/settings.json"],
+                    "missing_intended_paths": ["runtime/context.py"],
+                    "observed_file_read_refs": ["runtime/context.py"],
+                    "observed_file_read_mode": "provider_output_path_mentions",
+                },
+            },
+            {
+                "receipt_id": "receipt_failed",
+                "run_id": "run_4",
+                "node_id": "job_d",
+                "status": "failed",
+                "failure_code": "workflow.timeout",
+                "finished_at": "2026-05-01T19:55:33+00:00",
+                "workspace_manifest_audit": {
+                    "intended_manifest_paths": ["runtime/context.py"],
+                    "hydrated_manifest_paths": [".gemini/settings.json"],
+                    "missing_intended_paths": ["runtime/context.py"],
+                    "observed_file_read_refs": [],
+                    "observed_file_read_mode": "provider_output_path_mentions",
+                },
+            },
+        ]
+    )
+
+    result = runtime_truth.build_firecheck(conn)
+    records = result["snapshot"]["manifest_audit"]["records"]
+
+    assert result["can_fire"] is True
+    assert result["fire_state"] == "ready"
+    assert result["blockers"] == []
+    assert records[1]["actionable_missing_intended_paths"] == []
+    assert records[1]["superseded_by_success"] is True
+    assert records[1]["superseded_by_receipt_id"] == "receipt_success"
+
+
 def test_queued_work_without_fresh_worker_heartbeat_blocks_firecheck(monkeypatch) -> None:
     monkeypatch.setattr(runtime_truth, "_docker_snapshot", _docker_ok)
     conn = _FakeConn(queue={"pending": 2, "ready": 0, "claimed": 0, "running": 0})
