@@ -101,9 +101,9 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Coordinate durable Solutions: one Solution is a coordinated answer "
                 "under proof, backed by one or more workflow executions. This is "
-                "the replacement for wave-style multi-workflow coordination.\n\n"
+                "the replacement for legacy multi-workflow batch coordination.\n\n"
                 "USE WHEN: you need to submit, list, or inspect a multi-workflow "
-                "Solution with durable DB authority, receipts, phases, and attached "
+                "Solution with durable DB authority, receipts, and attached "
                 "workflow runs.\n\n"
                 "DO NOT USE: for a single workflow run; use praxis_workflow for that."
             ),

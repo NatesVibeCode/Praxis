@@ -6,20 +6,20 @@ from runtime.operations.queries import workflow_solution
 from surfaces.mcp.tools import solution as solution_tool
 
 
-def test_workflow_solution_status_translates_chain_waves_to_phases(monkeypatch) -> None:
+def test_workflow_solution_status_lifts_chain_groups_to_workflows(monkeypatch) -> None:
     def _fake_status(_conn, chain_id: str):
         assert chain_id == "workflow_chain_123"
         return {
             "chain_id": "workflow_chain_123",
             "program": "roadmap_burndown",
             "status": "running",
-            "current_wave": "phase_a",
+            "current_wave": "group_a",
             "coordination_path": "artifacts/workflow/solution.json",
             "why": "Burn down routing authority work.",
             "mode": "roadmap_burndown",
             "waves": [
                 {
-                    "wave_id": "phase_a",
+                    "wave_id": "group_a",
                     "status": "running",
                     "depends_on": [],
                     "blocked_by": None,
@@ -54,13 +54,12 @@ def test_workflow_solution_status_translates_chain_waves_to_phases(monkeypatch) 
     assert result["solution_id"] == "workflow_chain_123"
     assert result["authority"] == "workflow_solution"
     assert result["storage_authority"] == "workflow_chain"
-    assert result["current_phase"] == "phase_a"
-    assert result["phases_total"] == 1
-    assert result["phases"][0]["phase_id"] == "phase_a"
-    assert result["phases"][0]["workflows"][0]["run_id"] == "workflow_001"
-    assert result["phases"][0]["workflow_ids"] == ["workflow_001"]
-    assert result["phases"][0]["active_workflow_ids"] == ["workflow_001"]
+    assert result["current_workflow_ids"] == ["workflow.plan.001"]
+    assert result["workflows_total"] == 1
+    assert result["workflows"][0]["run_id"] == "workflow_001"
+    assert result["active_run_ids"] == ["workflow_001"]
     assert "waves" not in result
+    assert "phases" not in result
 
 
 def test_workflow_solution_list_returns_solution_summaries(monkeypatch) -> None:
@@ -71,7 +70,7 @@ def test_workflow_solution_list_returns_solution_summaries(monkeypatch) -> None:
                 "chain_id": "workflow_chain_123",
                 "program": "roadmap_burndown",
                 "status": "queued",
-                "current_wave_id": "phase_a",
+                "current_wave_id": "group_a",
                 "coordination_path": "artifacts/workflow/solution.json",
             }
         ],
@@ -91,7 +90,6 @@ def test_workflow_solution_list_returns_solution_summaries(monkeypatch) -> None:
             "storage_authority": "workflow_chain",
             "name": "roadmap_burndown",
             "status": "queued",
-            "current_phase": "phase_a",
             "coordination_path": "artifacts/workflow/solution.json",
             "created_at": None,
             "updated_at": None,
@@ -112,7 +110,7 @@ def test_praxis_solution_submit_uses_solution_operation(monkeypatch) -> None:
             "status": "queued",
             "chain_id": "workflow_chain_123",
             "program": "roadmap_burndown",
-            "current_wave": "phase_a",
+            "current_wave": "group_a",
             "waves_total": 2,
             "waves_completed": 0,
         }
@@ -137,8 +135,8 @@ def test_praxis_solution_submit_uses_solution_operation(monkeypatch) -> None:
     }
     assert result["solution_id"] == "workflow_chain_123"
     assert "chain_id" not in result
-    assert result["current_phase"] == "phase_a"
-    assert result["phases_total"] == 2
+    assert "current_phase" not in result
+    assert "phases_total" not in result
     assert result["authority"] == "workflow_solution"
     assert result["storage_authority"] == "workflow_chain"
     assert "current_wave" not in result
@@ -166,7 +164,7 @@ def test_praxis_solution_status_uses_solution_query(monkeypatch) -> None:
     assert result["ok"] is True
 
 
-def test_workflow_solution_normalizes_legacy_wave_refs(monkeypatch) -> None:
+def test_workflow_solution_lifts_chain_groups_to_solution_workflows(monkeypatch) -> None:
     def _fake_status(_conn, chain_id: str):
         assert chain_id == "workflow_chain_123"
         return {
@@ -183,14 +181,26 @@ def test_workflow_solution_normalizes_legacy_wave_refs(monkeypatch) -> None:
                     "status": "succeeded",
                     "depends_on": [],
                     "blocked_by": None,
-                    "runs": [{"run_id": "workflow_000", "run_status": "succeeded"}],
+                    "runs": [
+                        {
+                            "run_id": "run_000",
+                            "workflow_id": "workflow_000",
+                            "run_status": "succeeded",
+                        }
+                    ],
                 },
                 {
                     "wave_id": "wave_1_validation",
                     "status": "running",
                     "depends_on": ["wave_0_triage"],
                     "blocked_by": "wave_0_triage",
-                    "runs": [{"run_id": "workflow_001", "run_status": "running"}],
+                    "runs": [
+                        {
+                            "run_id": "run_001",
+                            "workflow_id": "workflow_001",
+                            "run_status": "running",
+                        }
+                    ],
                 },
             ],
         }
@@ -205,7 +215,7 @@ def test_workflow_solution_normalizes_legacy_wave_refs(monkeypatch) -> None:
         SimpleNamespace(get_pg_conn=lambda: object()),
     )
 
-    assert result["current_phase"] == "phase_1_validation"
-    assert result["phases"][1]["phase_id"] == "phase_1_validation"
-    assert result["phases"][1]["depends_on"] == ["phase_0_triage"]
-    assert result["phases"][1]["blocked_by"] == "phase_0_triage"
+    assert result["current_workflow_ids"] == ["workflow_001"]
+    assert result["workflow_ids"] == ["workflow_000", "workflow_001"]
+    assert result["workflows"][1]["depends_on_workflow_ids"] == ["workflow_000"]
+    assert result["workflows"][1]["blocked_by_workflow_ids"] == ["workflow_000"]

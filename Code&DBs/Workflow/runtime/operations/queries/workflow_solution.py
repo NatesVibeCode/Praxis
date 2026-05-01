@@ -1,16 +1,17 @@
 """CQRS query handlers for workflow Solution status.
 
 Solution is the operator-facing name for a coordinated answer under proof:
-one durable container with one or more workflow executions and phase gates.
-The current storage authority is the existing workflow_chain subsystem; this
-query translates that backing shape into Solution language at the surface.
+one durable container with one or more workflow executions. The current
+storage authority is the existing workflow_chain subsystem; this query
+translates that backing shape into Solution language at the surface without
+exposing the retired wave vocabulary.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class WorkflowSolutionStatusQuery(BaseModel):
@@ -20,19 +21,15 @@ class WorkflowSolutionStatusQuery(BaseModel):
         default=None,
         description="Solution identifier. Currently backed by workflow_chains.chain_id.",
     )
-    chain_id: str | None = Field(
-        default=None,
-        description="Backward-facing chain id accepted as an internal backing ref.",
-    )
     limit: int = Field(default=20, ge=1, le=100)
 
-    @field_validator("solution_id", "chain_id", mode="before")
+    @field_validator("solution_id", mode="before")
     @classmethod
     def _normalize_optional_text(cls, value: object) -> str | None:
         if value is None or value == "":
             return None
         if not isinstance(value, str) or not value.strip():
-            raise ValueError("solution_id/chain_id must be non-empty strings when provided")
+            raise ValueError("solution_id must be a non-empty string when provided")
         return value.strip()
 
     @field_validator("limit", mode="before")
@@ -46,12 +43,6 @@ class WorkflowSolutionStatusQuery(BaseModel):
             return max(1, min(int(value), 100))
         except (TypeError, ValueError) as exc:
             raise ValueError("limit must be an integer") from exc
-
-    @model_validator(mode="after")
-    def _ids_must_match_when_both_supplied(self) -> "WorkflowSolutionStatusQuery":
-        if self.solution_id and self.chain_id and self.solution_id != self.chain_id:
-            raise ValueError("solution_id and chain_id must match when both are supplied")
-        return self
 
 
 def _pg_conn(subsystems: Any) -> Any:
@@ -192,38 +183,6 @@ def _workflow_count_completed(workflows: list[dict[str, Any]]) -> int:
     return sum(1 for workflow in workflows if str(workflow.get("run_status") or "") == "succeeded")
 
 
-def _phase_payload(phase: dict[str, Any]) -> dict[str, Any]:
-    workflows = [
-        _workflow_run_payload(dict(run))
-        for run in (phase.get("runs") or [])
-        if isinstance(run, dict)
-    ]
-    workflow_ids = [
-        str(workflow.get("run_id")).strip()
-        for workflow in workflows
-        if str(workflow.get("run_id") or "").strip()
-    ]
-    active_workflow_ids = [
-        str(workflow.get("run_id")).strip()
-        for workflow in workflows
-        if str(workflow.get("run_id") or "").strip()
-        and str(workflow.get("run_status") or "") in {"queued", "running"}
-    ]
-    return {
-        "phase_id": _legacy_group_id(phase.get("wave_id")),
-        "status": phase.get("status"),
-        "depends_on": list(phase.get("depends_on") or []),
-        "blocked_by": _legacy_group_id(phase.get("blocked_by")),
-        "workflows": workflows,
-        "workflow_ids": workflow_ids,
-        "active_workflow_ids": active_workflow_ids,
-        "workflow_count": len(workflows),
-        "started_at": phase.get("started_at"),
-        "completed_at": phase.get("completed_at"),
-        "updated_at": phase.get("updated_at"),
-    }
-
-
 def _solution_payload(state: dict[str, Any]) -> dict[str, Any]:
     workflows = _solution_workflows(state)
     return {
@@ -272,7 +231,7 @@ def handle_query_workflow_solution_status(
     from runtime.workflow_chain import get_workflow_chain_status, list_workflow_chains
 
     conn = _pg_conn(subsystems)
-    solution_id = query.solution_id or query.chain_id
+    solution_id = query.solution_id
     if solution_id:
         state = get_workflow_chain_status(conn, solution_id)
         if state is None:
