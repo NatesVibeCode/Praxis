@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ReceiptCard, StatusRail, type ReceiptState } from '../primitives';
+import { Button, ReceiptCard, StatusRail, type ReceiptState } from '../primitives';
 import { emitPraxisOpenTab } from './events';
 
 export interface WorkspaceRunRow {
@@ -199,19 +199,20 @@ export function WorkspaceReceiptsTab({ manifestId, initialRuns = [] }: Workspace
             <div className="workspace-receipts__eyebrow">Receipts</div>
             <h2>Proof of work</h2>
           </div>
-          <div className="workspace-receipts__filters">
+          <div className="workspace-receipts__filters prx-button-row">
             {(['all', 'sealed', 'repaired', 'rejected'] as Filter[]).map((entry) => (
-              <button
+              <Button
                 key={entry}
-                type="button"
-                className={entry === filter ? 'workspace-receipts__filter workspace-receipts__filter--active' : 'workspace-receipts__filter'}
+                size="sm"
+                tone={entry === filter ? 'primary' : 'ghost'}
+                active={entry === filter}
                 onClick={() => {
                   setFilter(entry);
                   setSelectedReceiptId(null);
                 }}
               >
                 {entry}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -275,13 +276,13 @@ export function WorkspaceReceiptsTab({ manifestId, initialRuns = [] }: Workspace
                 { label: 'terminal', value: latestRun.terminal_reason_code || 'none', tone: latestRun.terminal_reason_code ? 'warn' : 'dim' },
               ]}
             />
-            <button
-              type="button"
-              className="workspace-receipts__open-run"
+            <Button
+              size="sm"
+              tone="ghost"
               onClick={() => emitPraxisOpenTab({ kind: 'run-detail', runId: latestRun.run_id })}
             >
-              Open run
-            </button>
+              Open run ↗
+            </Button>
           </div>
         ) : null}
 

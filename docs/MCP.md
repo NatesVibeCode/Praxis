@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 191 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 195 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -27,6 +27,9 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_friction` | `evidence` | `advanced` | - | `read` | - | Read or write the friction ledger — every guardrail bounce, warning, or hard failure (scope violations, secret leaks, policy bounces, JIT trigger matches). |
 | `praxis_patterns` | `evidence` | `stable` | - | `read`, `write` | - | Inspect and materialize durable platform patterns: recurring failure shapes clustered from friction events, bugs, and receipts. Patterns sit between raw evidence and bug tickets so repeated platform pain becomes one queryable authority object with evidence links and promotion rules. |
 | `praxis_receipts` | `evidence` | `advanced` | - | `read` | - | Search through past workflow results and analyze costs. Every workflow run produces receipts — this tool lets you search them by keyword and analyze token/cost spending. |
+| `praxis_verifier_catalog` | `evidence` | `stable` | `workflow verifier-catalog` | `read` | - | List registered verifier authority refs from verifier_registry. Returns each verifier's verifier_ref, kind (platform / receipt / run / path), enabled state, and any bound suggested-healer refs. Use this before picking a verifier for a bug-resolve, code-change preflight, or workflow-packet review gate so the chosen ref actually exists and is enabled. Backed by the verifier.catalog.list CQRS query (registered via migration 369). |
+| `praxis_verifier_run` | `evidence` | `stable` | `workflow verifier-run` | `write` | - | Run a registered verifier against a target. Records a verification_runs row, returns the outcome (status: passed / failed / error, plus outputs, duration_ms, suggested_healer_ref). The verifier_ref must be one the registry knows (use praxis_verifier_catalog to list). target_kind / target_ref must match what the verifier accepts: 'platform' for system-wide checks (target_ref typically empty), 'path' for file-targeted verifiers like pytest_file (target_ref = absolute path), 'receipt' / 'run' for receipt or run targets. promote_bug defaults to FALSE — leave that on only for canonical scheduler runs that should auto-file control-plane bugs on failure. |
+| `praxis_verifier_runs_list` | `evidence` | `stable` | `workflow verifier-runs` | `read` | - | List past verification_runs newest-first, optionally filtered by verifier_ref, target_kind (platform / receipt / run / path), target_ref, status (passed / failed / error), and an ISO trailing-window. Use this to confirm a verifier actually ran on a target — for example, to verify a fix's evidence chain before calling a bug FIXED, or to inspect failure rates of a specific verifier ref. Returns full run rows including inputs, outputs, suggested_healer_ref, decision_ref, and duration_ms. Backed by the verifier.runs.list CQRS query. |
 | `praxis_audit_primitive` | `general` | `advanced` | - | `read` | - | Generic scan/plan/resolve surface for platform audits (wiring, governance, drift). Call action='playbook' first to read the structured usage guide; then 'registered' to discover audits/patterns, 'plan' to see findings + proposed actions, 'apply' to execute auto-safe patterns. Code-editing patterns are gated behind autorun_ok=False and never fire from 'apply'. |
 | `praxis_data_dictionary` | `general` | `advanced` | - | `read` | - | Unified data dictionary authority. Auto-projects field descriptors for every injected object (tables, object_types, integrations, datasets, ingest payloads, operator decisions, receipts, MCP tools). Operator overrides win over projected rows. |
 | `praxis_data_dictionary_classifications` | `general` | `advanced` | - | `read` | - | Classification / tag authority for data dictionary objects. Auto-projected from name heuristics (PII detectors, credential tokens, owner columns) and structural type hints. Operator tags take precedence. |
@@ -205,6 +208,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_tool_gap_file` | `workflow` | `advanced` | - | `write` | - | File a tool gap when Praxis lacks a needed capability. This becomes roadmap fuel. Do this BEFORE improvising around a missing tool — the gap row is the right answer. |
 | `praxis_tool_gap_list` | `workflow` | `advanced` | - | `read` | - | List open / triaged / shipped tool gaps. Use this for roadmap triage — gaps filed by working agents tell you what tooling to build next. |
 | `praxis_workflow` | `workflow` | `advanced` | - | `launch`, `read`, `write` | - | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
+| `praxis_workflow_repair_queue` | `workflow` | `advanced` | `workflow repair` | `write` | - | Inspect and operate the durable repair queue for failed Solutions, Workflows, and Jobs. Failed terminal workflow state auto-enqueues repair intents; this tool reads, claims, releases, and closes those intents through CQRS receipts and events. |
 | `praxis_workflow_validate` | `workflow` | `advanced` | - | `read` | - | Dry-run a workflow spec to check for errors before executing it. Returns whether the spec is valid, how many jobs it contains, and which agents each job resolves to. |
 
 ## Tool Reference
@@ -498,6 +502,79 @@ Example input:
 {
   "action": "search",
   "query": "sandbox timeout"
+}
+```
+
+#### `praxis_verifier_catalog`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:verifier-catalog`
+- Risks: `read`
+- CLI entrypoint: `workflow verifier-catalog`
+- CLI schema help: `workflow tools describe praxis_verifier_catalog`
+- When to use: List registered verifier authority refs before picking one for a bug-resolve, code-change preflight, or workflow-packet review gate. Returns each verifier's verifier_ref, kind (platform / receipt / run / path), enabled state, and any bound suggested-healer refs.
+- When not to use: Do not use it to actually run a verifier — that path is still internal to verifier_authority (and reachable via praxis_bugs action=resolve). This is a read-only catalog query.
+- Recommended alias: `workflow verifier-catalog`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "enabled": true,
+  "limit": 50
+}
+```
+
+#### `praxis_verifier_run`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:verifier-run`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow verifier-run`
+- CLI schema help: `workflow tools describe praxis_verifier_run`
+- When to use: Run a registered verifier against a target as a deterministic review gate — receipt-backed, replayable, links to a verification_runs row. Use this from a workflow packet (integration_id=praxis_verifier_run, integration_action=run) to express a verify step without going through bug-resolve, or interactively to confirm a verifier passes against a specific target.
+- When not to use: Do not use it for fuzzy LLM-driven review — verifiers are deterministic. For control-plane scheduler runs that should auto-file bugs on failure, set promote_bug=True; otherwise leave the default (False).
+- Recommended alias: `workflow verifier-run`
+- Selector: none
+- Required args: `verifier_ref`
+
+Example input:
+
+```json
+{
+  "verifier_ref": "verifier.job.python.py_compile",
+  "target_kind": "path",
+  "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/runtime/example.py",
+  "inputs": {
+    "path": "/Users/nate/Praxis/Code&DBs/Workflow/runtime/example.py"
+  }
+}
+```
+
+#### `praxis_verifier_runs_list`
+
+- Surface: `evidence`
+- Tier: `stable`
+- Badges: `stable`, `evidence`, `alias:verifier-runs`
+- Risks: `read`
+- CLI entrypoint: `workflow verifier-runs`
+- CLI schema help: `workflow tools describe praxis_verifier_runs_list`
+- When to use: List past verification_runs newest-first to confirm a verifier actually ran on a target. Filter by verifier_ref, target_kind, target_ref, status, or trailing window. Use before resolving a bug to FIXED to verify the evidence chain, or to inspect failure rates of a specific verifier.
+- When not to use: Do not use it to RUN a verifier — that path is still internal (via praxis_bugs action=resolve). This is read-only history.
+- Recommended alias: `workflow verifier-runs`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "verifier_ref": "verifier.job.python.pytest_file",
+  "limit": 20
 }
 ```
 
@@ -4850,6 +4927,28 @@ Example input:
 ```json
 {
   "action": "list"
+}
+```
+
+#### `praxis_workflow_repair_queue`
+
+- Surface: `workflow`
+- Tier: `advanced`
+- Badges: `advanced`, `workflow`, `alias:repair`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow repair`
+- CLI schema help: `workflow tools describe praxis_workflow_repair_queue`
+- When to use: Use after a Solution, Workflow, or Job fails and you need a durable repair item instead of rediscovering lost run state.
+- When not to use: Do not use it to launch fresh workflow work; use praxis_workflow or praxis_solution for execution.
+- Recommended alias: `workflow repair`
+- Selector: `action`; default `list`; values `list`, `queue`, `status`, `summary`, `claim`, `release`, `complete`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "summary"
 }
 ```
 

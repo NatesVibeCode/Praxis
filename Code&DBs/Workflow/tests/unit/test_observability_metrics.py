@@ -338,6 +338,11 @@ def test_capability_distribution_casts_text_capability_payloads(monkeypatch) -> 
             observed["sql"] = sql
             return [{"capability": "ops", "count": 2}]
 
+        async def execute(self, sql: str, *args: Any) -> Any:
+            if sql.strip().upper().startswith("SELECT"):
+                return await self.fetch(sql, *args)
+            return "OK"
+
         async def close(self) -> None:
             return None
 
@@ -352,3 +357,21 @@ def test_capability_distribution_casts_text_capability_payloads(monkeypatch) -> 
 
     assert view.capability_distribution(days=7) == [{"capability": "ops", "count": 2}]
     assert "capabilities::jsonb" in observed["sql"]
+
+
+def test_fake_connection_execute_select_parity_observability() -> None:
+    async def run() -> None:
+        class _FakeConnection:
+            async def fetch(self, _sql: str, *_args):
+                return [{"id": 1}]
+
+            async def execute(self, sql: str, *args):
+                if sql.strip().upper().startswith("SELECT"):
+                    return await self.fetch(sql, *args)
+                return "OK"
+
+        conn = _FakeConnection()
+        assert await conn.execute("SELECT 1") == [{"id": 1}]
+        assert await conn.execute("UPDATE 1") == "OK"
+
+    asyncio.run(run())

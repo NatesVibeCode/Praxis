@@ -8,6 +8,7 @@ import {
   MetricTile,
   PanelCard,
   ReceiptCard,
+  StatusRail,
   StatusRow,
   type StatusRowTone,
 } from '../primitives';
@@ -322,28 +323,18 @@ function WorkflowCard({
         </div>
       }
     >
-      <div className="wf-card__desc">
+      <p className="wf-card__desc">
         {wf.description || 'No description yet. Use the editor to define authority, state, and execution rules.'}
-      </div>
+      </p>
 
-      <div className="wf-card__stat-grid">
-        <div className="wf-card__stat">
-          <span className="wf-card__stat-label">Latest run</span>
-          <strong>{latestRunCopy(wf)}</strong>
-        </div>
-        <div className="wf-card__stat">
-          <span className="wf-card__stat-label">Launch mode</span>
-          <strong>{scheduleCopy(wf)}</strong>
-        </div>
-        <div className="wf-card__stat">
-          <span className="wf-card__stat-label">Runs</span>
-          <strong>{wf.invocation_count ?? 0}</strong>
-        </div>
-        <div className="wf-card__stat">
-          <span className="wf-card__stat-label">Last activity</span>
-          <strong>{timeAgo(wf.last_invoked_at)}</strong>
-        </div>
-      </div>
+      <StatusRail
+        items={[
+          { label: 'Latest run', value: latestRunCopy(wf), tone: 'dim' },
+          { label: 'Launch', value: scheduleCopy(wf), tone: 'dim' },
+          { label: 'Runs', value: wf.invocation_count ?? 0, tone: 'dim' },
+          { label: 'Last', value: timeAgo(wf.last_invoked_at), tone: 'dim' },
+        ]}
+      />
     </PanelCard>
   );
 }
@@ -728,10 +719,10 @@ export function Dashboard({
               <p className="dash-hero__desc">{heroCopy}</p>
 
               <div className="dash-hero__actions prx-button-row">
-                <Button tone="primary" onClick={onDescribe}>Describe job</Button>
-                <Button onClick={onNewWorkflow}>Blank builder</Button>
-                <Button onClick={onChat}>Chat</Button>
-                <Button onClick={() => instanceFileRef.current?.click()}>Add file</Button>
+                <Button tone="primary" size="sm" onClick={onDescribe}>Describe job</Button>
+                <Button size="sm" onClick={onNewWorkflow}>Blank builder</Button>
+                <Button size="sm" onClick={onChat}>Chat</Button>
+                <Button size="sm" onClick={() => instanceFileRef.current?.click()}>Add file</Button>
               </div>
 
               {error && (

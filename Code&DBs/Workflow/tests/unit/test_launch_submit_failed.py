@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
@@ -56,7 +57,8 @@ def _stub_compile_spec(intent_dict, *, conn):
 
 
 class _FakeConn:
-    pass
+    def execute(self, _query: str, *_args: Any) -> list[dict[str, Any]]:
+        return []
 
 
 def _make_plan() -> Plan:

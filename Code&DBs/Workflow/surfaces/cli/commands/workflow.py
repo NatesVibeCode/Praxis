@@ -41,6 +41,18 @@ def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
     return tool_praxis_workflow(params)
 
 
+def _workflow_operation(operation_name: str, payload: dict[str, object]) -> dict[str, object]:
+    from runtime.operation_catalog_gateway import execute_operation_from_env
+    from surfaces.mcp.subsystems import workflow_database_env
+
+    result = execute_operation_from_env(
+        env=workflow_database_env(),
+        operation_name=operation_name,
+        payload=payload,
+    )
+    return result if isinstance(result, dict) else {"ok": False, "status": "failed", "result": result}
+
+
 def _workflow_subsystems():
     from surfaces.mcp.subsystems import _subs
 
@@ -2492,8 +2504,147 @@ def _cancel_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _repair_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow repair` — repair run sync state."""
+    """Handle `workflow repair` — repair run sync state and inspect repair queue."""
     import argparse
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow repair <run_id>|queue|claim|release|complete|summary [options]\n"
+            "\n"
+            "  <run_id>       Repair post-run sync state for one workflow run\n"
+            "  queue          List durable repair queue items\n"
+            "  claim          Claim the next queued repair item\n"
+            "  release        Return a claimed repair item to queued\n"
+            "  complete       Mark a repair item terminal\n"
+            "  summary        Count repair items by scope/status\n"
+        )
+        return 0 if args and args[0] in {"-h", "--help"} else 2
+
+    if args and args[0] in {"queue", "list"}:
+        parser = argparse.ArgumentParser(prog=f"workflow repair {args[0]}")
+        parser.add_argument("--status", default="queued", help="Queue status filter")
+        parser.add_argument("--scope", choices=("solution", "workflow", "job"), help="Repair scope filter")
+        parser.add_argument("--run-id", help="Workflow run id filter")
+        parser.add_argument("--solution-id", help="Solution id filter")
+        parser.add_argument("--limit", type=int, default=50, help="Max rows to return")
+        try:
+            parsed = _parse_args(parser, args[1:], stdout=stdout)
+        except SystemExit as exc:
+            return exc.code
+        try:
+            payload = _workflow_operation(
+                "workflow_repair_queue.status",
+                {
+                    "action": "list",
+                    "queue_status": parsed.status,
+                    "repair_scope": parsed.scope,
+                    "run_id": parsed.run_id,
+                    "solution_id": parsed.solution_id,
+                    "limit": parsed.limit,
+                },
+            )
+        except Exception as exc:
+            stdout.write(json.dumps({"status": "failed", "error": str(exc)}, indent=2, default=str) + "\n")
+            return 1
+        stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
+        return 0
+
+    if args and args[0] == "claim":
+        parser = argparse.ArgumentParser(prog="workflow repair claim")
+        parser.add_argument("--scope", choices=("solution", "workflow", "job"), help="Repair scope filter")
+        parser.add_argument("--claimed-by", default=f"cli.workflow.repair:{os.getpid()}", help="Repair worker id")
+        parser.add_argument("--ttl-minutes", type=int, default=30, help="Claim lease duration")
+        try:
+            parsed = _parse_args(parser, args[1:], stdout=stdout)
+        except SystemExit as exc:
+            return exc.code
+        try:
+            payload = _workflow_operation(
+                "workflow_repair_queue.command",
+                {
+                    "action": "claim",
+                    "claimed_by": parsed.claimed_by,
+                    "repair_scope": parsed.scope,
+                    "claim_ttl_minutes": parsed.ttl_minutes,
+                },
+            )
+        except Exception as exc:
+            stdout.write(json.dumps({"status": "failed", "error": str(exc)}, indent=2, default=str) + "\n")
+            return 1
+        stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
+        return 0 if payload.get("status") in {"claimed", "empty"} else 1
+
+    if args and args[0] == "complete":
+        parser = argparse.ArgumentParser(prog="workflow repair complete")
+        parser.add_argument("repair_id", help="Repair queue id")
+        parser.add_argument(
+            "--status",
+            choices=("completed", "failed", "cancelled", "superseded"),
+            default="completed",
+            help="Terminal queue status",
+        )
+        parser.add_argument("--result-ref", help="Optional result or evidence ref")
+        parser.add_argument("--note", help="Optional repair note")
+        try:
+            parsed = _parse_args(parser, args[1:], stdout=stdout)
+        except SystemExit as exc:
+            return exc.code
+        try:
+            payload = _workflow_operation(
+                "workflow_repair_queue.command",
+                {
+                    "action": "complete",
+                    "repair_id": parsed.repair_id,
+                    "queue_status": parsed.status,
+                    "result_ref": parsed.result_ref,
+                    "repair_note": parsed.note,
+                },
+            )
+        except Exception as exc:
+            stdout.write(json.dumps({"status": "failed", "error": str(exc)}, indent=2, default=str) + "\n")
+            return 1
+        stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
+        return 0 if payload.get("status") == "updated" else 1
+
+    if args and args[0] == "release":
+        parser = argparse.ArgumentParser(prog="workflow repair release")
+        parser.add_argument("repair_id", help="Repair queue id")
+        parser.add_argument("--note", help="Optional release note")
+        try:
+            parsed = _parse_args(parser, args[1:], stdout=stdout)
+        except SystemExit as exc:
+            return exc.code
+        try:
+            payload = _workflow_operation(
+                "workflow_repair_queue.command",
+                {
+                    "action": "release",
+                    "repair_id": parsed.repair_id,
+                    "repair_note": parsed.note,
+                },
+            )
+        except Exception as exc:
+            stdout.write(json.dumps({"status": "failed", "error": str(exc)}, indent=2, default=str) + "\n")
+            return 1
+        stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
+        return 0 if payload.get("status") == "released" else 1
+
+    if args and args[0] == "summary":
+        parser = argparse.ArgumentParser(prog="workflow repair summary")
+        try:
+            _parse_args(parser, args[1:], stdout=stdout)
+        except SystemExit as exc:
+            return exc.code
+        try:
+            payload = _workflow_operation(
+                "workflow_repair_queue.status",
+                {"action": "summary"},
+            )
+        except Exception as exc:
+            stdout.write(json.dumps({"status": "failed", "error": str(exc)}, indent=2, default=str) + "\n")
+            return 1
+        stdout.write(json.dumps(payload, indent=2, default=str) + "\n")
+        return 0
 
     parser = argparse.ArgumentParser(prog="workflow repair")
     parser.add_argument("run_id", help="Workflow run id to repair")

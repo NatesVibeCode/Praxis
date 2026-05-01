@@ -186,18 +186,19 @@ function DockToggleButton({
   onClick: () => void;
   tone?: 'default' | 'warning' | 'blocked' | 'ready';
 }) {
-  const toneClass = tone === 'default' ? '' : ` moon-center__dock-btn--${tone}`;
+  const buttonTone = tone === 'warning' || tone === 'blocked' ? 'danger' : tone === 'ready' ? 'primary' : 'ghost';
   return (
-    <button
-      type="button"
-      className={`moon-center__dock-btn${toneClass}${active ? ' moon-center__dock-btn--active' : ''}`}
+    <Button
+      tone={buttonTone}
+      size="sm"
+      active={active}
       data-keep-edge-menu-open="true"
       aria-label={ariaLabel || `Open ${label} dock`}
       aria-pressed={active}
       onClick={onClick}
     >
-      <span className="moon-center__dock-btn-label">{label}</span>
-    </button>
+      {label}
+    </Button>
   );
 }
 

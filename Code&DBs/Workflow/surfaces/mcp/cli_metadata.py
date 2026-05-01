@@ -2171,6 +2171,92 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_healer_catalog": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="healer-catalog",
+        when_to_use=(
+            "List registered healer authority refs before picking one for "
+            "praxis_healer_run, or to inspect what repairs are available "
+            "after a verifier fails. Returns each healer's auto_mode, "
+            "safety_mode, action_ref, and the verifier_refs it's bound to."
+        ),
+        when_not_to_use=(
+            "Do not use it to actually run a healer — use praxis_healer_run "
+            "for that. This is a read-only catalog query."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example("List enabled healers", {"enabled": True, "limit": 50}),
+            _example("Include disabled rows", {"enabled": False}),
+        ],
+    ),
+    "praxis_healer_runs_list": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="healer-runs",
+        when_to_use=(
+            "List past healing_runs newest-first to inspect repair history. "
+            "Filter by healer_ref / verifier_ref (which verifier triggered "
+            "the heal) / target / status / trailing-window. Use to confirm "
+            "a heal succeeded, audit failure rates, or check whether a "
+            "specific target has been auto-repaired recently."
+        ),
+        when_not_to_use=(
+            "Do not use it to RUN a healer — use praxis_healer_run."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Recent runs of one healer",
+                {"healer_ref": "healer.platform.schema_bootstrap", "limit": 20},
+            ),
+            _example(
+                "Runs triggered by one verifier",
+                {"verifier_ref": "verifier.platform.receipt_provenance"},
+            ),
+            _example(
+                "Failed heals in the last day",
+                {"status": "failed", "since_iso": "2026-04-30T00:00:00Z"},
+            ),
+        ],
+    ),
+    "praxis_healer_run": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="healer-run",
+        when_to_use=(
+            "Manually trigger a healer to repair a verifier failure. "
+            "verifier_ref is required; healer_ref is optional (auto-resolves "
+            "from verifier bindings when exactly one is bound). The runtime "
+            "reruns the bound verifier as post-verification — succeeded "
+            "status means BOTH healer action AND post-verification passed."
+        ),
+        when_not_to_use=(
+            "Do not use it for fuzzy LLM-driven repair — healers are "
+            "deterministic. The internal scheduler "
+            "(run_due_platform_verifications) already runs canonical heals "
+            "automatically; use this surface for manual repair gates."
+        ),
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Auto-resolve healer for one verifier",
+                {"verifier_ref": "verifier.platform.schema_authority"},
+            ),
+            _example(
+                "Explicit healer + verifier pair",
+                {
+                    "healer_ref": "healer.platform.schema_bootstrap",
+                    "verifier_ref": "verifier.platform.schema_authority",
+                },
+            ),
+            _example(
+                "Dry-run (no healing_runs row)",
+                {"verifier_ref": "verifier.platform.receipt_provenance", "record_run": False},
+            ),
+        ],
+    ),
     "praxis_verifier_run": _tool(
         surface="evidence",
         tier="stable",

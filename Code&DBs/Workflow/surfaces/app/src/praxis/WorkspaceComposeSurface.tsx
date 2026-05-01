@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StatusRail } from '../primitives';
+import { Button, StatusRail } from '../primitives';
 import { materializePlan, triggerWorkflow } from '../shared/buildController';
 import type { BuildPayload } from '../shared/types';
 import type { ComposeDraftSpec, ComposeSurfaceSpec, PraxisSurfaceBundleV4 } from './manifest';
@@ -378,30 +378,27 @@ export function WorkspaceComposeSurface({
                 { label: 'contract', value: contractState, tone: contractTone },
               ]}
             />
-            <button
-              type="button"
-              className="workspace-compose__ghost"
+            <Button
+              tone="ghost"
               disabled={busy === 'save'}
               onClick={() => void saveDraft()}
             >
               {busy === 'save' ? 'Saving' : 'Save draft'}
-            </button>
-            <button
-              type="button"
-              className="workspace-compose__primary"
+            </Button>
+            <Button
+              tone="primary"
               disabled={!intent.trim() || busy === 'compile'}
               onClick={() => void compileContract()}
             >
               {busy === 'compile' ? 'Compiling' : 'Compile contract'}
-            </button>
-            <button
-              type="button"
-              className="workspace-compose__primary workspace-compose__primary--dispatch"
+            </Button>
+            <Button
+              tone="primary"
               disabled={!canDispatch}
               onClick={() => void dispatch()}
             >
               {busy === 'dispatch' ? 'Dispatching' : 'Seal & dispatch'}
-            </button>
+            </Button>
           </div>
         </section>
 

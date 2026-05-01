@@ -27,6 +27,11 @@ class _FakeConn:
                 rows.append(dict(record))
         return rows
 
+    def execute(self, query: str, *args: Any) -> list[dict[str, Any]]:
+        if query.strip().upper().startswith("SELECT"):
+            return self.fetch(query, *args)
+        return []
+
 
 def test_audit_returns_empty_for_no_paths() -> None:
     result = audit_authority_impact_contract_coverage(_FakeConn(), paths=[])

@@ -4,16 +4,17 @@ import { useSlice } from '../hooks/useSlice';
 import { emitPraxisOpenTab } from './events';
 import type { SourceOption } from './manifest';
 import { activeSourceId } from '../modules/sourceBindings';
+import { SourceChip, type SourceChipTone } from '../primitives';
 
 interface SourceOptionPillsProps {
   options: SourceOption[];
 }
 
-function familyColor(option: SourceOption): string {
-  if (option.family === 'connected') return 'var(--success)';
-  if (option.family === 'external') return 'var(--warning)';
-  if (option.family === 'reference') return 'var(--accent)';
-  return 'var(--text-muted)';
+function familyTone(option: SourceOption): SourceChipTone {
+  if (option.family === 'connected') return 'ok';
+  if (option.family === 'external') return 'warn';
+  if (option.family === 'reference') return 'live';
+  return 'default';
 }
 
 function subtitle(option: SourceOption): string {
@@ -60,31 +61,19 @@ export function SourceOptionPills({ options }: SourceOptionPillsProps) {
   };
 
   return (
-    <div className="app-shell__surface-chip-list">
-      {options.map((option) => {
-        const color = familyColor(option);
-        const selected = option.id === activeId;
-        return (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => handleClick(option)}
-            title={option.description || option.label}
-            aria-pressed={selected}
-            className={[
-              'app-shell__surface-chip',
-              selected ? 'app-shell__surface-chip--active' : '',
-            ].filter(Boolean).join(' ')}
-            style={{ borderColor: `${color}33`, background: `${color}14` }}
-          >
-            <span className="app-shell__surface-chip-dot" style={{ background: color }} />
-            <span className="app-shell__surface-chip-copy">
-              <span className="app-shell__surface-chip-label">{option.label}</span>
-              <span className="app-shell__surface-chip-subtitle">{subtitle(option)}</span>
-            </span>
-          </button>
-        );
-      })}
+    <div className="prx-button-row">
+      {options.map((option) => (
+        <SourceChip
+          key={option.id}
+          tone={familyTone(option)}
+          active={option.id === activeId}
+          label={option.label}
+          subtitle={subtitle(option)}
+          onClick={() => handleClick(option)}
+          title={option.description || option.label}
+          aria-pressed={option.id === activeId}
+        />
+      ))}
     </div>
   );
 }

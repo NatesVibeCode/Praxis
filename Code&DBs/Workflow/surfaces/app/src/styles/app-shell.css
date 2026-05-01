@@ -4,10 +4,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 18% -12%, rgba(243, 238, 228, 0.09), transparent 34%),
-    radial-gradient(circle at 82% 116%, rgba(210, 153, 34, 0.045), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 18%);
+  background: #000000;
 }
 
 .app-shell__chrome,

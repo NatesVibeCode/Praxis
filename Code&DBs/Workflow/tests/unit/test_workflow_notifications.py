@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import runtime.workflow_notifications as workflow_notifications
 from runtime.workflow_notifications import WorkflowNotificationConsumer
@@ -73,7 +74,15 @@ class _FakeReceiptRepository:
 
 
 class _FakeConn:
-    pass
+    def execute(self, _query: str, *_args: Any) -> list[dict[str, Any]]:
+        return []
+
+
+def test_fake_connection_implements_execute_contract_notifications() -> None:
+    conn = _FakeConn()
+    # Verify it matches the expected contract: returns a list
+    results = conn.execute("SELECT 1")
+    assert isinstance(results, list)
 
 
 def test_poll_tracks_canonical_receipts_once(monkeypatch) -> None:

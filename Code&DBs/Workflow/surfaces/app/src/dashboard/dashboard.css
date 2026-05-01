@@ -354,14 +354,18 @@
   gap: 22px;
 }
 
+/* dash-hero / dash-panel / dash-section / dash-metric used to be framed
+ * containers. Per PRIMITIVES.md: outer rims around layout grids are banned.
+ * They're now bare layout blocks; framing belongs to the primitive that
+ * owns the discrete record (PanelCard for workflow cards, ReceiptCard for
+ * receipts). Layout wrappers are transparent. */
 .dash-hero,
 .dash-panel,
 .dash-section,
 .dash-metric {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(18, 18, 18, 0.92), rgba(9, 9, 9, 0.98));
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.16);
-  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .dash-hero {
@@ -651,24 +655,20 @@ button.dash-hero-card__stat--link:focus-visible {
   gap: 18px;
 }
 
+/* Sections / panels are now bare layout blocks (per PRIMITIVES.md).
+ * No padding, no rounded rim, no tinted background. */
 .dash-section,
 .dash-panel {
-  padding: 22px;
-  border-radius: 8px;
+  padding: 0;
+  border-radius: 0;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
-.dash-section--live {
-  background: linear-gradient(180deg, rgba(63, 185, 80, 0.055), rgba(10, 10, 10, 0.98));
-}
-
-.dash-section--saved {
-  background: linear-gradient(180deg, rgba(243, 238, 228, 0.055), rgba(10, 10, 10, 0.98));
-}
-
+.dash-section--live,
+.dash-section--saved,
 .dash-section--draft {
-  background: linear-gradient(180deg, rgba(210, 153, 34, 0.05), rgba(10, 10, 10, 0.98));
+  background: transparent;
 }
 
 .dash-section__header,
@@ -1730,11 +1730,11 @@ button.dash-hero-card__stat--link:focus-visible {
   .om-metrics__grid { grid-template-columns: 1fr; }
 }
 
-/* Quiet overview surface — pure black with a single warm glow corner */
+/* Quiet overview surface — pure black field, no decorative gradients.
+ * Matches primitives.html. Decorative gradients on dark cards produce
+ * brown wash — banned per PRIMITIVES.md. */
 .dash-page {
-  background:
-    radial-gradient(circle at 88% 12%, rgba(210, 153, 34, 0.06), transparent 30%),
-    #000000;
+  background: #000000;
 }
 
 .dash-sidebar {
@@ -2180,8 +2180,8 @@ button.dash-hero-card__stat--link:focus-visible {
 .dash-hero {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 44px;
-  padding: 74px 0 64px;
+  gap: 16px;
+  padding: 24px 0 16px;
 }
 
 .dash-hero__copy {
@@ -2189,19 +2189,24 @@ button.dash-hero-card__stat--link:focus-visible {
 }
 
 .dash-hero__title {
-  max-width: 12ch;
-  font-size: clamp(38px, 5.4vw, 64px);
-  letter-spacing: 0;
+  max-width: 16ch;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
 }
 
 .dash-hero__desc {
   max-width: 56ch;
   color: var(--text-muted);
-  font-size: clamp(16px, 1.35vw, 18px);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .dash-hero__actions {
-  max-width: 560px;
+  max-width: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 .dash-contract-preview {
@@ -2418,7 +2423,7 @@ button.dash-hero-card__stat--link:focus-visible {
 }
 
 .dash-board {
-  margin-top: 64px;
+  margin-top: 16px;
 }
 
 .dash-start-panel {

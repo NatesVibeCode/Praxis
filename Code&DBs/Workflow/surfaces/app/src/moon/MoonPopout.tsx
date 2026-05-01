@@ -61,7 +61,7 @@ export function MoonPopout({
       keywords: [item.actionValue || '', item.family, meta, detail, item.source || '', item.connectionStatus || ''],
       selected: node.route === item.actionValue,
       meta,
-      icon: <MoonGlyph type={item.icon} size={14} color={node.route === item.actionValue ? 'currentColor' : '#F4F6F8'} />,
+      icon: <MoonGlyph type={item.icon} size={14} color={node.route === item.actionValue ? 'currentColor' : 'var(--text)'} />,
       onSelect: () => {
         if (item.actionValue) onSelect(node.id, item.actionValue);
       },

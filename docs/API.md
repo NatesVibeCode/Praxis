@@ -32,7 +32,7 @@ Generate and test API docs in the same runtime environment; route counts are aut
 
 ## All Routes
 
-Public route count: `8`. All route count: `455`.
+Public route count: `8`. All route count: `460`.
 
 | Methods | Path | Visibility | Tags | Summary |
 | --- | --- | --- | --- | --- |
@@ -399,6 +399,8 @@ Public route count: `8`. All route count: `455`.
 | `POST` | `/api/typed_gap/emit` | `internal` | `operations` | typed_gap.emit |
 | `POST` | `/api/ui/telemetry` | `internal` | - | Append a frontend prx-* primitive event to the UI telemetry log. |
 | `GET` | `/api/ui/telemetry/recent` | `internal` | - | Return the last N rows from the UI telemetry log for inspection. |
+| `POST` | `/api/verifier_run` | `internal` | `operations` | verifier.run |
+| `GET` | `/api/verifier_runs_list` | `internal` | `operations` | verifier.runs.list |
 | `GET` | `/api/verifiers` | `internal` | `operations` | verifier.catalog.list |
 | `GET` | `/api/virtual-lab/sandbox-promotions` | `internal` | `operations` | virtual_lab_sandbox_promotion_read |
 | `POST` | `/api/virtual-lab/sandbox-promotions` | `internal` | `operations` | virtual_lab_sandbox_promotion_record |
@@ -411,6 +413,7 @@ Public route count: `8`. All route count: `455`.
 | `GET` | `/api/workflow-context` | `internal` | `operations` | workflow_context_read |
 | `POST` | `/api/workflow-context/bind` | `internal` | `operations` | workflow_context_bind |
 | `GET` | `/api/workflow-context/guardrails` | `internal` | `operations` | workflow_context_guardrail_check |
+| `POST` | `/api/workflow-context/materialize` | `internal` | `operations` | workflow_context_materialize |
 | `POST` | `/api/workflow-context/transition` | `internal` | `operations` | workflow_context_transition |
 | `POST` | `/api/workflow-job` | `internal` | - | workflow_job_post |
 | `POST` | `/api/workflow-runs` | `internal` | - | workflow_runs_handler_post |
@@ -426,6 +429,8 @@ Public route count: `8`. All route count: `455`.
 | `POST` | `/api/workflow_build_get` | `internal` | `operations` | workflow_build_get |
 | `POST` | `/api/workflow_chain_submit` | `internal` | `operations` | workflow_chain_submit |
 | `POST` | `/api/workflow_create_draft` | `internal` | `operations` | workflow_create_draft |
+| `POST` | `/api/workflow_repair_queue_command` | `internal` | `operations` | workflow_repair_queue.command |
+| `GET` | `/api/workflow_repair_queue_status` | `internal` | `operations` | workflow_repair_queue.status |
 | `GET` | `/api/workflow_solution_status` | `internal` | `operations` | workflow_solution.status |
 | `POST` | `/api/workflow_solution_submit` | `internal` | `operations` | workflow_solution.submit |
 | `GET` | `/api/workflows` | `internal` | - | workflows_get |

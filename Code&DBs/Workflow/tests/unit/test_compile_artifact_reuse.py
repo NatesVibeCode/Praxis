@@ -8,8 +8,8 @@ import pytest
 
 import pathlib
 
-import runtime.materialize_index as compile_index
-import runtime.materializer as compiler
+import runtime.compile_index as compile_index
+import runtime.compiler as compiler
 import runtime.operating_model_planner as planner
 
 _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
@@ -18,12 +18,14 @@ _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
 class _ArtifactConn:
     def __init__(self) -> None:
         self.compile_artifact_rows: list[dict[str, object]] = []
+        self.queries: list[str] = []
 
     def execute(self, query: str, *args):
-        if "INSERT INTO compile_artifacts" in query:
+        self.queries.append(" ".join(query.split()))
+        if "INSERT INTO materialize_artifacts" in query:
             self.compile_artifact_rows.append(
                 {
-                    "compile_artifact_id": args[0],
+                    "materialize_artifact_id": args[0],
                     "artifact_kind": args[1],
                     "artifact_ref": args[2],
                     "revision_ref": args[3],
@@ -36,7 +38,7 @@ class _ArtifactConn:
                 }
             )
             return []
-        if "FROM compile_artifacts" in query:
+        if "FROM materialize_artifacts" in query:
             artifact_kind = args[0]
             input_fingerprint = args[1]
             return [
@@ -149,6 +151,7 @@ def test_compile_prose_reuses_definition_artifact_on_exact_input_match(monkeypat
     )
 
     assert first["reuse_provenance"]["decision"] == "compiled"
+    assert not any("compile_artifacts" in query for query in conn.queries)
 
     monkeypatch.setattr(
         "runtime.intent_matcher.IntentMatcher",

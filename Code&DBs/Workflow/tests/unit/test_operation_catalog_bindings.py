@@ -112,6 +112,11 @@ def test_resolve_http_operation_binding_rejects_missing_reference() -> None:
             "AssembleStructuredDocumentContextQuery",
         ),
         (
+            "runtime.operations.commands.workflow_context.MaterializeWorkflowContextCommand",
+            "runtime.operations.commands.workflow_context.handle_workflow_context_materialize",
+            "MaterializeWorkflowContextCommand",
+        ),
+        (
             "runtime.operations.commands.promote_experiment_winner_command.PromoteExperimentWinnerCommand",
             "runtime.operations.commands.promote_experiment_winner_command.handle_promote_experiment_winner",
             "PromoteExperimentWinnerCommand",
