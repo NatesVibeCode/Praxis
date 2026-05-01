@@ -2171,6 +2171,37 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_verifier_runs_list": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="verifier-runs",
+        when_to_use=(
+            "List past verification_runs newest-first to confirm a "
+            "verifier actually ran on a target. Filter by verifier_ref, "
+            "target_kind, target_ref, status, or trailing window. Use "
+            "before resolving a bug to FIXED to verify the evidence chain, "
+            "or to inspect failure rates of a specific verifier."
+        ),
+        when_not_to_use=(
+            "Do not use it to RUN a verifier — that path is still internal "
+            "(via praxis_bugs action=resolve). This is read-only history."
+        ),
+        risks={"default": "read"},
+        examples=[
+            _example(
+                "Recent runs of one verifier",
+                {"verifier_ref": "verifier.job.python.pytest_file", "limit": 20},
+            ),
+            _example(
+                "Failed runs in the last day",
+                {"status": "failed", "since_iso": "2026-04-30T00:00:00Z"},
+            ),
+            _example(
+                "Runs against one path-kind target",
+                {"target_kind": "path", "target_ref": "/Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_smoke.py"},
+            ),
+        ],
+    ),
     "praxis_virtual_lab_state_read": _tool(
         surface="operations",
         tier="advanced",
