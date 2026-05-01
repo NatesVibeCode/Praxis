@@ -180,7 +180,11 @@ def _packet_phase(packet: dict[str, Any], *, index: int, total: int) -> dict[str
     step_id = str(packet.get("label") or f"step-{index:03d}")
     result_kind = _default_result_kind(packet)
     submit_tool = _default_submit_tool(result_kind)
-    return {
+    integration_args_raw = packet.get("integration_args")
+    integration_args: dict[str, Any] = (
+        dict(integration_args_raw) if isinstance(integration_args_raw, dict) else {}
+    )
+    phase: dict[str, Any] = {
         "phase_id": f"phase-{index:03d}",
         "step_id": step_id,
         "kind": str(packet.get("stage") or "build"),
@@ -194,7 +198,7 @@ def _packet_phase(packet: dict[str, Any], *, index: int, total: int) -> dict[str
         "outputs": list(packet.get("produces") or []),
         "persistence_targets": list(packet.get("write") or []),
         "handoff_target": None if index >= total else "next",
-        "integration_args": {},
+        "integration_args": integration_args,
         "capabilities": list(packet.get("capabilities") or []),
         "write_scope": list(packet.get("write") or []),
         "agent_tool_plan": _default_tool_plan(packet),
@@ -205,6 +209,13 @@ def _packet_phase(packet: dict[str, Any], *, index: int, total: int) -> dict[str
             "verification_required": bool(packet.get("gates")),
         },
     }
+    integration_id = packet.get("integration_id")
+    integration_action = packet.get("integration_action")
+    if isinstance(integration_id, str) and integration_id:
+        phase["integration_id"] = integration_id
+    if isinstance(integration_action, str) and integration_action:
+        phase["integration_action"] = integration_action
+    return phase
 
 
 def packets_to_definition(
