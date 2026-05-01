@@ -56,6 +56,7 @@ __all__ = [
     "resolve_api_key_env_vars",
     "resolve_mcp_args_template",
     "resolve_lane_policy",
+    "resolve_lane_policy_record",
     "resolve_adapter_contract",
     "supports_adapter",
     "supports_model_adapter",
